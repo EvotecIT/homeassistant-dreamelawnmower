@@ -32,6 +32,7 @@ ACCOUNT_TYPE_OPTIONS = {
 COUNTRY_OPTIONS = ["cn", "eu", "us", "ru", "sg"]
 
 PLATFORMS: list[Platform] = [
+    Platform.CAMERA,
     Platform.BINARY_SENSOR,
     Platform.BUTTON,
     Platform.LAWN_MOWER,

@@ -22,6 +22,7 @@ This first implementation is intentionally narrow so it can be validated on real
 - normalized binary sensors for `Error Active`, `Docked`, `Paused`, `Mowing`, and `Returning`
 - opt-in diagnostic sensors for unknown-property and realtime telemetry counts
 - experimental Python-first map summary and PNG rendering helpers
+- experimental disabled-by-default Home Assistant map camera
 - start mowing, pause, and dock
 - diagnostics, debug snapshot capture, and HACS-ready repo structure
 
@@ -100,7 +101,7 @@ Optional:
 - blob-like values are annotated with `value_bytes_len` and `value_bytes_hex`
 - keep `DREAME_PROP_ONLY_VALUES=1` to hide empty key-only responses while scanning
 
-This is intentionally Python-first and read-only for now. The next step is to prove map availability and payload stability on real hardware before adding a Home Assistant camera or image entity.
+This is still experimental and read-only. The integration now also exposes a disabled-by-default `camera` entity named `Map`, which tries to fetch and cache a rendered PNG on demand while keeping normal mower polling isolated from map failures.
 
 ## Automation examples
 
