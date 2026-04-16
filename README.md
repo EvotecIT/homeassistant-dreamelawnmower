@@ -86,6 +86,19 @@ Optional:
 - the probe prints `device/info` and `device/listV2` summaries by default
 - set `DREAME_PROP_KEYS=6.1,6.3` or another comma-separated key list to query `iotstatus/props`
 
+If you want to scan wider `siid.piid` ranges when hunting for map or telemetry keys, use:
+
+```bash
+python examples/property_probe.py
+```
+
+Optional:
+
+- set `DREAME_PROP_KEYS=2.1,2.2,6.1` to probe an explicit list
+- or set `DREAME_PROP_SIIDS=1,2,6` plus `DREAME_PROP_PIID_START=1` and `DREAME_PROP_PIID_END=40`
+- `2.1` is automatically labeled with the mower state names extracted from the Dreamehome app asset bundle
+- keep `DREAME_PROP_ONLY_VALUES=1` to hide empty key-only responses while scanning
+
 This is intentionally Python-first and read-only for now. The next step is to prove map availability and payload stability on real hardware before adding a Home Assistant camera or image entity.
 
 ## Automation examples

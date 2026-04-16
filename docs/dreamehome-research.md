@@ -44,12 +44,34 @@ The response DTOs show that:
 - `getDeviceListByMap()` returns `DeviceListRes -> Page -> records`
 - `getDevicePropsByDid()` returns key/value entries with `key`, `value`, and `updateDate`
 
+## Confirmed Flutter asset hints
+
+The extracted Flutter assets add two mower-specific clues:
+
+- `assets/home_device/common_mower_protocol.json` defines the mower state key `2.1`
+- that asset maps mower values like:
+  - `1 -> Working`
+  - `2 -> Standby`
+  - `4 -> Paused`
+  - `5 -> Returning Charge`
+  - `6 -> Charging`
+  - `11 -> Mapping`
+  - `13 -> Charging Completed`
+  - `14 -> Upgrading`
+
+The translation bundle also includes mower-specific strings that match real behavior we have already seen in testing:
+
+- mapping guidance: "After mapping, tap the button to start mowing."
+- offline recovery paths for low battery away from the station
+- explicit firmware-update restart wording
+- Link Module and Bluetooth fallback hints for offline mowers
+
 ## What this means for map support
 
 The app-side evidence suggests this Python-first investigation order:
 
 1. fetch `device/info` for the mower
-2. fetch `iotstatus/props` for app-observed keys once they are known
+2. brute-force `iotstatus/props` ranges from Python until real mower-only keys are confirmed
 3. fetch `device/listV2` and inspect whether map-enabled list payloads differ from the simpler account discovery flow
 4. only then decide whether the final map payload is in cloud props, `device/info`, `listV2`, or a Flutter/native side-channel
 
@@ -70,6 +92,15 @@ A live A2 probe through the new Python helper confirmed that:
 - `iotstatus/props` accepts requests from Python
 - probing legacy-looking keys `6.1`, `6.3`, `6.8`, and `6.13` while the mower was docked returned key-only entries with no values
 
+A second live scan through `examples/property_probe.py` against a small docked range (`siid` 1, 2, and 6 with `piid` 1-8) found three non-empty entries:
+
+- `2.1 = 13`
+  The app-derived mower state label decodes this to `Charging Completed`.
+- `2.2 = 31`
+  This is likely another mower state or error-adjacent field and should be tracked in future scans.
+- `1.1 = [206,0,0,...]`
+  This looks like a compact raw status blob rather than a simple scalar property.
+
 That means the endpoint is reachable, but those guessed keys are not enough by themselves to recover the map payload in the current docked state.
 
 ## Repo follow-up
@@ -79,5 +110,8 @@ The reusable Python client now includes cloud probe helpers so this research can
 - `async_get_cloud_device_info()`
 - `async_get_cloud_device_list_page()`
 - `async_get_cloud_properties(keys)`
+- `mower_state_label(value)` for the app-derived `2.1` state key
 
 Use `python examples/cloud_probe.py` to query these endpoints directly with the same credentials used by the integration.
+
+Use `python examples/property_probe.py` to scan `siid.piid` key ranges and highlight non-empty property results while keeping `2.1` readable.

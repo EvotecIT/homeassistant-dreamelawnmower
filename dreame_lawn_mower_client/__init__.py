@@ -2,6 +2,7 @@
 
 from ._loader import load_internal_module
 
+_app_protocol = load_internal_module("app_protocol")
 _client = load_internal_module("client")
 _models = load_internal_module("models")
 
@@ -15,9 +16,12 @@ DreameLawnMowerMapSummary = _models.DreameLawnMowerMapSummary
 DreameLawnMowerSnapshot = _models.DreameLawnMowerSnapshot
 DISPLAY_NAME_ALIASES = _models.DISPLAY_NAME_ALIASES
 MODEL_NAME_MAP = _models.MODEL_NAME_MAP
+MOWER_STATE_LABELS = _app_protocol.MOWER_STATE_LABELS
+MOWER_STATE_PROPERTY_KEY = _app_protocol.MOWER_STATE_PROPERTY_KEY
 SUPPORTED_ACCOUNT_TYPES = _models.SUPPORTED_ACCOUNT_TYPES
 display_name_for_model = _models.display_name_for_model
 map_summary_from_map_data = _models.map_summary_from_map_data
+mower_state_label = _app_protocol.mower_state_label
 
 __all__ = [
     "DISPLAY_NAME_ALIASES",
@@ -30,7 +34,10 @@ __all__ = [
     "DreameLawnMowerSnapshot",
     "DreameLawnMowerTwoFactorRequiredError",
     "MODEL_NAME_MAP",
+    "MOWER_STATE_LABELS",
+    "MOWER_STATE_PROPERTY_KEY",
     "SUPPORTED_ACCOUNT_TYPES",
     "display_name_for_model",
     "map_summary_from_map_data",
+    "mower_state_label",
 ]
