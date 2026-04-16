@@ -69,6 +69,11 @@ class DreameLawnMowerClient:
         """Return the selected mower descriptor."""
         return self._descriptor
 
+    @property
+    def device(self) -> Any | None:
+        """Return the currently connected upstream device instance."""
+        return self._device
+
     @classmethod
     async def async_discover_devices(
         cls,

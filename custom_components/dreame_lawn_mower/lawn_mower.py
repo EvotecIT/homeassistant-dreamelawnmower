@@ -71,16 +71,17 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
     def extra_state_attributes(self) -> dict[str, str | int | bool | None]:
         """Return additional mower attributes."""
         snapshot = self.coordinator.data
+        device = getattr(self.coordinator.client, "device", None)
         return {
             "state": snapshot.state,
             "state_name": snapshot.state_name,
             "task_status": snapshot.task_status,
             "task_status_name": snapshot.task_status_name,
             "unknown_property_count": len(
-                getattr(self.coordinator.client.device, "unknown_properties", {}) or {}
+                getattr(device, "unknown_properties", {}) or {}
             ),
             "realtime_property_count": len(
-                getattr(self.coordinator.client.device, "realtime_properties", {}) or {}
+                getattr(device, "realtime_properties", {}) or {}
             ),
             "last_realtime_method": snapshot.last_realtime_method,
             "error_code": snapshot.error_code,

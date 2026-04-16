@@ -16,6 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .dreame_client.models import DreameLawnMowerMapSummary
+from .image import png_bytes_to_jpeg
 
 _MAP_CACHE_TTL = timedelta(seconds=60)
 _MAP_TIMEOUT_SECONDS = 6.0
@@ -51,7 +52,7 @@ class DreameLawnMowerMapCamera(
         self._attr_unique_id = f"{self._descriptor.unique_id}_map"
         self._attr_brand = "Dreametech"
         self._attr_model = self._descriptor.display_model
-        self.content_type = "image/png"
+        self.content_type = "image/jpeg"
         self._last_image: bytes | None = None
         self._last_summary: DreameLawnMowerMapSummary | None = None
         self._last_refresh_at: datetime | None = None
@@ -155,7 +156,7 @@ class DreameLawnMowerMapCamera(
             if summary is not None:
                 self._last_summary = summary
             if image is not None:
-                self._last_image = image
+                self._last_image = png_bytes_to_jpeg(image)
                 self._last_refresh_at = datetime.now(UTC)
             elif self._last_image is None:
                 self._last_refresh_at = datetime.now(UTC)
