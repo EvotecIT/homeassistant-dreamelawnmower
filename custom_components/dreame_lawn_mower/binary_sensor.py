@@ -33,6 +33,14 @@ class DreameBinarySensorDescription:
     entity_category: EntityCategory | None = None
 
 
+def _raw_flag(snapshot: Any, key: str) -> bool | None:
+    """Return a raw boolean flag from the mower attributes."""
+    value = snapshot.raw_attributes.get(key)
+    if value is None:
+        return None
+    return bool(value)
+
+
 BINARY_SENSORS = [
     DreameBinarySensorDescription(
         key="online",
@@ -86,6 +94,30 @@ BINARY_SENSORS = [
         value_fn=lambda snapshot: snapshot.child_lock,
         exists_fn=lambda snapshot: snapshot.child_lock is not None,
         icon="mdi:lock-outline",
+    ),
+    DreameBinarySensorDescription(
+        key="raw_paused",
+        name="Raw Paused Flag",
+        value_fn=lambda snapshot: _raw_flag(snapshot, "paused"),
+        exists_fn=lambda snapshot: "paused" in snapshot.raw_attributes,
+        icon="mdi:pause-circle-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    DreameBinarySensorDescription(
+        key="raw_running",
+        name="Raw Running Flag",
+        value_fn=lambda snapshot: _raw_flag(snapshot, "running"),
+        exists_fn=lambda snapshot: "running" in snapshot.raw_attributes,
+        icon="mdi:play-circle-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    DreameBinarySensorDescription(
+        key="raw_returning",
+        name="Raw Returning Flag",
+        value_fn=lambda snapshot: _raw_flag(snapshot, "returning"),
+        exists_fn=lambda snapshot: "returning" in snapshot.raw_attributes,
+        icon="mdi:home-import-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
 ]
 

@@ -29,6 +29,11 @@ class DreameSensorDescription:
     entity_category: EntityCategory | None = None
 
 
+def _raw_attribute(snapshot: Any, key: str) -> Any:
+    """Return a raw mower attribute when available."""
+    return snapshot.raw_attributes.get(key)
+
+
 SENSORS = [
     DreameSensorDescription(
         key="battery",
@@ -81,6 +86,14 @@ SENSORS = [
         exists_fn=lambda snapshot: bool(snapshot.cleaning_mode_name)
         and snapshot.cleaning_mode_name != "unknown",
         icon="mdi:grass",
+    ),
+    DreameSensorDescription(
+        key="mower_state",
+        name="Mower State",
+        value_fn=lambda snapshot: _raw_attribute(snapshot, "mower_state"),
+        exists_fn=lambda snapshot: bool(_raw_attribute(snapshot, "mower_state")),
+        icon="mdi:robot-mower-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
 ]
 

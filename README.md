@@ -36,3 +36,7 @@ Note:
 
 - the full Home Assistant pytest stack is usually easiest in Linux CI
 - live validation against the real mower still matters because the protocol is reverse engineered
+
+## Migration note
+
+If you previously installed an older mower custom component under the `dreame_lawnmower` name, remove it before using this integration. Keeping both installed can lead to duplicate `Dreame Lawn Mower` entries during Home Assistant setup.
