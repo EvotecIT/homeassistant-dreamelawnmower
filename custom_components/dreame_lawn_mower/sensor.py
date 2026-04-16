@@ -146,12 +146,10 @@ async def async_setup_entry(
 ) -> None:
     """Set up mower sensors."""
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
-    snapshot = coordinator.data
     async_add_entities(
         [
             DreameLawnMowerSensor(coordinator, description)
             for description in SENSORS
-            if snapshot is not None and description.exists_fn(snapshot)
         ]
     )
 
@@ -176,4 +174,12 @@ class DreameLawnMowerSensor(DreameLawnMowerEntity, SensorEntity):
     @property
     def native_value(self) -> Any:
         """Return the sensor value."""
+        if not self.available:
+            return None
         return self.entity_description.value_fn(self.coordinator.data)
+
+    @property
+    def available(self) -> bool:
+        """Return whether the sensor currently has meaningful mower data."""
+        snapshot = self.coordinator.data
+        return snapshot is not None and self.entity_description.exists_fn(snapshot)
