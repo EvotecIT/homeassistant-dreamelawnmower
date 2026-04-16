@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import Sequence
 from typing import Any
 
+from .app_protocol import MOWER_STATE_PROPERTY_KEY, mower_state_label
 from .exceptions import DeviceException
 from .models import (
     SUPPORTED_ACCOUNT_TYPES,
@@ -165,6 +167,29 @@ class DreameLawnMowerClient:
         """Fetch raw cloud property values from the `iotstatus/props` endpoint."""
         return await asyncio.to_thread(self._sync_get_cloud_properties, keys)
 
+    async def async_scan_cloud_properties(
+        self,
+        *,
+        keys: str | Sequence[str] | None = None,
+        siids: Sequence[int] | None = None,
+        piid_start: int = 1,
+        piid_end: int = 25,
+        chunk_size: int = 50,
+        language: str = "en",
+        only_values: bool = True,
+    ) -> dict[str, Any]:
+        """Scan cloud properties in chunks and return normalized results."""
+        return await asyncio.to_thread(
+            self._sync_scan_cloud_properties,
+            keys,
+            siids,
+            piid_start,
+            piid_end,
+            chunk_size,
+            language,
+            only_values,
+        )
+
     async def async_get_cloud_device_list_page(
         self,
         *,
@@ -255,6 +280,54 @@ class DreameLawnMowerClient:
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
 
+    def _sync_scan_cloud_properties(
+        self,
+        keys: str | Sequence[str] | None,
+        siids: Sequence[int] | None,
+        piid_start: int,
+        piid_end: int,
+        chunk_size: int,
+        language: str,
+        only_values: bool,
+    ) -> dict[str, Any]:
+        normalized_keys = self._build_cloud_property_keys(
+            keys=keys,
+            siids=siids,
+            piid_start=piid_start,
+            piid_end=piid_end,
+        )
+        if not normalized_keys:
+            return {
+                "requested_key_count": 0,
+                "returned_entry_count": 0,
+                "displayed_entry_count": 0,
+                "entries": [],
+            }
+
+        all_entries: list[dict[str, Any]] = []
+        for offset in range(0, len(normalized_keys), max(chunk_size, 1)):
+            chunk = normalized_keys[offset: offset + max(chunk_size, 1)]
+            response = self._sync_get_cloud_properties(chunk)
+            all_entries.extend(self._normalize_cloud_property_entries(response))
+
+        rendered = all_entries
+        if only_values:
+            rendered = [entry for entry in rendered if self._entry_has_meaningful_value(entry)]
+
+        rendered = [
+            self._annotate_cloud_property_entry(entry, language=language)
+            for entry in sorted(
+                rendered,
+                key=lambda item: str(item.get("key", "")),
+            )
+        ]
+        return {
+            "requested_key_count": len(normalized_keys),
+            "returned_entry_count": len(all_entries),
+            "displayed_entry_count": len(rendered),
+            "entries": rendered,
+        }
+
     def _sync_get_cloud_device_list_page(
         self,
         current: int,
@@ -302,6 +375,97 @@ class DreameLawnMowerClient:
         if isinstance(keys, str):
             return keys
         return ",".join(str(key).strip() for key in keys if str(key).strip())
+
+    @staticmethod
+    def _build_cloud_property_keys(
+        *,
+        keys: str | Sequence[str] | None,
+        siids: Sequence[int] | None,
+        piid_start: int,
+        piid_end: int,
+    ) -> list[str]:
+        if keys is not None:
+            if isinstance(keys, str):
+                return [item.strip() for item in keys.split(",") if item.strip()]
+            return [str(item).strip() for item in keys if str(item).strip()]
+
+        if piid_end < piid_start:
+            raise ValueError("piid_end must be greater than or equal to piid_start")
+
+        normalized_siids = list(siids) if siids is not None else list(range(1, 9))
+        return [
+            f"{siid}.{piid}"
+            for siid in normalized_siids
+            for piid in range(piid_start, piid_end + 1)
+        ]
+
+    @staticmethod
+    def _normalize_cloud_property_entries(payload: Any) -> list[dict[str, Any]]:
+        if isinstance(payload, list):
+            return [item for item in payload if isinstance(item, dict)]
+
+        if isinstance(payload, dict):
+            for key in ("data", "result", "records", "list"):
+                value = payload.get(key)
+                if isinstance(value, list):
+                    return [item for item in value if isinstance(item, dict)]
+        return []
+
+    @staticmethod
+    def _entry_has_meaningful_value(entry: dict[str, Any]) -> bool:
+        value = entry.get("value")
+        if value not in (None, "", [], {}):
+            return True
+
+        for nested_key in ("values", "data", "raw", "content"):
+            nested = entry.get(nested_key)
+            if nested not in (None, "", [], {}):
+                return True
+        return False
+
+    @staticmethod
+    def _property_value_blob_preview(value: Any) -> tuple[int, str] | None:
+        raw = value
+        if isinstance(raw, str):
+            text = raw.strip()
+            if not (text.startswith("[") and text.endswith("]")):
+                return None
+            try:
+                raw = json.loads(text)
+            except json.JSONDecodeError:
+                return None
+
+        if not isinstance(raw, list) or not raw:
+            return None
+        if not all(isinstance(item, int) and 0 <= item <= 255 for item in raw):
+            return None
+
+        blob = bytes(raw)
+        return len(blob), blob.hex()
+
+    @classmethod
+    def _annotate_cloud_property_entry(
+        cls,
+        entry: dict[str, Any],
+        *,
+        language: str,
+    ) -> dict[str, Any]:
+        rendered = dict(entry)
+        key = str(rendered.get("key", ""))
+        value = rendered.get("value")
+
+        if key == MOWER_STATE_PROPERTY_KEY:
+            label = mower_state_label(value, language=language)
+            if label:
+                rendered["decoded_label"] = label
+
+        blob_preview = cls._property_value_blob_preview(value)
+        if blob_preview is not None:
+            blob_len, blob_hex = blob_preview
+            rendered["value_bytes_len"] = blob_len
+            rendered["value_bytes_hex"] = blob_hex
+
+        return rendered
 
     def _sync_get_cloud_protocol(self):
         device = self._ensure_device()

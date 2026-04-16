@@ -3,16 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 from collections.abc import Sequence
-from typing import Any
 
-from dreame_lawn_mower_client import (
-    MOWER_STATE_PROPERTY_KEY,
-    DreameLawnMowerClient,
-    mower_state_label,
-)
+from dreame_lawn_mower_client import DreameLawnMowerClient
 
 
 def _parse_csv_numbers(raw: str, *, default: Sequence[int]) -> list[int]:
@@ -44,42 +38,6 @@ def _property_keys_from_env() -> list[str]:
     ]
 
 
-def _normalize_prop_entries(payload: Any) -> list[dict[str, Any]]:
-    if isinstance(payload, list):
-        return [item for item in payload if isinstance(item, dict)]
-
-    if isinstance(payload, dict):
-        for key in ("data", "result", "records", "list"):
-            value = payload.get(key)
-            if isinstance(value, list):
-                return [item for item in value if isinstance(item, dict)]
-    return []
-
-
-def _has_meaningful_value(entry: dict[str, Any]) -> bool:
-    value = entry.get("value")
-    if value not in (None, "", [], {}):
-        return True
-
-    for nested_key in ("values", "data", "raw", "content"):
-        nested = entry.get(nested_key)
-        if nested not in (None, "", [], {}):
-            return True
-    return False
-
-
-def _render_entry(entry: dict[str, Any], *, language: str) -> dict[str, Any]:
-    rendered = dict(entry)
-    key = str(rendered.get("key", ""))
-
-    if key == MOWER_STATE_PROPERTY_KEY:
-        label = mower_state_label(rendered.get("value"), language=language)
-        if label:
-            rendered["decoded_label"] = label
-
-    return rendered
-
-
 async def main() -> None:
     username = os.environ["DREAME_USERNAME"]
     password = os.environ["DREAME_PASSWORD"]
@@ -108,32 +66,12 @@ async def main() -> None:
     try:
         print("Descriptor:", devices[0].title)
         print(f"Generated key count: {len(keys)}")
-
-        payload = await client.async_get_cloud_properties(keys)
-        entries = _normalize_prop_entries(payload)
-        if only_values:
-            entries = [entry for entry in entries if _has_meaningful_value(entry)]
-
-        rendered = [
-            _render_entry(entry, language=language)
-            for entry in sorted(
-                entries,
-                key=lambda item: str(item.get("key", "")),
-            )
-        ]
-
-        print(
-            json.dumps(
-                {
-                    "requested_key_count": len(keys),
-                    "returned_entry_count": len(_normalize_prop_entries(payload)),
-                    "displayed_entry_count": len(rendered),
-                    "entries": rendered,
-                },
-                indent=2,
-                sort_keys=True,
-            )
+        result = await client.async_scan_cloud_properties(
+            keys=keys,
+            language=language,
+            only_values=only_values,
         )
+        print(__import__("json").dumps(result, indent=2, sort_keys=True))
     finally:
         await client.async_close()
 

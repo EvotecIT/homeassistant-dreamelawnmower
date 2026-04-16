@@ -99,7 +99,7 @@ A second live scan through `examples/property_probe.py` against a small docked r
 - `2.2 = 31`
   This is likely another mower state or error-adjacent field and should be tracked in future scans.
 - `1.1 = [206,0,0,...]`
-  This looks like a compact raw status blob rather than a simple scalar property.
+  This looks like a compact raw status blob rather than a simple scalar property. The current Python scanner now also renders it as `20` bytes of hex: `ce000000000000000080006401ff000080d0b4ce`.
 
 That means the endpoint is reachable, but those guessed keys are not enough by themselves to recover the map payload in the current docked state.
 
@@ -110,6 +110,7 @@ The reusable Python client now includes cloud probe helpers so this research can
 - `async_get_cloud_device_info()`
 - `async_get_cloud_device_list_page()`
 - `async_get_cloud_properties(keys)`
+- `async_scan_cloud_properties(...)` for chunked `siid.piid` range scans
 - `mower_state_label(value)` for the app-derived `2.1` state key
 
 Use `python examples/cloud_probe.py` to query these endpoints directly with the same credentials used by the integration.
