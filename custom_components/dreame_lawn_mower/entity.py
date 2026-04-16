@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import DreameLawnMowerCoordinator
@@ -15,12 +17,18 @@ class DreameLawnMowerEntity(CoordinatorEntity[DreameLawnMowerCoordinator]):
     def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
         super().__init__(coordinator)
         self._descriptor = coordinator.client.descriptor
-        self._attr_device_info = {
-            "identifiers": {("dreame_lawn_mower", self._descriptor.unique_id)},
-            "manufacturer": "Dreametech",
-            "model": self._descriptor.display_model,
-            "name": self._descriptor.name,
-            "sw_version": getattr(coordinator.data, "firmware_version", None),
-            "hw_version": getattr(coordinator.data, "hardware_version", None),
-        }
 
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return dynamic device metadata for the registry."""
+        snapshot = self.coordinator.data
+        descriptor = snapshot.descriptor if snapshot is not None else self._descriptor
+        return {
+            "identifiers": {("dreame_lawn_mower", descriptor.unique_id)},
+            "manufacturer": "Dreametech",
+            "model": descriptor.display_model,
+            "name": descriptor.name,
+            "sw_version": getattr(snapshot, "firmware_version", None),
+            "hw_version": getattr(snapshot, "hardware_version", None),
+            "serial_number": getattr(snapshot, "serial_number", None),
+        }

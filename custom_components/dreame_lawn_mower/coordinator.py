@@ -29,6 +29,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_SECONDS,
     DOMAIN,
 )
+from .dreame_client.models import display_name_for_model
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,7 +42,8 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             did=entry.data[CONF_DID],
             name=entry.data[CONF_NAME],
             model=entry.data[CONF_MODEL],
-            display_model=entry.data[CONF_MODEL],
+            display_model=display_name_for_model(entry.data[CONF_MODEL])
+            or entry.data[CONF_MODEL],
             account_type=entry.data[CONF_ACCOUNT_TYPE],
             country=entry.data[CONF_COUNTRY],
             host=entry.data.get(CONF_HOST),

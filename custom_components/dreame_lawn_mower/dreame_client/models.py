@@ -16,6 +16,13 @@ MODEL_NAME_MAP = {
 }
 
 
+def display_name_for_model(model: str | None) -> str | None:
+    """Return a friendly model name when one is known."""
+    if model is None:
+        return None
+    return MODEL_NAME_MAP.get(model, model)
+
+
 def _as_optional_str(value: Any) -> str | None:
     if value is None:
         return None
@@ -67,12 +74,24 @@ class DreameLawnMowerSnapshot:
     error_name: str | None = None
     firmware_version: str | None = None
     hardware_version: str | None = None
+    serial_number: str | None = None
+    cloud_update_time: str | None = None
+    online: bool | None = None
     child_lock: bool | None = None
+    charging: bool = False
+    started: bool = False
     docked: bool = False
     paused: bool = False
     mowing: bool = False
     returning: bool = False
+    scheduled_clean: bool = False
+    shortcut_task: bool = False
+    mapping_available: bool = False
+    cleaning_mode: int | None = None
+    cleaning_mode_name: str | None = None
+    capabilities: tuple[str, ...] = field(default_factory=tuple)
     raw_attributes: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    raw_info: Mapping[str, Any] = field(default_factory=dict, repr=False)
 
 
 def descriptor_from_cloud_record(
@@ -94,7 +113,7 @@ def descriptor_from_cloud_record(
         or MODEL_NAME_MAP.get(model)
         or model
     )
-    display_model = MODEL_NAME_MAP.get(model, model)
+    display_model = display_name_for_model(model) or model
 
     return DreameLawnMowerDescriptor(
         did=str(raw.get("did") or ""),
@@ -121,6 +140,15 @@ def snapshot_from_device(
     error_obj = getattr(device.status, "error", None)
     state = state_obj.name.lower() if state_obj is not None else "unknown"
     state_name = getattr(device.status, "state_name", None) or state.replace("_", " ").title()
+    status_attributes = getattr(device.status, "attributes", {}) or {}
+    info_raw = getattr(getattr(device, "info", None), "raw", {}) or {}
+    capability_list = status_attributes.get("capabilities") or getattr(
+        getattr(device, "capability", None),
+        "list",
+        [],
+    )
+    capabilities = tuple(str(item) for item in capability_list or [])
+    cleaning_mode = getattr(device.status, "cleaning_mode", None)
 
     paused_states = {"paused", "monitoring_paused"}
     returning_states = {"returning"}
@@ -189,10 +217,27 @@ def snapshot_from_device(
         error_name=getattr(device.status, "error_name", None),
         firmware_version=getattr(getattr(device, "info", None), "firmware_version", None),
         hardware_version=getattr(getattr(device, "info", None), "hardware_version", None),
+        serial_number=_as_optional_str(info_raw.get("sn")),
+        cloud_update_time=_as_optional_str(info_raw.get("updateTime")),
+        online=info_raw.get("online"),
         child_lock=child_lock,
+        charging=bool(status_attributes.get("charging", getattr(device.status, "charging", False))),
+        started=bool(status_attributes.get("started", getattr(device.status, "started", False))),
         docked=bool(getattr(device.status, "docked", False)),
         paused=bool(getattr(device.status, "paused", False)),
         mowing=bool(getattr(device.status, "running", False)),
         returning=bool(getattr(device.status, "returning", False)),
-        raw_attributes=getattr(device.status, "attributes", {}) or {},
+        scheduled_clean=bool(getattr(device.status, "scheduled_clean", False)),
+        shortcut_task=bool(getattr(device.status, "shortcut_task", False)),
+        mapping_available=bool(
+            status_attributes.get(
+                "mapping_available",
+                getattr(device.status, "mapping_available", False),
+            )
+        ),
+        cleaning_mode=getattr(cleaning_mode, "value", cleaning_mode),
+        cleaning_mode_name=getattr(device.status, "cleaning_mode_name", None),
+        capabilities=capabilities,
+        raw_attributes=status_attributes,
+        raw_info=info_raw,
     )

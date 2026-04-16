@@ -31,7 +31,11 @@ ACCOUNT_TYPE_OPTIONS = {
 }
 COUNTRY_OPTIONS = ["cn", "eu", "us", "ru", "sg"]
 
-PLATFORMS: list[Platform] = [Platform.LAWN_MOWER, Platform.SENSOR]
+PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
+    Platform.LAWN_MOWER,
+    Platform.SENSOR,
+]
 
 ACTIVITY_MOWING = "mowing"
 ACTIVITY_DOCKED = "docked"
@@ -39,4 +43,3 @@ ACTIVITY_PAUSED = "paused"
 ACTIVITY_RETURNING = "returning"
 ACTIVITY_ERROR = "error"
 ACTIVITY_IDLE = "idle"
-

@@ -76,9 +76,20 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             "state_name": snapshot.state_name,
             "task_status": snapshot.task_status,
             "task_status_name": snapshot.task_status_name,
+            "cleaning_mode": snapshot.cleaning_mode,
+            "cleaning_mode_name": snapshot.cleaning_mode_name,
             "child_lock": snapshot.child_lock,
+            "online": snapshot.online,
+            "charging": snapshot.charging,
+            "started": snapshot.started,
             "returning": snapshot.returning,
             "docked": snapshot.docked,
+            "mapping_available": snapshot.mapping_available,
+            "scheduled_clean": snapshot.scheduled_clean,
+            "shortcut_task": snapshot.shortcut_task,
+            "serial_number": snapshot.serial_number,
+            "cloud_update_time": snapshot.cloud_update_time,
+            "capabilities": list(snapshot.capabilities),
         }
 
     async def async_start_mowing(self) -> None:

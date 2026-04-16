@@ -22,6 +22,7 @@ class DreameSensorDescription:
     key: str
     name: str
     value_fn: Callable[[Any], Any]
+    exists_fn: Callable[[Any], bool] = lambda _: True
     device_class: SensorDeviceClass | None = None
     native_unit_of_measurement: str | None = None
     icon: str | None = None
@@ -50,6 +51,37 @@ SENSORS = [
         icon="mdi:package-up",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
+    DreameSensorDescription(
+        key="hardware_version",
+        name="Hardware Version",
+        value_fn=lambda snapshot: snapshot.hardware_version,
+        icon="mdi:chip",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    DreameSensorDescription(
+        key="serial_number",
+        name="Serial Number",
+        value_fn=lambda snapshot: snapshot.serial_number,
+        exists_fn=lambda snapshot: bool(snapshot.serial_number),
+        icon="mdi:barcode",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    DreameSensorDescription(
+        key="cloud_update_time",
+        name="Cloud Update Time",
+        value_fn=lambda snapshot: snapshot.cloud_update_time,
+        exists_fn=lambda snapshot: bool(snapshot.cloud_update_time),
+        icon="mdi:clock-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    DreameSensorDescription(
+        key="cleaning_mode",
+        name="Cleaning Mode",
+        value_fn=lambda snapshot: snapshot.cleaning_mode_name,
+        exists_fn=lambda snapshot: bool(snapshot.cleaning_mode_name)
+        and snapshot.cleaning_mode_name != "unknown",
+        icon="mdi:grass",
+    ),
 ]
 
 
@@ -60,10 +92,12 @@ async def async_setup_entry(
 ) -> None:
     """Set up mower sensors."""
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    snapshot = coordinator.data
     async_add_entities(
         [
             DreameLawnMowerSensor(coordinator, description)
             for description in SENSORS
+            if snapshot is not None and description.exists_fn(snapshot)
         ]
     )
 
