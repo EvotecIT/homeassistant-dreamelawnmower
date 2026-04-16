@@ -237,7 +237,7 @@ def snapshot_from_device(
         error_code=error_code,
         error_name=error_name,
         error_text=error_text,
-        error_display=error_text or _friendly_error_name(error_name),
+        error_display=_friendly_error_name(error_name) or error_text,
         firmware_version=getattr(getattr(device, "info", None), "firmware_version", None),
         hardware_version=getattr(getattr(device, "info", None), "hardware_version", None),
         serial_number=_as_optional_str(info_raw.get("sn")),

@@ -139,4 +139,4 @@ def test_snapshot_prioritizes_error_activity_but_keeps_paused_state_context() ->
     assert snapshot.error_code == 31
     assert snapshot.error_name == "left_wheell_speed"
     assert snapshot.error_text == "Left wheell speed"
-    assert snapshot.error_display == "Left wheell speed"
+    assert snapshot.error_display == "Left wheel speed"
