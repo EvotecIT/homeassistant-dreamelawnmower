@@ -167,6 +167,7 @@ class DreameMowerDevice:
         self.host: str = None  # IP address or host name of the device
         # Dictionary for storing the current property values
         self.data: dict[DreameMowerProperty, Any] = {}
+        self.unknown_properties: dict[int, dict[str, Any]] = {}
         self.auto_switch_data: dict[DreameMowerAutoSwitchProperty, Any] = None
         self.ai_data: dict[DreameMowerStrAIProperty | DreameMowerAIProperty, Any] = None
         self.available: bool = False  # Last update is successful or not
@@ -358,6 +359,10 @@ class DreameMowerDevice:
             if not isinstance(prop, dict):
                 continue
             did = int(prop["did"])
+            property_enum = self._property_enum(did)
+            property_name = self._property_name(did)
+            if property_enum is None:
+                self._remember_unknown_property(did, prop)
             if prop["code"] == 0 and "value" in prop:
                 value = prop["value"]
                 if did in self._dirty_data:
@@ -367,7 +372,7 @@ class DreameMowerDevice:
                     ):
                         _LOGGER.info(
                             "Property %s Value Discarded: %s <- %s",
-                            DreameMowerProperty(did).name,
+                            property_name,
                             self._dirty_data[did].value,
                             value,
                         )
@@ -399,26 +404,30 @@ class DreameMowerDevice:
                         if current_value is not None:
                             _LOGGER.debug(
                                 "Property %s Changed: %s -> %s",
-                                DreameMowerProperty(did).name,
+                                property_name,
                                 current_value,
                                 value,
                             )
                         else:
                             _LOGGER.debug(
                                 "Property %s Added: %s",
-                                DreameMowerProperty(did).name,
+                                property_name,
                                 value,
                             )
                     self.data[did] = value
                     if did in self._property_update_callback:
-                        _LOGGER.debug("Property %s Callbacks: %s", DreameMowerProperty(did).name, self._property_update_callback[did])
+                        _LOGGER.debug(
+                            "Property %s Callbacks: %s",
+                            property_name,
+                            self._property_update_callback[did],
+                        )
                         for callback in self._property_update_callback[did]:
                             if not self._ready and custom_property:
                                 callback(current_value)
                             else:
                                 callbacks.append([callback, current_value])
             else:
-                _LOGGER.debug("Property %s Not Available", DreameMowerProperty(did).name)
+                _LOGGER.debug("Property %s Not Available", property_name)
 
         if not self._ready:
             self.capability.refresh(
@@ -459,6 +468,31 @@ class DreameMowerDevice:
                         _LOGGER.debug("Capability %s", p.upper())
 
         return changed
+
+    def _property_enum(self, did: int) -> DreameMowerProperty | None:
+        """Return the known property enum for a device property id."""
+        try:
+            return DreameMowerProperty(did)
+        except ValueError:
+            return None
+
+    def _property_name(self, did: int) -> str:
+        """Return a safe log/debug name for a property id."""
+        property_enum = self._property_enum(did)
+        if property_enum is not None:
+            return property_enum.name
+        return f"UNKNOWN_{did}"
+
+    def _remember_unknown_property(self, did: int, payload: dict[str, Any]) -> None:
+        """Store unknown property payloads for diagnostics instead of crashing."""
+        self.unknown_properties[did] = {
+            "did": did,
+            "code": payload.get("code"),
+            "siid": payload.get("siid"),
+            "piid": payload.get("piid"),
+            "value": payload.get("value"),
+            "last_seen": time.time(),
+        }
 
     def _request_properties(self, properties: list[DreameMowerProperty] = None) -> bool:
         """Request properties from the device."""
@@ -1964,7 +1998,7 @@ class DreameMowerDevice:
                         if value is None or v.value == value:
                             _LOGGER.info(
                                 "Property %s Value Restored: %s <- %s",
-                                DreameMowerProperty(k).name,
+                                self._property_name(k),
                                 v.previous_value,
                                 value,
                             )

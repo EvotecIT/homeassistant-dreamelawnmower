@@ -76,6 +76,9 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             "state_name": snapshot.state_name,
             "task_status": snapshot.task_status,
             "task_status_name": snapshot.task_status_name,
+            "unknown_property_count": len(
+                getattr(self.coordinator.client.device, "unknown_properties", {}) or {}
+            ),
             "error_code": snapshot.error_code,
             "error_name": snapshot.error_name,
             "error_text": snapshot.error_text,

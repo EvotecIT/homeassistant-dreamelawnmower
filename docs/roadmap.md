@@ -46,11 +46,11 @@ Targets:
 
 Checklist:
 
-- [ ] catch unknown property enum values and store them in a raw diagnostics bucket
-- [ ] ensure refresh continues even when one property block is unrecognized
+- [x] catch unknown property enum values and store them in a raw diagnostics bucket
+- [x] ensure refresh continues even when one property block is unrecognized
 - [ ] add model-family fixtures as new users report supported hardware
 - [ ] normalize display names for known Dreame, MOVA, LiDAX, Viax, and related mower rebadges
-- [ ] add regression tests for unknown-property tolerance
+- [x] add regression tests for unknown-property tolerance
 
 Definition of done:
 

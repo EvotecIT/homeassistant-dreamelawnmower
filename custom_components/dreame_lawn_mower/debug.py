@@ -144,6 +144,12 @@ def build_debug_payload(
             "available": _normalize_debug_value(getattr(device, "available", None)),
             "host": _normalize_debug_value(getattr(device, "host", None)),
             "token_present": bool(getattr(device, "token", None)),
+            "unknown_property_count": len(
+                getattr(device, "unknown_properties", {}) or {}
+            ),
+            "unknown_properties": _normalize_debug_value(
+                getattr(device, "unknown_properties", {}) or {}
+            ),
             "status_values": _collect_status_values(device),
             "status_attributes": _normalize_debug_value(
                 getattr(status, "attributes", {}) if status is not None else {}

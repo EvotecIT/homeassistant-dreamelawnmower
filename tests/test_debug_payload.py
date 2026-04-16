@@ -53,6 +53,16 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
         available=True,
         host="example.invalid",
         token="secret-token",
+        unknown_properties={
+            -113852866: {
+                "did": -113852866,
+                "code": 0,
+                "siid": 9,
+                "piid": 4,
+                "value": 123,
+                "last_seen": 123456.0,
+            }
+        },
         status=SimpleNamespace(
             state_name="paused",
             task_status_name="unknown",
@@ -109,5 +119,7 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
     assert payload["cloud_record"]["mac"] == "**REDACTED**"
     assert payload["device"]["host"] == "**REDACTED**"
     assert payload["device"]["info_raw"]["sn"] == "**REDACTED**"
+    assert payload["device"]["unknown_property_count"] == 1
+    assert payload["device"]["unknown_properties"]["-113852866"]["value"] == 123
     assert payload["device"]["status_values"]["battery_level"] == 79
     assert payload["device"]["capabilities"]["list"] == ["lidar_navigation", "map"]
