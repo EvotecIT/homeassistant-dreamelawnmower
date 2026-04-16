@@ -35,10 +35,4 @@ pytest
 Note:
 
 - the full Home Assistant pytest stack is usually easiest in Linux CI
-- live validation against the real mower still matters because the upstream protocol is reverse engineered
-
-## Architecture notes
-
-The longer-term direction is documented in [docs/implementation-plan.md](docs/implementation-plan.md).
-
-The most important design decision is that this should be mower-first, not a vacuum integration fork with renamed entities.
+- live validation against the real mower still matters because the protocol is reverse engineered
