@@ -28,6 +28,7 @@ class DreameBinarySensorDescription:
     name: str
     value_fn: Callable[[Any], bool | None]
     exists_fn: Callable[[Any], bool] = lambda _: True
+    entity_registry_enabled_default: bool = True
     device_class: BinarySensorDeviceClass | None = None
     icon: str | None = None
     entity_category: EntityCategory | None = None

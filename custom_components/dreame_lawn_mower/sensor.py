@@ -23,6 +23,7 @@ class DreameSensorDescription:
     name: str
     value_fn: Callable[[Any], Any]
     exists_fn: Callable[[Any], bool] = lambda _: True
+    entity_registry_enabled_default: bool = True
     device_class: SensorDeviceClass | None = None
     native_unit_of_measurement: str | None = None
     icon: str | None = None
