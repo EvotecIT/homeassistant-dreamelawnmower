@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -18,6 +19,7 @@ from .coordinator import DreameLawnMowerCoordinator
 from .dreame_client.models import DreameLawnMowerMapSummary
 from .image import png_bytes_to_jpeg
 
+_LOGGER = logging.getLogger(__name__)
 _MAP_CACHE_TTL = timedelta(seconds=60)
 _MAP_TIMEOUT_SECONDS = 6.0
 _MAP_POLL_INTERVAL_SECONDS = 0.5
@@ -144,19 +146,28 @@ class DreameLawnMowerMapCamera(
             if self._last_image is not None and self._cache_is_fresh():
                 return self._last_image
 
-            summary = await self.coordinator.client.async_refresh_map_summary(
-                timeout=_MAP_TIMEOUT_SECONDS,
-                interval=_MAP_POLL_INTERVAL_SECONDS,
-            )
-            image = await self.coordinator.client.async_get_map_png(
-                timeout=_MAP_TIMEOUT_SECONDS,
-                interval=_MAP_POLL_INTERVAL_SECONDS,
-            )
+            try:
+                summary = await self.coordinator.client.async_refresh_map_summary(
+                    timeout=_MAP_TIMEOUT_SECONDS,
+                    interval=_MAP_POLL_INTERVAL_SECONDS,
+                )
+                image = await self.coordinator.client.async_get_map_png(
+                    timeout=_MAP_TIMEOUT_SECONDS,
+                    interval=_MAP_POLL_INTERVAL_SECONDS,
+                )
+            except Exception as err:
+                _LOGGER.warning("Failed to refresh Dreame mower map image: %s", err)
+                self._last_refresh_at = datetime.now(UTC)
+                self.async_write_ha_state()
+                return self._last_image
 
             if summary is not None:
                 self._last_summary = summary
             if image is not None:
-                self._last_image = png_bytes_to_jpeg(image)
+                try:
+                    self._last_image = png_bytes_to_jpeg(image)
+                except Exception as err:
+                    _LOGGER.warning("Failed to convert Dreame mower map image: %s", err)
                 self._last_refresh_at = datetime.now(UTC)
             elif self._last_image is None:
                 self._last_refresh_at = datetime.now(UTC)

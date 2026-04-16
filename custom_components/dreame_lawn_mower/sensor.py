@@ -4,9 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
@@ -25,9 +30,13 @@ class DreameSensorDescription:
     exists_fn: Callable[[Any], bool] = lambda _: True
     entity_registry_enabled_default: bool = True
     entity_registry_visible_default: bool = True
+    translation_key: str | None = None
     device_class: SensorDeviceClass | None = None
     native_unit_of_measurement: str | None = None
     suggested_unit_of_measurement: str | None = None
+    state_class: SensorStateClass | str | None = None
+    last_reset: datetime | None = None
+    options: list[str] | None = None
     icon: str | None = None
     entity_category: EntityCategory | None = None
 
