@@ -21,6 +21,7 @@ This first implementation is intentionally narrow so it can be validated on real
 - normalized sensors for battery, error, firmware, state name, and task status
 - normalized binary sensors for `Error Active`, `Docked`, `Paused`, `Mowing`, and `Returning`
 - opt-in diagnostic sensors for unknown-property and realtime telemetry counts
+- experimental Python-first map summary and PNG rendering helpers
 - start mowing, pause, and dock
 - diagnostics, debug snapshot capture, and HACS-ready repo structure
 
@@ -59,6 +60,21 @@ When the mower is not available for live testing, use `Capture Debug Snapshot` a
 The repo already includes paused and paused-with-wheel-error A2 captures, which lets us regression-test awkward dock-contact states without reproducing them on demand.
 
 If you are troubleshooting a new model or strange dock behavior, enable the disabled-by-default diagnostic sensors for unknown-property count, realtime-property count, and last realtime method. They help confirm whether the mower is publishing live MQTT telemetry and whether we are seeing unmapped data that still needs decoding.
+
+## Map experiments
+
+The reusable Python client now includes an experimental read-only map path:
+
+- `async_refresh_map_summary()` tries to fetch current mower map metadata
+- `async_get_map_png()` tries to render the current mower map to PNG bytes
+
+The quickest way to try it outside Home Assistant is:
+
+```bash
+python examples/map_client.py
+```
+
+This is intentionally Python-first and read-only for now. The next step is to prove map availability and payload stability on real hardware before adding a Home Assistant camera or image entity.
 
 ## Automation examples
 

@@ -140,6 +140,35 @@ class DreameLawnMowerSnapshot:
     raw_info: Mapping[str, Any] = field(default_factory=dict, repr=False)
 
 
+@dataclass(slots=True, frozen=True)
+class DreameLawnMowerMapSummary:
+    """Normalized read-only summary of mower map data."""
+
+    available: bool
+    map_id: int | None = None
+    frame_id: int | None = None
+    timestamp_ms: int | None = None
+    rotation: int | None = None
+    width: int | None = None
+    height: int | None = None
+    grid_size: int | None = None
+    saved_map: bool = False
+    temporary_map: bool = False
+    recovery_map: bool = False
+    empty_map: bool = False
+    segment_count: int = 0
+    active_segment_count: int = 0
+    active_area_count: int = 0
+    active_point_count: int = 0
+    path_point_count: int = 0
+    no_go_area_count: int = 0
+    virtual_wall_count: int = 0
+    pathway_count: int = 0
+    obstacle_count: int = 0
+    charger_present: bool = False
+    robot_present: bool = False
+
+
 def descriptor_from_cloud_record(
     raw: Mapping[str, Any],
     *,
@@ -309,4 +338,47 @@ def snapshot_from_device(
         capabilities=capabilities,
         raw_attributes=status_attributes,
         raw_info=info_raw,
+    )
+
+
+def map_summary_from_map_data(map_data: Any) -> DreameLawnMowerMapSummary | None:
+    """Convert raw mower map data into a small reusable summary."""
+    if map_data is None:
+        return None
+
+    dimensions = getattr(map_data, "dimensions", None)
+    segments = getattr(map_data, "segments", None) or {}
+    active_segments = getattr(map_data, "active_segments", None) or []
+    active_areas = getattr(map_data, "active_areas", None) or []
+    active_points = getattr(map_data, "active_points", None) or []
+    path = getattr(map_data, "path", None) or []
+    no_go_areas = getattr(map_data, "no_go_areas", None) or []
+    virtual_walls = getattr(map_data, "virtual_walls", None) or []
+    pathways = getattr(map_data, "pathways", None) or []
+    obstacles = getattr(map_data, "obstacles", None) or {}
+
+    return DreameLawnMowerMapSummary(
+        available=not bool(getattr(map_data, "empty_map", False)),
+        map_id=getattr(map_data, "map_id", None),
+        frame_id=getattr(map_data, "frame_id", None),
+        timestamp_ms=getattr(map_data, "timestamp_ms", None),
+        rotation=getattr(map_data, "rotation", None),
+        width=getattr(dimensions, "width", None),
+        height=getattr(dimensions, "height", None),
+        grid_size=getattr(dimensions, "grid_size", None),
+        saved_map=bool(getattr(map_data, "saved_map", False)),
+        temporary_map=bool(getattr(map_data, "temporary_map", False)),
+        recovery_map=bool(getattr(map_data, "recovery_map", False)),
+        empty_map=bool(getattr(map_data, "empty_map", False)),
+        segment_count=len(segments),
+        active_segment_count=len(active_segments),
+        active_area_count=len(active_areas),
+        active_point_count=len(active_points),
+        path_point_count=len(path),
+        no_go_area_count=len(no_go_areas),
+        virtual_wall_count=len(virtual_walls),
+        pathway_count=len(pathways),
+        obstacle_count=len(obstacles),
+        charger_present=getattr(map_data, "charger_position", None) is not None,
+        robot_present=getattr(map_data, "robot_position", None) is not None,
     )

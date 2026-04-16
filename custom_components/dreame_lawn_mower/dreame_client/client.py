@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Sequence
 from typing import Any
 
@@ -11,8 +12,10 @@ from .models import (
     SUPPORTED_ACCOUNT_TYPES,
     DreameLawnMowerDescriptor,
     DreameLawnMowerSnapshot,
+    DreameLawnMowerMapSummary,
     descriptor_from_cloud_record,
     display_name_for_model,
+    map_summary_from_map_data,
     snapshot_from_device,
 )
 
@@ -121,6 +124,32 @@ class DreameLawnMowerClient:
         """Return the mower to base."""
         await self._async_call_device_method("dock")
 
+    async def async_refresh_map_summary(
+        self,
+        *,
+        timeout: float = 8.0,
+        interval: float = 0.5,
+    ) -> DreameLawnMowerMapSummary | None:
+        """Try to refresh map data and return a normalized summary."""
+        return await asyncio.to_thread(
+            self._sync_refresh_map_summary,
+            timeout,
+            interval,
+        )
+
+    async def async_get_map_png(
+        self,
+        *,
+        timeout: float = 8.0,
+        interval: float = 0.5,
+    ) -> bytes | None:
+        """Try to refresh the current mower map and return a rendered PNG."""
+        return await asyncio.to_thread(
+            self._sync_get_map_png,
+            timeout,
+            interval,
+        )
+
     async def async_close(self) -> None:
         """Disconnect long-lived device resources."""
         if self._device is not None:
@@ -142,6 +171,53 @@ class DreameLawnMowerClient:
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
         return device
+
+    def _sync_refresh_map_summary(
+        self,
+        timeout: float,
+        interval: float,
+    ) -> DreameLawnMowerMapSummary | None:
+        map_data = self._sync_wait_for_map(timeout, interval)
+        return map_summary_from_map_data(map_data)
+
+    def _sync_get_map_png(
+        self,
+        timeout: float,
+        interval: float,
+    ) -> bytes | None:
+        map_data = self._sync_wait_for_map(timeout, interval)
+        if map_data is None:
+            return None
+
+        device = self._ensure_device()
+        render_map_data = device.get_map_for_render(map_data) or map_data
+
+        from .map import DreameMowerMapDataJsonRenderer
+
+        renderer = DreameMowerMapDataJsonRenderer()
+        return renderer.render_map(render_map_data)
+
+    def _sync_wait_for_map(self, timeout: float, interval: float):
+        device = self._sync_update_device()
+        if getattr(device, "current_map", None) is not None:
+            return device.current_map
+
+        if getattr(device, "_map_manager", None) is None:
+            return None
+
+        try:
+            device.update_map()
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+
+        deadline = time.monotonic() + max(timeout, 0)
+        while time.monotonic() <= deadline:
+            current_map = getattr(device, "current_map", None)
+            if current_map is not None:
+                return current_map
+            time.sleep(max(interval, 0.1))
+
+        return getattr(device, "current_map", None)
 
     def _ensure_device(self):
         if self._device is not None:
