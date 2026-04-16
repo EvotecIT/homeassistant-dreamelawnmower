@@ -150,6 +150,17 @@ class DreameLawnMowerClient:
             interval,
         )
 
+    async def async_get_cloud_device_info(self) -> dict[str, Any] | None:
+        """Fetch the raw cloud `device/info` payload used by the mobile app."""
+        return await asyncio.to_thread(self._sync_get_cloud_device_info)
+
+    async def async_get_cloud_properties(
+        self,
+        keys: str | Sequence[str],
+    ) -> Any:
+        """Fetch raw cloud property values from the `iotstatus/props` endpoint."""
+        return await asyncio.to_thread(self._sync_get_cloud_properties, keys)
+
     async def async_close(self) -> None:
         """Disconnect long-lived device resources."""
         if self._device is not None:
@@ -197,6 +208,25 @@ class DreameLawnMowerClient:
         renderer = DreameMowerMapDataJsonRenderer()
         return renderer.render_map(render_map_data)
 
+    def _sync_get_cloud_device_info(self) -> dict[str, Any] | None:
+        cloud = self._sync_get_cloud_protocol()
+
+        try:
+            return cloud.get_device_info()
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+
+    def _sync_get_cloud_properties(
+        self,
+        keys: str | Sequence[str],
+    ) -> Any:
+        cloud = self._sync_get_cloud_protocol()
+        normalized_keys = self._normalize_cloud_property_keys(keys)
+        try:
+            return cloud.get_properties(normalized_keys)
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+
     def _sync_wait_for_map(self, timeout: float, interval: float):
         device = self._sync_update_device()
         if getattr(device, "current_map", None) is not None:
@@ -218,6 +248,22 @@ class DreameLawnMowerClient:
             time.sleep(max(interval, 0.1))
 
         return getattr(device, "current_map", None)
+
+    @staticmethod
+    def _normalize_cloud_property_keys(keys: str | Sequence[str]) -> str:
+        if isinstance(keys, str):
+            return keys
+        return ",".join(str(key).strip() for key in keys if str(key).strip())
+
+    def _sync_get_cloud_protocol(self):
+        device = self._ensure_device()
+        protocol = getattr(device, "_protocol", None)
+        cloud = getattr(protocol, "cloud", None)
+        if cloud is None:
+            raise DreameLawnMowerConnectionError("Cloud connection is unavailable.")
+        if not getattr(cloud, "logged_in", False) and not cloud.login():
+            raise DreameLawnMowerConnectionError("Unable to log in to the mower cloud API.")
+        return cloud
 
     def _ensure_device(self):
         if self._device is not None:

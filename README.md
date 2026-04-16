@@ -43,6 +43,7 @@ The current phased backlog lives in [`docs/roadmap.md`](docs/roadmap.md). It foc
 - A2 and A2 Pro telemetry expansion from verified payloads
 - mower-native vector map support
 - automation-friendly state and error exposure
+- app-guided reverse-engineering notes in [`docs/dreamehome-research.md`](docs/dreamehome-research.md)
 
 Note:
 
@@ -73,6 +74,16 @@ The quickest way to try it outside Home Assistant is:
 ```bash
 python examples/map_client.py
 ```
+
+If you want to probe the same cloud endpoints the Dreamehome app exposes for mower discovery and raw properties, use:
+
+```bash
+python examples/cloud_probe.py
+```
+
+Optional:
+
+- set `DREAME_PROP_KEYS=6.1,6.3` or another comma-separated key list to query `iotstatus/props`
 
 This is intentionally Python-first and read-only for now. The next step is to prove map availability and payload stability on real hardware before adding a Home Assistant camera or image entity.
 

@@ -94,10 +94,13 @@ Targets:
 - build a mower-native vector map parser
 - render zone maps as a read-only first step
 - avoid reusing vacuum map assumptions where they do not fit mower data
+- use confirmed app-side cloud endpoints before guessing at more legacy vacuum map paths
 
 Checklist:
 
+- [x] confirm Dreamehome app-side map-adjacent cloud endpoints from the real Android package
 - [ ] capture real mower `MAP.*` and `M_PATH.*` payload fixtures
+- [ ] probe `device/info`, `iotstatus/props`, and `device/listV2` from Python with captured A2 credentials
 - [ ] implement a parser for mower zones, boundaries, forbidden areas, and path segments
 - [ ] implement a simple renderer for read-only Home Assistant display
 - [ ] expose a map entity or camera-style surface only after the parser is stable

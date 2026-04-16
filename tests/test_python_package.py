@@ -20,3 +20,8 @@ def test_public_package_exports_client() -> None:
 def test_public_package_exports_map_helpers() -> None:
     assert DreameLawnMowerMapSummary is MapSummaryFromModule
     assert callable(map_summary_from_map_data)
+
+
+def test_public_package_client_has_cloud_probe_helpers() -> None:
+    assert hasattr(DreameLawnMowerClient, "async_get_cloud_device_info")
+    assert hasattr(DreameLawnMowerClient, "async_get_cloud_properties")
