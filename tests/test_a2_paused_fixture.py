@@ -51,6 +51,9 @@ def test_a2_paused_fixture_exposes_expected_sensor_set() -> None:
         "Hardware Version",
         "Serial Number",
         "Cloud Update Time",
+        "Unknown Property Count",
+        "Realtime Property Count",
+        "Last Realtime Method",
         "Mower State",
         "Raw Error",
     }

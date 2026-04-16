@@ -46,9 +46,12 @@ def test_a2_error_fixture_exposes_expected_sensor_set() -> None:
         "Error Code",
         "Firmware Version",
         "Hardware Version",
+        "Last Realtime Method",
         "Mower State",
         "Raw Error",
+        "Realtime Property Count",
         "Serial Number",
+        "Unknown Property Count",
     }
 
 

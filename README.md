@@ -19,6 +19,7 @@ This first implementation is intentionally narrow so it can be validated on real
 - config flow and reauthentication
 - one `lawn_mower` entity
 - core sensors for battery, error, and firmware version
+- opt-in diagnostic sensors for unknown-property and realtime telemetry counts
 - start mowing, pause, and dock
 - diagnostics, debug snapshot capture, and HACS-ready repo structure
 
@@ -55,3 +56,5 @@ If you previously installed an older mower custom component under the `dreame_la
 When the mower is not available for live testing, use `Capture Debug Snapshot` and `Download diagnostics` in Home Assistant to collect sanitized payloads. Those captures can be turned into repo fixtures under `tests/fixtures/` and used to extend entity coverage, capability gating, and parser regressions without requiring a mowing run.
 
 The repo already includes paused and paused-with-wheel-error A2 captures, which lets us regression-test awkward dock-contact states without reproducing them on demand.
+
+If you are troubleshooting a new model or strange dock behavior, enable the disabled-by-default diagnostic sensors for unknown-property count, realtime-property count, and last realtime method. They help confirm whether the mower is publishing live MQTT telemetry and whether we are seeing unmapped data that still needs decoding.

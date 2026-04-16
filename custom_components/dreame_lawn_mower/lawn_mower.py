@@ -82,6 +82,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             "realtime_property_count": len(
                 getattr(self.coordinator.client.device, "realtime_properties", {}) or {}
             ),
+            "last_realtime_method": snapshot.last_realtime_method,
             "error_code": snapshot.error_code,
             "error_name": snapshot.error_name,
             "error_text": snapshot.error_text,

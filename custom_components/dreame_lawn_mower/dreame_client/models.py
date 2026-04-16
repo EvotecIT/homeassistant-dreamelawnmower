@@ -119,6 +119,9 @@ class DreameLawnMowerSnapshot:
     hardware_version: str | None = None
     serial_number: str | None = None
     cloud_update_time: str | None = None
+    unknown_property_count: int = 0
+    realtime_property_count: int = 0
+    last_realtime_method: str | None = None
     online: bool | None = None
     child_lock: bool | None = None
     charging: bool = False
@@ -192,6 +195,9 @@ def snapshot_from_device(
     state_name = getattr(device.status, "state_name", None) or state.replace("_", " ").title()
     status_attributes = getattr(device.status, "attributes", {}) or {}
     info_raw = getattr(getattr(device, "info", None), "raw", {}) or {}
+    last_realtime_message = getattr(device, "last_realtime_message", None) or {}
+    last_realtime_payload = last_realtime_message.get("message", {})
+    last_realtime_method = _as_optional_str(last_realtime_payload.get("method"))
     error_name = _as_optional_str(getattr(device.status, "error_name", None))
     error_text = _as_optional_str(status_attributes.get("error"))
     error_code = getattr(error_obj, "value", None)
@@ -279,6 +285,9 @@ def snapshot_from_device(
         hardware_version=getattr(getattr(device, "info", None), "hardware_version", None),
         serial_number=_as_optional_str(info_raw.get("sn")),
         cloud_update_time=_as_optional_str(info_raw.get("updateTime")),
+        unknown_property_count=len(getattr(device, "unknown_properties", {}) or {}),
+        realtime_property_count=len(getattr(device, "realtime_properties", {}) or {}),
+        last_realtime_method=last_realtime_method,
         online=info_raw.get("online"),
         child_lock=child_lock,
         charging=bool(status_attributes.get("charging", getattr(device.status, "charging", False))),

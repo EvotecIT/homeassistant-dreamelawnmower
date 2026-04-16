@@ -54,6 +54,9 @@ class _FakeDevice:
         self.status = _FakeStatus()
         self.info = _FakeInfo()
         self.capability = SimpleNamespace(list=["lidar_navigation", "map"])
+        self.unknown_properties = {}
+        self.realtime_properties = {}
+        self.last_realtime_message = None
 
     def get_property(self, _prop):
         return None
@@ -174,6 +177,9 @@ def test_snapshot_uses_state_name_before_boolean_helpers() -> None:
     assert snapshot.online is True
     assert snapshot.serial_number == "G2408051LEE0090632"
     assert snapshot.cloud_update_time == "2025-04-22 10:03:44"
+    assert snapshot.unknown_property_count == 0
+    assert snapshot.realtime_property_count == 0
+    assert snapshot.last_realtime_method is None
     assert snapshot.capabilities == ("lidar_navigation", "map")
 
 
@@ -198,3 +204,36 @@ def test_snapshot_prioritizes_error_activity_but_keeps_paused_state_context() ->
     assert snapshot.error_name == "left_wheell_speed"
     assert snapshot.error_text == "Left wheell speed"
     assert snapshot.error_display == "Left wheel speed"
+
+
+def test_snapshot_tracks_realtime_and_unknown_diagnostics() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "dreame.mower.g2408",
+            "customName": "Garage Mower",
+        },
+        account_type="dreame",
+        country="eu",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.unknown_properties = {
+        -113852866: {"did": -113852866, "value": 123},
+    }
+    device.realtime_properties = {
+        "3.1": {"siid": 3, "piid": 1, "value": 80},
+        "9.4": {"siid": 9, "piid": 4, "value": {"blob": 123}},
+    }
+    device.last_realtime_message = {
+        "received_at": 123456.0,
+        "message": {"method": "properties_changed", "params": []},
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.unknown_property_count == 1
+    assert snapshot.realtime_property_count == 2
+    assert snapshot.last_realtime_method == "properties_changed"
