@@ -43,6 +43,23 @@ async def main() -> None:
         print("device/info:")
         print(json.dumps(device_info, indent=2, sort_keys=True))
 
+        device_page = await client.async_get_cloud_device_list_page()
+        print("device/listV2 summary:")
+        print(
+            json.dumps(
+                {
+                    "current": device_page.get("current") if device_page else None,
+                    "size": device_page.get("size") if device_page else None,
+                    "total": device_page.get("total") if device_page else None,
+                    "record_count": len(device_page.get("records", []))
+                    if device_page
+                    else None,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+
         property_keys = _property_keys_from_env()
         if property_keys:
             properties = await client.async_get_cloud_properties(property_keys)

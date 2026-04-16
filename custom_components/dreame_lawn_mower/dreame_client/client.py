@@ -150,9 +150,13 @@ class DreameLawnMowerClient:
             interval,
         )
 
-    async def async_get_cloud_device_info(self) -> dict[str, Any] | None:
+    async def async_get_cloud_device_info(
+        self,
+        *,
+        language: str | None = None,
+    ) -> dict[str, Any] | None:
         """Fetch the raw cloud `device/info` payload used by the mobile app."""
-        return await asyncio.to_thread(self._sync_get_cloud_device_info)
+        return await asyncio.to_thread(self._sync_get_cloud_device_info, language)
 
     async def async_get_cloud_properties(
         self,
@@ -160,6 +164,25 @@ class DreameLawnMowerClient:
     ) -> Any:
         """Fetch raw cloud property values from the `iotstatus/props` endpoint."""
         return await asyncio.to_thread(self._sync_get_cloud_properties, keys)
+
+    async def async_get_cloud_device_list_page(
+        self,
+        *,
+        current: int = 1,
+        size: int = 20,
+        language: str | None = "en",
+        master: bool | None = None,
+        shared_status: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Fetch the raw cloud `device/listV2` page used by the mobile app."""
+        return await asyncio.to_thread(
+            self._sync_get_cloud_device_list_page,
+            current,
+            size,
+            language,
+            master,
+            shared_status,
+        )
 
     async def async_close(self) -> None:
         """Disconnect long-lived device resources."""
@@ -208,10 +231,15 @@ class DreameLawnMowerClient:
         renderer = DreameMowerMapDataJsonRenderer()
         return renderer.render_map(render_map_data)
 
-    def _sync_get_cloud_device_info(self) -> dict[str, Any] | None:
+    def _sync_get_cloud_device_info(
+        self,
+        language: str | None = None,
+    ) -> dict[str, Any] | None:
         cloud = self._sync_get_cloud_protocol()
 
         try:
+            if hasattr(cloud, "get_device_info_v2"):
+                return cloud.get_device_info_v2(language)
             return cloud.get_device_info()
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
@@ -224,6 +252,26 @@ class DreameLawnMowerClient:
         normalized_keys = self._normalize_cloud_property_keys(keys)
         try:
             return cloud.get_properties(normalized_keys)
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+
+    def _sync_get_cloud_device_list_page(
+        self,
+        current: int,
+        size: int,
+        language: str | None,
+        master: bool | None,
+        shared_status: int | None,
+    ) -> dict[str, Any] | None:
+        cloud = self._sync_get_cloud_protocol()
+        try:
+            return cloud.get_device_list_v2(
+                current=current,
+                size=size,
+                lang=language,
+                master=master,
+                shared_status=shared_status,
+            )
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
 

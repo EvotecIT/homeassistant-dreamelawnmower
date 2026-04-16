@@ -355,6 +355,51 @@ class DreameMowerDreameHomeCloudProtocol:
                 return response["data"]
         return None
 
+    def get_device_list_v2(
+        self,
+        current: int = 1,
+        size: int = 20,
+        lang: str | None = None,
+        master: bool | None = None,
+        shared_status: int | None = None,
+    ) -> Any:
+        params = {
+            "current": current,
+            "size": size,
+        }
+        if lang:
+            params["lang"] = lang
+        if master is not None:
+            params["master"] = master
+        if shared_status is not None:
+            params["sharedStatus"] = shared_status
+
+        response = self.request(
+            f"{self.get_api_url()}/dreame-user-iot/iotuserbind/device/listV2",
+            json.dumps(params, separators=(",", ":")),
+        )
+        if response and "data" in response and response["code"] == 0:
+            data = response["data"]
+            if "page" in data:
+                return data["page"]
+            return data
+        return None
+
+    def get_device_info_v2(self, lang: str | None = None) -> Any:
+        params = {"did": self._did}
+        if lang:
+            params["lang"] = lang
+
+        response = self.request(
+            f"{self.get_api_url()}/dreame-user-iot/iotuserbind/device/info",
+            json.dumps(params, separators=(",", ":")),
+        )
+        if response and "data" in response and response["code"] == 0:
+            data = response["data"]
+            self._handle_device_info(data)
+            return data
+        return None
+
     def get_device_info(self) -> Any:
         response = self._api_call(
             f"{self._strings[23]}/{self._strings[24]}/{self._strings[27]}/{self._strings[29]}",

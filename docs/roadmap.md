@@ -101,6 +101,7 @@ Checklist:
 - [x] confirm Dreamehome app-side map-adjacent cloud endpoints from the real Android package
 - [ ] capture real mower `MAP.*` and `M_PATH.*` payload fixtures
 - [ ] probe `device/info`, `iotstatus/props`, and `device/listV2` from Python with captured A2 credentials
+- [x] expose Python-side helpers for `device/info`, `iotstatus/props`, and `device/listV2`
 - [ ] implement a parser for mower zones, boundaries, forbidden areas, and path segments
 - [ ] implement a simple renderer for read-only Home Assistant display
 - [ ] expose a map entity or camera-style surface only after the parser is stable

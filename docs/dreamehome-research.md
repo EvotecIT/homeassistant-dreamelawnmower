@@ -66,6 +66,7 @@ These are not proven yet:
 A live A2 probe through the new Python helper confirmed that:
 
 - `device/info` returns the expected mower payload for `dreame.mower.g2408`
+- `device/listV2` returns a valid page with the expected mower record
 - `iotstatus/props` accepts requests from Python
 - probing legacy-looking keys `6.1`, `6.3`, `6.8`, and `6.13` while the mower was docked returned key-only entries with no values
 
@@ -76,6 +77,7 @@ That means the endpoint is reachable, but those guessed keys are not enough by t
 The reusable Python client now includes cloud probe helpers so this research can be exercised without Home Assistant:
 
 - `async_get_cloud_device_info()`
+- `async_get_cloud_device_list_page()`
 - `async_get_cloud_properties(keys)`
 
 Use `python examples/cloud_probe.py` to query these endpoints directly with the same credentials used by the integration.

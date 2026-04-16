@@ -83,6 +83,7 @@ python examples/cloud_probe.py
 
 Optional:
 
+- the probe prints `device/info` and `device/listV2` summaries by default
 - set `DREAME_PROP_KEYS=6.1,6.3` or another comma-separated key list to query `iotstatus/props`
 
 This is intentionally Python-first and read-only for now. The next step is to prove map availability and payload stability on real hardware before adding a Home Assistant camera or image entity.
