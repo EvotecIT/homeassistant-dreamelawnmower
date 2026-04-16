@@ -15,7 +15,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import (
+    ACTIVITY_DOCKED,
+    ACTIVITY_ERROR,
+    ACTIVITY_MOWING,
+    ACTIVITY_PAUSED,
+    ACTIVITY_RETURNING,
+    DOMAIN,
+)
 from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity
 
@@ -44,6 +51,12 @@ def _raw_flag(snapshot: Any, key: str) -> bool | None:
 
 BINARY_SENSORS = [
     DreameBinarySensorDescription(
+        key="error_active",
+        name="Error Active",
+        value_fn=lambda snapshot: snapshot.activity == ACTIVITY_ERROR,
+        icon="mdi:alert-circle-outline",
+    ),
+    DreameBinarySensorDescription(
         key="online",
         name="Online",
         value_fn=lambda snapshot: snapshot.online
@@ -57,6 +70,30 @@ BINARY_SENSORS = [
         name="Charging",
         value_fn=lambda snapshot: snapshot.charging,
         icon="mdi:battery-charging",
+    ),
+    DreameBinarySensorDescription(
+        key="docked",
+        name="Docked",
+        value_fn=lambda snapshot: snapshot.activity == ACTIVITY_DOCKED,
+        icon="mdi:home-map-marker",
+    ),
+    DreameBinarySensorDescription(
+        key="paused",
+        name="Paused",
+        value_fn=lambda snapshot: snapshot.activity == ACTIVITY_PAUSED,
+        icon="mdi:pause-circle-outline",
+    ),
+    DreameBinarySensorDescription(
+        key="mowing",
+        name="Mowing",
+        value_fn=lambda snapshot: snapshot.activity == ACTIVITY_MOWING,
+        icon="mdi:robot-mower-outline",
+    ),
+    DreameBinarySensorDescription(
+        key="returning",
+        name="Returning",
+        value_fn=lambda snapshot: snapshot.activity == ACTIVITY_RETURNING,
+        icon="mdi:home-import-outline",
     ),
     DreameBinarySensorDescription(
         key="task_active",

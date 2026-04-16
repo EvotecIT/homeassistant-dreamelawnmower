@@ -19,6 +19,7 @@ This first implementation is intentionally narrow so it can be validated on real
 - config flow and reauthentication
 - one `lawn_mower` entity
 - core sensors for battery, error, and firmware version
+- normalized binary sensors for `Error Active`, `Docked`, `Paused`, `Mowing`, and `Returning`
 - opt-in diagnostic sensors for unknown-property and realtime telemetry counts
 - start mowing, pause, and dock
 - diagnostics, debug snapshot capture, and HACS-ready repo structure

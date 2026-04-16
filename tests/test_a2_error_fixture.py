@@ -66,11 +66,27 @@ def test_a2_error_fixture_exposes_expected_binary_sensor_set() -> None:
 
     assert visible == {
         "Charging",
+        "Docked",
+        "Error Active",
         "Mapping Available",
+        "Mowing",
         "Online",
+        "Paused",
         "Raw Paused Flag",
         "Raw Returning Flag",
         "Raw Running Flag",
+        "Returning",
         "Scheduled Task",
         "Task Active",
     }
+
+
+def test_a2_error_fixture_reports_expected_normalized_state_flags() -> None:
+    snapshot = _snapshot()
+    sensors = {description.name: description for description in BINARY_SENSORS}
+
+    assert sensors["Error Active"].value_fn(snapshot) is True
+    assert sensors["Docked"].value_fn(snapshot) is False
+    assert sensors["Paused"].value_fn(snapshot) is False
+    assert sensors["Mowing"].value_fn(snapshot) is False
+    assert sensors["Returning"].value_fn(snapshot) is False
