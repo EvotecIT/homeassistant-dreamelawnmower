@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "homeassistant-dreame-lawn-mower"
+version = "0.1.0"
+description = "HACS-ready Dreame and MOVA lawn mower integration for Home Assistant"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "MIT" }
+authors = [{ name = "Community Maintainers" }]
+dependencies = []
+
+[project.optional-dependencies]
+test = [
+  "pytest>=8.3.0",
+  "pytest-asyncio>=0.24.0",
+  "pytest-homeassistant-custom-component>=0.13.218",
+  "ruff>=0.11.0"
+]
+
+[tool.setuptools.packages.find]
+include = [
+  "custom_components*",
+  "dreame_lawn_mower_client*",
+  "tests*"
+]
+
+[tool.setuptools.package-data]
+"custom_components.dreame_lawn_mower" = ["manifest.json", "strings.json", "translations/*.json"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 88
+exclude = ["custom_components/dreame_lawn_mower/dreame_client"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

@@ -1,0 +1,47 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect Dreame lawn mower",
+        "description": "Sign in with your Dreamehome or MOVAhome account to discover mower devices.",
+        "data": {
+          "account_type": "Account type",
+          "username": "Username",
+          "password": "Password",
+          "country": "Region"
+        }
+      },
+      "device": {
+        "title": "Select mower",
+        "data": {
+          "device": "Discovered mower"
+        }
+      },
+      "reauth": {
+        "title": "Reconnect account",
+        "description": "Update your Dreamehome or MOVAhome credentials.",
+        "data": {
+          "username": "Username",
+          "password": "Password",
+          "country": "Region"
+        }
+      }
+    },
+    "error": {
+      "2fa_required": "Two-factor authentication must be completed in the vendor app or website before setup can continue.",
+      "cannot_auth": "The account login failed.",
+      "no_devices": "No supported lawn mower devices were found for this account."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Dreame lawn mower options",
+        "data": {
+          "scan_interval": "Polling interval in seconds"
+        }
+      }
+    }
+  }
+}
+

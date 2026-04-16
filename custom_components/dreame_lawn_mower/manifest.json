@@ -1,0 +1,24 @@
+{
+  "domain": "dreame_lawn_mower",
+  "name": "Dreame Lawn Mower",
+  "codeowners": ["@EvotecIT", "@PrzemyslawKlys"],
+  "config_flow": true,
+  "documentation": "https://github.com/EvotecIT/homeassistant-dreamelawnmower",
+  "integration_type": "device",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/EvotecIT/homeassistant-dreamelawnmower/issues",
+  "loggers": ["custom_components.dreame_lawn_mower"],
+  "quality_scale": "bronze",
+  "requirements": [
+    "pillow",
+    "numpy",
+    "pybase64",
+    "requests",
+    "pycryptodome",
+    "python-miio",
+    "py-mini-racer",
+    "paho-mqtt"
+  ],
+  "version": "0.1.0"
+}
+
