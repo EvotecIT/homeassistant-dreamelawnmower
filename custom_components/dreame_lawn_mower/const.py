@@ -33,6 +33,7 @@ COUNTRY_OPTIONS = ["cn", "eu", "us", "ru", "sg"]
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
+    Platform.BUTTON,
     Platform.LAWN_MOWER,
     Platform.SENSOR,
 ]

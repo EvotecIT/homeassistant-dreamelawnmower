@@ -20,7 +20,7 @@ This first implementation is intentionally narrow so it can be validated on real
 - one `lawn_mower` entity
 - core sensors for battery, error, and firmware version
 - start mowing, pause, and dock
-- diagnostics and HACS-ready repo structure
+- diagnostics, debug snapshot capture, and HACS-ready repo structure
 
 Under the hood, this version reuses the already reverse-engineered mower protocol internals so we can test against real devices now while continuing to clean up the public architecture.
 
