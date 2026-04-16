@@ -1,0 +1,75 @@
+"""Fixture-driven checks for the paused A2 diagnostics capture."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+from custom_components.dreame_lawn_mower.binary_sensor import BINARY_SENSORS
+from custom_components.dreame_lawn_mower.sensor import SENSORS
+
+from .fixture_data import load_json_fixture
+
+
+def _snapshot() -> SimpleNamespace:
+    payload = load_json_fixture("a2_paused_diagnostics.json")
+    return SimpleNamespace(**payload["data"]["snapshot"])
+
+
+def test_a2_paused_fixture_has_expected_snapshot_values() -> None:
+    snapshot = _snapshot()
+
+    assert snapshot.state == "paused"
+    assert snapshot.activity == "paused"
+    assert snapshot.battery_level == 76
+    assert snapshot.firmware_version == "4.3.6_0320"
+    assert snapshot.hardware_version == "Linux"
+    assert snapshot.cleaning_mode_name == "unknown"
+    assert snapshot.child_lock is None
+    assert snapshot.capabilities == [
+        "lidar_navigation",
+        "disable_sensor_cleaning",
+        "map",
+    ]
+    assert snapshot.raw_attributes["mower_state"] == "paused"
+    assert snapshot.raw_attributes["running"] is False
+
+
+def test_a2_paused_fixture_exposes_expected_sensor_set() -> None:
+    snapshot = _snapshot()
+
+    visible = {
+        description.name
+        for description in SENSORS
+        if description.exists_fn(snapshot)
+    }
+
+    assert visible == {
+        "Battery",
+        "Error",
+        "Firmware Version",
+        "Hardware Version",
+        "Serial Number",
+        "Cloud Update Time",
+        "Mower State",
+    }
+
+
+def test_a2_paused_fixture_exposes_expected_binary_sensor_set() -> None:
+    snapshot = _snapshot()
+
+    visible = {
+        description.name
+        for description in BINARY_SENSORS
+        if description.exists_fn(snapshot)
+    }
+
+    assert visible == {
+        "Online",
+        "Charging",
+        "Task Active",
+        "Mapping Available",
+        "Scheduled Task",
+        "Raw Paused Flag",
+        "Raw Running Flag",
+        "Raw Returning Flag",
+    }
