@@ -12,6 +12,7 @@ from .models import (
     DreameLawnMowerDescriptor,
     DreameLawnMowerSnapshot,
     descriptor_from_cloud_record,
+    display_name_for_model,
     snapshot_from_device,
 )
 
@@ -84,14 +85,21 @@ class DreameLawnMowerClient:
     async def async_refresh(self) -> DreameLawnMowerSnapshot:
         """Refresh device state and return a normalized snapshot."""
         device = await asyncio.to_thread(self._sync_update_device)
+        info_raw = getattr(getattr(device, "info", None), "raw", {}) or {}
+        device_info = info_raw.get("deviceInfo", {}) or {}
+        refreshed_model = (
+            getattr(getattr(device, "info", None), "model", None)
+            or self._descriptor.model
+        )
         self._descriptor = self._descriptor.__class__(
             did=self._descriptor.did,
             name=getattr(device, "name", None) or self._descriptor.name,
-            model=(
-                getattr(getattr(device, "info", None), "model", None)
-                or self._descriptor.model
-            ),
-            display_model=self._descriptor.display_model,
+            model=refreshed_model,
+            display_model=display_name_for_model(
+                refreshed_model,
+                fallback_name=device_info.get("displayName"),
+            )
+            or self._descriptor.display_model,
             account_type=self._descriptor.account_type,
             country=self._descriptor.country,
             host=getattr(device, "host", None) or self._descriptor.host,

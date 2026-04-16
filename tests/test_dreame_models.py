@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from dreame_lawn_mower_client.models import (
     descriptor_from_cloud_record,
+    display_name_for_model,
     snapshot_from_device,
 )
 
@@ -92,6 +93,63 @@ def test_descriptor_maps_known_model_names() -> None:
     assert descriptor is not None
     assert descriptor.display_model == "A2"
     assert descriptor.title == "Garage Mower (A2)"
+
+
+def test_descriptor_uses_cloud_display_name_for_unknown_rebadge_model() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-2",
+            "model": "mova.mower.x1234",
+            "customName": "Front Mower",
+            "deviceInfo": {"displayName": "Lidax Ultra 800"},
+        },
+        account_type="mova",
+        country="eu",
+    )
+
+    assert descriptor is not None
+    assert descriptor.display_model == "LiDAX Ultra 800"
+    assert descriptor.title == "Front Mower (LiDAX Ultra 800)"
+
+
+def test_descriptor_accepts_generic_mower_prefix() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-3",
+            "model": "lidax.mower.z1000",
+            "deviceInfo": {"displayName": "Viax 300"},
+        },
+        account_type="dreame",
+        country="eu",
+    )
+
+    assert descriptor is not None
+    assert descriptor.model == "lidax.mower.z1000"
+    assert descriptor.display_model == "Viax 300"
+
+
+def test_descriptor_rejects_non_mower_models() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-4",
+            "model": "dreame.vacuum.r2216",
+            "deviceInfo": {"displayName": "Vacuum"},
+        },
+        account_type="dreame",
+        country="eu",
+    )
+
+    assert descriptor is None
+
+
+def test_display_name_for_model_prefers_known_mapping_over_fallback_name() -> None:
+    assert (
+        display_name_for_model(
+            "dreame.mower.g2408",
+            fallback_name="Lidax Ultra 800",
+        )
+        == "A2"
+    )
 
 
 def test_snapshot_uses_state_name_before_boolean_helpers() -> None:

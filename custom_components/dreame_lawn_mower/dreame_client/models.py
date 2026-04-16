@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 SUPPORTED_ACCOUNT_TYPES = ("dreame", "mova")
-SUPPORTED_MODEL_PREFIXES = ("dreame.mower.", "mova.mower.")
+SUPPORTED_MODEL_MARKER = ".mower."
 
 MODEL_NAME_MAP = {
     "dreame.mower.p2255": "A1",
@@ -15,12 +15,42 @@ MODEL_NAME_MAP = {
     "dreame.mower.g3255": "A2 Pro",
 }
 
+DISPLAY_NAME_ALIASES = {
+    "a1": "A1",
+    "a1 pro": "A1 Pro",
+    "a2": "A2",
+    "a2 pro": "A2 Pro",
+    "awd 1000": "AWD 1000",
+    "lidax ultra 800": "LiDAX Ultra 800",
+    "lidax ultra 1200": "LiDAX Ultra 1200",
+    "viax 300": "Viax 300",
+    "vivax 250": "Vivax 250",
+}
 
-def display_name_for_model(model: str | None) -> str | None:
+
+def _canonical_display_name(value: str | None) -> str | None:
+    """Normalize a model display name from cloud metadata."""
+    text = _as_optional_str(value)
+    if text is None:
+        return None
+    normalized = " ".join(text.replace("_", " ").replace("-", " ").split()).lower()
+    return DISPLAY_NAME_ALIASES.get(normalized, text)
+
+
+def _is_supported_model(model: str | None) -> bool:
+    """Return whether a raw cloud model identifier looks like a mower."""
+    return bool(model and SUPPORTED_MODEL_MARKER in model)
+
+
+def display_name_for_model(
+    model: str | None,
+    *,
+    fallback_name: str | None = None,
+) -> str | None:
     """Return a friendly model name when one is known."""
     if model is None:
-        return None
-    return MODEL_NAME_MAP.get(model, model)
+        return _canonical_display_name(fallback_name)
+    return MODEL_NAME_MAP.get(model) or _canonical_display_name(fallback_name) or model
 
 
 def _as_optional_str(value: Any) -> str | None:
@@ -116,17 +146,24 @@ def descriptor_from_cloud_record(
     """Convert a raw cloud device record into a normalized descriptor."""
 
     model = _as_optional_str(raw.get("model"))
-    if model is None or not any(model.startswith(prefix) for prefix in SUPPORTED_MODEL_PREFIXES):
+    if not _is_supported_model(model):
         return None
+    device_info = raw.get("deviceInfo", {}) or {}
 
     name = (
         _as_optional_str(raw.get("customName"))
         or _as_optional_str(raw.get("name"))
-        or _as_optional_str(raw.get("deviceInfo", {}).get("displayName"))
+        or _as_optional_str(device_info.get("displayName"))
         or MODEL_NAME_MAP.get(model)
         or model
     )
-    display_model = display_name_for_model(model) or model
+    display_model = (
+        display_name_for_model(
+            model,
+            fallback_name=_as_optional_str(device_info.get("displayName")),
+        )
+        or model
+    )
 
     return DreameLawnMowerDescriptor(
         did=str(raw.get("did") or ""),
