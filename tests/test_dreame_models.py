@@ -58,6 +58,24 @@ class _FakeDevice:
         return None
 
 
+class _FakeErrorStatus(_FakeStatus):
+    def __init__(self) -> None:
+        super().__init__()
+        self.error = SimpleNamespace(value=31)
+        self.error_name = "left_wheell_speed"
+        self.has_error = True
+        self.attributes = {
+            **self.attributes,
+            "error": "Left wheell speed",
+        }
+
+
+class _FakeErrorDevice(_FakeDevice):
+    def __init__(self) -> None:
+        super().__init__()
+        self.status = _FakeErrorStatus()
+
+
 def test_descriptor_maps_known_model_names() -> None:
     descriptor = descriptor_from_cloud_record(
         {
@@ -99,3 +117,26 @@ def test_snapshot_uses_state_name_before_boolean_helpers() -> None:
     assert snapshot.serial_number == "G2408051LEE0090632"
     assert snapshot.cloud_update_time == "2025-04-22 10:03:44"
     assert snapshot.capabilities == ("lidar_navigation", "map")
+
+
+def test_snapshot_prioritizes_error_activity_but_keeps_paused_state_context() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "dreame.mower.g2408",
+            "customName": "Garage Mower",
+        },
+        account_type="dreame",
+        country="eu",
+    )
+
+    assert descriptor is not None
+
+    snapshot = snapshot_from_device(descriptor, _FakeErrorDevice())
+
+    assert snapshot.activity == "error"
+    assert snapshot.state == "paused"
+    assert snapshot.error_code == 31
+    assert snapshot.error_name == "left_wheell_speed"
+    assert snapshot.error_text == "Left wheell speed"
+    assert snapshot.error_display == "Left wheell speed"

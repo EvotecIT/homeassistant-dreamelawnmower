@@ -46,8 +46,24 @@ SENSORS = [
     DreameSensorDescription(
         key="error",
         name="Error",
-        value_fn=lambda snapshot: snapshot.error_name or "none",
+        value_fn=lambda snapshot: snapshot.error_display or "none",
         icon="mdi:alert-circle-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    DreameSensorDescription(
+        key="error_code",
+        name="Error Code",
+        value_fn=lambda snapshot: (
+            None if snapshot.error_code in (None, -1) else snapshot.error_code
+        ),
+        icon="mdi:numeric",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    DreameSensorDescription(
+        key="raw_error",
+        name="Raw Error",
+        value_fn=lambda snapshot: snapshot.error_text,
+        icon="mdi:text-box-search-outline",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     DreameSensorDescription(

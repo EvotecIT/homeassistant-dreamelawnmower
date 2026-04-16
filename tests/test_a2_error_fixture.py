@@ -1,4 +1,4 @@
-"""Fixture-driven checks for the paused A2 diagnostics capture."""
+"""Fixture-driven checks for the paused A2 wheel-speed error capture."""
 
 from __future__ import annotations
 
@@ -11,30 +11,26 @@ from .fixture_data import load_json_fixture
 
 
 def _snapshot() -> SimpleNamespace:
-    payload = load_json_fixture("a2_paused_diagnostics.json")
+    payload = load_json_fixture("a2_paused_left_wheel_error_diagnostics.json")
     return SimpleNamespace(**payload["data"]["snapshot"])
 
 
-def test_a2_paused_fixture_has_expected_snapshot_values() -> None:
+def test_a2_error_fixture_preserves_paused_state_context() -> None:
     snapshot = _snapshot()
 
     assert snapshot.state == "paused"
-    assert snapshot.activity == "paused"
-    assert snapshot.battery_level == 76
-    assert snapshot.firmware_version == "4.3.6_0320"
-    assert snapshot.hardware_version == "Linux"
-    assert snapshot.cleaning_mode_name == "unknown"
-    assert snapshot.child_lock is None
-    assert snapshot.capabilities == [
-        "lidar_navigation",
-        "disable_sensor_cleaning",
-        "map",
-    ]
+    assert snapshot.activity == "error"
+    assert snapshot.battery_level == 74
+    assert snapshot.error_code == 31
+    assert snapshot.error_name == "left_wheell_speed"
+    assert snapshot.error_text == "Left wheell speed"
+    assert snapshot.error_display == "Left wheel speed"
     assert snapshot.raw_attributes["mower_state"] == "paused"
     assert snapshot.raw_attributes["running"] is False
+    assert snapshot.started is True
 
 
-def test_a2_paused_fixture_exposes_expected_sensor_set() -> None:
+def test_a2_error_fixture_exposes_expected_sensor_set() -> None:
     snapshot = _snapshot()
 
     visible = {
@@ -45,18 +41,18 @@ def test_a2_paused_fixture_exposes_expected_sensor_set() -> None:
 
     assert visible == {
         "Battery",
+        "Cloud Update Time",
         "Error",
         "Error Code",
         "Firmware Version",
         "Hardware Version",
-        "Serial Number",
-        "Cloud Update Time",
         "Mower State",
         "Raw Error",
+        "Serial Number",
     }
 
 
-def test_a2_paused_fixture_exposes_expected_binary_sensor_set() -> None:
+def test_a2_error_fixture_exposes_expected_binary_sensor_set() -> None:
     snapshot = _snapshot()
 
     visible = {
@@ -66,12 +62,12 @@ def test_a2_paused_fixture_exposes_expected_binary_sensor_set() -> None:
     }
 
     assert visible == {
-        "Online",
         "Charging",
-        "Task Active",
         "Mapping Available",
-        "Scheduled Task",
+        "Online",
         "Raw Paused Flag",
-        "Raw Running Flag",
         "Raw Returning Flag",
+        "Raw Running Flag",
+        "Scheduled Task",
+        "Task Active",
     }

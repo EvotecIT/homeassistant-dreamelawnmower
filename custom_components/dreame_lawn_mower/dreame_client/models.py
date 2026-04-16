@@ -30,6 +30,17 @@ def _as_optional_str(value: Any) -> str | None:
     return text or None
 
 
+def _friendly_error_name(value: str | None) -> str | None:
+    """Return a cleaner user-facing error label."""
+    text = _as_optional_str(value)
+    if text is None or text == "no_error":
+        return None
+    cleaned = text.replace("_", " ")
+    # Upstream payloads currently contain a `wheell` typo on the A2.
+    cleaned = cleaned.replace("wheell", "wheel")
+    return cleaned.capitalize()
+
+
 @dataclass(slots=True, frozen=True)
 class DreameLawnMowerDescriptor:
     """Normalized mower discovery information."""
@@ -72,6 +83,8 @@ class DreameLawnMowerSnapshot:
     task_status_name: str | None = None
     error_code: int | None = None
     error_name: str | None = None
+    error_text: str | None = None
+    error_display: str | None = None
     firmware_version: str | None = None
     hardware_version: str | None = None
     serial_number: str | None = None
@@ -142,6 +155,14 @@ def snapshot_from_device(
     state_name = getattr(device.status, "state_name", None) or state.replace("_", " ").title()
     status_attributes = getattr(device.status, "attributes", {}) or {}
     info_raw = getattr(getattr(device, "info", None), "raw", {}) or {}
+    error_name = _as_optional_str(getattr(device.status, "error_name", None))
+    error_text = _as_optional_str(status_attributes.get("error"))
+    error_code = getattr(error_obj, "value", None)
+    has_error = bool(
+        getattr(device.status, "has_error", False)
+        or error_text
+        or (error_code not in (None, -1))
+    )
     capability_list = status_attributes.get("capabilities") or getattr(
         getattr(device, "capability", None),
         "list",
@@ -173,7 +194,7 @@ def snapshot_from_device(
         "waiting_for_task",
     }
 
-    if getattr(device.status, "has_error", False):
+    if has_error:
         activity = "error"
     elif state in paused_states:
         activity = "paused"
@@ -213,8 +234,10 @@ def snapshot_from_device(
         battery_level=getattr(device.status, "battery_level", None),
         task_status=task_obj.name.lower() if task_obj is not None else None,
         task_status_name=getattr(device.status, "task_status_name", None),
-        error_code=getattr(error_obj, "value", None),
-        error_name=getattr(device.status, "error_name", None),
+        error_code=error_code,
+        error_name=error_name,
+        error_text=error_text,
+        error_display=error_text or _friendly_error_name(error_name),
         firmware_version=getattr(getattr(device, "info", None), "firmware_version", None),
         hardware_version=getattr(getattr(device, "info", None), "hardware_version", None),
         serial_number=_as_optional_str(info_raw.get("sn")),
