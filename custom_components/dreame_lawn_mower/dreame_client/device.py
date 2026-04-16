@@ -168,6 +168,8 @@ class DreameMowerDevice:
         # Dictionary for storing the current property values
         self.data: dict[DreameMowerProperty, Any] = {}
         self.unknown_properties: dict[int, dict[str, Any]] = {}
+        self.realtime_properties: dict[str, dict[str, Any]] = {}
+        self.last_realtime_message: dict[str, Any] | None = None
         self.auto_switch_data: dict[DreameMowerAutoSwitchProperty, Any] = None
         self.ai_data: dict[DreameMowerStrAIProperty | DreameMowerAIProperty, Any] = None
         self.available: bool = False  # Last update is successful or not
@@ -317,6 +319,7 @@ class DreameMowerDevice:
             return
 
         _LOGGER.debug("Message Callback: %s", message)
+        self._remember_realtime_message(message)
 
         if "method" in message:
             self.available = True
@@ -324,6 +327,7 @@ class DreameMowerDevice:
                 params = []
                 map_params = []
                 for param in message["params"]:
+                    matched_property = None
                     properties = [prop for prop in DreameMowerProperty]
                     for prop in properties:
                         if prop in self.property_mapping:
@@ -334,6 +338,7 @@ class DreameMowerDevice:
                                 and param["siid"] == mapping["siid"]
                                 and param["piid"] == mapping["piid"]
                             ):
+                                matched_property = prop
                                 if prop in self._default_properties:
                                     param["did"] = str(prop.value)
                                     param["code"] = 0
@@ -347,6 +352,7 @@ class DreameMowerDevice:
                                     ):
                                         map_params.append(param)
                                 break
+                    self._remember_realtime_property(param, matched_property)
                 if len(map_params) and self._map_manager:
                     self._map_manager.handle_properties(map_params)
 
@@ -491,6 +497,39 @@ class DreameMowerDevice:
             "siid": payload.get("siid"),
             "piid": payload.get("piid"),
             "value": payload.get("value"),
+            "last_seen": time.time(),
+        }
+
+    def _remember_realtime_message(self, message: dict[str, Any]) -> None:
+        """Store the last realtime payload for diagnostics."""
+        self.last_realtime_message = {
+            "received_at": time.time(),
+            "message": copy.deepcopy(message),
+        }
+
+    def _remember_realtime_property(
+        self,
+        payload: dict[str, Any],
+        property_enum: DreameMowerProperty | None,
+    ) -> None:
+        """Store realtime MQTT property payloads, even when not yet decoded."""
+        siid = payload.get("siid")
+        piid = payload.get("piid")
+        if siid is None or piid is None:
+            return
+
+        key = f"{siid}.{piid}"
+        self.realtime_properties[key] = {
+            "siid": siid,
+            "piid": piid,
+            "did": payload.get("did"),
+            "code": payload.get("code"),
+            "value": copy.deepcopy(payload.get("value")),
+            "property_name": (
+                property_enum.name
+                if property_enum is not None
+                else f"UNKNOWN_REALTIME_{key}"
+            ),
             "last_seen": time.time(),
         }
 

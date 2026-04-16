@@ -150,6 +150,15 @@ def build_debug_payload(
             "unknown_properties": _normalize_debug_value(
                 getattr(device, "unknown_properties", {}) or {}
             ),
+            "realtime_property_count": len(
+                getattr(device, "realtime_properties", {}) or {}
+            ),
+            "realtime_properties": _normalize_debug_value(
+                getattr(device, "realtime_properties", {}) or {}
+            ),
+            "last_realtime_message": _normalize_debug_value(
+                getattr(device, "last_realtime_message", None)
+            ),
             "status_values": _collect_status_values(device),
             "status_attributes": _normalize_debug_value(
                 getattr(status, "attributes", {}) if status is not None else {}

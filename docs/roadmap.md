@@ -71,6 +71,7 @@ Targets:
 
 Checklist:
 
+- [x] capture raw realtime MQTT payloads and `siid/piid` pairs for diagnostics
 - [ ] capture and decode A2-family MQTT or realtime status payloads
 - [ ] document which fields are authoritative for live state, battery, task, and maintenance
 - [ ] add normalized snapshot fields only after fixture validation

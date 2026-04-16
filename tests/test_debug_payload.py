@@ -63,6 +63,36 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
                 "last_seen": 123456.0,
             }
         },
+        realtime_properties={
+            "1.2": {
+                "siid": 1,
+                "piid": 2,
+                "did": "101",
+                "code": 0,
+                "value": 79,
+                "property_name": "BATTERY_LEVEL",
+                "last_seen": 123457.0,
+            },
+            "9.4": {
+                "siid": 9,
+                "piid": 4,
+                "did": None,
+                "code": None,
+                "value": {"blob": 123},
+                "property_name": "UNKNOWN_REALTIME_9.4",
+                "last_seen": 123458.0,
+            },
+        },
+        last_realtime_message={
+            "received_at": 123459.0,
+            "message": {
+                "method": "properties_changed",
+                "params": [
+                    {"siid": 1, "piid": 2, "value": 79},
+                    {"siid": 9, "piid": 4, "value": {"blob": 123}},
+                ],
+            },
+        },
         status=SimpleNamespace(
             state_name="paused",
             task_status_name="unknown",
@@ -121,5 +151,15 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
     assert payload["device"]["info_raw"]["sn"] == "**REDACTED**"
     assert payload["device"]["unknown_property_count"] == 1
     assert payload["device"]["unknown_properties"]["-113852866"]["value"] == 123
+    assert payload["device"]["realtime_property_count"] == 2
+    assert (
+        payload["device"]["realtime_properties"]["1.2"]["property_name"]
+        == "BATTERY_LEVEL"
+    )
+    assert payload["device"]["realtime_properties"]["9.4"]["value"] == {"blob": 123}
+    assert (
+        payload["device"]["last_realtime_message"]["message"]["method"]
+        == "properties_changed"
+    )
     assert payload["device"]["status_values"]["battery_level"] == 79
     assert payload["device"]["capabilities"]["list"] == ["lidar_navigation", "map"]
