@@ -25,6 +25,8 @@ def test_a2_error_fixture_preserves_paused_state_context() -> None:
     assert snapshot.error_name == "left_wheell_speed"
     assert snapshot.error_text == "Left wheell speed"
     assert snapshot.error_display == "Left wheel speed"
+    assert snapshot.state_name == "paused"
+    assert snapshot.task_status_name == "unknown"
     assert snapshot.raw_attributes["mower_state"] == "paused"
     assert snapshot.raw_attributes["running"] is False
     assert snapshot.started is True
@@ -51,8 +53,18 @@ def test_a2_error_fixture_exposes_expected_sensor_set() -> None:
         "Raw Error",
         "Realtime Property Count",
         "Serial Number",
+        "State Name",
+        "Task Status",
         "Unknown Property Count",
     }
+
+
+def test_a2_error_fixture_reports_expected_normalized_sensor_values() -> None:
+    snapshot = _snapshot()
+    sensors = {description.name: description for description in SENSORS}
+
+    assert sensors["State Name"].value_fn(snapshot) == "paused"
+    assert sensors["Task Status"].value_fn(snapshot) == "unknown"
 
 
 def test_a2_error_fixture_exposes_expected_binary_sensor_set() -> None:

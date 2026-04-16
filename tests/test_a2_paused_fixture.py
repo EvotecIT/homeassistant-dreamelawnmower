@@ -24,6 +24,8 @@ def test_a2_paused_fixture_has_expected_snapshot_values() -> None:
     assert snapshot.firmware_version == "4.3.6_0320"
     assert snapshot.hardware_version == "Linux"
     assert snapshot.cleaning_mode_name == "unknown"
+    assert snapshot.state_name == "paused"
+    assert snapshot.task_status_name == "unknown"
     assert snapshot.child_lock is None
     assert snapshot.capabilities == [
         "lidar_navigation",
@@ -49,6 +51,8 @@ def test_a2_paused_fixture_exposes_expected_sensor_set() -> None:
         "Error Code",
         "Firmware Version",
         "Hardware Version",
+        "State Name",
+        "Task Status",
         "Serial Number",
         "Cloud Update Time",
         "Unknown Property Count",
@@ -57,6 +61,14 @@ def test_a2_paused_fixture_exposes_expected_sensor_set() -> None:
         "Mower State",
         "Raw Error",
     }
+
+
+def test_a2_paused_fixture_reports_expected_normalized_sensor_values() -> None:
+    snapshot = _snapshot()
+    sensors = {description.name: description for description in SENSORS}
+
+    assert sensors["State Name"].value_fn(snapshot) == "paused"
+    assert sensors["Task Status"].value_fn(snapshot) == "unknown"
 
 
 def test_a2_paused_fixture_exposes_expected_binary_sensor_set() -> None:

@@ -18,7 +18,7 @@ This first implementation is intentionally narrow so it can be validated on real
 - account-based autodiscovery through Dreamehome or MOVAhome
 - config flow and reauthentication
 - one `lawn_mower` entity
-- core sensors for battery, error, and firmware version
+- normalized sensors for battery, error, firmware, state name, and task status
 - normalized binary sensors for `Error Active`, `Docked`, `Paused`, `Mowing`, and `Returning`
 - opt-in diagnostic sensors for unknown-property and realtime telemetry counts
 - start mowing, pause, and dock
@@ -59,3 +59,59 @@ When the mower is not available for live testing, use `Capture Debug Snapshot` a
 The repo already includes paused and paused-with-wheel-error A2 captures, which lets us regression-test awkward dock-contact states without reproducing them on demand.
 
 If you are troubleshooting a new model or strange dock behavior, enable the disabled-by-default diagnostic sensors for unknown-property count, realtime-property count, and last realtime method. They help confirm whether the mower is publishing live MQTT telemetry and whether we are seeing unmapped data that still needs decoding.
+
+## Automation examples
+
+The normalized sensors and binary sensors are intended to keep automations out of mower attributes as much as possible.
+
+Open the garage door when mowing starts:
+
+```yaml
+automation:
+  - alias: Dreame mower opens garage door
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.dreame_a2_bodzio_mowing
+        to: "on"
+    actions:
+      - action: cover.open_cover
+        target:
+          entity_id: cover.garage_door
+```
+
+Notify when the mower reports an active error:
+
+```yaml
+automation:
+  - alias: Dreame mower error notification
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.dreame_a2_bodzio_error_active
+        to: "on"
+    actions:
+      - action: notify.mobile_app_phone
+        data:
+          title: Mower error
+          message: >
+            State: {{ states('sensor.dreame_a2_bodzio_state_name') }},
+            error: {{ states('sensor.dreame_a2_bodzio_error') }}
+```
+
+Close the garage door once the mower is back on the dock and charging:
+
+```yaml
+automation:
+  - alias: Dreame mower closes garage door
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.dreame_a2_bodzio_docked
+        to: "on"
+    conditions:
+      - condition: state
+        entity_id: binary_sensor.dreame_a2_bodzio_charging
+        state: "on"
+    actions:
+      - action: cover.close_cover
+        target:
+          entity_id: cover.garage_door
+```

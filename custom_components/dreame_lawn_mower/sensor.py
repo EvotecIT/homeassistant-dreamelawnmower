@@ -37,6 +37,18 @@ def _raw_attribute(snapshot: Any, key: str) -> Any:
 
 SENSORS = [
     DreameSensorDescription(
+        key="state_name",
+        name="State Name",
+        value_fn=lambda snapshot: snapshot.state_name,
+        icon="mdi:state-machine",
+    ),
+    DreameSensorDescription(
+        key="task_status",
+        name="Task Status",
+        value_fn=lambda snapshot: snapshot.task_status_name or "unknown",
+        icon="mdi:clipboard-text-clock-outline",
+    ),
+    DreameSensorDescription(
         key="battery",
         name="Battery",
         value_fn=lambda snapshot: snapshot.battery_level,
