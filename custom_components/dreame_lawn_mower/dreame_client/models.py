@@ -122,8 +122,39 @@ def snapshot_from_device(
     state = state_obj.name.lower() if state_obj is not None else "unknown"
     state_name = getattr(device.status, "state_name", None) or state.replace("_", " ").title()
 
+    paused_states = {"paused", "monitoring_paused"}
+    returning_states = {"returning"}
+    mowing_states = {
+        "mowing",
+        "remote_control",
+        "clean_summon",
+        "second_cleaning",
+        "human_following",
+        "spot_cleaning",
+        "shortcut",
+        "monitoring",
+    }
+    docked_states = {
+        "idle",
+        "charging",
+        "charging_completed",
+        "building",
+        "upgrading",
+        "station_reset",
+        "smart_charging",
+        "waiting_for_task",
+    }
+
     if getattr(device.status, "has_error", False):
         activity = "error"
+    elif state in paused_states:
+        activity = "paused"
+    elif state in returning_states:
+        activity = "returning"
+    elif state in mowing_states:
+        activity = "mowing"
+    elif state in docked_states:
+        activity = "docked"
     elif getattr(device.status, "paused", False):
         activity = "paused"
     elif getattr(device.status, "returning", False):
@@ -165,4 +196,3 @@ def snapshot_from_device(
         returning=bool(getattr(device.status, "returning", False)),
         raw_attributes=getattr(device.status, "attributes", {}) or {},
     )
-

@@ -10,7 +10,16 @@ readme = "README.md"
 requires-python = ">=3.13"
 license = { text = "MIT" }
 authors = [{ name = "Community Maintainers" }]
-dependencies = []
+dependencies = [
+  "numpy",
+  "paho-mqtt",
+  "pillow",
+  "py-mini-racer",
+  "pybase64",
+  "pycryptodome",
+  "python-miio",
+  "requests"
+]
 
 [project.optional-dependencies]
 test = [
