@@ -32,6 +32,15 @@ python -m compileall dreame_lawn_mower_client custom_components tests examples
 pytest
 ```
 
+## Roadmap
+
+The current phased backlog lives in [`docs/roadmap.md`](docs/roadmap.md). It focuses on:
+
+- model compatibility hardening for additional mower brands and rebadges
+- A2 and A2 Pro telemetry expansion from verified payloads
+- mower-native vector map support
+- automation-friendly state and error exposure
+
 Note:
 
 - the full Home Assistant pytest stack is usually easiest in Linux CI
