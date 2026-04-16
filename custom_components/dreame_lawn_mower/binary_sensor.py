@@ -38,7 +38,10 @@ class DreameBinarySensorDescription:
     entity_registry_enabled_default: bool = True
     entity_registry_visible_default: bool = True
     translation_key: str | None = None
+    translation_placeholders: dict[str, str] | None = None
+    force_update: bool = False
     device_class: BinarySensorDeviceClass | None = None
+    unit_of_measurement: str | None = None
     icon: str | None = None
     entity_category: EntityCategory | None = None
 

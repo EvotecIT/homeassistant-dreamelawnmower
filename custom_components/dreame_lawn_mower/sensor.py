@@ -31,9 +31,13 @@ class DreameSensorDescription:
     entity_registry_enabled_default: bool = True
     entity_registry_visible_default: bool = True
     translation_key: str | None = None
+    translation_placeholders: dict[str, str] | None = None
+    force_update: bool = False
     device_class: SensorDeviceClass | None = None
+    unit_of_measurement: str | None = None
     native_unit_of_measurement: str | None = None
     suggested_unit_of_measurement: str | None = None
+    suggested_display_precision: int | None = None
     state_class: SensorStateClass | str | None = None
     last_reset: datetime | None = None
     options: list[str] | None = None

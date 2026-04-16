@@ -24,7 +24,11 @@ def test_sensor_description_exposes_ha_compat_fields() -> None:
     assert description.entity_registry_enabled_default is True
     assert description.entity_registry_visible_default is True
     assert description.translation_key is None
+    assert description.translation_placeholders is None
+    assert description.force_update is False
+    assert description.unit_of_measurement is None
     assert description.suggested_unit_of_measurement is None
+    assert description.suggested_display_precision is None
     assert description.state_class is None
     assert description.last_reset is None
     assert description.options is None
@@ -40,6 +44,9 @@ def test_binary_sensor_description_exposes_ha_compat_fields() -> None:
     assert description.entity_registry_enabled_default is True
     assert description.entity_registry_visible_default is True
     assert description.translation_key is None
+    assert description.translation_placeholders is None
+    assert description.force_update is False
+    assert description.unit_of_measurement is None
 
 
 def test_client_device_property_defaults_to_none() -> None:
