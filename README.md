@@ -63,6 +63,14 @@ The repo already includes paused and paused-with-wheel-error A2 captures, which 
 
 If you are troubleshooting a new model or strange dock behavior, enable the disabled-by-default diagnostic sensors for unknown-property count, realtime-property count, and last realtime method. They help confirm whether the mower is publishing live MQTT telemetry and whether we are seeing unmapped data that still needs decoding.
 
+If Home Assistant logs contain a `Captured Dreame lawn mower ...` line, convert it to clean JSON before adding a fixture:
+
+```bash
+python examples/extract_ha_payload.py home-assistant.log --out tests/fixtures/new_capture.json
+```
+
+Use `--kind map_probe` for map probe logs, or `--all` if one log file contains multiple captures.
+
 ## Map experiments
 
 The reusable Python client now includes an experimental read-only map path:
