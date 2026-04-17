@@ -1,6 +1,7 @@
 """Regression checks for the standalone mower Python package."""
 
 from dreame_lawn_mower_client import (
+    CAMERA_PROBE_PROPERTY_KEYS,
     MAP_PROBE_PROPERTY_KEYS,
     MOWER_ERROR_PROPERTY_KEY,
     MOWER_PROPERTY_HINTS,
@@ -11,6 +12,7 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
     DreameLawnMowerRemoteControlSupport,
+    build_camera_probe_payload,
     build_cloud_property_summary,
     build_map_probe_payload,
     map_summary_from_map_data,
@@ -42,8 +44,10 @@ def test_public_package_exports_map_helpers() -> None:
     )
     assert callable(map_summary_from_map_data)
     assert callable(map_summary_to_dict)
+    assert callable(build_camera_probe_payload)
     assert callable(build_cloud_property_summary)
     assert callable(build_map_probe_payload)
+    assert "10001.1" in CAMERA_PROBE_PROPERTY_KEYS
     assert "2.1" in MAP_PROBE_PROPERTY_KEYS
 
 
@@ -55,6 +59,7 @@ def test_public_package_client_has_cloud_probe_helpers() -> None:
     assert hasattr(DreameLawnMowerClient, "async_scan_cloud_properties")
     assert hasattr(DreameLawnMowerClient, "async_probe_map_sources")
     assert hasattr(DreameLawnMowerClient, "async_get_camera_feature_support")
+    assert hasattr(DreameLawnMowerClient, "async_probe_camera_sources")
     assert hasattr(DreameLawnMowerClient, "async_request_photo_info")
     assert hasattr(DreameLawnMowerClient, "async_get_remote_control_support")
     assert hasattr(DreameLawnMowerClient, "async_remote_control_move_step")

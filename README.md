@@ -129,6 +129,14 @@ python examples/camera_feature_probe.py
 
 The probe reports protocol mappings for stream/photo properties and actions, app-side permit metadata, cached stream session/status state, and a compact `queryDevicePermit` summary. It does not start video, audio, lights, or photo capture.
 
+To inspect the app-style `10001.*` stream property family from both cloud and device property reads, use:
+
+```bash
+python examples/camera_sources_probe.py
+```
+
+Set `DREAME_CAMERA_PROBE_DEVICE_PROPERTIES=0` if you only want cloud `iotstatus/props` data. The default still only performs property reads; it does not call stream actions.
+
 After the read-only probe confirms support, a narrower safety-gated metadata request is available:
 
 ```bash

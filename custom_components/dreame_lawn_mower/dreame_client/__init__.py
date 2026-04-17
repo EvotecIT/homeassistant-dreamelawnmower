@@ -16,6 +16,7 @@ from .app_protocol import (
     mower_error_label,
     mower_state_label,
 )
+from .camera_probe import CAMERA_PROBE_PROPERTY_KEYS, build_camera_probe_payload
 from .map_probe import (
     MAP_PROBE_PROPERTY_KEYS,
     build_cloud_property_summary,
@@ -50,6 +51,7 @@ __all__ = [
     "DreameLawnMowerTwoFactorRequiredError",
     "DISPLAY_NAME_ALIASES",
     "MODEL_NAME_MAP",
+    "CAMERA_PROBE_PROPERTY_KEYS",
     "MAP_PROBE_PROPERTY_KEYS",
     "MOWER_ERROR_PROPERTY_KEY",
     "MOWER_PROPERTY_HINTS",
@@ -57,6 +59,7 @@ __all__ = [
     "MOWER_STATE_LABELS",
     "MOWER_STATE_PROPERTY_KEY",
     "SUPPORTED_ACCOUNT_TYPES",
+    "build_camera_probe_payload",
     "build_cloud_property_summary",
     "build_map_probe_payload",
     "display_name_for_model",

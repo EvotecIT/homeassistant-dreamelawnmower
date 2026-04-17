@@ -15,6 +15,7 @@ from .app_protocol import (
     mower_error_label,
     mower_state_label,
 )
+from .camera_probe import CAMERA_PROBE_PROPERTY_KEYS, build_camera_probe_payload
 from .exceptions import DeviceException, InvalidActionException
 from .map_probe import MAP_PROBE_PROPERTY_KEYS, build_map_probe_payload
 from .models import (
@@ -209,6 +210,19 @@ class DreameLawnMowerClient:
         streaming, audio, remote control, or mowing.
         """
         return await asyncio.to_thread(self._sync_request_photo_info, parameters)
+
+    async def async_probe_camera_sources(
+        self,
+        *,
+        language: str = "en",
+        request_device_properties: bool = True,
+    ) -> dict[str, Any]:
+        """Probe known camera/photo sources without starting stream actions."""
+        return await asyncio.to_thread(
+            self._sync_probe_camera_sources,
+            language,
+            request_device_properties,
+        )
 
     async def async_refresh_map_summary(
         self,
@@ -575,6 +589,101 @@ class DreameLawnMowerClient:
                 "GET_PHOTO_INFO returned no response."
             )
         return result
+
+    def _sync_probe_camera_sources(
+        self,
+        language: str,
+        request_device_properties: bool,
+    ) -> dict[str, Any]:
+        self._sync_update_device()
+        support = self._sync_get_camera_feature_support(
+            refresh=False,
+            include_cloud=True,
+            language=language,
+        )
+        cloud_properties = self._sync_scan_cloud_properties(
+            keys=CAMERA_PROBE_PROPERTY_KEYS,
+            siids=None,
+            piid_start=1,
+            piid_end=1,
+            chunk_size=50,
+            language=language,
+            only_values=False,
+        )
+        device_properties = (
+            self._sync_probe_camera_device_properties()
+            if request_device_properties
+            else {"skipped": True}
+        )
+        return build_camera_probe_payload(
+            descriptor=self._descriptor,
+            support=support,
+            cloud_properties=cloud_properties,
+            device_properties=device_properties,
+        )
+
+    def _sync_probe_camera_device_properties(self) -> dict[str, Any]:
+        device = self._ensure_device()
+        try:
+            from .types import DreameMowerProperty
+        except ImportError:
+            return {"error": "Camera protocol types are unavailable."}
+
+        properties = (
+            DreameMowerProperty.STREAM_STATUS,
+            DreameMowerProperty.STREAM_AUDIO,
+            DreameMowerProperty.STREAM_RECORD,
+            DreameMowerProperty.TAKE_PHOTO,
+            DreameMowerProperty.STREAM_KEEP_ALIVE,
+            DreameMowerProperty.STREAM_FAULT,
+            DreameMowerProperty.STREAM_PROPERTY,
+            DreameMowerProperty.STREAM_TASK,
+            DreameMowerProperty.STREAM_UPLOAD,
+            DreameMowerProperty.STREAM_CODE,
+        )
+        requested = []
+        for prop in properties:
+            mapping = getattr(device, "property_mapping", {}).get(prop)
+            if mapping and "aiid" not in mapping:
+                requested.append({"did": str(prop.value), **mapping})
+
+        protocol = getattr(device, "_protocol", None)
+        if protocol is None:
+            return {
+                "requested_property_count": len(requested),
+                "requested_properties": requested,
+                "error": "Device protocol is unavailable.",
+            }
+
+        raw_response = None
+        handled = False
+        error = None
+        try:
+            raw_response = protocol.get_properties(requested)
+            if raw_response is None:
+                error = "Device protocol returned no property response."
+            else:
+                handled = bool(device._handle_properties(raw_response))
+        except Exception as err:
+            error = str(err)
+
+        values = {}
+        for prop in properties:
+            values[prop.name.lower()] = _json_safe(
+                _safe_get_device_property(device, prop)
+            )
+
+        status = getattr(device, "status", None)
+        return {
+            "requested_property_count": len(requested),
+            "requested_properties": requested,
+            "raw_response": _json_safe(raw_response),
+            "handled": handled,
+            "error": error,
+            "values": values,
+            "stream_session_present": bool(getattr(status, "stream_session", None)),
+            "stream_status": _lower_enum_name(getattr(status, "stream_status", None)),
+        }
 
     def _sync_refresh_map_summary(
         self,
