@@ -17,7 +17,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .dreame_client.models import DreameLawnMowerMapSummary
-from .image import png_bytes_to_jpeg
+from .image import map_placeholder_jpeg, png_bytes_to_jpeg
 
 _LOGGER = logging.getLogger(__name__)
 _MAP_CACHE_TTL = timedelta(seconds=60)
@@ -58,6 +58,7 @@ class DreameLawnMowerMapCamera(
         self._last_image: bytes | None = None
         self._last_summary: DreameLawnMowerMapSummary | None = None
         self._last_refresh_at: datetime | None = None
+        self._last_error: str | None = None
         self._refresh_lock = asyncio.Lock()
 
     @property
@@ -94,6 +95,8 @@ class DreameLawnMowerMapCamera(
         refreshed_at = self._last_refresh_at
         return {
             "map_cached": self._last_image is not None,
+            "map_placeholder": self._last_image is None,
+            "map_error": self._last_error,
             "map_available": summary.available if summary is not None else None,
             "map_id": None if summary is None else summary.map_id,
             "frame_id": None if summary is None else summary.frame_id,
@@ -133,7 +136,7 @@ class DreameLawnMowerMapCamera(
         width: int | None = None,
         height: int | None = None,
     ) -> bytes | None:
-        """Return the latest mower map image as PNG bytes."""
+        """Return the latest mower map image as JPEG bytes."""
         del width, height
         return await self._async_get_map_image()
 
@@ -157,23 +160,27 @@ class DreameLawnMowerMapCamera(
                 )
             except Exception as err:
                 _LOGGER.warning("Failed to refresh Dreame mower map image: %s", err)
+                self._last_error = str(err)
                 self._last_refresh_at = datetime.now(UTC)
                 self.async_write_ha_state()
-                return self._last_image
+                return self._last_image or map_placeholder_jpeg(detail=self._last_error)
 
             if summary is not None:
                 self._last_summary = summary
             if image is not None:
                 try:
                     self._last_image = png_bytes_to_jpeg(image)
+                    self._last_error = None
                 except Exception as err:
                     _LOGGER.warning("Failed to convert Dreame mower map image: %s", err)
+                    self._last_error = str(err)
                 self._last_refresh_at = datetime.now(UTC)
             elif self._last_image is None:
+                self._last_error = "No map image was returned by the mower."
                 self._last_refresh_at = datetime.now(UTC)
 
             self.async_write_ha_state()
-            return self._last_image
+            return self._last_image or map_placeholder_jpeg(detail=self._last_error)
 
     def _cache_is_fresh(self) -> bool:
         """Return whether the cached map image is still fresh."""

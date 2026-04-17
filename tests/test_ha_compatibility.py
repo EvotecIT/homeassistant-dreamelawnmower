@@ -10,7 +10,10 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
 from custom_components.dreame_lawn_mower.dreame_client.client import (
     DreameLawnMowerClient,
 )
-from custom_components.dreame_lawn_mower.image import png_bytes_to_jpeg
+from custom_components.dreame_lawn_mower.image import (
+    map_placeholder_jpeg,
+    png_bytes_to_jpeg,
+)
 from custom_components.dreame_lawn_mower.sensor import DreameSensorDescription
 
 
@@ -63,3 +66,12 @@ def test_png_bytes_to_jpeg_returns_jpeg_bytes() -> None:
     converted = png_bytes_to_jpeg(source.getvalue())
 
     assert converted.startswith(b"\xff\xd8")
+
+
+def test_map_placeholder_jpeg_returns_valid_jpeg_bytes() -> None:
+    converted = map_placeholder_jpeg(detail="test")
+
+    assert converted.startswith(b"\xff\xd8")
+    with Image.open(BytesIO(converted)) as image:
+        assert image.format == "JPEG"
+        assert image.size == (1024, 768)
