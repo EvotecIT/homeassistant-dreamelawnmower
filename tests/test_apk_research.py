@@ -9,6 +9,8 @@ from dreame_lawn_mower_client import (
     DEFAULT_DECOMPILED_SOURCE_SUFFIXES,
     analyze_decompiled_sources,
     analyze_dreamehome_apk,
+    build_jadx_command,
+    run_jadx_decompile,
 )
 from dreame_lawn_mower_client.apk_research import (
     analyze_dreamehome_apk as module_analyze,
@@ -114,3 +116,31 @@ def test_public_package_exports_apk_research_helpers() -> None:
     assert ".java" in DEFAULT_DECOMPILED_SOURCE_SUFFIXES
     assert analyze_dreamehome_apk is module_analyze
     assert callable(analyze_decompiled_sources)
+    assert callable(build_jadx_command)
+    assert callable(run_jadx_decompile)
+
+
+def test_build_jadx_command_uses_explicit_executable(tmp_path) -> None:
+    command = build_jadx_command(
+        tmp_path / "dreame.apk",
+        tmp_path / "jadx-output",
+        jadx_path="C:/Tools/jadx/bin/jadx.bat",
+    )
+
+    assert command == [
+        "C:/Tools/jadx/bin/jadx.bat",
+        "-d",
+        str(tmp_path / "jadx-output"),
+        str(tmp_path / "dreame.apk"),
+    ]
+
+
+def test_run_jadx_decompile_reports_missing_executable(tmp_path) -> None:
+    result = run_jadx_decompile(
+        tmp_path / "dreame.apk",
+        tmp_path / "jadx-output",
+        jadx_path=tmp_path / "missing-jadx.exe",
+    )
+
+    assert result["ok"] is False
+    assert result["error"] == "jadx_failed_to_start"

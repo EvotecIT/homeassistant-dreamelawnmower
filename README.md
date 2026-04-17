@@ -115,6 +115,13 @@ jadx -d C:\path\to\dreamehome-jadx C:\path\to\dreamehome.apk
 python examples/source_research.py "C:\path\to\dreamehome-jadx" --term STREAM_VIDEO --term operType
 ```
 
+Or run the guarded wrapper, which detects `jadx`, refuses to overwrite an
+existing output folder unless `--overwrite` is passed, and then scans the result:
+
+```bash
+python examples/decompile_research.py "C:\path\to\dreamehome.apk" --output-dir "C:\path\to\dreamehome-jadx"
+```
+
 If you want to scan wider `siid.piid` ranges when hunting for map or telemetry keys, use:
 
 ```bash

@@ -34,14 +34,17 @@ MAP_PROBE_PROPERTY_KEYS = _map_probe.MAP_PROBE_PROPERTY_KEYS
 SUPPORTED_ACCOUNT_TYPES = _models.SUPPORTED_ACCOUNT_TYPES
 analyze_decompiled_sources = _apk_research.analyze_decompiled_sources
 analyze_dreamehome_apk = _apk_research.analyze_dreamehome_apk
+build_jadx_command = _apk_research.build_jadx_command
 build_camera_probe_payload = _camera_probe.build_camera_probe_payload
 build_cloud_property_summary = _map_probe.build_cloud_property_summary
 build_map_probe_payload = _map_probe.build_map_probe_payload
+find_jadx_executable = _apk_research.find_jadx_executable
 display_name_for_model = _models.display_name_for_model
 map_summary_from_map_data = _models.map_summary_from_map_data
 map_summary_to_dict = _models.map_summary_to_dict
 mower_error_label = _app_protocol.mower_error_label
 mower_state_label = _app_protocol.mower_state_label
+run_jadx_decompile = _apk_research.run_jadx_decompile
 
 __all__ = [
     "CAMERA_PROBE_PROPERTY_KEYS",
@@ -69,12 +72,15 @@ __all__ = [
     "SUPPORTED_ACCOUNT_TYPES",
     "analyze_decompiled_sources",
     "analyze_dreamehome_apk",
+    "build_jadx_command",
     "build_camera_probe_payload",
     "build_cloud_property_summary",
     "build_map_probe_payload",
     "display_name_for_model",
+    "find_jadx_executable",
     "map_summary_from_map_data",
     "map_summary_to_dict",
     "mower_error_label",
     "mower_state_label",
+    "run_jadx_decompile",
 ]

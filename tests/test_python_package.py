@@ -18,11 +18,13 @@ from dreame_lawn_mower_client import (
     analyze_dreamehome_apk,
     build_camera_probe_payload,
     build_cloud_property_summary,
+    build_jadx_command,
     build_map_probe_payload,
     map_summary_from_map_data,
     map_summary_to_dict,
     mower_error_label,
     mower_state_label,
+    run_jadx_decompile,
 )
 from dreame_lawn_mower_client.client import DreameLawnMowerClient as ClientFromModule
 from dreame_lawn_mower_client.models import (
@@ -52,7 +54,9 @@ def test_public_package_exports_map_helpers() -> None:
     assert callable(analyze_dreamehome_apk)
     assert callable(build_camera_probe_payload)
     assert callable(build_cloud_property_summary)
+    assert callable(build_jadx_command)
     assert callable(build_map_probe_payload)
+    assert callable(run_jadx_decompile)
     assert "10001.1" in CAMERA_PROBE_PROPERTY_KEYS
     assert "sendAction" in DEFAULT_APK_RESEARCH_TERMS
     assert ".java" in DEFAULT_DECOMPILED_SOURCE_SUFFIXES

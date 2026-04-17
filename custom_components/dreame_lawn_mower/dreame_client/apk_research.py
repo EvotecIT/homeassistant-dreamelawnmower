@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 import zipfile
 from collections.abc import Iterable, Sequence
 from pathlib import Path
@@ -50,6 +52,8 @@ DEFAULT_DECOMPILED_SOURCE_SUFFIXES = (
     ".dart",
     ".txt",
 )
+
+DEFAULT_JADX_EXECUTABLES = ("jadx", "jadx.bat", "jadx.cmd")
 
 PRINTABLE_RE = re.compile(rb"[ -~]{4,}")
 
@@ -237,6 +241,94 @@ def analyze_decompiled_sources(
     }
 
 
+def find_jadx_executable(
+    *,
+    candidates: Sequence[str] = DEFAULT_JADX_EXECUTABLES,
+) -> str | None:
+    """Return the first jadx executable found on PATH."""
+
+    for candidate in candidates:
+        resolved = shutil.which(candidate)
+        if resolved:
+            return resolved
+    return None
+
+
+def build_jadx_command(
+    apk_path: str | Path,
+    output_dir: str | Path,
+    *,
+    jadx_path: str | Path | None = None,
+) -> list[str]:
+    """Build a jadx command for decompiling a Dreamehome APK."""
+
+    executable = str(jadx_path or "jadx")
+    return [executable, "-d", str(Path(output_dir)), str(Path(apk_path))]
+
+
+def run_jadx_decompile(
+    apk_path: str | Path,
+    output_dir: str | Path,
+    *,
+    jadx_path: str | Path | None = None,
+    overwrite: bool = False,
+    timeout: float | None = None,
+) -> dict[str, Any]:
+    """Run jadx and return a JSON-safe process summary."""
+
+    executable = str(jadx_path) if jadx_path is not None else find_jadx_executable()
+    if not executable:
+        return {
+            "ok": False,
+            "error": "jadx_not_found",
+            "message": "Install jadx or pass --jadx-path to decompile APK sources.",
+        }
+
+    apk = Path(apk_path)
+    output = Path(output_dir)
+    if output.exists() and any(output.iterdir()) and not overwrite:
+        return {
+            "ok": False,
+            "error": "output_exists",
+            "message": "Output directory is not empty. Pass --overwrite to reuse it.",
+            "output_dir": str(output),
+        }
+    output.mkdir(parents=True, exist_ok=True)
+
+    command = build_jadx_command(apk, output, jadx_path=executable)
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=timeout,
+        )
+    except OSError as err:
+        return {
+            "ok": False,
+            "error": "jadx_failed_to_start",
+            "message": str(err),
+            "command": command,
+        }
+    except subprocess.TimeoutExpired as err:
+        return {
+            "ok": False,
+            "error": "jadx_timeout",
+            "message": str(err),
+            "command": command,
+        }
+
+    return {
+        "ok": completed.returncode == 0,
+        "returncode": completed.returncode,
+        "command": command,
+        "output_dir": str(output),
+        "stdout_tail": _tail_text(completed.stdout),
+        "stderr_tail": _tail_text(completed.stderr),
+    }
+
+
 def _append_limited(values: list[str], value: str, limit: int) -> None:
     if value in values or len(values) >= limit:
         return
@@ -360,3 +452,9 @@ def _relative_name(file_path: Path, root: Path) -> str:
         return file_path.relative_to(root).as_posix()
     except ValueError:
         return file_path.as_posix()
+
+
+def _tail_text(value: str, *, max_chars: int = 4000) -> str:
+    if len(value) <= max_chars:
+        return value
+    return value[-max_chars:]

@@ -21,6 +21,9 @@ from .apk_research import (
     DEFAULT_DECOMPILED_SOURCE_SUFFIXES,
     analyze_decompiled_sources,
     analyze_dreamehome_apk,
+    build_jadx_command,
+    find_jadx_executable,
+    run_jadx_decompile,
 )
 from .camera_probe import CAMERA_PROBE_PROPERTY_KEYS, build_camera_probe_payload
 from .map_probe import (
@@ -69,12 +72,15 @@ __all__ = [
     "SUPPORTED_ACCOUNT_TYPES",
     "analyze_decompiled_sources",
     "analyze_dreamehome_apk",
+    "build_jadx_command",
     "build_camera_probe_payload",
     "build_cloud_property_summary",
     "build_map_probe_payload",
+    "find_jadx_executable",
     "display_name_for_model",
     "map_summary_from_map_data",
     "map_summary_to_dict",
     "mower_error_label",
     "mower_state_label",
+    "run_jadx_decompile",
 ]

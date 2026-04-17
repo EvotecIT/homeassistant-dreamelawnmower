@@ -148,3 +148,7 @@ python examples/source_research.py "C:\path\to\dreamehome-jadx" --term STREAM_VI
 The source scanner reports candidate files plus compact file/line snippets, which
 should make it easier to identify the exact app class or bridge method before we
 try another live camera/map action.
+
+`python examples/decompile_research.py <apk> --output-dir <jadx-output>` wraps
+both steps once Java and `jadx` are available locally. It does not install tools
+or overwrite an existing output directory unless `--overwrite` is passed.
