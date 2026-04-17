@@ -43,6 +43,10 @@ async def main() -> None:
         print("device/info:")
         print(json.dumps(device_info, indent=2, sort_keys=True))
 
+        user_features = await client.async_get_cloud_user_features()
+        print("queryDevicePermit:")
+        print(json.dumps(user_features, indent=2, sort_keys=True))
+
         device_page = await client.async_get_cloud_device_list_page()
         print("device/listV2 summary:")
         print(

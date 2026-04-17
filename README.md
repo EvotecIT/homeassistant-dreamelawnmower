@@ -85,7 +85,8 @@ python examples/cloud_probe.py
 
 Optional:
 
-- the probe prints `device/info` and `device/listV2` summaries by default
+- the probe prints `device/info`, `device/listV2`, and `queryDevicePermit` summaries by default
+- `queryDevicePermit` is useful for confirming app-side feature and permit flags before exposing new Home Assistant entities
 - set `DREAME_PROP_KEYS=6.1,6.3` or another comma-separated key list to query `iotstatus/props`
 
 If you want to scan wider `siid.piid` ranges when hunting for map or telemetry keys, use:
@@ -104,7 +105,7 @@ Optional:
 
 This is still experimental and read-only. The integration exposes disabled-by-default `camera` entities named `Map` and `Map Data`. `Map` returns a rendered JPEG or a valid placeholder image. `Map Data` returns the same structured map view as JSON so we can debug the mower map pipeline and eventually support custom cards without tying the data model to the renderer.
 
-There is also a disabled-by-default `Capture Map Probe` button. Use it when the visible map is still a placeholder: it logs a compact JSON payload with the legacy current-map result, focused app-style property probes, and trimmed cloud metadata from `device/info` and `device/listV2`.
+There is also a disabled-by-default `Capture Map Probe` button. Use it when the visible map is still a placeholder: it logs a compact JSON payload with the legacy current-map result, focused app-style property probes, trimmed cloud metadata from `device/info` and `device/listV2`, and the app-side `queryDevicePermit` feature payload.
 
 ## Automation examples
 

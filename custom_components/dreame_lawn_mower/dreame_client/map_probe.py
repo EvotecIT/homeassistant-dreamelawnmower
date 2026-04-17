@@ -7,6 +7,22 @@ from typing import Any
 
 from .models import DreameLawnMowerDescriptor, DreameLawnMowerMapView
 
+REDACT_PROBE_KEYS = {
+    "bindDomain",
+    "did",
+    "host",
+    "localip",
+    "mac",
+    "masterName",
+    "masterUid",
+    "masterUid2UUID",
+    "password",
+    "sn",
+    "token",
+    "uid",
+    "username",
+}
+
 MAP_PROBE_PROPERTY_KEYS = (
     "1.1",
     "2.1",
@@ -32,6 +48,24 @@ MAP_PROBE_PROPERTY_KEYS = (
     "6.19",
     "6.20",
 )
+
+
+def _redact_probe_value(value: Any) -> Any:
+    """Return JSON-safe probe data without stable account or device IDs."""
+    if isinstance(value, Mapping):
+        return {
+            str(key): (
+                "**REDACTED**"
+                if str(key) in REDACT_PROBE_KEYS
+                else _redact_probe_value(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_probe_value(item) for item in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
 
 
 def _trim_device_record(record: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -83,6 +117,7 @@ def build_map_probe_payload(
     cloud_properties: Mapping[str, Any] | None,
     cloud_device_info: Mapping[str, Any] | None,
     cloud_device_list_page: Mapping[str, Any] | None,
+    cloud_user_features: Any = None,
 ) -> dict[str, Any]:
     """Build a JSON-safe map-source probe payload."""
     return {
@@ -99,4 +134,5 @@ def build_map_probe_payload(
         "cloud_device_list_record": _trim_device_record(
             _find_device_list_record(descriptor, cloud_device_list_page)
         ),
+        "cloud_user_features": _redact_probe_value(cloud_user_features),
     }

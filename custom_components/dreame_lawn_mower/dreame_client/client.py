@@ -174,6 +174,14 @@ class DreameLawnMowerClient:
         """Fetch the raw cloud `device/info` payload used by the mobile app."""
         return await asyncio.to_thread(self._sync_get_cloud_device_info, language)
 
+    async def async_get_cloud_user_features(
+        self,
+        *,
+        language: str | None = None,
+    ) -> Any:
+        """Fetch raw cloud feature/permit data from the mobile app endpoint."""
+        return await asyncio.to_thread(self._sync_get_cloud_user_features, language)
+
     async def async_get_cloud_properties(
         self,
         keys: str | Sequence[str],
@@ -327,6 +335,17 @@ class DreameLawnMowerClient:
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
 
+    def _sync_get_cloud_user_features(
+        self,
+        language: str | None = None,
+    ) -> Any:
+        cloud = self._sync_get_cloud_protocol()
+
+        try:
+            return cloud.get_user_features(language)
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+
     def _sync_get_cloud_properties(
         self,
         keys: str | Sequence[str],
@@ -430,12 +449,18 @@ class DreameLawnMowerClient:
             master=None,
             shared_status=None,
         )
+        try:
+            cloud_user_features = self._sync_get_cloud_user_features(language)
+        except DreameLawnMowerConnectionError as err:
+            cloud_user_features = {"error": str(err)}
+
         return build_map_probe_payload(
             descriptor=self._descriptor,
             map_view=map_view,
             cloud_properties=cloud_properties,
             cloud_device_info=cloud_device_info,
             cloud_device_list_page=cloud_device_list_page,
+            cloud_user_features=cloud_user_features,
         )
 
     def _sync_wait_for_map(self, timeout: float, interval: float):

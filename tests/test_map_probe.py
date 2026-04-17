@@ -60,6 +60,11 @@ def test_map_probe_payload_trims_cloud_records() -> None:
                 ]
             }
         },
+        cloud_user_features={
+            "did": "device-1",
+            "permit": "pincode,video,aiobs",
+            "features": ["map", "video"],
+        },
     )
 
     assert payload["descriptor"] == {
@@ -74,6 +79,8 @@ def test_map_probe_payload_trims_cloud_records() -> None:
     assert payload["cloud_device_info"]["key_define_url_present"] is True
     assert payload["cloud_device_info"]["display_name"] == "A2"
     assert payload["cloud_device_list_record"]["display_name"] == "A2"
+    assert payload["cloud_user_features"]["permit"] == "pincode,video,aiobs"
+    assert payload["cloud_user_features"]["did"] == "**REDACTED**"
     assert "did" not in payload["cloud_device_info"]
 
 

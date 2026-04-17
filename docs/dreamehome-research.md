@@ -108,6 +108,7 @@ That means the endpoint is reachable, but those guessed keys are not enough by t
 The reusable Python client now includes cloud probe helpers so this research can be exercised without Home Assistant:
 
 - `async_get_cloud_device_info()`
+- `async_get_cloud_user_features()` for the app-side `queryDevicePermit` endpoint
 - `async_get_cloud_device_list_page()`
 - `async_get_cloud_properties(keys)`
 - `async_scan_cloud_properties(...)` for chunked `siid.piid` range scans

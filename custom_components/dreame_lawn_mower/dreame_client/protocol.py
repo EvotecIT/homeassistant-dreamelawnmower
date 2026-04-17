@@ -400,6 +400,19 @@ class DreameMowerDreameHomeCloudProtocol:
             return data
         return None
 
+    def get_user_features(self, lang: str | None = None) -> Any:
+        params = {"did": self._did}
+        if lang:
+            params["lang"] = lang
+
+        response = self.request(
+            f"{self.get_api_url()}/dreame-user-iot/iotuserbind/queryDevicePermit",
+            json.dumps(params, separators=(",", ":")),
+        )
+        if response and "data" in response and response["code"] == 0:
+            return response["data"]
+        return None
+
     def get_device_info(self) -> Any:
         response = self._api_call(
             f"{self._strings[23]}/{self._strings[24]}/{self._strings[27]}/{self._strings[29]}",
