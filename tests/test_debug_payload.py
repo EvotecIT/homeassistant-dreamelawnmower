@@ -151,12 +151,37 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
     assert payload["device"]["info_raw"]["sn"] == "**REDACTED**"
     assert payload["device"]["unknown_property_count"] == 1
     assert payload["device"]["unknown_properties"]["-113852866"]["value"] == 123
+    assert payload["device"]["unknown_property_summary"] == {
+        "count": 1,
+        "keys": ["-113852866"],
+        "entries": [
+            {
+                "key": "-113852866",
+                "siid": 9,
+                "piid": 4,
+                "code": 0,
+                "value_type": "number",
+                "value_preview": 123,
+            }
+        ],
+    }
     assert payload["device"]["realtime_property_count"] == 2
     assert (
         payload["device"]["realtime_properties"]["1.2"]["property_name"]
         == "BATTERY_LEVEL"
     )
     assert payload["device"]["realtime_properties"]["9.4"]["value"] == {"blob": 123}
+    assert payload["device"]["realtime_summary"]["known_keys"] == ["1.2"]
+    assert payload["device"]["realtime_summary"]["unknown_keys"] == ["9.4"]
+    assert payload["device"]["realtime_summary"]["entries"][1] == {
+        "key": "9.4",
+        "property_name": "UNKNOWN_REALTIME_9.4",
+        "siid": 9,
+        "piid": 4,
+        "code": None,
+        "value_type": "object",
+        "value_preview": {"blob": 123},
+    }
     assert (
         payload["device"]["last_realtime_message"]["message"]["method"]
         == "properties_changed"
@@ -167,6 +192,27 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
     assert payload["state_reconciliation"]["error"]["active"] is False
     assert payload["state_reconciliation"]["flags"]["started"] is True
     assert payload["state_reconciliation"]["warnings"] == []
+    assert payload["triage"] == {
+        "schema_version": 2,
+        "known_model": True,
+        "model": "dreame.mower.g2408",
+        "display_model": "A2",
+        "activity": "paused",
+        "state": "paused",
+        "available": True,
+        "capabilities": ["lidar_navigation", "map"],
+        "unknown_property_count": 1,
+        "unknown_realtime_count": 1,
+        "state_warning_count": 0,
+        "issues": [
+            "unknown_device_properties_present",
+            "unknown_realtime_properties_present",
+        ],
+        "suggested_next_capture": [
+            "capture_map_probe",
+            "download_diagnostics_after_state_change",
+        ],
+    }
 
 
 def test_build_debug_payload_highlights_state_disagreements() -> None:
@@ -253,4 +299,11 @@ def test_build_debug_payload_highlights_state_disagreements() -> None:
         "state_looks_docked_but_raw_docked_false",
         "raw_mower_state_looks_docked_but_raw_docked_false",
         "raw_mower_state_differs_from_state_name",
+    ]
+    assert payload["triage"]["state_warning_count"] == 4
+    assert payload["triage"]["issues"] == [
+        "state:active_error_code_but_display_says_no_error",
+        "state:state_looks_docked_but_raw_docked_false",
+        "state:raw_mower_state_looks_docked_but_raw_docked_false",
+        "state:raw_mower_state_differs_from_state_name",
     ]

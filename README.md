@@ -69,6 +69,12 @@ there when Home Assistant shows a confusing state such as `Error` while another
 field says `No error`: it lists the normalized state, raw mower state, error
 signals, dock/charge flags, and any source-disagreement warnings.
 
+Diagnostics also include a compact `triage` section. That is the first thing to
+paste into an issue because it summarizes the model, capabilities, state
+warnings, unknown property counts, unknown realtime keys, and the best next
+capture to take. The larger raw sections remain in the downloaded diagnostics
+for parser fixes and fixture-driven tests.
+
 For automations, use the normal `Docked` binary sensor or `docked` attribute.
 Those are effective values derived from mower state and charging states. The
 disabled-by-default `Raw Docked Flag` diagnostic entity preserves the exact

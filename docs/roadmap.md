@@ -49,6 +49,7 @@ Checklist:
 
 - [x] catch unknown property enum values and store them in a raw diagnostics bucket
 - [x] ensure refresh continues even when one property block is unrecognized
+- [x] add compact diagnostics triage summaries for issue reports
 - [ ] add model-family fixtures as new users report supported hardware
 - [x] normalize display names for known Dreame, MOVA, LiDAX, Viax, and related mower rebadges
 - [x] add regression tests for unknown-property tolerance

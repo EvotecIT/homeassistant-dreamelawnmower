@@ -9,6 +9,10 @@ from enum import Enum
 from typing import Any
 
 from .const import CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
+from .dreame_client.models import MODEL_NAME_MAP, SUPPORTED_MODEL_MARKER
+
+DIAGNOSTIC_SCHEMA_VERSION = 2
+UNKNOWN_REALTIME_PREFIX = "UNKNOWN_REALTIME_"
 
 REDACT_KEYS = {
     CONF_PASSWORD,
@@ -90,6 +94,45 @@ def _normalize_debug_value(value: Any) -> Any:
     if isinstance(enum_value, (str, int, float, bool)):
         return enum_value
     return str(value)
+
+
+def _value_type(value: Any) -> str:
+    """Return a stable coarse type label for debug summaries."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int | float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, Mapping):
+        return "object"
+    if isinstance(value, list | tuple | set):
+        return "array"
+    return type(value).__name__
+
+
+def _short_preview(value: Any, *, max_length: int = 120) -> Any:
+    """Return a compact JSON-safe preview for report triage."""
+    normalized = _normalize_debug_value(value)
+    if isinstance(normalized, str):
+        return (
+            normalized
+            if len(normalized) <= max_length
+            else f"{normalized[: max_length - 3]}..."
+        )
+    if isinstance(normalized, list):
+        preview = normalized[:10]
+        if len(normalized) > 10:
+            preview.append(f"... +{len(normalized) - 10} items")
+        return preview
+    if isinstance(normalized, Mapping):
+        return {
+            key: normalized[key]
+            for key in list(normalized.keys())[:10]
+        }
+    return normalized
 
 
 def _is_no_error_value(value: Any) -> bool:
@@ -221,6 +264,124 @@ def _collect_state_reconciliation(snapshot: Any, device: Any) -> dict[str, Any]:
     }
 
 
+def _collect_unknown_property_summary(device: Any) -> dict[str, Any]:
+    """Return compact unknown-property details for issue triage."""
+    unknown_properties = getattr(device, "unknown_properties", {}) or {}
+    entries = []
+    for key, value in unknown_properties.items():
+        payload = value if isinstance(value, Mapping) else {}
+        entries.append(
+            {
+                "key": str(key),
+                "siid": _normalize_debug_value(payload.get("siid")),
+                "piid": _normalize_debug_value(payload.get("piid")),
+                "code": _normalize_debug_value(payload.get("code")),
+                "value_type": _value_type(payload.get("value")),
+                "value_preview": _short_preview(payload.get("value")),
+            }
+        )
+
+    entries.sort(key=lambda item: item["key"])
+    return {
+        "count": len(entries),
+        "keys": [entry["key"] for entry in entries],
+        "entries": entries,
+    }
+
+
+def _collect_realtime_summary(device: Any) -> dict[str, Any]:
+    """Return compact realtime-property details for issue triage."""
+    realtime_properties = getattr(device, "realtime_properties", {}) or {}
+    entries = []
+    known_keys: list[str] = []
+    unknown_keys: list[str] = []
+
+    for key, value in realtime_properties.items():
+        payload = value if isinstance(value, Mapping) else {}
+        property_name = str(payload.get("property_name") or "")
+        key_text = str(key)
+        if property_name.startswith(UNKNOWN_REALTIME_PREFIX):
+            unknown_keys.append(key_text)
+        else:
+            known_keys.append(key_text)
+        entries.append(
+            {
+                "key": key_text,
+                "property_name": property_name or None,
+                "siid": _normalize_debug_value(payload.get("siid")),
+                "piid": _normalize_debug_value(payload.get("piid")),
+                "code": _normalize_debug_value(payload.get("code")),
+                "value_type": _value_type(payload.get("value")),
+                "value_preview": _short_preview(payload.get("value")),
+            }
+        )
+
+    entries.sort(key=lambda item: item["key"])
+    known_keys.sort()
+    unknown_keys.sort()
+    return {
+        "count": len(entries),
+        "known_keys": known_keys,
+        "unknown_keys": unknown_keys,
+        "entries": entries,
+    }
+
+
+def _collect_triage_summary(
+    *,
+    snapshot: Any,
+    device: Any,
+    state_reconciliation: Mapping[str, Any],
+    unknown_property_summary: Mapping[str, Any],
+    realtime_summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return a compact first-read summary for user bug reports."""
+    descriptor = getattr(snapshot, "descriptor", None)
+    model = getattr(descriptor, "model", None)
+    capabilities = tuple(getattr(snapshot, "capabilities", ()) or ())
+    issues: list[str] = []
+    suggested_next_capture: list[str] = []
+    state_warnings = list(state_reconciliation.get("warnings", []) or [])
+
+    if model not in MODEL_NAME_MAP:
+        issues.append("model_not_in_known_model_map")
+    if model and SUPPORTED_MODEL_MARKER not in model:
+        issues.append("model_does_not_match_mower_marker")
+    if not bool(getattr(snapshot, "available", False)):
+        issues.append("snapshot_unavailable")
+    if state_warnings:
+        issues.extend(f"state:{warning}" for warning in state_warnings)
+    if unknown_property_summary.get("count", 0):
+        issues.append("unknown_device_properties_present")
+    if realtime_summary.get("unknown_keys"):
+        issues.append("unknown_realtime_properties_present")
+    mapping_available = bool(getattr(snapshot, "mapping_available", False))
+    if "map" in capabilities and not mapping_available:
+        suggested_next_capture.append("capture_map_probe")
+    if unknown_property_summary.get("count", 0) or realtime_summary.get("unknown_keys"):
+        suggested_next_capture.append("download_diagnostics_after_state_change")
+    if not suggested_next_capture:
+        suggested_next_capture.append("download_diagnostics")
+
+    return {
+        "schema_version": DIAGNOSTIC_SCHEMA_VERSION,
+        "known_model": model in MODEL_NAME_MAP,
+        "model": _normalize_debug_value(model),
+        "display_model": _normalize_debug_value(
+            getattr(descriptor, "display_model", None)
+        ),
+        "activity": _normalize_debug_value(getattr(snapshot, "activity", None)),
+        "state": _normalize_debug_value(getattr(snapshot, "state", None)),
+        "available": _normalize_debug_value(getattr(snapshot, "available", None)),
+        "capabilities": _normalize_debug_value(capabilities),
+        "unknown_property_count": unknown_property_summary.get("count", 0),
+        "unknown_realtime_count": len(realtime_summary.get("unknown_keys", []) or []),
+        "state_warning_count": len(state_warnings),
+        "issues": issues,
+        "suggested_next_capture": suggested_next_capture,
+    }
+
+
 def build_debug_payload(
     *,
     entry_data: Mapping[str, Any] | None,
@@ -231,13 +392,24 @@ def build_debug_payload(
     descriptor = getattr(snapshot, "descriptor", None)
     info = getattr(device, "info", None) if device is not None else None
     status = getattr(device, "status", None) if device is not None else None
+    state_reconciliation = _collect_state_reconciliation(snapshot, device)
+    unknown_property_summary = _collect_unknown_property_summary(device)
+    realtime_summary = _collect_realtime_summary(device)
 
     payload = {
+        "diagnostic_schema_version": DIAGNOSTIC_SCHEMA_VERSION,
         "captured_at": datetime.now(UTC).isoformat(),
         "entry": _normalize_debug_value(dict(entry_data or {})),
         "descriptor": _normalize_debug_value(descriptor),
         "snapshot": _normalize_debug_value(snapshot),
-        "state_reconciliation": _collect_state_reconciliation(snapshot, device),
+        "triage": _collect_triage_summary(
+            snapshot=snapshot,
+            device=device,
+            state_reconciliation=state_reconciliation,
+            unknown_property_summary=unknown_property_summary,
+            realtime_summary=realtime_summary,
+        ),
+        "state_reconciliation": state_reconciliation,
         "cloud_record": _normalize_debug_value(getattr(descriptor, "raw", {})),
         "device": {
             "name": _normalize_debug_value(getattr(device, "name", None)),
@@ -250,12 +422,14 @@ def build_debug_payload(
             "unknown_properties": _normalize_debug_value(
                 getattr(device, "unknown_properties", {}) or {}
             ),
+            "unknown_property_summary": unknown_property_summary,
             "realtime_property_count": len(
                 getattr(device, "realtime_properties", {}) or {}
             ),
             "realtime_properties": _normalize_debug_value(
                 getattr(device, "realtime_properties", {}) or {}
             ),
+            "realtime_summary": realtime_summary,
             "last_realtime_message": _normalize_debug_value(
                 getattr(device, "last_realtime_message", None)
             ),
