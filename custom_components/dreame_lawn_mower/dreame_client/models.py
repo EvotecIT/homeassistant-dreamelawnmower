@@ -324,10 +324,21 @@ def snapshot_from_device(
     error_name = _as_optional_str(getattr(device.status, "error_name", None))
     error_text = _as_optional_str(status_attributes.get("error"))
     error_code = getattr(error_obj, "value", None)
+    status_has_error = bool(getattr(device.status, "has_error", False))
+    error_code_active = error_code not in (None, -1, 0)
+    error_name_active = not _is_no_error_text(error_name)
+    error_text_active = not _is_no_error_text(error_text)
+    has_only_bare_error_flag = (
+        status_has_error
+        and error_code is None
+        and error_name is None
+        and error_text is None
+    )
     has_error = bool(
-        getattr(device.status, "has_error", False)
-        or not _is_no_error_text(error_text)
-        or (error_code not in (None, -1, 0))
+        error_code_active
+        or error_name_active
+        or error_text_active
+        or has_only_bare_error_flag
     )
     capability_list = status_attributes.get("capabilities") or getattr(
         getattr(device, "capability", None),

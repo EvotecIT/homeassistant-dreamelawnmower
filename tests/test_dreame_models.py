@@ -256,6 +256,71 @@ def test_snapshot_ignores_explicit_no_error_text_when_selecting_activity() -> No
     assert snapshot.realtime_property_count == 1
 
 
+def test_snapshot_ignores_sticky_has_error_when_error_details_say_no_error() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "dreame.mower.g2408",
+            "customName": "Garage Mower",
+        },
+        account_type="dreame",
+        country="eu",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.state = SimpleNamespace(name="CHARGING")
+    device.status.state_name = "charging"
+    device.status.error = SimpleNamespace(value=-1)
+    device.status.error_name = "no_error"
+    device.status.has_error = True
+    device.status.attributes = {
+        **device.status.attributes,
+        "charging": True,
+        "error": "No error",
+        "mower_state": "charging",
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == "docked"
+    assert snapshot.error_code == -1
+    assert snapshot.error_name == "no_error"
+    assert snapshot.error_text == "No error"
+
+
+def test_snapshot_keeps_bare_has_error_when_no_error_details_exist() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "dreame.mower.g2408",
+            "customName": "Garage Mower",
+        },
+        account_type="dreame",
+        country="eu",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.error = None
+    device.status.error_name = None
+    device.status.has_error = True
+    device.status.attributes = {
+        key: value
+        for key, value in device.status.attributes.items()
+        if key != "error"
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == "error"
+    assert snapshot.error_code is None
+    assert snapshot.error_name is None
+    assert snapshot.error_text is None
+
+
 def test_snapshot_tracks_realtime_and_unknown_diagnostics() -> None:
     descriptor = descriptor_from_cloud_record(
         {
