@@ -8,7 +8,13 @@ import time
 from collections.abc import Sequence
 from typing import Any
 
-from .app_protocol import MOWER_STATE_PROPERTY_KEY, mower_state_label
+from .app_protocol import (
+    MOWER_ERROR_PROPERTY_KEY,
+    MOWER_PROPERTY_HINTS,
+    MOWER_STATE_PROPERTY_KEY,
+    mower_error_label,
+    mower_state_label,
+)
 from .exceptions import DeviceException
 from .map_probe import MAP_PROBE_PROPERTY_KEYS, build_map_probe_payload
 from .models import (
@@ -568,9 +574,16 @@ class DreameLawnMowerClient:
         rendered = dict(entry)
         key = str(rendered.get("key", ""))
         value = rendered.get("value")
+        property_hint = MOWER_PROPERTY_HINTS.get(key)
+        if property_hint:
+            rendered["property_hint"] = property_hint
 
         if key == MOWER_STATE_PROPERTY_KEY:
             label = mower_state_label(value, language=language)
+            if label:
+                rendered["decoded_label"] = label
+        elif key == MOWER_ERROR_PROPERTY_KEY:
+            label = mower_error_label(value)
             if label:
                 rendered["decoded_label"] = label
 

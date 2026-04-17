@@ -20,12 +20,16 @@ DISPLAY_NAME_ALIASES = _models.DISPLAY_NAME_ALIASES
 MODEL_NAME_MAP = _models.MODEL_NAME_MAP
 MOWER_STATE_LABELS = _app_protocol.MOWER_STATE_LABELS
 MOWER_STATE_PROPERTY_KEY = _app_protocol.MOWER_STATE_PROPERTY_KEY
+MOWER_ERROR_PROPERTY_KEY = _app_protocol.MOWER_ERROR_PROPERTY_KEY
+MOWER_PROPERTY_HINTS = _app_protocol.MOWER_PROPERTY_HINTS
+MOWER_RAW_STATUS_PROPERTY_KEY = _app_protocol.MOWER_RAW_STATUS_PROPERTY_KEY
 MAP_PROBE_PROPERTY_KEYS = _map_probe.MAP_PROBE_PROPERTY_KEYS
 SUPPORTED_ACCOUNT_TYPES = _models.SUPPORTED_ACCOUNT_TYPES
 build_map_probe_payload = _map_probe.build_map_probe_payload
 display_name_for_model = _models.display_name_for_model
 map_summary_from_map_data = _models.map_summary_from_map_data
 map_summary_to_dict = _models.map_summary_to_dict
+mower_error_label = _app_protocol.mower_error_label
 mower_state_label = _app_protocol.mower_state_label
 
 __all__ = [
@@ -41,6 +45,9 @@ __all__ = [
     "DreameLawnMowerTwoFactorRequiredError",
     "MODEL_NAME_MAP",
     "MAP_PROBE_PROPERTY_KEYS",
+    "MOWER_ERROR_PROPERTY_KEY",
+    "MOWER_PROPERTY_HINTS",
+    "MOWER_RAW_STATUS_PROPERTY_KEY",
     "MOWER_STATE_LABELS",
     "MOWER_STATE_PROPERTY_KEY",
     "SUPPORTED_ACCOUNT_TYPES",
@@ -48,5 +55,6 @@ __all__ = [
     "display_name_for_model",
     "map_summary_from_map_data",
     "map_summary_to_dict",
+    "mower_error_label",
     "mower_state_label",
 ]

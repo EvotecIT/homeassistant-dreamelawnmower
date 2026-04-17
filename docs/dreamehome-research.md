@@ -113,7 +113,8 @@ The reusable Python client now includes cloud probe helpers so this research can
 - `async_get_cloud_properties(keys)`
 - `async_scan_cloud_properties(...)` for chunked `siid.piid` range scans
 - `mower_state_label(value)` for the app-derived `2.1` state key
+- `mower_error_label(value)` for known mower error codes seen through `2.2`
 
 Use `python examples/cloud_probe.py` to query these endpoints directly with the same credentials used by the integration.
 
-Use `python examples/property_probe.py` to scan `siid.piid` key ranges and highlight non-empty property results while keeping `2.1` readable.
+Use `python examples/property_probe.py` to scan `siid.piid` key ranges and highlight non-empty property results while keeping `1.1`, `2.1`, and `2.2` readable.

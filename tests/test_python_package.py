@@ -2,6 +2,9 @@
 
 from dreame_lawn_mower_client import (
     MAP_PROBE_PROPERTY_KEYS,
+    MOWER_ERROR_PROPERTY_KEY,
+    MOWER_PROPERTY_HINTS,
+    MOWER_RAW_STATUS_PROPERTY_KEY,
     MOWER_STATE_PROPERTY_KEY,
     DreameLawnMowerClient,
     DreameLawnMowerMapSummary,
@@ -9,6 +12,7 @@ from dreame_lawn_mower_client import (
     build_map_probe_payload,
     map_summary_from_map_data,
     map_summary_to_dict,
+    mower_error_label,
     mower_state_label,
 )
 from dreame_lawn_mower_client.client import DreameLawnMowerClient as ClientFromModule
@@ -43,7 +47,14 @@ def test_public_package_client_has_cloud_probe_helpers() -> None:
 
 
 def test_public_package_exports_app_protocol_helpers() -> None:
+    assert MOWER_RAW_STATUS_PROPERTY_KEY == "1.1"
     assert MOWER_STATE_PROPERTY_KEY == "2.1"
+    assert MOWER_ERROR_PROPERTY_KEY == "2.2"
+    assert MOWER_PROPERTY_HINTS["1.1"] == "raw_status_blob"
     assert mower_state_label(11) == "Mapping"
     assert mower_state_label("13") == "Charging Completed"
     assert mower_state_label(999) is None
+    assert mower_error_label(31) == "Left wheel speed"
+    assert mower_error_label(-1) == "No error"
+    assert mower_error_label(0) == "No error"
+    assert mower_error_label(99999) is None

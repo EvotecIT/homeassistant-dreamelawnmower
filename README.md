@@ -99,7 +99,9 @@ Optional:
 
 - set `DREAME_PROP_KEYS=2.1,2.2,6.1` to probe an explicit list
 - or set `DREAME_PROP_SIIDS=1,2,6` plus `DREAME_PROP_PIID_START=1` and `DREAME_PROP_PIID_END=40`
-- `2.1` is automatically labeled with the mower state names extracted from the Dreamehome app asset bundle
+- `1.1`, `2.1`, and `2.2` are automatically annotated as raw status blob, mower state, and mower error
+- `2.1` is labeled with mower state names extracted from the Dreamehome app asset bundle
+- `2.2` is labeled with cleaned mower error names when the error code is already known
 - blob-like values are annotated with `value_bytes_len` and `value_bytes_hex`
 - keep `DREAME_PROP_ONLY_VALUES=1` to hide empty key-only responses while scanning
 

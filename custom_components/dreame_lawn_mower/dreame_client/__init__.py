@@ -8,8 +8,12 @@ from .client import (
     DreameLawnMowerTwoFactorRequiredError,
 )
 from .app_protocol import (
+    MOWER_ERROR_PROPERTY_KEY,
+    MOWER_PROPERTY_HINTS,
+    MOWER_RAW_STATUS_PROPERTY_KEY,
     MOWER_STATE_LABELS,
     MOWER_STATE_PROPERTY_KEY,
+    mower_error_label,
     mower_state_label,
 )
 from .map_probe import MAP_PROBE_PROPERTY_KEYS, build_map_probe_payload
@@ -39,6 +43,9 @@ __all__ = [
     "DISPLAY_NAME_ALIASES",
     "MODEL_NAME_MAP",
     "MAP_PROBE_PROPERTY_KEYS",
+    "MOWER_ERROR_PROPERTY_KEY",
+    "MOWER_PROPERTY_HINTS",
+    "MOWER_RAW_STATUS_PROPERTY_KEY",
     "MOWER_STATE_LABELS",
     "MOWER_STATE_PROPERTY_KEY",
     "SUPPORTED_ACCOUNT_TYPES",
@@ -46,5 +53,6 @@ __all__ = [
     "display_name_for_model",
     "map_summary_from_map_data",
     "map_summary_to_dict",
+    "mower_error_label",
     "mower_state_label",
 ]
