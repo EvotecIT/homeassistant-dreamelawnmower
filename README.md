@@ -109,6 +109,8 @@ This is still experimental and read-only. The integration exposes disabled-by-de
 
 There is also a disabled-by-default `Capture Map Probe` button. Use it when the visible map is still a placeholder: it logs a compact JSON payload with the legacy current-map result, focused app-style property probes, trimmed cloud metadata from `device/info` and `device/listV2`, and the app-side `queryDevicePermit` feature payload.
 
+The map probe includes a `cloud_property_summary` section so large logs are easier to triage. Start there first: it lists non-empty keys, decoded labels, hinted keys, and blob lengths before you inspect the full `cloud_properties.entries` payload.
+
 ## Automation examples
 
 The normalized sensors and binary sensors are intended to keep automations out of mower attributes as much as possible.

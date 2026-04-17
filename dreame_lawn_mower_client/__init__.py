@@ -25,6 +25,7 @@ MOWER_PROPERTY_HINTS = _app_protocol.MOWER_PROPERTY_HINTS
 MOWER_RAW_STATUS_PROPERTY_KEY = _app_protocol.MOWER_RAW_STATUS_PROPERTY_KEY
 MAP_PROBE_PROPERTY_KEYS = _map_probe.MAP_PROBE_PROPERTY_KEYS
 SUPPORTED_ACCOUNT_TYPES = _models.SUPPORTED_ACCOUNT_TYPES
+build_cloud_property_summary = _map_probe.build_cloud_property_summary
 build_map_probe_payload = _map_probe.build_map_probe_payload
 display_name_for_model = _models.display_name_for_model
 map_summary_from_map_data = _models.map_summary_from_map_data
@@ -51,6 +52,7 @@ __all__ = [
     "MOWER_STATE_LABELS",
     "MOWER_STATE_PROPERTY_KEY",
     "SUPPORTED_ACCOUNT_TYPES",
+    "build_cloud_property_summary",
     "build_map_probe_payload",
     "display_name_for_model",
     "map_summary_from_map_data",

@@ -110,6 +110,67 @@ def _find_device_list_record(
     return None
 
 
+def _entry_has_value(entry: Mapping[str, Any]) -> bool:
+    """Return whether a probed property entry carries a useful value."""
+    for key in ("value", "values", "data", "raw", "content"):
+        value = entry.get(key)
+        if value not in (None, "", [], {}):
+            return True
+    return False
+
+
+def build_cloud_property_summary(
+    cloud_properties: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Return a compact index of useful property probe results."""
+    payload = dict(cloud_properties or {})
+    entries = payload.get("entries", [])
+    if not isinstance(entries, list):
+        entries = []
+
+    non_empty_keys: list[str] = []
+    hinted_keys: dict[str, str] = {}
+    decoded_labels: dict[str, str] = {}
+    blob_keys: dict[str, int] = {}
+
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+
+        key = str(entry.get("key") or "")
+        if not key:
+            continue
+
+        if _entry_has_value(entry):
+            non_empty_keys.append(key)
+
+        property_hint = entry.get("property_hint")
+        if property_hint:
+            hinted_keys[key] = str(property_hint)
+
+        decoded_label = entry.get("decoded_label")
+        if decoded_label:
+            decoded_labels[key] = str(decoded_label)
+
+        value_bytes_len = entry.get("value_bytes_len")
+        if isinstance(value_bytes_len, int):
+            blob_keys[key] = value_bytes_len
+
+    return {
+        "requested_key_count": payload.get("requested_key_count", 0),
+        "returned_entry_count": payload.get("returned_entry_count", 0),
+        "displayed_entry_count": payload.get("displayed_entry_count", len(entries)),
+        "non_empty_entry_count": len(non_empty_keys),
+        "hinted_entry_count": len(hinted_keys),
+        "decoded_entry_count": len(decoded_labels),
+        "blob_entry_count": len(blob_keys),
+        "non_empty_keys": non_empty_keys,
+        "hinted_keys": hinted_keys,
+        "decoded_labels": decoded_labels,
+        "blob_keys": blob_keys,
+    }
+
+
 def build_map_probe_payload(
     *,
     descriptor: DreameLawnMowerDescriptor,
@@ -130,6 +191,7 @@ def build_map_probe_payload(
         },
         "legacy_current_map": map_view.as_dict(),
         "cloud_properties": dict(cloud_properties or {}),
+        "cloud_property_summary": build_cloud_property_summary(cloud_properties),
         "cloud_device_info": _trim_device_record(cloud_device_info),
         "cloud_device_list_record": _trim_device_record(
             _find_device_list_record(descriptor, cloud_device_list_page)

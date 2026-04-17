@@ -16,7 +16,11 @@ from .app_protocol import (
     mower_error_label,
     mower_state_label,
 )
-from .map_probe import MAP_PROBE_PROPERTY_KEYS, build_map_probe_payload
+from .map_probe import (
+    MAP_PROBE_PROPERTY_KEYS,
+    build_cloud_property_summary,
+    build_map_probe_payload,
+)
 from .models import (
     DISPLAY_NAME_ALIASES,
     MODEL_NAME_MAP,
@@ -49,6 +53,7 @@ __all__ = [
     "MOWER_STATE_LABELS",
     "MOWER_STATE_PROPERTY_KEY",
     "SUPPORTED_ACCOUNT_TYPES",
+    "build_cloud_property_summary",
     "build_map_probe_payload",
     "display_name_for_model",
     "map_summary_from_map_data",

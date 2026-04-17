@@ -9,6 +9,7 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
+    build_cloud_property_summary,
     build_map_probe_payload,
     map_summary_from_map_data,
     map_summary_to_dict,
@@ -33,6 +34,7 @@ def test_public_package_exports_map_helpers() -> None:
     assert DreameLawnMowerMapView is MapViewFromModule
     assert callable(map_summary_from_map_data)
     assert callable(map_summary_to_dict)
+    assert callable(build_cloud_property_summary)
     assert callable(build_map_probe_payload)
     assert "2.1" in MAP_PROBE_PROPERTY_KEYS
 
