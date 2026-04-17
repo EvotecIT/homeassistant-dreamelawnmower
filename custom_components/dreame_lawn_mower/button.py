@@ -27,7 +27,12 @@ async def async_setup_entry(
 ) -> None:
     """Set up mower buttons."""
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([DreameLawnMowerCaptureDebugSnapshotButton(coordinator)])
+    async_add_entities(
+        [
+            DreameLawnMowerCaptureDebugSnapshotButton(coordinator),
+            DreameLawnMowerCaptureMapProbeButton(coordinator),
+        ]
+    )
 
 
 class DreameLawnMowerCaptureDebugSnapshotButton(
@@ -67,5 +72,42 @@ class DreameLawnMowerCaptureDebugSnapshotButton(
             title="Dreame Lawn Mower Debug Snapshot",
             notification_id=(
                 f"{DOMAIN}_{self.coordinator.entry.entry_id}_debug_snapshot"
+            ),
+        )
+
+
+class DreameLawnMowerCaptureMapProbeButton(
+    DreameLawnMowerEntity,
+    ButtonEntity,
+):
+    """Capture and log map-source diagnostics."""
+
+    _attr_name = "Capture Map Probe"
+    _attr_icon = "mdi:map-search-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_capture_map_probe"
+
+    async def async_press(self) -> None:
+        """Probe known read-only map sources and log the structured result."""
+        await self.coordinator.async_request_refresh()
+        payload = await self.coordinator.client.async_probe_map_sources()
+        _LOGGER.warning(
+            "Captured Dreame lawn mower map probe for %s: %s",
+            self.coordinator.client.descriptor.title,
+            json.dumps(payload, sort_keys=True),
+        )
+        persistent_notification.async_create(
+            self.coordinator.hass,
+            (
+                "Captured a Dreame lawn mower map probe. Check the Home "
+                "Assistant logs for the JSON payload."
+            ),
+            title="Dreame Lawn Mower Map Probe",
+            notification_id=(
+                f"{DOMAIN}_{self.coordinator.entry.entry_id}_map_probe"
             ),
         )

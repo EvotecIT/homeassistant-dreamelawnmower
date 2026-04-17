@@ -10,6 +10,7 @@ from typing import Any
 
 from .app_protocol import MOWER_STATE_PROPERTY_KEY, mower_state_label
 from .exceptions import DeviceException
+from .map_probe import MAP_PROBE_PROPERTY_KEYS, build_map_probe_payload
 from .models import (
     SUPPORTED_ACCOUNT_TYPES,
     DreameLawnMowerDescriptor,
@@ -222,6 +223,21 @@ class DreameLawnMowerClient:
             shared_status,
         )
 
+    async def async_probe_map_sources(
+        self,
+        *,
+        timeout: float = 6.0,
+        interval: float = 0.5,
+        language: str = "en",
+    ) -> dict[str, Any]:
+        """Probe known read-only map sources and return a JSON-safe payload."""
+        return await asyncio.to_thread(
+            self._sync_probe_map_sources,
+            timeout,
+            interval,
+            language,
+        )
+
     async def async_close(self) -> None:
         """Disconnect long-lived device resources."""
         if self._device is not None:
@@ -389,6 +405,38 @@ class DreameLawnMowerClient:
             )
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
+
+    def _sync_probe_map_sources(
+        self,
+        timeout: float,
+        interval: float,
+        language: str,
+    ) -> dict[str, Any]:
+        map_view = self._sync_refresh_map_view(timeout, interval)
+        cloud_properties = self._sync_scan_cloud_properties(
+            keys=MAP_PROBE_PROPERTY_KEYS,
+            siids=None,
+            piid_start=1,
+            piid_end=1,
+            chunk_size=50,
+            language=language,
+            only_values=False,
+        )
+        cloud_device_info = self._sync_get_cloud_device_info(language)
+        cloud_device_list_page = self._sync_get_cloud_device_list_page(
+            current=1,
+            size=20,
+            language=language,
+            master=None,
+            shared_status=None,
+        )
+        return build_map_probe_payload(
+            descriptor=self._descriptor,
+            map_view=map_view,
+            cloud_properties=cloud_properties,
+            cloud_device_info=cloud_device_info,
+            cloud_device_list_page=cloud_device_list_page,
+        )
 
     def _sync_wait_for_map(self, timeout: float, interval: float):
         device = self._sync_update_device()
