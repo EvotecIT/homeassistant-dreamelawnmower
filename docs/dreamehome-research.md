@@ -137,3 +137,14 @@ The first pass against the locally downloaded Dreamehome APK found:
 That is still useful negative evidence. It suggests the camera/map payload
 schema is either obfuscated in code, delivered dynamically, or best recovered
 from app traffic while opening the feature, rather than from a simple asset file.
+
+For the next offline pass, decompile the APK with `jadx` and scan the output:
+
+```bash
+jadx -d C:\path\to\dreamehome-jadx C:\path\to\dreamehome.apk
+python examples/source_research.py "C:\path\to\dreamehome-jadx" --term STREAM_VIDEO --term operType --term sendAction
+```
+
+The source scanner reports candidate files plus compact file/line snippets, which
+should make it easier to identify the exact app class or bridge method before we
+try another live camera/map action.

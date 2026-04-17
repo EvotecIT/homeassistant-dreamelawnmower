@@ -16,7 +16,12 @@ from .app_protocol import (
     mower_error_label,
     mower_state_label,
 )
-from .apk_research import DEFAULT_APK_RESEARCH_TERMS, analyze_dreamehome_apk
+from .apk_research import (
+    DEFAULT_APK_RESEARCH_TERMS,
+    DEFAULT_DECOMPILED_SOURCE_SUFFIXES,
+    analyze_decompiled_sources,
+    analyze_dreamehome_apk,
+)
 from .camera_probe import CAMERA_PROBE_PROPERTY_KEYS, build_camera_probe_payload
 from .map_probe import (
     MAP_PROBE_PROPERTY_KEYS,
@@ -51,6 +56,7 @@ __all__ = [
     "DreameLawnMowerSnapshot",
     "DreameLawnMowerTwoFactorRequiredError",
     "DEFAULT_APK_RESEARCH_TERMS",
+    "DEFAULT_DECOMPILED_SOURCE_SUFFIXES",
     "DISPLAY_NAME_ALIASES",
     "MODEL_NAME_MAP",
     "CAMERA_PROBE_PROPERTY_KEYS",
@@ -61,6 +67,7 @@ __all__ = [
     "MOWER_STATE_LABELS",
     "MOWER_STATE_PROPERTY_KEY",
     "SUPPORTED_ACCOUNT_TYPES",
+    "analyze_decompiled_sources",
     "analyze_dreamehome_apk",
     "build_camera_probe_payload",
     "build_cloud_property_summary",

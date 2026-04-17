@@ -6,6 +6,8 @@ import zipfile
 
 from dreame_lawn_mower_client import (
     DEFAULT_APK_RESEARCH_TERMS,
+    DEFAULT_DECOMPILED_SOURCE_SUFFIXES,
+    analyze_decompiled_sources,
     analyze_dreamehome_apk,
 )
 from dreame_lawn_mower_client.apk_research import (
@@ -65,6 +67,50 @@ def test_apk_research_skips_noisy_long_strings(tmp_path) -> None:
     assert "map" not in result.get("term_string_hits", {})
 
 
+def test_decompiled_source_research_indexes_files_and_snippets(tmp_path) -> None:
+    source_dir = tmp_path / "jadx"
+    source_dir.mkdir()
+    service = source_dir / "DreameStreamService.java"
+    service.write_text(
+        "\n".join(
+            (
+                "class DreameStreamService {",
+                '  private static final String API = "sendAction";',
+                '  void start() { call("STREAM_VIDEO", "operType", "monitor"); }',
+                "}",
+            )
+        ),
+        encoding="utf-8",
+    )
+    ignored_binary = source_dir / "classes.dex"
+    ignored_binary.write_bytes(b"STREAM_VIDEO sendAction")
+
+    result = analyze_decompiled_sources(
+        source_dir,
+        terms=("STREAM_VIDEO", "operType", "sendAction"),
+    )
+
+    assert result["source"]["scanned_files"] == 1
+    assert "DreameStreamService.java" in result["candidate_files"]
+    assert result["term_file_hits"]["STREAM_VIDEO"] == ["DreameStreamService.java"]
+    assert result["term_snippets"]["operType"] == [
+        {
+            "file": "DreameStreamService.java",
+            "line": 3,
+            "text": 'void start() { call("STREAM_VIDEO", "operType", "monitor"); }',
+        }
+    ]
+    assert result["endpoint_snippets"] == [
+        {
+            "file": "DreameStreamService.java",
+            "line": 2,
+            "text": 'private static final String API = "sendAction";',
+        }
+    ]
+
+
 def test_public_package_exports_apk_research_helpers() -> None:
     assert "sendAction" in DEFAULT_APK_RESEARCH_TERMS
+    assert ".java" in DEFAULT_DECOMPILED_SOURCE_SUFFIXES
     assert analyze_dreamehome_apk is module_analyze
+    assert callable(analyze_decompiled_sources)

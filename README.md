@@ -107,6 +107,14 @@ This is not a full decompiler. It scans dex/assets/resources for protocol terms,
 endpoints, and camera/map hints so live mower probes are guided by app evidence
 instead of random payload guesses.
 
+If the compact APK scan is too thin, decompile the APK with `jadx` and scan the
+source tree for file/line snippets:
+
+```bash
+jadx -d C:\path\to\dreamehome-jadx C:\path\to\dreamehome.apk
+python examples/source_research.py "C:\path\to\dreamehome-jadx" --term STREAM_VIDEO --term operType
+```
+
 If you want to scan wider `siid.piid` ranges when hunting for map or telemetry keys, use:
 
 ```bash

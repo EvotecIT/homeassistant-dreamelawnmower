@@ -3,6 +3,7 @@
 from dreame_lawn_mower_client import (
     CAMERA_PROBE_PROPERTY_KEYS,
     DEFAULT_APK_RESEARCH_TERMS,
+    DEFAULT_DECOMPILED_SOURCE_SUFFIXES,
     MAP_PROBE_PROPERTY_KEYS,
     MOWER_ERROR_PROPERTY_KEY,
     MOWER_PROPERTY_HINTS,
@@ -13,6 +14,7 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
     DreameLawnMowerRemoteControlSupport,
+    analyze_decompiled_sources,
     analyze_dreamehome_apk,
     build_camera_probe_payload,
     build_cloud_property_summary,
@@ -46,12 +48,14 @@ def test_public_package_exports_map_helpers() -> None:
     )
     assert callable(map_summary_from_map_data)
     assert callable(map_summary_to_dict)
+    assert callable(analyze_decompiled_sources)
     assert callable(analyze_dreamehome_apk)
     assert callable(build_camera_probe_payload)
     assert callable(build_cloud_property_summary)
     assert callable(build_map_probe_payload)
     assert "10001.1" in CAMERA_PROBE_PROPERTY_KEYS
     assert "sendAction" in DEFAULT_APK_RESEARCH_TERMS
+    assert ".java" in DEFAULT_DECOMPILED_SOURCE_SUFFIXES
     assert "2.1" in MAP_PROBE_PROPERTY_KEYS
 
 
