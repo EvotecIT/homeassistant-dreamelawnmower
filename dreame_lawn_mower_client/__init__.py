@@ -15,6 +15,7 @@ DreameLawnMowerTwoFactorRequiredError = _client.DreameLawnMowerTwoFactorRequired
 DreameLawnMowerDescriptor = _models.DreameLawnMowerDescriptor
 DreameLawnMowerMapSummary = _models.DreameLawnMowerMapSummary
 DreameLawnMowerMapView = _models.DreameLawnMowerMapView
+DreameLawnMowerRemoteControlSupport = _models.DreameLawnMowerRemoteControlSupport
 DreameLawnMowerSnapshot = _models.DreameLawnMowerSnapshot
 DISPLAY_NAME_ALIASES = _models.DISPLAY_NAME_ALIASES
 MODEL_NAME_MAP = _models.MODEL_NAME_MAP
@@ -42,6 +43,7 @@ __all__ = [
     "DreameLawnMowerError",
     "DreameLawnMowerMapSummary",
     "DreameLawnMowerMapView",
+    "DreameLawnMowerRemoteControlSupport",
     "DreameLawnMowerSnapshot",
     "DreameLawnMowerTwoFactorRequiredError",
     "MODEL_NAME_MAP",

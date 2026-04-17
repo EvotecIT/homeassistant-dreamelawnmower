@@ -119,6 +119,18 @@ There is also a disabled-by-default `Capture Map Probe` button. Use it when the 
 
 The map probe includes a `cloud_property_summary` section so large logs are easier to triage. Start there first: it lists non-empty keys, decoded labels, hinted keys, and blob lengths before you inspect the full `cloud_properties.entries` payload.
 
+## Remote control experiments
+
+The reverse-engineered protocol exposes remote control through property `4.15`. The reusable Python client can now report support with `async_get_remote_control_support()` and can send one validated movement step with `async_remote_control_move_step(rotation=..., velocity=..., prompt=...)`.
+
+The read-only support check is:
+
+```bash
+python examples/remote_control_probe.py
+```
+
+This is intentionally not exposed as a Home Assistant drive service yet. Remote control can physically move the mower, so the next step is to validate command ranges and safety behavior from the Python client before adding any HA UI or automation surface.
+
 ## Automation examples
 
 The normalized sensors and binary sensors are intended to keep automations out of mower attributes as much as possible.

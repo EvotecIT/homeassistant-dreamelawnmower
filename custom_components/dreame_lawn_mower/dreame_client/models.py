@@ -207,6 +207,23 @@ class DreameLawnMowerMapView:
         }
 
 
+@dataclass(slots=True, frozen=True)
+class DreameLawnMowerRemoteControlSupport:
+    """Read-only description of the mower remote-control surface."""
+
+    supported: bool
+    active: bool = False
+    siid: int | None = None
+    piid: int | None = None
+    state: str | None = None
+    status: str | None = None
+    reason: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a JSON-safe support payload."""
+        return asdict(self)
+
+
 def map_summary_to_dict(
     summary: DreameLawnMowerMapSummary | None,
 ) -> dict[str, Any] | None:

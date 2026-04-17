@@ -9,6 +9,7 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
+    DreameLawnMowerRemoteControlSupport,
     build_cloud_property_summary,
     build_map_probe_payload,
     map_summary_from_map_data,
@@ -32,6 +33,9 @@ def test_public_package_exports_client() -> None:
 def test_public_package_exports_map_helpers() -> None:
     assert DreameLawnMowerMapSummary is MapSummaryFromModule
     assert DreameLawnMowerMapView is MapViewFromModule
+    assert DreameLawnMowerRemoteControlSupport.__name__.endswith(
+        "RemoteControlSupport"
+    )
     assert callable(map_summary_from_map_data)
     assert callable(map_summary_to_dict)
     assert callable(build_cloud_property_summary)
@@ -46,6 +50,9 @@ def test_public_package_client_has_cloud_probe_helpers() -> None:
     assert hasattr(DreameLawnMowerClient, "async_get_cloud_properties")
     assert hasattr(DreameLawnMowerClient, "async_scan_cloud_properties")
     assert hasattr(DreameLawnMowerClient, "async_probe_map_sources")
+    assert hasattr(DreameLawnMowerClient, "async_get_remote_control_support")
+    assert hasattr(DreameLawnMowerClient, "async_remote_control_move_step")
+    assert hasattr(DreameLawnMowerClient, "async_remote_control_stop")
 
 
 def test_public_package_exports_app_protocol_helpers() -> None:

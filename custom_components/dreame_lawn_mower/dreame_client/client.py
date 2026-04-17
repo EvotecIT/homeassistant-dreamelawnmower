@@ -15,19 +15,23 @@ from .app_protocol import (
     mower_error_label,
     mower_state_label,
 )
-from .exceptions import DeviceException
+from .exceptions import DeviceException, InvalidActionException
 from .map_probe import MAP_PROBE_PROPERTY_KEYS, build_map_probe_payload
 from .models import (
     SUPPORTED_ACCOUNT_TYPES,
     DreameLawnMowerDescriptor,
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
+    DreameLawnMowerRemoteControlSupport,
     DreameLawnMowerSnapshot,
     descriptor_from_cloud_record,
     display_name_for_model,
     map_summary_from_map_data,
     snapshot_from_device,
 )
+
+REMOTE_CONTROL_MAX_ROTATION = 1000
+REMOTE_CONTROL_MAX_VELOCITY = 1000
 
 
 class DreameLawnMowerError(Exception):
@@ -138,6 +142,42 @@ class DreameLawnMowerClient:
     async def async_dock(self) -> None:
         """Return the mower to base."""
         await self._async_call_device_method("dock")
+
+    async def async_get_remote_control_support(
+        self,
+        *,
+        refresh: bool = False,
+    ) -> DreameLawnMowerRemoteControlSupport:
+        """Return whether the mower currently exposes remote-control support."""
+        return await asyncio.to_thread(self._sync_get_remote_control_support, refresh)
+
+    async def async_remote_control_move_step(
+        self,
+        *,
+        rotation: int = 0,
+        velocity: int = 0,
+        prompt: bool | None = None,
+    ) -> Any:
+        """Send one remote-control movement step.
+
+        This can physically move the mower, so Home Assistant controls should be
+        added only after the command shape is validated on real hardware.
+        """
+        _validate_remote_control_step(rotation=rotation, velocity=velocity)
+        return await asyncio.to_thread(
+            self._sync_remote_control_move_step,
+            rotation,
+            velocity,
+            prompt,
+        )
+
+    async def async_remote_control_stop(self) -> Any:
+        """Send a remote-control stop step."""
+        return await self.async_remote_control_move_step(
+            rotation=0,
+            velocity=0,
+            prompt=False,
+        )
 
     async def async_refresh_map_summary(
         self,
@@ -273,6 +313,87 @@ class DreameLawnMowerClient:
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
         return device
+
+    def _sync_get_remote_control_support(
+        self,
+        refresh: bool = False,
+    ) -> DreameLawnMowerRemoteControlSupport:
+        if refresh:
+            device = self._sync_update_device()
+        else:
+            device = self._ensure_device()
+
+        try:
+            from .types import DreameMowerProperty, DreameMowerStatus
+        except ImportError:
+            return DreameLawnMowerRemoteControlSupport(
+                supported=False,
+                reason="Remote-control protocol types are unavailable.",
+            )
+
+        mapping = getattr(device, "property_mapping", {}).get(
+            DreameMowerProperty.REMOTE_CONTROL
+        )
+        state = _lower_enum_name(getattr(getattr(device, "status", None), "state", None))
+        status_obj = getattr(getattr(device, "status", None), "status", None)
+        status = _lower_enum_name(status_obj)
+        active = bool(
+            getattr(device, "_remote_control", False)
+            or status_obj is DreameMowerStatus.REMOTE_CONTROL
+            or status == "remote_control"
+            or state == "remote_control"
+        )
+
+        if not mapping:
+            return DreameLawnMowerRemoteControlSupport(
+                supported=False,
+                active=active,
+                state=state,
+                status=status,
+                reason="Remote-control property mapping is not available.",
+            )
+
+        if bool(getattr(getattr(device, "status", None), "fast_mapping", False)):
+            return DreameLawnMowerRemoteControlSupport(
+                supported=False,
+                active=active,
+                siid=mapping.get("siid"),
+                piid=mapping.get("piid"),
+                state=state,
+                status=status,
+                reason="Remote control is blocked while fast mapping.",
+            )
+
+        return DreameLawnMowerRemoteControlSupport(
+            supported=True,
+            active=active,
+            siid=mapping.get("siid"),
+            piid=mapping.get("piid"),
+            state=state,
+            status=status,
+        )
+
+    def _sync_remote_control_move_step(
+        self,
+        rotation: int,
+        velocity: int,
+        prompt: bool | None,
+    ) -> Any:
+        _validate_remote_control_step(rotation=rotation, velocity=velocity)
+        support = self._sync_get_remote_control_support(refresh=False)
+        if not support.supported:
+            reason = support.reason or "Remote control is not supported."
+            raise DreameLawnMowerConnectionError(reason)
+
+        device = self._ensure_device()
+        try:
+            return device.remote_control_move_step(
+                rotation=rotation,
+                velocity=velocity,
+                prompt=prompt,
+            )
+        except (DeviceException, InvalidActionException) as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
 
     def _sync_refresh_map_summary(
         self,
@@ -677,3 +798,30 @@ def _sync_discover_devices(
 
     found.sort(key=lambda item: item.title.lower())
     return found
+
+
+def _lower_enum_name(value: Any) -> str | None:
+    name = getattr(value, "name", None)
+    if name:
+        return str(name).lower()
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text.lower() or None
+
+
+def _validate_remote_control_step(*, rotation: int, velocity: int) -> None:
+    if not isinstance(rotation, int) or isinstance(rotation, bool):
+        raise ValueError("rotation must be an integer")
+    if not isinstance(velocity, int) or isinstance(velocity, bool):
+        raise ValueError("velocity must be an integer")
+    if abs(rotation) > REMOTE_CONTROL_MAX_ROTATION:
+        raise ValueError(
+            f"rotation must be between {-REMOTE_CONTROL_MAX_ROTATION} and "
+            f"{REMOTE_CONTROL_MAX_ROTATION}"
+        )
+    if abs(velocity) > REMOTE_CONTROL_MAX_VELOCITY:
+        raise ValueError(
+            f"velocity must be between {-REMOTE_CONTROL_MAX_VELOCITY} and "
+            f"{REMOTE_CONTROL_MAX_VELOCITY}"
+        )
