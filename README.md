@@ -167,7 +167,7 @@ Optional:
 - blob-like values are annotated with `value_bytes_len` and `value_bytes_hex`
 - keep `DREAME_PROP_ONLY_VALUES=1` to hide empty key-only responses while scanning
 
-This is still experimental and read-only. The integration exposes disabled-by-default `camera` entities named `Map` and `Map Data`. `Map` returns a rendered JPEG or a valid placeholder image. `Map Data` returns the same structured map view as JSON so we can debug the mower map pipeline and eventually support custom cards without tying the data model to the renderer.
+This is still experimental and read-only. The integration exposes disabled-by-default `camera` entities named `Map` and `Map Diagnostics`. `Map` returns a rendered JPEG or a valid placeholder image. `Map Diagnostics` returns a readable JPEG diagnostics card and keeps the structured map view in entity attributes so Home Assistant no longer tries to render JSON as a broken camera preview.
 
 There is also a disabled-by-default `Capture Map Probe` button. Use it when the visible map is still a placeholder: it logs a compact JSON payload with the legacy current-map result, focused app-style property probes, trimmed cloud metadata from `device/info` and `device/listV2`, and the app-side `queryDevicePermit` feature payload.
 

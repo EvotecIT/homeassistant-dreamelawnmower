@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -18,7 +17,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .dreame_client.models import DreameLawnMowerMapView
-from .image import map_placeholder_jpeg, png_bytes_to_jpeg
+from .image import map_diagnostics_jpeg, map_placeholder_jpeg, png_bytes_to_jpeg
 
 _LOGGER = logging.getLogger(__name__)
 _MAP_CACHE_TTL = timedelta(seconds=60)
@@ -209,30 +208,55 @@ class DreameLawnMowerMapCamera(
 
 
 class DreameLawnMowerMapDataCamera(DreameLawnMowerMapCamera):
-    """Disabled-by-default JSON map data camera for diagnostics and custom cards."""
+    """Disabled-by-default map diagnostics camera."""
 
-    _attr_name = "Map Data"
+    _attr_name = "Map Diagnostics"
     _attr_icon = "mdi:code-json"
 
     def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{self._descriptor.unique_id}_map_data"
-        self.content_type = "application/json"
+        self.content_type = "image/jpeg"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose the latest structured map view for diagnostics."""
+        attributes = super().extra_state_attributes
+        if self._last_view is not None:
+            attributes["map_view"] = self._last_view.as_dict()
+        return attributes
 
     async def async_camera_image(
         self,
         width: int | None = None,
         height: int | None = None,
     ) -> bytes | None:
-        """Return structured map data as JSON bytes."""
+        """Return a readable diagnostics card as JPEG bytes."""
         del width, height
         view = await self._async_refresh_map_view()
-        payload = {
-            "device": {
-                "name": self._descriptor.name,
-                "model": self._descriptor.model,
-                "display_model": self._descriptor.display_model,
-            },
-            "map": view.as_dict(),
-        }
-        return json.dumps(payload, sort_keys=True).encode()
+        summary = view.summary
+        lines = [
+            f"Device: {self._descriptor.name} ({self._descriptor.display_model})",
+            f"Source: {view.source}",
+            f"Available: {view.available}",
+            f"Has rendered image: {view.has_image}",
+            f"Error: {view.error or 'none'}",
+        ]
+        if summary is not None:
+            lines.extend(
+                [
+                    f"Map ID: {summary.map_id}",
+                    f"Frame ID: {summary.frame_id}",
+                    f"Size: {summary.width} x {summary.height}",
+                    f"Segments: {summary.segment_count}",
+                    f"Path points: {summary.path_point_count}",
+                    f"No-go areas: {summary.no_go_area_count}",
+                    f"Virtual walls: {summary.virtual_wall_count}",
+                    f"Robot present: {summary.robot_present}",
+                    f"Charger present: {summary.charger_present}",
+                ]
+            )
+        else:
+            lines.append("Summary: no structured map payload was returned.")
+
+        return map_diagnostics_jpeg(lines=lines)
