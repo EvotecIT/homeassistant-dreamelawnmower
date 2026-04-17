@@ -12,6 +12,7 @@ DreameLawnMowerError = _client.DreameLawnMowerError
 DreameLawnMowerAuthError = _client.DreameLawnMowerAuthError
 DreameLawnMowerConnectionError = _client.DreameLawnMowerConnectionError
 DreameLawnMowerTwoFactorRequiredError = _client.DreameLawnMowerTwoFactorRequiredError
+DreameLawnMowerCameraFeatureSupport = _models.DreameLawnMowerCameraFeatureSupport
 DreameLawnMowerDescriptor = _models.DreameLawnMowerDescriptor
 DreameLawnMowerMapSummary = _models.DreameLawnMowerMapSummary
 DreameLawnMowerMapView = _models.DreameLawnMowerMapView
@@ -37,6 +38,7 @@ mower_state_label = _app_protocol.mower_state_label
 __all__ = [
     "DISPLAY_NAME_ALIASES",
     "DreameLawnMowerAuthError",
+    "DreameLawnMowerCameraFeatureSupport",
     "DreameLawnMowerClient",
     "DreameLawnMowerConnectionError",
     "DreameLawnMowerDescriptor",

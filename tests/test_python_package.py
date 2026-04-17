@@ -6,6 +6,7 @@ from dreame_lawn_mower_client import (
     MOWER_PROPERTY_HINTS,
     MOWER_RAW_STATUS_PROPERTY_KEY,
     MOWER_STATE_PROPERTY_KEY,
+    DreameLawnMowerCameraFeatureSupport,
     DreameLawnMowerClient,
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
@@ -33,6 +34,9 @@ def test_public_package_exports_client() -> None:
 def test_public_package_exports_map_helpers() -> None:
     assert DreameLawnMowerMapSummary is MapSummaryFromModule
     assert DreameLawnMowerMapView is MapViewFromModule
+    assert DreameLawnMowerCameraFeatureSupport.__name__.endswith(
+        "CameraFeatureSupport"
+    )
     assert DreameLawnMowerRemoteControlSupport.__name__.endswith(
         "RemoteControlSupport"
     )
@@ -50,6 +54,8 @@ def test_public_package_client_has_cloud_probe_helpers() -> None:
     assert hasattr(DreameLawnMowerClient, "async_get_cloud_properties")
     assert hasattr(DreameLawnMowerClient, "async_scan_cloud_properties")
     assert hasattr(DreameLawnMowerClient, "async_probe_map_sources")
+    assert hasattr(DreameLawnMowerClient, "async_get_camera_feature_support")
+    assert hasattr(DreameLawnMowerClient, "async_request_photo_info")
     assert hasattr(DreameLawnMowerClient, "async_get_remote_control_support")
     assert hasattr(DreameLawnMowerClient, "async_remote_control_move_step")
     assert hasattr(DreameLawnMowerClient, "async_remote_control_stop")

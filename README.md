@@ -119,6 +119,24 @@ There is also a disabled-by-default `Capture Map Probe` button. Use it when the 
 
 The map probe includes a `cloud_property_summary` section so large logs are easier to triage. Start there first: it lists non-empty keys, decoded labels, hinted keys, and blob lengths before you inspect the full `cloud_properties.entries` payload.
 
+## Camera and photo experiments
+
+Some A2-family cloud records advertise camera-related permits such as `video` and `aiobs`, but starting streams or taking photos is an active operation. The reusable Python client therefore exposes a read-only capability check first:
+
+```bash
+python examples/camera_feature_probe.py
+```
+
+The probe reports protocol mappings for stream/photo properties and actions, app-side permit metadata, cached stream session/status state, and a compact `queryDevicePermit` summary. It does not start video, audio, lights, or photo capture.
+
+After the read-only probe confirms support, a narrower safety-gated metadata request is available:
+
+```bash
+python examples/photo_info_probe.py --execute
+```
+
+Without `--execute` the script only prints support details. With `--execute` it calls `GET_PHOTO_INFO` once; it still does not start streaming, audio, remote control, or mowing.
+
 ## Remote control experiments
 
 The reverse-engineered protocol exposes remote control through property `4.15`. The reusable Python client can now report support with `async_get_remote_control_support()` and can send one validated movement step with `async_remote_control_move_step(rotation=..., velocity=..., prompt=...)`.

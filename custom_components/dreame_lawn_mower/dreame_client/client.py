@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .app_protocol import (
@@ -19,6 +19,7 @@ from .exceptions import DeviceException, InvalidActionException
 from .map_probe import MAP_PROBE_PROPERTY_KEYS, build_map_probe_payload
 from .models import (
     SUPPORTED_ACCOUNT_TYPES,
+    DreameLawnMowerCameraFeatureSupport,
     DreameLawnMowerDescriptor,
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
@@ -178,6 +179,36 @@ class DreameLawnMowerClient:
             velocity=0,
             prompt=False,
         )
+
+    async def async_get_camera_feature_support(
+        self,
+        *,
+        refresh: bool = False,
+        include_cloud: bool = True,
+        language: str | None = "en",
+    ) -> DreameLawnMowerCameraFeatureSupport:
+        """Return read-only camera/photo feature discovery details.
+
+        This only inspects cached protocol mappings, device metadata, and safe
+        cloud feature endpoints. It does not start a stream or take a photo.
+        """
+        return await asyncio.to_thread(
+            self._sync_get_camera_feature_support,
+            refresh,
+            include_cloud,
+            language,
+        )
+
+    async def async_request_photo_info(
+        self,
+        parameters: Any = None,
+    ) -> Any:
+        """Request mower photo metadata through the app protocol.
+
+        This is an active cloud/device action, but it does not start video
+        streaming, audio, remote control, or mowing.
+        """
+        return await asyncio.to_thread(self._sync_request_photo_info, parameters)
 
     async def async_refresh_map_summary(
         self,
@@ -394,6 +425,156 @@ class DreameLawnMowerClient:
             )
         except (DeviceException, InvalidActionException) as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
+
+    def _sync_get_camera_feature_support(
+        self,
+        refresh: bool = False,
+        include_cloud: bool = True,
+        language: str | None = "en",
+    ) -> DreameLawnMowerCameraFeatureSupport:
+        if refresh:
+            device = self._sync_update_device()
+        else:
+            device = self._ensure_device()
+
+        try:
+            from .types import DreameMowerAction, DreameMowerProperty
+        except ImportError:
+            return DreameLawnMowerCameraFeatureSupport(
+                supported=False,
+                advertised=False,
+                reason="Camera protocol types are unavailable.",
+            )
+
+        property_mappings = _protocol_mapping_summary(
+            getattr(device, "property_mapping", {}),
+            {
+                "stream_status": DreameMowerProperty.STREAM_STATUS,
+                "stream_audio": DreameMowerProperty.STREAM_AUDIO,
+                "stream_record": DreameMowerProperty.STREAM_RECORD,
+                "take_photo": DreameMowerProperty.TAKE_PHOTO,
+                "stream_keep_alive": DreameMowerProperty.STREAM_KEEP_ALIVE,
+                "stream_fault": DreameMowerProperty.STREAM_FAULT,
+                "stream_property": DreameMowerProperty.STREAM_PROPERTY,
+                "stream_task": DreameMowerProperty.STREAM_TASK,
+                "stream_upload": DreameMowerProperty.STREAM_UPLOAD,
+                "stream_code": DreameMowerProperty.STREAM_CODE,
+            },
+        )
+        action_mappings = _protocol_mapping_summary(
+            getattr(device, "action_mapping", {}),
+            {
+                "get_photo_info": DreameMowerAction.GET_PHOTO_INFO,
+                "stream_video": DreameMowerAction.STREAM_VIDEO,
+                "stream_audio": DreameMowerAction.STREAM_AUDIO,
+                "stream_property": DreameMowerAction.STREAM_PROPERTY,
+                "stream_code": DreameMowerAction.STREAM_CODE,
+            },
+        )
+
+        info_raw = getattr(getattr(device, "info", None), "raw", {}) or {}
+        device_info = info_raw.get("deviceInfo", {}) or {}
+        permit = _as_optional_text(device_info.get("permit") or info_raw.get("permit"))
+        feature = _as_optional_text(
+            device_info.get("feature") or info_raw.get("feature")
+        )
+        live_key_define = device_info.get("liveKeyDefine") or {}
+        capability = getattr(device, "capability", None)
+        status = getattr(device, "status", None)
+        camera_streaming = bool(getattr(capability, "camera_streaming", False))
+        camera_light = _optional_bool(
+            getattr(capability, "fill_light", None)
+            if hasattr(capability, "fill_light")
+            else getattr(capability, "camera_light", None)
+        )
+        ai_detection = bool(getattr(capability, "ai_detection", False))
+        obstacles = bool(getattr(capability, "obstacles", False))
+        stream_status_raw = _safe_get_device_property(
+            device,
+            DreameMowerProperty.STREAM_STATUS,
+        )
+        stream_status = _lower_enum_name(getattr(status, "stream_status", None))
+        stream_session_present = bool(getattr(status, "stream_session", None))
+        advertised = _camera_feature_advertised(
+            camera_streaming=camera_streaming,
+            camera_light=camera_light,
+            ai_detection=ai_detection,
+            obstacles=obstacles,
+            permit=permit,
+            feature=feature,
+            live_key_define=live_key_define,
+            video_status=device_info.get("videoStatus") or info_raw.get("videoStatus"),
+        )
+        protocol_mappings_available = bool(
+            action_mappings.get("get_photo_info")
+            or action_mappings.get("stream_video")
+            or property_mappings.get("stream_status")
+            or property_mappings.get("take_photo")
+        )
+        cloud_user_features = None
+        cloud_user_features_error = None
+        if include_cloud:
+            try:
+                cloud_user_features = _cloud_user_feature_summary(
+                    self._sync_get_cloud_user_features(language)
+                )
+            except DreameLawnMowerConnectionError as err:
+                cloud_user_features_error = str(err)
+
+        reason = None
+        if not protocol_mappings_available:
+            reason = "Camera/photo protocol mappings are not available."
+        elif not advertised:
+            reason = "Cloud/device metadata does not advertise camera or photo support."
+
+        return DreameLawnMowerCameraFeatureSupport(
+            supported=protocol_mappings_available and advertised,
+            advertised=advertised,
+            camera_streaming=camera_streaming,
+            camera_light=camera_light,
+            ai_detection=ai_detection,
+            obstacles=obstacles,
+            permit=permit,
+            feature=feature,
+            extend_sc_type=tuple(str(item) for item in device_info.get("extendScType", []) or []),
+            video_status=_json_safe(device_info.get("videoStatus") or info_raw.get("videoStatus")),
+            video_dynamic_vendor=_optional_bool(
+                device_info.get("videoDynamicVendor")
+                if "videoDynamicVendor" in device_info
+                else info_raw.get("videoDynamicVendor")
+            ),
+            live_key_count=len(live_key_define) if isinstance(live_key_define, Mapping) else 0,
+            stream_session_present=stream_session_present,
+            stream_status=stream_status,
+            stream_status_raw=_json_safe(stream_status_raw),
+            property_mappings=property_mappings,
+            action_mappings=action_mappings,
+            cloud_user_features=cloud_user_features,
+            cloud_user_features_error=cloud_user_features_error,
+            reason=reason,
+        )
+
+    def _sync_request_photo_info(self, parameters: Any = None) -> Any:
+        support = self._sync_get_camera_feature_support(
+            refresh=False,
+            include_cloud=False,
+        )
+        if not support.supported:
+            reason = support.reason or "Camera/photo support is not available."
+            raise DreameLawnMowerConnectionError(reason)
+
+        device = self._ensure_device()
+        try:
+            from .types import DreameMowerAction
+
+            result = device.call_action(DreameMowerAction.GET_PHOTO_INFO, parameters)
+        except (DeviceException, InvalidActionException) as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+        if result is None:
+            raise DreameLawnMowerConnectionError(
+                "GET_PHOTO_INFO returned no response."
+            )
+        return result
 
     def _sync_refresh_map_summary(
         self,
@@ -808,6 +989,117 @@ def _lower_enum_name(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text.lower() or None
+
+
+def _as_optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    return bool(value)
+
+
+def _protocol_mapping_summary(
+    mapping: Mapping[Any, Any],
+    members: Mapping[str, Any],
+) -> dict[str, dict[str, int]]:
+    summary: dict[str, dict[str, int]] = {}
+    for name, member in members.items():
+        value = mapping.get(member)
+        if isinstance(value, Mapping):
+            summary[name] = {
+                str(key): int(item)
+                for key, item in value.items()
+                if isinstance(item, int)
+            }
+    return summary
+
+
+def _safe_get_device_property(device: Any, prop: Any) -> Any:
+    get_property = getattr(device, "get_property", None)
+    if get_property is None:
+        return None
+    try:
+        return get_property(prop)
+    except Exception:
+        return None
+
+
+def _camera_feature_advertised(
+    *,
+    camera_streaming: bool,
+    camera_light: bool | None,
+    ai_detection: bool,
+    obstacles: bool,
+    permit: str | None,
+    feature: str | None,
+    live_key_define: Any,
+    video_status: Any,
+) -> bool:
+    permit_tokens = {
+        item.strip().casefold()
+        for item in (permit or "").split(",")
+        if item.strip()
+    }
+    return bool(
+        camera_streaming
+        or camera_light is not None
+        or ai_detection
+        or obstacles
+        or "video" in permit_tokens
+        or "aiobs" in permit_tokens
+        or "video" in (feature or "").casefold()
+        or (isinstance(live_key_define, Mapping) and bool(live_key_define))
+        or video_status is not None
+    )
+
+
+def _cloud_user_feature_summary(value: Any) -> Mapping[str, Any]:
+    safe = _json_safe(value, max_depth=3)
+    if isinstance(safe, Mapping):
+        interesting = {
+            key: safe[key]
+            for key in (
+                "feature",
+                "features",
+                "permit",
+                "permits",
+                "video",
+                "videoStatus",
+            )
+            if key in safe
+        }
+        return {
+            "type": "dict",
+            "keys": sorted(str(key) for key in safe.keys()),
+            "interesting": interesting,
+        }
+    if isinstance(safe, list):
+        return {"type": "list", "length": len(safe), "items": safe[:10]}
+    return {"type": type(value).__name__, "value": safe}
+
+
+def _json_safe(value: Any, *, max_depth: int = 4) -> Any:
+    if max_depth < 0:
+        return str(value)
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, Mapping):
+        return {
+            str(key): _json_safe(item, max_depth=max_depth - 1)
+            for key, item in value.items()
+        }
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        return [_json_safe(item, max_depth=max_depth - 1) for item in value]
+    name = getattr(value, "name", None)
+    if name is not None:
+        return str(name).lower()
+    return str(value)
 
 
 def _validate_remote_control_step(*, rotation: int, velocity: int) -> None:

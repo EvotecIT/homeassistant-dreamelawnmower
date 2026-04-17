@@ -25,6 +25,7 @@ from .models import (
     DISPLAY_NAME_ALIASES,
     MODEL_NAME_MAP,
     SUPPORTED_ACCOUNT_TYPES,
+    DreameLawnMowerCameraFeatureSupport,
     DreameLawnMowerDescriptor,
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
@@ -37,6 +38,7 @@ from .models import (
 
 __all__ = [
     "DreameLawnMowerAuthError",
+    "DreameLawnMowerCameraFeatureSupport",
     "DreameLawnMowerClient",
     "DreameLawnMowerConnectionError",
     "DreameLawnMowerDescriptor",

@@ -224,6 +224,36 @@ class DreameLawnMowerRemoteControlSupport:
         return asdict(self)
 
 
+@dataclass(slots=True, frozen=True)
+class DreameLawnMowerCameraFeatureSupport:
+    """Read-only description of the mower camera/photo protocol surface."""
+
+    supported: bool
+    advertised: bool
+    camera_streaming: bool = False
+    camera_light: bool | None = None
+    ai_detection: bool = False
+    obstacles: bool = False
+    permit: str | None = None
+    feature: str | None = None
+    extend_sc_type: tuple[str, ...] = field(default_factory=tuple)
+    video_status: Any | None = None
+    video_dynamic_vendor: bool | None = None
+    live_key_count: int = 0
+    stream_session_present: bool = False
+    stream_status: str | None = None
+    stream_status_raw: Any | None = None
+    property_mappings: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
+    action_mappings: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
+    cloud_user_features: Mapping[str, Any] | None = None
+    cloud_user_features_error: str | None = None
+    reason: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a JSON-safe support payload."""
+        return asdict(self)
+
+
 def map_summary_to_dict(
     summary: DreameLawnMowerMapSummary | None,
 ) -> dict[str, Any] | None:
