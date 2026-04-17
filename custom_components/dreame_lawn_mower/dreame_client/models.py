@@ -71,6 +71,14 @@ def _friendly_error_name(value: str | None) -> str | None:
     return cleaned.capitalize()
 
 
+def _is_no_error_text(value: str | None) -> bool:
+    """Return whether a text error value explicitly means no active error."""
+    text = _as_optional_str(value)
+    if text is None:
+        return True
+    return text.replace("_", " ").casefold() in {"no error", "none"}
+
+
 @dataclass(slots=True, frozen=True)
 class DreameLawnMowerDescriptor:
     """Normalized mower discovery information."""
@@ -271,8 +279,8 @@ def snapshot_from_device(
     error_code = getattr(error_obj, "value", None)
     has_error = bool(
         getattr(device.status, "has_error", False)
-        or error_text
-        or (error_code not in (None, -1))
+        or not _is_no_error_text(error_text)
+        or (error_code not in (None, -1, 0))
     )
     capability_list = status_attributes.get("capabilities") or getattr(
         getattr(device, "capability", None),

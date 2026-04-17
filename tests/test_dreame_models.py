@@ -206,6 +206,56 @@ def test_snapshot_prioritizes_error_activity_but_keeps_paused_state_context() ->
     assert snapshot.error_display == "Left wheel speed"
 
 
+def test_snapshot_ignores_explicit_no_error_text_when_selecting_activity() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "dreame.mower.g2408",
+            "customName": "Garage Mower",
+        },
+        account_type="dreame",
+        country="eu",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.state = SimpleNamespace(name="CHARGING")
+    device.status.state_name = "charging"
+    device.status.error = SimpleNamespace(value=-1)
+    device.status.error_name = "no_error"
+    device.status.has_error = False
+    device.status.docked = True
+    device.status.returning = True
+    device.status.attributes = {
+        **device.status.attributes,
+        "charging": True,
+        "error": "No error",
+        "mower_state": "charging",
+        "returning": True,
+        "status": "Returning",
+    }
+    device.realtime_properties = {
+        "2.2": {
+            "siid": 2,
+            "piid": 2,
+            "property_name": "ERROR",
+            "value": 73,
+        }
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == "docked"
+    assert snapshot.error_code == -1
+    assert snapshot.error_name == "no_error"
+    assert snapshot.error_text == "No error"
+    assert snapshot.error_display == "No error"
+    assert snapshot.docked is True
+    assert snapshot.returning is True
+    assert snapshot.realtime_property_count == 1
+
+
 def test_snapshot_tracks_realtime_and_unknown_diagnostics() -> None:
     descriptor = descriptor_from_cloud_record(
         {
