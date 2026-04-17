@@ -22,6 +22,75 @@ class ExtractedPayload:
     payload: dict[str, Any]
 
 
+def summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact triage summary for a mower debug or probe payload."""
+
+    payload = _payload_body(payload)
+    snapshot = _as_mapping(payload.get("snapshot"))
+    descriptor = _as_mapping(payload.get("descriptor") or snapshot.get("descriptor"))
+    device = _as_mapping(payload.get("device"))
+    reconciliation = _as_mapping(payload.get("state_reconciliation"))
+    error = _as_mapping(reconciliation.get("error"))
+    flags = _as_mapping(reconciliation.get("flags"))
+    cloud_property_summary = _as_mapping(payload.get("cloud_property_summary"))
+    map_payload = _as_mapping(payload.get("map"))
+
+    summary: dict[str, Any] = {
+        "captured_at": payload.get("captured_at"),
+        "name": descriptor.get("name") or device.get("name"),
+        "model": descriptor.get("display_model") or descriptor.get("model"),
+        "activity": reconciliation.get("activity") or snapshot.get("activity"),
+        "state": reconciliation.get("state") or snapshot.get("state"),
+        "state_name": reconciliation.get("state_name") or snapshot.get("state_name"),
+        "raw_mower_state": reconciliation.get("raw_mower_state")
+        or _as_mapping(snapshot.get("raw_attributes")).get("mower_state"),
+        "battery_level": snapshot.get("battery_level"),
+        "error": {
+            "active": error.get("active"),
+            "code": error.get("code", snapshot.get("error_code")),
+            "name": error.get("name", snapshot.get("error_name")),
+            "display": error.get("display", snapshot.get("error_display")),
+            "raw_attribute": error.get("raw_attribute"),
+        },
+        "flags": {
+            "charging": flags.get("charging", snapshot.get("charging")),
+            "docked": flags.get("docked", snapshot.get("docked")),
+            "mowing": flags.get("mowing", snapshot.get("mowing")),
+            "paused": flags.get("paused", snapshot.get("paused")),
+            "returning": flags.get("returning", snapshot.get("returning")),
+            "started": flags.get("started", snapshot.get("started")),
+        },
+        "warnings": reconciliation.get("warnings", []),
+        "unknown_property_count": device.get(
+            "unknown_property_count",
+            snapshot.get("unknown_property_count"),
+        ),
+        "realtime_property_count": device.get(
+            "realtime_property_count",
+            snapshot.get("realtime_property_count"),
+        ),
+        "last_realtime_method": snapshot.get("last_realtime_method"),
+    }
+
+    if cloud_property_summary:
+        summary["cloud_property_summary"] = {
+            "requested_key_count": cloud_property_summary.get("requested_key_count"),
+            "non_empty_keys": cloud_property_summary.get("non_empty_keys", []),
+            "decoded_labels": cloud_property_summary.get("decoded_labels", {}),
+            "blob_keys": cloud_property_summary.get("blob_keys", {}),
+        }
+
+    if map_payload:
+        summary["map"] = {
+            "source": map_payload.get("source"),
+            "available": map_payload.get("available"),
+            "has_image": map_payload.get("has_image"),
+            "error": map_payload.get("error"),
+        }
+
+    return _drop_empty(summary)
+
+
 def extract_payloads(text: str, *, kind: str | None = None) -> list[ExtractedPayload]:
     """Extract all mower JSON payloads from text.
 
@@ -66,6 +135,27 @@ def extract_first_payload(text: str, *, kind: str | None = None) -> dict[str, An
     if not payloads:
         raise ValueError("No Dreame lawn mower JSON payload found")
     return payloads[0].payload
+
+
+def _as_mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _payload_body(payload: dict[str, Any]) -> dict[str, Any]:
+    data = payload.get("data")
+    return data if isinstance(data, dict) else payload
+
+
+def _drop_empty(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: cleaned
+            for key, item in value.items()
+            if (cleaned := _drop_empty(item)) not in (None, {}, [])
+        }
+    if isinstance(value, list):
+        return [_drop_empty(item) for item in value]
+    return value
 
 
 def _candidate_json_offsets(
@@ -122,6 +212,11 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Write pretty JSON to this path instead of stdout",
     )
+    parser.add_argument(
+        "--summary",
+        action="store_true",
+        help="Print a compact triage summary instead of the full payload",
+    )
     return parser
 
 
@@ -136,12 +231,21 @@ def main() -> None:
 
     output: Any
     if args.all:
-        output = [
-            {"kind": payload.kind, "payload": payload.payload}
-            for payload in payloads
-        ]
+        output = []
+        for payload in payloads:
+            item = (
+                summarize_payload(payload.payload)
+                if args.summary
+                else payload.payload
+            )
+            key = "summary" if args.summary else "payload"
+            output.append({"kind": payload.kind, key: item})
     else:
-        output = payloads[0].payload
+        output = (
+            summarize_payload(payloads[0].payload)
+            if args.summary
+            else payloads[0].payload
+        )
 
     rendered = json.dumps(output, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     if args.out:

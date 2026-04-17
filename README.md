@@ -74,7 +74,14 @@ If Home Assistant logs contain a `Captured Dreame lawn mower ...` line, convert 
 python examples/extract_ha_payload.py home-assistant.log --out tests/fixtures/new_capture.json
 ```
 
-Use `--kind map_probe` for map probe logs, or `--all` if one log file contains multiple captures.
+Use `--summary` first when triaging a large capture:
+
+```bash
+python examples/extract_ha_payload.py home-assistant.log --summary
+```
+
+Use `--kind map_probe` for map probe logs, `--all` if one log file contains
+multiple captures, or combine `--all --summary` to get a compact triage list.
 
 ## Map experiments
 
