@@ -17,6 +17,7 @@ Already working in this repo today:
 - mower autodiscovery
 - one `lawn_mower` entity
 - start, pause, and dock actions
+- supervised remote-control services for live validation
 - diagnostic sensors and binary sensors
 - debug snapshot capture
 - fixture-backed parser regressions for paused and paused-with-error A2 states
@@ -164,6 +165,31 @@ Checklist:
 Definition of done:
 
 - auth failures are diagnosable, and update support is data-backed rather than speculative
+
+## Phase 6: Supervised Manual Control
+
+Why this is separate:
+
+- remote control physically moves the mower, so it needs tighter safety gates than read-only telemetry
+- early validation is still useful before building any visible joystick-style UI
+
+Targets:
+
+- expose a narrow service surface for supervised drive tests
+- keep command ranges validated in both the reusable client and Home Assistant layer
+- block movement when the mower appears to be mowing, returning, mapping, or fast mapping
+
+Checklist:
+
+- [x] add a reusable client support probe and bounded movement-step API
+- [x] add guarded Home Assistant `remote_control_step` and `remote_control_stop` services
+- [ ] validate tiny forward/back/turn pulses on real A2-family hardware
+- [ ] document observed command ranges and stop behavior from live smoke tests
+- [ ] decide whether a disabled-by-default UI entity or custom card is safe enough later
+
+Definition of done:
+
+- supervised manual driving can be tested predictably without exposing accidental mowing or unsafe dashboard controls
 
 ## Explicit non-goals for now
 

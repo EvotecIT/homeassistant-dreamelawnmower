@@ -1,0 +1,47 @@
+remote_control_step:
+  name: Remote control step
+  description: >-
+    Send one validated manual-drive movement step to the mower. This can
+    physically move the mower and is intended for short supervised tests only.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Required only when multiple Dreame lawn mower entries are loaded.
+      selector:
+        text: {}
+    rotation:
+      name: Rotation
+      description: Signed rotation speed from -1000 to 1000.
+      required: true
+      selector:
+        number:
+          min: -1000
+          max: 1000
+          step: 1
+          mode: box
+    velocity:
+      name: Velocity
+      description: Signed forward/backward speed from -1000 to 1000.
+      required: true
+      selector:
+        number:
+          min: -1000
+          max: 1000
+          step: 1
+          mode: box
+    prompt:
+      name: Prompt
+      description: Whether to allow the vendor protocol to request confirmation.
+      default: false
+      selector:
+        boolean: {}
+
+remote_control_stop:
+  name: Remote control stop
+  description: Send a zero-motion remote-control step to stop manual driving.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Required only when multiple Dreame lawn mower entries are loaded.
+      selector:
+        text: {}

@@ -23,6 +23,7 @@ This first implementation is intentionally narrow so it can be validated on real
 - opt-in diagnostic sensors for unknown-property and realtime telemetry counts
 - experimental Python-first map summary and PNG rendering helpers
 - experimental disabled-by-default Home Assistant map camera
+- supervised remote-control Home Assistant services for validation
 - start mowing, pause, and dock
 - diagnostics, debug snapshot capture, and HACS-ready repo structure
 
@@ -222,7 +223,26 @@ The safety-gated live smoke test is:
 python examples/remote_control_smoke.py --execute --velocity 60 --rotation 60 --duration 0.5 --dock
 ```
 
-This is intentionally not exposed as a Home Assistant drive service yet. Remote control can physically move the mower, so the next step is to validate command ranges and safety behavior from the Python client before adding any HA UI or automation surface.
+Home Assistant also exposes supervised service calls for validation:
+
+```yaml
+action: dreame_lawn_mower.remote_control_step
+data:
+  rotation: 0
+  velocity: 60
+  prompt: false
+```
+
+Stop manual driving with:
+
+```yaml
+action: dreame_lawn_mower.remote_control_stop
+```
+
+If you have more than one mower entry loaded, include `entry_id`. The movement
+service is intentionally guarded: it refuses to move while the mower appears to
+be mowing, returning, mapping, or fast mapping. Keep using short supervised
+pulses until command ranges are fully validated on real hardware.
 
 ## Automation examples
 
