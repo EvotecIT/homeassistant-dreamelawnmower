@@ -16,7 +16,6 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
-    ACTIVITY_DOCKED,
     ACTIVITY_ERROR,
     ACTIVITY_MOWING,
     ACTIVITY_PAUSED,
@@ -54,6 +53,11 @@ def _raw_flag(snapshot: Any, key: str) -> bool | None:
     return bool(value)
 
 
+def _raw_docked(snapshot: Any) -> bool | None:
+    """Return the vendor-reported dock flag when known."""
+    return getattr(snapshot, "raw_docked", None)
+
+
 BINARY_SENSORS = [
     DreameBinarySensorDescription(
         key="error_active",
@@ -79,8 +83,17 @@ BINARY_SENSORS = [
     DreameBinarySensorDescription(
         key="docked",
         name="Docked",
-        value_fn=lambda snapshot: snapshot.activity == ACTIVITY_DOCKED,
+        value_fn=lambda snapshot: snapshot.docked,
         icon="mdi:home-map-marker",
+    ),
+    DreameBinarySensorDescription(
+        key="raw_docked",
+        name="Raw Docked Flag",
+        value_fn=_raw_docked,
+        exists_fn=lambda snapshot: _raw_docked(snapshot) is not None,
+        icon="mdi:home-map-marker",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
     ),
     DreameBinarySensorDescription(
         key="paused",

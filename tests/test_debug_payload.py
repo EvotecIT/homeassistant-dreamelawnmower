@@ -190,7 +190,8 @@ def test_build_debug_payload_highlights_state_disagreements() -> None:
         error_text="No error",
         error_display="No error",
         charging=True,
-        docked=False,
+        docked=True,
+        raw_docked=False,
         started=True,
         raw_attributes={
             "mower_state": "charging_completed",
@@ -238,10 +239,11 @@ def test_build_debug_payload_highlights_state_disagreements() -> None:
     assert reconciliation["error"]["code"] == 73
     assert reconciliation["error"]["display"] == "No error"
     assert reconciliation["raw_mower_state"] == "charging_completed"
+    assert reconciliation["flags"]["docked"] is True
+    assert reconciliation["flags"]["raw_docked"] is False
     assert reconciliation["warnings"] == [
         "active_error_code_but_display_says_no_error",
-        "state_looks_docked_but_docked_flag_false",
-        "raw_mower_state_looks_docked_but_docked_flag_false",
-        "charging_true_but_docked_false",
+        "state_looks_docked_but_raw_docked_false",
+        "raw_mower_state_looks_docked_but_raw_docked_false",
         "raw_mower_state_differs_from_state_name",
     ]

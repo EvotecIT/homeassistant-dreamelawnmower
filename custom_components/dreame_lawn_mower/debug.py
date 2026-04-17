@@ -162,6 +162,7 @@ def _collect_state_reconciliation(snapshot: Any, device: Any) -> dict[str, Any]:
     state_name = getattr(snapshot, "state_name", None)
     raw_mower_state = raw_attributes.get("mower_state")
     snapshot_docked = bool(getattr(snapshot, "docked", False))
+    snapshot_raw_docked = getattr(snapshot, "raw_docked", None)
     snapshot_charging = bool(getattr(snapshot, "charging", False))
     active_error = _active_error_from_snapshot(snapshot)
     warnings: list[str] = []
@@ -170,10 +171,10 @@ def _collect_state_reconciliation(snapshot: Any, device: Any) -> dict[str, Any]:
         warnings.append("activity_error_without_active_error")
     if active_error and _is_no_error_value(getattr(snapshot, "error_display", None)):
         warnings.append("active_error_code_but_display_says_no_error")
-    if state in DOCKED_STATES and not snapshot_docked:
-        warnings.append("state_looks_docked_but_docked_flag_false")
-    if raw_mower_state in DOCKED_STATES and not snapshot_docked:
-        warnings.append("raw_mower_state_looks_docked_but_docked_flag_false")
+    if state in DOCKED_STATES and snapshot_raw_docked is False:
+        warnings.append("state_looks_docked_but_raw_docked_false")
+    if raw_mower_state in DOCKED_STATES and snapshot_raw_docked is False:
+        warnings.append("raw_mower_state_looks_docked_but_raw_docked_false")
     if snapshot_charging and not snapshot_docked:
         warnings.append("charging_true_but_docked_false")
     if (
@@ -205,6 +206,7 @@ def _collect_state_reconciliation(snapshot: Any, device: Any) -> dict[str, Any]:
         "flags": {
             "charging": snapshot_charging,
             "docked": snapshot_docked,
+            "raw_docked": snapshot_raw_docked,
             "mowing": bool(getattr(snapshot, "mowing", False)),
             "paused": bool(getattr(snapshot, "paused", False)),
             "returning": bool(getattr(snapshot, "returning", False)),

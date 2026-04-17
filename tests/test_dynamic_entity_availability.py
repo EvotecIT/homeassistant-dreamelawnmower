@@ -64,3 +64,17 @@ def test_child_lock_binary_sensor_can_become_available_after_startup() -> None:
 
     assert entity.available is True
     assert entity.is_on is True
+
+
+def test_raw_docked_binary_sensor_preserves_vendor_flag() -> None:
+    entity = object.__new__(DreameLawnMowerBinarySensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            raw_docked=False,
+            raw_attributes={},
+        )
+    )
+    entity.entity_description = _binary_sensor_description("raw_docked")
+
+    assert entity.available is True
+    assert entity.is_on is False

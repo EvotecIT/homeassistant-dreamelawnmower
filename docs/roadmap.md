@@ -130,7 +130,8 @@ Checklist:
 - [ ] keep `activity`, `state`, and raw mower-state semantics clearly separated
 - [x] include a diagnostic `state_reconciliation` summary for source disagreements
 - [x] avoid surfacing a sticky upstream error flag when code/text/name say no error
-- [ ] expose reliable docked, charging, returning, and active-task indicators
+- [x] separate effective docked state from the raw vendor dock flag
+- [ ] expose reliable charging, returning, and active-task indicators
 - [ ] add friendly error text plus raw vendor error text where both exist
 - [ ] document example Home Assistant automations for garage-door workflows
 - [ ] add fixture-based tests for paused, returning, docked, charging, and fault transitions as captures become available

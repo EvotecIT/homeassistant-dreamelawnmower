@@ -96,6 +96,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             "started": snapshot.started,
             "returning": snapshot.returning,
             "docked": snapshot.docked,
+            "raw_docked": snapshot.raw_docked,
             "mapping_available": snapshot.mapping_available,
             "scheduled_clean": snapshot.scheduled_clean,
             "shortcut_task": snapshot.shortcut_task,

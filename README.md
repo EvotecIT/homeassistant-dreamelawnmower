@@ -68,6 +68,11 @@ there when Home Assistant shows a confusing state such as `Error` while another
 field says `No error`: it lists the normalized state, raw mower state, error
 signals, dock/charge flags, and any source-disagreement warnings.
 
+For automations, use the normal `Docked` binary sensor or `docked` attribute.
+Those are effective values derived from mower state and charging states. The
+disabled-by-default `Raw Docked Flag` diagnostic entity preserves the exact
+vendor flag when you need to debug dock-contact wobble.
+
 If Home Assistant logs contain a `Captured Dreame lawn mower ...` line, convert it to clean JSON before adding a fixture:
 
 ```bash

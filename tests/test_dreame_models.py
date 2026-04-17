@@ -252,8 +252,39 @@ def test_snapshot_ignores_explicit_no_error_text_when_selecting_activity() -> No
     assert snapshot.error_text == "No error"
     assert snapshot.error_display == "No error"
     assert snapshot.docked is True
+    assert snapshot.raw_docked is True
     assert snapshot.returning is True
     assert snapshot.realtime_property_count == 1
+
+
+def test_snapshot_treats_charging_state_as_effectively_docked() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "dreame.mower.g2408",
+            "customName": "Garage Mower",
+        },
+        account_type="dreame",
+        country="eu",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.state = SimpleNamespace(name="CHARGING_COMPLETED")
+    device.status.state_name = "charging_completed"
+    device.status.docked = False
+    device.status.attributes = {
+        **device.status.attributes,
+        "charging": False,
+        "mower_state": "charging_completed",
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == "docked"
+    assert snapshot.docked is True
+    assert snapshot.raw_docked is False
 
 
 def test_snapshot_ignores_sticky_has_error_when_error_details_say_no_error() -> None:

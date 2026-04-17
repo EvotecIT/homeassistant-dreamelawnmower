@@ -135,6 +135,7 @@ class DreameLawnMowerSnapshot:
     charging: bool = False
     started: bool = False
     docked: bool = False
+    raw_docked: bool | None = None
     paused: bool = False
     mowing: bool = False
     returning: bool = False
@@ -391,6 +392,8 @@ def snapshot_from_device(
         activity = "mowing"
     else:
         activity = "idle"
+    raw_docked = bool(getattr(device.status, "docked", False))
+    effective_docked = bool(raw_docked or state in docked_states or activity == "docked")
 
     child_lock = None
     try:
@@ -426,7 +429,8 @@ def snapshot_from_device(
         child_lock=child_lock,
         charging=bool(status_attributes.get("charging", getattr(device.status, "charging", False))),
         started=bool(status_attributes.get("started", getattr(device.status, "started", False))),
-        docked=bool(getattr(device.status, "docked", False)),
+        docked=effective_docked,
+        raw_docked=raw_docked,
         paused=bool(getattr(device.status, "paused", False)),
         mowing=bool(getattr(device.status, "running", False)),
         returning=bool(getattr(device.status, "returning", False)),
