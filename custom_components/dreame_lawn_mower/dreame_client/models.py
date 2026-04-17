@@ -134,11 +134,13 @@ class DreameLawnMowerSnapshot:
     child_lock: bool | None = None
     charging: bool = False
     started: bool = False
+    raw_started: bool | None = None
     docked: bool = False
     raw_docked: bool | None = None
     paused: bool = False
     mowing: bool = False
     returning: bool = False
+    raw_returning: bool | None = None
     scheduled_clean: bool = False
     shortcut_task: bool = False
     mapping_available: bool = False
@@ -394,6 +396,12 @@ def snapshot_from_device(
         activity = "idle"
     raw_docked = bool(getattr(device.status, "docked", False))
     effective_docked = bool(raw_docked or state in docked_states or activity == "docked")
+    raw_started = bool(
+        status_attributes.get("started", getattr(device.status, "started", False))
+    )
+    effective_started = bool(raw_started and activity not in {"docked", "idle"})
+    raw_returning = bool(getattr(device.status, "returning", False))
+    effective_returning = bool(raw_returning and activity == "returning")
 
     child_lock = None
     try:
@@ -428,12 +436,14 @@ def snapshot_from_device(
         online=info_raw.get("online"),
         child_lock=child_lock,
         charging=bool(status_attributes.get("charging", getattr(device.status, "charging", False))),
-        started=bool(status_attributes.get("started", getattr(device.status, "started", False))),
+        started=effective_started,
+        raw_started=raw_started,
         docked=effective_docked,
         raw_docked=raw_docked,
         paused=bool(getattr(device.status, "paused", False)),
         mowing=bool(getattr(device.status, "running", False)),
-        returning=bool(getattr(device.status, "returning", False)),
+        returning=effective_returning,
+        raw_returning=raw_returning,
         scheduled_clean=bool(getattr(device.status, "scheduled_clean", False)),
         shortcut_task=bool(getattr(device.status, "shortcut_task", False)),
         mapping_available=bool(

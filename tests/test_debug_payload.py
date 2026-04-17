@@ -192,7 +192,10 @@ def test_build_debug_payload_highlights_state_disagreements() -> None:
         charging=True,
         docked=True,
         raw_docked=False,
-        started=True,
+        started=False,
+        raw_started=True,
+        returning=False,
+        raw_returning=True,
         raw_attributes={
             "mower_state": "charging_completed",
             "status": "Returning",
@@ -241,6 +244,10 @@ def test_build_debug_payload_highlights_state_disagreements() -> None:
     assert reconciliation["raw_mower_state"] == "charging_completed"
     assert reconciliation["flags"]["docked"] is True
     assert reconciliation["flags"]["raw_docked"] is False
+    assert reconciliation["flags"]["started"] is False
+    assert reconciliation["flags"]["raw_started"] is True
+    assert reconciliation["flags"]["returning"] is False
+    assert reconciliation["flags"]["raw_returning"] is True
     assert reconciliation["warnings"] == [
         "active_error_code_but_display_says_no_error",
         "state_looks_docked_but_raw_docked_false",

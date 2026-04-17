@@ -58,6 +58,17 @@ def _raw_docked(snapshot: Any) -> bool | None:
     return getattr(snapshot, "raw_docked", None)
 
 
+def _raw_started(snapshot: Any) -> bool | None:
+    """Return the vendor-reported started flag when known."""
+    return getattr(snapshot, "raw_started", None)
+
+
+def _raw_returning(snapshot: Any) -> bool | None:
+    """Return the vendor-reported returning flag when known."""
+    value = getattr(snapshot, "raw_returning", None)
+    return _raw_flag(snapshot, "returning") if value is None else value
+
+
 BINARY_SENSORS = [
     DreameBinarySensorDescription(
         key="error_active",
@@ -120,6 +131,15 @@ BINARY_SENSORS = [
         icon="mdi:play-circle-outline",
     ),
     DreameBinarySensorDescription(
+        key="raw_started",
+        name="Raw Started Flag",
+        value_fn=_raw_started,
+        exists_fn=lambda snapshot: _raw_started(snapshot) is not None,
+        icon="mdi:play-circle-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+    ),
+    DreameBinarySensorDescription(
         key="mapping_available",
         name="Mapping Available",
         value_fn=lambda snapshot: snapshot.mapping_available,
@@ -172,8 +192,8 @@ BINARY_SENSORS = [
     DreameBinarySensorDescription(
         key="raw_returning",
         name="Raw Returning Flag",
-        value_fn=lambda snapshot: _raw_flag(snapshot, "returning"),
-        exists_fn=lambda snapshot: "returning" in snapshot.raw_attributes,
+        value_fn=_raw_returning,
+        exists_fn=lambda snapshot: _raw_returning(snapshot) is not None,
         icon="mdi:home-import-outline",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),

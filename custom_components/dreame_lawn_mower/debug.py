@@ -164,6 +164,8 @@ def _collect_state_reconciliation(snapshot: Any, device: Any) -> dict[str, Any]:
     snapshot_docked = bool(getattr(snapshot, "docked", False))
     snapshot_raw_docked = getattr(snapshot, "raw_docked", None)
     snapshot_charging = bool(getattr(snapshot, "charging", False))
+    snapshot_raw_started = getattr(snapshot, "raw_started", None)
+    snapshot_raw_returning = getattr(snapshot, "raw_returning", None)
     active_error = _active_error_from_snapshot(snapshot)
     warnings: list[str] = []
 
@@ -210,7 +212,9 @@ def _collect_state_reconciliation(snapshot: Any, device: Any) -> dict[str, Any]:
             "mowing": bool(getattr(snapshot, "mowing", False)),
             "paused": bool(getattr(snapshot, "paused", False)),
             "returning": bool(getattr(snapshot, "returning", False)),
+            "raw_returning": snapshot_raw_returning,
             "started": bool(getattr(snapshot, "started", False)),
+            "raw_started": snapshot_raw_started,
         },
         "status_values": status_values,
         "warnings": warnings,

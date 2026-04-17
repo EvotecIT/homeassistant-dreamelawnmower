@@ -73,6 +73,11 @@ Those are effective values derived from mower state and charging states. The
 disabled-by-default `Raw Docked Flag` diagnostic entity preserves the exact
 vendor flag when you need to debug dock-contact wobble.
 
+The same pattern applies to `Task Active` / `started` and `Returning` /
+`returning`: normal entities are automation-friendly effective values, while
+`Raw Started Flag` and `Raw Returning Flag` preserve sticky vendor flags for
+debugging.
+
 If Home Assistant logs contain a `Captured Dreame lawn mower ...` line, convert it to clean JSON before adding a fixture:
 
 ```bash

@@ -78,3 +78,45 @@ def test_raw_docked_binary_sensor_preserves_vendor_flag() -> None:
 
     assert entity.available is True
     assert entity.is_on is False
+
+
+def test_task_active_binary_sensor_uses_effective_started_flag() -> None:
+    entity = object.__new__(DreameLawnMowerBinarySensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            started=False,
+            raw_attributes={},
+        )
+    )
+    entity.entity_description = _binary_sensor_description("task_active")
+
+    assert entity.available is True
+    assert entity.is_on is False
+
+
+def test_raw_started_binary_sensor_preserves_vendor_flag() -> None:
+    entity = object.__new__(DreameLawnMowerBinarySensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            raw_started=True,
+            raw_attributes={},
+        )
+    )
+    entity.entity_description = _binary_sensor_description("raw_started")
+
+    assert entity.available is True
+    assert entity.is_on is True
+
+
+def test_raw_returning_binary_sensor_preserves_vendor_flag() -> None:
+    entity = object.__new__(DreameLawnMowerBinarySensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            raw_returning=True,
+            raw_attributes={},
+        )
+    )
+    entity.entity_description = _binary_sensor_description("raw_returning")
+
+    assert entity.available is True
+    assert entity.is_on is True
