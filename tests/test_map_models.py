@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from dreame_lawn_mower_client.models import map_summary_from_map_data
+from dreame_lawn_mower_client.models import (
+    DreameLawnMowerMapView,
+    map_summary_from_map_data,
+    map_summary_to_dict,
+)
 
 
 def test_map_summary_from_map_data_returns_none_for_missing_map() -> None:
@@ -58,3 +62,74 @@ def test_map_summary_from_map_data_counts_mower_map_features() -> None:
     assert summary.obstacle_count == 3
     assert summary.charger_present is True
     assert summary.robot_present is True
+
+
+def test_map_summary_to_dict_returns_json_safe_payload() -> None:
+    map_data = SimpleNamespace(
+        map_id=17,
+        frame_id=23,
+        timestamp_ms=123456789,
+        rotation=90,
+        dimensions=SimpleNamespace(width=512, height=256, grid_size=50),
+        saved_map=True,
+        temporary_map=False,
+        recovery_map=False,
+        empty_map=False,
+        segments={1: object()},
+        active_segments=[],
+        active_areas=[],
+        active_points=[],
+        path=[],
+        no_go_areas=[],
+        virtual_walls=[],
+        pathways=[],
+        obstacles={},
+        charger_position=None,
+        robot_position=None,
+    )
+
+    summary = map_summary_from_map_data(map_data)
+
+    assert map_summary_to_dict(summary) == {
+        "available": True,
+        "map_id": 17,
+        "frame_id": 23,
+        "timestamp_ms": 123456789,
+        "rotation": 90,
+        "width": 512,
+        "height": 256,
+        "grid_size": 50,
+        "saved_map": True,
+        "temporary_map": False,
+        "recovery_map": False,
+        "empty_map": False,
+        "segment_count": 1,
+        "active_segment_count": 0,
+        "active_area_count": 0,
+        "active_point_count": 0,
+        "path_point_count": 0,
+        "no_go_area_count": 0,
+        "virtual_wall_count": 0,
+        "pathway_count": 0,
+        "obstacle_count": 0,
+        "charger_present": False,
+        "robot_present": False,
+    }
+
+
+def test_map_view_as_dict_omits_image_bytes() -> None:
+    view = DreameLawnMowerMapView(
+        source="legacy_current_map",
+        summary=None,
+        image_png=b"not-json-safe",
+        error="test",
+    )
+
+    assert view.has_image is True
+    assert view.as_dict() == {
+        "source": "legacy_current_map",
+        "available": False,
+        "has_image": True,
+        "error": "test",
+        "summary": None,
+    }

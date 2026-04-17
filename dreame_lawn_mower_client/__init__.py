@@ -13,6 +13,7 @@ DreameLawnMowerConnectionError = _client.DreameLawnMowerConnectionError
 DreameLawnMowerTwoFactorRequiredError = _client.DreameLawnMowerTwoFactorRequiredError
 DreameLawnMowerDescriptor = _models.DreameLawnMowerDescriptor
 DreameLawnMowerMapSummary = _models.DreameLawnMowerMapSummary
+DreameLawnMowerMapView = _models.DreameLawnMowerMapView
 DreameLawnMowerSnapshot = _models.DreameLawnMowerSnapshot
 DISPLAY_NAME_ALIASES = _models.DISPLAY_NAME_ALIASES
 MODEL_NAME_MAP = _models.MODEL_NAME_MAP
@@ -21,6 +22,7 @@ MOWER_STATE_PROPERTY_KEY = _app_protocol.MOWER_STATE_PROPERTY_KEY
 SUPPORTED_ACCOUNT_TYPES = _models.SUPPORTED_ACCOUNT_TYPES
 display_name_for_model = _models.display_name_for_model
 map_summary_from_map_data = _models.map_summary_from_map_data
+map_summary_to_dict = _models.map_summary_to_dict
 mower_state_label = _app_protocol.mower_state_label
 
 __all__ = [
@@ -31,6 +33,7 @@ __all__ = [
     "DreameLawnMowerDescriptor",
     "DreameLawnMowerError",
     "DreameLawnMowerMapSummary",
+    "DreameLawnMowerMapView",
     "DreameLawnMowerSnapshot",
     "DreameLawnMowerTwoFactorRequiredError",
     "MODEL_NAME_MAP",
@@ -39,5 +42,6 @@ __all__ = [
     "SUPPORTED_ACCOUNT_TYPES",
     "display_name_for_model",
     "map_summary_from_map_data",
+    "map_summary_to_dict",
     "mower_state_label",
 ]

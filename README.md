@@ -67,6 +67,7 @@ If you are troubleshooting a new model or strange dock behavior, enable the disa
 
 The reusable Python client now includes an experimental read-only map path:
 
+- `async_refresh_map_view()` fetches one reusable map view with source, summary, image bytes, and error metadata
 - `async_refresh_map_summary()` tries to fetch current mower map metadata
 - `async_get_map_png()` tries to render the current mower map to PNG bytes
 
@@ -101,7 +102,7 @@ Optional:
 - blob-like values are annotated with `value_bytes_len` and `value_bytes_hex`
 - keep `DREAME_PROP_ONLY_VALUES=1` to hide empty key-only responses while scanning
 
-This is still experimental and read-only. The integration now also exposes a disabled-by-default `camera` entity named `Map`, which tries to fetch and cache a rendered PNG on demand while keeping normal mower polling isolated from map failures.
+This is still experimental and read-only. The integration exposes disabled-by-default `camera` entities named `Map` and `Map Data`. `Map` returns a rendered JPEG or a valid placeholder image. `Map Data` returns the same structured map view as JSON so we can debug the mower map pipeline and eventually support custom cards without tying the data model to the renderer.
 
 ## Automation examples
 

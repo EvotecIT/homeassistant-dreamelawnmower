@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -16,7 +17,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
-from .dreame_client.models import DreameLawnMowerMapSummary
+from .dreame_client.models import DreameLawnMowerMapView
 from .image import map_placeholder_jpeg, png_bytes_to_jpeg
 
 _LOGGER = logging.getLogger(__name__)
@@ -32,7 +33,12 @@ async def async_setup_entry(
 ) -> None:
     """Set up the mower map camera."""
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([DreameLawnMowerMapCamera(coordinator)])
+    async_add_entities(
+        [
+            DreameLawnMowerMapCamera(coordinator),
+            DreameLawnMowerMapDataCamera(coordinator),
+        ]
+    )
 
 
 class DreameLawnMowerMapCamera(
@@ -56,7 +62,7 @@ class DreameLawnMowerMapCamera(
         self._attr_model = self._descriptor.display_model
         self.content_type = "image/jpeg"
         self._last_image: bytes | None = None
-        self._last_summary: DreameLawnMowerMapSummary | None = None
+        self._last_view: DreameLawnMowerMapView | None = None
         self._last_refresh_at: datetime | None = None
         self._last_error: str | None = None
         self._refresh_lock = asyncio.Lock()
@@ -91,12 +97,15 @@ class DreameLawnMowerMapCamera(
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Expose the latest cached map summary."""
-        summary = self._last_summary
+        view = self._last_view
+        summary = None if view is None else view.summary
         refreshed_at = self._last_refresh_at
         return {
             "map_cached": self._last_image is not None,
             "map_placeholder": self._last_image is None,
-            "map_error": self._last_error,
+            "map_source": None if view is None else view.source,
+            "map_has_image": False if view is None else view.has_image,
+            "map_error": self._last_error or (None if view is None else view.error),
             "map_available": summary.available if summary is not None else None,
             "map_id": None if summary is None else summary.map_id,
             "frame_id": None if summary is None else summary.frame_id,
@@ -145,16 +154,33 @@ class DreameLawnMowerMapCamera(
         if self._last_image is not None and self._cache_is_fresh():
             return self._last_image
 
-        async with self._refresh_lock:
-            if self._last_image is not None and self._cache_is_fresh():
+        view = await self._async_refresh_map_view()
+        if view.image_png is not None:
+            try:
+                self._last_image = png_bytes_to_jpeg(view.image_png)
+                self._last_error = None
+                self.async_write_ha_state()
                 return self._last_image
+            except Exception as err:
+                _LOGGER.warning("Failed to convert Dreame mower map image: %s", err)
+                self._last_error = str(err)
+                self.async_write_ha_state()
+
+        return self._last_image or map_placeholder_jpeg(
+            detail=self._last_error or view.error
+        )
+
+    async def _async_refresh_map_view(self) -> DreameLawnMowerMapView:
+        """Return a cached map view or refresh it on demand."""
+        if self._last_view is not None and self._cache_is_fresh():
+            return self._last_view
+
+        async with self._refresh_lock:
+            if self._last_view is not None and self._cache_is_fresh():
+                return self._last_view
 
             try:
-                summary = await self.coordinator.client.async_refresh_map_summary(
-                    timeout=_MAP_TIMEOUT_SECONDS,
-                    interval=_MAP_POLL_INTERVAL_SECONDS,
-                )
-                image = await self.coordinator.client.async_get_map_png(
+                view = await self.coordinator.client.async_refresh_map_view(
                     timeout=_MAP_TIMEOUT_SECONDS,
                     interval=_MAP_POLL_INTERVAL_SECONDS,
                 )
@@ -162,28 +188,51 @@ class DreameLawnMowerMapCamera(
                 _LOGGER.warning("Failed to refresh Dreame mower map image: %s", err)
                 self._last_error = str(err)
                 self._last_refresh_at = datetime.now(UTC)
+                self._last_view = DreameLawnMowerMapView(
+                    source="legacy_current_map",
+                    error=self._last_error,
+                )
                 self.async_write_ha_state()
-                return self._last_image or map_placeholder_jpeg(detail=self._last_error)
+                return self._last_view
 
-            if summary is not None:
-                self._last_summary = summary
-            if image is not None:
-                try:
-                    self._last_image = png_bytes_to_jpeg(image)
-                    self._last_error = None
-                except Exception as err:
-                    _LOGGER.warning("Failed to convert Dreame mower map image: %s", err)
-                    self._last_error = str(err)
-                self._last_refresh_at = datetime.now(UTC)
-            elif self._last_image is None:
-                self._last_error = "No map image was returned by the mower."
-                self._last_refresh_at = datetime.now(UTC)
-
+            self._last_view = view
+            self._last_error = view.error
+            self._last_refresh_at = datetime.now(UTC)
             self.async_write_ha_state()
-            return self._last_image or map_placeholder_jpeg(detail=self._last_error)
+            return view
 
     def _cache_is_fresh(self) -> bool:
         """Return whether the cached map image is still fresh."""
         return self._last_refresh_at is not None and (
             datetime.now(UTC) - self._last_refresh_at
         ) <= _MAP_CACHE_TTL
+
+
+class DreameLawnMowerMapDataCamera(DreameLawnMowerMapCamera):
+    """Disabled-by-default JSON map data camera for diagnostics and custom cards."""
+
+    _attr_name = "Map Data"
+    _attr_icon = "mdi:code-json"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_map_data"
+        self.content_type = "application/json"
+
+    async def async_camera_image(
+        self,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> bytes | None:
+        """Return structured map data as JSON bytes."""
+        del width, height
+        view = await self._async_refresh_map_view()
+        payload = {
+            "device": {
+                "name": self._descriptor.name,
+                "model": self._descriptor.model,
+                "display_model": self._descriptor.display_model,
+            },
+            "map": view.as_dict(),
+        }
+        return json.dumps(payload, sort_keys=True).encode()

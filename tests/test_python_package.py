@@ -4,12 +4,17 @@ from dreame_lawn_mower_client import (
     MOWER_STATE_PROPERTY_KEY,
     DreameLawnMowerClient,
     DreameLawnMowerMapSummary,
+    DreameLawnMowerMapView,
     map_summary_from_map_data,
+    map_summary_to_dict,
     mower_state_label,
 )
 from dreame_lawn_mower_client.client import DreameLawnMowerClient as ClientFromModule
 from dreame_lawn_mower_client.models import (
     DreameLawnMowerMapSummary as MapSummaryFromModule,
+)
+from dreame_lawn_mower_client.models import (
+    DreameLawnMowerMapView as MapViewFromModule,
 )
 
 
@@ -19,7 +24,9 @@ def test_public_package_exports_client() -> None:
 
 def test_public_package_exports_map_helpers() -> None:
     assert DreameLawnMowerMapSummary is MapSummaryFromModule
+    assert DreameLawnMowerMapView is MapViewFromModule
     assert callable(map_summary_from_map_data)
+    assert callable(map_summary_to_dict)
 
 
 def test_public_package_client_has_cloud_probe_helpers() -> None:

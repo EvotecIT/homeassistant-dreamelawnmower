@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping
 
 SUPPORTED_ACCOUNT_TYPES = ("dreame", "mova")
@@ -167,6 +167,45 @@ class DreameLawnMowerMapSummary:
     obstacle_count: int = 0
     charger_present: bool = False
     robot_present: bool = False
+
+
+@dataclass(slots=True, frozen=True)
+class DreameLawnMowerMapView:
+    """Reusable read-only map fetch result."""
+
+    source: str
+    summary: DreameLawnMowerMapSummary | None = None
+    image_png: bytes | None = field(default=None, repr=False)
+    error: str | None = None
+
+    @property
+    def available(self) -> bool:
+        """Return whether map metadata is available and not empty."""
+        return bool(self.summary and self.summary.available)
+
+    @property
+    def has_image(self) -> bool:
+        """Return whether a rendered image is available."""
+        return self.image_png is not None
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a JSON-safe map data payload."""
+        return {
+            "source": self.source,
+            "available": self.available,
+            "has_image": self.has_image,
+            "error": self.error,
+            "summary": map_summary_to_dict(self.summary),
+        }
+
+
+def map_summary_to_dict(
+    summary: DreameLawnMowerMapSummary | None,
+) -> dict[str, Any] | None:
+    """Return a JSON-safe dictionary for a map summary."""
+    if summary is None:
+        return None
+    return asdict(summary)
 
 
 def descriptor_from_cloud_record(

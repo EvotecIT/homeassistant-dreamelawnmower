@@ -18,9 +18,11 @@ from .models import (
     SUPPORTED_ACCOUNT_TYPES,
     DreameLawnMowerDescriptor,
     DreameLawnMowerMapSummary,
+    DreameLawnMowerMapView,
     DreameLawnMowerSnapshot,
     display_name_for_model,
     map_summary_from_map_data,
+    map_summary_to_dict,
 )
 
 __all__ = [
@@ -30,6 +32,7 @@ __all__ = [
     "DreameLawnMowerDescriptor",
     "DreameLawnMowerError",
     "DreameLawnMowerMapSummary",
+    "DreameLawnMowerMapView",
     "DreameLawnMowerSnapshot",
     "DreameLawnMowerTwoFactorRequiredError",
     "DISPLAY_NAME_ALIASES",
@@ -39,5 +42,6 @@ __all__ = [
     "SUPPORTED_ACCOUNT_TYPES",
     "display_name_for_model",
     "map_summary_from_map_data",
+    "map_summary_to_dict",
     "mower_state_label",
 ]

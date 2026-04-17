@@ -13,8 +13,9 @@ from .exceptions import DeviceException
 from .models import (
     SUPPORTED_ACCOUNT_TYPES,
     DreameLawnMowerDescriptor,
-    DreameLawnMowerSnapshot,
     DreameLawnMowerMapSummary,
+    DreameLawnMowerMapView,
+    DreameLawnMowerSnapshot,
     descriptor_from_cloud_record,
     display_name_for_model,
     map_summary_from_map_data,
@@ -138,11 +139,8 @@ class DreameLawnMowerClient:
         interval: float = 0.5,
     ) -> DreameLawnMowerMapSummary | None:
         """Try to refresh map data and return a normalized summary."""
-        return await asyncio.to_thread(
-            self._sync_refresh_map_summary,
-            timeout,
-            interval,
-        )
+        view = await self.async_refresh_map_view(timeout=timeout, interval=interval)
+        return view.summary
 
     async def async_get_map_png(
         self,
@@ -151,8 +149,18 @@ class DreameLawnMowerClient:
         interval: float = 0.5,
     ) -> bytes | None:
         """Try to refresh the current mower map and return a rendered PNG."""
+        view = await self.async_refresh_map_view(timeout=timeout, interval=interval)
+        return view.image_png
+
+    async def async_refresh_map_view(
+        self,
+        *,
+        timeout: float = 8.0,
+        interval: float = 0.5,
+    ) -> DreameLawnMowerMapView:
+        """Try to refresh map data and return metadata plus rendered image bytes."""
         return await asyncio.to_thread(
-            self._sync_get_map_png,
+            self._sync_refresh_map_view,
             timeout,
             interval,
         )
@@ -249,17 +257,46 @@ class DreameLawnMowerClient:
         timeout: float,
         interval: float,
     ) -> bytes | None:
-        map_data = self._sync_wait_for_map(timeout, interval)
-        if map_data is None:
-            return None
+        return self._sync_refresh_map_view(timeout, interval).image_png
 
+    def _sync_refresh_map_view(
+        self,
+        timeout: float,
+        interval: float,
+    ) -> DreameLawnMowerMapView:
+        source = "legacy_current_map"
+        try:
+            map_data = self._sync_wait_for_map(timeout, interval)
+        except DreameLawnMowerConnectionError as err:
+            return DreameLawnMowerMapView(source=source, error=str(err))
+
+        if map_data is None:
+            return DreameLawnMowerMapView(
+                source=source,
+                error="No map data returned by the legacy current-map path.",
+            )
+
+        summary = map_summary_from_map_data(map_data)
         device = self._ensure_device()
         render_map_data = device.get_map_for_render(map_data) or map_data
 
         from .map import DreameMowerMapDataJsonRenderer
 
-        renderer = DreameMowerMapDataJsonRenderer()
-        return renderer.render_map(render_map_data)
+        try:
+            renderer = DreameMowerMapDataJsonRenderer()
+            image_png = renderer.render_map(render_map_data)
+        except Exception as err:
+            return DreameLawnMowerMapView(
+                source=source,
+                summary=summary,
+                error=f"Failed to render map data: {err}",
+            )
+
+        return DreameLawnMowerMapView(
+            source=source,
+            summary=summary,
+            image_png=image_png,
+        )
 
     def _sync_get_cloud_device_info(
         self,
