@@ -119,3 +119,21 @@ The reusable Python client now includes cloud probe helpers so this research can
 Use `python examples/cloud_probe.py` to query these endpoints directly with the same credentials used by the integration.
 
 Use `python examples/property_probe.py` to scan `siid.piid` key ranges and highlight non-empty property results while keeping `1.1`, `2.1`, and `2.2` readable.
+
+Use `python examples/apk_research.py <apk> --max-string-length 220` when
+testing a new Dreamehome APK.
+It creates a compact string index of dex/assets/resources for protocol endpoints,
+camera terms, stream/session terms, mower/map hints, and candidate protocol assets.
+This keeps future app research repeatable without requiring a full decompiler for
+the first pass.
+
+The first pass against the locally downloaded Dreamehome APK found:
+
+- three dex files: `classes.dex`, `classes2.dex`, and `classes3.dex`
+- no obvious mower/camera/map protocol JSON assets in the base APK
+- one endpoint-like string: `sendCommand`
+- generic Android/framework string hits for `stream`, `camera`, `photo`, and `map`
+
+That is still useful negative evidence. It suggests the camera/map payload
+schema is either obfuscated in code, delivered dynamically, or best recovered
+from app traffic while opening the feature, rather than from a simple asset file.

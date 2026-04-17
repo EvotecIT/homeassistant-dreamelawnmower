@@ -97,6 +97,16 @@ Optional:
 - `queryDevicePermit` is useful for confirming app-side feature and permit flags before exposing new Home Assistant entities
 - set `DREAME_PROP_KEYS=6.1,6.3` or another comma-separated key list to query `iotstatus/props`
 
+When researching a newer Dreamehome APK, build a compact string index first:
+
+```bash
+python examples/apk_research.py "C:\path\to\dreamehome.apk" --max-string-length 220
+```
+
+This is not a full decompiler. It scans dex/assets/resources for protocol terms,
+endpoints, and camera/map hints so live mower probes are guided by app evidence
+instead of random payload guesses.
+
 If you want to scan wider `siid.piid` ranges when hunting for map or telemetry keys, use:
 
 ```bash

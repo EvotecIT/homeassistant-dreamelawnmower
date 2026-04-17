@@ -3,6 +3,7 @@
 from ._loader import load_internal_module
 
 _app_protocol = load_internal_module("app_protocol")
+_apk_research = load_internal_module("apk_research")
 _camera_probe = load_internal_module("camera_probe")
 _client = load_internal_module("client")
 _map_probe = load_internal_module("map_probe")
@@ -19,6 +20,7 @@ DreameLawnMowerMapSummary = _models.DreameLawnMowerMapSummary
 DreameLawnMowerMapView = _models.DreameLawnMowerMapView
 DreameLawnMowerRemoteControlSupport = _models.DreameLawnMowerRemoteControlSupport
 DreameLawnMowerSnapshot = _models.DreameLawnMowerSnapshot
+DEFAULT_APK_RESEARCH_TERMS = _apk_research.DEFAULT_APK_RESEARCH_TERMS
 DISPLAY_NAME_ALIASES = _models.DISPLAY_NAME_ALIASES
 MODEL_NAME_MAP = _models.MODEL_NAME_MAP
 MOWER_STATE_LABELS = _app_protocol.MOWER_STATE_LABELS
@@ -29,6 +31,7 @@ MOWER_RAW_STATUS_PROPERTY_KEY = _app_protocol.MOWER_RAW_STATUS_PROPERTY_KEY
 CAMERA_PROBE_PROPERTY_KEYS = _camera_probe.CAMERA_PROBE_PROPERTY_KEYS
 MAP_PROBE_PROPERTY_KEYS = _map_probe.MAP_PROBE_PROPERTY_KEYS
 SUPPORTED_ACCOUNT_TYPES = _models.SUPPORTED_ACCOUNT_TYPES
+analyze_dreamehome_apk = _apk_research.analyze_dreamehome_apk
 build_camera_probe_payload = _camera_probe.build_camera_probe_payload
 build_cloud_property_summary = _map_probe.build_cloud_property_summary
 build_map_probe_payload = _map_probe.build_map_probe_payload
@@ -39,6 +42,8 @@ mower_error_label = _app_protocol.mower_error_label
 mower_state_label = _app_protocol.mower_state_label
 
 __all__ = [
+    "CAMERA_PROBE_PROPERTY_KEYS",
+    "DEFAULT_APK_RESEARCH_TERMS",
     "DISPLAY_NAME_ALIASES",
     "DreameLawnMowerAuthError",
     "DreameLawnMowerCameraFeatureSupport",
@@ -52,7 +57,6 @@ __all__ = [
     "DreameLawnMowerSnapshot",
     "DreameLawnMowerTwoFactorRequiredError",
     "MODEL_NAME_MAP",
-    "CAMERA_PROBE_PROPERTY_KEYS",
     "MAP_PROBE_PROPERTY_KEYS",
     "MOWER_ERROR_PROPERTY_KEY",
     "MOWER_PROPERTY_HINTS",
@@ -60,6 +64,7 @@ __all__ = [
     "MOWER_STATE_LABELS",
     "MOWER_STATE_PROPERTY_KEY",
     "SUPPORTED_ACCOUNT_TYPES",
+    "analyze_dreamehome_apk",
     "build_camera_probe_payload",
     "build_cloud_property_summary",
     "build_map_probe_payload",
