@@ -69,6 +69,17 @@ def test_a2_paused_fixture_reports_expected_normalized_sensor_values() -> None:
 
     assert sensors["State Name"].value_fn(snapshot) == "paused"
     assert sensors["Task Status"].value_fn(snapshot) == "unknown"
+    assert sensors["Error Code"].value_fn(snapshot) == "none"
+    assert sensors["Raw Error"].value_fn(snapshot) == "none"
+
+
+def test_a2_paused_fixture_keeps_optional_entities_opt_in() -> None:
+    sensors = {description.name: description for description in SENSORS}
+    binary_sensors = {description.name: description for description in BINARY_SENSORS}
+
+    assert sensors["Cleaning Mode"].entity_registry_enabled_default is False
+    assert binary_sensors["Child Lock"].entity_registry_enabled_default is False
+    assert binary_sensors["Shortcut Task"].entity_registry_enabled_default is False
 
 
 def test_a2_paused_fixture_exposes_expected_binary_sensor_set() -> None:

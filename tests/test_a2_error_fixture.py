@@ -65,6 +65,8 @@ def test_a2_error_fixture_reports_expected_normalized_sensor_values() -> None:
 
     assert sensors["State Name"].value_fn(snapshot) == "paused"
     assert sensors["Task Status"].value_fn(snapshot) == "unknown"
+    assert sensors["Error Code"].value_fn(snapshot) == 31
+    assert sensors["Raw Error"].value_fn(snapshot) == "Left wheell speed"
 
 
 def test_a2_error_fixture_exposes_expected_binary_sensor_set() -> None:

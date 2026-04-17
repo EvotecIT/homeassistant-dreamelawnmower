@@ -130,6 +130,7 @@ BINARY_SENSORS = [
         or "shortcuts" in snapshot.capabilities,
         icon="mdi:flash-outline",
         entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
     ),
     DreameBinarySensorDescription(
         key="child_lock",
@@ -137,6 +138,7 @@ BINARY_SENSORS = [
         value_fn=lambda snapshot: snapshot.child_lock,
         exists_fn=lambda snapshot: snapshot.child_lock is not None,
         icon="mdi:lock-outline",
+        entity_registry_enabled_default=False,
     ),
     DreameBinarySensorDescription(
         key="raw_paused",

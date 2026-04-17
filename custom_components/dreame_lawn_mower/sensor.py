@@ -80,16 +80,16 @@ SENSORS = [
     DreameSensorDescription(
         key="error_code",
         name="Error Code",
-        value_fn=lambda snapshot: (
-            None if snapshot.error_code in (None, -1) else snapshot.error_code
-        ),
+        value_fn=lambda snapshot: "none"
+        if snapshot.error_code in (None, -1)
+        else snapshot.error_code,
         icon="mdi:numeric",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
     DreameSensorDescription(
         key="raw_error",
         name="Raw Error",
-        value_fn=lambda snapshot: snapshot.error_text,
+        value_fn=lambda snapshot: getattr(snapshot, "error_text", None) or "none",
         icon="mdi:text-box-search-outline",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
@@ -154,6 +154,7 @@ SENSORS = [
         exists_fn=lambda snapshot: bool(snapshot.cleaning_mode_name)
         and snapshot.cleaning_mode_name != "unknown",
         icon="mdi:grass",
+        entity_registry_enabled_default=False,
     ),
     DreameSensorDescription(
         key="mower_state",
