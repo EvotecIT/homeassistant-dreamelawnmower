@@ -128,6 +128,7 @@ Targets:
 Checklist:
 
 - [ ] keep `activity`, `state`, and raw mower-state semantics clearly separated
+- [x] include a diagnostic `state_reconciliation` summary for source disagreements
 - [ ] expose reliable docked, charging, returning, and active-task indicators
 - [ ] add friendly error text plus raw vendor error text where both exist
 - [ ] document example Home Assistant automations for garage-door workflows

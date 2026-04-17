@@ -63,6 +63,11 @@ The repo already includes paused and paused-with-wheel-error A2 captures, which 
 
 If you are troubleshooting a new model or strange dock behavior, enable the disabled-by-default diagnostic sensors for unknown-property count, realtime-property count, and last realtime method. They help confirm whether the mower is publishing live MQTT telemetry and whether we are seeing unmapped data that still needs decoding.
 
+Downloaded diagnostics also include a `state_reconciliation` section. Start
+there when Home Assistant shows a confusing state such as `Error` while another
+field says `No error`: it lists the normalized state, raw mower state, error
+signals, dock/charge flags, and any source-disagreement warnings.
+
 If Home Assistant logs contain a `Captured Dreame lawn mower ...` line, convert it to clean JSON before adding a fixture:
 
 ```bash

@@ -163,3 +163,85 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
     )
     assert payload["device"]["status_values"]["battery_level"] == 79
     assert payload["device"]["capabilities"]["list"] == ["lidar_navigation", "map"]
+    assert payload["state_reconciliation"]["activity"] == "paused"
+    assert payload["state_reconciliation"]["error"]["active"] is False
+    assert payload["state_reconciliation"]["flags"]["started"] is True
+    assert payload["state_reconciliation"]["warnings"] == []
+
+
+def test_build_debug_payload_highlights_state_disagreements() -> None:
+    descriptor = DreameLawnMowerDescriptor(
+        did="device-1",
+        name="Garage Mower",
+        model="dreame.mower.g2408",
+        display_model="A2",
+        account_type="dreame",
+        country="eu",
+    )
+    snapshot = DreameLawnMowerSnapshot(
+        descriptor=descriptor,
+        available=True,
+        state="charging",
+        state_name="charging",
+        activity="error",
+        battery_level=56,
+        error_code=73,
+        error_name="no_error",
+        error_text="No error",
+        error_display="No error",
+        charging=True,
+        docked=False,
+        started=True,
+        raw_attributes={
+            "mower_state": "charging_completed",
+            "status": "Returning",
+            "error": "No error",
+        },
+    )
+    device = SimpleNamespace(
+        name="Garage Mower",
+        available=True,
+        host=None,
+        token=None,
+        unknown_properties={},
+        realtime_properties={},
+        last_realtime_message=None,
+        status=SimpleNamespace(
+            state_name="charging",
+            task_status_name="unknown",
+            battery_level=56,
+            charging=True,
+            started=True,
+            paused=False,
+            running=False,
+            returning=False,
+            docked=False,
+            scheduled_clean=False,
+            shortcut_task=False,
+            cleaning_mode_name="unknown",
+            child_lock=None,
+            attributes={
+                "mower_state": "charging_completed",
+                "status": "Returning",
+                "error": "No error",
+            },
+        ),
+        capability=None,
+        info=None,
+    )
+
+    payload = build_debug_payload(entry_data={}, snapshot=snapshot, device=device)
+    reconciliation = payload["state_reconciliation"]
+
+    assert reconciliation["activity"] == "error"
+    assert reconciliation["error"]["active"] is True
+    assert reconciliation["error"]["code"] == 73
+    assert reconciliation["error"]["display"] == "No error"
+    assert reconciliation["raw_mower_state"] == "charging_completed"
+    assert reconciliation["warnings"] == [
+        "active_error_code_but_display_says_no_error",
+        "state_looks_docked_but_docked_flag_false",
+        "raw_mower_state_looks_docked_but_docked_flag_false",
+        "charging_true_but_docked_false",
+        "raw_mower_state_differs_from_state_name",
+    ]

@@ -56,6 +56,17 @@ CAPABILITY_FIELDS = (
     "disable_sensor_cleaning",
 )
 
+DOCKED_STATES = {
+    "idle",
+    "charging",
+    "charging_completed",
+    "building",
+    "upgrading",
+    "station_reset",
+    "smart_charging",
+    "waiting_for_task",
+}
+
 
 def _normalize_debug_value(value: Any) -> Any:
     """Convert a debug value into JSON-friendly data."""
@@ -79,6 +90,25 @@ def _normalize_debug_value(value: Any) -> Any:
     if isinstance(enum_value, (str, int, float, bool)):
         return enum_value
     return str(value)
+
+
+def _is_no_error_value(value: Any) -> bool:
+    """Return whether a debug value explicitly means no active error."""
+    if value is None:
+        return True
+    text = str(value).strip().replace("_", " ").casefold()
+    return text in {"", "none", "no error", "no error."}
+
+
+def _active_error_from_snapshot(snapshot: Any) -> bool:
+    """Return whether the normalized snapshot contains an active error signal."""
+    error_code = getattr(snapshot, "error_code", None)
+    return bool(
+        error_code not in (None, -1, 0)
+        or not _is_no_error_value(getattr(snapshot, "error_name", None))
+        or not _is_no_error_value(getattr(snapshot, "error_text", None))
+        or not _is_no_error_value(getattr(snapshot, "error_display", None))
+    )
 
 
 def _redact_debug_data(value: Any) -> Any:
@@ -122,6 +152,69 @@ def _collect_capability_values(device: Any) -> dict[str, Any]:
     return payload
 
 
+def _collect_state_reconciliation(snapshot: Any, device: Any) -> dict[str, Any]:
+    """Return source fields and warnings used to debug state disagreements."""
+    raw_attributes = getattr(snapshot, "raw_attributes", {}) or {}
+    status = getattr(device, "status", None) if device is not None else None
+    status_values = _collect_status_values(device)
+    activity = getattr(snapshot, "activity", None)
+    state = getattr(snapshot, "state", None)
+    state_name = getattr(snapshot, "state_name", None)
+    raw_mower_state = raw_attributes.get("mower_state")
+    snapshot_docked = bool(getattr(snapshot, "docked", False))
+    snapshot_charging = bool(getattr(snapshot, "charging", False))
+    active_error = _active_error_from_snapshot(snapshot)
+    warnings: list[str] = []
+
+    if activity == "error" and not active_error:
+        warnings.append("activity_error_without_active_error")
+    if active_error and _is_no_error_value(getattr(snapshot, "error_display", None)):
+        warnings.append("active_error_code_but_display_says_no_error")
+    if state in DOCKED_STATES and not snapshot_docked:
+        warnings.append("state_looks_docked_but_docked_flag_false")
+    if raw_mower_state in DOCKED_STATES and not snapshot_docked:
+        warnings.append("raw_mower_state_looks_docked_but_docked_flag_false")
+    if snapshot_charging and not snapshot_docked:
+        warnings.append("charging_true_but_docked_false")
+    if (
+        raw_mower_state is not None
+        and state_name is not None
+        and str(raw_mower_state).casefold() != str(state_name).casefold()
+    ):
+        warnings.append("raw_mower_state_differs_from_state_name")
+
+    return {
+        "activity": _normalize_debug_value(activity),
+        "state": _normalize_debug_value(state),
+        "state_name": _normalize_debug_value(state_name),
+        "raw_mower_state": _normalize_debug_value(raw_mower_state),
+        "status_state_name": _normalize_debug_value(
+            getattr(status, "state_name", None) if status is not None else None
+        ),
+        "status_status": _normalize_debug_value(raw_attributes.get("status")),
+        "error": {
+            "active": active_error,
+            "code": _normalize_debug_value(getattr(snapshot, "error_code", None)),
+            "name": _normalize_debug_value(getattr(snapshot, "error_name", None)),
+            "text": _normalize_debug_value(getattr(snapshot, "error_text", None)),
+            "display": _normalize_debug_value(
+                getattr(snapshot, "error_display", None)
+            ),
+            "raw_attribute": _normalize_debug_value(raw_attributes.get("error")),
+        },
+        "flags": {
+            "charging": snapshot_charging,
+            "docked": snapshot_docked,
+            "mowing": bool(getattr(snapshot, "mowing", False)),
+            "paused": bool(getattr(snapshot, "paused", False)),
+            "returning": bool(getattr(snapshot, "returning", False)),
+            "started": bool(getattr(snapshot, "started", False)),
+        },
+        "status_values": status_values,
+        "warnings": warnings,
+    }
+
+
 def build_debug_payload(
     *,
     entry_data: Mapping[str, Any] | None,
@@ -138,6 +231,7 @@ def build_debug_payload(
         "entry": _normalize_debug_value(dict(entry_data or {})),
         "descriptor": _normalize_debug_value(descriptor),
         "snapshot": _normalize_debug_value(snapshot),
+        "state_reconciliation": _collect_state_reconciliation(snapshot, device),
         "cloud_record": _normalize_debug_value(getattr(descriptor, "raw", {})),
         "device": {
             "name": _normalize_debug_value(getattr(device, "name", None)),
