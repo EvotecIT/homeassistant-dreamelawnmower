@@ -10,6 +10,8 @@ from custom_components.dreame_lawn_mower.dreame_client.camera_probe import (
 from custom_components.dreame_lawn_mower.dreame_client.types import (
     DreameMowerAction,
     DreameMowerProperty,
+    DreameMowerState,
+    DreameMowerStatus,
     DreameMowerStreamStatus,
 )
 from dreame_lawn_mower_client import (
@@ -45,6 +47,12 @@ class _FakeCameraDevice:
             obstacles=False,
         )
         self.status = SimpleNamespace(
+            state=DreameMowerState.CHARGING,
+            status=DreameMowerStatus.CHARGING,
+            started=False,
+            running=False,
+            returning=False,
+            fast_mapping=False,
             stream_session="session-1",
             stream_status=DreameMowerStreamStatus.VIDEO,
         )
@@ -78,6 +86,24 @@ class _FakeCameraDevice:
     ) -> dict[str, object]:
         self.actions.append((action, parameters))
         return {"code": 0, "result": {"url": "https://example.invalid/photo.jpg"}}
+
+    def call_stream_video_action(
+        self,
+        prop: DreameMowerProperty,
+        parameters: object = None,
+    ) -> dict[str, object]:
+        self.actions.append((DreameMowerAction.STREAM_VIDEO, (prop, parameters)))
+        if isinstance(parameters, dict) and parameters.get("operType") == "end":
+            self.status.stream_session = None
+            self.status.stream_status = DreameMowerStreamStatus.IDLE
+            self.data[DreameMowerProperty.STREAM_STATUS.value] = (
+                '{"result":0,"session":"session-1","operType":"end",'
+                '"operation":"monitor"}'
+            )
+            return {"code": 0, "result": "ended"}
+        self.status.stream_session = "session-1"
+        self.status.stream_status = DreameMowerStreamStatus.VIDEO
+        return {"code": 0, "result": "started"}
 
     def _handle_properties(self, properties: list[dict[str, object]]) -> bool:
         for item in properties:
@@ -217,6 +243,73 @@ def test_camera_sources_probe_builds_payload() -> None:
     assert payload["support"]["supported"] is True
     assert payload["cloud_property_summary"]["requested_key_count"] == 1
     assert payload["device_properties"]["requested_property_count"] == 10
+
+
+def test_camera_stream_handshake_starts_and_ends_monitor_session() -> None:
+    device = _FakeCameraDevice()
+    client = _client_with_device(device)
+    client._sync_update_device = lambda: device
+    client._sync_get_cloud_user_features = lambda language=None: ""
+
+    result = client._sync_probe_camera_stream_handshake(
+        timeout=0,
+        interval=0.1,
+        operation="monitor",
+        payload_mode="with_session",
+    )
+
+    assert result["operation"] == "monitor"
+    assert result["payload_mode"] == "with_session"
+    assert result["start_result"] == {"code": 0, "result": "started"}
+    assert result["end_result"] == {"code": 0, "result": "ended"}
+    assert result["polls"][0]["stream_session_present"] is True
+    assert result["after"]["stream_session_present"] is False
+    assert device.actions[0] == (
+        DreameMowerAction.STREAM_VIDEO,
+        (
+            DreameMowerProperty.STREAM_STATUS,
+            {"operType": "start", "operation": "monitor"},
+        ),
+    )
+
+
+def test_camera_stream_handshake_blocks_active_mower() -> None:
+    device = _FakeCameraDevice()
+    device.status.running = True
+    client = _client_with_device(device)
+    client._sync_update_device = lambda: device
+
+    try:
+        client._sync_probe_camera_stream_handshake(
+            timeout=0,
+            interval=0.1,
+            operation="monitor",
+            payload_mode="with_session",
+        )
+    except DreameLawnMowerConnectionError as err:
+        assert "blocked while the mower is active" in str(err)
+    else:
+        raise AssertionError("Expected active mower stream probe to be blocked")
+
+
+def test_camera_stream_handshake_can_omit_session_key() -> None:
+    device = _FakeCameraDevice()
+    client = _client_with_device(device)
+    client._sync_update_device = lambda: device
+    client._sync_get_cloud_user_features = lambda language=None: ""
+
+    result = client._sync_probe_camera_stream_handshake(
+        timeout=0,
+        interval=0.1,
+        operation="monitor",
+        payload_mode="no_session",
+    )
+
+    assert result["payload_mode"] == "no_session"
+    assert device.actions[0][0] == DreameMowerAction.STREAM_VIDEO
+    payload = device.actions[0][1]
+    assert isinstance(payload, list)
+    assert payload[0]["value"] == '{"operType":"start","operation":"monitor"}'
 
 
 def test_camera_probe_payload_contains_support_and_property_summary() -> None:

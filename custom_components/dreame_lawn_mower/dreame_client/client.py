@@ -224,6 +224,27 @@ class DreameLawnMowerClient:
             request_device_properties,
         )
 
+    async def async_probe_camera_stream_handshake(
+        self,
+        *,
+        timeout: float = 6.0,
+        interval: float = 0.75,
+        operation: str = "monitor",
+        payload_mode: str = "with_session",
+    ) -> dict[str, Any]:
+        """Try the camera stream start/end handshake and return debug details.
+
+        This can start a short camera streaming session. It does not start
+        audio, remote control, or mowing, and it always attempts an end call.
+        """
+        return await asyncio.to_thread(
+            self._sync_probe_camera_stream_handshake,
+            timeout,
+            interval,
+            operation,
+            payload_mode,
+        )
+
     async def async_refresh_map_summary(
         self,
         *,
@@ -621,6 +642,152 @@ class DreameLawnMowerClient:
             cloud_properties=cloud_properties,
             device_properties=device_properties,
         )
+
+    def _sync_probe_camera_stream_handshake(
+        self,
+        timeout: float,
+        interval: float,
+        operation: str,
+        payload_mode: str,
+    ) -> dict[str, Any]:
+        operation = _validate_stream_operation(operation)
+        payload_mode = _validate_stream_payload_mode(payload_mode)
+        before = self._sync_update_device()
+        self._guard_camera_stream_probe_idle(before)
+        support = self._sync_get_camera_feature_support(
+            refresh=False,
+            include_cloud=True,
+            language="en",
+        )
+        if not support.supported:
+            reason = support.reason or "Camera/photo support is not available."
+            raise DreameLawnMowerConnectionError(reason)
+
+        try:
+            from .types import DreameMowerProperty
+        except ImportError as err:
+            raise DreameLawnMowerConnectionError(
+                "Camera protocol types are unavailable."
+            ) from err
+
+        output: dict[str, Any] = {
+            "operation": operation,
+            "payload_mode": payload_mode,
+            "before": self._stream_status_payload(before),
+            "start_result": None,
+            "polls": [],
+            "end_result": None,
+            "after": None,
+            "cleanup_error": None,
+        }
+
+        device = self._ensure_device()
+        try:
+            output["start_result"] = _json_safe(
+                self._call_stream_video_status(
+                    device,
+                    DreameMowerProperty,
+                    operation=operation,
+                    oper_type="start",
+                    payload_mode=payload_mode,
+                )
+            )
+            deadline = time.monotonic() + max(timeout, 0)
+            while True:
+                refreshed = self._sync_update_device()
+                poll = self._stream_status_payload(refreshed)
+                output["polls"].append(poll)
+                if poll["stream_session_present"] or poll["stream_status"]:
+                    break
+                if time.monotonic() >= deadline:
+                    break
+                time.sleep(max(interval, 0.1))
+        finally:
+            try:
+                output["end_result"] = _json_safe(
+                    self._call_stream_video_status(
+                        device,
+                        DreameMowerProperty,
+                        operation=operation,
+                        oper_type="end",
+                        payload_mode=payload_mode,
+                    )
+                )
+            except Exception as err:
+                output["cleanup_error"] = str(err)
+            try:
+                output["after"] = self._stream_status_payload(self._sync_update_device())
+            except Exception as err:
+                if output["cleanup_error"] is None:
+                    output["cleanup_error"] = str(err)
+
+        return output
+
+    def _call_stream_video_status(
+        self,
+        device: Any,
+        property_enum: Any,
+        *,
+        operation: str,
+        oper_type: str,
+        payload_mode: str,
+    ) -> Any:
+        if payload_mode == "with_session":
+            return device.call_stream_video_action(
+                property_enum.STREAM_STATUS,
+                {"operType": oper_type, "operation": operation},
+            )
+
+        payload: dict[str, Any] = {"operType": oper_type, "operation": operation}
+        if payload_mode == "empty_session":
+            payload["session"] = ""
+
+        from .types import DreameMowerAction, PIID
+
+        return device.call_action(
+            DreameMowerAction.STREAM_VIDEO,
+            [
+                {
+                    "piid": PIID(property_enum.STREAM_STATUS),
+                    "value": str(json.dumps(payload, separators=(",", ":"))).replace(
+                        " ",
+                        "",
+                    ),
+                }
+            ],
+        )
+
+    def _guard_camera_stream_probe_idle(self, device: Any) -> None:
+        status = getattr(device, "status", None)
+        snapshot = snapshot_from_device(self._descriptor, device)
+        raw_running = bool(snapshot.raw_attributes.get("running"))
+        if snapshot.mowing or snapshot.returning or raw_running:
+            raise DreameLawnMowerConnectionError(
+                "Camera stream handshake probe is blocked while the mower is active."
+            )
+        if bool(getattr(status, "fast_mapping", False)):
+            raise DreameLawnMowerConnectionError(
+                "Camera stream handshake probe is blocked while mapping."
+            )
+
+    def _stream_status_payload(self, device: Any) -> dict[str, Any]:
+        try:
+            from .types import DreameMowerProperty
+        except ImportError:
+            stream_status_raw = None
+        else:
+            stream_status_raw = _safe_get_device_property(
+                device,
+                DreameMowerProperty.STREAM_STATUS,
+            )
+        status = getattr(device, "status", None)
+        return {
+            "state": _lower_enum_name(getattr(status, "state", None)),
+            "status": _lower_enum_name(getattr(status, "status", None)),
+            "stream_status": _lower_enum_name(getattr(status, "stream_status", None)),
+            "stream_session_present": bool(getattr(status, "stream_session", None)),
+            "stream_status_raw": _json_safe(stream_status_raw),
+        }
 
     def _sync_probe_camera_device_properties(self) -> dict[str, Any]:
         device = self._ensure_device()
@@ -1166,6 +1333,26 @@ def _camera_feature_advertised(
         or (isinstance(live_key_define, Mapping) and bool(live_key_define))
         or video_status is not None
     )
+
+
+def _validate_stream_operation(operation: str) -> str:
+    if not isinstance(operation, str):
+        raise ValueError("operation must be a string")
+    value = operation.strip()
+    if value not in {"monitor"}:
+        raise ValueError("operation must be 'monitor'")
+    return value
+
+
+def _validate_stream_payload_mode(payload_mode: str) -> str:
+    if not isinstance(payload_mode, str):
+        raise ValueError("payload_mode must be a string")
+    value = payload_mode.strip()
+    if value not in {"with_session", "no_session", "empty_session"}:
+        raise ValueError(
+            "payload_mode must be one of: with_session, no_session, empty_session"
+        )
+    return value
 
 
 def _cloud_user_feature_summary(value: Any) -> Mapping[str, Any]:

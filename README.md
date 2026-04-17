@@ -145,6 +145,20 @@ python examples/photo_info_probe.py --execute
 
 Without `--execute` the script only prints support details. With `--execute` it calls `GET_PHOTO_INFO` once; it still does not start streaming, audio, remote control, or mowing.
 
+The next safety-gated probe tries the probable app stream handshake:
+
+```bash
+python examples/camera_stream_handshake_probe.py --execute
+```
+
+This calls `STREAM_VIDEO` with `STREAM_STATUS` and a short `monitor` start/end pair, then polls for a session/status blob. It is intentionally blocked while the mower is active, returning, or mapping.
+
+If the default payload is rejected, test the app-style payload without a `session` key:
+
+```bash
+python examples/camera_stream_handshake_probe.py --execute --payload-mode no_session
+```
+
 ## Remote control experiments
 
 The reverse-engineered protocol exposes remote control through property `4.15`. The reusable Python client can now report support with `async_get_remote_control_support()` and can send one validated movement step with `async_remote_control_move_step(rotation=..., velocity=..., prompt=...)`.
