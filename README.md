@@ -129,6 +129,12 @@ The read-only support check is:
 python examples/remote_control_probe.py
 ```
 
+The safety-gated live smoke test is:
+
+```bash
+python examples/remote_control_smoke.py --execute --velocity 60 --rotation 60 --duration 0.5 --dock
+```
+
 This is intentionally not exposed as a Home Assistant drive service yet. Remote control can physically move the mower, so the next step is to validate command ranges and safety behavior from the Python client before adding any HA UI or automation surface.
 
 ## Automation examples
