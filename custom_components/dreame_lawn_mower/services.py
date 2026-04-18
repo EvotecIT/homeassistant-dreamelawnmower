@@ -16,6 +16,7 @@ from .dreame_client.client import (
     REMOTE_CONTROL_MAX_ROTATION,
     REMOTE_CONTROL_MAX_VELOCITY,
 )
+from .manual_control import remote_control_block_reason
 
 ATTR_ENTRY_ID = "entry_id"
 ATTR_PROMPT = "prompt"
@@ -26,7 +27,6 @@ SERVICE_REMOTE_CONTROL_STEP = "remote_control_step"
 SERVICE_REMOTE_CONTROL_STOP = "remote_control_stop"
 
 _SERVICES_REGISTERED = "__services_registered"
-_REMOTE_CONTROL_STATES = {"remote_control"}
 
 
 def _bounded_int(*, name: str, limit: int) -> Any:
@@ -150,19 +150,5 @@ def _guard_remote_control_step(coordinator: DreameLawnMowerCoordinator) -> None:
     if snapshot is None:
         raise HomeAssistantError("Mower state is not available yet.")
 
-    raw_attributes = snapshot.raw_attributes or {}
-    state = str(snapshot.state or "").casefold()
-    activity = str(snapshot.activity or "").casefold()
-    remote_control_active = state in _REMOTE_CONTROL_STATES
-    raw_running = bool(raw_attributes.get("running"))
-    mapping = bool(raw_attributes.get("mapping"))
-
-    if mapping:
-        raise HomeAssistantError("Remote control is blocked while mapping.")
-    if bool(raw_attributes.get("fast_mapping")):
-        raise HomeAssistantError("Remote control is blocked while fast mapping.")
-    if snapshot.returning and not remote_control_active:
-        raise HomeAssistantError("Remote control is blocked while returning to dock.")
-    mower_active = snapshot.mowing or activity == "mowing" or raw_running
-    if mower_active and not remote_control_active:
-        raise HomeAssistantError("Remote control is blocked while the mower is active.")
+    if reason := remote_control_block_reason(snapshot):
+        raise HomeAssistantError(reason)

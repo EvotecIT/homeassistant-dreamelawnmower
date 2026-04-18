@@ -25,15 +25,43 @@ Last updated: 2026-04-18
 - Remote control support is detected from protocol mapping `4.15`.
 - Safe remote-control movement works through
   `async_remote_control_move_step(...)` and `async_remote_control_stop()`.
+- Remote-control support payloads distinguish protocol availability from current
+  state safety: `supported` means the mapping exists, `state_safe` tells whether
+  nonzero movement is currently allowed.
+- Home Assistant exposes guarded manual-drive services plus diagnostic
+  `Manual Drive Safe` and `Manual Drive Block Reason` entities that share the
+  same state guard.
 - A supervised no-mow test drive was run successfully:
   stop, forward, turn right, turn left, backward, stop after each step, then
   dock.
 - The mower returned to `charging_completed` / `docked` after the test drive.
 - Operation snapshots work and group normalized state, realtime summaries,
   decoded status blob, map diagnostics, firmware evidence, and remote-control
-  support.
+  support. They also include the current manual-drive safety decision from the
+  same reusable guard used by Home Assistant.
+- A read-only operation snapshot on 2026-04-18 collected `before` and `final`
+  captures without movement. The mower stayed docked at `charging_completed`
+  with battery 100%, manual-drive state safety was true, remote-control support
+  was present, and the legacy map path still returned no map data.
+- Read-only remote-control support probes on 2026-04-18 reported
+  `supported=true`, `state_safe=true`, no block reason, `active=false`, and
+  docked states including `charging_completed` and `charging`.
+- A read-only remote-control smoke probe on 2026-04-18 reported before/after
+  `manual_drive_safe=true`, support `state_safe=true`, no block reason,
+  `active=false`, and no movement steps.
 - Firmware/update diagnostics work as evidence, but no verified mower OTA
   availability signal has been found.
+- Config-flow auth failures are classified into non-secret Home Assistant
+  errors for account type, region, connectivity, generic auth, 2FA, and no
+  matching mower devices.
+- Downloaded diagnostics use schema version 5 and include manual-drive safety
+  in `state_reconciliation` and `triage`.
+- The live docked `charging_completed` shape has a sanitized fixture regression
+  that preserves effective docked, raw dock false, not actively charging, raw
+  started true, effective started false, and manual-drive-safe semantics.
+- The live docked `charging` shape also has a sanitized fixture regression that
+  preserves raw/effective docked true, raw/effective charging true, raw started
+  true, effective started false, and manual-drive-safe semantics.
 
 ## Known Gaps
 
@@ -60,6 +88,7 @@ the workspace after live tests:
 - `field-trip-readonly.json`
 - `firmware-update-live.json`
 - `map-sources-current.json`
+- `remote-control-current.json`
 
 These files can help a future agent understand recent live behavior, but they
 must not be committed.
@@ -94,6 +123,12 @@ $env:DREAME_PASSWORD = [Environment]::GetEnvironmentVariable('DREAME_PASSWORD','
 $env:DREAME_COUNTRY = [Environment]::GetEnvironmentVariable('DREAME_COUNTRY','User')
 $env:DREAME_ACCOUNT_TYPE = [Environment]::GetEnvironmentVariable('DREAME_ACCOUNT_TYPE','User')
 python examples\map_sources_probe.py | Out-File -FilePath map-sources-current.json -Encoding utf8
+```
+
+Read-only remote-control support probe:
+
+```powershell
+python examples\remote_control_probe.py --out remote-control-current.json
 ```
 
 Firmware evidence probe:
@@ -135,9 +170,8 @@ credentials into repo files.
 
 ## Recommended Next Work
 
-- Move back to Home Assistant wiring for the already validated Python-client
-  features: operation snapshot button, diagnostics, remote-control services,
-  sensors/binary sensors, and safe state display.
+- Keep adding fixtures for real mower transitions such as idle, returning,
+  docked-charging, charging, and fault recovery.
 - Do not expose a Home Assistant firmware update entity yet. Keep firmware as
   diagnostics until a verified latest-version or OTA-available field is found.
 - Keep the map camera disabled/diagnostic until a real mower-native map source

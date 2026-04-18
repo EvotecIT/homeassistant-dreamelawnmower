@@ -21,6 +21,7 @@ def _coordinator(snapshot: object) -> object:
 def _snapshot(**overrides: object) -> SimpleNamespace:
     values = {
         "activity": "docked",
+        "battery_level": 80,
         "mowing": False,
         "raw_attributes": {},
         "returning": False,
@@ -86,3 +87,35 @@ def test_remote_control_guard_blocks_mapping() -> None:
                 )
             )
         )
+
+
+def test_remote_control_guard_blocks_low_battery() -> None:
+    with pytest.raises(HomeAssistantError, match="battery is low"):
+        _guard_remote_control_step(
+            _coordinator(
+                _snapshot(
+                    battery_level=19,
+                )
+            )
+        )
+
+
+def test_remote_control_guard_blocks_active_error() -> None:
+    with pytest.raises(HomeAssistantError, match="error is active"):
+        _guard_remote_control_step(
+            _coordinator(
+                _snapshot(
+                    activity="error",
+                )
+            )
+        )
+
+
+def test_remote_control_guard_allows_unknown_battery_level() -> None:
+    _guard_remote_control_step(
+        _coordinator(
+            _snapshot(
+                battery_level=None,
+            )
+        )
+    )

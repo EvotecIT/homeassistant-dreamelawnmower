@@ -57,6 +57,8 @@ map_summary_from_map_data = _models.map_summary_from_map_data
 map_summary_to_dict = _models.map_summary_to_dict
 mower_error_label = _app_protocol.mower_error_label
 mower_state_label = _app_protocol.mower_state_label
+remote_control_block_reason = _models.remote_control_block_reason
+remote_control_state_safe = _models.remote_control_state_safe
 run_jadx_decompile = _apk_research.run_jadx_decompile
 
 __all__ = [
@@ -106,5 +108,7 @@ __all__ = [
     "map_summary_to_dict",
     "mower_error_label",
     "mower_state_label",
+    "remote_control_block_reason",
+    "remote_control_state_safe",
     "run_jadx_decompile",
 ]

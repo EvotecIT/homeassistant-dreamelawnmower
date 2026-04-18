@@ -55,6 +55,30 @@ async def async_discover_devices(
     )
 
 
+def auth_error_key(err: Exception) -> str:
+    """Return a non-secret Home Assistant config-flow error key."""
+    text = str(err).casefold()
+    if "unsupported account type" in text:
+        return "invalid_account_type"
+    if any(marker in text for marker in ("country", "region", "location")):
+        return "invalid_region"
+    if any(
+        marker in text
+        for marker in (
+            "connection",
+            "connect",
+            "dns",
+            "host",
+            "network",
+            "ssl",
+            "timeout",
+            "timed out",
+        )
+    ):
+        return "cannot_connect"
+    return "cannot_auth"
+
+
 class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle the Dreame lawn mower config flow."""
 
@@ -95,8 +119,8 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
             except DreameLawnMowerTwoFactorRequiredError:
                 self._errors["base"] = "2fa_required"
-            except DreameLawnMowerAuthError:
-                self._errors["base"] = "cannot_auth"
+            except DreameLawnMowerAuthError as err:
+                self._errors["base"] = auth_error_key(err)
             else:
                 if not devices:
                     self._errors["base"] = "no_devices"
@@ -154,8 +178,8 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
             except DreameLawnMowerTwoFactorRequiredError:
                 self._errors["base"] = "2fa_required"
-            except DreameLawnMowerAuthError:
-                self._errors["base"] = "cannot_auth"
+            except DreameLawnMowerAuthError as err:
+                self._errors["base"] = auth_error_key(err)
             else:
                 selected = next(
                     (item for item in devices if item.did == entry.data[CONF_DID]),

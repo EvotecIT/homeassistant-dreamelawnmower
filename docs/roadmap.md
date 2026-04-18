@@ -78,7 +78,8 @@ Checklist:
 - [ ] document which fields are authoritative for live state, battery, task, and maintenance
 - [ ] add normalized snapshot fields only after fixture validation
 - [ ] expose maintenance/statistics sensors behind data-driven existence checks
-- [ ] add fixtures for idle, docked-charging, paused, and paused-with-error A2 states
+- [x] add fixtures for docked-charging, paused, and paused-with-error A2 states
+- [ ] add fixtures for idle and additional A2/A2 Pro transition states
 
 Definition of done:
 
@@ -129,15 +130,16 @@ Targets:
 
 Checklist:
 
-- [ ] keep `activity`, `state`, and raw mower-state semantics clearly separated
+- [x] keep `activity`, `state`, and raw mower-state semantics clearly separated
 - [x] include a diagnostic `state_reconciliation` summary for source disagreements
 - [x] avoid surfacing a sticky upstream error flag when code/text/name say no error
 - [x] separate effective docked state from the raw vendor dock flag
 - [x] separate effective returning and active-task state from raw vendor flags
-- [ ] expose reliable charging indicators
-- [ ] add friendly error text plus raw vendor error text where both exist
-- [ ] document example Home Assistant automations for garage-door workflows
-- [ ] add fixture-based tests for paused, returning, docked, charging, and fault transitions as captures become available
+- [x] expose reliable charging indicators
+- [x] add friendly error text plus raw vendor error text where both exist
+- [x] document example Home Assistant automations for garage-door workflows
+- [x] add fixture-based tests for paused, returning, docked, charging, and fault transitions
+- [ ] keep adding fixture-based tests for idle and recovery transitions as captures become available
 
 Definition of done:
 
@@ -158,8 +160,8 @@ Targets:
 
 Checklist:
 
-- [ ] improve error messages for bad region, account type, or incomplete auth flow
-- [ ] add more auth diagnostics without leaking secrets
+- [x] improve error messages for bad region, account type, or incomplete auth flow
+- [x] add more auth diagnostics without leaking secrets
 - [ ] verify whether OTA-available data exists for supported models
 - [ ] add an `update` entity only after OTA availability is confirmed from real payloads
 
@@ -178,13 +180,15 @@ Targets:
 
 - expose a narrow service surface for supervised drive tests
 - keep command ranges validated in both the reusable client and Home Assistant layer
-- block movement when the mower appears to be mowing, returning, mapping, or fast mapping
+- block movement when the mower appears to be mowing, returning, mapping, fast
+  mapping, in error, or below the minimum safe battery level
 
 Checklist:
 
 - [x] add a reusable client support probe and bounded movement-step API
 - [x] add guarded Home Assistant `remote_control_step` and `remote_control_stop` services
-- [ ] validate tiny forward/back/turn pulses on real A2-family hardware
+- [x] expose current manual-drive safety and block reason in Home Assistant
+- [x] validate tiny forward/back/turn pulses on real A2-family hardware
 - [ ] document observed command ranges and stop behavior from live smoke tests
 - [ ] decide whether a disabled-by-default UI entity or custom card is safe enough later
 

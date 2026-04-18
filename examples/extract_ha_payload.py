@@ -11,6 +11,7 @@ from typing import Any
 LOG_MARKERS = {
     "debug_snapshot": "Captured Dreame lawn mower debug snapshot",
     "map_probe": "Captured Dreame lawn mower map probe",
+    "operation_snapshot": "Captured Dreame lawn mower operation snapshot",
 }
 
 
@@ -26,16 +27,32 @@ def summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """Return a compact triage summary for a mower debug or probe payload."""
 
     payload = _payload_body(payload)
+    if isinstance(payload.get("captures"), list):
+        return _summarize_field_trip_payload(payload)
+
     snapshot = _as_mapping(payload.get("snapshot"))
     descriptor = _as_mapping(payload.get("descriptor") or snapshot.get("descriptor"))
     device = _as_mapping(payload.get("device"))
+    triage = _as_mapping(payload.get("triage"))
     reconciliation = _as_mapping(payload.get("state_reconciliation"))
     error = _as_mapping(reconciliation.get("error"))
     flags = _as_mapping(reconciliation.get("flags"))
+    manual_drive = _as_mapping(reconciliation.get("manual_drive"))
+    raw_attributes = _as_mapping(snapshot.get("raw_attributes"))
+    raw_state_signals = _as_mapping(snapshot.get("raw_state_signals"))
+    unknown_property_summary = _as_mapping(payload.get("unknown_property_summary"))
+    realtime_summary = _as_mapping(payload.get("realtime_summary"))
     cloud_property_summary = _as_mapping(payload.get("cloud_property_summary"))
     map_payload = _as_mapping(payload.get("map"))
+    map_view = _as_mapping(payload.get("map_view"))
+    firmware_update = _as_mapping(payload.get("firmware_update"))
+    remote_control_support = _as_mapping(payload.get("remote_control_support"))
+    status_blob = _as_mapping(payload.get("status_blob"))
 
     summary: dict[str, Any] = {
+        "label": payload.get("label"),
+        "diagnostic_schema_version": payload.get("diagnostic_schema_version")
+        or triage.get("schema_version"),
         "captured_at": payload.get("captured_at"),
         "name": descriptor.get("name") or device.get("name"),
         "model": descriptor.get("display_model") or descriptor.get("model"),
@@ -43,7 +60,8 @@ def summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "state": reconciliation.get("state") or snapshot.get("state"),
         "state_name": reconciliation.get("state_name") or snapshot.get("state_name"),
         "raw_mower_state": reconciliation.get("raw_mower_state")
-        or _as_mapping(snapshot.get("raw_attributes")).get("mower_state"),
+        or raw_attributes.get("mower_state")
+        or raw_state_signals.get("mower_state"),
         "battery_level": snapshot.get("battery_level"),
         "error": {
             "active": error.get("active"),
@@ -54,20 +72,37 @@ def summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
         },
         "flags": {
             "charging": flags.get("charging", snapshot.get("charging")),
+            "raw_charging": flags.get("raw_charging", snapshot.get("raw_charging")),
             "docked": flags.get("docked", snapshot.get("docked")),
+            "raw_docked": flags.get("raw_docked", snapshot.get("raw_docked")),
             "mowing": flags.get("mowing", snapshot.get("mowing")),
             "paused": flags.get("paused", snapshot.get("paused")),
             "returning": flags.get("returning", snapshot.get("returning")),
+            "raw_returning": flags.get("raw_returning", snapshot.get("raw_returning")),
             "started": flags.get("started", snapshot.get("started")),
+            "raw_started": flags.get("raw_started", snapshot.get("raw_started")),
+        },
+        "manual_drive": {
+            "safe": manual_drive.get("safe", snapshot.get("manual_drive_safe")),
+            "block_reason": manual_drive.get(
+                "block_reason",
+                snapshot.get("manual_drive_block_reason"),
+            ),
         },
         "warnings": reconciliation.get("warnings", []),
+        "triage_issues": triage.get("issues", []),
+        "suggested_next_capture": triage.get("suggested_next_capture", []),
+        "errors": payload.get("errors", []),
         "unknown_property_count": device.get(
             "unknown_property_count",
-            snapshot.get("unknown_property_count"),
+            snapshot.get(
+                "unknown_property_count",
+                unknown_property_summary.get("count"),
+            ),
         ),
         "realtime_property_count": device.get(
             "realtime_property_count",
-            snapshot.get("realtime_property_count"),
+            snapshot.get("realtime_property_count", realtime_summary.get("count")),
         ),
         "last_realtime_method": snapshot.get("last_realtime_method"),
     }
@@ -86,6 +121,37 @@ def summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "available": map_payload.get("available"),
             "has_image": map_payload.get("has_image"),
             "error": map_payload.get("error"),
+        }
+
+    if map_view:
+        summary["map_view"] = _map_view_summary(map_view)
+
+    if firmware_update:
+        summary["firmware_update"] = {
+            "current_version": firmware_update.get("current_version"),
+            "update_state": firmware_update.get("update_state"),
+            "update_available": firmware_update.get("update_available"),
+            "warnings": firmware_update.get("warnings", []),
+            "reason": firmware_update.get("reason"),
+        }
+
+    if remote_control_support:
+        summary["remote_control_support"] = {
+            "supported": remote_control_support.get("supported"),
+            "active": remote_control_support.get("active"),
+            "state_safe": remote_control_support.get("state_safe"),
+            "state_block_reason": remote_control_support.get("state_block_reason"),
+            "siid": remote_control_support.get("siid"),
+            "piid": remote_control_support.get("piid"),
+            "reason": remote_control_support.get("reason"),
+        }
+
+    if status_blob:
+        summary["status_blob"] = {
+            "source": status_blob.get("source"),
+            "length": status_blob.get("length"),
+            "frame_valid": status_blob.get("frame_valid"),
+            "notes": status_blob.get("notes", []),
         }
 
     return _drop_empty(summary)
@@ -156,6 +222,65 @@ def _drop_empty(value: Any) -> Any:
     if isinstance(value, list):
         return [_drop_empty(item) for item in value]
     return value
+
+
+def _map_view_summary(map_view: dict[str, Any]) -> dict[str, Any]:
+    diagnostics = _as_mapping(map_view.get("diagnostics"))
+    cloud_property_summary = _as_mapping(diagnostics.get("cloud_property_summary"))
+    return _drop_empty(
+        {
+            "source": map_view.get("source"),
+            "available": map_view.get("available"),
+            "has_image": map_view.get("has_image"),
+            "error": map_view.get("error"),
+            "diagnostic_reason": diagnostics.get("reason"),
+            "cloud_property_summary": {
+                "requested_key_count": cloud_property_summary.get(
+                    "requested_key_count"
+                ),
+                "non_empty_keys": cloud_property_summary.get("non_empty_keys", []),
+                "decoded_labels": cloud_property_summary.get("decoded_labels", {}),
+                "blob_keys": cloud_property_summary.get("blob_keys", {}),
+            },
+        }
+    )
+
+
+def _summarize_field_trip_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    captures = [
+        summarize_payload(capture)
+        for capture in payload.get("captures", [])
+        if isinstance(capture, dict)
+    ]
+    steps = [
+        {
+            "label": step.get("label"),
+            "ok": step.get("ok"),
+            "error": step.get("error"),
+        }
+        for step in payload.get("steps", [])
+        if isinstance(step, dict)
+    ]
+    settings = _as_mapping(payload.get("settings"))
+    return _drop_empty(
+        {
+            "execute": payload.get("execute"),
+            "device_index": payload.get("device_index"),
+            "capture_count": len(captures),
+            "step_count": len(steps),
+            "settings": {
+                "dock": settings.get("dock"),
+                "include_map": settings.get("include_map"),
+                "include_firmware": settings.get("include_firmware"),
+                "velocity": settings.get("velocity"),
+                "rotation": settings.get("rotation"),
+                "duration": settings.get("duration"),
+                "settle": settings.get("settle"),
+            },
+            "steps": steps,
+            "captures": captures,
+        }
+    )
 
 
 def _candidate_json_offsets(

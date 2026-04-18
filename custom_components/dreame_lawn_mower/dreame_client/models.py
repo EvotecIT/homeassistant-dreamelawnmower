@@ -8,6 +8,8 @@ from typing import Any
 
 SUPPORTED_ACCOUNT_TYPES = ("dreame", "mova")
 SUPPORTED_MODEL_MARKER = ".mower."
+MIN_REMOTE_CONTROL_BATTERY_LEVEL = 20
+REMOTE_CONTROL_STATES = {"remote_control"}
 
 MODEL_NAME_MAP = {
     "dreame.mower.p2255": "A1",
@@ -80,6 +82,37 @@ def _is_no_error_text(value: str | None) -> bool:
     return text.replace("_", " ").casefold() in {"no error", "none"}
 
 
+def _error_name_from_code(value: int | None) -> str | None:
+    """Return the bundled vendor error name for a numeric code, if known."""
+    if value in (None, -1, 0):
+        return None
+    try:
+        from .const import ERROR_CODE_TO_ERROR_NAME
+        from .types import DreameMowerErrorCode
+
+        return ERROR_CODE_TO_ERROR_NAME.get(DreameMowerErrorCode(value))
+    except (ImportError, ValueError):
+        return None
+
+
+def _friendly_error_display(
+    *,
+    error_code: int | None,
+    error_name: str | None,
+    error_text: str | None,
+) -> str | None:
+    """Return the best user-facing error while preserving raw text elsewhere."""
+    if error_code not in (None, -1, 0):
+        return (
+            _friendly_error_name(error_name)
+            or _friendly_error_name(_error_name_from_code(error_code))
+            or (None if _is_no_error_text(error_text) else error_text)
+            or f"Error {error_code}"
+        )
+
+    return _friendly_error_name(error_name) or error_text
+
+
 @dataclass(slots=True, frozen=True)
 class DreameLawnMowerDescriptor:
     """Normalized mower discovery information."""
@@ -134,6 +167,7 @@ class DreameLawnMowerSnapshot:
     online: bool | None = None
     child_lock: bool | None = None
     charging: bool = False
+    raw_charging: bool | None = None
     started: bool = False
     raw_started: bool | None = None
     docked: bool = False
@@ -299,6 +333,8 @@ class DreameLawnMowerRemoteControlSupport:
 
     supported: bool
     active: bool = False
+    state_safe: bool | None = None
+    state_block_reason: str | None = None
     siid: int | None = None
     piid: int | None = None
     state: str | None = None
@@ -338,6 +374,49 @@ class DreameLawnMowerCameraFeatureSupport:
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-safe support payload."""
         return asdict(self)
+
+
+def remote_control_block_reason(snapshot: Any) -> str | None:
+    """Return why manual remote control is blocked for the snapshot state."""
+    if snapshot is None:
+        return "Mower state is not available yet."
+
+    raw_attributes = getattr(snapshot, "raw_attributes", None) or {}
+    state = str(getattr(snapshot, "state", None) or "").casefold()
+    activity = str(getattr(snapshot, "activity", None) or "").casefold()
+    remote_control_active = state in REMOTE_CONTROL_STATES
+    raw_running = bool(raw_attributes.get("running"))
+    mapping = bool(raw_attributes.get("mapping"))
+    battery_level = getattr(snapshot, "battery_level", None)
+
+    if mapping:
+        return "Remote control is blocked while mapping."
+    if bool(raw_attributes.get("fast_mapping")):
+        return "Remote control is blocked while fast mapping."
+    if (
+        isinstance(battery_level, int | float)
+        and battery_level < MIN_REMOTE_CONTROL_BATTERY_LEVEL
+    ):
+        return "Remote control is blocked while battery is low."
+    if activity == "error":
+        return "Remote control is blocked while error is active."
+    if getattr(snapshot, "returning", False) and not remote_control_active:
+        return "Remote control is blocked while returning to dock."
+
+    mower_active = (
+        bool(getattr(snapshot, "mowing", False))
+        or activity == "mowing"
+        or raw_running
+    )
+    if mower_active and not remote_control_active:
+        return "Remote control is blocked while the mower is active."
+
+    return None
+
+
+def remote_control_state_safe(snapshot: Any) -> bool:
+    """Return whether the snapshot state allows a manual-drive step."""
+    return remote_control_block_reason(snapshot) is None
 
 
 def map_summary_to_dict(
@@ -459,6 +538,10 @@ def snapshot_from_device(
         "smart_charging",
         "waiting_for_task",
     }
+    charging_states = {
+        "charging",
+        "smart_charging",
+    }
 
     if has_error:
         activity = "error"
@@ -484,6 +567,14 @@ def snapshot_from_device(
     effective_docked = bool(
         raw_docked or state in docked_states or activity == "docked"
     )
+    raw_charging_source = status_attributes.get(
+        "charging",
+        getattr(device.status, "charging", None),
+    )
+    raw_charging = (
+        None if raw_charging_source is None else bool(raw_charging_source)
+    )
+    effective_charging = bool(raw_charging or state in charging_states)
     raw_started = bool(
         status_attributes.get("started", getattr(device.status, "started", False))
     )
@@ -515,7 +606,11 @@ def snapshot_from_device(
         error_code=error_code,
         error_name=error_name,
         error_text=error_text,
-        error_display=_friendly_error_name(error_name) or error_text,
+        error_display=_friendly_error_display(
+            error_code=error_code,
+            error_name=error_name,
+            error_text=error_text,
+        ),
         firmware_version=getattr(
             getattr(device, "info", None),
             "firmware_version",
@@ -533,12 +628,8 @@ def snapshot_from_device(
         last_realtime_method=last_realtime_method,
         online=info_raw.get("online"),
         child_lock=child_lock,
-        charging=bool(
-            status_attributes.get(
-                "charging",
-                getattr(device.status, "charging", False),
-            )
-        ),
+        charging=effective_charging,
+        raw_charging=raw_charging,
         started=effective_started,
         raw_started=raw_started,
         docked=effective_docked,

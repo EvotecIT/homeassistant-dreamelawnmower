@@ -3,6 +3,8 @@ remote_control_step:
   description: >-
     Send one validated manual-drive movement step to the mower. This can
     physically move the mower and is intended for short supervised tests only.
+    The service is blocked while the mower is mowing, returning, mapping, fast
+    mapping, in error, or below 20% battery.
   fields:
     entry_id:
       name: Config entry ID

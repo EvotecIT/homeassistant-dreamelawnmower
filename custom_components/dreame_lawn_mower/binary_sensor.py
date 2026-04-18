@@ -24,6 +24,7 @@ from .const import (
 )
 from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity
+from .manual_control import remote_control_state_safe
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +59,11 @@ def _raw_docked(snapshot: Any) -> bool | None:
     return getattr(snapshot, "raw_docked", None)
 
 
+def _raw_charging(snapshot: Any) -> bool | None:
+    """Return the vendor-reported charging flag when known."""
+    return getattr(snapshot, "raw_charging", None)
+
+
 def _raw_started(snapshot: Any) -> bool | None:
     """Return the vendor-reported started flag when known."""
     return getattr(snapshot, "raw_started", None)
@@ -90,6 +96,15 @@ BINARY_SENSORS = [
         name="Charging",
         value_fn=lambda snapshot: snapshot.charging,
         icon="mdi:battery-charging",
+    ),
+    DreameBinarySensorDescription(
+        key="raw_charging",
+        name="Raw Charging Flag",
+        value_fn=_raw_charging,
+        exists_fn=lambda snapshot: _raw_charging(snapshot) is not None,
+        icon="mdi:battery-charging",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
     ),
     DreameBinarySensorDescription(
         key="docked",
@@ -164,6 +179,13 @@ BINARY_SENSORS = [
         icon="mdi:flash-outline",
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
+    ),
+    DreameBinarySensorDescription(
+        key="manual_drive_safe",
+        name="Manual Drive Safe",
+        value_fn=remote_control_state_safe,
+        icon="mdi:shield-check-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
     ),
     DreameBinarySensorDescription(
         key="child_lock",

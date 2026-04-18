@@ -14,9 +14,14 @@ from .dreame_client.app_protocol import (
     decode_mower_status_blob,
 )
 from .dreame_client.map_probe import MAP_CANDIDATE_TERMS
-from .dreame_client.models import MODEL_NAME_MAP, SUPPORTED_MODEL_MARKER
+from .dreame_client.models import (
+    MODEL_NAME_MAP,
+    SUPPORTED_MODEL_MARKER,
+    remote_control_block_reason,
+    remote_control_state_safe,
+)
 
-DIAGNOSTIC_SCHEMA_VERSION = 3
+DIAGNOSTIC_SCHEMA_VERSION = 5
 UNKNOWN_REALTIME_PREFIX = "UNKNOWN_REALTIME_"
 
 REDACT_KEYS = {
@@ -255,6 +260,7 @@ def _collect_state_reconciliation(snapshot: Any, device: Any) -> dict[str, Any]:
     snapshot_docked = bool(getattr(snapshot, "docked", False))
     snapshot_raw_docked = getattr(snapshot, "raw_docked", None)
     snapshot_charging = bool(getattr(snapshot, "charging", False))
+    snapshot_raw_charging = getattr(snapshot, "raw_charging", None)
     snapshot_raw_started = getattr(snapshot, "raw_started", None)
     snapshot_raw_returning = getattr(snapshot, "raw_returning", None)
     active_error = _active_error_from_snapshot(snapshot)
@@ -298,6 +304,7 @@ def _collect_state_reconciliation(snapshot: Any, device: Any) -> dict[str, Any]:
         },
         "flags": {
             "charging": snapshot_charging,
+            "raw_charging": snapshot_raw_charging,
             "docked": snapshot_docked,
             "raw_docked": snapshot_raw_docked,
             "mowing": bool(getattr(snapshot, "mowing", False)),
@@ -306,6 +313,12 @@ def _collect_state_reconciliation(snapshot: Any, device: Any) -> dict[str, Any]:
             "raw_returning": snapshot_raw_returning,
             "started": bool(getattr(snapshot, "started", False)),
             "raw_started": snapshot_raw_started,
+        },
+        "manual_drive": {
+            "safe": remote_control_state_safe(snapshot),
+            "block_reason": _normalize_debug_value(
+                remote_control_block_reason(snapshot)
+            ),
         },
         "status_values": status_values,
         "warnings": warnings,
@@ -470,6 +483,16 @@ def _collect_triage_summary(
         ),
         "activity": _normalize_debug_value(getattr(snapshot, "activity", None)),
         "state": _normalize_debug_value(getattr(snapshot, "state", None)),
+        "error": {
+            "active": bool(state_reconciliation.get("error", {}).get("active")),
+            "code": _normalize_debug_value(getattr(snapshot, "error_code", None)),
+            "display": _normalize_debug_value(
+                getattr(snapshot, "error_display", None)
+            ),
+        },
+        "manual_drive": _normalize_debug_value(
+            state_reconciliation.get("manual_drive", {})
+        ),
         "available": _normalize_debug_value(getattr(snapshot, "available", None)),
         "capabilities": _normalize_debug_value(capabilities),
         "unknown_property_count": unknown_property_summary.get("count", 0),

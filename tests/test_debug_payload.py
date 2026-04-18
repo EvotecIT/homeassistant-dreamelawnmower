@@ -154,6 +154,7 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
         device=device,
     )
 
+    assert payload["diagnostic_schema_version"] == 5
     assert payload["entry"]["username"] == "**REDACTED**"
     assert payload["entry"]["password"] == "**REDACTED**"
     assert payload["entry"]["token"] == "**REDACTED**"
@@ -231,15 +232,22 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
     assert payload["device"]["capabilities"]["list"] == ["lidar_navigation", "map"]
     assert payload["state_reconciliation"]["activity"] == "paused"
     assert payload["state_reconciliation"]["error"]["active"] is False
+    assert payload["state_reconciliation"]["flags"]["raw_charging"] is None
     assert payload["state_reconciliation"]["flags"]["started"] is True
+    assert payload["state_reconciliation"]["manual_drive"] == {
+        "safe": True,
+        "block_reason": None,
+    }
     assert payload["state_reconciliation"]["warnings"] == []
     assert payload["triage"] == {
-        "schema_version": 3,
+        "schema_version": 5,
         "known_model": True,
         "model": "dreame.mower.g2408",
         "display_model": "A2",
         "activity": "paused",
         "state": "paused",
+        "error": {"active": False, "code": None, "display": None},
+        "manual_drive": {"safe": True, "block_reason": None},
         "available": True,
         "capabilities": ["lidar_navigation", "map"],
         "unknown_property_count": 1,
@@ -296,7 +304,7 @@ def test_build_debug_payload_highlights_state_disagreements() -> None:
         error_code=73,
         error_name="no_error",
         error_text="No error",
-        error_display="No error",
+        error_display="Error 73",
         charging=True,
         docked=True,
         raw_docked=False,
@@ -348,23 +356,36 @@ def test_build_debug_payload_highlights_state_disagreements() -> None:
     assert reconciliation["activity"] == "error"
     assert reconciliation["error"]["active"] is True
     assert reconciliation["error"]["code"] == 73
-    assert reconciliation["error"]["display"] == "No error"
+    assert reconciliation["error"]["display"] == "Error 73"
     assert reconciliation["raw_mower_state"] == "charging_completed"
     assert reconciliation["flags"]["docked"] is True
     assert reconciliation["flags"]["raw_docked"] is False
+    assert reconciliation["flags"]["raw_charging"] is None
     assert reconciliation["flags"]["started"] is False
     assert reconciliation["flags"]["raw_started"] is True
     assert reconciliation["flags"]["returning"] is False
     assert reconciliation["flags"]["raw_returning"] is True
+    assert reconciliation["manual_drive"] == {
+        "safe": False,
+        "block_reason": "Remote control is blocked while error is active.",
+    }
     assert reconciliation["warnings"] == [
-        "active_error_code_but_display_says_no_error",
         "state_looks_docked_but_raw_docked_false",
         "raw_mower_state_looks_docked_but_raw_docked_false",
         "raw_mower_state_differs_from_state_name",
     ]
-    assert payload["triage"]["state_warning_count"] == 4
+    assert payload["triage"]["schema_version"] == 5
+    assert payload["triage"]["error"] == {
+        "active": True,
+        "code": 73,
+        "display": "Error 73",
+    }
+    assert payload["triage"]["manual_drive"] == {
+        "safe": False,
+        "block_reason": "Remote control is blocked while error is active.",
+    }
+    assert payload["triage"]["state_warning_count"] == 3
     assert payload["triage"]["issues"] == [
-        "state:active_error_code_but_display_says_no_error",
         "state:state_looks_docked_but_raw_docked_false",
         "state:raw_mower_state_looks_docked_but_raw_docked_false",
         "state:raw_mower_state_differs_from_state_name",

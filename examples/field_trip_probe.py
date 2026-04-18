@@ -17,6 +17,8 @@ from typing import Any
 
 from dreame_lawn_mower_client import DreameLawnMowerClient
 
+MIN_EXECUTE_BATTERY_LEVEL = 20
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -127,6 +129,36 @@ def _write_checkpoint(args: argparse.Namespace, output: dict[str, Any]) -> None:
         )
 
 
+def _raise_if_unsafe_execute(capture: dict[str, Any]) -> None:
+    """Block live movement when the latest operation snapshot looks unsafe."""
+    snapshot = capture.get("snapshot") if isinstance(capture, dict) else {}
+    if not isinstance(snapshot, dict):
+        raise RuntimeError("Refusing to execute without a valid mower snapshot.")
+    if snapshot.get("manual_drive_safe") is False:
+        reason = snapshot.get("manual_drive_block_reason")
+        raise RuntimeError(str(reason or "Remote control is blocked."))
+    raw_state_signals = snapshot.get("raw_state_signals") or {}
+    if not isinstance(raw_state_signals, dict):
+        raw_state_signals = {}
+
+    battery_level = snapshot.get("battery_level")
+    if (
+        isinstance(battery_level, int | float)
+        and battery_level < MIN_EXECUTE_BATTERY_LEVEL
+    ):
+        raise RuntimeError("Refusing to execute remote control while battery is low.")
+    if snapshot.get("activity") == "error":
+        raise RuntimeError("Refusing to execute remote control while error is active.")
+    if bool(snapshot.get("mowing")):
+        raise RuntimeError("Refusing to execute remote control while mowing.")
+    if bool(snapshot.get("returning")):
+        raise RuntimeError("Refusing to execute remote control while returning.")
+    if bool(raw_state_signals.get("mapping")):
+        raise RuntimeError("Refusing to execute remote control while mapping.")
+    if bool(raw_state_signals.get("fast_mapping")):
+        raise RuntimeError("Refusing to execute remote control while fast mapping.")
+
+
 async def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
@@ -179,6 +211,7 @@ async def main() -> None:
         _write_checkpoint(args, output)
 
         if args.execute:
+            _raise_if_unsafe_execute(output["captures"][-1])
             output["steps"].append(
                 await _safe_step("stop_before", client.async_remote_control_stop)
             )
@@ -186,6 +219,7 @@ async def main() -> None:
             await asyncio.sleep(args.settle)
             output["captures"].append(await _capture(client, "after_stop_before", args))
             _write_checkpoint(args, output)
+            _raise_if_unsafe_execute(output["captures"][-1])
 
             for label, rotation, velocity in (
                 ("forward", 0, args.velocity),
@@ -193,6 +227,7 @@ async def main() -> None:
                 ("turn_left", -args.rotation, 0),
                 ("backward", 0, -args.velocity),
             ):
+                _raise_if_unsafe_execute(output["captures"][-1])
                 output["steps"].append(
                     await _safe_step(
                         label,

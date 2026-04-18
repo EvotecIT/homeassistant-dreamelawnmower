@@ -8,6 +8,7 @@ from dreame_lawn_mower_client.models import (
     descriptor_from_cloud_record,
     display_name_for_model,
     firmware_update_support_from_device,
+    remote_control_state_safe,
     snapshot_from_device,
 )
 
@@ -188,6 +189,8 @@ def test_snapshot_uses_state_name_before_boolean_helpers() -> None:
     assert snapshot.activity == "paused"
     assert snapshot.state == "paused"
     assert snapshot.started is True
+    assert snapshot.charging is False
+    assert snapshot.raw_charging is False
     assert snapshot.mapping_available is True
     assert snapshot.online is True
     assert snapshot.serial_number == "G2408051LEE0090632"
@@ -219,6 +222,65 @@ def test_snapshot_prioritizes_error_activity_but_keeps_paused_state_context() ->
     assert snapshot.error_name == "left_wheell_speed"
     assert snapshot.error_text == "Left wheell speed"
     assert snapshot.error_display == "Left wheel speed"
+
+
+def test_snapshot_uses_error_code_label_when_text_says_no_error() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "dreame.mower.g2408",
+            "customName": "Garage Mower",
+        },
+        account_type="dreame",
+        country="eu",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.error = SimpleNamespace(value=31)
+    device.status.error_name = "no_error"
+    device.status.has_error = True
+    device.status.attributes = {
+        **device.status.attributes,
+        "error": "No error",
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == "error"
+    assert snapshot.error_code == 31
+    assert snapshot.error_name == "no_error"
+    assert snapshot.error_text == "No error"
+    assert snapshot.error_display == "Left wheel speed"
+
+
+def test_snapshot_falls_back_to_error_code_when_label_is_unknown() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "dreame.mower.g2408",
+            "customName": "Garage Mower",
+        },
+        account_type="dreame",
+        country="eu",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.error = SimpleNamespace(value=73)
+    device.status.error_name = "no_error"
+    device.status.has_error = True
+    device.status.attributes = {
+        **device.status.attributes,
+        "error": "No error",
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == "error"
+    assert snapshot.error_display == "Error 73"
 
 
 def test_snapshot_ignores_explicit_no_error_text_when_selecting_activity() -> None:
@@ -268,6 +330,8 @@ def test_snapshot_ignores_explicit_no_error_text_when_selecting_activity() -> No
     assert snapshot.error_display == "No error"
     assert snapshot.docked is True
     assert snapshot.raw_docked is True
+    assert snapshot.charging is True
+    assert snapshot.raw_charging is True
     assert snapshot.returning is False
     assert snapshot.raw_returning is True
     assert snapshot.realtime_property_count == 1
@@ -301,8 +365,41 @@ def test_snapshot_treats_charging_state_as_effectively_docked() -> None:
     assert snapshot.activity == "docked"
     assert snapshot.docked is True
     assert snapshot.raw_docked is False
+    assert snapshot.charging is False
+    assert snapshot.raw_charging is False
     assert snapshot.started is False
     assert snapshot.raw_started is True
+
+
+def test_snapshot_treats_charging_state_as_effectively_charging() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "dreame.mower.g2408",
+            "customName": "Garage Mower",
+        },
+        account_type="dreame",
+        country="eu",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.state = SimpleNamespace(name="CHARGING")
+    device.status.state_name = "charging"
+    device.status.charging = False
+    device.status.attributes = {
+        **device.status.attributes,
+        "charging": False,
+        "mower_state": "charging",
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == "docked"
+    assert snapshot.charging is True
+    assert snapshot.raw_charging is False
+    assert snapshot.docked is True
 
 
 def test_snapshot_treats_docked_sticky_returning_as_raw_only() -> None:
@@ -333,6 +430,8 @@ def test_snapshot_treats_docked_sticky_returning_as_raw_only() -> None:
 
     assert snapshot.activity == "docked"
     assert snapshot.docked is True
+    assert snapshot.charging is True
+    assert snapshot.raw_charging is True
     assert snapshot.started is False
     assert snapshot.raw_started is True
     assert snapshot.returning is False
@@ -377,9 +476,33 @@ def test_snapshot_treats_returning_running_flag_as_returning_not_mowing() -> Non
 
 
 def test_field_trip_returning_fixture_matches_normalized_state() -> None:
-    payload = load_json_fixture("field_trip_returning_summary.json")
-    raw_status = payload["capture"]["raw_status"]
+    payload, snapshot = _field_trip_fixture_snapshot(
+        "field_trip_returning_summary.json"
+    )
     expected = payload["capture"]["expected"]
+
+    assert snapshot.activity == expected["activity"]
+    assert snapshot.mowing is expected["mowing"]
+    assert snapshot.returning is expected["returning"]
+    assert snapshot.docked is expected["docked"]
+    assert snapshot.started is expected["started"]
+
+
+def test_field_trip_charging_completed_fixture_matches_normalized_state() -> None:
+    payload, snapshot = _field_trip_fixture_snapshot(
+        "field_trip_charging_completed_summary.json"
+    )
+    _assert_field_trip_snapshot_matches_expected(payload, snapshot)
+
+
+def test_field_trip_charging_fixture_matches_normalized_state() -> None:
+    payload, snapshot = _field_trip_fixture_snapshot("field_trip_charging_summary.json")
+    _assert_field_trip_snapshot_matches_expected(payload, snapshot)
+
+
+def _field_trip_fixture_snapshot(fixture_name: str):
+    payload = load_json_fixture(fixture_name)
+    raw_status = payload["capture"]["raw_status"]
     descriptor = descriptor_from_cloud_record(
         {
             "did": "field-trip-device",
@@ -405,11 +528,22 @@ def test_field_trip_returning_fixture_matches_normalized_state() -> None:
 
     snapshot = snapshot_from_device(descriptor, device)
 
+    return payload, snapshot
+
+
+def _assert_field_trip_snapshot_matches_expected(payload, snapshot) -> None:
+    expected = payload["capture"]["expected"]
+
     assert snapshot.activity == expected["activity"]
     assert snapshot.mowing is expected["mowing"]
     assert snapshot.returning is expected["returning"]
     assert snapshot.docked is expected["docked"]
+    assert snapshot.raw_docked is expected["raw_docked"]
+    assert snapshot.charging is expected["charging"]
+    assert snapshot.raw_charging is expected["raw_charging"]
     assert snapshot.started is expected["started"]
+    assert snapshot.raw_started is expected["raw_started"]
+    assert remote_control_state_safe(snapshot) is expected["manual_drive_safe"]
 
 
 def test_snapshot_ignores_sticky_has_error_when_error_details_say_no_error() -> None:

@@ -41,6 +41,8 @@ from .models import (
     firmware_update_support_from_device,
     map_diagnostics_from_device,
     map_summary_from_map_data,
+    remote_control_block_reason,
+    remote_control_state_safe,
     snapshot_from_device,
 )
 
@@ -498,6 +500,12 @@ class DreameLawnMowerClient:
             or status == "remote_control"
             or state == "remote_control"
         )
+        state_safe: bool | None = None
+        state_block_reason: str | None = None
+        if mapping:
+            snapshot = snapshot_from_device(self._descriptor, device)
+            state_block_reason = remote_control_block_reason(snapshot)
+            state_safe = state_block_reason is None
 
         if not mapping:
             return DreameLawnMowerRemoteControlSupport(
@@ -509,19 +517,25 @@ class DreameLawnMowerClient:
             )
 
         if bool(getattr(getattr(device, "status", None), "fast_mapping", False)):
+            state_safe = False
+            state_block_reason = "Remote control is blocked while fast mapping."
             return DreameLawnMowerRemoteControlSupport(
                 supported=False,
                 active=active,
+                state_safe=state_safe,
+                state_block_reason=state_block_reason,
                 siid=mapping.get("siid"),
                 piid=mapping.get("piid"),
                 state=state,
                 status=status,
-                reason="Remote control is blocked while fast mapping.",
+                reason=state_block_reason,
             )
 
         return DreameLawnMowerRemoteControlSupport(
             supported=True,
             active=active,
+            state_safe=state_safe,
+            state_block_reason=state_block_reason,
             siid=mapping.get("siid"),
             piid=mapping.get("piid"),
             state=state,
@@ -539,6 +553,8 @@ class DreameLawnMowerClient:
         if not support.supported:
             reason = support.reason or "Remote control is not supported."
             raise DreameLawnMowerConnectionError(reason)
+        if (rotation or velocity) and support.state_block_reason:
+            raise DreameLawnMowerConnectionError(support.state_block_reason)
 
         device = self._ensure_device()
         try:
@@ -1812,6 +1828,7 @@ def _operation_snapshot_summary(snapshot: DreameLawnMowerSnapshot) -> dict[str, 
         "task_status_name": snapshot.task_status_name,
         "battery_level": snapshot.battery_level,
         "charging": snapshot.charging,
+        "raw_charging": snapshot.raw_charging,
         "docked": snapshot.docked,
         "raw_docked": snapshot.raw_docked,
         "started": snapshot.started,
@@ -1838,6 +1855,8 @@ def _operation_snapshot_summary(snapshot: DreameLawnMowerSnapshot) -> dict[str, 
         "unknown_property_count": snapshot.unknown_property_count,
         "realtime_property_count": snapshot.realtime_property_count,
         "last_realtime_method": snapshot.last_realtime_method,
+        "manual_drive_safe": remote_control_state_safe(snapshot),
+        "manual_drive_block_reason": remote_control_block_reason(snapshot),
         "raw_state_signals": _json_safe(
             {
                 key: raw_attributes.get(key)

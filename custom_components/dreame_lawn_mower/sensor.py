@@ -20,6 +20,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity
+from .manual_control import remote_control_block_reason
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +52,12 @@ def _raw_attribute(snapshot: Any, key: str) -> Any:
 
 
 SENSORS = [
+    DreameSensorDescription(
+        key="activity",
+        name="Activity",
+        value_fn=lambda snapshot: snapshot.activity,
+        icon="mdi:robot-mower",
+    ),
     DreameSensorDescription(
         key="state_name",
         name="State Name",
@@ -144,6 +151,14 @@ SENSORS = [
         name="Last Realtime Method",
         value_fn=lambda snapshot: getattr(snapshot, "last_realtime_method", None),
         icon="mdi:message-badge-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+    ),
+    DreameSensorDescription(
+        key="manual_drive_block_reason",
+        name="Manual Drive Block Reason",
+        value_fn=lambda snapshot: remote_control_block_reason(snapshot) or "none",
+        icon="mdi:shield-alert-outline",
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
     ),

@@ -29,8 +29,11 @@
     },
     "error": {
       "2fa_required": "Two-factor authentication must be completed in the vendor app or website before setup can continue.",
-      "cannot_auth": "The account login failed.",
-      "no_devices": "No supported lawn mower devices were found for this account."
+      "cannot_auth": "The account login failed. Check the username, password, account type, and region.",
+      "cannot_connect": "Home Assistant could not reach the Dreame or MOVA cloud. Check network access and try again.",
+      "invalid_account_type": "The selected account type is not supported by this integration.",
+      "invalid_region": "The selected region was rejected by the cloud. Check the account region used in the vendor app.",
+      "no_devices": "No supported lawn mower devices were found for this account. Check that the selected region and account type match the vendor app."
     }
   },
   "options": {
@@ -44,4 +47,3 @@
     }
   }
 }
-

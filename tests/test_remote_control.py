@@ -134,6 +134,8 @@ def test_remote_control_support_reports_protocol_mapping() -> None:
     assert isinstance(support, DreameLawnMowerRemoteControlSupport)
     assert support.supported is True
     assert support.active is False
+    assert support.state_safe is True
+    assert support.state_block_reason is None
     assert support.siid == 4
     assert support.piid == 15
     assert support.state == "charging"
@@ -169,9 +171,59 @@ def test_remote_control_support_blocks_fast_mapping() -> None:
     support = client._sync_get_remote_control_support()
 
     assert support.supported is False
+    assert support.state_safe is False
+    assert support.state_block_reason == (
+        "Remote control is blocked while fast mapping."
+    )
     assert support.siid == 4
     assert support.piid == 15
     assert support.reason == "Remote control is blocked while fast mapping."
+
+
+def test_remote_control_support_reports_unsafe_state_without_hiding_protocol() -> None:
+    device = _FakeRemoteControlDevice()
+    device.status.battery_level = 19
+    client = _client_with_device(device)
+
+    support = client._sync_get_remote_control_support()
+
+    assert support.supported is True
+    assert support.state_safe is False
+    assert support.state_block_reason == (
+        "Remote control is blocked while battery is low."
+    )
+
+
+def test_remote_control_move_step_blocks_unsafe_nonzero_commands() -> None:
+    device = _FakeRemoteControlDevice()
+    device.status.battery_level = 19
+    client = _client_with_device(device)
+
+    with pytest.raises(DreameLawnMowerConnectionError, match="battery is low"):
+        client._sync_remote_control_move_step(
+            rotation=0,
+            velocity=120,
+            prompt=False,
+        )
+
+    assert device.commands == []
+
+
+def test_remote_control_move_step_allows_stop_when_state_is_unsafe() -> None:
+    device = _FakeRemoteControlDevice()
+    device.status.battery_level = 19
+    client = _client_with_device(device)
+
+    result = client._sync_remote_control_move_step(
+        rotation=0,
+        velocity=0,
+        prompt=False,
+    )
+
+    assert result == {
+        "code": 0,
+        "command": {"rotation": 0, "velocity": 0, "prompt": False},
+    }
 
 
 def test_remote_control_move_step_rejects_missing_mapping() -> None:
@@ -218,6 +270,8 @@ def test_operation_snapshot_combines_safe_field_test_evidence() -> None:
     assert payload["snapshot"]["state"] == "charging"
     assert payload["snapshot"]["activity"] == "docked"
     assert payload["snapshot"]["battery_level"] == 84
+    assert payload["snapshot"]["manual_drive_safe"] is True
+    assert payload["snapshot"]["manual_drive_block_reason"] is None
     assert payload["snapshot"]["raw_state_signals"] == {
         "mower_state": "charging",
         "charging": True,
@@ -241,6 +295,8 @@ def test_operation_snapshot_combines_safe_field_test_evidence() -> None:
     assert payload["status_blob"]["source"] == "realtime"
     assert payload["status_blob"]["frame_valid"] is True
     assert payload["remote_control_support"]["supported"] is True
+    assert payload["remote_control_support"]["state_safe"] is True
+    assert payload["remote_control_support"]["state_block_reason"] is None
     assert payload["remote_control_support"]["siid"] == 4
     assert payload["remote_control_support"]["piid"] == 15
     assert "map_view" not in payload

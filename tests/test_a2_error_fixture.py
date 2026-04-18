@@ -42,6 +42,7 @@ def test_a2_error_fixture_exposes_expected_sensor_set() -> None:
     }
 
     assert visible == {
+        "Activity",
         "Battery",
         "Cloud Update Time",
         "Error",
@@ -49,6 +50,7 @@ def test_a2_error_fixture_exposes_expected_sensor_set() -> None:
         "Firmware Version",
         "Hardware Version",
         "Last Realtime Method",
+        "Manual Drive Block Reason",
         "Mower State",
         "Raw Error",
         "Realtime Property Count",
@@ -63,10 +65,14 @@ def test_a2_error_fixture_reports_expected_normalized_sensor_values() -> None:
     snapshot = _snapshot()
     sensors = {description.name: description for description in SENSORS}
 
+    assert sensors["Activity"].value_fn(snapshot) == "error"
     assert sensors["State Name"].value_fn(snapshot) == "paused"
     assert sensors["Task Status"].value_fn(snapshot) == "unknown"
     assert sensors["Error Code"].value_fn(snapshot) == 31
     assert sensors["Raw Error"].value_fn(snapshot) == "Left wheell speed"
+    assert sensors["Manual Drive Block Reason"].value_fn(snapshot) == (
+        "Remote control is blocked while error is active."
+    )
 
 
 def test_a2_error_fixture_exposes_expected_binary_sensor_set() -> None:
@@ -83,6 +89,7 @@ def test_a2_error_fixture_exposes_expected_binary_sensor_set() -> None:
         "Docked",
         "Error Active",
         "Mapping Available",
+        "Manual Drive Safe",
         "Mowing",
         "Online",
         "Paused",
@@ -104,3 +111,4 @@ def test_a2_error_fixture_reports_expected_normalized_state_flags() -> None:
     assert sensors["Paused"].value_fn(snapshot) is False
     assert sensors["Mowing"].value_fn(snapshot) is False
     assert sensors["Returning"].value_fn(snapshot) is False
+    assert sensors["Manual Drive Safe"].value_fn(snapshot) is False

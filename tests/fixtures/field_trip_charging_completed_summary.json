@@ -1,0 +1,42 @@
+{
+  "description": "Sanitized read-only field-trip capture shape observed while docked at charging_completed.",
+  "model": "dreame.mower.g2408",
+  "capture": {
+    "label": "readonly_docked",
+    "raw_status": {
+      "state": "CHARGING_COMPLETED",
+      "state_name": "charging_completed",
+      "battery_level": 100,
+      "charging": false,
+      "docked": false,
+      "running": false,
+      "returning": false,
+      "started": true,
+      "attributes": {
+        "mower_state": "charging_completed",
+        "charging": false,
+        "docked": false,
+        "running": false,
+        "returning": false,
+        "started": true,
+        "capabilities": [
+          "lidar_navigation",
+          "disable_sensor_cleaning",
+          "map"
+        ]
+      }
+    },
+    "expected": {
+      "activity": "docked",
+      "mowing": false,
+      "returning": false,
+      "docked": true,
+      "raw_docked": false,
+      "charging": false,
+      "raw_charging": false,
+      "started": false,
+      "raw_started": true,
+      "manual_drive_safe": true
+    }
+  }
+}

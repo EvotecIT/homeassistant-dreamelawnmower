@@ -34,6 +34,8 @@ from dreame_lawn_mower_client import (
     map_summary_to_dict,
     mower_error_label,
     mower_state_label,
+    remote_control_block_reason,
+    remote_control_state_safe,
     run_jadx_decompile,
 )
 from dreame_lawn_mower_client.client import DreameLawnMowerClient as ClientFromModule
@@ -67,6 +69,8 @@ def test_public_package_exports_map_helpers() -> None:
     assert callable(map_summary_to_dict)
     assert callable(map_diagnostics_from_device)
     assert callable(firmware_update_support_from_device)
+    assert callable(remote_control_block_reason)
+    assert callable(remote_control_state_safe)
     assert callable(key_definition_label)
     assert callable(analyze_decompiled_sources)
     assert callable(analyze_dreamehome_assets)

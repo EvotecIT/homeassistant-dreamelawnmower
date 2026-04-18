@@ -93,6 +93,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             "child_lock": snapshot.child_lock,
             "online": snapshot.online,
             "charging": snapshot.charging,
+            "raw_charging": snapshot.raw_charging,
             "started": snapshot.started,
             "raw_started": snapshot.raw_started,
             "returning": snapshot.returning,

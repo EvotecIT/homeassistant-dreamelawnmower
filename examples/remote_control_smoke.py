@@ -9,7 +9,11 @@ import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from dreame_lawn_mower_client import DreameLawnMowerClient
+from dreame_lawn_mower_client import (
+    DreameLawnMowerClient,
+    remote_control_block_reason,
+    remote_control_state_safe,
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -81,8 +85,16 @@ def _snapshot_summary(snapshot: Any, support: Any) -> dict[str, Any]:
         "error_code": snapshot.error_code,
         "error_display": snapshot.error_display,
         "realtime_property_count": snapshot.realtime_property_count,
+        "manual_drive_safe": remote_control_state_safe(snapshot),
+        "manual_drive_block_reason": remote_control_block_reason(snapshot),
         "remote_control_support": support.as_dict(),
     }
+
+
+def _raise_if_unsafe_execute(snapshot: Any) -> None:
+    """Block live movement when the current snapshot looks unsafe."""
+    if reason := remote_control_block_reason(snapshot):
+        raise RuntimeError(reason)
 
 
 async def main() -> None:
@@ -125,6 +137,7 @@ async def main() -> None:
         }
 
         if args.execute:
+            _raise_if_unsafe_execute(before)
             output["steps"].append(
                 await _safe_step("stop_before", client.async_remote_control_stop)
             )

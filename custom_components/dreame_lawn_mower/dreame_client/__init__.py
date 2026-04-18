@@ -1,11 +1,16 @@
 """Bundled reusable Dreame lawn mower client implementation."""
 
-from .client import (
-    DreameLawnMowerAuthError,
-    DreameLawnMowerClient,
-    DreameLawnMowerConnectionError,
-    DreameLawnMowerError,
-    DreameLawnMowerTwoFactorRequiredError,
+from .apk_research import (
+    DEFAULT_APK_RESEARCH_TERMS,
+    DEFAULT_DECOMPILED_SOURCE_SUFFIXES,
+    DEFAULT_DREAMEHOME_ASSET_SUFFIXES,
+    DEFAULT_DREAMEHOME_ASSET_TERMS,
+    analyze_decompiled_sources,
+    analyze_dreamehome_apk,
+    analyze_dreamehome_assets,
+    build_jadx_command,
+    find_jadx_executable,
+    run_jadx_decompile,
 )
 from .app_protocol import (
     MOWER_ERROR_PROPERTY_KEY,
@@ -18,19 +23,14 @@ from .app_protocol import (
     mower_error_label,
     mower_state_label,
 )
-from .apk_research import (
-    DEFAULT_APK_RESEARCH_TERMS,
-    DEFAULT_DECOMPILED_SOURCE_SUFFIXES,
-    DEFAULT_DREAMEHOME_ASSET_SUFFIXES,
-    DEFAULT_DREAMEHOME_ASSET_TERMS,
-    analyze_decompiled_sources,
-    analyze_dreamehome_assets,
-    analyze_dreamehome_apk,
-    build_jadx_command,
-    find_jadx_executable,
-    run_jadx_decompile,
-)
 from .camera_probe import CAMERA_PROBE_PROPERTY_KEYS, build_camera_probe_payload
+from .client import (
+    DreameLawnMowerAuthError,
+    DreameLawnMowerClient,
+    DreameLawnMowerConnectionError,
+    DreameLawnMowerError,
+    DreameLawnMowerTwoFactorRequiredError,
+)
 from .map_probe import (
     MAP_PROBE_PROPERTY_KEYS,
     build_cloud_key_definition_summary,
@@ -55,6 +55,8 @@ from .models import (
     map_diagnostics_from_device,
     map_summary_from_map_data,
     map_summary_to_dict,
+    remote_control_block_reason,
+    remote_control_state_safe,
 )
 
 __all__ = [
@@ -102,6 +104,8 @@ __all__ = [
     "map_diagnostics_from_device",
     "map_summary_from_map_data",
     "map_summary_to_dict",
+    "remote_control_block_reason",
+    "remote_control_state_safe",
     "mower_error_label",
     "mower_state_label",
     "run_jadx_decompile",

@@ -44,6 +44,20 @@ def test_cleaning_mode_sensor_can_become_available_after_startup() -> None:
     assert entity.native_value == "standard"
 
 
+def test_activity_sensor_exposes_normalized_client_activity() -> None:
+    entity = object.__new__(DreameLawnMowerSensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            activity="returning",
+            raw_attributes={},
+        )
+    )
+    entity.entity_description = _sensor_description("activity")
+
+    assert entity.available is True
+    assert entity.native_value == "returning"
+
+
 def test_child_lock_binary_sensor_can_become_available_after_startup() -> None:
     entity = object.__new__(DreameLawnMowerBinarySensor)
     entity.coordinator = SimpleNamespace(
@@ -78,6 +92,74 @@ def test_raw_docked_binary_sensor_preserves_vendor_flag() -> None:
 
     assert entity.available is True
     assert entity.is_on is False
+
+
+def test_raw_charging_binary_sensor_preserves_vendor_flag() -> None:
+    entity = object.__new__(DreameLawnMowerBinarySensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            raw_charging=False,
+            raw_attributes={},
+        )
+    )
+    entity.entity_description = _binary_sensor_description("raw_charging")
+
+    assert entity.available is True
+    assert entity.is_on is False
+
+
+def test_manual_drive_safe_binary_sensor_uses_shared_guard() -> None:
+    entity = object.__new__(DreameLawnMowerBinarySensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            activity="returning",
+            battery_level=80,
+            mowing=False,
+            raw_attributes={},
+            returning=True,
+            state="returning",
+        )
+    )
+    entity.entity_description = _binary_sensor_description("manual_drive_safe")
+
+    assert entity.available is True
+    assert entity.is_on is False
+
+
+def test_manual_drive_block_reason_sensor_reports_none_when_safe() -> None:
+    entity = object.__new__(DreameLawnMowerSensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            activity="docked",
+            battery_level=80,
+            mowing=False,
+            raw_attributes={},
+            returning=False,
+            state="charging",
+        )
+    )
+    entity.entity_description = _sensor_description("manual_drive_block_reason")
+
+    assert entity.available is True
+    assert entity.native_value == "none"
+
+
+def test_manual_drive_block_reason_sensor_reports_current_reason() -> None:
+    entity = object.__new__(DreameLawnMowerSensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            activity="docked",
+            battery_level=10,
+            mowing=False,
+            raw_attributes={},
+            returning=False,
+            state="charging",
+        )
+    )
+    entity.entity_description = _sensor_description("manual_drive_block_reason")
+
+    assert entity.available is True
+    assert entity.native_value == "Remote control is blocked while battery is low."
 
 
 def test_task_active_binary_sensor_uses_effective_started_flag() -> None:

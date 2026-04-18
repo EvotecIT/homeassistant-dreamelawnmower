@@ -46,6 +46,7 @@ def test_a2_paused_fixture_exposes_expected_sensor_set() -> None:
     }
 
     assert visible == {
+        "Activity",
         "Battery",
         "Error",
         "Error Code",
@@ -58,6 +59,7 @@ def test_a2_paused_fixture_exposes_expected_sensor_set() -> None:
         "Unknown Property Count",
         "Realtime Property Count",
         "Last Realtime Method",
+        "Manual Drive Block Reason",
         "Mower State",
         "Raw Error",
     }
@@ -67,10 +69,12 @@ def test_a2_paused_fixture_reports_expected_normalized_sensor_values() -> None:
     snapshot = _snapshot()
     sensors = {description.name: description for description in SENSORS}
 
+    assert sensors["Activity"].value_fn(snapshot) == "paused"
     assert sensors["State Name"].value_fn(snapshot) == "paused"
     assert sensors["Task Status"].value_fn(snapshot) == "unknown"
     assert sensors["Error Code"].value_fn(snapshot) == "none"
     assert sensors["Raw Error"].value_fn(snapshot) == "none"
+    assert sensors["Manual Drive Block Reason"].value_fn(snapshot) == "none"
 
 
 def test_a2_paused_fixture_keeps_optional_entities_opt_in() -> None:
@@ -101,6 +105,7 @@ def test_a2_paused_fixture_exposes_expected_binary_sensor_set() -> None:
         "Charging",
         "Task Active",
         "Mapping Available",
+        "Manual Drive Safe",
         "Scheduled Task",
         "Raw Paused Flag",
         "Raw Running Flag",
@@ -117,3 +122,4 @@ def test_a2_paused_fixture_reports_expected_normalized_state_flags() -> None:
     assert sensors["Paused"].value_fn(snapshot) is True
     assert sensors["Mowing"].value_fn(snapshot) is False
     assert sensors["Returning"].value_fn(snapshot) is False
+    assert sensors["Manual Drive Safe"].value_fn(snapshot) is True

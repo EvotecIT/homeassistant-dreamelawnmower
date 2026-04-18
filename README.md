@@ -79,16 +79,28 @@ warnings, unknown property counts, unknown realtime keys, and the best next
 capture to take. The larger raw sections remain in the downloaded diagnostics
 for parser fixes and fixture-driven tests.
 
+The normal `Error` sensor is cleaned for humans and falls back to known numeric
+error-code labels when the vendor text says `No error`. The diagnostic `Raw
+Error` sensor keeps the vendor text exactly as reported so odd captures can
+still be investigated.
+
 Unknown-property and realtime summaries also include value-type counts,
 map-candidate previews, and decoded `1.1` status-blob metadata where available.
 Those fields are especially useful when comparing A2/A2 Pro captures from
 different mower states.
 
+For state automations, prefer the `Activity` sensor when you need the
+integration's normalized activity exactly as the Python client sees it:
+`docked`, `idle`, `paused`, `mowing`, `returning`, or `error`. The normal
+`State Name` sensor keeps the vendor state label, and the diagnostic `Mower
+State` sensor preserves the raw app/realtime state when present.
+
 Home Assistant also exposes `Capture Operation Snapshot`. Use it during field
 tests because it logs one sanitized, grouped payload with normalized state,
 realtime properties, decoded status blob, map diagnostics, firmware/update
-evidence, and remote-control support. It is read-only and does not start
-mowing, camera streaming, remote control, or docking.
+evidence, remote-control support, and the current manual-drive safety reason.
+It is read-only and does not start mowing, camera streaming, remote control, or
+docking.
 
 Firmware/update diagnostics are intentionally evidence-first. The client keeps
 `update_available` unknown unless a verified mower OTA field is found, because
@@ -101,6 +113,11 @@ For automations, use the normal `Docked` binary sensor or `docked` attribute.
 Those are effective values derived from mower state and charging states. The
 disabled-by-default `Raw Docked Flag` diagnostic entity preserves the exact
 vendor flag when you need to debug dock-contact wobble.
+
+Use the normal `Charging` binary sensor when you need an automation-friendly
+charge signal. It treats explicit charging states as charging even if the
+vendor boolean lags behind. The disabled-by-default `Raw Charging Flag`
+diagnostic entity keeps the exact vendor value for comparison.
 
 The same pattern applies to `Task Active` / `started` and `Returning` /
 `returning`: normal entities are automation-friendly effective values, while
@@ -121,6 +138,9 @@ python examples/extract_ha_payload.py home-assistant.log --summary
 
 Use `--kind map_probe` for map probe logs, `--all` if one log file contains
 multiple captures, or combine `--all --summary` to get a compact triage list.
+The extractor also understands operation snapshot logs from `Capture Operation
+Snapshot`, including raw/effective state flags, manual-drive safety, and triage
+recommendations.
 
 ## Map experiments
 
@@ -238,12 +258,25 @@ python examples/camera_stream_handshake_probe.py --execute --payload-mode no_ses
 
 ## Remote control experiments
 
-The reverse-engineered protocol exposes remote control through property `4.15`. The reusable Python client can now report support with `async_get_remote_control_support()` and can send one validated movement step with `async_remote_control_move_step(rotation=..., velocity=..., prompt=...)`.
+The reverse-engineered protocol exposes remote control through property `4.15`.
+The reusable Python client can now report support with
+`async_get_remote_control_support()` and can send one validated movement step
+with `async_remote_control_move_step(rotation=..., velocity=..., prompt=...)`.
+In support payloads, `supported` means the protocol surface exists and
+`state_safe` means the mower's current state is safe enough for a nonzero
+manual-drive step. Stop commands remain allowed so a caller can always send a
+zero-motion command.
 
 The read-only support check is:
 
 ```bash
 python examples/remote_control_probe.py
+```
+
+To save a read-only support payload without committing it:
+
+```bash
+python examples/remote_control_probe.py --out remote-control-current.json
 ```
 
 The safety-gated live smoke test is:
@@ -273,6 +306,10 @@ movement pulses with before/during/after captures:
 python examples/field_trip_probe.py --execute --confirm-supervised --velocity 60 --rotation 45 --duration 0.5 --dock --include-map --out field-trip.json
 ```
 
+The reusable client and both live movement scripts refuse nonzero movement while
+the mower appears to be mowing, returning, mapping, fast mapping, in error, or
+below 20% battery.
+
 Home Assistant also exposes supervised service calls for validation:
 
 ```yaml
@@ -291,12 +328,21 @@ action: dreame_lawn_mower.remote_control_stop
 
 If you have more than one mower entry loaded, include `entry_id`. The movement
 service is intentionally guarded: it refuses to move while the mower appears to
-be mowing, returning, mapping, or fast mapping. Keep using short supervised
-pulses until command ranges are fully validated on real hardware.
+be mowing, returning, mapping, fast mapping, in error, or below 20% battery.
+Keep using short supervised pulses until command ranges are fully validated on
+real hardware.
+
+The `Manual Drive Safe` diagnostic binary sensor mirrors the same state guard
+used by the service. It does not prove that the protocol exposes remote control;
+it only tells you whether the current mower state is safe enough to attempt a
+supervised manual-drive step. Enable the diagnostic `Manual Drive Block Reason`
+sensor when you want the exact guard reason in dashboards or traces.
 
 ## Automation examples
 
-The normalized sensors and binary sensors are intended to keep automations out of mower attributes as much as possible.
+The normalized sensors and binary sensors are intended to keep automations out
+of mower attributes as much as possible. Entity IDs below are examples; use the
+ones created by your Home Assistant instance.
 
 Open the garage door when mowing starts:
 
@@ -331,10 +377,21 @@ automation:
             error: {{ states('sensor.dreame_a2_bodzio_error') }}
 ```
 
-Close the garage door once the mower is back on the dock and charging:
+Keep the garage open while the mower is returning, then close it only after the
+effective docked and charging signals agree:
 
 ```yaml
 automation:
+  - alias: Dreame mower keeps garage open while returning
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.dreame_a2_bodzio_returning
+        to: "on"
+    actions:
+      - action: cover.open_cover
+        target:
+          entity_id: cover.garage_door
+
   - alias: Dreame mower closes garage door
     triggers:
       - trigger: state
@@ -349,3 +406,47 @@ automation:
         target:
           entity_id: cover.garage_door
 ```
+
+Use `Activity` when you prefer one normalized state sensor instead of several
+binary sensors:
+
+```yaml
+automation:
+  - alias: Dreame mower garage follows activity
+    triggers:
+      - trigger: state
+        entity_id: sensor.dreame_a2_bodzio_activity
+    actions:
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: sensor.dreame_a2_bodzio_activity
+                state: "mowing"
+            sequence:
+              - action: cover.open_cover
+                target:
+                  entity_id: cover.garage_door
+          - conditions:
+              - condition: state
+                entity_id: sensor.dreame_a2_bodzio_activity
+                state: "returning"
+            sequence:
+              - action: cover.open_cover
+                target:
+                  entity_id: cover.garage_door
+          - conditions:
+              - condition: state
+                entity_id: sensor.dreame_a2_bodzio_activity
+                state: "docked"
+              - condition: state
+                entity_id: binary_sensor.dreame_a2_bodzio_charging
+                state: "on"
+            sequence:
+              - action: cover.close_cover
+                target:
+                  entity_id: cover.garage_door
+```
+
+For manual-drive testing dashboards, put `Manual Drive Safe` next to the
+service buttons and enable `Manual Drive Block Reason` while validating. Keep
+the service buttons supervised; the sensor is a guardrail, not a joystick UI.
