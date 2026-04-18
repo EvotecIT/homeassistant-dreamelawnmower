@@ -12,11 +12,16 @@ class _FakeCloud:
     def __init__(self, content: bytes | None = None) -> None:
         self.content = content
         self.requested_url: str | None = None
+        self.requested_language: str | None = None
 
     def get_file(self, url: str, retry_count: int = 4) -> bytes | None:
         self.requested_url = url
         assert retry_count == 1
         return self.content
+
+    def get_device_otc_info(self, lang: str | None = None) -> dict[str, object]:
+        self.requested_language = lang
+        return {"status": "ok", "map": {"object_name": "MAP.123"}}
 
 
 def _client() -> DreameLawnMowerClient:
@@ -104,3 +109,14 @@ def test_cloud_key_definition_reports_missing_url() -> None:
     assert result["fetched"] is False
     assert result["source"] is None
     assert result["error"] == "key_define_url_missing"
+
+
+def test_cloud_device_otc_info_uses_app_endpoint_helper() -> None:
+    client = _client()
+    cloud = _FakeCloud()
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_get_cloud_device_otc_info("en")
+
+    assert result == {"status": "ok", "map": {"object_name": "MAP.123"}}
+    assert cloud.requested_language == "en"

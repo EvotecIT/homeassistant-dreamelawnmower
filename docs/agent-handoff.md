@@ -69,6 +69,8 @@ Last updated: 2026-04-18
   but the live A2 currently returns no data from the legacy current-map path.
 - App-style cloud property probing currently returns useful status/realtime
   fields, but no non-empty map-like fields.
+- The app-side `devOTCInfo` endpoint is reachable, but the 2026-04-18 live A2
+  docked response was an empty object, so it is not a solved map source yet.
 - `pluginForceUpdate` is not treated as firmware update availability. It is
   conflicting across cloud metadata sources and appears to be app/plugin
   metadata rather than a verified mower OTA signal.
@@ -91,6 +93,8 @@ the workspace after live tests:
 - `property-scan-*.json`
 - `property-scan-*.txt`
 - `remote-control-current.json`
+- `apk-scan*.json`
+- `asset-scan*.json`
 
 These files can help a future agent understand recent live behavior, but they
 must not be committed.

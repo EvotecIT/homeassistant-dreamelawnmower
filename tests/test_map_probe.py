@@ -155,9 +155,45 @@ def test_map_probe_payload_trims_cloud_records() -> None:
     assert payload["cloud_device_list_record"]["display_name"] == "A2"
     assert payload["cloud_user_features"]["permit"] == "pincode,video,aiobs"
     assert payload["cloud_user_features"]["did"] == "**REDACTED**"
+    assert payload["cloud_device_otc_info"] == {"present": False}
     assert payload["cloud_key_definition"]["fetched"] is True
     assert payload["cloud_key_definition"]["key_define_count"] == 2
     assert payload["cloud_key_definition"]["key_define_keys"] == ["2.1", "2.2"]
+
+
+def test_map_probe_payload_summarizes_cloud_otc_info() -> None:
+    descriptor = DreameLawnMowerDescriptor(
+        did="device-1",
+        name="Garage Mower",
+        model="dreame.mower.g2408",
+        display_model="A2",
+        account_type="dreame",
+        country="eu",
+    )
+
+    payload = build_map_probe_payload(
+        descriptor=descriptor,
+        map_view=DreameLawnMowerMapView(source="legacy_current_map"),
+        cloud_properties={},
+        cloud_device_info={},
+        cloud_device_list_page={},
+        cloud_device_otc_info={
+            "did": "device-1",
+            "map": {"object_name": "MAP.123"},
+            "status": "ok",
+        },
+    )
+
+    assert payload["cloud_device_otc_info"] == {
+        "present": True,
+        "type": "object",
+        "keys": ["did", "map", "status"],
+        "preview": {
+            "did": "**REDACTED**",
+            "map": {"object_name": "MAP.123"},
+            "status": "ok",
+        },
+    }
     assert "did" not in payload["cloud_device_info"]
 
 

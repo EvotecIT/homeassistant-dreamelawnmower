@@ -94,6 +94,7 @@ def test_public_package_exports_map_helpers() -> None:
 
 def test_public_package_client_has_cloud_probe_helpers() -> None:
     assert hasattr(DreameLawnMowerClient, "async_get_cloud_device_info")
+    assert hasattr(DreameLawnMowerClient, "async_get_cloud_device_otc_info")
     assert hasattr(DreameLawnMowerClient, "async_get_cloud_user_features")
     assert hasattr(DreameLawnMowerClient, "async_get_cloud_device_list_page")
     assert hasattr(DreameLawnMowerClient, "async_get_cloud_properties")

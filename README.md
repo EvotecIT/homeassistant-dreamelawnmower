@@ -164,7 +164,7 @@ python examples/cloud_probe.py
 
 Optional:
 
-- the probe prints `device/info`, `device/listV2`, and `queryDevicePermit` summaries by default
+- the probe prints `device/info`, `queryDevicePermit`, `devOTCInfo`, and a `device/listV2` summary by default
 - `queryDevicePermit` is useful for confirming app-side feature and permit flags before exposing new Home Assistant entities
 - set `DREAME_PROP_KEYS=6.1,6.3` or another comma-separated key list to query `iotstatus/props`
 
@@ -220,6 +220,8 @@ The map probe includes a `cloud_property_summary` section so large logs are easi
 It also includes `cloud_property_history_summary` for the legacy map history
 keys `6.1`, `6.3`, and `6.13`, which helps distinguish "no map history
 records" from "history records exist but decode/render failed".
+The same probe now also records a compact `cloud_device_otc_info` summary from
+the app's `devOTCInfo` endpoint, redacted to top-level shape and preview data.
 
 ```bash
 python examples/map_sources_probe.py --out map-sources-current.json

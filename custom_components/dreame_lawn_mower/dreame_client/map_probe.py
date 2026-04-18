@@ -117,6 +117,32 @@ def _trim_device_record(record: Mapping[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _compact_cloud_payload(value: Any) -> dict[str, Any]:
+    """Return top-level shape and redacted preview for unknown cloud payloads."""
+    if value is None:
+        return {"present": False}
+    redacted = _redact_probe_value(value)
+    if isinstance(redacted, Mapping):
+        return {
+            "present": True,
+            "type": "object",
+            "keys": [str(key) for key in list(redacted)[:30]],
+            "preview": _property_value_preview(redacted),
+        }
+    if isinstance(redacted, list):
+        return {
+            "present": True,
+            "type": "array",
+            "count": len(redacted),
+            "preview": _property_value_preview(redacted),
+        }
+    return {
+        "present": True,
+        "type": _property_value_type(redacted),
+        "preview": _property_value_preview(redacted),
+    }
+
+
 def _find_device_list_record(
     descriptor: DreameLawnMowerDescriptor,
     device_list_page: Mapping[str, Any] | None,
@@ -379,6 +405,7 @@ def build_map_probe_payload(
     cloud_device_list_page: Mapping[str, Any] | None,
     cloud_property_history: Mapping[str, Any] | None = None,
     cloud_user_features: Any = None,
+    cloud_device_otc_info: Any = None,
     cloud_key_definition: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a JSON-safe map-source probe payload."""
@@ -402,6 +429,7 @@ def build_map_probe_payload(
             _find_device_list_record(descriptor, cloud_device_list_page)
         ),
         "cloud_user_features": _redact_probe_value(cloud_user_features),
+        "cloud_device_otc_info": _compact_cloud_payload(cloud_device_otc_info),
         "cloud_key_definition": build_cloud_key_definition_summary(
             cloud_key_definition
         ),

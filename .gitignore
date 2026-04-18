@@ -11,3 +11,5 @@ map-sources*.json
 property-scan*.json
 property-scan*.txt
 remote-control*.json
+apk-scan*.json
+asset-scan*.json

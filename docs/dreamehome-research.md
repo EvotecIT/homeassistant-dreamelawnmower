@@ -10,9 +10,10 @@ This note captures concrete findings from the real Dreamehome Android package so
 
 The app package was extracted from an XAPK so the Java and Flutter assets could be inspected locally.
 
-## Confirmed Retrofit endpoints
+## Confirmed app/cloud endpoints
 
-These endpoints are present in the app's `DreameApi` Retrofit interface:
+These endpoints are present in the app's `DreameApi` Retrofit interface or APK
+strings:
 
 - `POST /dreame-user-iot/iotuserbind/device/info`
   Used by `postDeviceInfo(DeviceInfoReq)`.
@@ -22,6 +23,8 @@ These endpoints are present in the app's `DreameApi` Retrofit interface:
   Used by `getDevicePropsByDid(DevicePropsReq)`.
 - `POST /dreame-user-iot/iotuserbind/queryDevicePermit`
   Used by `getUserFeatures(UserFeatureReq)`.
+- `POST /dreame-user-iot/iotstatus/devOTCInfo`
+  Present in APK strings and reachable from the same app API host.
 - `POST /dreame-iot-com-{host}/device/sendCommand`
   Used by `sendCommand`, `sendAction`, `trySendCommand`, and `trySendActionCommand`.
 
@@ -149,10 +152,15 @@ An April 18, 2026 follow-up against the live A2 found:
 - Direct read-only history probes for legacy map keys `6.1` (`MAP_DATA`), `6.3`
   (`OBJECT_NAME`), and `6.13` (`OLD_MAP_DATA`) returned zero records while the
   mower was docked and charging.
+- The APK string scan confirms `/dreame-user-iot/iotstatus/devOTCInfo` and
+  `/dreame-user-iot/iotstatus/history`. A live read-only `devOTCInfo` call
+  succeeds for the same A2, but returned an empty object in the current docked
+  state.
 
 This is useful negative evidence: the current docked live A2 map is not exposed
 through the legacy current-map path, the fixed map-property guesses, the broad
-`iotstatus/props` ranges tested so far, or the legacy map history endpoint.
+`iotstatus/props` ranges tested so far, the legacy map history endpoint, or the
+current docked `devOTCInfo` response.
 
 Use `python examples/apk_research.py <apk> --max-string-length 220` when
 testing a new Dreamehome APK.

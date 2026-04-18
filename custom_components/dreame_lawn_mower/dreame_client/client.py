@@ -370,6 +370,14 @@ class DreameLawnMowerClient:
         """Fetch raw cloud feature/permit data from the mobile app endpoint."""
         return await asyncio.to_thread(self._sync_get_cloud_user_features, language)
 
+    async def async_get_cloud_device_otc_info(
+        self,
+        *,
+        language: str | None = None,
+    ) -> Any:
+        """Fetch read-only cloud OTC metadata from the mobile app endpoint."""
+        return await asyncio.to_thread(self._sync_get_cloud_device_otc_info, language)
+
     async def async_get_cloud_properties(
         self,
         keys: str | Sequence[str],
@@ -1212,6 +1220,19 @@ class DreameLawnMowerClient:
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
 
+    def _sync_get_cloud_device_otc_info(
+        self,
+        language: str | None = None,
+    ) -> Any:
+        cloud = self._sync_get_cloud_protocol()
+
+        try:
+            if hasattr(cloud, "get_device_otc_info"):
+                return cloud.get_device_otc_info(language)
+            return None
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+
     def _sync_get_cloud_properties(
         self,
         keys: str | Sequence[str],
@@ -1446,6 +1467,10 @@ class DreameLawnMowerClient:
             cloud_user_features = self._sync_get_cloud_user_features(language)
         except DreameLawnMowerConnectionError as err:
             cloud_user_features = {"error": str(err)}
+        try:
+            cloud_device_otc_info = self._sync_get_cloud_device_otc_info(language)
+        except DreameLawnMowerConnectionError as err:
+            cloud_device_otc_info = {"error": str(err)}
 
         return build_map_probe_payload(
             descriptor=self._descriptor,
@@ -1455,6 +1480,7 @@ class DreameLawnMowerClient:
             cloud_device_list_page=cloud_device_list_page,
             cloud_property_history=cloud_property_history,
             cloud_user_features=cloud_user_features,
+            cloud_device_otc_info=cloud_device_otc_info,
             cloud_key_definition=cloud_key_definition,
         )
 
