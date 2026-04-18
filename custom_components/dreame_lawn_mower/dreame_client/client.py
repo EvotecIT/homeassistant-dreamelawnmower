@@ -764,6 +764,13 @@ class DreameLawnMowerClient:
             "label": label,
             "captured_at": datetime.now(UTC).isoformat(),
             "snapshot": _operation_snapshot_summary(snapshot),
+            "unknown_property_summary": _operation_property_summary(
+                getattr(device, "unknown_properties", {}) or {}
+            ),
+            "realtime_summary": _operation_property_summary(
+                getattr(device, "realtime_properties", {}) or {},
+                unknown_prefix="UNKNOWN_REALTIME_",
+            ),
             "errors": errors,
         }
 
@@ -1836,6 +1843,93 @@ def _operation_snapshot_summary(snapshot: DreameLawnMowerSnapshot) -> dict[str, 
             }
         ),
     }
+
+
+def _operation_property_summary(
+    properties: Mapping[Any, Any],
+    *,
+    unknown_prefix: str | None = None,
+) -> dict[str, Any]:
+    """Return compact live property evidence for operation snapshots."""
+    entries: list[dict[str, Any]] = []
+    known_keys: list[str] = []
+    unknown_keys: list[str] = []
+    value_type_counts: dict[str, int] = {}
+
+    for key, value in properties.items():
+        key_text = str(key)
+        payload = value if isinstance(value, Mapping) else {}
+        property_name = str(payload.get("property_name") or "")
+        property_value = payload.get("value") if isinstance(value, Mapping) else value
+        value_type = _operation_value_type(property_value)
+        value_type_counts[value_type] = value_type_counts.get(value_type, 0) + 1
+
+        if unknown_prefix is not None:
+            if property_name.startswith(unknown_prefix):
+                unknown_keys.append(key_text)
+            else:
+                known_keys.append(key_text)
+
+        status_blob = None
+        if key_text == MOWER_RAW_STATUS_PROPERTY_KEY:
+            decoded = decode_mower_status_blob(property_value, source="operation")
+            status_blob = decoded.as_dict() if decoded is not None else None
+
+        entries.append(
+            {
+                "key": key_text,
+                "property_name": property_name or None,
+                "siid": _json_safe(payload.get("siid")),
+                "piid": _json_safe(payload.get("piid")),
+                "code": _json_safe(payload.get("code")),
+                "value_type": value_type,
+                "value_preview": _operation_short_preview(property_value),
+                "status_blob": status_blob,
+            }
+        )
+
+    entries.sort(key=lambda item: item["key"])
+    known_keys.sort()
+    unknown_keys.sort()
+    summary: dict[str, Any] = {
+        "count": len(entries),
+        "value_type_counts": value_type_counts,
+        "entries": entries[:30],
+    }
+    if unknown_prefix is not None:
+        summary["known_keys"] = known_keys
+        summary["unknown_keys"] = unknown_keys
+    return summary
+
+
+def _operation_value_type(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int | float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, Mapping):
+        return "object"
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        return "array"
+    return type(value).__name__
+
+
+def _operation_short_preview(value: Any) -> Any:
+    normalized = _json_safe(value, max_depth=3)
+    if isinstance(normalized, str):
+        return normalized if len(normalized) <= 120 else f"{normalized[:117]}..."
+    if isinstance(normalized, list):
+        preview = normalized[:10]
+        if len(normalized) > 10:
+            preview.append(f"... +{len(normalized) - 10} items")
+        return preview
+    if isinstance(normalized, Mapping):
+        return {key: normalized[key] for key in list(normalized.keys())[:10]}
+    return normalized
 
 
 def _json_safe(value: Any, *, max_depth: int = 4) -> Any:

@@ -223,6 +223,21 @@ def test_operation_snapshot_combines_safe_field_test_evidence() -> None:
         "charging": True,
         "started": True,
     }
+    assert payload["unknown_property_summary"] == {
+        "count": 0,
+        "value_type_counts": {},
+        "entries": [],
+    }
+    assert payload["realtime_summary"]["count"] == 1
+    assert payload["realtime_summary"]["known_keys"] == ["1.1"]
+    assert payload["realtime_summary"]["unknown_keys"] == []
+    assert payload["realtime_summary"]["entries"][0]["key"] == "1.1"
+    assert payload["realtime_summary"]["entries"][0]["value_type"] == "array"
+    assert payload["realtime_summary"]["entries"][0]["value_preview"] == [206, 0, 206]
+    assert (
+        payload["realtime_summary"]["entries"][0]["status_blob"]["source"]
+        == "operation"
+    )
     assert payload["status_blob"]["source"] == "realtime"
     assert payload["status_blob"]["frame_valid"] is True
     assert payload["remote_control_support"]["supported"] is True

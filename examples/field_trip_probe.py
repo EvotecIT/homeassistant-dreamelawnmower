@@ -118,6 +118,15 @@ async def _capture(
     )
 
 
+def _write_checkpoint(args: argparse.Namespace, output: dict[str, Any]) -> None:
+    """Persist partial results so a slow cloud call does not lose evidence."""
+    if args.out:
+        args.out.write_text(
+            json.dumps(output, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+
 async def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
@@ -167,13 +176,16 @@ async def main() -> None:
     }
     try:
         output["captures"].append(await _capture(client, "before", args))
+        _write_checkpoint(args, output)
 
         if args.execute:
             output["steps"].append(
                 await _safe_step("stop_before", client.async_remote_control_stop)
             )
+            _write_checkpoint(args, output)
             await asyncio.sleep(args.settle)
             output["captures"].append(await _capture(client, "after_stop_before", args))
+            _write_checkpoint(args, output)
 
             for label, rotation, velocity in (
                 ("forward", 0, args.velocity),
@@ -193,6 +205,7 @@ async def main() -> None:
                         ),
                     )
                 )
+                _write_checkpoint(args, output)
                 await asyncio.sleep(args.duration)
                 output["steps"].append(
                     await _safe_step(
@@ -200,15 +213,19 @@ async def main() -> None:
                         client.async_remote_control_stop,
                     )
                 )
+                _write_checkpoint(args, output)
                 await asyncio.sleep(args.settle)
                 output["captures"].append(
                     await _capture(client, f"after_{label}", args)
                 )
+                _write_checkpoint(args, output)
 
             if args.dock:
                 output["steps"].append(await _safe_step("dock", client.async_dock))
+                _write_checkpoint(args, output)
                 await asyncio.sleep(max(2.0, args.settle))
                 output["captures"].append(await _capture(client, "after_dock", args))
+                _write_checkpoint(args, output)
         else:
             output["steps"].append(
                 {
@@ -217,8 +234,10 @@ async def main() -> None:
                     "result": "No movement commands sent.",
                 }
             )
+            _write_checkpoint(args, output)
 
         output["captures"].append(await _capture(client, "final", args))
+        _write_checkpoint(args, output)
     finally:
         await client.async_close()
 
