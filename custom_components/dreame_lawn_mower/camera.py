@@ -18,6 +18,7 @@ from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .dreame_client.models import DreameLawnMowerMapView
 from .image import map_diagnostics_jpeg, map_placeholder_jpeg, png_bytes_to_jpeg
+from .map_attributes import map_camera_attributes
 
 _LOGGER = logging.getLogger(__name__)
 _MAP_CACHE_TTL = timedelta(seconds=60)
@@ -96,49 +97,12 @@ class DreameLawnMowerMapCamera(
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Expose the latest cached map summary."""
-        view = self._last_view
-        summary = None if view is None else view.summary
-        refreshed_at = self._last_refresh_at
-        return {
-            "map_cached": self._last_image is not None,
-            "map_placeholder": self._last_image is None,
-            "map_source": None if view is None else view.source,
-            "map_has_image": False if view is None else view.has_image,
-            "map_error": self._last_error or (None if view is None else view.error),
-            "map_available": summary.available if summary is not None else None,
-            "map_id": None if summary is None else summary.map_id,
-            "frame_id": None if summary is None else summary.frame_id,
-            "timestamp_ms": None if summary is None else summary.timestamp_ms,
-            "rotation": None if summary is None else summary.rotation,
-            "width": None if summary is None else summary.width,
-            "height": None if summary is None else summary.height,
-            "grid_size": None if summary is None else summary.grid_size,
-            "saved_map": None if summary is None else summary.saved_map,
-            "temporary_map": None if summary is None else summary.temporary_map,
-            "recovery_map": None if summary is None else summary.recovery_map,
-            "empty_map": None if summary is None else summary.empty_map,
-            "segment_count": None if summary is None else summary.segment_count,
-            "active_segment_count": (
-                None if summary is None else summary.active_segment_count
-            ),
-            "active_area_count": None if summary is None else summary.active_area_count,
-            "active_point_count": (
-                None if summary is None else summary.active_point_count
-            ),
-            "path_point_count": None if summary is None else summary.path_point_count,
-            "no_go_area_count": None if summary is None else summary.no_go_area_count,
-            "spot_area_count": None if summary is None else summary.spot_area_count,
-            "virtual_wall_count": (
-                None if summary is None else summary.virtual_wall_count
-            ),
-            "pathway_count": None if summary is None else summary.pathway_count,
-            "obstacle_count": None if summary is None else summary.obstacle_count,
-            "charger_present": None if summary is None else summary.charger_present,
-            "robot_present": None if summary is None else summary.robot_present,
-            "last_map_refresh": (
-                None if refreshed_at is None else refreshed_at.isoformat()
-            ),
-        }
+        return map_camera_attributes(
+            self._last_view,
+            image_cached=self._last_image is not None,
+            refreshed_at=self._last_refresh_at,
+            last_error=self._last_error,
+        )
 
     async def async_camera_image(
         self,
