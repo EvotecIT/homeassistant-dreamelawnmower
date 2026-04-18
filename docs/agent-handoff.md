@@ -88,6 +88,8 @@ the workspace after live tests:
 - `field-trip-readonly.json`
 - `firmware-update-live.json`
 - `map-sources-current.json`
+- `property-scan-*.json`
+- `property-scan-*.txt`
 - `remote-control-current.json`
 
 These files can help a future agent understand recent live behavior, but they
@@ -126,7 +128,13 @@ $env:DREAME_USERNAME = [Environment]::GetEnvironmentVariable('DREAME_USERNAME','
 $env:DREAME_PASSWORD = [Environment]::GetEnvironmentVariable('DREAME_PASSWORD','User')
 $env:DREAME_COUNTRY = [Environment]::GetEnvironmentVariable('DREAME_COUNTRY','User')
 $env:DREAME_ACCOUNT_TYPE = [Environment]::GetEnvironmentVariable('DREAME_ACCOUNT_TYPE','User')
-python examples\map_sources_probe.py | Out-File -FilePath map-sources-current.json -Encoding utf8
+python examples\map_sources_probe.py --out map-sources-current.json
+```
+
+Broad read-only property scan:
+
+```powershell
+python examples\property_probe.py --siids 1,2,3,4,5,6,7,8,9,10,11,12 --piid-start 1 --piid-end 80 --out property-scan-1-12-current.json
 ```
 
 Read-only remote-control support probe:

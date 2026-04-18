@@ -8,4 +8,6 @@ __pycache__/
 field-trip*.json
 firmware-update*.json
 map-sources*.json
+property-scan*.json
+property-scan*.txt
 remote-control*.json

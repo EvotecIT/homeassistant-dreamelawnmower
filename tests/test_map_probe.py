@@ -6,6 +6,7 @@ from dreame_lawn_mower_client import (
     MAP_PROBE_PROPERTY_KEYS,
     DreameLawnMowerMapView,
     build_cloud_key_definition_summary,
+    build_cloud_property_history_summary,
     build_cloud_property_summary,
     build_map_probe_payload,
 )
@@ -143,6 +144,12 @@ def test_map_probe_payload_trims_cloud_records() -> None:
         "value_type": "object",
         "value_preview": {"zones": [{"name": "front", "polygon": [[1, 2]]}]},
     }
+    assert payload["cloud_property_history_summary"] == {
+        "requested_keys": [],
+        "populated_keys": [],
+        "populated_key_count": 0,
+        "keys": {},
+    }
     assert payload["cloud_device_info"]["key_define_url_present"] is True
     assert payload["cloud_device_info"]["display_name"] == "A2"
     assert payload["cloud_device_list_record"]["display_name"] == "A2"
@@ -159,6 +166,33 @@ def test_map_probe_keys_include_known_a2_docked_hits() -> None:
     assert "2.1" in MAP_PROBE_PROPERTY_KEYS
     assert "2.2" in MAP_PROBE_PROPERTY_KEYS
     assert "6.13" in MAP_PROBE_PROPERTY_KEYS
+
+
+def test_cloud_property_history_summary_marks_populated_map_history() -> None:
+    summary = build_cloud_property_history_summary(
+        {
+            "6.1": [
+                {
+                    "time": 1776341619,
+                    "value": '["MAP.123",1,2,3]',
+                }
+            ],
+            "6.3": [],
+            "6.13": {"error": "timeout"},
+        }
+    )
+
+    assert summary["requested_keys"] == ["6.1", "6.3", "6.13"]
+    assert summary["populated_keys"] == ["6.1"]
+    assert summary["keys"]["6.1"] == {
+        "entry_count": 1,
+        "has_value": True,
+        "latest_time": 1776341619,
+        "latest_value_type": "str",
+        "latest_value_preview": '["MAP.123",1,2,3]',
+    }
+    assert summary["keys"]["6.3"]["has_value"] is False
+    assert summary["keys"]["6.13"]["error"] == "timeout"
 
 
 def test_cloud_property_summary_handles_empty_or_unexpected_payloads() -> None:
@@ -190,6 +224,7 @@ def test_cloud_key_definition_summary_handles_missing_payloads() -> None:
     assert build_cloud_key_definition_summary(None) == {
         "url_present": False,
         "ver": None,
+        "source": None,
         "fetched": False,
         "error": None,
         "root_keys": [],

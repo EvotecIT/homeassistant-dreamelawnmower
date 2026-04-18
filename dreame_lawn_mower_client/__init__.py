@@ -37,6 +37,7 @@ MOWER_ERROR_PROPERTY_KEY = _app_protocol.MOWER_ERROR_PROPERTY_KEY
 MOWER_PROPERTY_HINTS = _app_protocol.MOWER_PROPERTY_HINTS
 MOWER_RAW_STATUS_PROPERTY_KEY = _app_protocol.MOWER_RAW_STATUS_PROPERTY_KEY
 CAMERA_PROBE_PROPERTY_KEYS = _camera_probe.CAMERA_PROBE_PROPERTY_KEYS
+MAP_HISTORY_PROPERTY_KEYS = _map_probe.MAP_HISTORY_PROPERTY_KEYS
 MAP_PROBE_PROPERTY_KEYS = _map_probe.MAP_PROBE_PROPERTY_KEYS
 SUPPORTED_ACCOUNT_TYPES = _models.SUPPORTED_ACCOUNT_TYPES
 analyze_decompiled_sources = _apk_research.analyze_decompiled_sources
@@ -45,6 +46,9 @@ analyze_dreamehome_apk = _apk_research.analyze_dreamehome_apk
 build_jadx_command = _apk_research.build_jadx_command
 build_camera_probe_payload = _camera_probe.build_camera_probe_payload
 build_cloud_key_definition_summary = _map_probe.build_cloud_key_definition_summary
+build_cloud_property_history_summary = (
+    _map_probe.build_cloud_property_history_summary
+)
 build_cloud_property_summary = _map_probe.build_cloud_property_summary
 build_map_probe_payload = _map_probe.build_map_probe_payload
 find_jadx_executable = _apk_research.find_jadx_executable
@@ -83,6 +87,7 @@ __all__ = [
     "DreameLawnMowerStatusBlob",
     "DreameLawnMowerTwoFactorRequiredError",
     "MODEL_NAME_MAP",
+    "MAP_HISTORY_PROPERTY_KEYS",
     "MAP_PROBE_PROPERTY_KEYS",
     "MOWER_ERROR_PROPERTY_KEY",
     "MOWER_PROPERTY_HINTS",
@@ -96,6 +101,7 @@ __all__ = [
     "build_jadx_command",
     "build_camera_probe_payload",
     "build_cloud_key_definition_summary",
+    "build_cloud_property_history_summary",
     "build_cloud_property_summary",
     "build_map_probe_payload",
     "decode_mower_status_blob",

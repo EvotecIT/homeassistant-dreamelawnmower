@@ -134,6 +134,26 @@ non-empty keys, value-type counts, blob previews, decoded-label sources, and
 map-candidate entries. That summary is the preferred payload to compare between
 models or mower states before adding new Home Assistant entities.
 
+An April 18, 2026 follow-up against the live A2 found:
+
+- `device/info` did not expose `keyDefine.url`, but the matching `device/listV2`
+  record did. The client now falls back to that record and successfully fetches
+  Dreame's public key definition from `device_list_v2`.
+- The fetched key definition currently contains only `2.1`, enough to label the
+  mower state but not enough to reveal map keys.
+- A broad read-only `iotstatus/props` scan across siids `1-12`, piids `1-80`
+  returned 16 displayed values and no map candidates. The only blob-like values
+  were `1.1` and `1.4`.
+- Follow-up scans across siids `13-24` and `25-40`, piids `1-80`, returned no
+  non-empty values.
+- Direct read-only history probes for legacy map keys `6.1` (`MAP_DATA`), `6.3`
+  (`OBJECT_NAME`), and `6.13` (`OLD_MAP_DATA`) returned zero records while the
+  mower was docked and charging.
+
+This is useful negative evidence: the current docked live A2 map is not exposed
+through the legacy current-map path, the fixed map-property guesses, the broad
+`iotstatus/props` ranges tested so far, or the legacy map history endpoint.
+
 Use `python examples/apk_research.py <apk> --max-string-length 220` when
 testing a new Dreamehome APK.
 It creates a compact string index of dex/assets/resources for protocol endpoints,

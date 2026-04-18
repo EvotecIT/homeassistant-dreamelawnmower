@@ -32,8 +32,10 @@ from .client import (
     DreameLawnMowerTwoFactorRequiredError,
 )
 from .map_probe import (
+    MAP_HISTORY_PROPERTY_KEYS,
     MAP_PROBE_PROPERTY_KEYS,
     build_cloud_key_definition_summary,
+    build_cloud_property_history_summary,
     build_cloud_property_summary,
     build_map_probe_payload,
 )
@@ -82,6 +84,7 @@ __all__ = [
     "MODEL_NAME_MAP",
     "CAMERA_PROBE_PROPERTY_KEYS",
     "MAP_PROBE_PROPERTY_KEYS",
+    "MAP_HISTORY_PROPERTY_KEYS",
     "MOWER_ERROR_PROPERTY_KEY",
     "MOWER_PROPERTY_HINTS",
     "MOWER_RAW_STATUS_PROPERTY_KEY",
@@ -94,6 +97,7 @@ __all__ = [
     "build_jadx_command",
     "build_camera_probe_payload",
     "build_cloud_key_definition_summary",
+    "build_cloud_property_history_summary",
     "build_cloud_property_summary",
     "build_map_probe_payload",
     "decode_mower_status_blob",

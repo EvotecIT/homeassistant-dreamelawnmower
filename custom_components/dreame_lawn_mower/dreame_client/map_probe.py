@@ -49,6 +49,12 @@ MAP_PROBE_PROPERTY_KEYS = (
     "6.20",
 )
 
+MAP_HISTORY_PROPERTY_KEYS = (
+    "6.1",  # MAP_DATA
+    "6.3",  # OBJECT_NAME
+    "6.13",  # OLD_MAP_DATA
+)
+
 MAP_CANDIDATE_TERMS = (
     "map",
     "m_path",
@@ -139,6 +145,14 @@ def _entry_has_value(entry: Mapping[str, Any]) -> bool:
 
 def _property_value(entry: Mapping[str, Any]) -> Any:
     for key in ("value", "values", "data", "raw", "content"):
+        value = entry.get(key)
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
+def _history_entry_value(entry: Mapping[str, Any]) -> Any:
+    for key in ("value", "val", "values", "data", "raw", "content"):
         value = entry.get(key)
         if value not in (None, "", [], {}):
             return value
@@ -284,6 +298,45 @@ def build_cloud_property_summary(
     }
 
 
+def build_cloud_property_history_summary(
+    history: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Return compact evidence from read-only property-history probes."""
+    payload = dict(history or {})
+    keys: dict[str, Any] = {}
+    populated_keys: list[str] = []
+
+    for key, value in payload.items():
+        if isinstance(value, Mapping) and value.get("error"):
+            keys[str(key)] = {
+                "entry_count": 0,
+                "has_value": False,
+                "error": value.get("error"),
+            }
+            continue
+
+        entries = value if isinstance(value, list) else []
+        latest = entries[0] if entries and isinstance(entries[0], Mapping) else {}
+        latest_value = _history_entry_value(latest)
+        has_value = latest_value is not None
+        if has_value:
+            populated_keys.append(str(key))
+        keys[str(key)] = {
+            "entry_count": len(entries),
+            "has_value": has_value,
+            "latest_time": latest.get("time") or latest.get("ts"),
+            "latest_value_type": _property_value_type(latest_value),
+            "latest_value_preview": _property_value_preview(latest_value),
+        }
+
+    return {
+        "requested_keys": list(payload),
+        "populated_keys": populated_keys,
+        "populated_key_count": len(populated_keys),
+        "keys": keys,
+    }
+
+
 def build_cloud_key_definition_summary(
     cloud_key_definition: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
@@ -308,6 +361,7 @@ def build_cloud_key_definition_summary(
     return {
         "url_present": bool(payload.get("url_present") or payload.get("url")),
         "ver": payload.get("ver"),
+        "source": payload.get("source"),
         "fetched": bool(payload.get("fetched")),
         "error": payload.get("error"),
         "root_keys": root_keys[:20],
@@ -323,6 +377,7 @@ def build_map_probe_payload(
     cloud_properties: Mapping[str, Any] | None,
     cloud_device_info: Mapping[str, Any] | None,
     cloud_device_list_page: Mapping[str, Any] | None,
+    cloud_property_history: Mapping[str, Any] | None = None,
     cloud_user_features: Any = None,
     cloud_key_definition: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -338,6 +393,10 @@ def build_map_probe_payload(
         "legacy_current_map": map_view.as_dict(),
         "cloud_properties": dict(cloud_properties or {}),
         "cloud_property_summary": build_cloud_property_summary(cloud_properties),
+        "cloud_property_history": _redact_probe_value(cloud_property_history or {}),
+        "cloud_property_history_summary": build_cloud_property_history_summary(
+            cloud_property_history
+        ),
         "cloud_device_info": _trim_device_record(cloud_device_info),
         "cloud_device_list_record": _trim_device_record(
             _find_device_list_record(descriptor, cloud_device_list_page)

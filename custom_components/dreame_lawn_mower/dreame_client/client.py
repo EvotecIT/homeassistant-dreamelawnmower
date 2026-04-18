@@ -22,6 +22,7 @@ from .app_protocol import (
 from .camera_probe import CAMERA_PROBE_PROPERTY_KEYS, build_camera_probe_payload
 from .exceptions import DeviceException, InvalidActionException
 from .map_probe import (
+    MAP_HISTORY_PROPERTY_KEYS,
     MAP_PROBE_PROPERTY_KEYS,
     build_cloud_property_summary,
     build_map_probe_payload,
@@ -1222,6 +1223,23 @@ class DreameLawnMowerClient:
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
 
+    def _sync_get_cloud_property_history(
+        self,
+        key: str,
+        *,
+        limit: int = 3,
+        time_start: int = 0,
+    ) -> Any:
+        cloud = self._sync_get_cloud_protocol()
+        try:
+            return cloud.get_device_property(
+                key,
+                limit=limit,
+                time_start=time_start,
+            )
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+
     def _sync_scan_cloud_properties(
         self,
         keys: str | Sequence[str] | None,
@@ -1313,19 +1331,37 @@ class DreameLawnMowerClient:
         self,
         language: str | None = None,
         device_info: Mapping[str, Any] | None = None,
+        device_list_page: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         cloud = self._sync_get_cloud_protocol()
         device_info = device_info or self._sync_get_cloud_device_info(language) or {}
-        key_define = (
-            device_info.get("keyDefine", {})
-            if isinstance(device_info, Mapping)
-            else {}
-        ) or {}
+        key_define = _key_define_from_mapping(device_info)
+        source = "device_info"
+        if not key_define.get("url"):
+            if device_list_page is None:
+                try:
+                    device_list_page = self._sync_get_cloud_device_list_page(
+                        current=1,
+                        size=20,
+                        language=language,
+                        master=None,
+                        shared_status=None,
+                    )
+                except DreameLawnMowerConnectionError:
+                    device_list_page = None
+            list_key_define = _key_define_from_device_list_page(
+                self._descriptor.did,
+                device_list_page,
+            )
+            if list_key_define.get("url"):
+                key_define = list_key_define
+                source = "device_list_v2"
         url = key_define.get("url") if isinstance(key_define, Mapping) else None
         result: dict[str, Any] = {
             "url": url,
             "url_present": bool(url),
             "ver": key_define.get("ver") if isinstance(key_define, Mapping) else None,
+            "source": source if url else None,
             "fetched": False,
             "payload": None,
             "error": None,
@@ -1366,10 +1402,18 @@ class DreameLawnMowerClient:
     ) -> dict[str, Any]:
         map_view = self._sync_refresh_map_view(timeout, interval)
         cloud_device_info = self._sync_get_cloud_device_info(language)
+        cloud_device_list_page = self._sync_get_cloud_device_list_page(
+            current=1,
+            size=20,
+            language=language,
+            master=None,
+            shared_status=None,
+        )
         try:
             cloud_key_definition = self._sync_get_cloud_key_definition(
                 language,
                 cloud_device_info,
+                cloud_device_list_page,
             )
         except DreameLawnMowerConnectionError as err:
             cloud_key_definition = {"error": str(err)}
@@ -1388,13 +1432,16 @@ class DreameLawnMowerClient:
                 else None
             ),
         )
-        cloud_device_list_page = self._sync_get_cloud_device_list_page(
-            current=1,
-            size=20,
-            language=language,
-            master=None,
-            shared_status=None,
-        )
+        cloud_property_history: dict[str, Any] = {}
+        for key in MAP_HISTORY_PROPERTY_KEYS:
+            try:
+                cloud_property_history[key] = self._sync_get_cloud_property_history(
+                    key,
+                    limit=3,
+                    time_start=0,
+                )
+            except DreameLawnMowerConnectionError as err:
+                cloud_property_history[key] = {"error": str(err)}
         try:
             cloud_user_features = self._sync_get_cloud_user_features(language)
         except DreameLawnMowerConnectionError as err:
@@ -1406,6 +1453,7 @@ class DreameLawnMowerClient:
             cloud_properties=cloud_properties,
             cloud_device_info=cloud_device_info,
             cloud_device_list_page=cloud_device_list_page,
+            cloud_property_history=cloud_property_history,
             cloud_user_features=cloud_user_features,
             cloud_key_definition=cloud_key_definition,
         )
@@ -1702,6 +1750,32 @@ def _optional_bool(value: Any) -> bool | None:
     if value is None:
         return None
     return bool(value)
+
+
+def _key_define_from_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    key_define = value.get("keyDefine")
+    return key_define if isinstance(key_define, Mapping) else {}
+
+
+def _device_list_records(value: Mapping[str, Any] | None) -> list[Mapping[str, Any]]:
+    if not isinstance(value, Mapping):
+        return []
+    result = value.get("result", value)
+    page = result.get("page", result) if isinstance(result, Mapping) else {}
+    records = page.get("records", []) if isinstance(page, Mapping) else []
+    return [record for record in records if isinstance(record, Mapping)]
+
+
+def _key_define_from_device_list_page(
+    did: str,
+    device_list_page: Mapping[str, Any] | None,
+) -> Mapping[str, Any]:
+    for record in _device_list_records(device_list_page):
+        if record.get("did") == did:
+            return _key_define_from_mapping(record)
+    return {}
 
 
 def _protocol_mapping_summary(

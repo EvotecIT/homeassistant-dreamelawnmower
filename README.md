@@ -196,25 +196,34 @@ python examples/decompile_research.py "C:\path\to\dreamehome.apk" --output-dir "
 If you want to scan wider `siid.piid` ranges when hunting for map or telemetry keys, use:
 
 ```bash
-python examples/property_probe.py
+python examples/property_probe.py --out property-scan-current.json
 ```
 
 Optional:
 
-- set `DREAME_PROP_KEYS=2.1,2.2,6.1` to probe an explicit list
-- or set `DREAME_PROP_SIIDS=1,2,6` plus `DREAME_PROP_PIID_START=1` and `DREAME_PROP_PIID_END=40`
+- use `--keys 2.1,2.2,6.1` to probe an explicit list
+- or use `--siids 1,2,6 --piid-start 1 --piid-end 40`
+- `DREAME_PROP_KEYS`, `DREAME_PROP_SIIDS`, `DREAME_PROP_PIID_START`, and
+  `DREAME_PROP_PIID_END` remain supported as environment-variable defaults
 - `1.1`, `2.1`, and `2.2` are automatically annotated as raw status blob, mower state, and mower error
 - `2.1` is labeled with mower state names extracted from the Dreamehome app asset bundle
 - `2.2` is labeled with cleaned mower error names when the error code is already known
 - blob-like values are annotated with `value_bytes_len` and `value_bytes_hex`
 - the returned `summary` groups non-empty keys, unknown non-empty keys, decoded-label sources, value-type counts, and map-candidate payloads
-- keep `DREAME_PROP_ONLY_VALUES=1` to hide empty key-only responses while scanning
+- non-empty values are shown by default; pass `--all` to include empty key-only responses
 
 This is still experimental and read-only. The integration exposes disabled-by-default `camera` entities named `Map` and `Map Diagnostics`. `Map` returns a rendered JPEG or a valid placeholder image. `Map Diagnostics` returns a readable JPEG diagnostics card and keeps the structured map view in entity attributes so Home Assistant no longer tries to render JSON as a broken camera preview.
 
 There is also a disabled-by-default `Capture Map Probe` button. Use it when the visible map is still a placeholder: it logs a compact JSON payload with the legacy current-map result, focused app-style property probes, trimmed cloud metadata from `device/info` and `device/listV2`, and the app-side `queryDevicePermit` feature payload.
 
 The map probe includes a `cloud_property_summary` section so large logs are easier to triage. Start there first: it lists non-empty keys, unknown non-empty keys, decoded labels and sources, hinted keys, value-type counts, map-candidate payload previews, and blob lengths before you inspect the full `cloud_properties.entries` payload.
+It also includes `cloud_property_history_summary` for the legacy map history
+keys `6.1`, `6.3`, and `6.13`, which helps distinguish "no map history
+records" from "history records exist but decode/render failed".
+
+```bash
+python examples/map_sources_probe.py --out map-sources-current.json
+```
 
 ## Camera and photo experiments
 

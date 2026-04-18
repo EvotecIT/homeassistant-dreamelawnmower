@@ -5,6 +5,7 @@ from dreame_lawn_mower_client import (
     DEFAULT_APK_RESEARCH_TERMS,
     DEFAULT_DECOMPILED_SOURCE_SUFFIXES,
     DEFAULT_DREAMEHOME_ASSET_TERMS,
+    MAP_HISTORY_PROPERTY_KEYS,
     MAP_PROBE_PROPERTY_KEYS,
     MOWER_ERROR_PROPERTY_KEY,
     MOWER_PROPERTY_HINTS,
@@ -23,6 +24,7 @@ from dreame_lawn_mower_client import (
     analyze_dreamehome_assets,
     build_camera_probe_payload,
     build_cloud_key_definition_summary,
+    build_cloud_property_history_summary,
     build_cloud_property_summary,
     build_jadx_command,
     build_map_probe_payload,
@@ -77,6 +79,7 @@ def test_public_package_exports_map_helpers() -> None:
     assert callable(analyze_dreamehome_apk)
     assert callable(build_camera_probe_payload)
     assert callable(build_cloud_key_definition_summary)
+    assert callable(build_cloud_property_history_summary)
     assert callable(build_cloud_property_summary)
     assert callable(build_jadx_command)
     assert callable(build_map_probe_payload)
@@ -86,6 +89,7 @@ def test_public_package_exports_map_helpers() -> None:
     assert ".java" in DEFAULT_DECOMPILED_SOURCE_SUFFIXES
     assert "object_name" in DEFAULT_DREAMEHOME_ASSET_TERMS
     assert "2.1" in MAP_PROBE_PROPERTY_KEYS
+    assert "6.1" in MAP_HISTORY_PROPERTY_KEYS
 
 
 def test_public_package_client_has_cloud_probe_helpers() -> None:

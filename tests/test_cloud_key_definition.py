@@ -54,19 +54,53 @@ def test_cloud_key_definition_fetches_public_payload() -> None:
     assert result["url_present"] is True
     assert result["fetched"] is True
     assert result["ver"] == 10
+    assert result["source"] == "device_info"
     assert result["payload"]["keyDefine"]["2.1"]["en"]["13"] == (
         "Charging Completed"
     )
     assert cloud.requested_url == "https://example.invalid/key.json"
 
 
+def test_cloud_key_definition_falls_back_to_device_list_record() -> None:
+    client = _client()
+    cloud = _FakeCloud(
+        b'{"keyDefine":{"6.13":{"en":{"map":"Map payload"}}},"ver":11}'
+    )
+    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_device_info = lambda language=None: {"keyDefine": {}}
+    client._sync_get_cloud_device_list_page = lambda **kwargs: {
+        "page": {
+            "records": [
+                {
+                    "did": "device-1",
+                    "keyDefine": {
+                        "url": "https://example.invalid/list-key.json",
+                        "ver": 11,
+                    },
+                }
+            ]
+        }
+    }
+
+    result = client._sync_get_cloud_key_definition("en")
+
+    assert result["url_present"] is True
+    assert result["fetched"] is True
+    assert result["ver"] == 11
+    assert result["source"] == "device_list_v2"
+    assert result["payload"]["keyDefine"]["6.13"]["en"]["map"] == "Map payload"
+    assert cloud.requested_url == "https://example.invalid/list-key.json"
+
+
 def test_cloud_key_definition_reports_missing_url() -> None:
     client = _client()
     client._sync_get_cloud_protocol = lambda: _FakeCloud()
     client._sync_get_cloud_device_info = lambda language=None: {"keyDefine": {}}
+    client._sync_get_cloud_device_list_page = lambda **kwargs: {"page": {"records": []}}
 
     result = client._sync_get_cloud_key_definition("en")
 
     assert result["url_present"] is False
     assert result["fetched"] is False
+    assert result["source"] is None
     assert result["error"] == "key_define_url_missing"
