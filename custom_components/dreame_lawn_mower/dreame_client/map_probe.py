@@ -49,6 +49,24 @@ MAP_PROBE_PROPERTY_KEYS = (
     "6.20",
 )
 
+MAP_CANDIDATE_TERMS = (
+    "map",
+    "m_path",
+    "current_map",
+    "object_name",
+    "obj_name",
+    "boundary",
+    "polygon",
+    "area",
+    "zone",
+    "point",
+    "path",
+    "route",
+    "coordinate",
+)
+
+PROPERTY_VALUE_PREVIEW_LENGTH = 140
+
 
 def _redact_probe_value(value: Any) -> Any:
     """Return JSON-safe probe data without stable account or device IDs."""
@@ -119,6 +137,70 @@ def _entry_has_value(entry: Mapping[str, Any]) -> bool:
     return False
 
 
+def _property_value(entry: Mapping[str, Any]) -> Any:
+    for key in ("value", "values", "data", "raw", "content"):
+        value = entry.get(key)
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
+def _property_value_type(value: Any) -> str:
+    if value is None:
+        return "empty"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    if isinstance(value, str):
+        return "str"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, Mapping):
+        return "object"
+    return type(value).__name__
+
+
+def _property_value_preview(value: Any) -> Any:
+    if isinstance(value, list):
+        preview = [_redact_probe_value(item) for item in value[:10]]
+        if len(value) > 10:
+            preview.append(f"... +{len(value) - 10} items")
+        return preview
+    if isinstance(value, Mapping):
+        preview: dict[str, Any] = {}
+        for index, (key, item) in enumerate(value.items()):
+            if index >= 10:
+                preview["..."] = f"+{len(value) - 10} keys"
+                break
+            preview[str(key)] = _redact_probe_value(item)
+        return preview
+    if isinstance(value, str):
+        text = value.strip()
+        if len(text) > PROPERTY_VALUE_PREVIEW_LENGTH:
+            return f"{text[:PROPERTY_VALUE_PREVIEW_LENGTH]}..."
+        return text
+    return _redact_probe_value(value)
+
+
+def _map_candidate_reason(key: str, value: Any) -> str | None:
+    haystacks = [key.casefold()]
+    if isinstance(value, str):
+        haystacks.append(value[:2000].casefold())
+    elif isinstance(value, Mapping):
+        haystacks.extend(str(item).casefold() for item in value.keys())
+
+    for term in MAP_CANDIDATE_TERMS:
+        folded = term.casefold()
+        if any(folded in haystack for haystack in haystacks):
+            return f"contains_{term}"
+    if isinstance(value, Mapping):
+        return "object_payload"
+    return None
+
+
 def build_cloud_property_summary(
     cloud_properties: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
@@ -131,7 +213,11 @@ def build_cloud_property_summary(
     non_empty_keys: list[str] = []
     hinted_keys: dict[str, str] = {}
     decoded_labels: dict[str, str] = {}
+    decoded_label_sources: dict[str, str] = {}
     blob_keys: dict[str, int] = {}
+    unknown_non_empty_keys: list[str] = []
+    value_type_counts: dict[str, int] = {}
+    candidate_map_properties: list[dict[str, Any]] = []
 
     for entry in entries:
         if not isinstance(entry, Mapping):
@@ -141,20 +227,41 @@ def build_cloud_property_summary(
         if not key:
             continue
 
-        if _entry_has_value(entry):
+        value = _property_value(entry)
+        value_type = _property_value_type(value)
+        value_type_counts[value_type] = value_type_counts.get(value_type, 0) + 1
+
+        if value is not None:
             non_empty_keys.append(key)
 
         property_hint = entry.get("property_hint")
         if property_hint:
             hinted_keys[key] = str(property_hint)
+        elif value is not None:
+            unknown_non_empty_keys.append(key)
 
         decoded_label = entry.get("decoded_label")
         if decoded_label:
             decoded_labels[key] = str(decoded_label)
 
+        decoded_label_source = entry.get("decoded_label_source")
+        if decoded_label_source:
+            decoded_label_sources[key] = str(decoded_label_source)
+
         value_bytes_len = entry.get("value_bytes_len")
         if isinstance(value_bytes_len, int):
             blob_keys[key] = value_bytes_len
+
+        candidate_reason = _map_candidate_reason(key, value)
+        if candidate_reason and value is not None:
+            candidate_map_properties.append(
+                {
+                    "key": key,
+                    "reason": candidate_reason,
+                    "value_type": value_type,
+                    "value_preview": _property_value_preview(value),
+                }
+            )
 
     return {
         "requested_key_count": payload.get("requested_key_count", 0),
@@ -164,10 +271,16 @@ def build_cloud_property_summary(
         "hinted_entry_count": len(hinted_keys),
         "decoded_entry_count": len(decoded_labels),
         "blob_entry_count": len(blob_keys),
+        "unknown_non_empty_entry_count": len(unknown_non_empty_keys),
+        "candidate_map_entry_count": len(candidate_map_properties),
         "non_empty_keys": non_empty_keys,
+        "unknown_non_empty_keys": unknown_non_empty_keys,
         "hinted_keys": hinted_keys,
         "decoded_labels": decoded_labels,
+        "decoded_label_sources": decoded_label_sources,
         "blob_keys": blob_keys,
+        "value_type_counts": value_type_counts,
+        "candidate_map_properties": candidate_map_properties[:20],
     }
 
 

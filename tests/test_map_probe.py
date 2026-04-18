@@ -46,6 +46,11 @@ def test_map_probe_payload_trims_cloud_records() -> None:
                     "value": 13,
                     "property_hint": "mower_state",
                     "decoded_label": "Charging Completed",
+                    "decoded_label_source": "cloud_key_definition",
+                },
+                {
+                    "key": "6.50",
+                    "value": {"zones": [{"name": "front", "polygon": [[1, 2]]}]},
                 },
                 {"key": "6.1", "value": None},
             ],
@@ -108,7 +113,12 @@ def test_map_probe_payload_trims_cloud_records() -> None:
     assert payload["legacy_current_map"]["source"] == "legacy_current_map"
     assert payload["legacy_current_map"]["diagnostics"] is None
     assert payload["cloud_properties"]["entries"][1]["value"] == 13
-    assert payload["cloud_property_summary"]["non_empty_keys"] == ["1.1", "2.1"]
+    assert payload["cloud_property_summary"]["non_empty_keys"] == [
+        "1.1",
+        "2.1",
+        "6.50",
+    ]
+    assert payload["cloud_property_summary"]["unknown_non_empty_keys"] == ["6.50"]
     assert payload["cloud_property_summary"]["hinted_keys"] == {
         "1.1": "raw_status_blob",
         "2.1": "mower_state",
@@ -116,7 +126,23 @@ def test_map_probe_payload_trims_cloud_records() -> None:
     assert payload["cloud_property_summary"]["decoded_labels"] == {
         "2.1": "Charging Completed",
     }
+    assert payload["cloud_property_summary"]["decoded_label_sources"] == {
+        "2.1": "cloud_key_definition",
+    }
     assert payload["cloud_property_summary"]["blob_keys"] == {"1.1": 3}
+    assert payload["cloud_property_summary"]["value_type_counts"] == {
+        "array": 1,
+        "empty": 1,
+        "int": 1,
+        "object": 1,
+    }
+    assert payload["cloud_property_summary"]["candidate_map_entry_count"] == 1
+    assert payload["cloud_property_summary"]["candidate_map_properties"][0] == {
+        "key": "6.50",
+        "reason": "contains_zone",
+        "value_type": "object",
+        "value_preview": {"zones": [{"name": "front", "polygon": [[1, 2]]}]},
+    }
     assert payload["cloud_device_info"]["key_define_url_present"] is True
     assert payload["cloud_device_info"]["display_name"] == "A2"
     assert payload["cloud_device_list_record"]["display_name"] == "A2"
@@ -144,10 +170,16 @@ def test_cloud_property_summary_handles_empty_or_unexpected_payloads() -> None:
         "hinted_entry_count": 0,
         "decoded_entry_count": 0,
         "blob_entry_count": 0,
+        "unknown_non_empty_entry_count": 0,
+        "candidate_map_entry_count": 0,
         "non_empty_keys": [],
+        "unknown_non_empty_keys": [],
         "hinted_keys": {},
         "decoded_labels": {},
+        "decoded_label_sources": {},
         "blob_keys": {},
+        "value_type_counts": {},
+        "candidate_map_properties": [],
     }
     assert build_cloud_property_summary({"entries": "not-a-list"})[
         "displayed_entry_count"

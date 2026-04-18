@@ -129,6 +129,10 @@ Use `python examples/cloud_probe.py` to query these endpoints directly with the 
 Use `python examples/property_probe.py` to scan `siid.piid` key ranges and highlight non-empty property results while keeping `1.1`, `2.1`, and `2.2` readable.
 Property scans now also fetch the device `keyDefine` JSON when available, so
 published Dreame labels are applied before mower-specific fallback labels.
+The scan output includes a `summary` block with non-empty keys, unknown
+non-empty keys, value-type counts, blob previews, decoded-label sources, and
+map-candidate entries. That summary is the preferred payload to compare between
+models or mower states before adding new Home Assistant entities.
 
 Use `python examples/apk_research.py <apk> --max-string-length 220` when
 testing a new Dreamehome APK.

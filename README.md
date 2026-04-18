@@ -165,13 +165,14 @@ Optional:
 - `2.1` is labeled with mower state names extracted from the Dreamehome app asset bundle
 - `2.2` is labeled with cleaned mower error names when the error code is already known
 - blob-like values are annotated with `value_bytes_len` and `value_bytes_hex`
+- the returned `summary` groups non-empty keys, unknown non-empty keys, decoded-label sources, value-type counts, and map-candidate payloads
 - keep `DREAME_PROP_ONLY_VALUES=1` to hide empty key-only responses while scanning
 
 This is still experimental and read-only. The integration exposes disabled-by-default `camera` entities named `Map` and `Map Diagnostics`. `Map` returns a rendered JPEG or a valid placeholder image. `Map Diagnostics` returns a readable JPEG diagnostics card and keeps the structured map view in entity attributes so Home Assistant no longer tries to render JSON as a broken camera preview.
 
 There is also a disabled-by-default `Capture Map Probe` button. Use it when the visible map is still a placeholder: it logs a compact JSON payload with the legacy current-map result, focused app-style property probes, trimmed cloud metadata from `device/info` and `device/listV2`, and the app-side `queryDevicePermit` feature payload.
 
-The map probe includes a `cloud_property_summary` section so large logs are easier to triage. Start there first: it lists non-empty keys, decoded labels, hinted keys, and blob lengths before you inspect the full `cloud_properties.entries` payload.
+The map probe includes a `cloud_property_summary` section so large logs are easier to triage. Start there first: it lists non-empty keys, unknown non-empty keys, decoded labels and sources, hinted keys, value-type counts, map-candidate payload previews, and blob lengths before you inspect the full `cloud_properties.entries` payload.
 
 ## Camera and photo experiments
 

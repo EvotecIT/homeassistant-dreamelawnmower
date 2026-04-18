@@ -20,7 +20,11 @@ from .app_protocol import (
 )
 from .camera_probe import CAMERA_PROBE_PROPERTY_KEYS, build_camera_probe_payload
 from .exceptions import DeviceException, InvalidActionException
-from .map_probe import MAP_PROBE_PROPERTY_KEYS, build_map_probe_payload
+from .map_probe import (
+    MAP_PROBE_PROPERTY_KEYS,
+    build_cloud_property_summary,
+    build_map_probe_payload,
+)
 from .models import (
     SUPPORTED_ACCOUNT_TYPES,
     DreameLawnMowerCameraFeatureSupport,
@@ -1100,12 +1104,14 @@ class DreameLawnMowerClient:
             piid_end=piid_end,
         )
         if not normalized_keys:
-            return {
+            result = {
                 "requested_key_count": 0,
                 "returned_entry_count": 0,
                 "displayed_entry_count": 0,
                 "entries": [],
             }
+            result["summary"] = build_cloud_property_summary(result)
+            return result
 
         all_entries: list[dict[str, Any]] = []
         for offset in range(0, len(normalized_keys), max(chunk_size, 1)):
@@ -1135,12 +1141,14 @@ class DreameLawnMowerClient:
                 key=lambda item: str(item.get("key", "")),
             )
         ]
-        return {
+        result = {
             "requested_key_count": len(normalized_keys),
             "returned_entry_count": len(all_entries),
             "displayed_entry_count": len(rendered),
             "entries": rendered,
         }
+        result["summary"] = build_cloud_property_summary(result)
+        return result
 
     def _sync_get_cloud_device_list_page(
         self,

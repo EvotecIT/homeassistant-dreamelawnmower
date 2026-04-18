@@ -175,3 +175,46 @@ def test_client_status_blob_prefers_cached_realtime_payload() -> None:
     assert decoded is not None
     assert decoded.source == "realtime"
     assert decoded.frame_valid is True
+
+
+def test_scan_cloud_properties_returns_summary_with_dynamic_labels() -> None:
+    client = DreameLawnMowerClient(
+        username="user",
+        password="pass",
+        country="eu",
+        account_type="dreame",
+        descriptor=DreameLawnMowerDescriptor(
+            did="1",
+            name="Mower",
+            model="dreame.mower.g2408",
+            display_model="A2",
+            account_type="dreame",
+            country="eu",
+        ),
+    )
+    client._sync_get_cloud_properties = lambda keys: [
+        {"key": "2.1", "value": 13},
+        {"key": "9.9", "value": '{"current_map":true}'},
+    ]
+    client._sync_get_cloud_key_definition = lambda language: {
+        "payload": {
+            "keyDefine": {
+                "2.1": {"en": {"13": "Charging Completed From Cloud"}},
+            }
+        }
+    }
+
+    result = client._sync_scan_cloud_properties(
+        keys=("2.1", "9.9"),
+        siids=None,
+        piid_start=1,
+        piid_end=1,
+        chunk_size=10,
+        language="en",
+        only_values=True,
+    )
+
+    assert result["entries"][0]["decoded_label"] == "Charging Completed From Cloud"
+    assert result["entries"][0]["decoded_label_source"] == "cloud_key_definition"
+    assert result["summary"]["candidate_map_entry_count"] == 1
+    assert result["summary"]["candidate_map_properties"][0]["key"] == "9.9"
