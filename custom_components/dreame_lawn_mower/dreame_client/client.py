@@ -1410,6 +1410,15 @@ class DreameLawnMowerClient:
                         payload_text.encode("utf-8")
                     ).hexdigest()
                     parsed_payload = json.loads(payload_text)
+                    hash_match = (
+                        expected_hash == payload_hash
+                        if isinstance(expected_hash, str)
+                        else None
+                    )
+                    if hash_match is False:
+                        raise DreameLawnMowerConnectionError(
+                            "App map payload hash mismatch."
+                        )
                     map_result.update(
                         {
                             "available": True,
@@ -1418,11 +1427,7 @@ class DreameLawnMowerClient:
                             "decoded_size": len(payload_text.encode("utf-8")),
                             "chunk_count": chunk_count,
                             "md5": payload_hash,
-                            "hash_match": (
-                                expected_hash == payload_hash
-                                if isinstance(expected_hash, str)
-                                else None
-                            ),
+                            "hash_match": hash_match,
                             "payload_keys": (
                                 sorted(str(key) for key in parsed_payload)
                                 if isinstance(parsed_payload, Mapping)
@@ -1528,18 +1533,16 @@ class DreameLawnMowerClient:
                 )
             chunk_bytes = text.encode("utf-8")
             actual_size = len(chunk_bytes)
-            if isinstance(returned_size, int) and returned_size != actual_size:
-                raise DreameLawnMowerConnectionError(
-                    "MAPD returned size "
-                    f"{returned_size} but data was {actual_size} bytes "
-                    f"at offset {offset}."
-                )
             if actual_size > requested_size:
                 raise DreameLawnMowerConnectionError(
                     f"MAPD returned too much data at offset {offset}."
                 )
             chunks.extend(chunk_bytes)
-            offset += actual_size
+            offset += (
+                returned_size
+                if isinstance(returned_size, int) and returned_size > 0
+                else actual_size
+            )
             chunk_count += 1
         return chunks.decode("utf-8"), chunk_count, offset
 

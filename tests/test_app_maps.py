@@ -170,11 +170,14 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
     assert [call["d"]["size"] for call in mapd_calls] == expected_sizes
 
 
-def test_app_maps_reject_mismatched_chunk_size() -> None:
+def test_app_maps_reject_hash_mismatched_payload() -> None:
     client = _client()
+    payload = {"map": [{"area": 1, "data": [[1, 2], [3, 4], [5, 6]]}]}
+    payload_text = json.dumps(payload, separators=(",", ":"))
+    corrupt_payload_text = '{"map":[]}'
     cloud = _FakeAppMapCloud(
-        {"map": [{"area": 1, "data": [[1, 2], [3, 4], [5, 6]]}]},
-        chunk_overrides={0: ('{"map"', 40)},
+        payload,
+        chunk_overrides={0: (corrupt_payload_text, len(payload_text))},
     )
     client._sync_get_cloud_protocol = lambda: cloud
 
@@ -186,9 +189,8 @@ def test_app_maps_reject_mismatched_chunk_size() -> None:
 
     assert result["available"] is False
     assert result["maps"][0]["available"] is False
-    assert result["errors"][0]["error"] == (
-        "MAPD returned size 40 but data was 6 bytes at offset 0."
-    )
+    assert result["errors"][0]["error"] == "App map payload hash mismatch."
+    assert payload_text != corrupt_payload_text
 
 
 def test_app_map_text_rejects_oversized_chunk() -> None:
