@@ -398,6 +398,7 @@ class DreameLawnMowerClient:
         *,
         chunk_size: int = 400,
         include_payload: bool = False,
+        include_objects: bool = True,
         include_object_urls: bool = False,
     ) -> dict[str, Any]:
         """Fetch mower-native app map payloads through read-only app commands."""
@@ -405,6 +406,7 @@ class DreameLawnMowerClient:
             self._sync_get_app_maps,
             chunk_size,
             include_payload,
+            include_objects,
             include_object_urls,
         )
 
@@ -1166,8 +1168,7 @@ class DreameLawnMowerClient:
         timeout: float,
         interval: float,
     ) -> DreameLawnMowerMapSummary | None:
-        map_data = self._sync_wait_for_map(timeout, interval)
-        return map_summary_from_map_data(map_data)
+        return self._sync_refresh_map_view(timeout, interval).summary
 
     def _sync_get_map_png(
         self,
@@ -1181,21 +1182,47 @@ class DreameLawnMowerClient:
         timeout: float,
         interval: float,
     ) -> DreameLawnMowerMapView:
+        app_view = self._sync_refresh_app_map_view(
+            legacy_error=None,
+            legacy_reason="app_action_map_primary",
+        )
+        if app_view.available and app_view.image_png is not None:
+            return app_view
+
+        legacy_view = self._sync_refresh_legacy_map_view(timeout, interval)
+        if legacy_view.available or legacy_view.image_png is not None:
+            return legacy_view
+
+        return app_view
+
+    def _sync_refresh_legacy_map_view(
+        self,
+        timeout: float,
+        interval: float,
+    ) -> DreameLawnMowerMapView:
         source = "legacy_current_map"
         try:
             map_data = self._sync_wait_for_map(timeout, interval)
         except DreameLawnMowerConnectionError as err:
             error = str(err)
-            return self._sync_refresh_app_map_view(
-                legacy_error=error,
-                legacy_reason=error,
+            return DreameLawnMowerMapView(
+                source=source,
+                error=error,
+                diagnostics=self._safe_map_diagnostics(
+                    source=source,
+                    reason=error,
+                ),
             )
 
         if map_data is None:
             error = "No map data returned by the legacy current-map path."
-            return self._sync_refresh_app_map_view(
-                legacy_error=error,
-                legacy_reason="legacy_current_map_empty",
+            return DreameLawnMowerMapView(
+                source=source,
+                error=error,
+                diagnostics=self._safe_map_diagnostics(
+                    source=source,
+                    reason="legacy_current_map_empty",
+                ),
             )
 
         summary = map_summary_from_map_data(map_data)
@@ -1240,6 +1267,7 @@ class DreameLawnMowerClient:
             app_maps = self._sync_get_app_maps(
                 chunk_size=400,
                 include_payload=True,
+                include_objects=False,
             )
             selected = _select_app_map_payload(app_maps)
             if selected is None:
@@ -1332,6 +1360,7 @@ class DreameLawnMowerClient:
         self,
         chunk_size: int = 400,
         include_payload: bool = False,
+        include_objects: bool = True,
         include_object_urls: bool = False,
     ) -> dict[str, Any]:
         chunk_size = _validate_app_map_chunk_size(chunk_size)
@@ -1346,12 +1375,13 @@ class DreameLawnMowerClient:
             "maps": [],
             "errors": [],
         }
-        try:
-            result["objects"] = self._sync_get_app_map_objects(
-                include_urls=include_object_urls,
-            )
-        except Exception as err:  # noqa: BLE001 - object metadata is diagnostic
-            result["objects"] = {"error": str(err)}
+        if include_objects:
+            try:
+                result["objects"] = self._sync_get_app_map_objects(
+                    include_urls=include_object_urls,
+                )
+            except Exception as err:  # noqa: BLE001 - object metadata is diagnostic
+                result["objects"] = {"error": str(err)}
 
         for entry in map_entries:
             if entry.get("current"):
@@ -1782,6 +1812,7 @@ class DreameLawnMowerClient:
             app_maps = self._sync_get_app_maps(
                 chunk_size=400,
                 include_payload=False,
+                include_objects=True,
                 include_object_urls=False,
             )
         except DreameLawnMowerConnectionError as err:

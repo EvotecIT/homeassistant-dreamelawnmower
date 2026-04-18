@@ -33,6 +33,7 @@ def test_app_map_probe_parser_supports_payload_opt_in() -> None:
             "400",
             "--include-payload",
             "--include-object-urls",
+            "--skip-objects",
             "--device-index",
             "1",
             "--out",
@@ -43,5 +44,6 @@ def test_app_map_probe_parser_supports_payload_opt_in() -> None:
     assert args.chunk_size == 400
     assert args.include_payload is True
     assert args.include_object_urls is True
+    assert args.skip_objects is True
     assert args.device_index == 1
     assert str(args.out) == "app-map-current.json"

@@ -151,7 +151,7 @@ The reusable Python client now includes an experimental read-only map path:
 - `async_get_map_png()` tries to render the current mower map to PNG bytes
 - `async_get_app_maps()` fetches mower-native app map JSON through confirmed read-only `MAPL`, `MAPI`, and chunked `MAPD` app commands
 - `async_get_app_map_objects()` fetches read-only 3D map object metadata through `OBJ type=3dmap`; expiring download URLs are opt-in
-- when the legacy map path is empty, `async_refresh_map_view()` falls back to the confirmed app-map JSON and renders a simple vector PNG
+- `async_refresh_map_view()` uses the confirmed app-map JSON first and renders a simple vector PNG; the older legacy current-map path remains a fallback
 
 The quickest way to try it outside Home Assistant is:
 
@@ -168,7 +168,8 @@ python examples/app_map_probe.py --out app-map-current.json
 By default this omits raw coordinates and writes only metadata plus summaries.
 Use `--include-payload` only for local parser or renderer work. Use
 `--include-object-urls` only when you intentionally need expiring 3D object
-download URLs in the ignored local output file.
+download URLs in the ignored local output file. Use `--skip-objects` when you
+only want the 2D map payload.
 
 If you want to probe the same cloud endpoints the Dreamehome app exposes for mower discovery and raw properties, use:
 
@@ -226,7 +227,7 @@ Optional:
 - the returned `summary` groups non-empty keys, unknown non-empty keys, decoded-label sources, value-type counts, and map-candidate payloads
 - non-empty values are shown by default; pass `--all` to include empty key-only responses
 
-This is still experimental and read-only. The integration exposes disabled-by-default `camera` entities named `Map` and `Map Diagnostics`. `Map` returns a rendered JPEG from the app-map fallback when available, or a valid placeholder image. `Map Diagnostics` returns a readable JPEG diagnostics card and keeps the structured map view in entity attributes so Home Assistant no longer tries to render JSON as a broken camera preview.
+This is still experimental and read-only. The integration exposes disabled-by-default `camera` entities named `Map` and `Map Diagnostics`. `Map` returns a rendered JPEG from the app-map source when available, or a valid placeholder image. `Map Diagnostics` returns a readable JPEG diagnostics card and keeps the structured map view in entity attributes so Home Assistant no longer tries to render JSON as a broken camera preview.
 
 There is also a disabled-by-default `Capture Map Probe` button. Use it when the visible map is still a placeholder: it logs a compact JSON payload with the legacy current-map result, focused app-style property probes, trimmed cloud metadata from `device/info` and `device/listV2`, the app-side `queryDevicePermit` feature payload, and a payload-free summary of the confirmed app-map path.
 

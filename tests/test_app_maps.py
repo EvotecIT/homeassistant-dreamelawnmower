@@ -192,7 +192,10 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
         }
     )
     client._sync_get_cloud_protocol = lambda: cloud
-    client._sync_wait_for_map = lambda timeout, interval: None
+    def fail_if_legacy_map_is_called(timeout, interval):  # noqa: ARG001
+        raise AssertionError("legacy map path should not run when app map works")
+
+    client._sync_wait_for_map = fail_if_legacy_map_is_called
     client._safe_map_diagnostics = lambda **kwargs: None
 
     view = client._sync_refresh_map_view(timeout=0, interval=0)
@@ -207,3 +210,21 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
     assert view.summary.segment_count == 1
     assert view.summary.no_go_area_count == 1
     assert view.summary.path_point_count == 3
+    assert "OBJ" not in [call["t"] for call in cloud.calls]
+
+
+def test_map_view_uses_legacy_path_when_app_map_fails() -> None:
+    client = _client()
+    client._sync_get_app_maps = lambda **kwargs: {
+        "available": False,
+        "maps": [],
+        "errors": [{"error": "no app map"}],
+    }
+    client._sync_wait_for_map = lambda timeout, interval: None
+    client._safe_map_diagnostics = lambda **kwargs: None
+
+    view = client._sync_refresh_map_view(timeout=0, interval=0)
+
+    assert view.source == "app_action_map"
+    assert view.available is False
+    assert view.error == "No app-map payload was returned."

@@ -61,10 +61,11 @@ Last updated: 2026-04-18
 - `examples/app_map_probe.py` provides the focused read-only app-map probe.
   By default it omits raw coordinates; `--include-payload` is opt-in for local
   parser or renderer work.
-- The existing map-view path now falls back to the app-map payload and renders
-  a simple PNG. A live run of `examples/map_client.py` on 2026-04-18 produced
-  an `app_action_map` image for current map `0` with 2 map areas, 2 no-go/spot
-  areas, and 63 trajectory points.
+- The existing map-view path now tries the app-map payload first and renders a
+  simple PNG. The older legacy current-map path remains a fallback. A live run
+  of `examples/map_client.py` on 2026-04-18 produced an `app_action_map` image
+  for current map `0` with 2 map areas, 2 no-go/spot areas, and 63 trajectory
+  points.
 - `OBJ type=3dmap` is also wired as read-only object metadata through
   `async_get_app_map_objects()`. A live A2 probe returned two `.bin` object
   names. Expiring object URLs are intentionally opt-in and omitted from default
@@ -175,7 +176,8 @@ python examples\app_map_probe.py --out app-map-current.json
 Only use `--include-payload` for local parser/renderer work. It includes raw
 map coordinates and should stay in ignored local files. Only use
 `--include-object-urls` when debugging 3D map object downloads; it writes
-expiring signed URLs to the ignored output file.
+expiring signed URLs to the ignored output file. Use `--skip-objects` when you
+only want the 2D map payload.
 
 Render the current app-map fallback PNG:
 
