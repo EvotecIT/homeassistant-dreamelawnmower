@@ -14,6 +14,7 @@ from .app_protocol import (
     MOWER_STATE_LABELS,
     MOWER_STATE_PROPERTY_KEY,
     decode_mower_status_blob,
+    key_definition_label,
     mower_error_label,
     mower_state_label,
 )
@@ -94,6 +95,7 @@ __all__ = [
     "build_cloud_property_summary",
     "build_map_probe_payload",
     "decode_mower_status_blob",
+    "key_definition_label",
     "find_jadx_executable",
     "display_name_for_model",
     "firmware_update_support_from_device",

@@ -127,6 +127,8 @@ The reusable Python client now includes cloud probe helpers so this research can
 Use `python examples/cloud_probe.py` to query these endpoints directly with the same credentials used by the integration.
 
 Use `python examples/property_probe.py` to scan `siid.piid` key ranges and highlight non-empty property results while keeping `1.1`, `2.1`, and `2.2` readable.
+Property scans now also fetch the device `keyDefine` JSON when available, so
+published Dreame labels are applied before mower-specific fallback labels.
 
 Use `python examples/apk_research.py <apk> --max-string-length 220` when
 testing a new Dreamehome APK.

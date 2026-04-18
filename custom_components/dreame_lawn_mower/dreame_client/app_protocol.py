@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Final
 
 from .models import DreameLawnMowerStatusBlob
@@ -79,6 +79,46 @@ def mower_error_label(value: object) -> str | None:
         return _clean_label(ERROR_CODE_TO_ERROR_NAME.get(enum_value))
     except (ImportError, ValueError):
         return None
+
+
+def key_definition_label(
+    key_definition: Mapping[str, object] | None,
+    key: object,
+    value: object,
+    *,
+    language: str = "en",
+) -> str | None:
+    """Return a label from Dreame's public `keyDefine` JSON, if present."""
+    if not isinstance(key_definition, Mapping) or value is None:
+        return None
+
+    definition = key_definition.get("payload")
+    if not isinstance(definition, Mapping):
+        definition = key_definition
+
+    key_define = definition.get("keyDefine")
+    if not isinstance(key_define, Mapping):
+        return None
+
+    key_labels = key_define.get(str(key))
+    if not isinstance(key_labels, Mapping):
+        return None
+
+    language_labels = key_labels.get(language) or key_labels.get("en")
+    if not isinstance(language_labels, Mapping):
+        language_labels = _first_mapping_value(key_labels)
+    if not isinstance(language_labels, Mapping):
+        return None
+
+    label = language_labels.get(str(value))
+    return str(label).strip() if label is not None and str(label).strip() else None
+
+
+def _first_mapping_value(value: Mapping[object, object]) -> Mapping[object, object] | None:
+    for item in value.values():
+        if isinstance(item, Mapping):
+            return item
+    return None
 
 
 def decode_mower_status_blob(

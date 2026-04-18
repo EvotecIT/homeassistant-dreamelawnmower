@@ -28,6 +28,7 @@ from dreame_lawn_mower_client import (
     build_map_probe_payload,
     decode_mower_status_blob,
     firmware_update_support_from_device,
+    key_definition_label,
     map_diagnostics_from_device,
     map_summary_from_map_data,
     map_summary_to_dict,
@@ -66,6 +67,7 @@ def test_public_package_exports_map_helpers() -> None:
     assert callable(map_summary_to_dict)
     assert callable(map_diagnostics_from_device)
     assert callable(firmware_update_support_from_device)
+    assert callable(key_definition_label)
     assert callable(analyze_decompiled_sources)
     assert callable(analyze_dreamehome_assets)
     assert callable(analyze_dreamehome_apk)

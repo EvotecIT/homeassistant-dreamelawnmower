@@ -14,6 +14,7 @@ from .app_protocol import (
     MOWER_RAW_STATUS_PROPERTY_KEY,
     MOWER_STATE_PROPERTY_KEY,
     decode_mower_status_blob,
+    key_definition_label,
     mower_error_label,
     mower_state_label,
 )
@@ -345,6 +346,7 @@ class DreameLawnMowerClient:
         chunk_size: int = 50,
         language: str = "en",
         only_values: bool = True,
+        include_key_definition: bool = True,
     ) -> dict[str, Any]:
         """Scan cloud properties in chunks and return normalized results."""
         return await asyncio.to_thread(
@@ -356,6 +358,8 @@ class DreameLawnMowerClient:
             chunk_size,
             language,
             only_values,
+            include_key_definition,
+            None,
         )
 
     async def async_get_cloud_device_list_page(
@@ -1086,6 +1090,8 @@ class DreameLawnMowerClient:
         chunk_size: int,
         language: str,
         only_values: bool,
+        include_key_definition: bool = True,
+        key_definition: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         normalized_keys = self._build_cloud_property_keys(
             keys=keys,
@@ -1107,12 +1113,23 @@ class DreameLawnMowerClient:
             response = self._sync_get_cloud_properties(chunk)
             all_entries.extend(self._normalize_cloud_property_entries(response))
 
+        cloud_key_definition = key_definition
+        if include_key_definition and cloud_key_definition is None:
+            try:
+                cloud_key_definition = self._sync_get_cloud_key_definition(language)
+            except DreameLawnMowerConnectionError:
+                cloud_key_definition = None
+
         rendered = all_entries
         if only_values:
             rendered = [entry for entry in rendered if self._entry_has_meaningful_value(entry)]
 
         rendered = [
-            self._annotate_cloud_property_entry(entry, language=language)
+            self._annotate_cloud_property_entry(
+                entry,
+                language=language,
+                key_definition=cloud_key_definition,
+            )
             for entry in sorted(
                 rendered,
                 key=lambda item: str(item.get("key", "")),
@@ -1201,6 +1218,14 @@ class DreameLawnMowerClient:
         language: str,
     ) -> dict[str, Any]:
         map_view = self._sync_refresh_map_view(timeout, interval)
+        cloud_device_info = self._sync_get_cloud_device_info(language)
+        try:
+            cloud_key_definition = self._sync_get_cloud_key_definition(
+                language,
+                cloud_device_info,
+            )
+        except DreameLawnMowerConnectionError as err:
+            cloud_key_definition = {"error": str(err)}
         cloud_properties = self._sync_scan_cloud_properties(
             keys=MAP_PROBE_PROPERTY_KEYS,
             siids=None,
@@ -1209,8 +1234,13 @@ class DreameLawnMowerClient:
             chunk_size=50,
             language=language,
             only_values=False,
+            include_key_definition=False,
+            key_definition=(
+                cloud_key_definition
+                if isinstance(cloud_key_definition, Mapping)
+                else None
+            ),
         )
-        cloud_device_info = self._sync_get_cloud_device_info(language)
         cloud_device_list_page = self._sync_get_cloud_device_list_page(
             current=1,
             size=20,
@@ -1222,13 +1252,6 @@ class DreameLawnMowerClient:
             cloud_user_features = self._sync_get_cloud_user_features(language)
         except DreameLawnMowerConnectionError as err:
             cloud_user_features = {"error": str(err)}
-        try:
-            cloud_key_definition = self._sync_get_cloud_key_definition(
-                language,
-                cloud_device_info,
-            )
-        except DreameLawnMowerConnectionError as err:
-            cloud_key_definition = {"error": str(err)}
 
         return build_map_probe_payload(
             descriptor=self._descriptor,
@@ -1383,6 +1406,7 @@ class DreameLawnMowerClient:
         entry: dict[str, Any],
         *,
         language: str,
+        key_definition: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         rendered = dict(entry)
         key = str(rendered.get("key", ""))
@@ -1391,14 +1415,26 @@ class DreameLawnMowerClient:
         if property_hint:
             rendered["property_hint"] = property_hint
 
-        if key == MOWER_STATE_PROPERTY_KEY:
+        label = key_definition_label(
+            key_definition,
+            key,
+            value,
+            language=language,
+        )
+        if label:
+            rendered["decoded_label"] = label
+            rendered["decoded_label_source"] = "cloud_key_definition"
+
+        if key == MOWER_STATE_PROPERTY_KEY and not rendered.get("decoded_label"):
             label = mower_state_label(value, language=language)
             if label:
                 rendered["decoded_label"] = label
-        elif key == MOWER_ERROR_PROPERTY_KEY:
+                rendered["decoded_label_source"] = "bundled_mower_protocol"
+        elif key == MOWER_ERROR_PROPERTY_KEY and not rendered.get("decoded_label"):
             label = mower_error_label(value)
             if label:
                 rendered["decoded_label"] = label
+                rendered["decoded_label_source"] = "bundled_mower_errors"
         elif key == MOWER_RAW_STATUS_PROPERTY_KEY:
             status_blob = decode_mower_status_blob(value)
             if status_blob is not None:

@@ -6,6 +6,7 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
     DreameLawnMowerDescriptor,
     decode_mower_status_blob,
+    key_definition_label,
 )
 
 
@@ -23,6 +24,50 @@ def test_property_annotations_label_known_mower_state_and_error_keys() -> None:
     assert state_entry["decoded_label"] == "Charging Completed"
     assert error_entry["property_hint"] == "mower_error"
     assert error_entry["decoded_label"] == "Left wheel speed"
+    assert error_entry["decoded_label_source"] == "bundled_mower_errors"
+
+
+def test_property_annotations_prefer_cloud_key_definition_labels() -> None:
+    key_definition = {
+        "payload": {
+            "keyDefine": {
+                "2.1": {
+                    "en": {"13": "Charging Complete From Cloud"},
+                    "pl": {"13": "Ladowanie zakonczone"},
+                }
+            }
+        }
+    }
+
+    entry = DreameLawnMowerClient._annotate_cloud_property_entry(
+        {"key": "2.1", "value": 13},
+        language="pl",
+        key_definition=key_definition,
+    )
+
+    assert entry["decoded_label"] == "Ladowanie zakonczone"
+    assert entry["decoded_label_source"] == "cloud_key_definition"
+
+
+def test_key_definition_label_falls_back_to_english_and_raw_payload() -> None:
+    raw_key_definition = {
+        "keyDefine": {
+            "2.1": {
+                "en": {"13": "Charging Completed"},
+            }
+        }
+    }
+
+    assert (
+        key_definition_label(
+            raw_key_definition,
+            "2.1",
+            13,
+            language="missing",
+        )
+        == "Charging Completed"
+    )
+    assert key_definition_label(raw_key_definition, "2.2", 31) is None
 
 
 def test_property_annotations_mark_raw_status_blob_frame() -> None:
