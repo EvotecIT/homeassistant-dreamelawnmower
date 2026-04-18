@@ -442,7 +442,7 @@ def test_firmware_update_support_preserves_evidence_without_guessing_ota() -> No
         device,
         cloud_device_info={
             "ver": "4.3.6_0320",
-            "deviceInfo": {"pluginForceUpdate": True},
+            "deviceInfo": {"pluginForceUpdate": False},
         },
         cloud_device_list_page={
             "page": {
@@ -463,15 +463,20 @@ def test_firmware_update_support_preserves_evidence_without_guessing_ota() -> No
     assert support.plugin_status == "Live"
     assert support.firmware_develop_type == "SINGLE_PLATFORM"
     assert support.update_available is None
-    assert "pluginForceUpdate" in support.reason
+    assert support.warnings == ("plugin_force_update_conflict",)
+    assert "differs across cloud metadata sources" in support.reason
     assert support.evidence["info"]["latestStatus"] == 13
     assert support.evidence["cloud_device_info"]["deviceInfo"] == {
-        "pluginForceUpdate": True
+        "pluginForceUpdate": False
     }
     assert support.evidence["cloud_device_list_page"]["page"] == {"record_count": 1}
     assert support.evidence["cloud_device_list_page"]["records"][0] == {
         "latestStatus": 13,
         "deviceInfo": {"firmwareDevelopType": "SINGLE_PLATFORM"},
+    }
+    assert support.evidence["pluginForceUpdateSources"] == {
+        "cached_device_info": True,
+        "cloud_device_info": False,
     }
 
 
@@ -484,3 +489,25 @@ def test_firmware_update_support_marks_update_state() -> None:
     assert support.update_state == "upgrading"
     assert support.update_available is None
     assert support.reason == "Mower reports an update-related state."
+
+
+def test_firmware_update_support_summarizes_root_records() -> None:
+    device = _FakeDevice()
+
+    support = firmware_update_support_from_device(
+        device,
+        cloud_device_list_page={
+            "current": 1,
+            "size": 20,
+            "total": 1,
+            "records": [{"latestStatus": 13}],
+        },
+    )
+
+    assert support.evidence["cloud_device_list_page"] == {
+        "current": 1,
+        "size": 20,
+        "total": 1,
+        "root": {"record_count": 1},
+        "records": [{"latestStatus": 13}],
+    }

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 SUPPORTED_ACCOUNT_TYPES = ("dreame", "mova")
 SUPPORTED_MODEL_MARKER = ".mower."
@@ -188,6 +189,7 @@ class DreameLawnMowerFirmwareUpdateSupport:
     update_available: bool | None = None
     cloud_error: str | None = None
     evidence: Mapping[str, Any] = field(default_factory=dict)
+    warnings: tuple[str, ...] = field(default_factory=tuple)
     reason: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -551,8 +553,29 @@ def firmware_update_support_from_device(
             cloud_device_list_page
         )
 
+    warnings: list[str] = []
+    plugin_force_update_sources = _collect_plugin_force_update_sources(
+        cached_device_info=device_info,
+        cloud_device_info=cloud_device_info,
+        cloud_device_list_page=cloud_device_list_page,
+    )
+    if plugin_force_update_sources:
+        evidence["pluginForceUpdateSources"] = plugin_force_update_sources
+        unique_plugin_values = {
+            item
+            for item in plugin_force_update_sources.values()
+            if isinstance(item, bool)
+        }
+        if len(unique_plugin_values) > 1:
+            warnings.append("plugin_force_update_conflict")
+
     reason = "No verified mower firmware update availability signal was found."
-    if plugin_force_update:
+    if "plugin_force_update_conflict" in warnings:
+        reason = (
+            "pluginForceUpdate differs across cloud metadata sources, so it is "
+            "not treated as verified mower firmware update availability."
+        )
+    elif plugin_force_update:
         reason = (
             "Cloud metadata advertises pluginForceUpdate, which appears to be "
             "mobile-app/plugin metadata, not a verified mower firmware update."
@@ -576,6 +599,7 @@ def firmware_update_support_from_device(
         update_available=None,
         cloud_error=cloud_error,
         evidence=evidence,
+        warnings=tuple(warnings),
         reason=reason,
     )
 
@@ -633,15 +657,22 @@ def _compact_mapping_evidence(value: Mapping[str, Any]) -> dict[str, Any]:
     """Return useful keys without storing full noisy cloud payloads in support."""
     page = value.get("page") if isinstance(value, Mapping) else None
     records = page.get("records") if isinstance(page, Mapping) else None
+    if not isinstance(records, list) and isinstance(value.get("records"), list):
+        records = value.get("records")
     if isinstance(records, list):
-        return {
-            "page": {"record_count": len(records)},
+        key_name = "page" if isinstance(page, Mapping) else "root"
+        summary: dict[str, Any] = {
+            key_name: {"record_count": len(records)},
             "records": [
                 _compact_mapping_evidence(item)
                 for item in records[:5]
                 if isinstance(item, Mapping)
             ],
         }
+        for key in ("current", "size", "total"):
+            if isinstance(value, Mapping) and key in value:
+                summary[key] = value.get(key)
+        return summary
 
     interesting_keys = (
         "status",
@@ -671,3 +702,40 @@ def _compact_mapping_evidence(value: Mapping[str, Any]) -> dict[str, Any]:
             if key in device_info
         }
     return result
+
+
+def _collect_plugin_force_update_sources(
+    *,
+    cached_device_info: Mapping[str, Any],
+    cloud_device_info: Mapping[str, Any] | None,
+    cloud_device_list_page: Mapping[str, Any] | None,
+) -> dict[str, bool]:
+    sources: dict[str, bool] = {}
+    if "pluginForceUpdate" in cached_device_info:
+        sources["cached_device_info"] = bool(
+            cached_device_info.get("pluginForceUpdate")
+        )
+
+    if isinstance(cloud_device_info, Mapping):
+        device_info = cloud_device_info.get("deviceInfo")
+        if isinstance(device_info, Mapping) and "pluginForceUpdate" in device_info:
+            sources["cloud_device_info"] = bool(device_info.get("pluginForceUpdate"))
+
+    if isinstance(cloud_device_list_page, Mapping):
+        records = cloud_device_list_page.get("records")
+        page = cloud_device_list_page.get("page")
+        if not isinstance(records, list) and isinstance(page, Mapping):
+            records = page.get("records")
+        if isinstance(records, list):
+            for index, record in enumerate(records[:5]):
+                if not isinstance(record, Mapping):
+                    continue
+                device_info = record.get("deviceInfo")
+                if (
+                    isinstance(device_info, Mapping)
+                    and "pluginForceUpdate" in device_info
+                ):
+                    sources[f"cloud_device_list_page.records[{index}]"] = bool(
+                        device_info.get("pluginForceUpdate")
+                    )
+    return sources
