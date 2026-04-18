@@ -184,7 +184,8 @@ The successful map path is the app action bridge described above. On
   `total_area`, and `trajectory`.
 - `OBJ type=3dmap`: two `.bin` object names. Calling the app-side
   `/dreame-user-iot/iotfile/getDownloadUrl` helper with those names returns
-  expiring OSS URLs, but the binary format is not decoded yet.
+  OSS-looking URLs, but direct GETs against the tested URLs returned 404 XML.
+  The binary format is therefore not downloaded or decoded yet.
 
 Use `python examples/app_map_probe.py --out app-map-current.json` for a focused
 read-only probe that omits raw coordinates by default. Add `--include-payload`

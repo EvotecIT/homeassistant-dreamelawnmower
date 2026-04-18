@@ -68,7 +68,9 @@ Last updated: 2026-04-18
 - `OBJ type=3dmap` is also wired as read-only object metadata through
   `async_get_app_map_objects()`. A live A2 probe returned two `.bin` object
   names. Expiring object URLs are intentionally opt-in and omitted from default
-  probe output.
+  probe output. Direct HTTP GETs against the tested generated URLs returned
+  404 XML, so treat 3D objects as metadata-only until a downloadable path is
+  confirmed.
 - Config-flow auth failures are classified into non-secret Home Assistant
   errors for account type, region, connectivity, generic auth, 2FA, and no
   matching mower devices.
@@ -245,7 +247,8 @@ credentials into repo files.
   once more fixtures are available. The confirmed payload keys are `map`,
   `spot`, `point`, `semantic`, `trajectory`, `total_area`, `name`, and
   `cut_relation`.
-- `OBJ type=3dmap` object names and signed download URLs are discoverable, but
-  the `.bin` format is not decoded yet.
+- `OBJ type=3dmap` object names and signed-looking download URLs are
+  discoverable, but the tested URLs returned 404 XML. The `.bin` format is not
+  downloaded or decoded yet.
 - Keep the map camera/entity disabled by default until the renderer has stable
   fixtures from more mower states and models.
