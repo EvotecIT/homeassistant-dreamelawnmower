@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from custom_components.dreame_lawn_mower.debug import build_debug_payload
+from custom_components.dreame_lawn_mower.debug import (
+    build_debug_payload,
+    sanitize_debug_data,
+)
 from dreame_lawn_mower_client.models import (
     DreameLawnMowerDescriptor,
     DreameLawnMowerSnapshot,
@@ -156,6 +159,7 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
     assert payload["entry"]["token"] == "**REDACTED**"
     assert payload["entry"]["did"] == "**REDACTED**"
     assert payload["cloud_record"]["mac"] == "**REDACTED**"
+    assert payload["snapshot"]["serial_number"] == "**REDACTED**"
     assert payload["device"]["host"] == "**REDACTED**"
     assert payload["device"]["info_raw"]["sn"] == "**REDACTED**"
     assert payload["device"]["unknown_property_count"] == 1
@@ -250,6 +254,27 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
             "download_diagnostics_after_state_change",
         ],
     }
+
+
+def test_sanitize_debug_data_redacts_operation_snapshot_identifiers() -> None:
+    payload = sanitize_debug_data(
+        {
+            "snapshot": {
+                "descriptor": {
+                    "did": "device-1",
+                    "host": "192.0.2.10",
+                    "token_present": True,
+                },
+                "serial_number": "SERIAL123",
+            },
+            "status_blob": {"hex": "ce00ce"},
+        }
+    )
+
+    assert payload["snapshot"]["descriptor"]["did"] == "**REDACTED**"
+    assert payload["snapshot"]["descriptor"]["host"] == "**REDACTED**"
+    assert payload["snapshot"]["serial_number"] == "**REDACTED**"
+    assert payload["status_blob"]["hex"] == "ce00ce"
 
 
 def test_build_debug_payload_highlights_state_disagreements() -> None:

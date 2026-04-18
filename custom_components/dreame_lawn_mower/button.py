@@ -14,7 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
-from .debug import build_debug_payload
+from .debug import build_debug_payload, sanitize_debug_data
 from .entity import DreameLawnMowerEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,6 +30,7 @@ async def async_setup_entry(
     async_add_entities(
         [
             DreameLawnMowerCaptureDebugSnapshotButton(coordinator),
+            DreameLawnMowerCaptureOperationSnapshotButton(coordinator),
             DreameLawnMowerCaptureMapProbeButton(coordinator),
         ]
     )
@@ -72,6 +73,50 @@ class DreameLawnMowerCaptureDebugSnapshotButton(
             title="Dreame Lawn Mower Debug Snapshot",
             notification_id=(
                 f"{DOMAIN}_{self.coordinator.entry.entry_id}_debug_snapshot"
+            ),
+        )
+
+
+class DreameLawnMowerCaptureOperationSnapshotButton(
+    DreameLawnMowerEntity,
+    ButtonEntity,
+):
+    """Capture and log a compact field-test operation snapshot."""
+
+    _attr_name = "Capture Operation Snapshot"
+    _attr_icon = "mdi:clipboard-pulse-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_capture_operation_snapshot"
+        )
+
+    async def async_press(self) -> None:
+        """Capture grouped read-only operation evidence and log it."""
+        payload = await self.coordinator.client.async_capture_operation_snapshot(
+            label="home_assistant_button",
+            include_map_view=True,
+            include_firmware=True,
+        )
+        payload = sanitize_debug_data(payload)
+        _LOGGER.warning(
+            "Captured Dreame lawn mower operation snapshot for %s: %s",
+            self.coordinator.client.descriptor.title,
+            json.dumps(payload, sort_keys=True),
+        )
+        await self.coordinator.async_request_refresh()
+        persistent_notification.async_create(
+            self.coordinator.hass,
+            (
+                "Captured a sanitized Dreame lawn mower operation snapshot. "
+                "Check the Home Assistant logs for grouped state, realtime, "
+                "map, firmware, and remote-control evidence."
+            ),
+            title="Dreame Lawn Mower Operation Snapshot",
+            notification_id=(
+                f"{DOMAIN}_{self.coordinator.entry.entry_id}_operation_snapshot"
             ),
         )
 

@@ -31,6 +31,7 @@ REDACT_KEYS = {
     "masterName",
     "masterUid",
     "masterUid2UUID",
+    "serial_number",
     "sn",
     "token",
     "uid",
@@ -210,6 +211,11 @@ def _redact_debug_data(value: Any) -> Any:
     if isinstance(value, list):
         return [_redact_debug_data(item) for item in value]
     return value
+
+
+def sanitize_debug_data(value: Any) -> Any:
+    """Return JSON-friendly debug data with sensitive fields redacted."""
+    return _redact_debug_data(_normalize_debug_value(value))
 
 
 def _collect_status_values(device: Any) -> dict[str, Any]:
