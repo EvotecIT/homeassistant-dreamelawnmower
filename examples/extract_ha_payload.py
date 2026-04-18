@@ -45,6 +45,7 @@ def summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     cloud_property_summary = _as_mapping(payload.get("cloud_property_summary"))
     map_payload = _as_mapping(payload.get("map"))
     map_view = _as_mapping(payload.get("map_view"))
+    app_maps = _as_mapping(payload.get("app_maps"))
     firmware_update = _as_mapping(payload.get("firmware_update"))
     remote_control_support = _as_mapping(payload.get("remote_control_support"))
     status_blob = _as_mapping(payload.get("status_blob"))
@@ -125,6 +126,9 @@ def summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
     if map_view:
         summary["map_view"] = _map_view_summary(map_view)
+
+    if app_maps:
+        summary["app_maps"] = _app_maps_summary(app_maps)
 
     if firmware_update:
         summary["firmware_update"] = {
@@ -242,6 +246,54 @@ def _map_view_summary(map_view: dict[str, Any]) -> dict[str, Any]:
                 "decoded_labels": cloud_property_summary.get("decoded_labels", {}),
                 "blob_keys": cloud_property_summary.get("blob_keys", {}),
             },
+        }
+    )
+
+
+def _app_maps_summary(app_maps: dict[str, Any]) -> dict[str, Any]:
+    maps = app_maps.get("maps") if isinstance(app_maps.get("maps"), list) else []
+    return _drop_empty(
+        {
+            "source": app_maps.get("source"),
+            "available": app_maps.get("available"),
+            "map_count": app_maps.get("map_count"),
+            "current_map_index": app_maps.get("current_map_index"),
+            "errors": app_maps.get("errors", []),
+            "maps": [
+                _app_map_entry_summary(item)
+                for item in maps
+                if isinstance(item, dict)
+            ],
+        }
+    )
+
+
+def _app_map_entry_summary(item: dict[str, Any]) -> dict[str, Any]:
+    summary = _as_mapping(item.get("summary"))
+    return _drop_empty(
+        {
+            "idx": item.get("idx"),
+            "current": item.get("current"),
+            "created": item.get("created"),
+            "available": item.get("available"),
+            "hash_match": item.get("hash_match"),
+            "summary": {
+                "map_area_count": summary.get("map_area_count"),
+                "boundary_point_count": summary.get("boundary_point_count"),
+                "spot_count": summary.get("spot_count"),
+                "spot_boundary_point_count": summary.get(
+                    "spot_boundary_point_count"
+                ),
+                "semantic_count": summary.get("semantic_count"),
+                "semantic_boundary_point_count": summary.get(
+                    "semantic_boundary_point_count"
+                ),
+                "semantic_key_counts": summary.get("semantic_key_counts"),
+                "trajectory_count": summary.get("trajectory_count"),
+                "trajectory_point_count": summary.get("trajectory_point_count"),
+                "cut_relation_count": summary.get("cut_relation_count"),
+            },
+            "error": item.get("error"),
         }
     )
 

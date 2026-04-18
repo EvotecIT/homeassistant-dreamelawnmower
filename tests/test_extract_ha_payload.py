@@ -505,6 +505,41 @@ def test_summarize_payload_includes_map_probe_summary() -> None:
             "has_image": False,
             "error": "No mapdata returned",
         },
+        "app_maps": {
+            "source": "app_action_map",
+            "available": True,
+            "map_count": 2,
+            "current_map_index": 0,
+            "errors": [],
+            "maps": [
+                {
+                    "idx": 0,
+                    "current": True,
+                    "created": True,
+                    "available": True,
+                    "hash_match": True,
+                    "summary": {
+                        "map_area_count": 2,
+                        "boundary_point_count": 401,
+                        "spot_count": 2,
+                        "spot_boundary_point_count": 8,
+                        "semantic_count": 0,
+                        "semantic_boundary_point_count": 0,
+                        "semantic_key_counts": {},
+                        "trajectory_count": 1,
+                        "trajectory_point_count": 63,
+                        "cut_relation_count": 0,
+                    },
+                },
+                {
+                    "idx": 1,
+                    "current": False,
+                    "created": True,
+                    "available": False,
+                    "error": "hash mismatch",
+                },
+            ],
+        },
     }
 
     assert summarize_payload(payload) == {
@@ -519,5 +554,38 @@ def test_summarize_payload_includes_map_probe_summary() -> None:
             "available": False,
             "has_image": False,
             "error": "No mapdata returned",
+        },
+        "app_maps": {
+            "source": "app_action_map",
+            "available": True,
+            "map_count": 2,
+            "current_map_index": 0,
+            "maps": [
+                {
+                    "idx": 0,
+                    "current": True,
+                    "created": True,
+                    "available": True,
+                    "hash_match": True,
+                    "summary": {
+                        "map_area_count": 2,
+                        "boundary_point_count": 401,
+                        "spot_count": 2,
+                        "spot_boundary_point_count": 8,
+                        "semantic_count": 0,
+                        "semantic_boundary_point_count": 0,
+                        "trajectory_count": 1,
+                        "trajectory_point_count": 63,
+                        "cut_relation_count": 0,
+                    },
+                },
+                {
+                    "idx": 1,
+                    "current": False,
+                    "created": True,
+                    "available": False,
+                    "error": "hash mismatch",
+                },
+            ],
         },
     }
