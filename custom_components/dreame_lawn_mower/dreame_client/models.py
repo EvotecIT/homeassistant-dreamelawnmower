@@ -180,7 +180,9 @@ class DreameLawnMowerFirmwareUpdateSupport:
     current_version: str | None = None
     hardware_version: str | None = None
     cloud_update_time: str | None = None
+    latest_status: int | str | None = None
     plugin_force_update: bool | None = None
+    plugin_force_update_sources: Mapping[str, bool] = field(default_factory=dict)
     plugin_status: str | None = None
     firmware_develop_type: str | None = None
     device_info_release_at: str | None = None
@@ -188,6 +190,7 @@ class DreameLawnMowerFirmwareUpdateSupport:
     update_state: str | None = None
     update_available: bool | None = None
     cloud_error: str | None = None
+    candidate_update_fields: Mapping[str, Any] = field(default_factory=dict)
     evidence: Mapping[str, Any] = field(default_factory=dict)
     warnings: tuple[str, ...] = field(default_factory=tuple)
     reason: str | None = None
@@ -607,6 +610,15 @@ def firmware_update_support_from_device(
             cloud_device_list_page
         )
 
+    candidate_update_fields = _collect_update_candidate_fields(
+        {
+            "info": info_raw,
+            "deviceInfo": device_info,
+            "cloud_device_info": cloud_device_info,
+            "cloud_device_list_page": cloud_device_list_page,
+        }
+    )
+
     warnings: list[str] = []
     plugin_force_update_sources = _collect_plugin_force_update_sources(
         cached_device_info=device_info,
@@ -642,7 +654,9 @@ def firmware_update_support_from_device(
         or _as_optional_str(getattr(info, "firmware_version", None)),
         hardware_version=_as_optional_str(getattr(info, "hardware_version", None)),
         cloud_update_time=_as_optional_str(info_raw.get("updateTime")),
+        latest_status=info_raw.get("latestStatus"),
         plugin_force_update=plugin_force_update,
+        plugin_force_update_sources=plugin_force_update_sources,
         plugin_status=_as_optional_str(device_info.get("status")),
         firmware_develop_type=_as_optional_str(
             device_info.get("firmwareDevelopType")
@@ -652,6 +666,7 @@ def firmware_update_support_from_device(
         update_state=update_state,
         update_available=None,
         cloud_error=cloud_error,
+        candidate_update_fields=candidate_update_fields,
         evidence=evidence,
         warnings=tuple(warnings),
         reason=reason,
@@ -865,3 +880,87 @@ def _collect_plugin_force_update_sources(
                         device_info.get("pluginForceUpdate")
                     )
     return sources
+
+
+_UPDATE_CANDIDATE_KEY_TOKENS = (
+    "firmware",
+    "update",
+    "upgrade",
+    "version",
+)
+_UPDATE_CANDIDATE_EXACT_KEYS = {
+    "lateststatus",
+    "ota",
+    "pluginforceupdate",
+    "releaseat",
+    "ver",
+}
+_UPDATE_CANDIDATE_FIELD_LIMIT = 50
+_UPDATE_CANDIDATE_LIST_LIMIT = 5
+
+
+def _collect_update_candidate_fields(
+    sources: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return compact update-looking fields for cross-model diagnostics."""
+
+    result: dict[str, Any] = {}
+    for source, value in sources.items():
+        if value is None:
+            continue
+        _walk_update_candidate_fields(value, str(source), result)
+        if len(result) >= _UPDATE_CANDIDATE_FIELD_LIMIT:
+            break
+    return result
+
+
+def _walk_update_candidate_fields(
+    value: Any,
+    path: str,
+    result: dict[str, Any],
+) -> None:
+    if len(result) >= _UPDATE_CANDIDATE_FIELD_LIMIT:
+        return
+
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            key_text = str(key)
+            child_path = f"{path}.{key_text}" if path else key_text
+            if _is_update_candidate_key(key_text):
+                compact_value = _compact_update_candidate_value(item)
+                if compact_value is not None:
+                    result[child_path] = compact_value
+                    if len(result) >= _UPDATE_CANDIDATE_FIELD_LIMIT:
+                        return
+            _walk_update_candidate_fields(item, child_path, result)
+            if len(result) >= _UPDATE_CANDIDATE_FIELD_LIMIT:
+                return
+        return
+
+    if isinstance(value, list | tuple):
+        for index, item in enumerate(value[:_UPDATE_CANDIDATE_LIST_LIMIT]):
+            _walk_update_candidate_fields(item, f"{path}[{index}]", result)
+            if len(result) >= _UPDATE_CANDIDATE_FIELD_LIMIT:
+                return
+
+
+def _is_update_candidate_key(key: str) -> bool:
+    normalized = key.replace("_", "").replace("-", "").casefold()
+    return normalized in _UPDATE_CANDIDATE_EXACT_KEYS or any(
+        token in normalized for token in _UPDATE_CANDIDATE_KEY_TOKENS
+    )
+
+
+def _compact_update_candidate_value(value: Any) -> Any:
+    if value is None or isinstance(value, bool | int | float):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        return text if len(text) <= 160 else f"{text[:157]}..."
+    if isinstance(value, Mapping):
+        return {"type": "object", "keys": [str(key) for key in list(value)[:10]]}
+    if isinstance(value, list | tuple):
+        return {"type": "array", "count": len(value)}
+    return str(value)

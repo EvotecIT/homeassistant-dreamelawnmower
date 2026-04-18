@@ -535,9 +535,28 @@ def test_firmware_update_support_preserves_evidence_without_guessing_ota() -> No
     assert support.hardware_version == "Linux"
     assert support.cloud_update_time == "2025-04-22 10:03:44"
     assert support.plugin_force_update is True
+    assert support.plugin_force_update_sources == {
+        "cached_device_info": True,
+        "cloud_device_info": False,
+    }
     assert support.plugin_status == "Live"
     assert support.firmware_develop_type == "SINGLE_PLATFORM"
+    assert support.latest_status == 13
     assert support.update_available is None
+    assert support.candidate_update_fields["info.ver"] == "4.3.6_0320"
+    assert support.candidate_update_fields["info.updateTime"] == (
+        "2025-04-22 10:03:44"
+    )
+    assert support.candidate_update_fields["deviceInfo.pluginForceUpdate"] is True
+    assert support.candidate_update_fields[
+        "cloud_device_info.deviceInfo.pluginForceUpdate"
+    ] is False
+    assert support.candidate_update_fields[
+        "cloud_device_list_page.page.records[0].latestStatus"
+    ] == 13
+    assert support.candidate_update_fields[
+        "cloud_device_list_page.page.records[0].deviceInfo.firmwareDevelopType"
+    ] == "SINGLE_PLATFORM"
     assert support.warnings == ("plugin_force_update_conflict",)
     assert "differs across cloud metadata sources" in support.reason
     assert support.evidence["info"]["latestStatus"] == 13
@@ -553,6 +572,45 @@ def test_firmware_update_support_preserves_evidence_without_guessing_ota() -> No
         "cached_device_info": True,
         "cloud_device_info": False,
     }
+
+
+def test_firmware_update_support_tracks_live_like_plugin_sources() -> None:
+    device = _FakeDevice()
+
+    support = firmware_update_support_from_device(
+        device,
+        cloud_device_info={
+            "ver": "4.3.6_0320",
+            "latestStatus": 6,
+            "deviceInfo": {"pluginForceUpdate": False},
+        },
+        cloud_device_list_page={
+            "records": [
+                {
+                    "ver": "4.3.6_0320",
+                    "latestStatus": 6,
+                    "deviceInfo": {
+                        "pluginForceUpdate": True,
+                        "firmwareDevelopType": "SINGLE_PLATFORM",
+                    },
+                }
+            ]
+        },
+    )
+
+    assert support.plugin_force_update_sources == {
+        "cached_device_info": True,
+        "cloud_device_info": False,
+        "cloud_device_list_page.records[0]": True,
+    }
+    assert support.warnings == ("plugin_force_update_conflict",)
+    assert support.update_available is None
+    assert support.candidate_update_fields[
+        "cloud_device_list_page.records[0].deviceInfo.pluginForceUpdate"
+    ] is True
+    assert support.candidate_update_fields[
+        "cloud_device_list_page.records[0].deviceInfo.firmwareDevelopType"
+    ] == "SINGLE_PLATFORM"
 
 
 def test_firmware_update_support_marks_update_state() -> None:
@@ -586,3 +644,7 @@ def test_firmware_update_support_summarizes_root_records() -> None:
         "root": {"record_count": 1},
         "records": [{"latestStatus": 13}],
     }
+    assert "cloud_device_list_page.total" not in support.candidate_update_fields
+    assert support.candidate_update_fields[
+        "cloud_device_list_page.records[0].latestStatus"
+    ] == 13

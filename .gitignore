@@ -6,3 +6,4 @@ __pycache__/
 *.egg-info/
 .tmp_apk/
 field-trip*.json
+firmware-update*.json

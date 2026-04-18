@@ -86,6 +86,13 @@ realtime properties, decoded status blob, map diagnostics, firmware/update
 evidence, and remote-control support. It is read-only and does not start
 mowing, camera streaming, remote control, or docking.
 
+Firmware/update diagnostics are intentionally evidence-first. The client keeps
+`update_available` unknown unless a verified mower OTA field is found, because
+Dreame currently exposes conflicting `pluginForceUpdate` values that look like
+mobile-app/plugin metadata. Diagnostics include per-source plugin flags and
+`candidate_update_fields` so new mower models can reveal the real OTA signal
+without dumping full cloud payloads.
+
 For automations, use the normal `Docked` binary sensor or `docked` attribute.
 Those are effective values derived from mower state and charging states. The
 disabled-by-default `Raw Docked Flag` diagnostic entity preserves the exact
@@ -247,6 +254,12 @@ control support, and optional map/update evidence without moving the mower:
 
 ```bash
 python examples/field_trip_probe.py --include-map --include-firmware
+```
+
+To inspect only firmware/update metadata, run the dedicated read-only probe:
+
+```bash
+python examples/firmware_update_probe.py
 ```
 
 When the mower is outdoors and supervised, the same script can wrap tiny
