@@ -13,9 +13,14 @@ from examples.remote_control_probe import _support_probe_payload
 from examples.remote_control_smoke import (
     _raise_if_unsafe_execute as raise_if_unsafe_remote_control,
 )
-from examples.remote_control_smoke import _settings_summary as remote_control_settings
+from examples.remote_control_smoke import (
+    _settings_summary as remote_control_settings,
+)
 from examples.remote_control_smoke import (
     _snapshot_summary as remote_control_snapshot_summary,
+)
+from examples.remote_control_smoke import (
+    _write_output as write_remote_control_output,
 )
 
 
@@ -86,6 +91,27 @@ def test_remote_control_smoke_settings_are_recorded() -> None:
         "dock": True,
         "device_index": 1,
     }
+
+
+def test_remote_control_smoke_writes_output_file(tmp_path) -> None:
+    out = tmp_path / "remote-control-smoke.json"
+
+    write_remote_control_output(
+        SimpleNamespace(out=out),
+        {"execute": False, "steps": [{"label": "read_only", "ok": True}]},
+    )
+
+    assert out.read_text(encoding="utf-8") == (
+        '{\n'
+        '  "execute": false,\n'
+        '  "steps": [\n'
+        "    {\n"
+        '      "label": "read_only",\n'
+        '      "ok": true\n'
+        "    }\n"
+        "  ]\n"
+        "}\n"
+    )
 
 
 def test_remote_control_probe_payload_includes_support_and_safety() -> None:

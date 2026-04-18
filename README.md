@@ -285,6 +285,9 @@ The safety-gated live smoke test is:
 python examples/remote_control_smoke.py --execute --velocity 60 --rotation 60 --duration 0.5 --dock
 ```
 
+Add `--out remote-control-smoke.json` when you want to keep the structured
+before/after support and step evidence locally without committing it.
+
 The more conservative live A2 validation used `velocity=30`, `rotation=25`,
 `duration=0.35`, and `settle=1.5` with a stop command before the first pulse and
 after every forward, turn-right, turn-left, and backward pulse. That sequence

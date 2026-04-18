@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 from dreame_lawn_mower_client import (
@@ -57,6 +58,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=0,
         help="Zero-based discovered mower index to test.",
     )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        help="Optional JSON output file. Prints to stdout when omitted.",
+    )
     return parser
 
 
@@ -105,6 +111,14 @@ def _raise_if_unsafe_execute(snapshot: Any) -> None:
     """Block live movement when the current snapshot looks unsafe."""
     if reason := remote_control_block_reason(snapshot):
         raise RuntimeError(reason)
+
+
+def _write_output(args: argparse.Namespace, output: dict[str, Any]) -> None:
+    rendered = json.dumps(output, indent=2, sort_keys=True) + "\n"
+    if args.out:
+        args.out.write_text(rendered, encoding="utf-8")
+    else:
+        print(rendered, end="")
 
 
 async def main() -> None:
@@ -187,7 +201,7 @@ async def main() -> None:
         after = await client.async_refresh()
         after_support = await client.async_get_remote_control_support()
         output["after"] = _snapshot_summary(after, after_support)
-        print(json.dumps(output, indent=2, sort_keys=True))
+        _write_output(args, output)
     finally:
         await client.async_close()
 
