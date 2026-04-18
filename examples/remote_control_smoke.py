@@ -91,6 +91,16 @@ def _snapshot_summary(snapshot: Any, support: Any) -> dict[str, Any]:
     }
 
 
+def _settings_summary(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "velocity": args.velocity,
+        "rotation": args.rotation,
+        "duration": args.duration,
+        "dock": args.dock,
+        "device_index": args.device_index,
+    }
+
+
 def _raise_if_unsafe_execute(snapshot: Any) -> None:
     """Block live movement when the current snapshot looks unsafe."""
     if reason := remote_control_block_reason(snapshot):
@@ -131,6 +141,8 @@ async def main() -> None:
         support = await client.async_get_remote_control_support()
         output: dict[str, Any] = {
             "execute": args.execute,
+            "device_index": args.device_index,
+            "settings": _settings_summary(args),
             "before": _snapshot_summary(before, support),
             "support": support.as_dict(),
             "steps": [],

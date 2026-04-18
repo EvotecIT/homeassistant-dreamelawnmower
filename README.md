@@ -285,6 +285,13 @@ The safety-gated live smoke test is:
 python examples/remote_control_smoke.py --execute --velocity 60 --rotation 60 --duration 0.5 --dock
 ```
 
+The more conservative live A2 validation used `velocity=30`, `rotation=25`,
+`duration=0.35`, and `settle=1.5` with a stop command before the first pulse and
+after every forward, turn-right, turn-left, and backward pulse. That sequence
+ended with a dock request and the mower returned to a docked charging state.
+Treat those as observed safe smoke-test values, not as a full command-range
+calibration.
+
 For a more useful field-trip capture, use the operation snapshot helper. In
 read-only mode it captures normalized state, realtime status blob, remote
 control support, and optional map/update evidence without moving the mower:
@@ -329,8 +336,8 @@ action: dreame_lawn_mower.remote_control_stop
 If you have more than one mower entry loaded, include `entry_id`. The movement
 service is intentionally guarded: it refuses to move while the mower appears to
 be mowing, returning, mapping, fast mapping, in error, or below 20% battery.
-Keep using short supervised pulses until command ranges are fully validated on
-real hardware.
+Keep using short supervised pulses until wider command ranges are fully
+validated on real hardware.
 
 The `Manual Drive Safe` diagnostic binary sensor mirrors the same state guard
 used by the service. It does not prove that the protocol exposes remote control;

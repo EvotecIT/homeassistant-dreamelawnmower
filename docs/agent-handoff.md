@@ -115,6 +115,10 @@ $env:DREAME_ACCOUNT_TYPE = [Environment]::GetEnvironmentVariable('DREAME_ACCOUNT
 python examples\field_trip_probe.py --execute --confirm-supervised --velocity 30 --rotation 25 --duration 0.35 --settle 1.5 --dock --include-map --include-firmware --map-timeout 8 --out field-trip-current-live.json
 ```
 
+Observed live A2 values so far are intentionally conservative: velocity `30`,
+rotation `25`, duration `0.35`, settle `1.5`, stop before the first pulse, stop
+after every pulse, then dock. Do not treat this as a full range calibration.
+
 Focused map-source probe:
 
 ```powershell

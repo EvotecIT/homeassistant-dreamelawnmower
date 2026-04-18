@@ -189,7 +189,7 @@ Checklist:
 - [x] add guarded Home Assistant `remote_control_step` and `remote_control_stop` services
 - [x] expose current manual-drive safety and block reason in Home Assistant
 - [x] validate tiny forward/back/turn pulses on real A2-family hardware
-- [ ] document observed command ranges and stop behavior from live smoke tests
+- [x] document observed command ranges and stop behavior from live smoke tests
 - [ ] decide whether a disabled-by-default UI entity or custom card is safe enough later
 
 Definition of done:

@@ -13,6 +13,7 @@ from examples.remote_control_probe import _support_probe_payload
 from examples.remote_control_smoke import (
     _raise_if_unsafe_execute as raise_if_unsafe_remote_control,
 )
+from examples.remote_control_smoke import _settings_summary as remote_control_settings
 from examples.remote_control_smoke import (
     _snapshot_summary as remote_control_snapshot_summary,
 )
@@ -65,6 +66,26 @@ def test_remote_control_smoke_summary_includes_manual_drive_safety() -> None:
 
     assert summary["manual_drive_safe"] is True
     assert summary["manual_drive_block_reason"] is None
+
+
+def test_remote_control_smoke_settings_are_recorded() -> None:
+    settings = remote_control_settings(
+        SimpleNamespace(
+            device_index=1,
+            dock=True,
+            duration=0.35,
+            rotation=25,
+            velocity=30,
+        )
+    )
+
+    assert settings == {
+        "velocity": 30,
+        "rotation": 25,
+        "duration": 0.35,
+        "dock": True,
+        "device_index": 1,
+    }
 
 
 def test_remote_control_probe_payload_includes_support_and_safety() -> None:
