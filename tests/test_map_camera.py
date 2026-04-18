@@ -180,10 +180,17 @@ def test_map_camera_cache_stores_error_view() -> None:
     cache = DreameLawnMowerMapCameraCache(ttl=timedelta(seconds=60))
     now = datetime(2026, 4, 19, 8, 0, tzinfo=UTC)
 
+    cache.store_view(
+        DreameLawnMowerMapView(source="app_action_map", image_png=b"first"),
+        now=now - timedelta(seconds=61),
+    )
+    cache.store_image(b"jpeg-first")
+
     view = cache.store_error("offline", source="app_action_map", now=now)
 
     assert view.source == "app_action_map"
     assert view.error == "offline"
     assert cache.last_view is view
+    assert cache.last_image is None
     assert cache.last_error == "offline"
     assert cache.last_refresh_at == now

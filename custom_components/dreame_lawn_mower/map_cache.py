@@ -68,9 +68,9 @@ class DreameLawnMowerMapCameraCache:
         now: datetime | None = None,
     ) -> DreameLawnMowerMapView:
         """Store an error view and return it."""
-        self.last_error = error
-        self.last_refresh_at = now or datetime.now(UTC)
-        self.last_view = DreameLawnMowerMapView(source=source, error=error)
+        self.last_image = None
+        view = DreameLawnMowerMapView(source=source, error=error)
+        self.store_view(view, now=now)
         return self.last_view
 
     def store_image(self, image: bytes) -> None:
