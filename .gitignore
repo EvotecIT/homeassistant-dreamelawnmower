@@ -7,7 +7,9 @@ __pycache__/
 .tmp_apk/
 field-trip*.json
 firmware-update*.json
+app-map*.json
 map-sources*.json
+source-scan*.json
 property-scan*.json
 property-scan*.txt
 remote-control*.json

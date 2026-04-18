@@ -51,6 +51,16 @@ Last updated: 2026-04-18
   `active=false`, and no movement steps.
 - Firmware/update diagnostics work as evidence, but no verified mower OTA
   availability signal has been found.
+- Mower-native app map retrieval now works through read-only app action
+  commands recovered from the downloaded Dreamehome plugin:
+  `MAPL`, `MAPI`, and chunked `MAPD`.
+- A live A2 probe on 2026-04-18 returned two created maps. Both maps were
+  downloaded in chunks, parsed as JSON, and matched the mower-provided MD5
+  hashes. Current map index was `0`; summaries included boundary point counts,
+  map area totals, spots, and trajectories.
+- `examples/app_map_probe.py` provides the focused read-only app-map probe.
+  By default it omits raw coordinates; `--include-payload` is opt-in for local
+  parser or renderer work.
 - Config-flow auth failures are classified into non-secret Home Assistant
   errors for account type, region, connectivity, generic auth, 2FA, and no
   matching mower devices.
@@ -65,10 +75,14 @@ Last updated: 2026-04-18
 
 ## Known Gaps
 
-- Map image retrieval is not solved. The client has map summary/view/probe APIs,
-  but the live A2 currently returns no data from the legacy current-map path.
+- Real mower map retrieval is solved at the Python-client level through the
+  app action path, but Home Assistant does not yet render or expose the vector
+  map as an entity/camera.
+- The legacy vacuum-style current-map path still returns no data for the live
+  A2. Keep it as negative diagnostics rather than the primary mower map source.
 - App-style cloud property probing currently returns useful status/realtime
-  fields, but no non-empty map-like fields.
+  fields, but no non-empty map-like fields. The confirmed map payload comes
+  from app actions, not `iotstatus/props`.
 - The app-side `devOTCInfo` endpoint is reachable, but the 2026-04-18 live A2
   docked response was an empty object, so it is not a solved map source yet.
 - `pluginForceUpdate` is not treated as firmware update availability. It is
@@ -89,7 +103,9 @@ the workspace after live tests:
 - `field-trip-postdock.json`
 - `field-trip-readonly.json`
 - `firmware-update-live.json`
+- `app-map-current.json`
 - `map-sources-current.json`
+- `source-scan-map.json`
 - `property-scan-*.json`
 - `property-scan-*.txt`
 - `remote-control-current.json`
@@ -134,6 +150,19 @@ $env:DREAME_COUNTRY = [Environment]::GetEnvironmentVariable('DREAME_COUNTRY','Us
 $env:DREAME_ACCOUNT_TYPE = [Environment]::GetEnvironmentVariable('DREAME_ACCOUNT_TYPE','User')
 python examples\map_sources_probe.py --out map-sources-current.json
 ```
+
+Focused app-map probe without raw coordinates:
+
+```powershell
+$env:DREAME_USERNAME = [Environment]::GetEnvironmentVariable('DREAME_USERNAME','User')
+$env:DREAME_PASSWORD = [Environment]::GetEnvironmentVariable('DREAME_PASSWORD','User')
+$env:DREAME_COUNTRY = [Environment]::GetEnvironmentVariable('DREAME_COUNTRY','User')
+$env:DREAME_ACCOUNT_TYPE = [Environment]::GetEnvironmentVariable('DREAME_ACCOUNT_TYPE','User')
+python examples\app_map_probe.py --out app-map-current.json
+```
+
+Only use `--include-payload` for local parser/renderer work. It includes raw
+map coordinates and should stay in ignored local files.
 
 Broad read-only property scan:
 
@@ -190,7 +219,8 @@ credentials into repo files.
   docked-charging, charging, and fault recovery.
 - Do not expose a Home Assistant firmware update entity yet. Keep firmware as
   diagnostics until a verified latest-version or OTA-available field is found.
-- Keep the map camera disabled/diagnostic until a real mower-native map source
-  is found.
-- For map work, focus on finding the mower-native cloud/app map endpoint rather
-  than trying to force the empty legacy current-map path.
+- Add a parser/renderer for the app-map JSON payload. The confirmed payload keys
+  are `map`, `spot`, `point`, `semantic`, `trajectory`, `total_area`, `name`,
+  and `cut_relation`.
+- Keep the map camera/entity disabled or diagnostic until the parser and
+  renderer have stable fixtures from the live app-map path.

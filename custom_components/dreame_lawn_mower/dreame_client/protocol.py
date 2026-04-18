@@ -14,7 +14,7 @@ import time
 import locale
 from datetime import datetime
 from paho.mqtt import client as mqtt_client
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 from Crypto.Cipher import ARC4
 from miio.miioprotocol import MiIOProtocol
 
@@ -426,6 +426,26 @@ class DreameMowerDreameHomeCloudProtocol:
             return response["data"]
         return None
 
+    def get_app_plugin_version(
+        self,
+        model: str | None = None,
+        app_version_code: int = 2050300,
+        os: int = 1,
+    ) -> Any:
+        params = {
+            "model": model or self._model,
+            "appVer": app_version_code,
+            "os": os,
+        }
+
+        response = self.get(
+            f"{self.get_api_url()}/dreame-product/upgrades/appplugin",
+            params=params,
+        )
+        if response and "data" in response and response["code"] == 0:
+            return response["data"]
+        return None
+
     def get_device_info(self) -> Any:
         response = self._api_call(
             f"{self._strings[23]}/{self._strings[24]}/{self._strings[27]}/{self._strings[29]}",
@@ -541,6 +561,25 @@ class DreameMowerDreameHomeCloudProtocol:
                 "DreameMowerDreameHomeCloudProtocol.send failed: %s", api_response)
             return None
         return api_response["data"]["result"]
+
+    def call_app_action(
+        self,
+        payload: Mapping[str, Any],
+        siid: int = 2,
+        aiid: int = 50,
+        retry_count: int = 2,
+    ) -> Any:
+        """Call the mobile-app action bridge used by mower plugin commands."""
+        return self.send(
+            "action",
+            {
+                "did": str(self._did),
+                "siid": siid,
+                "aiid": aiid,
+                "in": [payload],
+            },
+            retry_count=retry_count,
+        )
 
     def get_file(self, url: str, retry_count: int = 4) -> Any:
         retries = 0
@@ -712,6 +751,76 @@ class DreameMowerDreameHomeCloudProtocol:
             else:
                 _LOGGER.warn(
                     "Execute api call failed with response: %s", response.text)
+
+        if self._fail_count == 5:
+            self._connected = False
+        else:
+            self._fail_count = self._fail_count + 1
+        return None
+
+    def get(self, url: str, params: Mapping[str, Any] | None = None, retry_count=2) -> Any:
+        _LOGGER.debug("DreameMowerDreameHomeCloudProtocol.get %s %s", url, params)
+
+        retries = 0
+        if not retry_count or retry_count < 0:
+            retry_count = 0
+        while retries < retry_count + 1:
+            timeout = 20
+            try:
+                if self._key_expire and time.time() > self._key_expire:
+                    self.login()
+
+                headers = {
+                    "Accept": "*/*",
+                    "Accept-Language": "en-US;q=0.8",
+                    "Accept-Encoding": "gzip, deflate",
+                    self._strings[47]: self._strings[3],
+                    self._strings[49]: self._strings[5],
+                    self._strings[50]: self._ti if self._ti else self._strings[6],
+                    self._strings[51]: self._strings[52],
+                    self._strings[46]: self._key,
+                }
+                if self._country == "cn":
+                    headers[self._strings[48]] = self._strings[4]
+
+                response = self._session.get(
+                    url,
+                    headers=headers,
+                    params=params,
+                    timeout=timeout,
+                )
+                break
+            except requests.exceptions.Timeout:
+                retries = retries + 1
+                response = None
+                if self._connected:
+                    _LOGGER.warning(
+                        "DreameMowerDreameHomeCloudProtocol.get: Read timed out. "
+                        "(read timeout=%s): %s",
+                        timeout,
+                        params,
+                    )
+            except Exception as ex:
+                retries = retries + 1
+                response = None
+                if self._connected:
+                    _LOGGER.warning("Error while executing get request: %s", str(ex))
+
+        if response is not None:
+            if response.status_code == 200:
+                self._fail_count = 0
+                self._connected = True
+                _LOGGER.debug(
+                    "DreameMowerDreameHomeCloudProtocol.get response.text: %s",
+                    response.text,
+                )
+                return json.loads(response.text)
+            if response.status_code == 401 and self._secondary_key:
+                _LOGGER.debug("Execute get request failed: Token Expired")
+                self.login()
+            else:
+                _LOGGER.warn(
+                    "Execute get request failed with response: %s", response.text)
 
         if self._fail_count == 5:
             self._connected = False

@@ -23,6 +23,20 @@ class _FakeCloud:
         self.requested_language = lang
         return {"status": "ok", "map": {"object_name": "MAP.123"}}
 
+    def get_app_plugin_version(
+        self,
+        model: str,
+        app_version_code: int,
+        os: int,
+    ) -> dict[str, object]:
+        return {
+            "model": model,
+            "app_version_code": app_version_code,
+            "os": os,
+            "version": 402,
+            "sourceCommonPluginVer": 338,
+        }
+
 
 def _client() -> DreameLawnMowerClient:
     return DreameLawnMowerClient(
@@ -120,3 +134,18 @@ def test_cloud_device_otc_info_uses_app_endpoint_helper() -> None:
 
     assert result == {"status": "ok", "map": {"object_name": "MAP.123"}}
     assert cloud.requested_language == "en"
+
+
+def test_app_plugin_version_uses_app_endpoint_helper() -> None:
+    client = _client()
+    client._sync_get_cloud_protocol = lambda: _FakeCloud()
+
+    result = client._sync_get_app_plugin_version(app_version_code=2050300, os=1)
+
+    assert result == {
+        "model": "dreame.mower.g2408",
+        "app_version_code": 2050300,
+        "os": 1,
+        "version": 402,
+        "sourceCommonPluginVer": 338,
+    }

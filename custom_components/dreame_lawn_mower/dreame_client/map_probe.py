@@ -407,6 +407,7 @@ def build_map_probe_payload(
     cloud_user_features: Any = None,
     cloud_device_otc_info: Any = None,
     cloud_key_definition: Mapping[str, Any] | None = None,
+    app_maps: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a JSON-safe map-source probe payload."""
     return {
@@ -433,4 +434,5 @@ def build_map_probe_payload(
         "cloud_key_definition": build_cloud_key_definition_summary(
             cloud_key_definition
         ),
+        "app_maps": _redact_probe_value(app_maps or {}),
     }

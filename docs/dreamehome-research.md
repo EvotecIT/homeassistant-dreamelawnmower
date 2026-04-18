@@ -27,6 +27,10 @@ strings:
   Present in APK strings and reachable from the same app API host.
 - `POST /dreame-iot-com-{host}/device/sendCommand`
   Used by `sendCommand`, `sendAction`, `trySendCommand`, and `trySendActionCommand`.
+- `GET /dreame-product/upgrades/appplugin`
+  Used by the app to fetch the dynamically downloaded model plugin. For the live
+  A2 (`dreame.mower.g2408`) with Dreamehome app version code `2050300`, `os=1`
+  returned Android plugin metadata for common plugin version `338`.
 
 These line up with the earlier hypothesis that the mower app is not relying only on the older vacuum-style `current_map` flow.
 
@@ -69,30 +73,36 @@ The translation bundle also includes mower-specific strings that match real beha
 - explicit firmware-update restart wording
 - Link Module and Bluetooth fallback hints for offline mowers
 
-The extracted Flutter/plugin assets do **not** currently expose an obvious A2
-vector-map schema. A focused asset scan of the local `2.5.3.0` extraction found
-only the common mower status protocol under `home_device` and the generic React
-Native executor stubs under `assets/plugin`; no bundled `M_PATH`, `current_map`,
-`object_name`, boundary, polygon, or zone map artifact was present. That makes
-the app-visible map more likely to come from cloud properties, dynamically
-downloaded plugin code, or runtime traffic than from a simple bundled JSON file.
+The base APK assets do **not** expose the A2 vector-map schema. A focused asset
+scan of the local `2.5.3.0` extraction found only the common mower status
+protocol under `home_device` and the generic React Native executor stubs under
+`assets/plugin`; no bundled `M_PATH`, `current_map`, `object_name`, boundary,
+polygon, or zone map artifact was present.
 
-## What this means for map support
+The dynamically downloaded Android plugin does expose the mower map protocol.
+For `dreame.mower.g2408`, the live plugin metadata pointed to common plugin
+`dreame.vacuum.common` version `338`. Its React Native bundle contains the map
+commands used below.
 
-The app-side evidence suggests this Python-first investigation order:
+## Confirmed mower map commands
 
-1. fetch `device/info` for the mower
-2. brute-force `iotstatus/props` ranges from Python until real mower-only keys are confirmed
-3. fetch `device/listV2` and inspect whether map-enabled list payloads differ from the simpler account discovery flow
-4. only then decide whether the final map payload is in cloud props, `device/info`, `listV2`, or a Flutter/native side-channel
+The downloaded model plugin sends read-only mower map commands through the same
+MIoT cloud action bridge as other app commands: method `action`, `siid=2`,
+`aiid=50`, and `in=[payload]`.
 
-## Current unknowns
+Confirmed getter payloads:
 
-These are not proven yet:
+- `{"m":"g","t":"MAPL"}` lists maps.
+- `{"m":"g","t":"MAPI","d":{"idx":0}}` returns map metadata including `size`
+  and `hash`.
+- `{"m":"g","t":"MAPD","d":{"start":0,"size":400}}` returns a chunk of the
+  selected/current map JSON.
+- `{"m":"g","t":"MAPBI","d":{"idx":0}}` and `MAPBD` exist for backup maps, but
+  are not yet wired into the client.
+- `{"m":"g","t":"OBJ","d":{"type":"3dmap"}}` returns 3D map object filenames.
 
-- the exact `keys` values used by the app for mower vector maps
-- whether the final map payload is delivered as `MAP.*` / `M_PATH.*` keys, another property family, or a Flutter/native bridge call
-- whether docked-but-idle state suppresses part of the map payload
+Do not call the plugin's `uploadMap` action from automated probes. It uses an
+action-style payload (`m:"a"`) and can change device state.
 
 ## First live probe result
 
@@ -161,6 +171,21 @@ This is useful negative evidence: the current docked live A2 map is not exposed
 through the legacy current-map path, the fixed map-property guesses, the broad
 `iotstatus/props` ranges tested so far, the legacy map history endpoint, or the
 current docked `devOTCInfo` response.
+
+The successful map path is the app action bridge described above. On
+2026-04-18, a live A2 returned:
+
+- `MAPL`: two created maps, both with backups, current map index `0`.
+- `MAPI idx=0`: size `5679`, hash `8664aa561145354644a40145e705cc7b`.
+- `MAPI idx=1`: size `7112`, hash `936e9cdfc3e1ced2c4c2365b0cdb24d5`.
+- Chunked `MAPD`: both maps reassembled and parsed as JSON, with hashes
+  matching the mower metadata.
+- Payload keys: `cut_relation`, `map`, `name`, `point`, `semantic`, `spot`,
+  `total_area`, and `trajectory`.
+
+Use `python examples/app_map_probe.py --out app-map-current.json` for a focused
+read-only probe that omits raw coordinates by default. Add `--include-payload`
+only for local parser/rendering work.
 
 Use `python examples/apk_research.py <apk> --max-string-length 220` when
 testing a new Dreamehome APK.

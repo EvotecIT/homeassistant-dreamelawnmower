@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import time
 from collections.abc import Mapping, Sequence
@@ -377,6 +378,32 @@ class DreameLawnMowerClient:
     ) -> Any:
         """Fetch read-only cloud OTC metadata from the mobile app endpoint."""
         return await asyncio.to_thread(self._sync_get_cloud_device_otc_info, language)
+
+    async def async_get_app_plugin_version(
+        self,
+        *,
+        app_version_code: int = 2050300,
+        os: int = 1,
+    ) -> Any:
+        """Fetch read-only mobile plugin metadata for this mower model."""
+        return await asyncio.to_thread(
+            self._sync_get_app_plugin_version,
+            app_version_code,
+            os,
+        )
+
+    async def async_get_app_maps(
+        self,
+        *,
+        chunk_size: int = 400,
+        include_payload: bool = False,
+    ) -> dict[str, Any]:
+        """Fetch mower-native app map payloads through read-only app commands."""
+        return await asyncio.to_thread(
+            self._sync_get_app_maps,
+            chunk_size,
+            include_payload,
+        )
 
     async def async_get_cloud_properties(
         self,
@@ -1233,6 +1260,186 @@ class DreameLawnMowerClient:
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
 
+    def _sync_get_app_plugin_version(
+        self,
+        app_version_code: int = 2050300,
+        os: int = 1,
+    ) -> Any:
+        cloud = self._sync_get_cloud_protocol()
+        try:
+            if hasattr(cloud, "get_app_plugin_version"):
+                return cloud.get_app_plugin_version(
+                    self._descriptor.model,
+                    app_version_code,
+                    os,
+                )
+            return None
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+
+    def _sync_get_app_maps(
+        self,
+        chunk_size: int = 400,
+        include_payload: bool = False,
+    ) -> dict[str, Any]:
+        chunk_size = _validate_app_map_chunk_size(chunk_size)
+        map_list_result = self._sync_call_app_action({"m": "g", "t": "MAPL"})
+        map_entries = _normalize_app_map_entries(map_list_result)
+        result: dict[str, Any] = {
+            "source": "app_action_map",
+            "available": False,
+            "map_count": len(map_entries),
+            "current_map_index": None,
+            "raw_map_list": _json_safe(map_list_result, max_depth=5),
+            "maps": [],
+            "errors": [],
+        }
+
+        for entry in map_entries:
+            if entry.get("current"):
+                result["current_map_index"] = entry["idx"]
+            if not entry.get("created"):
+                result["maps"].append(entry)
+                continue
+
+            map_result = dict(entry)
+            try:
+                info_result = self._sync_call_app_action(
+                    {"m": "g", "t": "MAPI", "d": {"idx": entry["idx"]}}
+                )
+                info = _app_action_data(info_result)
+                map_result["info"] = _json_safe(info, max_depth=4)
+                size = info.get("size") if isinstance(info, Mapping) else None
+                expected_hash = info.get("hash") if isinstance(info, Mapping) else None
+                if isinstance(size, int) and size > 0:
+                    payload_text, chunk_count, received_size = (
+                        self._sync_get_app_map_text(
+                            size=size,
+                            chunk_size=chunk_size,
+                        )
+                    )
+                    payload_hash = hashlib.md5(
+                        payload_text.encode("utf-8")
+                    ).hexdigest()
+                    parsed_payload = json.loads(payload_text)
+                    map_result.update(
+                        {
+                            "available": True,
+                            "reported_size": size,
+                            "received_size": received_size,
+                            "decoded_size": len(payload_text.encode("utf-8")),
+                            "chunk_count": chunk_count,
+                            "md5": payload_hash,
+                            "hash_match": (
+                                expected_hash == payload_hash
+                                if isinstance(expected_hash, str)
+                                else None
+                            ),
+                            "payload_keys": (
+                                sorted(str(key) for key in parsed_payload)
+                                if isinstance(parsed_payload, Mapping)
+                                else []
+                            ),
+                            "summary": _app_map_payload_summary(parsed_payload),
+                        }
+                    )
+                    if include_payload:
+                        map_result["payload"] = _json_safe(
+                            parsed_payload,
+                            max_depth=12,
+                        )
+                else:
+                    map_result["available"] = False
+                    map_result["error"] = "map_info_missing_size"
+            except Exception as err:  # noqa: BLE001 - probes keep per-map evidence
+                map_result["available"] = False
+                map_result["error"] = str(err)
+                result["errors"].append({"idx": entry.get("idx"), "error": str(err)})
+
+            result["maps"].append(map_result)
+
+        result["available"] = any(
+            isinstance(item, Mapping) and bool(item.get("available"))
+            for item in result["maps"]
+        )
+        return result
+
+    def _sync_get_app_map_text(
+        self,
+        *,
+        size: int,
+        chunk_size: int,
+    ) -> tuple[str, int, int]:
+        chunks = bytearray()
+        offset = 0
+        chunk_count = 0
+        while offset < size:
+            requested_size = min(size - offset, chunk_size)
+            chunk_result = self._sync_call_app_action(
+                {
+                    "m": "g",
+                    "t": "MAPD",
+                    "d": {"start": offset, "size": requested_size},
+                }
+            )
+            data = _app_action_data(chunk_result)
+            if not isinstance(data, Mapping):
+                raise DreameLawnMowerConnectionError(
+                    f"MAPD returned invalid chunk at offset {offset}."
+                )
+            text = data.get("data")
+            returned_size = data.get("size")
+            if not isinstance(text, str) or text == "":
+                raise DreameLawnMowerConnectionError(
+                    f"MAPD returned empty data at offset {offset}."
+                )
+            chunks.extend(text.encode("utf-8"))
+            increment = (
+                returned_size
+                if isinstance(returned_size, int) and returned_size > 0
+                else len(text.encode("utf-8"))
+            )
+            offset += increment
+            chunk_count += 1
+        return chunks.decode("utf-8"), chunk_count, offset
+
+    def _sync_call_app_action(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        siid: int = 2,
+        aiid: int = 50,
+    ) -> Any:
+        cloud = self._sync_get_cloud_protocol()
+        if not getattr(cloud, "_host", None):
+            try:
+                if hasattr(cloud, "get_device_info_v2"):
+                    cloud.get_device_info_v2("en")
+                elif hasattr(cloud, "get_device_info"):
+                    cloud.get_device_info()
+            except DeviceException as err:
+                raise DreameLawnMowerConnectionError(str(err)) from err
+        try:
+            if hasattr(cloud, "call_app_action"):
+                response = cloud.call_app_action(payload, siid=siid, aiid=aiid)
+            else:
+                response = cloud.send(
+                    "action",
+                    {
+                        "did": str(cloud.device_id),
+                        "siid": siid,
+                        "aiid": aiid,
+                        "in": [payload],
+                    },
+                )
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+
+        out = response.get("out") if isinstance(response, Mapping) else None
+        if isinstance(out, Sequence) and not isinstance(out, str | bytes | bytearray):
+            return out[0] if out else None
+        return response
+
     def _sync_get_cloud_properties(
         self,
         keys: str | Sequence[str],
@@ -1471,6 +1678,13 @@ class DreameLawnMowerClient:
             cloud_device_otc_info = self._sync_get_cloud_device_otc_info(language)
         except DreameLawnMowerConnectionError as err:
             cloud_device_otc_info = {"error": str(err)}
+        try:
+            app_maps = self._sync_get_app_maps(
+                chunk_size=400,
+                include_payload=False,
+            )
+        except DreameLawnMowerConnectionError as err:
+            app_maps = {"error": str(err)}
 
         return build_map_probe_payload(
             descriptor=self._descriptor,
@@ -1482,6 +1696,7 @@ class DreameLawnMowerClient:
             cloud_user_features=cloud_user_features,
             cloud_device_otc_info=cloud_device_otc_info,
             cloud_key_definition=cloud_key_definition,
+            app_maps=app_maps,
         )
 
     def _safe_map_diagnostics(
@@ -1776,6 +1991,94 @@ def _optional_bool(value: Any) -> bool | None:
     if value is None:
         return None
     return bool(value)
+
+
+def _validate_app_map_chunk_size(value: int) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError("chunk_size must be an integer")
+    if value <= 0:
+        raise ValueError("chunk_size must be greater than zero")
+    return value
+
+
+def _app_action_data(value: Any) -> Any:
+    if not isinstance(value, Mapping):
+        return None
+    if value.get("r") not in (None, 0):
+        raise DreameLawnMowerConnectionError(f"App action failed: {value}")
+    return value.get("d")
+
+
+def _normalize_app_map_entries(value: Any) -> list[dict[str, Any]]:
+    entries = _app_action_data(value)
+    if not isinstance(entries, Sequence) or isinstance(
+        entries,
+        str | bytes | bytearray,
+    ):
+        return []
+
+    result: list[dict[str, Any]] = []
+    for item in entries:
+        if not isinstance(item, Sequence) or isinstance(item, str | bytes | bytearray):
+            continue
+        values = list(item)
+        if len(values) < 4:
+            continue
+        result.append(
+            {
+                "idx": values[0],
+                "current": bool(values[1]),
+                "created": bool(values[2]),
+                "has_backup": bool(values[3]),
+                "force_load": bool(values[4]) if len(values) > 4 else False,
+            }
+        )
+    return result
+
+
+def _app_map_payload_summary(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {"payload_type": _operation_value_type(value)}
+
+    maps = value.get("map") if isinstance(value.get("map"), list) else []
+    spots = value.get("spot") if isinstance(value.get("spot"), list) else []
+    points = value.get("point") if isinstance(value.get("point"), list) else []
+    semantic = value.get("semantic") if isinstance(value.get("semantic"), list) else []
+    trajectories = (
+        value.get("trajectory") if isinstance(value.get("trajectory"), list) else []
+    )
+    cut_relation = (
+        value.get("cut_relation") if isinstance(value.get("cut_relation"), list) else []
+    )
+
+    boundary_point_count = 0
+    total_area = value.get("total_area")
+    map_area_total = 0.0
+    for item in maps:
+        if not isinstance(item, Mapping):
+            continue
+        coordinates = item.get("data")
+        if isinstance(coordinates, Sequence) and not isinstance(
+            coordinates,
+            str | bytes | bytearray,
+        ):
+            boundary_point_count += len(coordinates)
+        area = item.get("area")
+        if isinstance(area, int | float):
+            map_area_total += float(area)
+
+    return {
+        "name": value.get("name"),
+        "total_area": total_area,
+        "map_area_total": round(map_area_total, 2),
+        "map_area_count": len(maps),
+        "boundary_point_count": boundary_point_count,
+        "spot_count": len(spots),
+        "point_count": len(points),
+        "semantic_count": len(semantic),
+        "trajectory_count": len(trajectories),
+        "cut_relation_count": len(cut_relation),
+    }
 
 
 def _key_define_from_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:

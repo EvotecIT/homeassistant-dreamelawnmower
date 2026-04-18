@@ -149,12 +149,22 @@ The reusable Python client now includes an experimental read-only map path:
 - `async_refresh_map_view()` fetches one reusable map view with source, summary, image bytes, and error metadata
 - `async_refresh_map_summary()` tries to fetch current mower map metadata
 - `async_get_map_png()` tries to render the current mower map to PNG bytes
+- `async_get_app_maps()` fetches mower-native app map JSON through confirmed read-only `MAPL`, `MAPI`, and chunked `MAPD` app commands
 
 The quickest way to try it outside Home Assistant is:
 
 ```bash
 python examples/map_client.py
 ```
+
+The confirmed A2 app-map path is:
+
+```bash
+python examples/app_map_probe.py --out app-map-current.json
+```
+
+By default this omits raw coordinates and writes only metadata plus summaries.
+Use `--include-payload` only for local parser or renderer work.
 
 If you want to probe the same cloud endpoints the Dreamehome app exposes for mower discovery and raw properties, use:
 
@@ -214,7 +224,7 @@ Optional:
 
 This is still experimental and read-only. The integration exposes disabled-by-default `camera` entities named `Map` and `Map Diagnostics`. `Map` returns a rendered JPEG or a valid placeholder image. `Map Diagnostics` returns a readable JPEG diagnostics card and keeps the structured map view in entity attributes so Home Assistant no longer tries to render JSON as a broken camera preview.
 
-There is also a disabled-by-default `Capture Map Probe` button. Use it when the visible map is still a placeholder: it logs a compact JSON payload with the legacy current-map result, focused app-style property probes, trimmed cloud metadata from `device/info` and `device/listV2`, and the app-side `queryDevicePermit` feature payload.
+There is also a disabled-by-default `Capture Map Probe` button. Use it when the visible map is still a placeholder: it logs a compact JSON payload with the legacy current-map result, focused app-style property probes, trimmed cloud metadata from `device/info` and `device/listV2`, the app-side `queryDevicePermit` feature payload, and a payload-free summary of the confirmed app-map path.
 
 The map probe includes a `cloud_property_summary` section so large logs are easier to triage. Start there first: it lists non-empty keys, unknown non-empty keys, decoded labels and sources, hinted keys, value-type counts, map-candidate payload previews, and blob lengths before you inspect the full `cloud_properties.entries` payload.
 It also includes `cloud_property_history_summary` for the legacy map history
