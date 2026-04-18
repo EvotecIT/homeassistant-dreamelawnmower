@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from dreame_lawn_mower_client.models import (
     descriptor_from_cloud_record,
     display_name_for_model,
+    firmware_update_support_from_device,
     snapshot_from_device,
 )
 
@@ -18,7 +19,19 @@ class _FakeInfo:
         self.raw = {
             "online": True,
             "sn": "G2408051LEE0090632",
+            "ver": "4.3.6_0320",
             "updateTime": "2025-04-22 10:03:44",
+            "latestStatus": 13,
+            "featureCode": -1,
+            "featureCode2": -1,
+            "status": "Live",
+            "deviceInfo": {
+                "pluginForceUpdate": True,
+                "firmwareDevelopType": "SINGLE_PLATFORM",
+                "releaseAt": "1741340511687",
+                "updatedAt": "1762737943926",
+                "status": "Live",
+            },
         }
 
 
@@ -420,3 +433,54 @@ def test_snapshot_tracks_realtime_and_unknown_diagnostics() -> None:
     assert snapshot.unknown_property_count == 1
     assert snapshot.realtime_property_count == 2
     assert snapshot.last_realtime_method == "properties_changed"
+
+
+def test_firmware_update_support_preserves_evidence_without_guessing_ota() -> None:
+    device = _FakeDevice()
+
+    support = firmware_update_support_from_device(
+        device,
+        cloud_device_info={
+            "ver": "4.3.6_0320",
+            "deviceInfo": {"pluginForceUpdate": True},
+        },
+        cloud_device_list_page={
+            "page": {
+                "records": [
+                    {
+                        "latestStatus": 13,
+                        "deviceInfo": {"firmwareDevelopType": "SINGLE_PLATFORM"},
+                    }
+                ]
+            }
+        },
+    )
+
+    assert support.current_version == "4.3.6_0320"
+    assert support.hardware_version == "Linux"
+    assert support.cloud_update_time == "2025-04-22 10:03:44"
+    assert support.plugin_force_update is True
+    assert support.plugin_status == "Live"
+    assert support.firmware_develop_type == "SINGLE_PLATFORM"
+    assert support.update_available is None
+    assert "pluginForceUpdate" in support.reason
+    assert support.evidence["info"]["latestStatus"] == 13
+    assert support.evidence["cloud_device_info"]["deviceInfo"] == {
+        "pluginForceUpdate": True
+    }
+    assert support.evidence["cloud_device_list_page"]["page"] == {"record_count": 1}
+    assert support.evidence["cloud_device_list_page"]["records"][0] == {
+        "latestStatus": 13,
+        "deviceInfo": {"firmwareDevelopType": "SINGLE_PLATFORM"},
+    }
+
+
+def test_firmware_update_support_marks_update_state() -> None:
+    device = _FakeDevice()
+    device.status.state = SimpleNamespace(name="UPGRADING")
+
+    support = firmware_update_support_from_device(device)
+
+    assert support.update_state == "upgrading"
+    assert support.update_available is None
+    assert support.reason == "Mower reports an update-related state."

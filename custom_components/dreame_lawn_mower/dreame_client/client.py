@@ -11,7 +11,9 @@ from typing import Any
 from .app_protocol import (
     MOWER_ERROR_PROPERTY_KEY,
     MOWER_PROPERTY_HINTS,
+    MOWER_RAW_STATUS_PROPERTY_KEY,
     MOWER_STATE_PROPERTY_KEY,
+    decode_mower_status_blob,
     mower_error_label,
     mower_state_label,
 )
@@ -22,12 +24,15 @@ from .models import (
     SUPPORTED_ACCOUNT_TYPES,
     DreameLawnMowerCameraFeatureSupport,
     DreameLawnMowerDescriptor,
+    DreameLawnMowerFirmwareUpdateSupport,
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
     DreameLawnMowerRemoteControlSupport,
     DreameLawnMowerSnapshot,
+    DreameLawnMowerStatusBlob,
     descriptor_from_cloud_record,
     display_name_for_model,
+    firmware_update_support_from_device,
     map_summary_from_map_data,
     snapshot_from_device,
 )
@@ -198,6 +203,34 @@ class DreameLawnMowerClient:
             refresh,
             include_cloud,
             language,
+        )
+
+    async def async_get_firmware_update_support(
+        self,
+        *,
+        refresh: bool = False,
+        include_cloud: bool = True,
+        language: str | None = "en",
+    ) -> DreameLawnMowerFirmwareUpdateSupport:
+        """Return firmware/update evidence without guessing availability."""
+        return await asyncio.to_thread(
+            self._sync_get_firmware_update_support,
+            refresh,
+            include_cloud,
+            language,
+        )
+
+    async def async_get_status_blob(
+        self,
+        *,
+        refresh: bool = False,
+        include_cloud: bool = True,
+    ) -> DreameLawnMowerStatusBlob | None:
+        """Return the latest decoded raw realtime status blob, if available."""
+        return await asyncio.to_thread(
+            self._sync_get_status_blob,
+            refresh,
+            include_cloud,
         )
 
     async def async_request_photo_info(
@@ -588,6 +621,75 @@ class DreameLawnMowerClient:
             cloud_user_features_error=cloud_user_features_error,
             reason=reason,
         )
+
+    def _sync_get_firmware_update_support(
+        self,
+        refresh: bool = False,
+        include_cloud: bool = True,
+        language: str | None = "en",
+    ) -> DreameLawnMowerFirmwareUpdateSupport:
+        if refresh:
+            device = self._sync_update_device()
+        else:
+            device = self._ensure_device()
+
+        cloud_device_info = None
+        cloud_device_list_page = None
+        cloud_error = None
+        if include_cloud:
+            try:
+                cloud_device_info = self._sync_get_cloud_device_info(language)
+                cloud_device_list_page = self._sync_get_cloud_device_list_page(
+                    current=1,
+                    size=20,
+                    language=language,
+                    master=None,
+                    shared_status=None,
+                )
+            except DreameLawnMowerConnectionError as err:
+                cloud_error = str(err)
+
+        return firmware_update_support_from_device(
+            device,
+            cloud_device_info=cloud_device_info,
+            cloud_device_list_page=cloud_device_list_page,
+            cloud_error=cloud_error,
+        )
+
+    def _sync_get_status_blob(
+        self,
+        refresh: bool = False,
+        include_cloud: bool = True,
+    ) -> DreameLawnMowerStatusBlob | None:
+        if refresh:
+            device = self._sync_update_device()
+        else:
+            device = self._ensure_device()
+
+        realtime_entry = (getattr(device, "realtime_properties", {}) or {}).get(
+            MOWER_RAW_STATUS_PROPERTY_KEY
+        )
+        if isinstance(realtime_entry, Mapping):
+            decoded = decode_mower_status_blob(
+                realtime_entry.get("value"),
+                source="realtime",
+            )
+            if decoded is not None:
+                return decoded
+
+        if not include_cloud:
+            return None
+
+        response = self._sync_get_cloud_properties(MOWER_RAW_STATUS_PROPERTY_KEY)
+        for entry in self._normalize_cloud_property_entries(response):
+            if str(entry.get("key", "")) == MOWER_RAW_STATUS_PROPERTY_KEY:
+                decoded = decode_mower_status_blob(
+                    entry.get("value"),
+                    source="cloud",
+                )
+                if decoded is not None:
+                    return decoded
+        return None
 
     def _sync_request_photo_info(self, parameters: Any = None) -> Any:
         support = self._sync_get_camera_feature_support(
@@ -1164,6 +1266,10 @@ class DreameLawnMowerClient:
             label = mower_error_label(value)
             if label:
                 rendered["decoded_label"] = label
+        elif key == MOWER_RAW_STATUS_PROPERTY_KEY:
+            status_blob = decode_mower_status_blob(value)
+            if status_blob is not None:
+                rendered["status_blob"] = status_blob.as_dict()
 
         blob_preview = cls._property_value_blob_preview(value)
         if blob_preview is not None:

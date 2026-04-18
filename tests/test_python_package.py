@@ -11,15 +11,19 @@ from dreame_lawn_mower_client import (
     MOWER_STATE_PROPERTY_KEY,
     DreameLawnMowerCameraFeatureSupport,
     DreameLawnMowerClient,
+    DreameLawnMowerFirmwareUpdateSupport,
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
     DreameLawnMowerRemoteControlSupport,
+    DreameLawnMowerStatusBlob,
     analyze_decompiled_sources,
     analyze_dreamehome_apk,
     build_camera_probe_payload,
     build_cloud_property_summary,
     build_jadx_command,
     build_map_probe_payload,
+    decode_mower_status_blob,
+    firmware_update_support_from_device,
     map_summary_from_map_data,
     map_summary_to_dict,
     mower_error_label,
@@ -48,8 +52,13 @@ def test_public_package_exports_map_helpers() -> None:
     assert DreameLawnMowerRemoteControlSupport.__name__.endswith(
         "RemoteControlSupport"
     )
+    assert DreameLawnMowerFirmwareUpdateSupport.__name__.endswith(
+        "FirmwareUpdateSupport"
+    )
+    assert DreameLawnMowerStatusBlob.__name__.endswith("StatusBlob")
     assert callable(map_summary_from_map_data)
     assert callable(map_summary_to_dict)
+    assert callable(firmware_update_support_from_device)
     assert callable(analyze_decompiled_sources)
     assert callable(analyze_dreamehome_apk)
     assert callable(build_camera_probe_payload)
@@ -71,6 +80,8 @@ def test_public_package_client_has_cloud_probe_helpers() -> None:
     assert hasattr(DreameLawnMowerClient, "async_scan_cloud_properties")
     assert hasattr(DreameLawnMowerClient, "async_probe_map_sources")
     assert hasattr(DreameLawnMowerClient, "async_get_camera_feature_support")
+    assert hasattr(DreameLawnMowerClient, "async_get_firmware_update_support")
+    assert hasattr(DreameLawnMowerClient, "async_get_status_blob")
     assert hasattr(DreameLawnMowerClient, "async_probe_camera_sources")
     assert hasattr(DreameLawnMowerClient, "async_probe_camera_stream_handshake")
     assert hasattr(DreameLawnMowerClient, "async_request_photo_info")
@@ -91,3 +102,4 @@ def test_public_package_exports_app_protocol_helpers() -> None:
     assert mower_error_label(-1) == "No error"
     assert mower_error_label(0) == "No error"
     assert mower_error_label(99999) is None
+    assert decode_mower_status_blob([206, 0, 206]).frame_valid is True

@@ -16,10 +16,14 @@ DreameLawnMowerConnectionError = _client.DreameLawnMowerConnectionError
 DreameLawnMowerTwoFactorRequiredError = _client.DreameLawnMowerTwoFactorRequiredError
 DreameLawnMowerCameraFeatureSupport = _models.DreameLawnMowerCameraFeatureSupport
 DreameLawnMowerDescriptor = _models.DreameLawnMowerDescriptor
+DreameLawnMowerFirmwareUpdateSupport = (
+    _models.DreameLawnMowerFirmwareUpdateSupport
+)
 DreameLawnMowerMapSummary = _models.DreameLawnMowerMapSummary
 DreameLawnMowerMapView = _models.DreameLawnMowerMapView
 DreameLawnMowerRemoteControlSupport = _models.DreameLawnMowerRemoteControlSupport
 DreameLawnMowerSnapshot = _models.DreameLawnMowerSnapshot
+DreameLawnMowerStatusBlob = _models.DreameLawnMowerStatusBlob
 DEFAULT_APK_RESEARCH_TERMS = _apk_research.DEFAULT_APK_RESEARCH_TERMS
 DEFAULT_DECOMPILED_SOURCE_SUFFIXES = _apk_research.DEFAULT_DECOMPILED_SOURCE_SUFFIXES
 DISPLAY_NAME_ALIASES = _models.DISPLAY_NAME_ALIASES
@@ -39,7 +43,9 @@ build_camera_probe_payload = _camera_probe.build_camera_probe_payload
 build_cloud_property_summary = _map_probe.build_cloud_property_summary
 build_map_probe_payload = _map_probe.build_map_probe_payload
 find_jadx_executable = _apk_research.find_jadx_executable
+decode_mower_status_blob = _app_protocol.decode_mower_status_blob
 display_name_for_model = _models.display_name_for_model
+firmware_update_support_from_device = _models.firmware_update_support_from_device
 map_summary_from_map_data = _models.map_summary_from_map_data
 map_summary_to_dict = _models.map_summary_to_dict
 mower_error_label = _app_protocol.mower_error_label
@@ -57,10 +63,12 @@ __all__ = [
     "DreameLawnMowerConnectionError",
     "DreameLawnMowerDescriptor",
     "DreameLawnMowerError",
+    "DreameLawnMowerFirmwareUpdateSupport",
     "DreameLawnMowerMapSummary",
     "DreameLawnMowerMapView",
     "DreameLawnMowerRemoteControlSupport",
     "DreameLawnMowerSnapshot",
+    "DreameLawnMowerStatusBlob",
     "DreameLawnMowerTwoFactorRequiredError",
     "MODEL_NAME_MAP",
     "MAP_PROBE_PROPERTY_KEYS",
@@ -76,8 +84,10 @@ __all__ = [
     "build_camera_probe_payload",
     "build_cloud_property_summary",
     "build_map_probe_payload",
+    "decode_mower_status_blob",
     "display_name_for_model",
     "find_jadx_executable",
+    "firmware_update_support_from_device",
     "map_summary_from_map_data",
     "map_summary_to_dict",
     "mower_error_label",

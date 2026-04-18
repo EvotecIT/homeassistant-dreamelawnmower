@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Sequence
 from typing import Final
+
+from .models import DreameLawnMowerStatusBlob
 
 MOWER_RAW_STATUS_PROPERTY_KEY: Final[str] = "1.1"
 MOWER_STATE_PROPERTY_KEY: Final[str] = "2.1"
@@ -75,3 +79,68 @@ def mower_error_label(value: object) -> str | None:
         return _clean_label(ERROR_CODE_TO_ERROR_NAME.get(enum_value))
     except (ImportError, ValueError):
         return None
+
+
+def decode_mower_status_blob(
+    value: object,
+    *,
+    source: str | None = None,
+) -> DreameLawnMowerStatusBlob | None:
+    """Return a conservative structure for the app realtime `1.1` byte blob.
+
+    The Dreamehome app exposes this as a framed byte array. We preserve indexed
+    bytes for cross-device comparison, but intentionally avoid assigning
+    semantics until we can prove them from multiple mower states/models.
+    """
+    raw = _normalize_byte_array(value)
+    if raw is None:
+        return None
+
+    notes: list[str] = []
+    if len(raw) != 20:
+        notes.append("unexpected_length")
+
+    frame_start = raw[0] if raw else None
+    frame_end = raw[-1] if raw else None
+    frame_valid = bool(len(raw) >= 2 and frame_start == 0xCE and frame_end == 0xCE)
+    if not frame_valid:
+        notes.append("invalid_frame_markers")
+
+    return DreameLawnMowerStatusBlob(
+        supported=True,
+        source=source,
+        raw=raw,
+        length=len(raw),
+        hex=bytes(raw).hex(),
+        frame_start=frame_start,
+        frame_end=frame_end,
+        frame_valid=frame_valid,
+        payload=raw[1:-1] if len(raw) >= 2 else (),
+        bytes_by_index={str(index): item for index, item in enumerate(raw)},
+        notes=tuple(notes),
+    )
+
+
+def _normalize_byte_array(value: object) -> tuple[int, ...] | None:
+    raw = value
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not (text.startswith("[") and text.endswith("]")):
+            return None
+        try:
+            raw = json.loads(text)
+        except json.JSONDecodeError:
+            return None
+
+    if isinstance(raw, bytes | bytearray):
+        return tuple(raw)
+
+    if not isinstance(raw, Sequence) or isinstance(raw, str | bytes | bytearray):
+        return None
+    if not raw:
+        return None
+    if not all(isinstance(item, int) and not isinstance(item, bool) for item in raw):
+        return None
+    if not all(0 <= item <= 255 for item in raw):
+        return None
+    return tuple(raw)

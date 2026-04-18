@@ -152,6 +152,50 @@ class DreameLawnMowerSnapshot:
 
 
 @dataclass(slots=True, frozen=True)
+class DreameLawnMowerStatusBlob:
+    """Structured, conservative view of the app realtime `1.1` status blob."""
+
+    supported: bool
+    source: str | None = None
+    raw: tuple[int, ...] = field(default_factory=tuple)
+    length: int = 0
+    hex: str | None = None
+    frame_start: int | None = None
+    frame_end: int | None = None
+    frame_valid: bool = False
+    payload: tuple[int, ...] = field(default_factory=tuple)
+    bytes_by_index: Mapping[str, int] = field(default_factory=dict)
+    notes: tuple[str, ...] = field(default_factory=tuple)
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a JSON-safe status blob payload."""
+        return asdict(self)
+
+
+@dataclass(slots=True, frozen=True)
+class DreameLawnMowerFirmwareUpdateSupport:
+    """Read-only firmware/update evidence from device and cloud metadata."""
+
+    current_version: str | None = None
+    hardware_version: str | None = None
+    cloud_update_time: str | None = None
+    plugin_force_update: bool | None = None
+    plugin_status: str | None = None
+    firmware_develop_type: str | None = None
+    device_info_release_at: str | None = None
+    device_info_updated_at: str | None = None
+    update_state: str | None = None
+    update_available: bool | None = None
+    cloud_error: str | None = None
+    evidence: Mapping[str, Any] = field(default_factory=dict)
+    reason: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a JSON-safe firmware/update payload."""
+        return asdict(self)
+
+
+@dataclass(slots=True, frozen=True)
 class DreameLawnMowerMapSummary:
     """Normalized read-only summary of mower map data."""
 
@@ -460,6 +504,82 @@ def snapshot_from_device(
     )
 
 
+def firmware_update_support_from_device(
+    device: Any,
+    *,
+    cloud_device_info: Mapping[str, Any] | None = None,
+    cloud_device_list_page: Mapping[str, Any] | None = None,
+    cloud_error: str | None = None,
+) -> DreameLawnMowerFirmwareUpdateSupport:
+    """Build firmware/update evidence without guessing OTA availability."""
+
+    info = getattr(device, "info", None)
+    info_raw = getattr(info, "raw", {}) or {}
+    device_info = info_raw.get("deviceInfo", {}) or {}
+    status = getattr(device, "status", None)
+    state = getattr(status, "state", None)
+    state_name = _as_optional_str(getattr(state, "name", None))
+    update_state = state_name.lower() if state_name else None
+    if update_state not in {"upgrading", "updating"}:
+        update_state = None
+
+    plugin_force_update = _optional_bool_from_raw(device_info.get("pluginForceUpdate"))
+    evidence: dict[str, Any] = {
+        "info": {
+            "ver": _as_optional_str(info_raw.get("ver"))
+            or _as_optional_str(getattr(info, "firmware_version", None)),
+            "updateTime": _as_optional_str(info_raw.get("updateTime")),
+            "latestStatus": info_raw.get("latestStatus"),
+            "status": _as_optional_str(info_raw.get("status")),
+            "featureCode": info_raw.get("featureCode"),
+            "featureCode2": info_raw.get("featureCode2"),
+        },
+        "deviceInfo": {
+            "pluginForceUpdate": plugin_force_update,
+            "firmwareDevelopType": _as_optional_str(
+                device_info.get("firmwareDevelopType")
+            ),
+            "releaseAt": _as_optional_str(device_info.get("releaseAt")),
+            "updatedAt": _as_optional_str(device_info.get("updatedAt")),
+            "status": _as_optional_str(device_info.get("status")),
+        },
+    }
+    if cloud_device_info is not None:
+        evidence["cloud_device_info"] = _compact_mapping_evidence(cloud_device_info)
+    if cloud_device_list_page is not None:
+        evidence["cloud_device_list_page"] = _compact_mapping_evidence(
+            cloud_device_list_page
+        )
+
+    reason = "No verified mower firmware update availability signal was found."
+    if plugin_force_update:
+        reason = (
+            "Cloud metadata advertises pluginForceUpdate, which appears to be "
+            "mobile-app/plugin metadata, not a verified mower firmware update."
+        )
+    if update_state is not None:
+        reason = "Mower reports an update-related state."
+
+    return DreameLawnMowerFirmwareUpdateSupport(
+        current_version=_as_optional_str(info_raw.get("ver"))
+        or _as_optional_str(getattr(info, "firmware_version", None)),
+        hardware_version=_as_optional_str(getattr(info, "hardware_version", None)),
+        cloud_update_time=_as_optional_str(info_raw.get("updateTime")),
+        plugin_force_update=plugin_force_update,
+        plugin_status=_as_optional_str(device_info.get("status")),
+        firmware_develop_type=_as_optional_str(
+            device_info.get("firmwareDevelopType")
+        ),
+        device_info_release_at=_as_optional_str(device_info.get("releaseAt")),
+        device_info_updated_at=_as_optional_str(device_info.get("updatedAt")),
+        update_state=update_state,
+        update_available=None,
+        cloud_error=cloud_error,
+        evidence=evidence,
+        reason=reason,
+    )
+
+
 def map_summary_from_map_data(map_data: Any) -> DreameLawnMowerMapSummary | None:
     """Convert raw mower map data into a small reusable summary."""
     if map_data is None:
@@ -501,3 +621,53 @@ def map_summary_from_map_data(map_data: Any) -> DreameLawnMowerMapSummary | None
         charger_present=getattr(map_data, "charger_position", None) is not None,
         robot_present=getattr(map_data, "robot_position", None) is not None,
     )
+
+
+def _optional_bool_from_raw(value: Any) -> bool | None:
+    if value is None:
+        return None
+    return bool(value)
+
+
+def _compact_mapping_evidence(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Return useful keys without storing full noisy cloud payloads in support."""
+    page = value.get("page") if isinstance(value, Mapping) else None
+    records = page.get("records") if isinstance(page, Mapping) else None
+    if isinstance(records, list):
+        return {
+            "page": {"record_count": len(records)},
+            "records": [
+                _compact_mapping_evidence(item)
+                for item in records[:5]
+                if isinstance(item, Mapping)
+            ],
+        }
+
+    interesting_keys = (
+        "status",
+        "latestStatus",
+        "ver",
+        "updateTime",
+        "featureCode",
+        "featureCode2",
+        "pluginForceUpdate",
+    )
+    result = {
+        key: value.get(key)
+        for key in interesting_keys
+        if isinstance(value, Mapping) and key in value
+    }
+    device_info = value.get("deviceInfo") if isinstance(value, Mapping) else None
+    if isinstance(device_info, Mapping):
+        result["deviceInfo"] = {
+            key: device_info.get(key)
+            for key in (
+                "status",
+                "pluginForceUpdate",
+                "firmwareDevelopType",
+                "releaseAt",
+                "updatedAt",
+            )
+            if key in device_info
+        }
+    return result
