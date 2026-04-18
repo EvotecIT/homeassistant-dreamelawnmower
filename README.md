@@ -31,6 +31,10 @@ Under the hood, this version reuses the already reverse-engineered mower protoco
 
 ## Development
 
+For a future-agent snapshot of the current implementation state, live-device
+findings, safe probe commands, and known gaps, read
+[`docs/agent-handoff.md`](docs/agent-handoff.md).
+
 ```bash
 python -m pip install -e .[test]
 python -m compileall dreame_lawn_mower_client custom_components tests examples
