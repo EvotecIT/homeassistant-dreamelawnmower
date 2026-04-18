@@ -12,6 +12,7 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerCameraFeatureSupport,
     DreameLawnMowerClient,
     DreameLawnMowerFirmwareUpdateSupport,
+    DreameLawnMowerMapDiagnostics,
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
     DreameLawnMowerRemoteControlSupport,
@@ -24,6 +25,7 @@ from dreame_lawn_mower_client import (
     build_map_probe_payload,
     decode_mower_status_blob,
     firmware_update_support_from_device,
+    map_diagnostics_from_device,
     map_summary_from_map_data,
     map_summary_to_dict,
     mower_error_label,
@@ -55,9 +57,11 @@ def test_public_package_exports_map_helpers() -> None:
     assert DreameLawnMowerFirmwareUpdateSupport.__name__.endswith(
         "FirmwareUpdateSupport"
     )
+    assert DreameLawnMowerMapDiagnostics.__name__.endswith("MapDiagnostics")
     assert DreameLawnMowerStatusBlob.__name__.endswith("StatusBlob")
     assert callable(map_summary_from_map_data)
     assert callable(map_summary_to_dict)
+    assert callable(map_diagnostics_from_device)
     assert callable(firmware_update_support_from_device)
     assert callable(analyze_decompiled_sources)
     assert callable(analyze_dreamehome_apk)

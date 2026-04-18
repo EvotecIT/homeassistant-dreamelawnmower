@@ -93,6 +93,7 @@ def test_map_probe_payload_trims_cloud_records() -> None:
         "country": "eu",
     }
     assert payload["legacy_current_map"]["source"] == "legacy_current_map"
+    assert payload["legacy_current_map"]["diagnostics"] is None
     assert payload["cloud_properties"]["entries"][1]["value"] == 13
     assert payload["cloud_property_summary"]["non_empty_keys"] == ["1.1", "2.1"]
     assert payload["cloud_property_summary"]["hinted_keys"] == {

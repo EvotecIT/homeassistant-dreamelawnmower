@@ -19,6 +19,7 @@ DreameLawnMowerDescriptor = _models.DreameLawnMowerDescriptor
 DreameLawnMowerFirmwareUpdateSupport = (
     _models.DreameLawnMowerFirmwareUpdateSupport
 )
+DreameLawnMowerMapDiagnostics = _models.DreameLawnMowerMapDiagnostics
 DreameLawnMowerMapSummary = _models.DreameLawnMowerMapSummary
 DreameLawnMowerMapView = _models.DreameLawnMowerMapView
 DreameLawnMowerRemoteControlSupport = _models.DreameLawnMowerRemoteControlSupport
@@ -46,6 +47,7 @@ find_jadx_executable = _apk_research.find_jadx_executable
 decode_mower_status_blob = _app_protocol.decode_mower_status_blob
 display_name_for_model = _models.display_name_for_model
 firmware_update_support_from_device = _models.firmware_update_support_from_device
+map_diagnostics_from_device = _models.map_diagnostics_from_device
 map_summary_from_map_data = _models.map_summary_from_map_data
 map_summary_to_dict = _models.map_summary_to_dict
 mower_error_label = _app_protocol.mower_error_label
@@ -64,6 +66,7 @@ __all__ = [
     "DreameLawnMowerDescriptor",
     "DreameLawnMowerError",
     "DreameLawnMowerFirmwareUpdateSupport",
+    "DreameLawnMowerMapDiagnostics",
     "DreameLawnMowerMapSummary",
     "DreameLawnMowerMapView",
     "DreameLawnMowerRemoteControlSupport",
@@ -88,6 +91,7 @@ __all__ = [
     "display_name_for_model",
     "find_jadx_executable",
     "firmware_update_support_from_device",
+    "map_diagnostics_from_device",
     "map_summary_from_map_data",
     "map_summary_to_dict",
     "mower_error_label",

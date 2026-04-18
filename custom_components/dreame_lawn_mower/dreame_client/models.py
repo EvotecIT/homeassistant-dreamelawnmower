@@ -227,6 +227,36 @@ class DreameLawnMowerMapSummary:
 
 
 @dataclass(slots=True, frozen=True)
+class DreameLawnMowerMapDiagnostics:
+    """Structured details explaining a map fetch result."""
+
+    source: str
+    reason: str | None = None
+    state: str | None = None
+    state_name: str | None = None
+    capability_map: bool | None = None
+    capability_lidar_navigation: bool | None = None
+    map_manager_present: bool = False
+    map_manager_ready: bool | None = None
+    map_request_count: int | None = None
+    map_request_needed: bool | None = None
+    current_map_present: bool = False
+    selected_map_present: bool = False
+    map_list_count: int | None = None
+    saved_map_count: int | None = None
+    has_saved_map: bool | None = None
+    has_temporary_map: bool | None = None
+    has_new_map: bool | None = None
+    mapping_available: bool | None = None
+    raw_status_flags: Mapping[str, Any] = field(default_factory=dict)
+    cloud_property_summary: Mapping[str, Any] | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a JSON-safe diagnostics payload."""
+        return asdict(self)
+
+
+@dataclass(slots=True, frozen=True)
 class DreameLawnMowerMapView:
     """Reusable read-only map fetch result."""
 
@@ -234,6 +264,7 @@ class DreameLawnMowerMapView:
     summary: DreameLawnMowerMapSummary | None = None
     image_png: bytes | None = field(default=None, repr=False)
     error: str | None = None
+    diagnostics: DreameLawnMowerMapDiagnostics | None = None
 
     @property
     def available(self) -> bool:
@@ -253,6 +284,9 @@ class DreameLawnMowerMapView:
             "has_image": self.has_image,
             "error": self.error,
             "summary": map_summary_to_dict(self.summary),
+            "diagnostics": (
+                self.diagnostics.as_dict() if self.diagnostics is not None else None
+            ),
         }
 
 
@@ -647,10 +681,82 @@ def map_summary_from_map_data(map_data: Any) -> DreameLawnMowerMapSummary | None
     )
 
 
+def map_diagnostics_from_device(
+    device: Any,
+    *,
+    source: str,
+    reason: str | None = None,
+    cloud_property_summary: Mapping[str, Any] | None = None,
+) -> DreameLawnMowerMapDiagnostics:
+    """Return map diagnostics from the current device and map-manager state."""
+
+    status = getattr(device, "status", None)
+    capability = getattr(device, "capability", None)
+    map_manager = getattr(device, "_map_manager", None)
+    current_map = getattr(device, "current_map", None)
+    selected_map = getattr(device, "selected_map", None)
+    map_list = _safe_len(getattr(device, "map_list", None))
+    map_data_list = getattr(device, "map_data_list", None)
+
+    return DreameLawnMowerMapDiagnostics(
+        source=source,
+        reason=reason,
+        state=_lower_optional_name(getattr(status, "state", None)),
+        state_name=_as_optional_str(getattr(status, "state_name", None)),
+        capability_map=_optional_bool_from_raw(getattr(capability, "map", None)),
+        capability_lidar_navigation=_optional_bool_from_raw(
+            getattr(capability, "lidar_navigation", None)
+        ),
+        map_manager_present=map_manager is not None,
+        map_manager_ready=_optional_bool_from_raw(getattr(map_manager, "ready", None)),
+        map_request_count=getattr(map_manager, "_map_request_count", None),
+        map_request_needed=getattr(map_manager, "_need_map_request", None),
+        current_map_present=current_map is not None,
+        selected_map_present=selected_map is not None,
+        map_list_count=map_list,
+        saved_map_count=_safe_len(map_data_list),
+        has_saved_map=_optional_bool_from_raw(getattr(status, "has_saved_map", None)),
+        has_temporary_map=_optional_bool_from_raw(
+            getattr(status, "has_temporary_map", None)
+        ),
+        has_new_map=_optional_bool_from_raw(getattr(status, "has_new_map", None)),
+        mapping_available=_optional_bool_from_raw(
+            getattr(status, "mapping_available", None)
+        ),
+        raw_status_flags={
+            key: value
+            for key, value in {
+                "running": getattr(status, "running", None),
+                "returning": getattr(status, "returning", None),
+                "docked": getattr(status, "docked", None),
+                "started": getattr(status, "started", None),
+            }.items()
+            if value is not None
+        },
+        cloud_property_summary=cloud_property_summary,
+    )
+
+
 def _optional_bool_from_raw(value: Any) -> bool | None:
     if value is None:
         return None
     return bool(value)
+
+
+def _lower_optional_name(value: Any) -> str | None:
+    name = getattr(value, "name", None)
+    if name:
+        return str(name).lower()
+    return _as_optional_str(value)
+
+
+def _safe_len(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return len(value)
+    except TypeError:
+        return None
 
 
 def _compact_mapping_evidence(value: Mapping[str, Any]) -> dict[str, Any]:

@@ -33,6 +33,7 @@ from .models import (
     descriptor_from_cloud_record,
     display_name_for_model,
     firmware_update_support_from_device,
+    map_diagnostics_from_device,
     map_summary_from_map_data,
     snapshot_from_device,
 )
@@ -978,12 +979,25 @@ class DreameLawnMowerClient:
         try:
             map_data = self._sync_wait_for_map(timeout, interval)
         except DreameLawnMowerConnectionError as err:
-            return DreameLawnMowerMapView(source=source, error=str(err))
-
-        if map_data is None:
+            error = str(err)
             return DreameLawnMowerMapView(
                 source=source,
-                error="No map data returned by the legacy current-map path.",
+                error=error,
+                diagnostics=self._safe_map_diagnostics(
+                    source=source,
+                    reason=error,
+                ),
+            )
+
+        if map_data is None:
+            error = "No map data returned by the legacy current-map path."
+            return DreameLawnMowerMapView(
+                source=source,
+                error=error,
+                diagnostics=self._safe_map_diagnostics(
+                    source=source,
+                    reason="legacy_current_map_empty",
+                ),
             )
 
         summary = map_summary_from_map_data(map_data)
@@ -996,16 +1010,25 @@ class DreameLawnMowerClient:
             renderer = DreameMowerMapDataJsonRenderer()
             image_png = renderer.render_map(render_map_data)
         except Exception as err:
+            error = f"Failed to render map data: {err}"
             return DreameLawnMowerMapView(
                 source=source,
                 summary=summary,
-                error=f"Failed to render map data: {err}",
+                error=error,
+                diagnostics=self._safe_map_diagnostics(
+                    source=source,
+                    reason="legacy_current_map_render_failed",
+                ),
             )
 
         return DreameLawnMowerMapView(
             source=source,
             summary=summary,
             image_png=image_png,
+            diagnostics=self._safe_map_diagnostics(
+                source=source,
+                reason="legacy_current_map_rendered",
+            ),
         )
 
     def _sync_get_cloud_device_info(
@@ -1142,11 +1165,53 @@ class DreameLawnMowerClient:
 
         return build_map_probe_payload(
             descriptor=self._descriptor,
-            map_view=map_view,
+            map_view=self._map_view_with_cloud_summary(map_view, cloud_properties),
             cloud_properties=cloud_properties,
             cloud_device_info=cloud_device_info,
             cloud_device_list_page=cloud_device_list_page,
             cloud_user_features=cloud_user_features,
+        )
+
+    def _safe_map_diagnostics(
+        self,
+        *,
+        source: str,
+        reason: str | None = None,
+        cloud_property_summary: Mapping[str, Any] | None = None,
+    ):
+        try:
+            device = self._ensure_device()
+            return map_diagnostics_from_device(
+                device,
+                source=source,
+                reason=reason,
+                cloud_property_summary=cloud_property_summary,
+            )
+        except Exception:
+            return None
+
+    def _map_view_with_cloud_summary(
+        self,
+        map_view: DreameLawnMowerMapView,
+        cloud_properties: Mapping[str, Any] | None,
+    ) -> DreameLawnMowerMapView:
+        from .map_probe import build_cloud_property_summary
+
+        diagnostics = self._safe_map_diagnostics(
+            source=map_view.source,
+            reason=(
+                map_view.diagnostics.reason
+                if map_view.diagnostics is not None
+                else map_view.error
+            ),
+            cloud_property_summary=build_cloud_property_summary(cloud_properties),
+        )
+        return DreameLawnMowerMapView(
+            source=map_view.source,
+            summary=map_view.summary,
+            image_png=map_view.image_png,
+            error=map_view.error,
+            diagnostics=diagnostics or map_view.diagnostics,
         )
 
     def _sync_wait_for_map(self, timeout: float, interval: float):

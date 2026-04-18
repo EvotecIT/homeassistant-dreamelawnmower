@@ -5,7 +5,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from dreame_lawn_mower_client.models import (
+    DreameLawnMowerMapDiagnostics,
     DreameLawnMowerMapView,
+    map_diagnostics_from_device,
     map_summary_from_map_data,
     map_summary_to_dict,
 )
@@ -118,11 +120,18 @@ def test_map_summary_to_dict_returns_json_safe_payload() -> None:
 
 
 def test_map_view_as_dict_omits_image_bytes() -> None:
+    diagnostics = DreameLawnMowerMapDiagnostics(
+        source="legacy_current_map",
+        reason="test",
+        map_manager_present=True,
+        current_map_present=False,
+    )
     view = DreameLawnMowerMapView(
         source="legacy_current_map",
         summary=None,
         image_png=b"not-json-safe",
         error="test",
+        diagnostics=diagnostics,
     )
 
     assert view.has_image is True
@@ -132,4 +141,80 @@ def test_map_view_as_dict_omits_image_bytes() -> None:
         "has_image": True,
         "error": "test",
         "summary": None,
+        "diagnostics": {
+            "source": "legacy_current_map",
+            "reason": "test",
+            "state": None,
+            "state_name": None,
+            "capability_map": None,
+            "capability_lidar_navigation": None,
+            "map_manager_present": True,
+            "map_manager_ready": None,
+            "map_request_count": None,
+            "map_request_needed": None,
+            "current_map_present": False,
+            "selected_map_present": False,
+            "map_list_count": None,
+            "saved_map_count": None,
+            "has_saved_map": None,
+            "has_temporary_map": None,
+            "has_new_map": None,
+            "mapping_available": None,
+            "raw_status_flags": {},
+            "cloud_property_summary": None,
+        },
     }
+
+
+def test_map_diagnostics_from_device_reports_fetch_context() -> None:
+    device = SimpleNamespace(
+        status=SimpleNamespace(
+            state=SimpleNamespace(name="CHARGING_COMPLETED"),
+            state_name="charging_completed",
+            has_saved_map=False,
+            has_temporary_map=False,
+            has_new_map=False,
+            mapping_available=False,
+            running=False,
+            returning=False,
+            docked=True,
+            started=False,
+        ),
+        capability=SimpleNamespace(map=True, lidar_navigation=True),
+        _map_manager=SimpleNamespace(
+            ready=True,
+            _map_request_count=2,
+            _need_map_request=False,
+        ),
+        current_map=None,
+        selected_map=object(),
+        map_list=[17],
+        map_data_list={17: object()},
+    )
+
+    diagnostics = map_diagnostics_from_device(
+        device,
+        source="legacy_current_map",
+        reason="legacy_current_map_empty",
+        cloud_property_summary={"non_empty_keys": ["1.1", "2.1"]},
+    )
+
+    assert diagnostics.state == "charging_completed"
+    assert diagnostics.reason == "legacy_current_map_empty"
+    assert diagnostics.capability_map is True
+    assert diagnostics.capability_lidar_navigation is True
+    assert diagnostics.map_manager_present is True
+    assert diagnostics.map_manager_ready is True
+    assert diagnostics.map_request_count == 2
+    assert diagnostics.map_request_needed is False
+    assert diagnostics.current_map_present is False
+    assert diagnostics.selected_map_present is True
+    assert diagnostics.map_list_count == 1
+    assert diagnostics.saved_map_count == 1
+    assert diagnostics.raw_status_flags == {
+        "running": False,
+        "returning": False,
+        "docked": True,
+        "started": False,
+    }
+    assert diagnostics.cloud_property_summary == {"non_empty_keys": ["1.1", "2.1"]}

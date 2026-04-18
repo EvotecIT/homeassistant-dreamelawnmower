@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from pathlib import Path
 
@@ -34,10 +35,15 @@ async def main() -> None:
     )
     try:
         snapshot = await client.async_refresh()
-        map_summary = await client.async_refresh_map_summary()
+        map_view = await client.async_refresh_map_view()
+        map_summary = map_view.summary
 
         print(snapshot.descriptor.title)
         print(f"State: {snapshot.state_name}")
+        print(
+            "Map diagnostics:",
+            json.dumps(map_view.as_dict(), indent=2, sort_keys=True),
+        )
         if map_summary is None:
             print("Map: unavailable")
             return
@@ -55,9 +61,8 @@ async def main() -> None:
             },
         )
 
-        png_bytes = await client.async_get_map_png()
-        if png_bytes:
-            output_path.write_bytes(png_bytes)
+        if map_view.image_png:
+            output_path.write_bytes(map_view.image_png)
             print(f"Saved map image to {output_path}")
     finally:
         await client.async_close()
