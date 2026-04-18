@@ -171,6 +171,12 @@ Use `--include-payload` only for local parser or renderer work. Use
 download URLs in the ignored local output file. Use `--skip-objects` when you
 only want the 2D map payload.
 
+App-map summaries intentionally keep unknown map layers neutral. `spot` is
+reported as spot-mowing areas, while `semantic` is summarized as
+`semantic_count`, `semantic_boundary_point_count`, and `semantic_key_counts`
+without labeling it as no-go or restriction data until more mower captures prove
+the meaning.
+
 If you want to probe the same cloud endpoints the Dreamehome app exposes for mower discovery and raw properties, use:
 
 ```bash

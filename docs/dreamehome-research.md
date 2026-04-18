@@ -182,6 +182,9 @@ The successful map path is the app action bridge described above. On
   matching the mower metadata.
 - Payload keys: `cut_relation`, `map`, `name`, `point`, `semantic`, `spot`,
   `total_area`, and `trajectory`.
+- Current parser summaries keep `semantic` neutral: they report entry count,
+  drawable boundary point count, and observed key counts without assuming those
+  entries are no-go or restriction zones.
 - `OBJ type=3dmap`: two `.bin` object names. Calling the app-side
   `/dreame-user-iot/iotfile/getDownloadUrl` helper with those names returns
   OSS-looking URLs, but direct GETs against the tested URLs returned 404 XML.
