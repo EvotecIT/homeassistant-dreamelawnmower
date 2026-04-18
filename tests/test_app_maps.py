@@ -127,7 +127,10 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
             "map": [{"area": 12.5, "data": [[1, 2], [3, 4], [5, 6]]}],
             "spot": [{"id": 1}],
             "point": [[7, 8]],
-            "semantic": [],
+            "semantic": [
+                {"data": [[9, 9], [10, 9], [10, 10]], "type": "unknown"},
+                {"type": "unknown", "label": "future"},
+            ],
             "trajectory": [{"data": [[1, 1]]}],
             "cut_relation": [],
         }
@@ -154,7 +157,9 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
         "spot_count": 1,
         "spot_boundary_point_count": 0,
         "point_count": 1,
-        "semantic_count": 0,
+        "semantic_count": 2,
+        "semantic_boundary_point_count": 3,
+        "semantic_key_counts": {"data": 1, "label": 1, "type": 2},
         "trajectory_count": 1,
         "trajectory_point_count": 1,
         "cut_relation_count": 0,

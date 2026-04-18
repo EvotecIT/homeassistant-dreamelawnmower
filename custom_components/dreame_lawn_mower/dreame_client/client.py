@@ -2206,7 +2206,9 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
 
     boundary_point_count = 0
     spot_boundary_point_count = 0
+    semantic_boundary_point_count = 0
     trajectory_point_count = 0
+    semantic_key_counts: dict[str, int] = {}
     total_area = value.get("total_area")
     map_area_total = 0.0
     for item in maps:
@@ -2230,6 +2232,17 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
             str | bytes | bytearray,
         ):
             spot_boundary_point_count += len(coordinates)
+    for item in semantic:
+        if not isinstance(item, Mapping):
+            continue
+        for key in item:
+            semantic_key_counts[str(key)] = semantic_key_counts.get(str(key), 0) + 1
+        coordinates = item.get("data")
+        if isinstance(coordinates, Sequence) and not isinstance(
+            coordinates,
+            str | bytes | bytearray,
+        ):
+            semantic_boundary_point_count += len(coordinates)
     for item in trajectories:
         if not isinstance(item, Mapping):
             continue
@@ -2250,6 +2263,8 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
         "spot_boundary_point_count": spot_boundary_point_count,
         "point_count": len(points),
         "semantic_count": len(semantic),
+        "semantic_boundary_point_count": semantic_boundary_point_count,
+        "semantic_key_counts": dict(sorted(semantic_key_counts.items())),
         "trajectory_count": len(trajectories),
         "trajectory_point_count": trajectory_point_count,
         "cut_relation_count": len(cut_relation),
