@@ -227,7 +227,7 @@ Optional:
 - the returned `summary` groups non-empty keys, unknown non-empty keys, decoded-label sources, value-type counts, and map-candidate payloads
 - non-empty values are shown by default; pass `--all` to include empty key-only responses
 
-This is still experimental and read-only. The integration exposes disabled-by-default `camera` entities named `Map` and `Map Diagnostics`. `Map` returns a rendered JPEG from the app-map source when available, or a valid placeholder image. `Map Diagnostics` returns a readable JPEG diagnostics card and keeps the structured map view in entity attributes so Home Assistant no longer tries to render JSON as a broken camera preview.
+This is still experimental and read-only. The integration exposes disabled-by-default `camera` entities named `Map` and `Map Diagnostics`. `Map` returns a rendered JPEG from the app-map source when available, or a valid placeholder image. Its attributes include `map_source`, `map_id`, dimensions, segment counts, path-point counts, `spot_area_count`, and `no_go_area_count`. In the confirmed A2 app payload, `spot` means spot-mowing areas; it is not a no-go zone list. `Map Diagnostics` returns a readable JPEG diagnostics card and keeps the structured map view in entity attributes so Home Assistant no longer tries to render JSON as a broken camera preview.
 
 There is also a disabled-by-default `Capture Map Probe` button. Use it when the visible map is still a placeholder: it logs a compact JSON payload with the legacy current-map result, focused app-style property probes, trimmed cloud metadata from `device/info` and `device/listV2`, the app-side `queryDevicePermit` feature payload, and a payload-free summary of the confirmed app-map path.
 

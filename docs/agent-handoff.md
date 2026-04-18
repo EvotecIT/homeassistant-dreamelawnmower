@@ -248,7 +248,7 @@ credentials into repo files.
 - Improve the simple app-map renderer into a polished mower-specific renderer
   once more fixtures are available. The confirmed payload keys are `map`,
   `spot`, `point`, `semantic`, `trajectory`, `total_area`, `name`, and
-  `cut_relation`.
+  `cut_relation`. Treat `spot` as spot-mowing areas, not no-go zones.
 - `OBJ type=3dmap` object names and signed-looking download URLs are
   discoverable, but the tested URLs returned 404 XML. The `.bin` format is not
   downloaded or decoded yet.

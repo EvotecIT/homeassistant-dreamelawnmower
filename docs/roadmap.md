@@ -90,7 +90,7 @@ Definition of done:
 Why this matters:
 
 - mower maps are polygon or vector data, not the vacuum bitmap model
-- upstream work already suggests zone boundaries, forbidden areas, and trails can be extracted from cloud batch APIs
+- live app-map probes confirm zone boundaries, spot-mowing areas, and trails can be extracted from app action payloads
 
 Targets:
 
@@ -108,9 +108,9 @@ Checklist:
 - [x] extract mower app protocol hints like the `2.1` state table into reusable Python-side tooling
 - [x] add a Python-side property range scanner so `iotstatus/props` discovery is repeatable
 - [x] expose Python-side helpers for app-map `MAPL`, `MAPI`, and chunked `MAPD`
-- [ ] implement a parser for mower zones, boundaries, forbidden areas, and path segments
+- [ ] harden the parser for more mower zones, boundaries, restrictions, and path variants
 - [x] implement a simple renderer for read-only Home Assistant display
-- [ ] expose a map entity or camera-style surface only after the parser is stable
+- [x] expose a disabled-by-default map camera-style surface for read-only validation
 - [ ] add tests for parser chunk reassembly, boundary extraction, and trail parsing
 
 Definition of done:
