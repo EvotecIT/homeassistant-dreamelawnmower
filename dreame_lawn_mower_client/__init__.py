@@ -27,6 +27,8 @@ DreameLawnMowerSnapshot = _models.DreameLawnMowerSnapshot
 DreameLawnMowerStatusBlob = _models.DreameLawnMowerStatusBlob
 DEFAULT_APK_RESEARCH_TERMS = _apk_research.DEFAULT_APK_RESEARCH_TERMS
 DEFAULT_DECOMPILED_SOURCE_SUFFIXES = _apk_research.DEFAULT_DECOMPILED_SOURCE_SUFFIXES
+DEFAULT_DREAMEHOME_ASSET_SUFFIXES = _apk_research.DEFAULT_DREAMEHOME_ASSET_SUFFIXES
+DEFAULT_DREAMEHOME_ASSET_TERMS = _apk_research.DEFAULT_DREAMEHOME_ASSET_TERMS
 DISPLAY_NAME_ALIASES = _models.DISPLAY_NAME_ALIASES
 MODEL_NAME_MAP = _models.MODEL_NAME_MAP
 MOWER_STATE_LABELS = _app_protocol.MOWER_STATE_LABELS
@@ -38,9 +40,11 @@ CAMERA_PROBE_PROPERTY_KEYS = _camera_probe.CAMERA_PROBE_PROPERTY_KEYS
 MAP_PROBE_PROPERTY_KEYS = _map_probe.MAP_PROBE_PROPERTY_KEYS
 SUPPORTED_ACCOUNT_TYPES = _models.SUPPORTED_ACCOUNT_TYPES
 analyze_decompiled_sources = _apk_research.analyze_decompiled_sources
+analyze_dreamehome_assets = _apk_research.analyze_dreamehome_assets
 analyze_dreamehome_apk = _apk_research.analyze_dreamehome_apk
 build_jadx_command = _apk_research.build_jadx_command
 build_camera_probe_payload = _camera_probe.build_camera_probe_payload
+build_cloud_key_definition_summary = _map_probe.build_cloud_key_definition_summary
 build_cloud_property_summary = _map_probe.build_cloud_property_summary
 build_map_probe_payload = _map_probe.build_map_probe_payload
 find_jadx_executable = _apk_research.find_jadx_executable
@@ -58,6 +62,8 @@ __all__ = [
     "CAMERA_PROBE_PROPERTY_KEYS",
     "DEFAULT_APK_RESEARCH_TERMS",
     "DEFAULT_DECOMPILED_SOURCE_SUFFIXES",
+    "DEFAULT_DREAMEHOME_ASSET_SUFFIXES",
+    "DEFAULT_DREAMEHOME_ASSET_TERMS",
     "DISPLAY_NAME_ALIASES",
     "DreameLawnMowerAuthError",
     "DreameLawnMowerCameraFeatureSupport",
@@ -82,9 +88,11 @@ __all__ = [
     "MOWER_STATE_PROPERTY_KEY",
     "SUPPORTED_ACCOUNT_TYPES",
     "analyze_decompiled_sources",
+    "analyze_dreamehome_assets",
     "analyze_dreamehome_apk",
     "build_jadx_command",
     "build_camera_probe_payload",
+    "build_cloud_key_definition_summary",
     "build_cloud_property_summary",
     "build_map_probe_payload",
     "decode_mower_status_blob",

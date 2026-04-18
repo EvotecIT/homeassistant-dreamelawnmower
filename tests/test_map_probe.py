@@ -5,6 +5,7 @@ from __future__ import annotations
 from dreame_lawn_mower_client import (
     MAP_PROBE_PROPERTY_KEYS,
     DreameLawnMowerMapView,
+    build_cloud_key_definition_summary,
     build_cloud_property_summary,
     build_map_probe_payload,
 )
@@ -83,6 +84,18 @@ def test_map_probe_payload_trims_cloud_records() -> None:
             "permit": "pincode,video,aiobs",
             "features": ["map", "video"],
         },
+        cloud_key_definition={
+            "url_present": True,
+            "ver": 10,
+            "fetched": True,
+            "payload": {
+                "keyDefine": {
+                    "2.1": {"en": {"13": "Charging Completed"}},
+                    "2.2": {"en": {"31": "Left wheel speed"}},
+                },
+                "ver": 10,
+            },
+        },
     )
 
     assert payload["descriptor"] == {
@@ -109,6 +122,9 @@ def test_map_probe_payload_trims_cloud_records() -> None:
     assert payload["cloud_device_list_record"]["display_name"] == "A2"
     assert payload["cloud_user_features"]["permit"] == "pincode,video,aiobs"
     assert payload["cloud_user_features"]["did"] == "**REDACTED**"
+    assert payload["cloud_key_definition"]["fetched"] is True
+    assert payload["cloud_key_definition"]["key_define_count"] == 2
+    assert payload["cloud_key_definition"]["key_define_keys"] == ["2.1", "2.2"]
     assert "did" not in payload["cloud_device_info"]
 
 
@@ -136,3 +152,18 @@ def test_cloud_property_summary_handles_empty_or_unexpected_payloads() -> None:
     assert build_cloud_property_summary({"entries": "not-a-list"})[
         "displayed_entry_count"
     ] == 0
+
+
+def test_cloud_key_definition_summary_handles_missing_payloads() -> None:
+    assert build_cloud_key_definition_summary(None) == {
+        "url_present": False,
+        "ver": None,
+        "fetched": False,
+        "error": None,
+        "root_keys": [],
+        "key_define_count": 0,
+        "key_define_keys": [],
+    }
+    assert build_cloud_key_definition_summary(
+        {"url": "https://example.invalid/key.json", "error": "timeout"}
+    )["error"] == "timeout"

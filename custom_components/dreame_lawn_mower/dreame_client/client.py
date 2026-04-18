@@ -377,6 +377,17 @@ class DreameLawnMowerClient:
             shared_status,
         )
 
+    async def async_get_cloud_key_definition(
+        self,
+        *,
+        language: str | None = "en",
+    ) -> dict[str, Any]:
+        """Fetch the public device status translation JSON advertised by cloud."""
+        return await asyncio.to_thread(
+            self._sync_get_cloud_key_definition,
+            language,
+        )
+
     async def async_probe_map_sources(
         self,
         *,
@@ -1134,6 +1145,55 @@ class DreameLawnMowerClient:
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
 
+    def _sync_get_cloud_key_definition(
+        self,
+        language: str | None = None,
+        device_info: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        cloud = self._sync_get_cloud_protocol()
+        device_info = device_info or self._sync_get_cloud_device_info(language) or {}
+        key_define = (
+            device_info.get("keyDefine", {})
+            if isinstance(device_info, Mapping)
+            else {}
+        ) or {}
+        url = key_define.get("url") if isinstance(key_define, Mapping) else None
+        result: dict[str, Any] = {
+            "url": url,
+            "url_present": bool(url),
+            "ver": key_define.get("ver") if isinstance(key_define, Mapping) else None,
+            "fetched": False,
+            "payload": None,
+            "error": None,
+        }
+        if not url:
+            result["error"] = "key_define_url_missing"
+            return result
+
+        try:
+            content = cloud.get_file(str(url), retry_count=1)
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+        except Exception as err:
+            result["error"] = str(err)
+            return result
+
+        if not content:
+            result["error"] = "key_definition_fetch_failed"
+            return result
+
+        try:
+            text = (
+                content.decode("utf-8")
+                if isinstance(content, bytes)
+                else str(content)
+            )
+            result["payload"] = json.loads(text)
+            result["fetched"] = True
+        except (UnicodeDecodeError, json.JSONDecodeError) as err:
+            result["error"] = f"key_definition_parse_failed: {err}"
+        return result
+
     def _sync_probe_map_sources(
         self,
         timeout: float,
@@ -1162,6 +1222,13 @@ class DreameLawnMowerClient:
             cloud_user_features = self._sync_get_cloud_user_features(language)
         except DreameLawnMowerConnectionError as err:
             cloud_user_features = {"error": str(err)}
+        try:
+            cloud_key_definition = self._sync_get_cloud_key_definition(
+                language,
+                cloud_device_info,
+            )
+        except DreameLawnMowerConnectionError as err:
+            cloud_key_definition = {"error": str(err)}
 
         return build_map_probe_payload(
             descriptor=self._descriptor,
@@ -1170,6 +1237,7 @@ class DreameLawnMowerClient:
             cloud_device_info=cloud_device_info,
             cloud_device_list_page=cloud_device_list_page,
             cloud_user_features=cloud_user_features,
+            cloud_key_definition=cloud_key_definition,
         )
 
     def _safe_map_diagnostics(

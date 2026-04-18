@@ -66,6 +66,14 @@ The translation bundle also includes mower-specific strings that match real beha
 - explicit firmware-update restart wording
 - Link Module and Bluetooth fallback hints for offline mowers
 
+The extracted Flutter/plugin assets do **not** currently expose an obvious A2
+vector-map schema. A focused asset scan of the local `2.5.3.0` extraction found
+only the common mower status protocol under `home_device` and the generic React
+Native executor stubs under `assets/plugin`; no bundled `M_PATH`, `current_map`,
+`object_name`, boundary, polygon, or zone map artifact was present. That makes
+the app-visible map more likely to come from cloud properties, dynamically
+downloaded plugin code, or runtime traffic than from a simple bundled JSON file.
+
 ## What this means for map support
 
 The app-side evidence suggests this Python-first investigation order:
@@ -152,3 +160,13 @@ try another live camera/map action.
 `python examples/decompile_research.py <apk> --output-dir <jadx-output>` wraps
 both steps once Java and `jadx` are available locally. It does not install tools
 or overwrite an existing output directory unless `--overwrite` is passed.
+
+Use `python examples/asset_research.py <extracted-assets-dir>` for a tighter
+scan of Flutter/plugin assets. It is useful when users provide an extracted APK
+or XAPK and we want compact evidence about whether map protocol strings are
+bundled in assets before asking them for runtime captures.
+
+Use `python examples/key_definition_probe.py` to fetch the public
+`keyDefine.url` advertised by `device/info`. This pulls Dreame's own
+device-status translation JSON for the mower model, which can help decode
+`iotstatus/props` values without guessing.

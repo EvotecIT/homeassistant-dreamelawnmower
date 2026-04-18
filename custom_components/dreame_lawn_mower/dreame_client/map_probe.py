@@ -171,6 +171,38 @@ def build_cloud_property_summary(
     }
 
 
+def build_cloud_key_definition_summary(
+    cloud_key_definition: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Return a compact summary of Dreame's public device key definition."""
+    payload = dict(cloud_key_definition or {})
+    definition = payload.get("payload")
+    key_define = (
+        definition.get("keyDefine", {})
+        if isinstance(definition, Mapping)
+        else {}
+    )
+    root_keys = (
+        sorted(str(key) for key in definition)
+        if isinstance(definition, Mapping)
+        else []
+    )
+    key_define_keys = (
+        sorted(str(key) for key in key_define)
+        if isinstance(key_define, Mapping)
+        else []
+    )
+    return {
+        "url_present": bool(payload.get("url_present") or payload.get("url")),
+        "ver": payload.get("ver"),
+        "fetched": bool(payload.get("fetched")),
+        "error": payload.get("error"),
+        "root_keys": root_keys[:20],
+        "key_define_count": len(key_define_keys),
+        "key_define_keys": key_define_keys[:30],
+    }
+
+
 def build_map_probe_payload(
     *,
     descriptor: DreameLawnMowerDescriptor,
@@ -179,6 +211,7 @@ def build_map_probe_payload(
     cloud_device_info: Mapping[str, Any] | None,
     cloud_device_list_page: Mapping[str, Any] | None,
     cloud_user_features: Any = None,
+    cloud_key_definition: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a JSON-safe map-source probe payload."""
     return {
@@ -197,4 +230,7 @@ def build_map_probe_payload(
             _find_device_list_record(descriptor, cloud_device_list_page)
         ),
         "cloud_user_features": _redact_probe_value(cloud_user_features),
+        "cloud_key_definition": build_cloud_key_definition_summary(
+            cloud_key_definition
+        ),
     }

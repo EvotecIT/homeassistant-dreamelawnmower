@@ -53,6 +53,45 @@ DEFAULT_DECOMPILED_SOURCE_SUFFIXES = (
     ".txt",
 )
 
+DEFAULT_DREAMEHOME_ASSET_TERMS = (
+    "mower",
+    "g2408",
+    "10425",
+    "1423",
+    "map",
+    "MAP",
+    "M_PATH",
+    "current_map",
+    "object_name",
+    "obj_name",
+    "boundary",
+    "polygon",
+    "area",
+    "zone",
+    "room",
+    "point",
+    "path",
+    "route",
+    "sendAction",
+    "sendCommand",
+    "get_file",
+    "file_url",
+    "device_status",
+    "iotKeyValue",
+)
+
+DEFAULT_DREAMEHOME_ASSET_SUFFIXES = (
+    ".json",
+    ".xml",
+    ".txt",
+    ".js",
+    ".jx",
+    ".html",
+    ".dart",
+    ".properties",
+    ".conf",
+)
+
 DEFAULT_JADX_EXECUTABLES = ("jadx", "jadx.bat", "jadx.cmd")
 
 PRINTABLE_RE = re.compile(rb"[ -~]{4,}")
@@ -238,6 +277,99 @@ def analyze_decompiled_sources(
             term: hits for term, hits in term_snippets.items() if hits
         },
         "endpoint_snippets": endpoint_snippets,
+    }
+
+
+def analyze_dreamehome_assets(
+    source_dir: str | Path,
+    *,
+    terms: Sequence[str] | None = None,
+    suffixes: Sequence[str] = DEFAULT_DREAMEHOME_ASSET_SUFFIXES,
+    max_files_per_term: int = 40,
+    max_snippets_per_term: int = 30,
+    max_file_size: int = 2_000_000,
+    max_line_length: int = 500,
+    context_chars: int = 160,
+) -> dict[str, Any]:
+    """Scan extracted Dreamehome assets for compact protocol evidence.
+
+    This is intentionally aimed at Flutter/plugin assets rather than full
+    decompiled source trees. It ignores large binary blobs and returns only
+    short snippets so APK research can be shared without noisy vendor payloads.
+    """
+
+    path = Path(source_dir)
+    normalized_terms = tuple(terms or DEFAULT_DREAMEHOME_ASSET_TERMS)
+    normalized_suffixes = tuple(suffix.casefold() for suffix in suffixes)
+    term_file_hits: dict[str, list[str]] = {term: [] for term in normalized_terms}
+    term_snippets: dict[str, list[dict[str, Any]]] = {
+        term: [] for term in normalized_terms
+    }
+    candidate_files: list[str] = []
+    scanned_files = 0
+    skipped_large_files = 0
+
+    for file_path in sorted(path.rglob("*")):
+        if not file_path.is_file():
+            continue
+        if normalized_suffixes and file_path.suffix.casefold() not in normalized_suffixes:
+            continue
+        try:
+            stat = file_path.stat()
+        except OSError:
+            continue
+        if stat.st_size > max_file_size:
+            skipped_large_files += 1
+            continue
+
+        relative_name = _relative_name(file_path, path)
+        scanned_files += 1
+        if _is_candidate_source_file(relative_name):
+            candidate_files.append(relative_name)
+
+        try:
+            text = file_path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+
+        lower_text = text.casefold()
+        for term in normalized_terms:
+            if term.casefold() not in lower_text:
+                continue
+            _append_limited(term_file_hits[term], relative_name, max_files_per_term)
+            _append_snippets(
+                term_snippets[term],
+                text,
+                term,
+                relative_name,
+                max_snippets_per_term,
+                max_line_length=max_line_length,
+                context_chars=context_chars,
+            )
+
+    return {
+        "source": {
+            "path": str(path),
+            "scanned_files": scanned_files,
+            "skipped_large_files": skipped_large_files,
+        },
+        "limits": {
+            "max_file_size": max_file_size,
+            "max_line_length": max_line_length,
+            "context_chars": context_chars,
+        },
+        "suffixes": list(normalized_suffixes),
+        "terms": list(normalized_terms),
+        "candidate_files": sorted(candidate_files)[:300],
+        "term_file_hits": {
+            term: hits for term, hits in term_file_hits.items() if hits
+        },
+        "term_snippets": {
+            term: hits for term, hits in term_snippets.items() if hits
+        },
+        "missing_terms": [
+            term for term, hits in term_file_hits.items() if not hits
+        ],
     }
 
 

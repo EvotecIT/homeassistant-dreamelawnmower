@@ -7,8 +7,10 @@ import zipfile
 from dreame_lawn_mower_client import (
     DEFAULT_APK_RESEARCH_TERMS,
     DEFAULT_DECOMPILED_SOURCE_SUFFIXES,
+    DEFAULT_DREAMEHOME_ASSET_TERMS,
     analyze_decompiled_sources,
     analyze_dreamehome_apk,
+    analyze_dreamehome_assets,
     build_jadx_command,
     run_jadx_decompile,
 )
@@ -111,10 +113,49 @@ def test_decompiled_source_research_indexes_files_and_snippets(tmp_path) -> None
     ]
 
 
+def test_dreamehome_asset_research_indexes_compact_map_hints(tmp_path) -> None:
+    source_dir = tmp_path / "assets"
+    source_dir.mkdir()
+    protocol = source_dir / "common_mower_protocol.json"
+    protocol.write_text(
+        '{"device":"mower","keyDefine":{"2.1":{"en":{"13":"Charging Completed"}}}}',
+        encoding="utf-8",
+    )
+    plugin = source_dir / "RNExecutorBase.jx"
+    plugin.write_text(
+        'function sendAction(){ return "M_PATH current_map object_name"; }',
+        encoding="utf-8",
+    )
+    ignored_large = source_dir / "vendor.js"
+    ignored_large.write_text("map" * 1000, encoding="utf-8")
+
+    result = analyze_dreamehome_assets(
+        source_dir,
+        terms=("mower", "M_PATH", "object_name", "missing"),
+        max_file_size=100,
+    )
+
+    assert "mower" in DEFAULT_DREAMEHOME_ASSET_TERMS
+    assert result["source"]["scanned_files"] == 2
+    assert result["source"]["skipped_large_files"] == 1
+    assert result["term_file_hits"]["mower"] == ["common_mower_protocol.json"]
+    assert result["term_file_hits"]["M_PATH"] == ["RNExecutorBase.jx"]
+    assert result["term_snippets"]["object_name"] == [
+        {
+            "file": "RNExecutorBase.jx",
+            "line": 1,
+            "text": 'function sendAction(){ return "M_PATH current_map object_name"; }',
+        }
+    ]
+    assert "missing" in result["missing_terms"]
+
+
 def test_public_package_exports_apk_research_helpers() -> None:
     assert "sendAction" in DEFAULT_APK_RESEARCH_TERMS
     assert ".java" in DEFAULT_DECOMPILED_SOURCE_SUFFIXES
+    assert "map" in DEFAULT_DREAMEHOME_ASSET_TERMS
     assert analyze_dreamehome_apk is module_analyze
+    assert callable(analyze_dreamehome_assets)
     assert callable(analyze_decompiled_sources)
     assert callable(build_jadx_command)
     assert callable(run_jadx_decompile)

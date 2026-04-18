@@ -20,7 +20,10 @@ from .app_protocol import (
 from .apk_research import (
     DEFAULT_APK_RESEARCH_TERMS,
     DEFAULT_DECOMPILED_SOURCE_SUFFIXES,
+    DEFAULT_DREAMEHOME_ASSET_SUFFIXES,
+    DEFAULT_DREAMEHOME_ASSET_TERMS,
     analyze_decompiled_sources,
+    analyze_dreamehome_assets,
     analyze_dreamehome_apk,
     build_jadx_command,
     find_jadx_executable,
@@ -29,6 +32,7 @@ from .apk_research import (
 from .camera_probe import CAMERA_PROBE_PROPERTY_KEYS, build_camera_probe_payload
 from .map_probe import (
     MAP_PROBE_PROPERTY_KEYS,
+    build_cloud_key_definition_summary,
     build_cloud_property_summary,
     build_map_probe_payload,
 )
@@ -69,6 +73,8 @@ __all__ = [
     "DreameLawnMowerTwoFactorRequiredError",
     "DEFAULT_APK_RESEARCH_TERMS",
     "DEFAULT_DECOMPILED_SOURCE_SUFFIXES",
+    "DEFAULT_DREAMEHOME_ASSET_SUFFIXES",
+    "DEFAULT_DREAMEHOME_ASSET_TERMS",
     "DISPLAY_NAME_ALIASES",
     "MODEL_NAME_MAP",
     "CAMERA_PROBE_PROPERTY_KEYS",
@@ -80,9 +86,11 @@ __all__ = [
     "MOWER_STATE_PROPERTY_KEY",
     "SUPPORTED_ACCOUNT_TYPES",
     "analyze_decompiled_sources",
+    "analyze_dreamehome_assets",
     "analyze_dreamehome_apk",
     "build_jadx_command",
     "build_camera_probe_payload",
+    "build_cloud_key_definition_summary",
     "build_cloud_property_summary",
     "build_map_probe_payload",
     "decode_mower_status_blob",

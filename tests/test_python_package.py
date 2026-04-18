@@ -4,6 +4,7 @@ from dreame_lawn_mower_client import (
     CAMERA_PROBE_PROPERTY_KEYS,
     DEFAULT_APK_RESEARCH_TERMS,
     DEFAULT_DECOMPILED_SOURCE_SUFFIXES,
+    DEFAULT_DREAMEHOME_ASSET_TERMS,
     MAP_PROBE_PROPERTY_KEYS,
     MOWER_ERROR_PROPERTY_KEY,
     MOWER_PROPERTY_HINTS,
@@ -19,7 +20,9 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerStatusBlob,
     analyze_decompiled_sources,
     analyze_dreamehome_apk,
+    analyze_dreamehome_assets,
     build_camera_probe_payload,
+    build_cloud_key_definition_summary,
     build_cloud_property_summary,
     build_jadx_command,
     build_map_probe_payload,
@@ -64,8 +67,10 @@ def test_public_package_exports_map_helpers() -> None:
     assert callable(map_diagnostics_from_device)
     assert callable(firmware_update_support_from_device)
     assert callable(analyze_decompiled_sources)
+    assert callable(analyze_dreamehome_assets)
     assert callable(analyze_dreamehome_apk)
     assert callable(build_camera_probe_payload)
+    assert callable(build_cloud_key_definition_summary)
     assert callable(build_cloud_property_summary)
     assert callable(build_jadx_command)
     assert callable(build_map_probe_payload)
@@ -73,6 +78,7 @@ def test_public_package_exports_map_helpers() -> None:
     assert "10001.1" in CAMERA_PROBE_PROPERTY_KEYS
     assert "sendAction" in DEFAULT_APK_RESEARCH_TERMS
     assert ".java" in DEFAULT_DECOMPILED_SOURCE_SUFFIXES
+    assert "object_name" in DEFAULT_DREAMEHOME_ASSET_TERMS
     assert "2.1" in MAP_PROBE_PROPERTY_KEYS
 
 
@@ -82,6 +88,7 @@ def test_public_package_client_has_cloud_probe_helpers() -> None:
     assert hasattr(DreameLawnMowerClient, "async_get_cloud_device_list_page")
     assert hasattr(DreameLawnMowerClient, "async_get_cloud_properties")
     assert hasattr(DreameLawnMowerClient, "async_scan_cloud_properties")
+    assert hasattr(DreameLawnMowerClient, "async_get_cloud_key_definition")
     assert hasattr(DreameLawnMowerClient, "async_probe_map_sources")
     assert hasattr(DreameLawnMowerClient, "async_get_camera_feature_support")
     assert hasattr(DreameLawnMowerClient, "async_get_firmware_update_support")
