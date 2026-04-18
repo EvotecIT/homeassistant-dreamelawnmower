@@ -5,16 +5,25 @@ from __future__ import annotations
 import hashlib
 import json
 
-from dreame_lawn_mower_client import DreameLawnMowerClient
+from dreame_lawn_mower_client import (
+    DreameLawnMowerClient,
+    DreameLawnMowerConnectionError,
+)
 from dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
 
 
 class _FakeAppMapCloud:
     logged_in = True
 
-    def __init__(self, payload: dict[str, object]) -> None:
+    def __init__(
+        self,
+        payload: dict[str, object],
+        *,
+        chunk_overrides: dict[int, tuple[str, int]] | None = None,
+    ) -> None:
         self.payload_text = json.dumps(payload, separators=(",", ":"))
         self.payload_hash = hashlib.md5(self.payload_text.encode("utf-8")).hexdigest()
+        self.chunk_overrides = chunk_overrides or {}
         self.calls: list[dict[str, object]] = []
 
     def call_app_action(
@@ -56,13 +65,19 @@ class _FakeAppMapCloud:
             data = payload["d"]
             start = int(data["start"])
             size = int(data["size"])
-            text = self.payload_text[start : start + size]
+            if start in self.chunk_overrides:
+                text, reported_size = self.chunk_overrides[start]
+                size = reported_size
+            else:
+                payload_bytes = self.payload_text.encode("utf-8")
+                text = payload_bytes[start : start + size].decode("utf-8")
+                size = len(text.encode("utf-8"))
             return {
                 "out": [
                     {
                         "m": "r",
                         "r": 0,
-                        "d": {"size": len(text.encode("utf-8")), "data": text},
+                        "d": {"size": size, "data": text},
                     }
                 ]
             }
@@ -147,6 +162,48 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
     assert result["maps"][0]["payload"]["name"] == "Garden"
     assert result["maps"][1]["created"] is False
     assert [call["t"] for call in cloud.calls][:4] == ["MAPL", "OBJ", "MAPI", "MAPD"]
+    mapd_calls = [call for call in cloud.calls if call["t"] == "MAPD"]
+    payload_size = len(cloud.payload_text.encode("utf-8"))
+    expected_starts = list(range(0, payload_size, 40))
+    expected_sizes = [min(40, payload_size - start) for start in expected_starts]
+    assert [call["d"]["start"] for call in mapd_calls] == expected_starts
+    assert [call["d"]["size"] for call in mapd_calls] == expected_sizes
+
+
+def test_app_maps_reject_mismatched_chunk_size() -> None:
+    client = _client()
+    cloud = _FakeAppMapCloud(
+        {"map": [{"area": 1, "data": [[1, 2], [3, 4], [5, 6]]}]},
+        chunk_overrides={0: ('{"map"', 40)},
+    )
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_get_app_maps(
+        chunk_size=40,
+        include_payload=True,
+        include_objects=False,
+    )
+
+    assert result["available"] is False
+    assert result["maps"][0]["available"] is False
+    assert result["errors"][0]["error"] == (
+        "MAPD returned size 40 but data was 6 bytes at offset 0."
+    )
+
+
+def test_app_map_text_rejects_oversized_chunk() -> None:
+    client = _client()
+    client._sync_call_app_action = lambda payload: {
+        "r": 0,
+        "d": {"data": "abcdef"},
+    }
+
+    try:
+        client._sync_get_app_map_text(size=5, chunk_size=5)
+    except DreameLawnMowerConnectionError as err:
+        assert str(err) == "MAPD returned too much data at offset 0."
+    else:  # pragma: no cover - explicit failure branch for readability
+        raise AssertionError("Expected mismatched MAPD chunk to fail")
 
 
 def test_app_maps_can_omit_sensitive_payload_coordinates() -> None:

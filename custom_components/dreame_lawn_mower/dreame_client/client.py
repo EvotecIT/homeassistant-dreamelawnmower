@@ -1461,7 +1461,10 @@ class DreameLawnMowerClient:
         )
         data = _app_action_data(object_result)
         names = data.get("name") if isinstance(data, Mapping) else None
-        if not isinstance(names, Sequence) or isinstance(names, str | bytes | bytearray):
+        if not isinstance(names, Sequence) or isinstance(
+            names,
+            str | bytes | bytearray,
+        ):
             names = []
 
         objects: list[dict[str, Any]] = []
@@ -1523,13 +1526,20 @@ class DreameLawnMowerClient:
                 raise DreameLawnMowerConnectionError(
                     f"MAPD returned empty data at offset {offset}."
                 )
-            chunks.extend(text.encode("utf-8"))
-            increment = (
-                returned_size
-                if isinstance(returned_size, int) and returned_size > 0
-                else len(text.encode("utf-8"))
-            )
-            offset += increment
+            chunk_bytes = text.encode("utf-8")
+            actual_size = len(chunk_bytes)
+            if isinstance(returned_size, int) and returned_size != actual_size:
+                raise DreameLawnMowerConnectionError(
+                    "MAPD returned size "
+                    f"{returned_size} but data was {actual_size} bytes "
+                    f"at offset {offset}."
+                )
+            if actual_size > requested_size:
+                raise DreameLawnMowerConnectionError(
+                    f"MAPD returned too much data at offset {offset}."
+                )
+            chunks.extend(chunk_bytes)
+            offset += actual_size
             chunk_count += 1
         return chunks.decode("utf-8"), chunk_count, offset
 

@@ -111,7 +111,7 @@ Checklist:
 - [ ] harden the parser for more mower zones, boundaries, restrictions, and path variants
 - [x] implement a simple renderer for read-only Home Assistant display
 - [x] expose a disabled-by-default map camera-style surface for read-only validation
-- [ ] add tests for parser chunk reassembly, boundary extraction, and trail parsing
+- [x] add tests for parser chunk reassembly, boundary extraction, and trail parsing
 
 Definition of done:
 
