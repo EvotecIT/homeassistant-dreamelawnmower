@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import asyncio
+from datetime import UTC, datetime, timedelta
 
 from custom_components.dreame_lawn_mower.map_attributes import map_camera_attributes
+from custom_components.dreame_lawn_mower.map_cache import DreameLawnMowerMapCameraCache
 from dreame_lawn_mower_client.models import (
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
@@ -75,3 +77,92 @@ def test_map_camera_attributes_report_placeholder_without_view() -> None:
     assert attributes["spot_area_count"] is None
     assert attributes["no_go_area_count"] is None
     assert attributes["last_map_refresh"] is None
+
+
+def test_map_camera_cache_reuses_fresh_view() -> None:
+    """Shared camera cache avoids duplicate app-map refreshes."""
+    calls = 0
+    cache = DreameLawnMowerMapCameraCache(ttl=timedelta(seconds=60))
+    first_now = datetime(2026, 4, 19, 8, 0, tzinfo=UTC)
+
+    async def refresh() -> DreameLawnMowerMapView:
+        nonlocal calls
+        calls += 1
+        return DreameLawnMowerMapView(source="app_action_map")
+
+    async def run() -> None:
+        first = await cache.async_get_view(refresh, now=first_now)
+        second = await cache.async_get_view(
+            refresh,
+            now=first_now + timedelta(seconds=30),
+        )
+        assert first is second
+
+    asyncio.run(run())
+
+    assert calls == 1
+    assert cache.last_view is not None
+    assert cache.last_refresh_at == first_now
+
+
+def test_map_camera_cache_refreshes_after_ttl() -> None:
+    """Expired cache entries are refreshed on demand."""
+    calls = 0
+    cache = DreameLawnMowerMapCameraCache(ttl=timedelta(seconds=60))
+    first_now = datetime(2026, 4, 19, 8, 0, tzinfo=UTC)
+
+    async def refresh() -> DreameLawnMowerMapView:
+        nonlocal calls
+        calls += 1
+        return DreameLawnMowerMapView(source=f"app_action_map_{calls}")
+
+    async def run() -> None:
+        first = await cache.async_get_view(refresh, now=first_now)
+        second = await cache.async_get_view(
+            refresh,
+            now=first_now + timedelta(seconds=61),
+        )
+        assert first.source == "app_action_map_1"
+        assert second.source == "app_action_map_2"
+
+    asyncio.run(run())
+
+    assert calls == 2
+
+
+def test_map_camera_cache_coalesces_concurrent_refreshes() -> None:
+    """Concurrent map camera refreshes share the same in-flight result."""
+    calls = 0
+    cache = DreameLawnMowerMapCameraCache(ttl=timedelta(seconds=60))
+    now = datetime(2026, 4, 19, 8, 0, tzinfo=UTC)
+
+    async def refresh() -> DreameLawnMowerMapView:
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0)
+        return DreameLawnMowerMapView(source="app_action_map")
+
+    async def run() -> None:
+        first, second = await asyncio.gather(
+            cache.async_get_view(refresh, now=now),
+            cache.async_get_view(refresh, now=now),
+        )
+        assert first is second
+
+    asyncio.run(run())
+
+    assert calls == 1
+
+
+def test_map_camera_cache_stores_error_view() -> None:
+    """Refresh failures are cached as explicit diagnostic map views."""
+    cache = DreameLawnMowerMapCameraCache(ttl=timedelta(seconds=60))
+    now = datetime(2026, 4, 19, 8, 0, tzinfo=UTC)
+
+    view = cache.store_error("offline", source="app_action_map", now=now)
+
+    assert view.source == "app_action_map"
+    assert view.error == "offline"
+    assert cache.last_view is view
+    assert cache.last_error == "offline"
+    assert cache.last_refresh_at == now
