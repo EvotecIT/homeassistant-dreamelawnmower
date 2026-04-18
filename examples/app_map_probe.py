@@ -31,6 +31,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Include raw parsed map coordinates in the output.",
     )
     parser.add_argument(
+        "--include-object-urls",
+        action="store_true",
+        help="Include expiring 3D map object download URLs in the output.",
+    )
+    parser.add_argument(
         "--device-index",
         type=int,
         default=0,
@@ -77,6 +82,7 @@ async def main() -> None:
         payload = await client.async_get_app_maps(
             chunk_size=args.chunk_size,
             include_payload=args.include_payload,
+            include_object_urls=args.include_object_urls,
         )
         rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
         if args.out:

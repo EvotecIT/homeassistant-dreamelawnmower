@@ -65,6 +65,10 @@ Last updated: 2026-04-18
   a simple PNG. A live run of `examples/map_client.py` on 2026-04-18 produced
   an `app_action_map` image for current map `0` with 2 map areas, 2 no-go/spot
   areas, and 63 trajectory points.
+- `OBJ type=3dmap` is also wired as read-only object metadata through
+  `async_get_app_map_objects()`. A live A2 probe returned two `.bin` object
+  names. Expiring object URLs are intentionally opt-in and omitted from default
+  probe output.
 - Config-flow auth failures are classified into non-secret Home Assistant
   errors for account type, region, connectivity, generic auth, 2FA, and no
   matching mower devices.
@@ -167,7 +171,9 @@ python examples\app_map_probe.py --out app-map-current.json
 ```
 
 Only use `--include-payload` for local parser/renderer work. It includes raw
-map coordinates and should stay in ignored local files.
+map coordinates and should stay in ignored local files. Only use
+`--include-object-urls` when debugging 3D map object downloads; it writes
+expiring signed URLs to the ignored output file.
 
 Render the current app-map fallback PNG:
 
@@ -239,5 +245,7 @@ credentials into repo files.
   once more fixtures are available. The confirmed payload keys are `map`,
   `spot`, `point`, `semantic`, `trajectory`, `total_area`, `name`, and
   `cut_relation`.
+- `OBJ type=3dmap` object names and signed download URLs are discoverable, but
+  the `.bin` format is not decoded yet.
 - Keep the map camera/entity disabled by default until the renderer has stable
   fixtures from more mower states and models.

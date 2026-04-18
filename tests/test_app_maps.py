@@ -66,7 +66,24 @@ class _FakeAppMapCloud:
                     }
                 ]
             }
+        if command == "OBJ":
+            return {
+                "out": [
+                    {
+                        "m": "r",
+                        "r": 0,
+                        "d": {
+                            "name": [
+                                "ali_dreame/2025/04/23/device/map-one.0233.bin"
+                            ]
+                        },
+                    }
+                ]
+            }
         raise AssertionError(f"Unexpected app command: {payload}")
+
+    def get_interim_file_url(self, name: str) -> str:
+        return f"https://example.invalid/{name}?signature=redacted"
 
 
 def _client() -> DreameLawnMowerClient:
@@ -107,6 +124,10 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
     assert result["available"] is True
     assert result["map_count"] == 2
     assert result["current_map_index"] == 0
+    assert result["objects"]["object_count"] == 1
+    assert result["objects"]["urls_included"] is False
+    assert result["objects"]["objects"][0]["extension"] == "bin"
+    assert "url" not in result["objects"]["objects"][0]
     assert result["maps"][0]["available"] is True
     assert result["maps"][0]["hash_match"] is True
     assert result["maps"][0]["summary"] == {
@@ -125,7 +146,7 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
     }
     assert result["maps"][0]["payload"]["name"] == "Garden"
     assert result["maps"][1]["created"] is False
-    assert [call["t"] for call in cloud.calls][:3] == ["MAPL", "MAPI", "MAPD"]
+    assert [call["t"] for call in cloud.calls][:4] == ["MAPL", "OBJ", "MAPI", "MAPD"]
 
 
 def test_app_maps_can_omit_sensitive_payload_coordinates() -> None:
@@ -138,6 +159,20 @@ def test_app_maps_can_omit_sensitive_payload_coordinates() -> None:
     assert result["available"] is True
     assert "payload" not in result["maps"][0]
     assert result["maps"][0]["payload_keys"] == ["map"]
+
+
+def test_app_map_object_urls_are_opt_in() -> None:
+    client = _client()
+    cloud = _FakeAppMapCloud({"map": [{"area": 1, "data": [[1, 2]]}]})
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    objects = client._sync_get_app_map_objects(include_urls=True)
+
+    assert objects["source"] == "app_action_obj_3dmap"
+    assert objects["object_count"] == 1
+    assert objects["urls_included"] is True
+    assert objects["objects"][0]["url_present"] is True
+    assert objects["objects"][0]["url"].startswith("https://example.invalid/")
 
 
 def test_map_view_falls_back_to_rendered_app_map() -> None:

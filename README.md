@@ -150,6 +150,7 @@ The reusable Python client now includes an experimental read-only map path:
 - `async_refresh_map_summary()` tries to fetch current mower map metadata
 - `async_get_map_png()` tries to render the current mower map to PNG bytes
 - `async_get_app_maps()` fetches mower-native app map JSON through confirmed read-only `MAPL`, `MAPI`, and chunked `MAPD` app commands
+- `async_get_app_map_objects()` fetches read-only 3D map object metadata through `OBJ type=3dmap`; expiring download URLs are opt-in
 - when the legacy map path is empty, `async_refresh_map_view()` falls back to the confirmed app-map JSON and renders a simple vector PNG
 
 The quickest way to try it outside Home Assistant is:
@@ -165,7 +166,9 @@ python examples/app_map_probe.py --out app-map-current.json
 ```
 
 By default this omits raw coordinates and writes only metadata plus summaries.
-Use `--include-payload` only for local parser or renderer work.
+Use `--include-payload` only for local parser or renderer work. Use
+`--include-object-urls` only when you intentionally need expiring 3D object
+download URLs in the ignored local output file.
 
 If you want to probe the same cloud endpoints the Dreamehome app exposes for mower discovery and raw properties, use:
 

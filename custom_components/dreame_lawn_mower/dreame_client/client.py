@@ -398,12 +398,25 @@ class DreameLawnMowerClient:
         *,
         chunk_size: int = 400,
         include_payload: bool = False,
+        include_object_urls: bool = False,
     ) -> dict[str, Any]:
         """Fetch mower-native app map payloads through read-only app commands."""
         return await asyncio.to_thread(
             self._sync_get_app_maps,
             chunk_size,
             include_payload,
+            include_object_urls,
+        )
+
+    async def async_get_app_map_objects(
+        self,
+        *,
+        include_urls: bool = False,
+    ) -> dict[str, Any]:
+        """Fetch read-only 3D map object metadata from the app command path."""
+        return await asyncio.to_thread(
+            self._sync_get_app_map_objects,
+            include_urls,
         )
 
     async def async_get_cloud_properties(
@@ -1319,6 +1332,7 @@ class DreameLawnMowerClient:
         self,
         chunk_size: int = 400,
         include_payload: bool = False,
+        include_object_urls: bool = False,
     ) -> dict[str, Any]:
         chunk_size = _validate_app_map_chunk_size(chunk_size)
         map_list_result = self._sync_call_app_action({"m": "g", "t": "MAPL"})
@@ -1332,6 +1346,12 @@ class DreameLawnMowerClient:
             "maps": [],
             "errors": [],
         }
+        try:
+            result["objects"] = self._sync_get_app_map_objects(
+                include_urls=include_object_urls,
+            )
+        except Exception as err:  # noqa: BLE001 - object metadata is diagnostic
+            result["objects"] = {"error": str(err)}
 
         for entry in map_entries:
             if entry.get("current"):
@@ -1401,6 +1421,48 @@ class DreameLawnMowerClient:
             for item in result["maps"]
         )
         return result
+
+    def _sync_get_app_map_objects(
+        self,
+        include_urls: bool = False,
+    ) -> dict[str, Any]:
+        object_result = self._sync_call_app_action(
+            {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}}
+        )
+        data = _app_action_data(object_result)
+        names = data.get("name") if isinstance(data, Mapping) else None
+        if not isinstance(names, Sequence) or isinstance(names, str | bytes | bytearray):
+            names = []
+
+        objects: list[dict[str, Any]] = []
+        cloud = self._sync_get_cloud_protocol()
+        for raw_name in names:
+            name = str(raw_name)
+            item: dict[str, Any] = {
+                "name": name,
+                "extension": _app_object_extension(name),
+                "url_present": False,
+            }
+            if include_urls:
+                try:
+                    url = (
+                        cloud.get_interim_file_url(name)
+                        if hasattr(cloud, "get_interim_file_url")
+                        else None
+                    )
+                    item["url_present"] = bool(url)
+                    item["url"] = url
+                except Exception as err:  # noqa: BLE001 - preserve per-object evidence
+                    item["error"] = str(err)
+            objects.append(item)
+
+        return {
+            "source": "app_action_obj_3dmap",
+            "object_count": len(objects),
+            "objects": objects,
+            "raw": _json_safe(object_result, max_depth=4),
+            "urls_included": bool(include_urls),
+        }
 
     def _sync_get_app_map_text(
         self,
@@ -1720,6 +1782,7 @@ class DreameLawnMowerClient:
             app_maps = self._sync_get_app_maps(
                 chunk_size=400,
                 include_payload=False,
+                include_object_urls=False,
             )
         except DreameLawnMowerConnectionError as err:
             app_maps = {"error": str(err)}
@@ -2045,6 +2108,14 @@ def _app_action_data(value: Any) -> Any:
     if value.get("r") not in (None, 0):
         raise DreameLawnMowerConnectionError(f"App action failed: {value}")
     return value.get("d")
+
+
+def _app_object_extension(value: str) -> str | None:
+    name = value.rsplit("/", 1)[-1]
+    if "." not in name:
+        return None
+    extension = name.rsplit(".", 1)[-1].strip()
+    return extension or None
 
 
 def _normalize_app_map_entries(value: Any) -> list[dict[str, Any]]:
