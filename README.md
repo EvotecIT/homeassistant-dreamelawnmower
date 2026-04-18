@@ -75,6 +75,11 @@ warnings, unknown property counts, unknown realtime keys, and the best next
 capture to take. The larger raw sections remain in the downloaded diagnostics
 for parser fixes and fixture-driven tests.
 
+Unknown-property and realtime summaries also include value-type counts,
+map-candidate previews, and decoded `1.1` status-blob metadata where available.
+Those fields are especially useful when comparing A2/A2 Pro captures from
+different mower states.
+
 For automations, use the normal `Docked` binary sensor or `docked` attribute.
 Those are effective values derived from mower state and charging states. The
 disabled-by-default `Raw Docked Flag` diagnostic entity preserves the exact

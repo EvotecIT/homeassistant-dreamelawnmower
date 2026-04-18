@@ -64,6 +64,15 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
             }
         },
         realtime_properties={
+            "1.1": {
+                "siid": 1,
+                "piid": 1,
+                "did": "100",
+                "code": 0,
+                "value": [206, 0, 206],
+                "property_name": "RAW_STATUS",
+                "last_seen": 123456.5,
+            },
             "1.2": {
                 "siid": 1,
                 "piid": 2,
@@ -154,6 +163,9 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
     assert payload["device"]["unknown_property_summary"] == {
         "count": 1,
         "keys": ["-113852866"],
+        "value_type_counts": {"number": 1},
+        "candidate_map_property_count": 0,
+        "candidate_map_properties": [],
         "entries": [
             {
                 "key": "-113852866",
@@ -162,18 +174,41 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
                 "code": 0,
                 "value_type": "number",
                 "value_preview": 123,
+                "map_candidate_reason": None,
             }
         ],
     }
-    assert payload["device"]["realtime_property_count"] == 2
+    assert payload["device"]["realtime_property_count"] == 3
     assert (
         payload["device"]["realtime_properties"]["1.2"]["property_name"]
         == "BATTERY_LEVEL"
     )
     assert payload["device"]["realtime_properties"]["9.4"]["value"] == {"blob": 123}
-    assert payload["device"]["realtime_summary"]["known_keys"] == ["1.2"]
+    assert payload["device"]["realtime_summary"]["known_keys"] == ["1.1", "1.2"]
     assert payload["device"]["realtime_summary"]["unknown_keys"] == ["9.4"]
-    assert payload["device"]["realtime_summary"]["entries"][1] == {
+    assert payload["device"]["realtime_summary"]["value_type_counts"] == {
+        "array": 1,
+        "number": 1,
+        "object": 1,
+    }
+    assert payload["device"]["realtime_summary"]["status_blob_keys"] == ["1.1"]
+    assert payload["device"]["realtime_summary"]["candidate_map_property_count"] == 1
+    assert payload["device"]["realtime_summary"]["candidate_map_properties"] == [
+        {
+            "key": "9.4",
+            "reason": "object_payload",
+            "value_type": "object",
+            "value_preview": {"blob": 123},
+        }
+    ]
+    assert payload["device"]["realtime_summary"]["entries"][0]["status_blob"] == {
+        "length": 3,
+        "frame_valid": True,
+        "hex": "ce00ce",
+        "notes": ["unexpected_length"],
+        "bytes_by_index": {"0": 206, "1": 0, "2": 206},
+    }
+    assert payload["device"]["realtime_summary"]["entries"][2] == {
         "key": "9.4",
         "property_name": "UNKNOWN_REALTIME_9.4",
         "siid": 9,
@@ -181,6 +216,8 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
         "code": None,
         "value_type": "object",
         "value_preview": {"blob": 123},
+        "map_candidate_reason": "object_payload",
+        "status_blob": None,
     }
     assert (
         payload["device"]["last_realtime_message"]["message"]["method"]
@@ -193,7 +230,7 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
     assert payload["state_reconciliation"]["flags"]["started"] is True
     assert payload["state_reconciliation"]["warnings"] == []
     assert payload["triage"] == {
-        "schema_version": 2,
+        "schema_version": 3,
         "known_model": True,
         "model": "dreame.mower.g2408",
         "display_model": "A2",

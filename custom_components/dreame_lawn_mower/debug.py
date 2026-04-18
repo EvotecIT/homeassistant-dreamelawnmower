@@ -9,9 +9,14 @@ from enum import Enum
 from typing import Any
 
 from .const import CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
+from .dreame_client.app_protocol import (
+    MOWER_RAW_STATUS_PROPERTY_KEY,
+    decode_mower_status_blob,
+)
+from .dreame_client.map_probe import MAP_CANDIDATE_TERMS
 from .dreame_client.models import MODEL_NAME_MAP, SUPPORTED_MODEL_MARKER
 
-DIAGNOSTIC_SCHEMA_VERSION = 2
+DIAGNOSTIC_SCHEMA_VERSION = 3
 UNKNOWN_REALTIME_PREFIX = "UNKNOWN_REALTIME_"
 
 REDACT_KEYS = {
@@ -133,6 +138,43 @@ def _short_preview(value: Any, *, max_length: int = 120) -> Any:
             for key in list(normalized.keys())[:10]
         }
     return normalized
+
+
+def _map_candidate_reason(key: object, value: Any) -> str | None:
+    """Return why a value looks useful for future map decoding, if it does."""
+    haystacks = [str(key).casefold()]
+    if isinstance(value, str):
+        haystacks.append(value[:2000].casefold())
+    elif isinstance(value, Mapping):
+        haystacks.extend(str(item).casefold() for item in value.keys())
+
+    for term in MAP_CANDIDATE_TERMS:
+        folded = term.casefold()
+        if any(folded in haystack for haystack in haystacks):
+            return f"contains_{term}"
+    if isinstance(value, Mapping):
+        return "object_payload"
+    return None
+
+
+def _count_value_type(counter: dict[str, int], value: Any) -> None:
+    value_type = _value_type(value)
+    counter[value_type] = counter.get(value_type, 0) + 1
+
+
+def _status_blob_summary(key: object, value: Any) -> dict[str, Any] | None:
+    if str(key) != MOWER_RAW_STATUS_PROPERTY_KEY:
+        return None
+    decoded = decode_mower_status_blob(value, source="debug")
+    if decoded is None:
+        return None
+    return {
+        "length": decoded.length,
+        "frame_valid": decoded.frame_valid,
+        "hex": decoded.hex,
+        "notes": _normalize_debug_value(decoded.notes),
+        "bytes_by_index": _normalize_debug_value(decoded.bytes_by_index),
+    }
 
 
 def _is_no_error_value(value: Any) -> bool:
@@ -268,23 +310,47 @@ def _collect_unknown_property_summary(device: Any) -> dict[str, Any]:
     """Return compact unknown-property details for issue triage."""
     unknown_properties = getattr(device, "unknown_properties", {}) or {}
     entries = []
+    value_type_counts: dict[str, int] = {}
+    candidate_map_properties: list[dict[str, Any]] = []
     for key, value in unknown_properties.items():
         payload = value if isinstance(value, Mapping) else {}
+        property_value = payload.get("value")
+        _count_value_type(value_type_counts, property_value)
+        candidate_reason = _map_candidate_reason(
+            f"{payload.get('siid')}.{payload.get('piid')}",
+            property_value,
+        )
+        if candidate_reason:
+            candidate_map_properties.append(
+                {
+                    "key": str(key),
+                    "siid": _normalize_debug_value(payload.get("siid")),
+                    "piid": _normalize_debug_value(payload.get("piid")),
+                    "reason": candidate_reason,
+                    "value_type": _value_type(property_value),
+                    "value_preview": _short_preview(property_value),
+                }
+            )
         entries.append(
             {
                 "key": str(key),
                 "siid": _normalize_debug_value(payload.get("siid")),
                 "piid": _normalize_debug_value(payload.get("piid")),
                 "code": _normalize_debug_value(payload.get("code")),
-                "value_type": _value_type(payload.get("value")),
-                "value_preview": _short_preview(payload.get("value")),
+                "value_type": _value_type(property_value),
+                "value_preview": _short_preview(property_value),
+                "map_candidate_reason": candidate_reason,
             }
         )
 
     entries.sort(key=lambda item: item["key"])
+    candidate_map_properties.sort(key=lambda item: item["key"])
     return {
         "count": len(entries),
         "keys": [entry["key"] for entry in entries],
+        "value_type_counts": value_type_counts,
+        "candidate_map_property_count": len(candidate_map_properties),
+        "candidate_map_properties": candidate_map_properties[:20],
         "entries": entries,
     }
 
@@ -295,6 +361,9 @@ def _collect_realtime_summary(device: Any) -> dict[str, Any]:
     entries = []
     known_keys: list[str] = []
     unknown_keys: list[str] = []
+    value_type_counts: dict[str, int] = {}
+    candidate_map_properties: list[dict[str, Any]] = []
+    status_blob_keys: list[str] = []
 
     for key, value in realtime_properties.items():
         payload = value if isinstance(value, Mapping) else {}
@@ -304,6 +373,21 @@ def _collect_realtime_summary(device: Any) -> dict[str, Any]:
             unknown_keys.append(key_text)
         else:
             known_keys.append(key_text)
+        property_value = payload.get("value")
+        _count_value_type(value_type_counts, property_value)
+        candidate_reason = _map_candidate_reason(key_text, property_value)
+        if candidate_reason:
+            candidate_map_properties.append(
+                {
+                    "key": key_text,
+                    "reason": candidate_reason,
+                    "value_type": _value_type(property_value),
+                    "value_preview": _short_preview(property_value),
+                }
+            )
+        status_blob = _status_blob_summary(key_text, property_value)
+        if status_blob is not None:
+            status_blob_keys.append(key_text)
         entries.append(
             {
                 "key": key_text,
@@ -311,18 +395,26 @@ def _collect_realtime_summary(device: Any) -> dict[str, Any]:
                 "siid": _normalize_debug_value(payload.get("siid")),
                 "piid": _normalize_debug_value(payload.get("piid")),
                 "code": _normalize_debug_value(payload.get("code")),
-                "value_type": _value_type(payload.get("value")),
-                "value_preview": _short_preview(payload.get("value")),
+                "value_type": _value_type(property_value),
+                "value_preview": _short_preview(property_value),
+                "map_candidate_reason": candidate_reason,
+                "status_blob": status_blob,
             }
         )
 
     entries.sort(key=lambda item: item["key"])
     known_keys.sort()
     unknown_keys.sort()
+    candidate_map_properties.sort(key=lambda item: item["key"])
+    status_blob_keys.sort()
     return {
         "count": len(entries),
         "known_keys": known_keys,
         "unknown_keys": unknown_keys,
+        "value_type_counts": value_type_counts,
+        "candidate_map_property_count": len(candidate_map_properties),
+        "candidate_map_properties": candidate_map_properties[:20],
+        "status_blob_keys": status_blob_keys,
         "entries": entries,
     }
 
