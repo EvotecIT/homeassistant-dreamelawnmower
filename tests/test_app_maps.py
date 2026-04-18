@@ -208,7 +208,8 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
     assert view.summary.available is True
     assert view.summary.map_id == 0
     assert view.summary.segment_count == 1
-    assert view.summary.no_go_area_count == 1
+    assert view.summary.no_go_area_count == 0
+    assert view.summary.spot_area_count == 1
     assert view.summary.path_point_count == 3
     assert "OBJ" not in [call["t"] for call in cloud.calls]
 

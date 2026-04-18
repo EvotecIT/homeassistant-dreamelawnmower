@@ -127,6 +127,7 @@ class DreameLawnMowerMapCamera(
             ),
             "path_point_count": None if summary is None else summary.path_point_count,
             "no_go_area_count": None if summary is None else summary.no_go_area_count,
+            "spot_area_count": None if summary is None else summary.spot_area_count,
             "virtual_wall_count": (
                 None if summary is None else summary.virtual_wall_count
             ),
@@ -251,6 +252,7 @@ class DreameLawnMowerMapDataCamera(DreameLawnMowerMapCamera):
                     f"Segments: {summary.segment_count}",
                     f"Path points: {summary.path_point_count}",
                     f"No-go areas: {summary.no_go_area_count}",
+                    f"Spot areas: {summary.spot_area_count}",
                     f"Virtual walls: {summary.virtual_wall_count}",
                     f"Robot present: {summary.robot_present}",
                     f"Charger present: {summary.charger_present}",

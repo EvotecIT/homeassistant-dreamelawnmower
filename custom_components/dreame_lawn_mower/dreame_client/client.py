@@ -2279,7 +2279,7 @@ def _app_map_view_summary(
         active_area_count=int(payload_summary.get("map_area_count") or 0),
         active_point_count=int(payload_summary.get("point_count") or 0),
         path_point_count=int(payload_summary.get("trajectory_point_count") or 0),
-        no_go_area_count=int(payload_summary.get("spot_count") or 0),
+        spot_area_count=int(payload_summary.get("spot_count") or 0),
     )
 
 
@@ -2339,10 +2339,10 @@ def _render_app_map_payload_png(payload: Any) -> tuple[bytes, int, int]:
         if len(projected) >= 3:
             draw.polygon(
                 projected,
-                fill=(239, 68, 68, 90),
-                outline=(185, 28, 28, 255),
+                fill=(250, 204, 21, 95),
+                outline=(161, 98, 7, 255),
             )
-            draw.line(projected + [projected[0]], fill=(185, 28, 28, 255), width=3)
+            draw.line(projected + [projected[0]], fill=(161, 98, 7, 255), width=3)
 
     for trajectory in trajectories:
         projected = [project(point) for point in trajectory]

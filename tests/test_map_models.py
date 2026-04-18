@@ -34,6 +34,7 @@ def test_map_summary_from_map_data_counts_mower_map_features() -> None:
         active_points=[object()],
         path=[object(), object(), object()],
         no_go_areas=[object()],
+        spot_areas=[object(), object()],
         virtual_walls=[object(), object()],
         pathways=[object()],
         obstacles={"1": object(), "2": object(), "3": object()},
@@ -59,6 +60,7 @@ def test_map_summary_from_map_data_counts_mower_map_features() -> None:
     assert summary.active_point_count == 1
     assert summary.path_point_count == 3
     assert summary.no_go_area_count == 1
+    assert summary.spot_area_count == 2
     assert summary.virtual_wall_count == 2
     assert summary.pathway_count == 1
     assert summary.obstacle_count == 3
@@ -83,6 +85,7 @@ def test_map_summary_to_dict_returns_json_safe_payload() -> None:
         active_points=[],
         path=[],
         no_go_areas=[],
+        spot_areas=[],
         virtual_walls=[],
         pathways=[],
         obstacles={},
@@ -111,6 +114,7 @@ def test_map_summary_to_dict_returns_json_safe_payload() -> None:
         "active_point_count": 0,
         "path_point_count": 0,
         "no_go_area_count": 0,
+        "spot_area_count": 0,
         "virtual_wall_count": 0,
         "pathway_count": 0,
         "obstacle_count": 0,

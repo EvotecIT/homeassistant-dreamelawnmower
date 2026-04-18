@@ -256,6 +256,7 @@ class DreameLawnMowerMapSummary:
     active_point_count: int = 0
     path_point_count: int = 0
     no_go_area_count: int = 0
+    spot_area_count: int = 0
     virtual_wall_count: int = 0
     pathway_count: int = 0
     obstacle_count: int = 0
@@ -776,6 +777,7 @@ def map_summary_from_map_data(map_data: Any) -> DreameLawnMowerMapSummary | None
     active_points = getattr(map_data, "active_points", None) or []
     path = getattr(map_data, "path", None) or []
     no_go_areas = getattr(map_data, "no_go_areas", None) or []
+    spot_areas = getattr(map_data, "spot_areas", None) or []
     virtual_walls = getattr(map_data, "virtual_walls", None) or []
     pathways = getattr(map_data, "pathways", None) or []
     obstacles = getattr(map_data, "obstacles", None) or {}
@@ -799,6 +801,7 @@ def map_summary_from_map_data(map_data: Any) -> DreameLawnMowerMapSummary | None
         active_point_count=len(active_points),
         path_point_count=len(path),
         no_go_area_count=len(no_go_areas),
+        spot_area_count=len(spot_areas),
         virtual_wall_count=len(virtual_walls),
         pathway_count=len(pathways),
         obstacle_count=len(obstacles),

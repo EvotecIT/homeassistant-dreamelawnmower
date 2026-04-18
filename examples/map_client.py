@@ -56,6 +56,7 @@ async def main() -> None:
                 "segments": map_summary.segment_count,
                 "path_points": map_summary.path_point_count,
                 "no_go_areas": map_summary.no_go_area_count,
+                "spot_areas": map_summary.spot_area_count,
                 "width": map_summary.width,
                 "height": map_summary.height,
             },
