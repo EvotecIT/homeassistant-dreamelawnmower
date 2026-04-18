@@ -61,6 +61,10 @@ Last updated: 2026-04-18
 - `examples/app_map_probe.py` provides the focused read-only app-map probe.
   By default it omits raw coordinates; `--include-payload` is opt-in for local
   parser or renderer work.
+- The existing map-view path now falls back to the app-map payload and renders
+  a simple PNG. A live run of `examples/map_client.py` on 2026-04-18 produced
+  an `app_action_map` image for current map `0` with 2 map areas, 2 no-go/spot
+  areas, and 63 trajectory points.
 - Config-flow auth failures are classified into non-secret Home Assistant
   errors for account type, region, connectivity, generic auth, 2FA, and no
   matching mower devices.
@@ -104,6 +108,7 @@ the workspace after live tests:
 - `field-trip-readonly.json`
 - `firmware-update-live.json`
 - `app-map-current.json`
+- `dreame-map-current.png`
 - `map-sources-current.json`
 - `source-scan-map.json`
 - `property-scan-*.json`
@@ -164,6 +169,17 @@ python examples\app_map_probe.py --out app-map-current.json
 Only use `--include-payload` for local parser/renderer work. It includes raw
 map coordinates and should stay in ignored local files.
 
+Render the current app-map fallback PNG:
+
+```powershell
+$env:DREAME_USERNAME = [Environment]::GetEnvironmentVariable('DREAME_USERNAME','User')
+$env:DREAME_PASSWORD = [Environment]::GetEnvironmentVariable('DREAME_PASSWORD','User')
+$env:DREAME_COUNTRY = [Environment]::GetEnvironmentVariable('DREAME_COUNTRY','User')
+$env:DREAME_ACCOUNT_TYPE = [Environment]::GetEnvironmentVariable('DREAME_ACCOUNT_TYPE','User')
+$env:DREAME_MAP_OUTPUT = 'dreame-map-current.png'
+python examples\map_client.py
+```
+
 Broad read-only property scan:
 
 ```powershell
@@ -219,8 +235,9 @@ credentials into repo files.
   docked-charging, charging, and fault recovery.
 - Do not expose a Home Assistant firmware update entity yet. Keep firmware as
   diagnostics until a verified latest-version or OTA-available field is found.
-- Add a parser/renderer for the app-map JSON payload. The confirmed payload keys
-  are `map`, `spot`, `point`, `semantic`, `trajectory`, `total_area`, `name`,
-  and `cut_relation`.
-- Keep the map camera/entity disabled or diagnostic until the parser and
-  renderer have stable fixtures from the live app-map path.
+- Improve the simple app-map renderer into a polished mower-specific renderer
+  once more fixtures are available. The confirmed payload keys are `map`,
+  `spot`, `point`, `semantic`, `trajectory`, `total_area`, `name`, and
+  `cut_relation`.
+- Keep the map camera/entity disabled by default until the renderer has stable
+  fixtures from more mower states and models.

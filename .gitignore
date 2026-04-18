@@ -8,6 +8,7 @@ __pycache__/
 field-trip*.json
 firmware-update*.json
 app-map*.json
+dreame-map*.png
 map-sources*.json
 source-scan*.json
 property-scan*.json

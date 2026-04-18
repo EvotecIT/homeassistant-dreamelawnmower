@@ -96,7 +96,7 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
             "spot": [{"id": 1}],
             "point": [[7, 8]],
             "semantic": [],
-            "trajectory": [[1, 1]],
+            "trajectory": [{"data": [[1, 1]]}],
             "cut_relation": [],
         }
     )
@@ -116,9 +116,11 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
         "map_area_count": 1,
         "boundary_point_count": 3,
         "spot_count": 1,
+        "spot_boundary_point_count": 0,
         "point_count": 1,
         "semantic_count": 0,
         "trajectory_count": 1,
+        "trajectory_point_count": 1,
         "cut_relation_count": 0,
     }
     assert result["maps"][0]["payload"]["name"] == "Garden"
@@ -136,3 +138,37 @@ def test_app_maps_can_omit_sensitive_payload_coordinates() -> None:
     assert result["available"] is True
     assert "payload" not in result["maps"][0]
     assert result["maps"][0]["payload_keys"] == ["map"]
+
+
+def test_map_view_falls_back_to_rendered_app_map() -> None:
+    client = _client()
+    cloud = _FakeAppMapCloud(
+        {
+            "total_area": 1,
+            "map": [
+                {
+                    "area": 1,
+                    "data": [[0, 0], [100, 0], [100, 100], [0, 100]],
+                }
+            ],
+            "spot": [{"data": [[20, 20], [40, 20], [40, 40], [20, 40]]}],
+            "point": [[50, 50]],
+            "trajectory": [{"data": [[0, 0], [50, 50], [100, 100]]}],
+        }
+    )
+    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_wait_for_map = lambda timeout, interval: None
+    client._safe_map_diagnostics = lambda **kwargs: None
+
+    view = client._sync_refresh_map_view(timeout=0, interval=0)
+
+    assert view.source == "app_action_map"
+    assert view.error is None
+    assert view.image_png is not None
+    assert view.image_png.startswith(b"\x89PNG")
+    assert view.summary is not None
+    assert view.summary.available is True
+    assert view.summary.map_id == 0
+    assert view.summary.segment_count == 1
+    assert view.summary.no_go_area_count == 1
+    assert view.summary.path_point_count == 3

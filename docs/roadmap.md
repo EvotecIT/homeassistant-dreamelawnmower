@@ -109,7 +109,7 @@ Checklist:
 - [x] add a Python-side property range scanner so `iotstatus/props` discovery is repeatable
 - [x] expose Python-side helpers for app-map `MAPL`, `MAPI`, and chunked `MAPD`
 - [ ] implement a parser for mower zones, boundaries, forbidden areas, and path segments
-- [ ] implement a simple renderer for read-only Home Assistant display
+- [x] implement a simple renderer for read-only Home Assistant display
 - [ ] expose a map entity or camera-style surface only after the parser is stable
 - [ ] add tests for parser chunk reassembly, boundary extraction, and trail parsing
 

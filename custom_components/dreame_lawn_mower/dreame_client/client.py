@@ -8,6 +8,7 @@ import json
 import time
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from io import BytesIO
 from typing import Any
 
 from .app_protocol import (
@@ -1172,24 +1173,16 @@ class DreameLawnMowerClient:
             map_data = self._sync_wait_for_map(timeout, interval)
         except DreameLawnMowerConnectionError as err:
             error = str(err)
-            return DreameLawnMowerMapView(
-                source=source,
-                error=error,
-                diagnostics=self._safe_map_diagnostics(
-                    source=source,
-                    reason=error,
-                ),
+            return self._sync_refresh_app_map_view(
+                legacy_error=error,
+                legacy_reason=error,
             )
 
         if map_data is None:
             error = "No map data returned by the legacy current-map path."
-            return DreameLawnMowerMapView(
-                source=source,
-                error=error,
-                diagnostics=self._safe_map_diagnostics(
-                    source=source,
-                    reason="legacy_current_map_empty",
-                ),
+            return self._sync_refresh_app_map_view(
+                legacy_error=error,
+                legacy_reason="legacy_current_map_empty",
             )
 
         summary = map_summary_from_map_data(map_data)
@@ -1222,6 +1215,51 @@ class DreameLawnMowerClient:
                 reason="legacy_current_map_rendered",
             ),
         )
+
+    def _sync_refresh_app_map_view(
+        self,
+        *,
+        legacy_error: str | None,
+        legacy_reason: str,
+    ) -> DreameLawnMowerMapView:
+        source = "app_action_map"
+        try:
+            app_maps = self._sync_get_app_maps(
+                chunk_size=400,
+                include_payload=True,
+            )
+            selected = _select_app_map_payload(app_maps)
+            if selected is None:
+                error = legacy_error or "No app-map payload was returned."
+                return DreameLawnMowerMapView(
+                    source=source,
+                    error=error,
+                    diagnostics=self._safe_map_diagnostics(
+                        source=source,
+                        reason=legacy_reason,
+                    ),
+                )
+            payload = selected.get("payload")
+            image_png, width, height = _render_app_map_payload_png(payload)
+            return DreameLawnMowerMapView(
+                source=source,
+                summary=_app_map_view_summary(selected, payload, width, height),
+                image_png=image_png,
+                diagnostics=self._safe_map_diagnostics(
+                    source=source,
+                    reason="app_action_map_rendered",
+                ),
+            )
+        except Exception as err:  # noqa: BLE001 - map view keeps diagnostics visible
+            error = f"{legacy_error or 'Legacy map unavailable'}; app map failed: {err}"
+            return DreameLawnMowerMapView(
+                source=source,
+                error=error,
+                diagnostics=self._safe_map_diagnostics(
+                    source=source,
+                    reason="app_action_map_failed",
+                ),
+            )
 
     def _sync_get_cloud_device_info(
         self,
@@ -2052,6 +2090,8 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
     )
 
     boundary_point_count = 0
+    spot_boundary_point_count = 0
+    trajectory_point_count = 0
     total_area = value.get("total_area")
     map_area_total = 0.0
     for item in maps:
@@ -2066,6 +2106,24 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
         area = item.get("area")
         if isinstance(area, int | float):
             map_area_total += float(area)
+    for item in spots:
+        if not isinstance(item, Mapping):
+            continue
+        coordinates = item.get("data")
+        if isinstance(coordinates, Sequence) and not isinstance(
+            coordinates,
+            str | bytes | bytearray,
+        ):
+            spot_boundary_point_count += len(coordinates)
+    for item in trajectories:
+        if not isinstance(item, Mapping):
+            continue
+        coordinates = item.get("data")
+        if isinstance(coordinates, Sequence) and not isinstance(
+            coordinates,
+            str | bytes | bytearray,
+        ):
+            trajectory_point_count += len(coordinates)
 
     return {
         "name": value.get("name"),
@@ -2074,11 +2132,156 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
         "map_area_count": len(maps),
         "boundary_point_count": boundary_point_count,
         "spot_count": len(spots),
+        "spot_boundary_point_count": spot_boundary_point_count,
         "point_count": len(points),
         "semantic_count": len(semantic),
         "trajectory_count": len(trajectories),
+        "trajectory_point_count": trajectory_point_count,
         "cut_relation_count": len(cut_relation),
     }
+
+
+def _select_app_map_payload(app_maps: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    maps = app_maps.get("maps") if isinstance(app_maps, Mapping) else None
+    if not isinstance(maps, Sequence) or isinstance(maps, str | bytes | bytearray):
+        return None
+    current_idx = app_maps.get("current_map_index")
+    available_maps = [
+        item
+        for item in maps
+        if isinstance(item, Mapping)
+        and bool(item.get("available"))
+        and isinstance(item.get("payload"), Mapping)
+    ]
+    for item in available_maps:
+        if item.get("idx") == current_idx:
+            return item
+    return available_maps[0] if available_maps else None
+
+
+def _app_map_view_summary(
+    selected: Mapping[str, Any],
+    payload: Any,
+    width: int,
+    height: int,
+) -> DreameLawnMowerMapSummary:
+    payload_summary = _app_map_payload_summary(payload)
+    map_id = selected.get("idx")
+    return DreameLawnMowerMapSummary(
+        available=True,
+        map_id=map_id if isinstance(map_id, int) else None,
+        width=width,
+        height=height,
+        saved_map=bool(selected.get("created")),
+        segment_count=int(payload_summary.get("map_area_count") or 0),
+        active_area_count=int(payload_summary.get("map_area_count") or 0),
+        active_point_count=int(payload_summary.get("point_count") or 0),
+        path_point_count=int(payload_summary.get("trajectory_point_count") or 0),
+        no_go_area_count=int(payload_summary.get("spot_count") or 0),
+    )
+
+
+def _render_app_map_payload_png(payload: Any) -> tuple[bytes, int, int]:
+    if not isinstance(payload, Mapping):
+        raise ValueError("App map payload is missing.")
+
+    map_polygons = _app_map_coordinate_sets(payload.get("map"))
+    spot_polygons = _app_map_coordinate_sets(payload.get("spot"))
+    trajectories = _app_map_coordinate_sets(payload.get("trajectory"))
+    points = _app_map_points(payload.get("point"))
+    all_points = [
+        point
+        for group in [*map_polygons, *spot_polygons, *trajectories, points]
+        for point in group
+    ]
+    if not all_points:
+        raise ValueError("App map payload does not contain drawable coordinates.")
+
+    min_x = min(point[0] for point in all_points)
+    max_x = max(point[0] for point in all_points)
+    min_y = min(point[1] for point in all_points)
+    max_y = max(point[1] for point in all_points)
+    span_x = max(max_x - min_x, 1)
+    span_y = max(max_y - min_y, 1)
+    padding = 48
+    canvas = 900
+    scale = min((canvas - padding * 2) / span_x, (canvas - padding * 2) / span_y)
+    width = max(int(span_x * scale) + padding * 2, 320)
+    height = max(int(span_y * scale) + padding * 2, 320)
+
+    def project(point: tuple[float, float]) -> tuple[int, int]:
+        x, y = point
+        return (
+            int(round((x - min_x) * scale + padding)),
+            int(round((max_y - y) * scale + padding)),
+        )
+
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGBA", (width, height), (248, 250, 252, 255))
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    for polygon in sorted(map_polygons, key=len, reverse=True):
+        projected = [project(point) for point in polygon]
+        if len(projected) >= 3:
+            draw.polygon(
+                projected,
+                fill=(187, 230, 197, 150),
+                outline=(44, 125, 83, 255),
+            )
+            draw.line(projected + [projected[0]], fill=(44, 125, 83, 255), width=4)
+
+    for polygon in spot_polygons:
+        projected = [project(point) for point in polygon]
+        if len(projected) >= 3:
+            draw.polygon(
+                projected,
+                fill=(239, 68, 68, 90),
+                outline=(185, 28, 28, 255),
+            )
+            draw.line(projected + [projected[0]], fill=(185, 28, 28, 255), width=3)
+
+    for trajectory in trajectories:
+        projected = [project(point) for point in trajectory]
+        if len(projected) >= 2:
+            draw.line(projected, fill=(37, 99, 235, 255), width=4, joint="curve")
+
+    for point in points:
+        x, y = project(point)
+        draw.ellipse((x - 6, y - 6, x + 6, y + 6), fill=(15, 23, 42, 255))
+
+    image = Image.alpha_composite(image, overlay).convert("RGB")
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue(), width, height
+
+
+def _app_map_coordinate_sets(value: Any) -> list[list[tuple[float, float]]]:
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes | bytearray):
+        return []
+    result: list[list[tuple[float, float]]] = []
+    for item in value:
+        data = item.get("data") if isinstance(item, Mapping) else item
+        points = _app_map_points(data)
+        if points:
+            result.append(points)
+    return result
+
+
+def _app_map_points(value: Any) -> list[tuple[float, float]]:
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes | bytearray):
+        return []
+    points: list[tuple[float, float]] = []
+    for item in value:
+        if not isinstance(item, Sequence) or isinstance(item, str | bytes | bytearray):
+            continue
+        if len(item) < 2:
+            continue
+        x, y = item[0], item[1]
+        if isinstance(x, int | float) and isinstance(y, int | float):
+            points.append((float(x), float(y)))
+    return points
 
 
 def _key_define_from_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
