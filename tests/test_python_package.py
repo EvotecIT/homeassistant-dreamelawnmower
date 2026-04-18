@@ -98,6 +98,7 @@ def test_public_package_client_has_cloud_probe_helpers() -> None:
     assert hasattr(DreameLawnMowerClient, "async_probe_camera_sources")
     assert hasattr(DreameLawnMowerClient, "async_probe_camera_stream_handshake")
     assert hasattr(DreameLawnMowerClient, "async_request_photo_info")
+    assert hasattr(DreameLawnMowerClient, "async_capture_operation_snapshot")
     assert hasattr(DreameLawnMowerClient, "async_get_remote_control_support")
     assert hasattr(DreameLawnMowerClient, "async_remote_control_move_step")
     assert hasattr(DreameLawnMowerClient, "async_remote_control_stop")

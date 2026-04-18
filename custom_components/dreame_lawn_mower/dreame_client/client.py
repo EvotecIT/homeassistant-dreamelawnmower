@@ -6,6 +6,7 @@ import asyncio
 import json
 import time
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from typing import Any
 
 from .app_protocol import (
@@ -237,6 +238,39 @@ class DreameLawnMowerClient:
             self._sync_get_status_blob,
             refresh,
             include_cloud,
+        )
+
+    async def async_capture_operation_snapshot(
+        self,
+        *,
+        label: str | None = None,
+        include_status_blob: bool = True,
+        include_cloud_status_blob: bool = True,
+        include_remote_control: bool = True,
+        include_map_view: bool = False,
+        include_firmware: bool = False,
+        map_timeout: float = 6.0,
+        map_interval: float = 0.5,
+        language: str | None = "en",
+    ) -> dict[str, Any]:
+        """Capture a JSON-safe operational snapshot for supervised field tests.
+
+        The snapshot is read-only. It refreshes mower state once, then optionally
+        adds decoded realtime status, remote-control support, map-view
+        diagnostics, and firmware/update evidence. It never starts mowing,
+        remote control, camera streaming, or docking.
+        """
+        return await asyncio.to_thread(
+            self._sync_capture_operation_snapshot,
+            label,
+            include_status_blob,
+            include_cloud_status_blob,
+            include_remote_control,
+            include_map_view,
+            include_firmware,
+            map_timeout,
+            map_interval,
+            language,
         )
 
     async def async_request_photo_info(
@@ -710,6 +744,73 @@ class DreameLawnMowerClient:
                 if decoded is not None:
                     return decoded
         return None
+
+    def _sync_capture_operation_snapshot(
+        self,
+        label: str | None,
+        include_status_blob: bool,
+        include_cloud_status_blob: bool,
+        include_remote_control: bool,
+        include_map_view: bool,
+        include_firmware: bool,
+        map_timeout: float,
+        map_interval: float,
+        language: str | None,
+    ) -> dict[str, Any]:
+        device = self._sync_update_device()
+        snapshot = snapshot_from_device(self._descriptor, device)
+        errors: list[dict[str, str]] = []
+        payload: dict[str, Any] = {
+            "label": label,
+            "captured_at": datetime.now(UTC).isoformat(),
+            "snapshot": _operation_snapshot_summary(snapshot),
+            "errors": errors,
+        }
+
+        if include_status_blob:
+            try:
+                status_blob = self._sync_get_status_blob(
+                    refresh=False,
+                    include_cloud=include_cloud_status_blob,
+                )
+                payload["status_blob"] = (
+                    status_blob.as_dict() if status_blob is not None else None
+                )
+            except Exception as err:  # noqa: BLE001 - probe snapshots keep evidence
+                payload["status_blob"] = None
+                errors.append({"section": "status_blob", "error": str(err)})
+
+        if include_remote_control:
+            try:
+                payload["remote_control_support"] = (
+                    self._sync_get_remote_control_support(refresh=False).as_dict()
+                )
+            except Exception as err:  # noqa: BLE001 - probe snapshots keep evidence
+                payload["remote_control_support"] = None
+                errors.append({"section": "remote_control_support", "error": str(err)})
+
+        if include_map_view:
+            try:
+                payload["map_view"] = self._sync_refresh_map_view(
+                    timeout=map_timeout,
+                    interval=map_interval,
+                ).as_dict()
+            except Exception as err:  # noqa: BLE001 - probe snapshots keep evidence
+                payload["map_view"] = None
+                errors.append({"section": "map_view", "error": str(err)})
+
+        if include_firmware:
+            try:
+                payload["firmware_update"] = self._sync_get_firmware_update_support(
+                    refresh=False,
+                    include_cloud=True,
+                    language=language,
+                ).as_dict()
+            except Exception as err:  # noqa: BLE001 - probe snapshots keep evidence
+                payload["firmware_update"] = None
+                errors.append({"section": "firmware_update", "error": str(err)})
+
+        return payload
 
     def _sync_request_photo_info(self, parameters: Any = None) -> Any:
         support = self._sync_get_camera_feature_support(
@@ -1661,6 +1762,80 @@ def _cloud_user_feature_summary(value: Any) -> Mapping[str, Any]:
     if isinstance(safe, list):
         return {"type": "list", "length": len(safe), "items": safe[:10]}
     return {"type": type(value).__name__, "value": safe}
+
+
+def _operation_snapshot_summary(snapshot: DreameLawnMowerSnapshot) -> dict[str, Any]:
+    """Return a compact, stable snapshot for field-test logs."""
+    raw_attributes = snapshot.raw_attributes or {}
+    return {
+        "device": snapshot.descriptor.title,
+        "descriptor": {
+            "did": snapshot.descriptor.did,
+            "name": snapshot.descriptor.name,
+            "model": snapshot.descriptor.model,
+            "display_model": snapshot.descriptor.display_model,
+            "account_type": snapshot.descriptor.account_type,
+            "country": snapshot.descriptor.country,
+            "host_present": bool(snapshot.descriptor.host),
+            "token_present": bool(snapshot.descriptor.token),
+        },
+        "available": snapshot.available,
+        "online": snapshot.online,
+        "state": snapshot.state,
+        "state_name": snapshot.state_name,
+        "activity": snapshot.activity,
+        "task_status": snapshot.task_status,
+        "task_status_name": snapshot.task_status_name,
+        "battery_level": snapshot.battery_level,
+        "charging": snapshot.charging,
+        "docked": snapshot.docked,
+        "raw_docked": snapshot.raw_docked,
+        "started": snapshot.started,
+        "raw_started": snapshot.raw_started,
+        "mowing": snapshot.mowing,
+        "paused": snapshot.paused,
+        "returning": snapshot.returning,
+        "raw_returning": snapshot.raw_returning,
+        "scheduled_clean": snapshot.scheduled_clean,
+        "shortcut_task": snapshot.shortcut_task,
+        "mapping_available": snapshot.mapping_available,
+        "error_code": snapshot.error_code,
+        "error_name": snapshot.error_name,
+        "error_text": snapshot.error_text,
+        "error_display": snapshot.error_display,
+        "child_lock": snapshot.child_lock,
+        "cleaning_mode": snapshot.cleaning_mode,
+        "cleaning_mode_name": snapshot.cleaning_mode_name,
+        "capabilities": list(snapshot.capabilities),
+        "firmware_version": snapshot.firmware_version,
+        "hardware_version": snapshot.hardware_version,
+        "serial_number": snapshot.serial_number,
+        "cloud_update_time": snapshot.cloud_update_time,
+        "unknown_property_count": snapshot.unknown_property_count,
+        "realtime_property_count": snapshot.realtime_property_count,
+        "last_realtime_method": snapshot.last_realtime_method,
+        "raw_state_signals": _json_safe(
+            {
+                key: raw_attributes.get(key)
+                for key in (
+                    "mower_state",
+                    "status",
+                    "error",
+                    "charging",
+                    "docked",
+                    "started",
+                    "running",
+                    "paused",
+                    "returning",
+                    "mapping",
+                    "fast_mapping",
+                    "has_saved_map",
+                    "has_temporary_map",
+                )
+                if key in raw_attributes
+            }
+        ),
+    }
 
 
 def _json_safe(value: Any, *, max_depth: int = 4) -> Any:

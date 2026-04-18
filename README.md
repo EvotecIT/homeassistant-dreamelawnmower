@@ -235,6 +235,21 @@ The safety-gated live smoke test is:
 python examples/remote_control_smoke.py --execute --velocity 60 --rotation 60 --duration 0.5 --dock
 ```
 
+For a more useful field-trip capture, use the operation snapshot helper. In
+read-only mode it captures normalized state, realtime status blob, remote
+control support, and optional map/update evidence without moving the mower:
+
+```bash
+python examples/field_trip_probe.py --include-map --include-firmware
+```
+
+When the mower is outdoors and supervised, the same script can wrap tiny
+movement pulses with before/during/after captures:
+
+```bash
+python examples/field_trip_probe.py --execute --confirm-supervised --velocity 60 --rotation 45 --duration 0.5 --dock --include-map --out field-trip.json
+```
+
 Home Assistant also exposes supervised service calls for validation:
 
 ```yaml
