@@ -7,3 +7,4 @@ __pycache__/
 .tmp_apk/
 field-trip*.json
 firmware-update*.json
+map-sources*.json
