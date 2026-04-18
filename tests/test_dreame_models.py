@@ -11,6 +11,8 @@ from dreame_lawn_mower_client.models import (
     snapshot_from_device,
 )
 
+from .fixture_data import load_json_fixture
+
 
 class _FakeInfo:
     def __init__(self) -> None:
@@ -335,6 +337,79 @@ def test_snapshot_treats_docked_sticky_returning_as_raw_only() -> None:
     assert snapshot.raw_started is True
     assert snapshot.returning is False
     assert snapshot.raw_returning is True
+
+
+def test_snapshot_treats_returning_running_flag_as_returning_not_mowing() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "dreame.mower.g2408",
+            "customName": "Garage Mower",
+        },
+        account_type="dreame",
+        country="eu",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.state = SimpleNamespace(name="RETURNING")
+    device.status.state_name = "returning"
+    device.status.returning = True
+    device.status.running = True
+    device.status.docked = False
+    device.status.attributes = {
+        **device.status.attributes,
+        "charging": False,
+        "mower_state": "returning",
+        "returning": True,
+        "running": True,
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == "returning"
+    assert snapshot.returning is True
+    assert snapshot.raw_returning is True
+    assert snapshot.mowing is False
+    assert snapshot.started is True
+    assert snapshot.docked is False
+
+
+def test_field_trip_returning_fixture_matches_normalized_state() -> None:
+    payload = load_json_fixture("field_trip_returning_summary.json")
+    raw_status = payload["capture"]["raw_status"]
+    expected = payload["capture"]["expected"]
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "field-trip-device",
+            "model": payload["model"],
+            "customName": "Field Trip Mower",
+        },
+        account_type="dreame",
+        country="eu",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.state = SimpleNamespace(name=raw_status["state"])
+    device.status.state_name = raw_status["state_name"]
+    device.status.battery_level = raw_status["battery_level"]
+    device.status.charging = raw_status["charging"]
+    device.status.docked = raw_status["docked"]
+    device.status.running = raw_status["running"]
+    device.status.returning = raw_status["returning"]
+    device.status.started = raw_status["started"]
+    device.status.attributes = raw_status["attributes"]
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == expected["activity"]
+    assert snapshot.mowing is expected["mowing"]
+    assert snapshot.returning is expected["returning"]
+    assert snapshot.docked is expected["docked"]
+    assert snapshot.started is expected["started"]
 
 
 def test_snapshot_ignores_sticky_has_error_when_error_details_say_no_error() -> None:

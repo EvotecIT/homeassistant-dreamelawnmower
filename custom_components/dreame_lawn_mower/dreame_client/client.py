@@ -487,7 +487,9 @@ class DreameLawnMowerClient:
         mapping = getattr(device, "property_mapping", {}).get(
             DreameMowerProperty.REMOTE_CONTROL
         )
-        state = _lower_enum_name(getattr(getattr(device, "status", None), "state", None))
+        state = _lower_enum_name(
+            getattr(getattr(device, "status", None), "state", None)
+        )
         status_obj = getattr(getattr(device, "status", None), "status", None)
         status = _lower_enum_name(status_obj)
         active = bool(
@@ -658,14 +660,20 @@ class DreameLawnMowerClient:
             obstacles=obstacles,
             permit=permit,
             feature=feature,
-            extend_sc_type=tuple(str(item) for item in device_info.get("extendScType", []) or []),
-            video_status=_json_safe(device_info.get("videoStatus") or info_raw.get("videoStatus")),
+            extend_sc_type=tuple(
+                str(item) for item in device_info.get("extendScType", []) or []
+            ),
+            video_status=_json_safe(
+                device_info.get("videoStatus") or info_raw.get("videoStatus")
+            ),
             video_dynamic_vendor=_optional_bool(
                 device_info.get("videoDynamicVendor")
                 if "videoDynamicVendor" in device_info
                 else info_raw.get("videoDynamicVendor")
             ),
-            live_key_count=len(live_key_define) if isinstance(live_key_define, Mapping) else 0,
+            live_key_count=(
+                len(live_key_define) if isinstance(live_key_define, Mapping) else 0
+            ),
             stream_session_present=stream_session_present,
             stream_status=stream_status,
             stream_status_raw=_json_safe(stream_status_raw),
@@ -946,7 +954,9 @@ class DreameLawnMowerClient:
             except Exception as err:
                 output["cleanup_error"] = str(err)
             try:
-                output["after"] = self._stream_status_payload(self._sync_update_device())
+                output["after"] = self._stream_status_payload(
+                    self._sync_update_device()
+                )
             except Exception as err:
                 if output["cleanup_error"] is None:
                     output["cleanup_error"] = str(err)
@@ -972,7 +982,7 @@ class DreameLawnMowerClient:
         if payload_mode == "empty_session":
             payload["session"] = ""
 
-        from .types import DreameMowerAction, PIID
+        from .types import PIID, DreameMowerAction
 
         return device.call_action(
             DreameMowerAction.STREAM_VIDEO,
@@ -990,7 +1000,10 @@ class DreameLawnMowerClient:
     def _guard_camera_stream_probe_idle(self, device: Any) -> None:
         status = getattr(device, "status", None)
         snapshot = snapshot_from_device(self._descriptor, device)
-        raw_running = bool(snapshot.raw_attributes.get("running"))
+        raw_running = bool(
+            snapshot.raw_attributes.get("running")
+            or getattr(status, "running", False)
+        )
         if snapshot.mowing or snapshot.returning or raw_running:
             raise DreameLawnMowerConnectionError(
                 "Camera stream handshake probe is blocked while the mower is active."
@@ -1236,7 +1249,9 @@ class DreameLawnMowerClient:
 
         rendered = all_entries
         if only_values:
-            rendered = [entry for entry in rendered if self._entry_has_meaningful_value(entry)]
+            rendered = [
+                entry for entry in rendered if self._entry_has_meaningful_value(entry)
+            ]
 
         rendered = [
             self._annotate_cloud_property_entry(
@@ -1571,7 +1586,9 @@ class DreameLawnMowerClient:
         if cloud is None:
             raise DreameLawnMowerConnectionError("Cloud connection is unavailable.")
         if not getattr(cloud, "logged_in", False) and not cloud.login():
-            raise DreameLawnMowerConnectionError("Unable to log in to the mower cloud API.")
+            raise DreameLawnMowerConnectionError(
+                "Unable to log in to the mower cloud API."
+            )
         return cloud
 
     def _ensure_device(self):

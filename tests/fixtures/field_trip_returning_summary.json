@@ -1,0 +1,37 @@
+{
+  "description": "Sanitized field-trip capture shape observed after a dock request.",
+  "model": "dreame.mower.g2408",
+  "capture": {
+    "label": "after_dock",
+    "raw_status": {
+      "state": "RETURNING",
+      "state_name": "returning",
+      "battery_level": 100,
+      "charging": false,
+      "docked": false,
+      "running": true,
+      "returning": true,
+      "started": true,
+      "attributes": {
+        "mower_state": "returning",
+        "charging": false,
+        "docked": false,
+        "running": true,
+        "returning": true,
+        "started": true,
+        "capabilities": [
+          "lidar_navigation",
+          "disable_sensor_cleaning",
+          "map"
+        ]
+      }
+    },
+    "expected": {
+      "activity": "returning",
+      "mowing": false,
+      "returning": true,
+      "docked": false,
+      "started": true
+    }
+  }
+}

@@ -398,7 +398,10 @@ def snapshot_from_device(
     task_obj = getattr(device.status, "task_status", None)
     error_obj = getattr(device.status, "error", None)
     state = state_obj.name.lower() if state_obj is not None else "unknown"
-    state_name = getattr(device.status, "state_name", None) or state.replace("_", " ").title()
+    state_name = getattr(device.status, "state_name", None) or state.replace(
+        "_",
+        " ",
+    ).title()
     status_attributes = getattr(device.status, "attributes", {}) or {}
     info_raw = getattr(getattr(device, "info", None), "raw", {}) or {}
     last_realtime_message = getattr(device, "last_realtime_message", None) or {}
@@ -475,13 +478,17 @@ def snapshot_from_device(
     else:
         activity = "idle"
     raw_docked = bool(getattr(device.status, "docked", False))
-    effective_docked = bool(raw_docked or state in docked_states or activity == "docked")
+    effective_docked = bool(
+        raw_docked or state in docked_states or activity == "docked"
+    )
     raw_started = bool(
         status_attributes.get("started", getattr(device.status, "started", False))
     )
     effective_started = bool(raw_started and activity not in {"docked", "idle"})
     raw_returning = bool(getattr(device.status, "returning", False))
     effective_returning = bool(raw_returning and activity == "returning")
+    raw_running = bool(getattr(device.status, "running", False))
+    effective_mowing = bool(raw_running and activity == "mowing")
 
     child_lock = None
     try:
@@ -506,8 +513,16 @@ def snapshot_from_device(
         error_name=error_name,
         error_text=error_text,
         error_display=_friendly_error_name(error_name) or error_text,
-        firmware_version=getattr(getattr(device, "info", None), "firmware_version", None),
-        hardware_version=getattr(getattr(device, "info", None), "hardware_version", None),
+        firmware_version=getattr(
+            getattr(device, "info", None),
+            "firmware_version",
+            None,
+        ),
+        hardware_version=getattr(
+            getattr(device, "info", None),
+            "hardware_version",
+            None,
+        ),
         serial_number=_as_optional_str(info_raw.get("sn")),
         cloud_update_time=_as_optional_str(info_raw.get("updateTime")),
         unknown_property_count=len(getattr(device, "unknown_properties", {}) or {}),
@@ -515,13 +530,18 @@ def snapshot_from_device(
         last_realtime_method=last_realtime_method,
         online=info_raw.get("online"),
         child_lock=child_lock,
-        charging=bool(status_attributes.get("charging", getattr(device.status, "charging", False))),
+        charging=bool(
+            status_attributes.get(
+                "charging",
+                getattr(device.status, "charging", False),
+            )
+        ),
         started=effective_started,
         raw_started=raw_started,
         docked=effective_docked,
         raw_docked=raw_docked,
         paused=bool(getattr(device.status, "paused", False)),
-        mowing=bool(getattr(device.status, "running", False)),
+        mowing=effective_mowing,
         returning=effective_returning,
         raw_returning=raw_returning,
         scheduled_clean=bool(getattr(device.status, "scheduled_clean", False)),
