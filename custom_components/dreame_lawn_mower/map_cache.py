@@ -54,6 +54,8 @@ class DreameLawnMowerMapCameraCache:
         now: datetime | None = None,
     ) -> None:
         """Store a successful or diagnostic map view."""
+        if view is not self.last_view:
+            self.last_image = None
         self.last_view = view
         self.last_error = view.error
         self.last_refresh_at = now or datetime.now(UTC)

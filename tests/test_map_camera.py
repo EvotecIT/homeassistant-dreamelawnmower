@@ -130,6 +130,27 @@ def test_map_camera_cache_refreshes_after_ttl() -> None:
     assert calls == 2
 
 
+def test_map_camera_cache_invalidates_image_when_view_refreshes() -> None:
+    """A refreshed map view must not reuse an older rendered JPEG."""
+    cache = DreameLawnMowerMapCameraCache(ttl=timedelta(seconds=60))
+    first_now = datetime(2026, 4, 19, 8, 0, tzinfo=UTC)
+
+    cache.store_view(
+        DreameLawnMowerMapView(source="app_action_map", image_png=b"first"),
+        now=first_now,
+    )
+    cache.store_image(b"jpeg-first")
+
+    cache.store_view(
+        DreameLawnMowerMapView(source="app_action_map", image_png=b"second"),
+        now=first_now + timedelta(seconds=61),
+    )
+
+    assert cache.last_image is None
+    assert cache.last_view is not None
+    assert cache.last_view.image_png == b"second"
+
+
 def test_map_camera_cache_coalesces_concurrent_refreshes() -> None:
     """Concurrent map camera refreshes share the same in-flight result."""
     calls = 0
