@@ -312,7 +312,13 @@ class DreameMapMowerMapManager:
             object_name = None
             raw_map_data = None
             for prop in out:
-                value = prop[MAP_PARAMETER_VALUE]
+                value = prop.get(MAP_PARAMETER_VALUE)
+                if value is None:
+                    _LOGGER.debug(
+                        "Map response property has no value field: %s",
+                        prop,
+                    )
+                    continue
                 if value != "":
                     piid = prop["piid"]
                     if piid == PIID(DreameMowerProperty.OBJECT_NAME):

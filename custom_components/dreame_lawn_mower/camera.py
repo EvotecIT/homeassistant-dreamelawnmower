@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from functools import partial
 from typing import Any
 
 from homeassistant.components.camera import Camera
@@ -122,7 +123,10 @@ class DreameLawnMowerMapCamera(
         view = await self._async_refresh_map_view()
         if view.image_png is not None:
             try:
-                image = png_bytes_to_jpeg(view.image_png)
+                image = await self.hass.async_add_executor_job(
+                    png_bytes_to_jpeg,
+                    view.image_png,
+                )
                 self._map_cache.store_image(image)
                 self._map_cache.last_error = None
                 self.async_write_ha_state()
@@ -132,8 +136,13 @@ class DreameLawnMowerMapCamera(
                 self._map_cache.last_error = str(err)
                 self.async_write_ha_state()
 
-        return self._map_cache.last_image or map_placeholder_jpeg(
-            detail=self._map_cache.last_error or view.error
+        if self._map_cache.last_image is not None:
+            return self._map_cache.last_image
+        return await self.hass.async_add_executor_job(
+            partial(
+                map_placeholder_jpeg,
+                detail=self._map_cache.last_error or view.error,
+            )
         )
 
     async def _async_refresh_map_view(self) -> DreameLawnMowerMapView:
@@ -211,4 +220,6 @@ class DreameLawnMowerMapDataCamera(DreameLawnMowerMapCamera):
         else:
             lines.append("Summary: no structured map payload was returned.")
 
-        return map_diagnostics_jpeg(lines=lines)
+        return await self.hass.async_add_executor_job(
+            partial(map_diagnostics_jpeg, lines=lines)
+        )

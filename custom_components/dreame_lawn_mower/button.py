@@ -59,7 +59,7 @@ class DreameLawnMowerCaptureDebugSnapshotButton(
             snapshot=self.coordinator.data,
             device=self.coordinator.client._device,
         )
-        _LOGGER.warning(
+        _LOGGER.info(
             "Captured Dreame lawn mower debug snapshot for %s: %s",
             self.coordinator.client.descriptor.title,
             json.dumps(payload, sort_keys=True),
@@ -67,9 +67,9 @@ class DreameLawnMowerCaptureDebugSnapshotButton(
         persistent_notification.async_create(
             self.coordinator.hass,
             (
-                "Captured a sanitized Dreame lawn mower debug snapshot. "
-                "Check the Home Assistant logs for the JSON payload or use "
-                "Download diagnostics on this config entry."
+                "Captured a sanitized Dreame lawn mower debug snapshot. Use "
+                "Download diagnostics on this config entry, or enable info "
+                "logging for this integration to view the JSON payload."
             ),
             title="Dreame Lawn Mower Debug Snapshot",
             notification_id=(
@@ -102,7 +102,7 @@ class DreameLawnMowerCaptureOperationSnapshotButton(
             include_firmware=True,
         )
         payload = sanitize_debug_data(payload)
-        _LOGGER.warning(
+        _LOGGER.info(
             "Captured Dreame lawn mower operation snapshot for %s: %s",
             self.coordinator.client.descriptor.title,
             json.dumps(payload, sort_keys=True),
@@ -112,8 +112,9 @@ class DreameLawnMowerCaptureOperationSnapshotButton(
             self.coordinator.hass,
             (
                 "Captured a sanitized Dreame lawn mower operation snapshot. "
-                "Check the Home Assistant logs for grouped state, realtime, "
-                "map, firmware, and remote-control evidence."
+                "Use Download diagnostics, or enable info logging for this "
+                "integration to view grouped state, realtime, map, firmware, "
+                "and remote-control evidence."
             ),
             title="Dreame Lawn Mower Operation Snapshot",
             notification_id=(
@@ -141,7 +142,7 @@ class DreameLawnMowerCaptureMapProbeButton(
         """Probe known read-only map sources and log the structured result."""
         await self.coordinator.async_request_refresh()
         payload = await self.coordinator.client.async_probe_map_sources()
-        _LOGGER.warning(
+        _LOGGER.info(
             "Captured Dreame lawn mower map probe for %s: %s",
             self.coordinator.client.descriptor.title,
             json.dumps(payload, sort_keys=True),
@@ -149,8 +150,8 @@ class DreameLawnMowerCaptureMapProbeButton(
         persistent_notification.async_create(
             self.coordinator.hass,
             (
-                "Captured a Dreame lawn mower map probe. Check the Home "
-                "Assistant logs for the JSON payload."
+                "Captured a Dreame lawn mower map probe. Enable info logging "
+                "for this integration to view the JSON payload."
             ),
             title="Dreame Lawn Mower Map Probe",
             notification_id=(
@@ -179,7 +180,7 @@ class DreameLawnMowerCaptureScheduleProbeButton(
         payload = await self.coordinator.client.async_get_app_schedules(
             include_raw=False,
         )
-        _LOGGER.warning(
+        _LOGGER.info(
             "Captured Dreame lawn mower schedule probe for %s: %s",
             self.coordinator.client.descriptor.title,
             json.dumps(payload, sort_keys=True),
@@ -187,8 +188,8 @@ class DreameLawnMowerCaptureScheduleProbeButton(
         persistent_notification.async_create(
             self.coordinator.hass,
             (
-                "Captured a Dreame lawn mower schedule probe. Check the Home "
-                "Assistant logs for decoded schedule JSON."
+                "Captured a Dreame lawn mower schedule probe. Enable info "
+                "logging for this integration to view decoded schedule JSON."
             ),
             title="Dreame Lawn Mower Schedule Probe",
             notification_id=(

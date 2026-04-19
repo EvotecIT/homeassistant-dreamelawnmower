@@ -93,6 +93,7 @@ def schedule_calendar_events(
     start_date: datetime,
     end_date: datetime,
     *,
+    include_all_schedules: bool = False,
     mower_name: str | None = None,
 ) -> list[CalendarEvent]:
     """Build Home Assistant calendar events from decoded app schedule data."""
@@ -102,10 +103,15 @@ def schedule_calendar_events(
         return []
 
     events: list[CalendarEvent] = []
+    active_version = (
+        None if include_all_schedules else _active_schedule_version(payload)
+    )
     for day in _candidate_days(local_start.date(), local_end.date()):
         week_day = _schedule_week_day(day)
         for schedule in payload.get("schedules") or []:
             if not isinstance(schedule, Mapping):
+                continue
+            if active_version is not None and schedule.get("version") != active_version:
                 continue
             map_index = schedule.get("idx")
             map_label = _schedule_label(schedule)
@@ -131,6 +137,16 @@ def schedule_calendar_events(
                         )
                     )
     return sorted(events, key=lambda event: event.start_datetime_local)
+
+
+def _active_schedule_version(payload: Mapping[str, Any]) -> int | None:
+    current_task = payload.get("current_task")
+    if not isinstance(current_task, Mapping):
+        return None
+    try:
+        return int(current_task["version"])
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def _task_events(

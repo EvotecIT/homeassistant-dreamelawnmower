@@ -102,6 +102,9 @@ Last updated: 2026-04-19
 - `examples/schedule_calendar_preview.py` converts a live schedule fetch or an
   ignored schedule probe JSON file into Home Assistant-style calendar event
   JSON, which is useful on Windows where the HA pytest plugin cannot load.
+- The calendar now follows the `SCHDT` active schedule version when present.
+  Use the preview tool's `--include-all-schedules` option only for diagnostics
+  when investigating default or other-map schedule slots.
 - Config-flow auth failures are classified into non-secret Home Assistant
   errors for account type, region, connectivity, generic auth, 2FA, and no
   matching mower devices.
@@ -245,6 +248,9 @@ Preview decoded schedules as Home Assistant calendar events without loading HA:
 ```powershell
 python examples\schedule_calendar_preview.py --from-file schedule-probe-current.json --timezone Europe/Warsaw --out schedule-calendar-preview.json
 ```
+
+Add `--include-all-schedules` only when you intentionally want the hidden or
+other-map schedule slots in the preview.
 
 Only execute schedule writes in a supervised test window after checking the
 dry-run JSON. Actual writes require both explicit gates. Prefer first testing

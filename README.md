@@ -202,6 +202,11 @@ running Home Assistant instance:
 python examples/schedule_calendar_preview.py --from-file schedule-probe-current.json --timezone Europe/Warsaw --out schedule-calendar-preview.json
 ```
 
+The Home Assistant calendar follows the schedule version reported by `SCHDT`
+when available, so stale/default/other-map schedule slots do not appear as
+normal mowing events. For diagnostics, add `--include-all-schedules` to the
+preview command to show every decoded schedule slot.
+
 Schedule write support is intentionally guarded. This builds the app-side
 `SCHDSV2` enable/disable request without sending it:
 

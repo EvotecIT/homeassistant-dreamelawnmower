@@ -53,6 +53,98 @@ def test_schedule_calendar_events_include_enabled_plan_tasks() -> None:
     assert events[0].as_dict()["all_day"] is False
 
 
+def test_schedule_calendar_events_prefer_current_task_version() -> None:
+    payload = {
+        "current_task": {"version": 19383},
+        "schedules": [
+            {
+                "idx": -1,
+                "version": 31345,
+                "plans": [
+                    {
+                        "plan_id": 0,
+                        "enabled": True,
+                        "weeks": [
+                            {
+                                "week_day": 0,
+                                "tasks": [
+                                    {
+                                        "type_name": "all_area_mowing",
+                                        "start": 8 * 60,
+                                        "end": 10 * 60,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "idx": 0,
+                "version": 19383,
+                "plans": [
+                    {
+                        "plan_id": 0,
+                        "enabled": True,
+                        "weeks": [
+                            {
+                                "week_day": 0,
+                                "tasks": [
+                                    {
+                                        "type_name": "all_area_mowing",
+                                        "start": 658,
+                                        "end": 1257,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "idx": 1,
+                "version": 4760,
+                "plans": [
+                    {
+                        "plan_id": 0,
+                        "enabled": True,
+                        "weeks": [
+                            {
+                                "week_day": 0,
+                                "tasks": [
+                                    {
+                                        "type_name": "all_area_mowing",
+                                        "start": 10 * 60,
+                                        "end": 21 * 60,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+
+    events = schedule_calendar_events(
+        payload,
+        datetime(2026, 4, 19, 0, 0, tzinfo=UTC),
+        datetime(2026, 4, 20, 0, 0, tzinfo=UTC),
+    )
+
+    assert len(events) == 1
+    assert events[0].start == datetime(2026, 4, 19, 10, 58, tzinfo=UTC)
+
+    all_events = schedule_calendar_events(
+        payload,
+        datetime(2026, 4, 19, 0, 0, tzinfo=UTC),
+        datetime(2026, 4, 20, 0, 0, tzinfo=UTC),
+        include_all_schedules=True,
+    )
+
+    assert [event.start.hour for event in all_events] == [8, 10, 10]
+
+
 def test_schedule_calendar_events_include_overnight_overlap() -> None:
     payload = {
         "schedules": [

@@ -47,6 +47,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Number of days to preview from --start. Defaults to 14.",
     )
     parser.add_argument(
+        "--include-all-schedules",
+        action="store_true",
+        help=(
+            "Include every decoded schedule slot. By default the preview "
+            "matches Home Assistant and uses the SCHDT active schedule version "
+            "when available."
+        ),
+    )
+    parser.add_argument(
         "--map-indices",
         default="",
         help=(
@@ -156,6 +165,7 @@ async def main() -> None:
         payload,
         start,
         end,
+        include_all_schedules=args.include_all_schedules,
         mower_name=_descriptor_title(payload),
     )
     result = {
