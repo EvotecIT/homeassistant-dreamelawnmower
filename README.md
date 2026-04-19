@@ -137,11 +137,14 @@ Use `--summary` first when triaging a large capture:
 python examples/extract_ha_payload.py home-assistant.log --summary
 ```
 
-Use `--kind map_probe` for map probe logs, `--all` if one log file contains
-multiple captures, or combine `--all --summary` to get a compact triage list.
-The extractor also understands operation snapshot logs from `Capture Operation
-Snapshot`, including raw/effective state flags, manual-drive safety, and triage
-recommendations.
+Use `--kind map_probe` or `--kind schedule_probe` for focused probe logs,
+`--all` if one log file contains multiple captures, or combine
+`--all --summary` to get a compact triage list. The extractor also understands
+operation snapshot logs from `Capture Operation Snapshot`, including
+raw/effective state flags, manual-drive safety, and triage recommendations.
+Schedule probe summaries include the active-version schedule selection so
+hidden default or other-map slots are easier to distinguish from visible
+calendar events.
 
 ## Map experiments
 

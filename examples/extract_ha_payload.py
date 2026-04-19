@@ -12,6 +12,7 @@ LOG_MARKERS = {
     "debug_snapshot": "Captured Dreame lawn mower debug snapshot",
     "map_probe": "Captured Dreame lawn mower map probe",
     "operation_snapshot": "Captured Dreame lawn mower operation snapshot",
+    "schedule_probe": "Captured Dreame lawn mower schedule probe",
 }
 
 
@@ -29,6 +30,12 @@ def summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     payload = _payload_body(payload)
     if isinstance(payload.get("captures"), list):
         return _summarize_field_trip_payload(payload)
+    if (
+        isinstance(payload.get("schedules"), list)
+        or isinstance(payload.get("schedule_selection"), dict)
+        or isinstance(payload.get("current_task"), dict)
+    ):
+        return _summarize_schedule_payload(payload)
 
     snapshot = _as_mapping(payload.get("snapshot"))
     descriptor = _as_mapping(payload.get("descriptor") or snapshot.get("descriptor"))
@@ -333,6 +340,63 @@ def _summarize_field_trip_payload(payload: dict[str, Any]) -> dict[str, Any]:
             },
             "steps": steps,
             "captures": captures,
+        }
+    )
+
+
+def _summarize_schedule_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    schedules = [
+        schedule
+        for schedule in payload.get("schedules", [])
+        if isinstance(schedule, dict)
+    ]
+    current_task = _as_mapping(payload.get("current_task"))
+    selection = _as_mapping(payload.get("schedule_selection"))
+    errors = payload.get("errors", [])
+
+    return _drop_empty(
+        {
+            "current_task": {
+                "start_time": current_task.get("start_time"),
+                "end_time": current_task.get("end_time"),
+                "plan_id": current_task.get("plan_id"),
+                "version": current_task.get("version"),
+            },
+            "schedule_count": len(schedules),
+            "schedule_selection": {
+                "mode": selection.get("mode"),
+                "active_version": selection.get("active_version"),
+                "active_version_filter_applied": selection.get(
+                    "active_version_filter_applied"
+                ),
+                "included_schedule_count": selection.get("included_schedule_count"),
+                "hidden_schedule_count": selection.get("hidden_schedule_count"),
+                "included_schedules": selection.get("included_schedules", []),
+                "hidden_schedules": selection.get("hidden_schedules", []),
+            },
+            "schedules": [
+                _schedule_entry_summary(schedule) for schedule in schedules
+            ],
+            "error_count": len(errors) if isinstance(errors, list) else None,
+            "errors": errors,
+        }
+    )
+
+
+def _schedule_entry_summary(schedule: dict[str, Any]) -> dict[str, Any]:
+    plans = [
+        plan
+        for plan in schedule.get("plans", [])
+        if isinstance(plan, dict)
+    ]
+    return _drop_empty(
+        {
+            "idx": schedule.get("idx"),
+            "label": schedule.get("label"),
+            "version": schedule.get("version"),
+            "enabled_plan_count": schedule.get("enabled_plan_count"),
+            "plan_count": len(plans),
+            "error": schedule.get("error"),
         }
     )
 

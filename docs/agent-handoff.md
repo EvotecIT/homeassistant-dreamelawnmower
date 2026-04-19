@@ -160,6 +160,9 @@ Last updated: 2026-04-19
   schedules from Home Assistant without raw schedule payload text. It also
   adds `schedule_selection`, so the button log explains which schedule version
   is visible and which stored slots are hidden.
+- `examples/extract_ha_payload.py` recognizes those schedule-probe log lines
+  via `--kind schedule_probe`; `--summary` preserves the active-version
+  selection, visible schedule count, and hidden schedule slots.
 - Home Assistant exposes a guarded `set_schedule_plan_enabled` service. It
   defaults to dry-run and only sends writes when both `execute` and
   `confirm_schedule_write` are true.

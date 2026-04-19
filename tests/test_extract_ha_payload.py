@@ -30,6 +30,7 @@ def test_extract_payloads_keeps_log_kind_for_multiple_entries() -> None:
     debug_payload = {"snapshot": {"state": "docked"}}
     map_payload = {"map": {"source": "placeholder"}}
     operation_payload = {"snapshot": {"label": "field_test"}}
+    schedule_payload = {"schedules": []}
     log_text = "\n".join(
         [
             "noise before",
@@ -40,6 +41,8 @@ def test_extract_payloads_keeps_log_kind_for_multiple_entries() -> None:
             f"{json.dumps(operation_payload)}",
             "Captured Dreame lawn mower map probe for Dreame A2 (A2): "
             f"{json.dumps(map_payload)}",
+            "Captured Dreame lawn mower schedule probe for Dreame A2 (A2): "
+            f"{json.dumps(schedule_payload)}",
             "noise after",
         ]
     )
@@ -50,11 +53,13 @@ def test_extract_payloads_keeps_log_kind_for_multiple_entries() -> None:
         "debug_snapshot",
         "operation_snapshot",
         "map_probe",
+        "schedule_probe",
     ]
     assert [payload.payload for payload in payloads] == [
         debug_payload,
         operation_payload,
         map_payload,
+        schedule_payload,
     ]
 
 
@@ -67,12 +72,15 @@ def test_extract_payloads_accepts_plain_json_diagnostics() -> None:
 def test_extract_payloads_can_filter_by_kind() -> None:
     debug_payload = {"snapshot": {"state": "docked"}}
     map_payload = {"map": {"source": "placeholder"}}
+    schedule_payload = {"schedules": []}
     log_text = "\n".join(
         [
             "Captured Dreame lawn mower debug snapshot for Dreame A2 (A2): "
             f"{json.dumps(debug_payload)}",
             "Captured Dreame lawn mower map probe for Dreame A2 (A2): "
             f"{json.dumps(map_payload)}",
+            "Captured Dreame lawn mower schedule probe for Dreame A2 (A2): "
+            f"{json.dumps(schedule_payload)}",
         ]
     )
 
@@ -81,6 +89,12 @@ def test_extract_payloads_can_filter_by_kind() -> None:
     assert len(payloads) == 1
     assert payloads[0].kind == "map_probe"
     assert payloads[0].payload == map_payload
+
+    schedule_payloads = extract_payloads(log_text, kind="schedule_probe")
+
+    assert len(schedule_payloads) == 1
+    assert schedule_payloads[0].kind == "schedule_probe"
+    assert schedule_payloads[0].payload == schedule_payload
 
 
 def test_extract_first_payload_raises_when_no_payload_is_found() -> None:
@@ -592,4 +606,131 @@ def test_summarize_payload_includes_map_probe_summary() -> None:
                 },
             ],
         },
+    }
+
+
+def test_summarize_payload_includes_schedule_probe_summary() -> None:
+    payload = {
+        "current_task": {
+            "start_time": "10:58",
+            "end_time": "20:57",
+            "plan_id": 0,
+            "version": 19383,
+        },
+        "schedule_selection": {
+            "mode": "active_version",
+            "active_version": 19383,
+            "active_version_filter_applied": True,
+            "included_schedule_count": 1,
+            "hidden_schedule_count": 2,
+            "included_schedules": [
+                {
+                    "idx": 0,
+                    "label": "map_0",
+                    "version": 19383,
+                    "enabled_plan_count": 1,
+                }
+            ],
+            "hidden_schedules": [
+                {
+                    "idx": -1,
+                    "label": "default",
+                    "version": 31345,
+                    "enabled_plan_count": 1,
+                },
+                {
+                    "idx": 1,
+                    "label": "map_1",
+                    "version": 4760,
+                    "enabled_plan_count": 1,
+                },
+            ],
+        },
+        "schedules": [
+            {
+                "idx": -1,
+                "label": "default",
+                "version": 31345,
+                "enabled_plan_count": 1,
+                "plans": [{"plan_id": 0, "enabled": True}],
+            },
+            {
+                "idx": 0,
+                "label": "map_0",
+                "version": 19383,
+                "enabled_plan_count": 1,
+                "plans": [{"plan_id": 0, "enabled": True}],
+            },
+            {
+                "idx": 1,
+                "label": "map_1",
+                "version": 4760,
+                "enabled_plan_count": 1,
+                "plans": [{"plan_id": 0, "enabled": True}],
+            },
+        ],
+        "errors": [],
+    }
+
+    assert summarize_payload(payload) == {
+        "current_task": {
+            "start_time": "10:58",
+            "end_time": "20:57",
+            "plan_id": 0,
+            "version": 19383,
+        },
+        "schedule_count": 3,
+        "schedule_selection": {
+            "mode": "active_version",
+            "active_version": 19383,
+            "active_version_filter_applied": True,
+            "included_schedule_count": 1,
+            "hidden_schedule_count": 2,
+            "included_schedules": [
+                {
+                    "idx": 0,
+                    "label": "map_0",
+                    "version": 19383,
+                    "enabled_plan_count": 1,
+                }
+            ],
+            "hidden_schedules": [
+                {
+                    "idx": -1,
+                    "label": "default",
+                    "version": 31345,
+                    "enabled_plan_count": 1,
+                },
+                {
+                    "idx": 1,
+                    "label": "map_1",
+                    "version": 4760,
+                    "enabled_plan_count": 1,
+                },
+            ],
+        },
+        "schedules": [
+            {
+                "idx": -1,
+                "label": "default",
+                "version": 31345,
+                "enabled_plan_count": 1,
+                "plan_count": 1,
+            },
+            {
+                "idx": 0,
+                "label": "map_0",
+                "version": 19383,
+                "enabled_plan_count": 1,
+                "plan_count": 1,
+            },
+            {
+                "idx": 1,
+                "label": "map_1",
+                "version": 4760,
+                "enabled_plan_count": 1,
+                "plan_count": 1,
+            },
+        ],
+        "error_count": 0,
     }
