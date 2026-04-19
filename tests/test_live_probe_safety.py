@@ -336,6 +336,13 @@ def test_task_status_sample_summary_tracks_state_and_task_changes() -> None:
     assert summary["error_active"] is True
     assert summary["error_changed"] is True
     assert summary["service_5_values"] == {"5.106": ["6", "7"]}
+    assert summary["service_5_latest"] == {"5.106": "7"}
+    assert summary["service_5_cluster_samples"] == [
+        {"5.106": "6"},
+        {"5.106": "7"},
+    ]
+    assert summary["service_5_changed"] is True
+    assert summary["service_5_changed_keys"] == ["5.106"]
     assert summary["unknown_non_empty_keys"] == ["5.106"]
     assert summary["unknown_values"] == {"5.106": ["6", "7"]}
 
@@ -383,6 +390,24 @@ def test_task_status_change_detection_uses_state_or_task_status() -> None:
     ]
 
     assert task_samples_changed(samples) is True
+
+    service5_only_samples = [
+        {
+            "entries": [
+                {"key": "2.1", "value": "1"},
+                {"key": "5.106", "value": "6"},
+            ]
+        },
+        {
+            "entries": [
+                {"key": "2.1", "value": "1"},
+                {"key": "5.106", "value": "7"},
+            ]
+        },
+    ]
+
+    assert task_samples_changed(service5_only_samples) is False
+    assert task_samples_changed(service5_only_samples, include_service_5=True) is True
     assert task_samples_changed(samples[:1]) is False
 
 

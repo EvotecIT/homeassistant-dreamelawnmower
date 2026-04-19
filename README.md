@@ -321,6 +321,19 @@ Optional:
 - the returned `summary` groups non-empty keys, unknown non-empty keys, decoded-label sources, value-type counts, and map-candidate payloads
 - non-empty values are shown by default; pass `--all` to include empty key-only responses
 
+For repeated live task/status samples, use:
+
+```bash
+python examples/task_status_probe.py --samples 6 --interval 10 --out task-status-live.json
+```
+
+The task probe watches the app state (`2.1`), mower error (`2.2`), task object
+(`2.50`), device time (`2.51`), battery (`3.1`), and the currently unknown
+service-5 discovery cluster (`5.104` through `5.107`). Add
+`--stop-on-change` to stop when state/task changes, or combine it with
+`--stop-on-service5-change` to also stop when those unknown service-5 values
+change.
+
 This is still experimental and read-only. The integration exposes disabled-by-default `camera` entities named `Map` and `Map Diagnostics`. `Map` returns a rendered JPEG from the app-map source when available, or a valid placeholder image. Its attributes include `map_source`, `map_id`, dimensions, segment counts, path-point counts, `spot_area_count`, and `no_go_area_count`. In the confirmed A2 app payload, `spot` means spot-mowing areas; it is not a no-go zone list. `Map Diagnostics` returns a readable JPEG diagnostics card and keeps the structured map view in entity attributes so Home Assistant no longer tries to render JSON as a broken camera preview.
 
 The disabled-by-default `All Maps` camera renders a contact sheet from every

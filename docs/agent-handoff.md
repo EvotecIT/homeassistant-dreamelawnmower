@@ -479,6 +479,12 @@ Read-only task/status transition watcher:
 python examples\task_status_probe.py --samples 120 --interval 15 --stop-on-change --out task-status-transition.json
 ```
 
+Add `--stop-on-service5-change` when you also want the watcher to stop on the
+unknown service-5 discovery cluster (`5.104` through `5.107`). The summary keeps
+`service_5_latest`, `service_5_cluster_samples`, `service_5_changed`, and
+`service_5_changed_keys` so these values can be compared across mowing,
+charging, rain, and error states without assigning unverified labels.
+
 Firmware evidence probe:
 
 ```powershell

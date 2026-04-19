@@ -23,6 +23,7 @@ TASK_STATUS_KEYS = (
     "5.106",
     "5.107",
 )
+SERVICE_5_KEYS = tuple(key for key in TASK_STATUS_KEYS if key.startswith("5."))
 
 
 def _unique_values(values: list[Any]) -> list[Any]:
@@ -92,14 +93,26 @@ def summarize_task_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
         if (error := _error_summary(_entry_by_key(sample, "2.2"))) is not None
     ]
     service_5_values: dict[str, list[Any]] = {}
-    for key in TASK_STATUS_KEYS:
-        if not key.startswith("5."):
-            continue
+    service_5_cluster_samples: list[dict[str, Any]] = []
+    for key in SERVICE_5_KEYS:
         service_5_values[key] = [
             _entry_value(entry)
             for sample in samples
             if isinstance(entry := _entry_by_key(sample, key), dict)
         ]
+    for sample in samples:
+        cluster = {
+            key: _entry_value(entry)
+            for key in SERVICE_5_KEYS
+            if isinstance(entry := _entry_by_key(sample, key), dict)
+        }
+        if cluster:
+            service_5_cluster_samples.append(cluster)
+    service_5_changed_keys = [
+        key
+        for key, values in service_5_values.items()
+        if len(_unique_values(values)) > 1
+    ]
     unknown_keys: list[str] = []
     unknown_values: dict[str, list[Any]] = {}
     for sample in samples:
@@ -133,6 +146,12 @@ def summarize_task_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
             for key, values in service_5_values.items()
             if values
         },
+        "service_5_latest": service_5_cluster_samples[-1]
+        if service_5_cluster_samples
+        else {},
+        "service_5_cluster_samples": _unique_values(service_5_cluster_samples),
+        "service_5_changed": bool(service_5_changed_keys),
+        "service_5_changed_keys": service_5_changed_keys,
         "unknown_non_empty_keys": unknown_keys,
         "unknown_values": {
             key: _unique_values(values) for key, values in unknown_values.items()
@@ -142,10 +161,18 @@ def summarize_task_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def task_samples_changed(samples: list[dict[str, Any]]) -> bool:
+def task_samples_changed(
+    samples: list[dict[str, Any]],
+    *,
+    include_service_5: bool = False,
+) -> bool:
     """Return whether repeated samples show a mower state or task-status change."""
     summary = summarize_task_samples(samples)
-    return bool(summary["state_changed"] or summary["task_status_changed"])
+    return bool(
+        summary["state_changed"]
+        or summary["task_status_changed"]
+        or (include_service_5 and summary["service_5_changed"])
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -184,6 +211,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--stop-on-change",
         action="store_true",
         help="Stop after mower state or task status changes.",
+    )
+    parser.add_argument(
+        "--stop-on-service5-change",
+        action="store_true",
+        help="Also stop when the unknown service-5 discovery cluster changes.",
     )
     parser.add_argument(
         "--min-samples",
@@ -253,12 +285,21 @@ async def main() -> None:
             if (
                 args.stop_on_change
                 and len(samples) >= args.min_samples
-                and task_samples_changed(samples)
+                and task_samples_changed(
+                    samples,
+                    include_service_5=args.stop_on_service5_change,
+                )
             ):
                 break
             if index + 1 < args.samples:
                 await asyncio.sleep(max(args.interval, 0))
 
+        summary = summarize_task_samples(samples)
+        state_or_task_changed = task_samples_changed(samples)
+        any_tracked_change = task_samples_changed(
+            samples,
+            include_service_5=args.stop_on_service5_change,
+        )
         output = {
             "device": devices[args.device_index].title,
             "keys": keys,
@@ -266,9 +307,18 @@ async def main() -> None:
             "sample_count": len(samples),
             "interval": args.interval,
             "stop_on_change": args.stop_on_change,
-            "stopped_on_change": task_samples_changed(samples),
+            "stop_on_service5_change": args.stop_on_service5_change,
+            "stopped_on_change": any_tracked_change,
+            "state_or_task_change_detected": state_or_task_changed,
+            "service_5_change_detected": bool(summary["service_5_changed"]),
+            "stopped_on_service5_change": bool(
+                args.stop_on_change
+                and args.stop_on_service5_change
+                and summary["service_5_changed"]
+                and not state_or_task_changed
+            ),
             "samples": samples,
-            "summary": summarize_task_samples(samples),
+            "summary": summary,
         }
         rendered = json.dumps(output, indent=2, sort_keys=True) + "\n"
         if args.out:
