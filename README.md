@@ -23,6 +23,7 @@ This first implementation is intentionally narrow so it can be validated on real
 - opt-in diagnostic sensors for unknown-property and realtime telemetry counts
 - experimental Python-first map summary and PNG rendering helpers
 - experimental disabled-by-default Home Assistant map camera
+- experimental read-only Python schedule decoder
 - supervised remote-control Home Assistant services for validation
 - start mowing, pause, and dock
 - diagnostics, debug snapshot capture, and HACS-ready repo structure
@@ -176,6 +177,27 @@ reported as spot-mowing areas, while `semantic` is summarized as
 `semantic_count`, `semantic_boundary_point_count`, and `semantic_key_counts`
 without labeling it as no-go or restriction data until more mower captures prove
 the meaning.
+
+## Schedule experiments
+
+The reusable Python client can read mower-native schedules through confirmed
+read-only app commands:
+
+- `async_get_app_schedules()` fetches schedule metadata and decoded schedule plans
+- `SCHDIV2` returns schedule size/version metadata
+- chunked `SCHDDV2` returns schedule JSON
+- `SCHDT` returns the current or next scheduled task window
+
+The quickest focused probe is:
+
+```bash
+python examples/schedule_probe.py --out schedule-probe-current.json
+```
+
+This does not create, enable, disable, or edit schedules. Home Assistant does
+not expose a schedule/calendar entity yet; the current UI-facing support is
+still only the diagnostic `Scheduled Task` binary sensor while a scheduled task
+is reported active.
 
 If you want to probe the same cloud endpoints the Dreamehome app exposes for mower discovery and raw properties, use:
 

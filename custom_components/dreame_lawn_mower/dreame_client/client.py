@@ -48,6 +48,12 @@ from .models import (
     remote_control_state_safe,
     snapshot_from_device,
 )
+from .schedule import (
+    EMPTY_SCHEDULE_VERSION,
+    SCHEDULE_CHUNK_SIZE,
+    decode_schedule_payload_text,
+    schedule_task_summary,
+)
 
 REMOTE_CONTROL_MAX_ROTATION = 1000
 REMOTE_CONTROL_MAX_VELOCITY = 1000
@@ -354,6 +360,21 @@ class DreameLawnMowerClient:
             self._sync_refresh_map_view,
             timeout,
             interval,
+        )
+
+    async def async_get_app_schedules(
+        self,
+        *,
+        include_raw: bool = False,
+        map_indices: Sequence[int] | None = None,
+        chunk_size: int = SCHEDULE_CHUNK_SIZE,
+    ) -> dict[str, Any]:
+        """Return read-only mower schedules from the app action protocol."""
+        return await asyncio.to_thread(
+            self._sync_get_app_schedules,
+            include_raw,
+            map_indices,
+            chunk_size,
         )
 
     async def async_get_cloud_device_info(
@@ -1356,6 +1377,146 @@ class DreameLawnMowerClient:
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
 
+    def _sync_get_app_schedules(
+        self,
+        include_raw: bool = False,
+        map_indices: Sequence[int] | None = None,
+        chunk_size: int = SCHEDULE_CHUNK_SIZE,
+    ) -> dict[str, Any]:
+        """Fetch and decode mower schedules through read-only app actions."""
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be greater than zero.")
+
+        result: dict[str, Any] = {
+            "source": "app_action_schedule",
+            "available": False,
+            "current_task": None,
+            "schedules": [],
+            "errors": [],
+        }
+
+        try:
+            task_result = self._sync_call_app_action(
+                {"m": "g", "t": "SCHDT", "d": {"t": 0}}
+            )
+            result["raw_current_task"] = _json_safe(task_result, max_depth=4)
+            task_data = _app_action_data(task_result)
+            result["current_task"] = schedule_task_summary(task_data)
+        except Exception as err:  # noqa: BLE001 - schedule task is diagnostic
+            result["errors"].append({"stage": "current_task", "error": str(err)})
+
+        for map_index in self._app_schedule_map_indices(map_indices):
+            schedule_result: dict[str, Any] = {
+                "idx": map_index,
+                "label": "default" if map_index == -1 else f"map_{map_index}",
+                "available": False,
+            }
+            try:
+                info_result = self._sync_call_app_action(
+                    {"m": "g", "t": "SCHDIV2", "d": {"i": map_index}}
+                )
+                schedule_result["raw_info"] = _json_safe(info_result, max_depth=4)
+                info = _app_action_data(info_result)
+                if not isinstance(info, Mapping):
+                    raise DreameLawnMowerConnectionError(
+                        "SCHDIV2 returned invalid schedule metadata."
+                    )
+                size = _positive_int(info.get("l"))
+                version = _positive_int(info.get("v"))
+                schedule_result["size"] = size
+                schedule_result["version"] = version
+                if not size or version is None or version == EMPTY_SCHEDULE_VERSION:
+                    schedule_result["plans"] = []
+                    result["schedules"].append(schedule_result)
+                    continue
+
+                payload_text, chunk_count, offset = self._sync_get_app_schedule_text(
+                    size=size,
+                    version=version,
+                    chunk_size=chunk_size,
+                )
+                plans = decode_schedule_payload_text(payload_text)
+                schedule_result.update(
+                    {
+                        "available": bool(plans),
+                        "chunk_count": chunk_count,
+                        "downloaded_size": offset,
+                        "plan_count": len(plans),
+                        "enabled_plan_count": sum(
+                            1 for plan in plans if plan.get("enabled")
+                        ),
+                        "plans": plans,
+                    }
+                )
+                if include_raw:
+                    schedule_result["raw_text"] = payload_text
+                if plans:
+                    result["available"] = True
+            except Exception as err:  # noqa: BLE001 - keep probing other maps
+                schedule_result["error"] = str(err)
+                result["errors"].append(
+                    {"idx": map_index, "stage": "schedule", "error": str(err)}
+                )
+            result["schedules"].append(schedule_result)
+
+        return result
+
+    def _sync_get_app_schedule_text(
+        self,
+        *,
+        size: int,
+        version: int,
+        chunk_size: int = SCHEDULE_CHUNK_SIZE,
+    ) -> tuple[str, int, int]:
+        chunks = bytearray()
+        offset = 0
+        chunk_count = 0
+        while offset < size:
+            request_size = min(chunk_size, size - offset)
+            chunk_result = self._sync_call_app_action(
+                {
+                    "m": "g",
+                    "t": "SCHDDV2",
+                    "d": {"s": offset, "l": request_size, "v": version},
+                }
+            )
+            data = _app_action_data(chunk_result)
+            if not isinstance(data, Mapping) or "d" not in data:
+                raise DreameLawnMowerConnectionError(
+                    f"SCHDDV2 returned invalid chunk at offset {offset}."
+                )
+            text = str(data.get("d") or "")
+            encoded = text.encode("utf-8")
+            returned_size = _positive_int(data.get("l"))
+            if not encoded:
+                raise DreameLawnMowerConnectionError(
+                    f"SCHDDV2 returned empty data at offset {offset}."
+                )
+            if len(chunks) + len(encoded) > size:
+                raise DreameLawnMowerConnectionError(
+                    f"SCHDDV2 returned too much data at offset {offset}."
+                )
+            chunks.extend(encoded)
+            offset += returned_size if returned_size else len(encoded)
+            chunk_count += 1
+        return chunks.decode("utf-8"), chunk_count, offset
+
+    def _app_schedule_map_indices(
+        self,
+        map_indices: Sequence[int] | None,
+    ) -> list[int]:
+        if map_indices is not None:
+            return _dedupe_ints(map_indices)
+        try:
+            map_list_result = self._sync_call_app_action({"m": "g", "t": "MAPL"})
+            detected = [
+                entry["idx"]
+                for entry in _normalize_app_map_entries(map_list_result)
+            ]
+        except Exception:  # noqa: BLE001 - fall back to the two app schedule slots
+            detected = [0, 1]
+        return _dedupe_ints([-1, *detected])
+
     def _sync_get_app_maps(
         self,
         chunk_size: int = 400,
@@ -2144,6 +2305,26 @@ def _validate_app_map_chunk_size(value: int) -> int:
     if value <= 0:
         raise ValueError("chunk_size must be greater than zero")
     return value
+
+
+def _positive_int(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
+
+
+def _dedupe_ints(values: Sequence[int]) -> list[int]:
+    result: list[int] = []
+    for value in values:
+        parsed = _positive_int(value)
+        if parsed is None and value != -1:
+            continue
+        parsed = -1 if value == -1 else parsed
+        if parsed not in result:
+            result.append(parsed)
+    return result
 
 
 def _app_action_data(value: Any) -> Any:

@@ -3,7 +3,7 @@
 This file is for future coding sessions after context is cleared. It captures
 the current project state, live-device findings, safe commands, and known gaps.
 
-Last updated: 2026-04-18
+Last updated: 2026-04-19
 
 ## Current State
 
@@ -72,6 +72,16 @@ Last updated: 2026-04-18
   probe output. Direct HTTP GETs against the tested generated URLs returned
   404 XML, so treat 3D objects as metadata-only until a downloadable path is
   confirmed.
+- Mower-native schedule retrieval now works through read-only app action
+  commands recovered from the downloaded Dreamehome plugin: `SCHDIV2`,
+  chunked `SCHDDV2`, and `SCHDT`.
+- A live A2 schedule probe on 2026-04-19 decoded default/map schedule slots.
+  Map `0` reported version `19383`, one enabled all-area mowing plan, and a
+  task window from `10:58` to `20:57`; `SCHDT` returned `[658, 1257, 0, 19383]`
+  matching that plan/version.
+- `examples/schedule_probe.py` provides the focused read-only schedule probe.
+  By default it omits raw schedule JSON; `--include-raw` is opt-in for parser
+  work and should remain in ignored local files.
 - Config-flow auth failures are classified into non-secret Home Assistant
   errors for account type, region, connectivity, generic auth, 2FA, and no
   matching mower devices.
@@ -121,6 +131,7 @@ the workspace after live tests:
 - `property-scan-*.json`
 - `property-scan-*.txt`
 - `remote-control-current.json`
+- `schedule-probe-current.json`
 - `apk-scan*.json`
 - `asset-scan*.json`
 
@@ -190,6 +201,20 @@ $env:DREAME_MAP_OUTPUT = 'dreame-map-current.png'
 python examples\map_client.py
 ```
 
+Focused schedule probe without raw schedule JSON:
+
+```powershell
+$env:DREAME_USERNAME = [Environment]::GetEnvironmentVariable('DREAME_USERNAME','User')
+$env:DREAME_PASSWORD = [Environment]::GetEnvironmentVariable('DREAME_PASSWORD','User')
+$env:DREAME_COUNTRY = [Environment]::GetEnvironmentVariable('DREAME_COUNTRY','User')
+$env:DREAME_ACCOUNT_TYPE = [Environment]::GetEnvironmentVariable('DREAME_ACCOUNT_TYPE','User')
+python examples\schedule_probe.py --out schedule-probe-current.json
+```
+
+Only use `--include-raw` for local parser work. It includes the raw schedule
+JSON and should stay in ignored local files. Do not call write-side schedule
+commands until the read-only parser has more fixtures.
+
 Broad read-only property scan:
 
 ```powershell
@@ -257,3 +282,5 @@ credentials into repo files.
   downloaded or decoded yet.
 - Keep the map camera/entity disabled by default until the renderer has stable
   fixtures from more mower states and models.
+- Add a Home Assistant schedule/calendar surface only after the read-only
+  schedule parser has more fixtures and clear UX for multi-map schedule slots.

@@ -122,6 +122,7 @@ Definition of done:
 Why this matters:
 
 - users want garage-door, dock, and return-home automations
+- scheduled mowing visibility lets users coordinate automations before the mower leaves the dock
 - those automations only work when `activity`, `state`, and raw flags are understandable and stable
 
 Targets:
@@ -140,6 +141,9 @@ Checklist:
 - [x] add friendly error text plus raw vendor error text where both exist
 - [x] document example Home Assistant automations for garage-door workflows
 - [x] add fixture-based tests for paused, returning, docked, charging, and fault transitions
+- [x] recover and validate read-only app schedule retrieval through `SCHDIV2`, `SCHDDV2`, and `SCHDT`
+- [x] add a Python-side read-only schedule probe and parser tests
+- [ ] expose a Home Assistant schedule or calendar surface after more schedule fixtures
 - [ ] keep adding fixture-based tests for idle and recovery transitions as captures become available
 
 Definition of done:

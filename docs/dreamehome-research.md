@@ -104,6 +104,36 @@ Confirmed getter payloads:
 Do not call the plugin's `uploadMap` action from automated probes. It uses an
 action-style payload (`m:"a"`) and can change device state.
 
+## Confirmed mower schedule commands
+
+The downloaded model plugin also exposes a schedule API through the same
+`siid=2`, `aiid=50` app action bridge. Confirmed read-only getter payloads:
+
+- `{"m":"g","t":"SCHDIV2","d":{"i":0}}` returns schedule metadata for a map:
+  index `i`, payload length `l`, and version `v`.
+- `{"m":"g","t":"SCHDDV2","d":{"s":0,"l":100,"v":19383}}` returns a chunk of
+  schedule JSON for the requested version.
+- `{"m":"g","t":"SCHDT","d":{"t":0}}` returns the current or next scheduled task
+  window as minute-of-day start/end values plus plan/version identifiers.
+
+The write-side commands also exist in the bundle but are intentionally not used
+by this repo yet: `SCHDIV2` with `m:"s"` prepares an update, `SCHDDV2` with
+`m:"s"` uploads schedule chunks, and `SCHDSV2` changes enabled schedule status.
+
+On 2026-04-19, a live A2 read-only schedule probe confirmed:
+
+- default schedule slot `-1`: length `79`, version `31345`, one enabled plan.
+- map `0`: length `96`, version `19383`, one enabled all-area mowing plan with
+  a task window `10:58` to `20:57`.
+- map `1`: length `96`, version `4760`, one enabled all-area mowing plan with a
+  task window `10:00` to `21:01`.
+- `SCHDT` returned `[658, 1257, 0, 19383]`, matching map `0` plan `0` and the
+  `10:58` to `20:57` task window.
+
+The schedule payload stores task days in a base64 binary block. The app decodes
+that block into `plan_id`, `enabled`, `name`, `weeks`, and per-day task entries
+with minute-of-day start/end values, type, cyclic flag, and optional regions.
+
 ## First live probe result
 
 A live A2 probe through the new Python helper confirmed that:
