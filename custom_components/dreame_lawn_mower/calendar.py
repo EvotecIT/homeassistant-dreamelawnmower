@@ -10,6 +10,7 @@ from typing import Any
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
@@ -29,7 +30,12 @@ async def async_setup_entry(
 ) -> None:
     """Set up mower schedule calendar."""
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([DreameLawnMowerScheduleCalendar(coordinator)])
+    async_add_entities(
+        [
+            DreameLawnMowerScheduleCalendar(coordinator),
+            DreameLawnMowerAllSchedulesCalendar(coordinator),
+        ]
+    )
 
 
 class DreameLawnMowerScheduleCalendar(DreameLawnMowerEntity, CalendarEntity):
@@ -37,10 +43,12 @@ class DreameLawnMowerScheduleCalendar(DreameLawnMowerEntity, CalendarEntity):
 
     _attr_name = "Schedule"
     _attr_icon = "mdi:calendar-clock"
+    _include_all_schedules = False
+    _unique_id_suffix = "schedule_calendar"
 
     def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = f"{self._descriptor.unique_id}_schedule_calendar"
+        self._attr_unique_id = f"{self._descriptor.unique_id}_{self._unique_id_suffix}"
         self._cached_event: CalendarEvent | None = None
         self._cached_event_count: int | None = None
         self._cached_selection: dict[str, Any] | None = None
@@ -91,16 +99,31 @@ class DreameLawnMowerScheduleCalendar(DreameLawnMowerEntity, CalendarEntity):
             _LOGGER.debug("Failed to fetch mower schedules: %s", err)
             return []
         self._last_error = None
-        self._cached_selection = schedule_calendar_selection(payload)
+        self._cached_selection = schedule_calendar_selection(
+            payload,
+            include_all_schedules=self._include_all_schedules,
+        )
         events = schedule_calendar_events(
             payload,
             start_date,
             end_date,
+            include_all_schedules=self._include_all_schedules,
             mower_name=self._descriptor.name,
         )
         self._cached_event_count = len(events)
         self._cached_event = events[0] if events else None
         return events
+
+
+class DreameLawnMowerAllSchedulesCalendar(DreameLawnMowerScheduleCalendar):
+    """Disabled-by-default calendar that includes every decoded schedule slot."""
+
+    _attr_name = "All Schedules"
+    _attr_icon = "mdi:calendar-multiple"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+    _include_all_schedules = True
+    _unique_id_suffix = "all_schedules_calendar"
 
 
 def schedule_calendar_events(

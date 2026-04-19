@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from custom_components.dreame_lawn_mower.calendar import (
+    DreameLawnMowerAllSchedulesCalendar,
     schedule_calendar_attributes,
     schedule_calendar_events,
     schedule_calendar_selection,
@@ -147,6 +148,20 @@ def test_schedule_calendar_events_prefer_current_task_version() -> None:
     )
 
     assert [event.start.hour for event in all_events] == [8, 10, 10]
+
+
+def test_all_schedules_calendar_is_diagnostic_disabled_by_default() -> None:
+    assert DreameLawnMowerAllSchedulesCalendar._include_all_schedules is True
+    assert (
+        DreameLawnMowerAllSchedulesCalendar.__dict__["__attr_entity_category"]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerAllSchedulesCalendar.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
+    )
 
 
 def test_schedule_calendar_selection_explains_active_version_filter() -> None:

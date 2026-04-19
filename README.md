@@ -238,6 +238,9 @@ Home Assistant now exposes a read-only `Schedule` calendar entity backed by the
 same app schedule commands. Calendar event queries fetch current app schedule
 data on demand, and the diagnostic `Scheduled Task` binary sensor still reports
 whether the mower says a scheduled task is currently active.
+A disabled-by-default diagnostic `All Schedules` calendar shows every decoded
+default and per-map schedule slot. Keep normal automations on `Schedule`; enable
+`All Schedules` only when investigating hidden/default/other-map plans.
 A disabled-by-default diagnostic `Capture Schedule Probe` button can log decoded
 schedule JSON from Home Assistant without including raw schedule payload text.
 The same press updates the disabled-by-default diagnostic sensor

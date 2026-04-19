@@ -150,6 +150,9 @@ The Python encoder round-trips the known live-shaped schedule payloads and can
 build full upload request chunks, but full schedule editing is not exposed yet.
 Home Assistant exposes decoded enabled plans through a read-only calendar
 entity; calendar queries fetch the app schedule data on demand.
+The normal calendar filters to the active `SCHDT` schedule version when present.
+A disabled-by-default diagnostic `All Schedules` calendar includes every decoded
+default and per-map schedule slot for investigation.
 
 ## Observed app mower preferences
 

@@ -175,6 +175,10 @@ Last updated: 2026-04-19
 - Home Assistant now has a read-only `Schedule` calendar entity. Calendar
   event queries call the app schedule reader on demand and convert enabled
   per-map plans into local scheduled mowing events.
+- Home Assistant also has a disabled-by-default diagnostic `All Schedules`
+  calendar that sets the same all-schedule mode as the preview tool. It is
+  meant for explaining hidden default/other-map slots, while the normal
+  `Schedule` calendar remains the automation-friendly active-version view.
 - A disabled-by-default `Capture Schedule Probe` diagnostic button logs decoded
   schedules from Home Assistant without raw schedule payload text. It also
   adds `schedule_selection`, so the button log explains which schedule version
