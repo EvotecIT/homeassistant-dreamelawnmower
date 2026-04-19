@@ -98,6 +98,11 @@ def test_message_callback_tracks_realtime_properties_and_unmapped_pairs() -> Non
             "params": [
                 {"siid": 3, "piid": 1, "value": 80},
                 {"siid": 1, "piid": 4, "value": [206, 0, 206]},
+                {
+                    "siid": 2,
+                    "piid": 50,
+                    "value": '{"d":{"exe":true,"o":6,"status":true},"t":"TASK"}',
+                },
                 {"siid": 9, "piid": 4, "value": {"blob": 123}},
             ],
         },
@@ -112,6 +117,7 @@ def test_message_callback_tracks_realtime_properties_and_unmapped_pairs() -> Non
     )
     assert device.realtime_properties["1.4"]["property_name"] == "runtime_status_blob"
     assert device.realtime_properties["1.4"]["value"] == [206, 0, 206]
+    assert device.realtime_properties["2.50"]["property_name"] == "task_status"
     assert device.realtime_properties["9.4"]["property_name"] == "UNKNOWN_REALTIME_9.4"
     assert device.realtime_properties["9.4"]["value"] == {"blob": 123}
     assert device.last_realtime_message is not None

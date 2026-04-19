@@ -17,7 +17,9 @@ from .app_protocol import (
     MOWER_RAW_STATUS_PROPERTY_KEY,
     MOWER_RUNTIME_STATUS_PROPERTY_KEY,
     MOWER_STATE_PROPERTY_KEY,
+    MOWER_TASK_PROPERTY_KEY,
     decode_mower_status_blob,
+    decode_mower_task_status,
     key_definition_label,
     mower_error_label,
     mower_state_label,
@@ -2282,6 +2284,10 @@ class DreameLawnMowerClient:
             status_blob = decode_mower_status_blob(value)
             if status_blob is not None:
                 rendered["status_blob"] = status_blob.as_dict()
+        elif key == MOWER_TASK_PROPERTY_KEY:
+            task_status = decode_mower_task_status(value)
+            if task_status is not None:
+                rendered["task_status"] = task_status
 
         blob_preview = cls._property_value_blob_preview(value)
         if blob_preview is not None:
@@ -2932,6 +2938,9 @@ def _operation_property_summary(
         if key_text in status_blob_keys:
             decoded = decode_mower_status_blob(property_value, source="operation")
             status_blob = decoded.as_dict() if decoded is not None else None
+        task_status = None
+        if key_text == MOWER_TASK_PROPERTY_KEY:
+            task_status = decode_mower_task_status(property_value)
 
         entries.append(
             {
@@ -2943,6 +2952,7 @@ def _operation_property_summary(
                 "value_type": value_type,
                 "value_preview": _operation_short_preview(property_value),
                 "status_blob": status_blob,
+                "task_status": task_status,
             }
         )
 

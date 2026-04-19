@@ -6,6 +6,7 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
     DreameLawnMowerDescriptor,
     decode_mower_status_blob,
+    decode_mower_task_status,
     key_definition_label,
 )
 
@@ -256,6 +257,37 @@ def test_property_annotations_mark_runtime_status_blob_frame() -> None:
     assert entry["value_bytes_len"] == 33
     assert entry["status_blob"]["frame_valid"] is True
     assert entry["status_blob"]["notes"] == ("unexpected_length",)
+
+
+def test_task_status_decoder_keeps_obvious_task_fields() -> None:
+    decoded = decode_mower_task_status(
+        '{"d":{"exe":true,"o":6,"status":true},"t":"TASK"}'
+    )
+
+    assert decoded == {
+        "type": "TASK",
+        "executing": True,
+        "status": True,
+        "operation": 6,
+    }
+
+
+def test_property_annotations_decode_task_status_property() -> None:
+    entry = DreameLawnMowerClient._annotate_cloud_property_entry(
+        {
+            "key": "2.50",
+            "value": '{"d":{"exe":true,"o":6,"status":true},"t":"TASK"}',
+        },
+        language="en",
+    )
+
+    assert entry["property_hint"] == "task_status"
+    assert entry["task_status"] == {
+        "type": "TASK",
+        "executing": True,
+        "status": True,
+        "operation": 6,
+    }
 
 
 def test_scan_cloud_properties_returns_summary_with_dynamic_labels() -> None:

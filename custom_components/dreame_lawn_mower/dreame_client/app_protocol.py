@@ -12,11 +12,17 @@ MOWER_RAW_STATUS_PROPERTY_KEY: Final[str] = "1.1"
 MOWER_RUNTIME_STATUS_PROPERTY_KEY: Final[str] = "1.4"
 MOWER_STATE_PROPERTY_KEY: Final[str] = "2.1"
 MOWER_ERROR_PROPERTY_KEY: Final[str] = "2.2"
+MOWER_TASK_PROPERTY_KEY: Final[str] = "2.50"
+MOWER_TIME_PROPERTY_KEY: Final[str] = "2.51"
+MOWER_BATTERY_PROPERTY_KEY: Final[str] = "3.1"
 MOWER_PROPERTY_HINTS: Final[dict[str, str]] = {
     MOWER_RAW_STATUS_PROPERTY_KEY: "raw_status_blob",
     MOWER_RUNTIME_STATUS_PROPERTY_KEY: "runtime_status_blob",
     MOWER_STATE_PROPERTY_KEY: "mower_state",
     MOWER_ERROR_PROPERTY_KEY: "mower_error",
+    MOWER_TASK_PROPERTY_KEY: "task_status",
+    MOWER_TIME_PROPERTY_KEY: "device_time",
+    MOWER_BATTERY_PROPERTY_KEY: "battery_level",
 }
 MOWER_STATE_LABELS: Final[dict[str, dict[str, str]]] = {
     "en": {
@@ -81,6 +87,34 @@ def mower_error_label(value: object) -> str | None:
         return _clean_label(ERROR_CODE_TO_ERROR_NAME.get(enum_value))
     except (ImportError, ValueError):
         return None
+
+
+def decode_mower_task_status(value: object) -> dict[str, object] | None:
+    """Return a compact structure for app task-status property `2.50`."""
+    raw = value
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(raw, Mapping):
+        return None
+
+    data = raw.get("d")
+    if not isinstance(data, Mapping):
+        data = {}
+
+    result: dict[str, object] = {}
+    task_type = raw.get("t")
+    if task_type is not None:
+        result["type"] = str(task_type)
+    if "exe" in data:
+        result["executing"] = bool(data.get("exe"))
+    if "status" in data:
+        result["status"] = bool(data.get("status"))
+    if "o" in data:
+        result["operation"] = data.get("o")
+    return result or None
 
 
 def key_definition_label(

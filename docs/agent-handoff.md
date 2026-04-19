@@ -49,6 +49,11 @@ Last updated: 2026-04-19
 - The same live mowing run surfaced realtime key `1.4` as a framed 33-byte
   runtime blob. It is now labeled `runtime_status_blob` and decoded as framed
   evidence, but its byte meanings are still unknown.
+- Focused live property scans during mowing confirmed more app-protocol keys:
+  `2.50` is a task-status object such as
+  `{"t":"TASK","d":{"exe":true,"status":true,"o":6}}`, `2.51` is the device
+  time/tz payload, and `3.1` mirrors the battery level. `2.50` is now decoded
+  conservatively as `type`, `executing`, `status`, and `operation`.
 - A read-only operation snapshot on 2026-04-18 collected `before` and `final`
   captures without movement. The mower stayed docked at `charging_completed`
   with battery 100%, manual-drive state safety was true, remote-control support
@@ -386,6 +391,9 @@ credentials into repo files.
   evidence suggests `1.1` byte `11` is battery-like and byte `17` changes
   during mowing. Realtime key `1.4` is a 33-byte runtime blob whose frame is
   valid but whose byte meanings are still unproven.
+- Keep sampling task/status properties across transitions. During mowing,
+  `2.50` remained `TASK` with `executing=true`, `status=true`, and operation
+  `6`; `5.106` still appears as an unknown numeric value.
 - Add a Home Assistant schedule/calendar surface only after the read-only
   schedule parser has more fixtures and clear UX for multi-map schedule slots.
 - Validate schedule enable/disable writes live before exposing Home Assistant

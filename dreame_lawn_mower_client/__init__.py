@@ -38,6 +38,9 @@ MOWER_ERROR_PROPERTY_KEY = _app_protocol.MOWER_ERROR_PROPERTY_KEY
 MOWER_PROPERTY_HINTS = _app_protocol.MOWER_PROPERTY_HINTS
 MOWER_RAW_STATUS_PROPERTY_KEY = _app_protocol.MOWER_RAW_STATUS_PROPERTY_KEY
 MOWER_RUNTIME_STATUS_PROPERTY_KEY = _app_protocol.MOWER_RUNTIME_STATUS_PROPERTY_KEY
+MOWER_TASK_PROPERTY_KEY = _app_protocol.MOWER_TASK_PROPERTY_KEY
+MOWER_TIME_PROPERTY_KEY = _app_protocol.MOWER_TIME_PROPERTY_KEY
+MOWER_BATTERY_PROPERTY_KEY = _app_protocol.MOWER_BATTERY_PROPERTY_KEY
 CAMERA_PROBE_PROPERTY_KEYS = _camera_probe.CAMERA_PROBE_PROPERTY_KEYS
 MAP_HISTORY_PROPERTY_KEYS = _map_probe.MAP_HISTORY_PROPERTY_KEYS
 MAP_PROBE_PROPERTY_KEYS = _map_probe.MAP_PROBE_PROPERTY_KEYS
@@ -59,6 +62,7 @@ build_schedule_enable_status_request = _schedule.build_schedule_enable_status_re
 build_schedule_upload_requests = _schedule.build_schedule_upload_requests
 find_jadx_executable = _apk_research.find_jadx_executable
 decode_mower_status_blob = _app_protocol.decode_mower_status_blob
+decode_mower_task_status = _app_protocol.decode_mower_task_status
 decode_schedule_payload_text = _schedule.decode_schedule_payload_text
 decode_schedule_plans = _schedule.decode_schedule_plans
 decode_schedule_week_payload = _schedule.decode_schedule_week_payload
@@ -107,6 +111,9 @@ __all__ = [
     "MOWER_PROPERTY_HINTS",
     "MOWER_RAW_STATUS_PROPERTY_KEY",
     "MOWER_RUNTIME_STATUS_PROPERTY_KEY",
+    "MOWER_TASK_PROPERTY_KEY",
+    "MOWER_TIME_PROPERTY_KEY",
+    "MOWER_BATTERY_PROPERTY_KEY",
     "MOWER_STATE_LABELS",
     "MOWER_STATE_PROPERTY_KEY",
     "SCHEDULE_CHUNK_SIZE",
@@ -123,6 +130,7 @@ __all__ = [
     "build_schedule_enable_status_request",
     "build_schedule_upload_requests",
     "decode_mower_status_blob",
+    "decode_mower_task_status",
     "decode_schedule_payload_text",
     "decode_schedule_plans",
     "decode_schedule_week_payload",
