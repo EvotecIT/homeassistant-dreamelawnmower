@@ -94,6 +94,8 @@ Last updated: 2026-04-19
 - Home Assistant now has a read-only `Schedule` calendar entity. Calendar
   event queries call the app schedule reader on demand and convert enabled
   per-map plans into local scheduled mowing events.
+- A disabled-by-default `Capture Schedule Probe` diagnostic button logs decoded
+  schedules from Home Assistant without raw schedule payload text.
 - Config-flow auth failures are classified into non-secret Home Assistant
   errors for account type, region, connectivity, generic auth, 2FA, and no
   matching mower devices.

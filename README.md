@@ -217,6 +217,8 @@ Home Assistant now exposes a read-only `Schedule` calendar entity backed by the
 same app schedule commands. Calendar event queries fetch current app schedule
 data on demand, and the diagnostic `Scheduled Task` binary sensor still reports
 whether the mower says a scheduled task is currently active.
+A disabled-by-default diagnostic `Capture Schedule Probe` button can log decoded
+schedule JSON from Home Assistant without including raw schedule payload text.
 
 If you want to probe the same cloud endpoints the Dreamehome app exposes for mower discovery and raw properties, use:
 

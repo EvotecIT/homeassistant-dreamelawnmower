@@ -32,6 +32,7 @@ async def async_setup_entry(
             DreameLawnMowerCaptureDebugSnapshotButton(coordinator),
             DreameLawnMowerCaptureOperationSnapshotButton(coordinator),
             DreameLawnMowerCaptureMapProbeButton(coordinator),
+            DreameLawnMowerCaptureScheduleProbeButton(coordinator),
         ]
     )
 
@@ -154,5 +155,43 @@ class DreameLawnMowerCaptureMapProbeButton(
             title="Dreame Lawn Mower Map Probe",
             notification_id=(
                 f"{DOMAIN}_{self.coordinator.entry.entry_id}_map_probe"
+            ),
+        )
+
+
+class DreameLawnMowerCaptureScheduleProbeButton(
+    DreameLawnMowerEntity,
+    ButtonEntity,
+):
+    """Capture and log read-only app schedule diagnostics."""
+
+    _attr_name = "Capture Schedule Probe"
+    _attr_icon = "mdi:calendar-search"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_capture_schedule_probe"
+
+    async def async_press(self) -> None:
+        """Probe read-only app schedules and log the structured result."""
+        payload = await self.coordinator.client.async_get_app_schedules(
+            include_raw=False,
+        )
+        _LOGGER.warning(
+            "Captured Dreame lawn mower schedule probe for %s: %s",
+            self.coordinator.client.descriptor.title,
+            json.dumps(payload, sort_keys=True),
+        )
+        persistent_notification.async_create(
+            self.coordinator.hass,
+            (
+                "Captured a Dreame lawn mower schedule probe. Check the Home "
+                "Assistant logs for decoded schedule JSON."
+            ),
+            title="Dreame Lawn Mower Schedule Probe",
+            notification_id=(
+                f"{DOMAIN}_{self.coordinator.entry.entry_id}_schedule_probe"
             ),
         )

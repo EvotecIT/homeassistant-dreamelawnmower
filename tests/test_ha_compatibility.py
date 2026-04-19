@@ -7,6 +7,9 @@ from PIL import Image
 from custom_components.dreame_lawn_mower.binary_sensor import (
     DreameBinarySensorDescription,
 )
+from custom_components.dreame_lawn_mower.button import (
+    DreameLawnMowerCaptureScheduleProbeButton,
+)
 from custom_components.dreame_lawn_mower.dreame_client.client import (
     DreameLawnMowerClient,
 )
@@ -51,6 +54,19 @@ def test_binary_sensor_description_exposes_ha_compat_fields() -> None:
     assert description.translation_placeholders is None
     assert description.force_update is False
     assert description.unit_of_measurement is None
+
+
+def test_schedule_probe_button_is_diagnostic_disabled_by_default() -> None:
+    assert (
+        DreameLawnMowerCaptureScheduleProbeButton.__dict__["__attr_entity_category"]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerCaptureScheduleProbeButton.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
+    )
 
 
 def test_client_device_property_defaults_to_none() -> None:
