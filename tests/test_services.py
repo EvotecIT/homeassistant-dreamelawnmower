@@ -13,6 +13,7 @@ from custom_components.dreame_lawn_mower.services import (
     SET_SCHEDULE_PLAN_ENABLED_SCHEMA,
     _guard_remote_control_step,
     _guard_schedule_write_request,
+    _schedule_write_notification,
 )
 
 
@@ -114,6 +115,57 @@ def test_schedule_write_guard_allows_dry_run_without_confirmation() -> None:
     )
 
     _guard_schedule_write_request(call)
+
+
+def test_schedule_write_notification_summarizes_dry_run_change() -> None:
+    title, message = _schedule_write_notification(
+        {
+            "executed": False,
+            "changed": True,
+            "map_index": 0,
+            "plan_id": 1,
+            "previous_enabled": False,
+            "enabled": True,
+            "version": 19383,
+            "schedule": {"label": "map_0"},
+            "target_plan": {"name": "Evening trim"},
+            "request": {
+                "m": "s",
+                "t": "SCHDSV2",
+                "d": {"i": 0, "v": 19383, "s": [1, 1]},
+            },
+        }
+    )
+
+    assert title == "Dreame Lawn Mower Schedule Dry Run"
+    assert "Built dry-run schedule enable request for map_0 Evening trim" in message
+    assert "previous=False, target=True (will change), version=19383" in message
+    assert '"t": "SCHDSV2"' in message
+
+
+def test_schedule_write_notification_summarizes_executed_noop() -> None:
+    title, message = _schedule_write_notification(
+        {
+            "executed": True,
+            "changed": False,
+            "map_index": 0,
+            "plan_id": 1,
+            "previous_enabled": False,
+            "enabled": False,
+            "version": 19383,
+            "request": {
+                "m": "s",
+                "t": "SCHDSV2",
+                "d": {"i": 0, "v": 19383, "s": [1, 0]},
+            },
+            "response_data": {"r": 0, "v": 19383},
+        }
+    )
+
+    assert title == "Dreame Lawn Mower Schedule Updated"
+    assert "Sent schedule enable request for map 0 plan 1" in message
+    assert "previous=False, target=False (was already matched)" in message
+    assert 'Response: `{"r": 0, "v": 19383}`' in message
 
 
 def test_remote_control_guard_blocks_active_mower() -> None:

@@ -1538,6 +1538,7 @@ class DreameLawnMowerClient:
             version=version,
             plans=updated_plans,
         )
+        target_enabled = bool(enabled)
         result: dict[str, Any] = {
             "source": "app_action_schedule_write",
             "action": "set_schedule_plan_enabled",
@@ -1546,7 +1547,17 @@ class DreameLawnMowerClient:
             "map_index": map_index,
             "plan_id": plan_id,
             "previous_enabled": previous_enabled,
-            "enabled": bool(enabled),
+            "enabled": target_enabled,
+            "changed": (
+                previous_enabled is not None and previous_enabled != target_enabled
+            ),
+            "schedule": _schedule_entry_overview(schedule),
+            "target_plan": _schedule_plan_overview(
+                updated_plans,
+                plan_id=plan_id,
+                previous_enabled=previous_enabled,
+                enabled=target_enabled,
+            ),
             "version": version,
             "request": request,
         }
@@ -2437,6 +2448,77 @@ def _dedupe_ints(values: Sequence[int]) -> list[int]:
         if parsed not in result:
             result.append(parsed)
     return result
+
+
+def _schedule_entry_overview(schedule: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "idx": schedule.get("idx"),
+        "label": schedule.get("label"),
+        "available": schedule.get("available"),
+        "version": schedule.get("version"),
+        "plan_count": schedule.get("plan_count"),
+        "enabled_plan_count": schedule.get("enabled_plan_count"),
+    }
+
+
+def _schedule_plan_overview(
+    plans: Sequence[Mapping[str, Any]],
+    *,
+    plan_id: int,
+    previous_enabled: bool | None,
+    enabled: bool,
+) -> dict[str, Any]:
+    for plan in plans:
+        if _positive_int(plan.get("plan_id")) != plan_id:
+            continue
+
+        weeks = plan.get("weeks")
+        week_items: list[Mapping[str, Any]] = []
+        if isinstance(weeks, Sequence) and not isinstance(
+            weeks,
+            str | bytes | bytearray,
+        ):
+            week_items = [week for week in weeks if isinstance(week, Mapping)]
+        tasks = [
+            task
+            for week in week_items
+            for task in _schedule_week_tasks(week)
+        ]
+        type_names = sorted(
+            {
+                str(task["type_name"])
+                for task in tasks
+                if task.get("type_name") is not None
+            }
+        )
+        first_task = tasks[0] if tasks else {}
+        return {
+            "plan_id": plan_id,
+            "name": plan.get("name"),
+            "previous_enabled": previous_enabled,
+            "enabled": enabled,
+            "week_count": len(week_items),
+            "task_count": len(tasks),
+            "first_start_time": first_task.get("start_time"),
+            "first_end_time": first_task.get("end_time"),
+            "type_names": type_names,
+        }
+
+    return {
+        "plan_id": plan_id,
+        "previous_enabled": previous_enabled,
+        "enabled": enabled,
+    }
+
+
+def _schedule_week_tasks(week: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    tasks = week.get("tasks")
+    if not isinstance(tasks, Sequence) or isinstance(
+        tasks,
+        str | bytes | bytearray,
+    ):
+        return []
+    return [task for task in tasks if isinstance(task, Mapping)]
 
 
 def _app_action_data(value: Any) -> Any:

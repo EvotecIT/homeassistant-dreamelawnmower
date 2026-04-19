@@ -237,7 +237,9 @@ schedule JSON from Home Assistant without including raw schedule payload text.
 The guarded `dreame_lawn_mower.set_schedule_plan_enabled` service is also
 available for enable/disable testing. It defaults to dry-run and only sends the
 write request when both `execute: true` and `confirm_schedule_write: true` are
-set.
+set. Dry-run and executed notifications include the previous enabled state,
+target state, whether the request changes anything, the schedule version, and
+the exact `SCHDSV2` request payload.
 
 If you want to probe the same cloud endpoints the Dreamehome app exposes for mower discovery and raw properties, use:
 

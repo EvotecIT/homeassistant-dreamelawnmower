@@ -224,22 +224,48 @@ def _notify_schedule_plan_enabled(
     result: dict[str, Any],
 ) -> None:
     """Create a user-visible notification for a schedule write or dry-run."""
-    request = json.dumps(result.get("request"), sort_keys=True)
-    if result.get("executed"):
-        title = "Dreame Lawn Mower Schedule Updated"
-        action = "Sent"
-    else:
-        title = "Dreame Lawn Mower Schedule Dry Run"
-        action = "Built dry-run"
+    title, message = _schedule_write_notification(result)
     persistent_notification.async_create(
         coordinator.hass,
-        (
-            f"{action} schedule enable request for map "
-            f"{result.get('map_index')} plan {result.get('plan_id')} "
-            f"enabled={result.get('enabled')}. Request: `{request}`"
-        ),
+        message,
         title=title,
         notification_id=(
             f"{DOMAIN}_{coordinator.entry.entry_id}_schedule_plan_enabled"
         ),
     )
+
+
+def _schedule_write_notification(result: dict[str, Any]) -> tuple[str, str]:
+    """Return title and message for a schedule write result notification."""
+    request = json.dumps(result.get("request"), sort_keys=True)
+    schedule = result.get("schedule")
+    target_plan = result.get("target_plan")
+    schedule_label = (
+        schedule.get("label")
+        if isinstance(schedule, dict)
+        else f"map {result.get('map_index')}"
+    )
+    plan_name = (
+        target_plan.get("name")
+        if isinstance(target_plan, dict) and target_plan.get("name")
+        else f"plan {result.get('plan_id')}"
+    )
+    change_text = "will change" if result.get("changed") else "already matched"
+    if result.get("executed"):
+        title = "Dreame Lawn Mower Schedule Updated"
+        action = "Sent"
+        change_text = "changed" if result.get("changed") else "was already matched"
+    else:
+        title = "Dreame Lawn Mower Schedule Dry Run"
+        action = "Built dry-run"
+
+    message = (
+        f"{action} schedule enable request for {schedule_label} {plan_name}: "
+        f"previous={result.get('previous_enabled')}, "
+        f"target={result.get('enabled')} ({change_text}), "
+        f"version={result.get('version')}. Request: `{request}`"
+    )
+    if result.get("executed") and result.get("response_data") is not None:
+        response = json.dumps(result.get("response_data"), sort_keys=True)
+        message = f"{message} Response: `{response}`"
+    return title, message

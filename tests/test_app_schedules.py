@@ -232,6 +232,27 @@ def test_set_app_schedule_plan_enabled_builds_dry_run_request() -> None:
     assert result["dry_run"] is True
     assert result["executed"] is False
     assert result["previous_enabled"] is False
+    assert result["enabled"] is True
+    assert result["changed"] is True
+    assert result["schedule"] == {
+        "idx": 0,
+        "label": "map_0",
+        "available": True,
+        "version": 19383,
+        "plan_count": 2,
+        "enabled_plan_count": 1,
+    }
+    assert result["target_plan"] == {
+        "plan_id": 1,
+        "name": "",
+        "previous_enabled": False,
+        "enabled": True,
+        "week_count": 0,
+        "task_count": 0,
+        "first_start_time": None,
+        "first_end_time": None,
+        "type_names": [],
+    }
     assert result["request"] == {
         "m": "s",
         "t": "SCHDSV2",
@@ -269,6 +290,7 @@ def test_set_app_schedule_plan_enabled_can_execute_when_confirmed() -> None:
 
     assert result["dry_run"] is False
     assert result["executed"] is True
+    assert result["changed"] is True
     assert result["response"] == {"m": "r", "r": 0, "d": {"r": 0, "v": 19383}}
     assert result["response_data"] == {"r": 0, "v": 19383}
     assert [call["t"] for call in cloud.calls] == [

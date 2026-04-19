@@ -165,7 +165,9 @@ Last updated: 2026-04-19
   selection, visible schedule count, and hidden schedule slots.
 - Home Assistant exposes a guarded `set_schedule_plan_enabled` service. It
   defaults to dry-run and only sends writes when both `execute` and
-  `confirm_schedule_write` are true.
+  `confirm_schedule_write` are true. The client result and HA notification now
+  summarize previous enabled state, target state, changed/no-op status,
+  schedule version, and the exact `SCHDSV2` request payload.
 - `examples/schedule_calendar_preview.py` converts a live schedule fetch or an
   ignored schedule probe JSON file into Home Assistant-style calendar event
   JSON, which is useful on Windows where the HA pytest plugin cannot load.
