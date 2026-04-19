@@ -57,6 +57,43 @@ def test_map_camera_attributes_include_app_map_summary_counts() -> None:
     assert attributes["robot_present"] is True
     assert attributes["charger_present"] is True
     assert attributes["last_map_refresh"] == "2026-04-18T12:30:00+00:00"
+    assert attributes["app_map_count"] is None
+    assert attributes["app_maps"] is None
+
+
+def test_map_camera_attributes_include_all_app_map_metadata() -> None:
+    """Camera attributes expose all app maps, not only the rendered map."""
+    view = DreameLawnMowerMapView(
+        source="app_action_map",
+        app_maps={
+            "map_count": 2,
+            "current_map_index": 0,
+            "available_map_count": 2,
+            "created_map_count": 2,
+            "error_count": 0,
+            "maps": [
+                {"idx": 0, "current": True, "available": True},
+                {"idx": 1, "current": False, "available": True},
+            ],
+        },
+    )
+
+    attributes = map_camera_attributes(
+        view,
+        image_cached=False,
+        refreshed_at=None,
+        last_error=None,
+    )
+
+    assert attributes["app_map_count"] == 2
+    assert attributes["app_current_map_index"] == 0
+    assert attributes["app_available_map_count"] == 2
+    assert attributes["app_created_map_count"] == 2
+    assert attributes["app_map_error_count"] == 0
+    assert attributes["app_maps"] == [
+        {"idx": 0, "current": True, "available": True},
+        {"idx": 1, "current": False, "available": True},
+    ]
 
 
 def test_map_camera_attributes_report_placeholder_without_view() -> None:

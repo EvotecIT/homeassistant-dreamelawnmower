@@ -12,6 +12,7 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
 from custom_components.dreame_lawn_mower.button import (
     DreameLawnMowerCapturePreferenceProbeButton,
     DreameLawnMowerCaptureScheduleProbeButton,
+    DreameLawnMowerCaptureWeatherProbeButton,
     schedule_probe_payload,
 )
 from custom_components.dreame_lawn_mower.dreame_client.client import (
@@ -26,10 +27,12 @@ from custom_components.dreame_lawn_mower.sensor import (
     DreameLawnMowerLastPreferenceProbeSensor,
     DreameLawnMowerLastScheduleProbeSensor,
     DreameLawnMowerLastScheduleWriteSensor,
+    DreameLawnMowerLastWeatherProbeSensor,
     DreameSensorDescription,
     preference_probe_result_attributes,
     schedule_probe_result_attributes,
     schedule_write_result_attributes,
+    weather_probe_result_attributes,
 )
 
 
@@ -96,6 +99,19 @@ def test_preference_probe_button_is_diagnostic_disabled_by_default() -> None:
     )
 
 
+def test_weather_probe_button_is_diagnostic_disabled_by_default() -> None:
+    assert (
+        DreameLawnMowerCaptureWeatherProbeButton.__dict__["__attr_entity_category"]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerCaptureWeatherProbeButton.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
+    )
+
+
 def test_last_schedule_write_sensor_is_diagnostic_disabled_by_default() -> None:
     assert (
         DreameLawnMowerLastScheduleWriteSensor.__dict__["__attr_entity_category"]
@@ -133,6 +149,58 @@ def test_last_preference_probe_sensor_is_diagnostic_disabled_by_default() -> Non
         ]
         is False
     )
+
+
+def test_last_weather_probe_sensor_is_diagnostic_disabled_by_default() -> None:
+    assert (
+        DreameLawnMowerLastWeatherProbeSensor.__dict__["__attr_entity_category"]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerLastWeatherProbeSensor.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
+    )
+
+
+def test_weather_probe_result_attributes_are_compact() -> None:
+    result = {
+        "captured_at": "2026-04-19T14:30:00+02:00",
+        "source": "app_action_weather_protection",
+        "available": True,
+        "fault_hint": "INFO_BAD_WEATHER_PROTECTING",
+        "present_config_keys": ["WRP"],
+        "weather_switch_enabled": True,
+        "rain_protection_enabled": True,
+        "rain_protection_duration_hours": 8,
+        "rain_sensor_sensitivity": 0,
+        "rain_protect_end_time": 1776600300,
+        "rain_protect_end_time_present": True,
+        "rain_protection_raw": [1, 8, 0],
+        "config_keys": ["WRF", "WRP"],
+        "raw_config": {"secret-ish": "not included"},
+        "errors": [],
+        "warnings": [{"stage": "rain_end_time", "warning": "not protecting"}],
+    }
+
+    assert weather_probe_result_attributes(result) == {
+        "captured_at": "2026-04-19T14:30:00+02:00",
+        "source": "app_action_weather_protection",
+        "available": True,
+        "fault_hint": "INFO_BAD_WEATHER_PROTECTING",
+        "present_config_keys": ["WRP"],
+        "weather_switch_enabled": True,
+        "rain_protection_enabled": True,
+        "rain_protection_duration_hours": 8,
+        "rain_sensor_sensitivity": 0,
+        "rain_protect_end_time": 1776600300,
+        "rain_protect_end_time_present": True,
+        "rain_protection_raw": [1, 8, 0],
+        "error_count": 0,
+        "warning_count": 1,
+        "warnings": [{"stage": "rain_end_time", "warning": "not protecting"}],
+    }
 
 
 def test_preference_probe_result_attributes_are_compact() -> None:

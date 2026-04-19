@@ -219,6 +219,29 @@ class DreameLawnMowerMapDataCamera(DreameLawnMowerMapCamera):
             )
         else:
             lines.append("Summary: no structured map payload was returned.")
+        if view.app_maps:
+            maps = view.app_maps.get("maps")
+            lines.extend(
+                [
+                    f"App map count: {view.app_maps.get('map_count')}",
+                    f"Current app map: {view.app_maps.get('current_map_index')}",
+                    f"Available app maps: {view.app_maps.get('available_map_count')}",
+                ]
+            )
+            if isinstance(maps, list):
+                for entry in maps[:6]:
+                    if not isinstance(entry, dict):
+                        continue
+                    lines.append(
+                        "Map {idx}: current={current} available={available} "
+                        "areas={areas} points={points}".format(
+                            idx=entry.get("idx"),
+                            current=entry.get("current"),
+                            available=entry.get("available"),
+                            areas=entry.get("map_area_count"),
+                            points=entry.get("boundary_point_count"),
+                        )
+                    )
 
         return await self.hass.async_add_executor_job(
             partial(map_diagnostics_jpeg, lines=lines)

@@ -110,6 +110,9 @@ Last updated: 2026-04-19
   points. A follow-up live run on 2026-04-19 while the mower reported `mowing`
   again rendered current map `0` through `app_action_map` with the same 2 map
   areas, 2 spot areas, and 63 trajectory points.
+- The app-map helper downloads every created map returned by `MAPL`; the HA map
+  camera still renders the current map image, but its attributes expose compact
+  all-map metadata (`app_map_count`, `app_current_map_index`, `app_maps`, etc.).
 - `OBJ type=3dmap` is also wired as read-only object metadata through
   `async_get_app_map_objects()`. A live A2 probe returned two `.bin` object
   names. Expiring object URLs are intentionally opt-in and omitted from default
@@ -208,6 +211,18 @@ Last updated: 2026-04-19
   errors: map `0` in global mode with 5 preference areas and map `1` in global
   mode with 2 preference areas. Local output was stored in ignored
   `preference-probe-live.json`.
+- The downloaded A2 plugin bundle identifies weather/rain protection settings
+  in read-only `CFG`: `WRF` is the weather switch and `WRP` is the rain
+  protection tuple. `RPET` returns `endTime` while
+  `INFO_BAD_WEATHER_PROTECTING` is active. The reusable client now has
+  `async_get_weather_protection()` plus `examples/weather_probe.py`, and Home
+  Assistant has disabled-by-default Capture/Last Weather Probe diagnostics.
+  Keep writes (`setWRF`/`setWRP`) unexposed until runtime locks and safety are
+  validated live.
+- A live read-only weather probe on 2026-04-19 while rain was expected returned
+  `WRP=[1,8,0]`, decoded as rain protection enabled for 8 hours with sensitivity
+  `0`. `CFG` did not include `WRF`, and `RPET` returned no active end time at
+  capture time. Local output is ignored as `weather-probe-live*.json`.
 - Config-flow auth failures are classified into non-secret Home Assistant
   errors for account type, region, connectivity, generic auth, 2FA, and no
   matching mower devices.

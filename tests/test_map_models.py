@@ -167,6 +167,7 @@ def test_map_view_as_dict_omits_image_bytes() -> None:
             "raw_status_flags": {},
             "cloud_property_summary": None,
         },
+        "app_maps": {},
     }
 
 

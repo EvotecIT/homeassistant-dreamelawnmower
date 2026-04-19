@@ -208,6 +208,29 @@ cutting heights from `3.5` to `6.0` cm, rotation/none direction modes,
 obstacle avoidance enabled, obstacle avoidance heights from `5` to `20` cm,
 distances from `10` to `20` cm, and all three AI classes enabled.
 
+## Observed weather and rain protection settings
+
+The A2 plugin bundle identifies the weather/rain-protection read path as the
+general settings app action `CFG`. Relevant fields observed in the bundle:
+
+- `WRF`: boolean weather switch used by the app as `weatherSwitch`.
+- `WRP`: rain-protection tuple. The app default is `[1, 8, 0]`, and older
+  two-value payloads are padded with a third `0` before use.
+- `RPET`: read-only app action returning `endTime` while
+  `INFO_BAD_WEATHER_PROTECTING` is active.
+
+The Python client now exposes `async_get_weather_protection()` and
+`examples/weather_probe.py`. Home Assistant mirrors this as disabled-by-default
+diagnostic entities: `Capture Weather Probe` and `Last Weather Probe`. These are
+read-only; write actions such as `setWRF` and `setWRP` remain intentionally
+unexposed until their runtime constraints and mower-state safety are validated
+live.
+
+A live read-only A2 run of `examples/weather_probe.py` on 2026-04-19 while rain
+was expected returned `WRP=[1,8,0]`, decoded as rain protection enabled for 8
+hours with sensitivity `0`. `CFG` did not include `WRF` on that device, and
+`RPET` returned no active `endTime` at capture time.
+
 ## First live probe result
 
 A live A2 probe through the new Python helper confirmed that:
@@ -289,6 +312,10 @@ The successful map path is the app action bridge described above. On
 - Current parser summaries keep `semantic` neutral: they report entry count,
   drawable boundary point count, and observed key counts without assuming those
   entries are no-go or restriction zones.
+- The Python client downloads every created map returned by `MAPL`. The Home
+  Assistant map camera renders the current map image, and its attributes expose
+  compact metadata for every app map so secondary maps remain visible without
+  switching the rendered camera frame.
 - `OBJ type=3dmap`: two `.bin` object names. Calling the app-side
   `/dreame-user-iot/iotfile/getDownloadUrl` helper with those names returns
   OSS-looking URLs, but direct GETs against the tested URLs returned 404 XML.

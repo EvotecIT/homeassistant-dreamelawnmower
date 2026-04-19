@@ -419,6 +419,17 @@ class DreameLawnMowerClient:
             map_indices,
         )
 
+    async def async_get_weather_protection(
+        self,
+        *,
+        include_raw: bool = False,
+    ) -> dict[str, Any]:
+        """Return read-only weather/rain protection settings from app actions."""
+        return await asyncio.to_thread(
+            self._sync_get_weather_protection,
+            include_raw,
+        )
+
     async def async_get_cloud_device_info(
         self,
         *,
@@ -1338,6 +1349,7 @@ class DreameLawnMowerClient:
                 return DreameLawnMowerMapView(
                     source=source,
                     error=error,
+                    app_maps=_app_maps_view_metadata(app_maps),
                     diagnostics=self._safe_map_diagnostics(
                         source=source,
                         reason=legacy_reason,
@@ -1349,6 +1361,7 @@ class DreameLawnMowerClient:
                 source=source,
                 summary=_app_map_view_summary(selected, payload, width, height),
                 image_png=image_png,
+                app_maps=_app_maps_view_metadata(app_maps),
                 diagnostics=self._safe_map_diagnostics(
                     source=source,
                     reason="app_action_map_rendered",
@@ -1681,6 +1694,70 @@ class DreameLawnMowerClient:
                     {"idx": map_index, "stage": "preferences", "error": str(err)}
                 )
             result["maps"].append(entry)
+
+        return result
+
+    def _sync_get_weather_protection(
+        self,
+        include_raw: bool = False,
+    ) -> dict[str, Any]:
+        """Fetch read-only weather and rain-protection settings."""
+        result: dict[str, Any] = {
+            "source": "app_action_weather_protection",
+            "available": False,
+            "fault_hint": "INFO_BAD_WEATHER_PROTECTING",
+            "config_keys": ["WRF", "WRP"],
+            "rain_end_time_command": "RPET",
+            "errors": [],
+            "warnings": [],
+        }
+
+        try:
+            config_result = self._sync_call_app_action({"m": "g", "t": "CFG"})
+            if include_raw:
+                result["raw_config"] = _json_safe(config_result, max_depth=4)
+            config = _app_action_data(config_result)
+            if not isinstance(config, Mapping):
+                raise DreameLawnMowerConnectionError(
+                    f"CFG returned invalid weather config: {config_result}"
+                )
+            result["present_config_keys"] = [
+                key for key in result["config_keys"] if key in config
+            ]
+            result.update(_weather_protection_summary(config))
+            result["available"] = True
+        except Exception as err:  # noqa: BLE001 - diagnostic probe should return evidence
+            result["errors"].append({"stage": "config", "error": str(err)})
+
+        try:
+            rain_end_result = self._sync_call_app_action({"m": "g", "t": "RPET"})
+            if include_raw:
+                result["raw_rain_end_time"] = _json_safe(
+                    rain_end_result,
+                    max_depth=4,
+                )
+            rain_end_data = _app_action_data(rain_end_result)
+            if isinstance(rain_end_data, Mapping):
+                end_time = rain_end_data.get("endTime")
+                if end_time is None:
+                    end_time = rain_end_data.get("end_time")
+                if end_time is not None:
+                    result["rain_protect_end_time"] = end_time
+                    result["rain_protect_end_time_present"] = True
+                    result["available"] = True
+                else:
+                    result["rain_protect_end_time_present"] = False
+            elif rain_end_data is None:
+                result["rain_protect_end_time_present"] = False
+            elif rain_end_data is not None:
+                result["warnings"].append(
+                    {
+                        "stage": "rain_end_time",
+                        "warning": f"RPET returned unexpected data: {rain_end_data}",
+                    }
+                )
+        except Exception as err:  # noqa: BLE001 - RPET may only answer while protection is active
+            result["warnings"].append({"stage": "rain_end_time", "warning": str(err)})
 
         return result
 
@@ -2276,6 +2353,7 @@ class DreameLawnMowerClient:
             image_png=map_view.image_png,
             error=map_view.error,
             diagnostics=diagnostics or map_view.diagnostics,
+            app_maps=map_view.app_maps,
         )
 
     def _sync_wait_for_map(self, timeout: float, interval: float):
@@ -2538,6 +2616,21 @@ def _optional_bool(value: Any) -> bool | None:
     return bool(value)
 
 
+def _setting_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return value != 0
+    text = str(value).strip().lower()
+    if text in ("1", "true", "yes", "on"):
+        return True
+    if text in ("0", "false", "no", "off"):
+        return False
+    return bool(value)
+
+
 def _validate_app_map_chunk_size(value: int) -> int:
     if not isinstance(value, int) or isinstance(value, bool):
         raise ValueError("chunk_size must be an integer")
@@ -2778,6 +2871,93 @@ def _select_app_map_payload(app_maps: Mapping[str, Any]) -> Mapping[str, Any] | 
         if item.get("idx") == current_idx:
             return item
     return available_maps[0] if available_maps else None
+
+
+def _weather_protection_summary(config: Mapping[str, Any]) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    weather_switch = _setting_bool(config.get("WRF"))
+    if weather_switch is not None:
+        summary["weather_switch_enabled"] = weather_switch
+
+    wrp = config.get("WRP")
+    if isinstance(wrp, Sequence) and not isinstance(wrp, str | bytes | bytearray):
+        values = list(wrp)
+        if len(values) == 2:
+            values.append(0)
+        summary["rain_protection_raw"] = _json_safe(values, max_depth=2)
+        if values:
+            summary["rain_protection_enabled"] = _setting_bool(values[0])
+        if len(values) > 1:
+            summary["rain_protection_duration_hours"] = _positive_int(values[1])
+        if len(values) > 2:
+            summary["rain_sensor_sensitivity"] = _positive_int(values[2])
+
+    end_time = config.get("rainProtectEndTime")
+    if end_time is not None:
+        summary["rain_protect_end_time"] = end_time
+        summary["rain_protect_end_time_present"] = True
+    return {
+        key: value
+        for key, value in summary.items()
+        if value is not None
+    }
+
+
+def _app_maps_view_metadata(app_maps: Mapping[str, Any]) -> dict[str, Any]:
+    maps = app_maps.get("maps") if isinstance(app_maps, Mapping) else None
+    if not isinstance(maps, Sequence) or isinstance(maps, str | bytes | bytearray):
+        maps = []
+
+    entries = [
+        _app_map_entry_view_metadata(item)
+        for item in maps
+        if isinstance(item, Mapping)
+    ]
+    return {
+        "source": app_maps.get("source"),
+        "available": bool(app_maps.get("available")),
+        "map_count": app_maps.get("map_count", len(entries)),
+        "current_map_index": app_maps.get("current_map_index"),
+        "available_map_count": sum(1 for item in entries if item.get("available")),
+        "created_map_count": sum(1 for item in entries if item.get("created")),
+        "maps": entries,
+        "error_count": len(app_maps.get("errors", []) or []),
+    }
+
+
+def _app_map_entry_view_metadata(entry: Mapping[str, Any]) -> dict[str, Any]:
+    summary = entry.get("summary") if isinstance(entry.get("summary"), Mapping) else {}
+    info = entry.get("info") if isinstance(entry.get("info"), Mapping) else {}
+    result = {
+        "idx": entry.get("idx"),
+        "current": bool(entry.get("current")),
+        "created": bool(entry.get("created")),
+        "available": bool(entry.get("available")),
+        "has_backup": bool(entry.get("has_backup")),
+        "force_load": bool(entry.get("force_load")),
+        "reported_size": entry.get("reported_size") or info.get("size"),
+        "received_size": entry.get("received_size"),
+        "chunk_count": entry.get("chunk_count"),
+        "hash_match": entry.get("hash_match"),
+        "payload_keys": entry.get("payload_keys"),
+        "name": summary.get("name"),
+        "total_area": summary.get("total_area"),
+        "map_area_count": summary.get("map_area_count"),
+        "map_area_total": summary.get("map_area_total"),
+        "boundary_point_count": summary.get("boundary_point_count"),
+        "spot_count": summary.get("spot_count"),
+        "point_count": summary.get("point_count"),
+        "trajectory_count": summary.get("trajectory_count"),
+        "trajectory_point_count": summary.get("trajectory_point_count"),
+        "semantic_count": summary.get("semantic_count"),
+        "cut_relation_count": summary.get("cut_relation_count"),
+        "error": entry.get("error"),
+    }
+    return {
+        key: value
+        for key, value in result.items()
+        if value not in (None, [], {})
+    }
 
 
 def _app_map_view_summary(

@@ -304,6 +304,7 @@ class DreameLawnMowerMapView:
     image_png: bytes | None = field(default=None, repr=False)
     error: str | None = None
     diagnostics: DreameLawnMowerMapDiagnostics | None = None
+    app_maps: Mapping[str, Any] | None = None
 
     @property
     def available(self) -> bool:
@@ -326,6 +327,7 @@ class DreameLawnMowerMapView:
             "diagnostics": (
                 self.diagnostics.as_dict() if self.diagnostics is not None else None
             ),
+            "app_maps": dict(self.app_maps or {}),
         }
 
 

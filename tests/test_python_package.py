@@ -130,6 +130,7 @@ def test_public_package_client_has_cloud_probe_helpers() -> None:
     assert hasattr(DreameLawnMowerClient, "async_remote_control_stop")
     assert hasattr(DreameLawnMowerClient, "async_get_app_schedules")
     assert hasattr(DreameLawnMowerClient, "async_get_mowing_preferences")
+    assert hasattr(DreameLawnMowerClient, "async_get_weather_protection")
     assert hasattr(DreameLawnMowerClient, "async_set_app_schedule_plan_enabled")
 
 

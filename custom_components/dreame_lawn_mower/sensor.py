@@ -197,6 +197,7 @@ async def async_setup_entry(
         + [DreameLawnMowerLastScheduleWriteSensor(coordinator)]
         + [DreameLawnMowerLastScheduleProbeSensor(coordinator)]
         + [DreameLawnMowerLastPreferenceProbeSensor(coordinator)]
+        + [DreameLawnMowerLastWeatherProbeSensor(coordinator)]
     )
 
 
@@ -449,6 +450,85 @@ def preference_probe_result_attributes(
     if isinstance(errors, list):
         attributes["error_count"] = len(errors)
         attributes["errors"] = errors
+    return {
+        key: value
+        for key, value in attributes.items()
+        if value not in (None, [], {})
+    }
+
+
+class DreameLawnMowerLastWeatherProbeSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the last read-only weather/rain protection probe result."""
+
+    _attr_name = "Last Weather Probe"
+    _attr_icon = "mdi:weather-pouring"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_last_weather_probe"
+
+    @property
+    def native_value(self) -> str:
+        """Return a compact state for the last weather probe."""
+        return _weather_probe_state(
+            self.coordinator.last_weather_probe_result,
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe details for the last weather probe."""
+        return weather_probe_result_attributes(
+            self.coordinator.last_weather_probe_result,
+        )
+
+
+def _weather_probe_state(result: dict[str, Any] | None) -> str:
+    if not result:
+        return "none"
+    errors = result.get("errors")
+    if isinstance(errors, list) and errors and not result.get("available"):
+        return "error"
+    return "available" if result.get("available") else "unavailable"
+
+
+def weather_probe_result_attributes(
+    result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return compact, non-secret attributes for a weather probe result."""
+    if not result:
+        return {}
+
+    errors = result.get("errors")
+    warnings = result.get("warnings")
+    attributes: dict[str, Any] = {
+        "captured_at": result.get("captured_at"),
+        "source": result.get("source"),
+        "available": result.get("available"),
+        "fault_hint": result.get("fault_hint"),
+        "present_config_keys": result.get("present_config_keys"),
+        "weather_switch_enabled": result.get("weather_switch_enabled"),
+        "rain_protection_enabled": result.get("rain_protection_enabled"),
+        "rain_protection_duration_hours": result.get(
+            "rain_protection_duration_hours",
+        ),
+        "rain_sensor_sensitivity": result.get("rain_sensor_sensitivity"),
+        "rain_protect_end_time": result.get("rain_protect_end_time"),
+        "rain_protect_end_time_present": result.get(
+            "rain_protect_end_time_present",
+        ),
+        "rain_protection_raw": result.get("rain_protection_raw"),
+    }
+    if isinstance(errors, list):
+        attributes["error_count"] = len(errors)
+        attributes["errors"] = errors
+    if isinstance(warnings, list):
+        attributes["warning_count"] = len(warnings)
+        attributes["warnings"] = warnings
     return {
         key: value
         for key, value in attributes.items()

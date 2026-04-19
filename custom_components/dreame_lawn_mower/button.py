@@ -36,6 +36,7 @@ async def async_setup_entry(
             DreameLawnMowerCaptureMapProbeButton(coordinator),
             DreameLawnMowerCaptureScheduleProbeButton(coordinator),
             DreameLawnMowerCapturePreferenceProbeButton(coordinator),
+            DreameLawnMowerCaptureWeatherProbeButton(coordinator),
         ]
     )
 
@@ -246,6 +247,49 @@ class DreameLawnMowerCapturePreferenceProbeButton(
             title="Dreame Lawn Mower Preference Probe",
             notification_id=(
                 f"{DOMAIN}_{self.coordinator.entry.entry_id}_preference_probe"
+            ),
+        )
+
+
+class DreameLawnMowerCaptureWeatherProbeButton(
+    DreameLawnMowerEntity,
+    ButtonEntity,
+):
+    """Capture and log read-only weather/rain protection diagnostics."""
+
+    _attr_name = "Capture Weather Probe"
+    _attr_icon = "mdi:weather-pouring"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_capture_weather_probe"
+
+    async def async_press(self) -> None:
+        """Probe read-only weather/rain protection settings and log the result."""
+        payload = await self.coordinator.client.async_get_weather_protection(
+            include_raw=False,
+        )
+        payload.setdefault("captured_at", datetime.now(UTC).isoformat())
+        self.coordinator.last_weather_probe_result = payload
+        self.coordinator.async_update_listeners()
+        _LOGGER.info(
+            "Captured Dreame lawn mower weather probe for %s: %s",
+            self.coordinator.client.descriptor.title,
+            json.dumps(payload, sort_keys=True),
+        )
+        persistent_notification.async_create(
+            self.coordinator.hass,
+            (
+                "Captured a Dreame lawn mower weather probe. Enable info "
+                "logging for this integration to view decoded weather/rain "
+                "protection JSON, or enable the Last Weather Probe diagnostic "
+                "sensor."
+            ),
+            title="Dreame Lawn Mower Weather Probe",
+            notification_id=(
+                f"{DOMAIN}_{self.coordinator.entry.entry_id}_weather_probe"
             ),
         )
 

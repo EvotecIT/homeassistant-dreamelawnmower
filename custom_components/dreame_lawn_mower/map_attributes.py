@@ -58,4 +58,15 @@ def map_camera_attributes(
             for key in _MAP_SUMMARY_ATTRIBUTE_KEYS
         }
     )
+    app_maps = {} if view is None or view.app_maps is None else dict(view.app_maps)
+    attributes.update(
+        {
+            "app_map_count": app_maps.get("map_count"),
+            "app_current_map_index": app_maps.get("current_map_index"),
+            "app_available_map_count": app_maps.get("available_map_count"),
+            "app_created_map_count": app_maps.get("created_map_count"),
+            "app_map_error_count": app_maps.get("error_count"),
+            "app_maps": app_maps.get("maps"),
+        }
+    )
     return attributes

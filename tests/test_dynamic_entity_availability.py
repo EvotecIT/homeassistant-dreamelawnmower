@@ -13,6 +13,7 @@ from custom_components.dreame_lawn_mower.sensor import (
     DreameLawnMowerLastPreferenceProbeSensor,
     DreameLawnMowerLastScheduleProbeSensor,
     DreameLawnMowerLastScheduleWriteSensor,
+    DreameLawnMowerLastWeatherProbeSensor,
     DreameLawnMowerSensor,
 )
 
@@ -350,4 +351,63 @@ def test_last_preference_probe_sensor_reports_error_probe() -> None:
         "map_count": 0,
         "error_count": 1,
         "errors": [{"stage": "preferences", "error": "cloud unavailable"}],
+    }
+
+
+def test_last_weather_probe_sensor_reports_none_before_probe() -> None:
+    entity = object.__new__(DreameLawnMowerLastWeatherProbeSensor)
+    entity.coordinator = SimpleNamespace(last_weather_probe_result=None)
+
+    assert entity.native_value == "none"
+    assert entity.extra_state_attributes == {}
+
+
+def test_last_weather_probe_sensor_reports_available_probe() -> None:
+    entity = object.__new__(DreameLawnMowerLastWeatherProbeSensor)
+    entity.coordinator = SimpleNamespace(
+        last_weather_probe_result={
+            "source": "app_action_weather_protection",
+            "available": True,
+            "present_config_keys": ["WRP"],
+            "weather_switch_enabled": True,
+            "rain_protection_enabled": True,
+            "rain_protection_duration_hours": 8,
+            "rain_sensor_sensitivity": 0,
+            "errors": [],
+            "warnings": [],
+        }
+    )
+
+    assert entity.native_value == "available"
+    assert entity.extra_state_attributes == {
+        "source": "app_action_weather_protection",
+        "available": True,
+        "present_config_keys": ["WRP"],
+        "weather_switch_enabled": True,
+        "rain_protection_enabled": True,
+        "rain_protection_duration_hours": 8,
+        "rain_sensor_sensitivity": 0,
+        "error_count": 0,
+        "warning_count": 0,
+    }
+
+
+def test_last_weather_probe_sensor_reports_config_error() -> None:
+    entity = object.__new__(DreameLawnMowerLastWeatherProbeSensor)
+    entity.coordinator = SimpleNamespace(
+        last_weather_probe_result={
+            "source": "app_action_weather_protection",
+            "available": False,
+            "errors": [{"stage": "config", "error": "cloud unavailable"}],
+            "warnings": [],
+        }
+    )
+
+    assert entity.native_value == "error"
+    assert entity.extra_state_attributes == {
+        "source": "app_action_weather_protection",
+        "available": False,
+        "error_count": 1,
+        "errors": [{"stage": "config", "error": "cloud unavailable"}],
+        "warning_count": 0,
     }

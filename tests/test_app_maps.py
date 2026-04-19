@@ -275,6 +275,48 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
     assert view.summary.no_go_area_count == 0
     assert view.summary.spot_area_count == 1
     assert view.summary.path_point_count == 3
+    assert view.app_maps == {
+        "source": "app_action_map",
+        "available": True,
+        "map_count": 2,
+        "current_map_index": 0,
+        "available_map_count": 1,
+        "created_map_count": 1,
+        "maps": [
+            {
+                "idx": 0,
+                "current": True,
+                "created": True,
+                "available": True,
+                "has_backup": True,
+                "force_load": False,
+                "reported_size": len(cloud.payload_text.encode("utf-8")),
+                "received_size": len(cloud.payload_text.encode("utf-8")),
+                "chunk_count": 1,
+                "hash_match": True,
+                "payload_keys": ["map", "point", "spot", "total_area", "trajectory"],
+                "total_area": 1,
+                "map_area_count": 1,
+                "map_area_total": 1.0,
+                "boundary_point_count": 4,
+                "spot_count": 1,
+                "point_count": 1,
+                "trajectory_count": 1,
+                "trajectory_point_count": 3,
+                "semantic_count": 0,
+                "cut_relation_count": 0,
+            },
+            {
+                "idx": 1,
+                "current": False,
+                "created": False,
+                "available": False,
+                "has_backup": False,
+                "force_load": False,
+            },
+        ],
+        "error_count": 0,
+    }
     assert "OBJ" not in [call["t"] for call in cloud.calls]
 
 

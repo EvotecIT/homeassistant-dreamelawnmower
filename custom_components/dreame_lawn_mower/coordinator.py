@@ -62,6 +62,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         self.last_preference_probe_result: dict[str, Any] | None = None
         self.last_schedule_probe_result: dict[str, Any] | None = None
         self.last_schedule_write_result: dict[str, Any] | None = None
+        self.last_weather_probe_result: dict[str, Any] | None = None
 
         super().__init__(
             hass,
