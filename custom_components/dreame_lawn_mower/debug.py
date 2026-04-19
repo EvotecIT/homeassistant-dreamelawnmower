@@ -11,6 +11,7 @@ from typing import Any
 from .const import CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
 from .dreame_client.app_protocol import (
     MOWER_RAW_STATUS_PROPERTY_KEY,
+    MOWER_RUNTIME_STATUS_PROPERTY_KEY,
     decode_mower_status_blob,
 )
 from .dreame_client.map_probe import MAP_CANDIDATE_TERMS
@@ -169,7 +170,11 @@ def _count_value_type(counter: dict[str, int], value: Any) -> None:
 
 
 def _status_blob_summary(key: object, value: Any) -> dict[str, Any] | None:
-    if str(key) != MOWER_RAW_STATUS_PROPERTY_KEY:
+    status_blob_keys = {
+        MOWER_RAW_STATUS_PROPERTY_KEY,
+        MOWER_RUNTIME_STATUS_PROPERTY_KEY,
+    }
+    if str(key) not in status_blob_keys:
         return None
     decoded = decode_mower_status_blob(value, source="debug")
     if decoded is None:

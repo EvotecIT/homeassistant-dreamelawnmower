@@ -97,6 +97,7 @@ def test_message_callback_tracks_realtime_properties_and_unmapped_pairs() -> Non
             "method": "properties_changed",
             "params": [
                 {"siid": 3, "piid": 1, "value": 80},
+                {"siid": 1, "piid": 4, "value": [206, 0, 206]},
                 {"siid": 9, "piid": 4, "value": {"blob": 123}},
             ],
         },
@@ -109,6 +110,8 @@ def test_message_callback_tracks_realtime_properties_and_unmapped_pairs() -> Non
     assert device.realtime_properties["3.1"]["did"] == str(
         DreameMowerProperty.BATTERY_LEVEL.value
     )
+    assert device.realtime_properties["1.4"]["property_name"] == "runtime_status_blob"
+    assert device.realtime_properties["1.4"]["value"] == [206, 0, 206]
     assert device.realtime_properties["9.4"]["property_name"] == "UNKNOWN_REALTIME_9.4"
     assert device.realtime_properties["9.4"]["value"] == {"blob": 123}
     assert device.last_realtime_message is not None

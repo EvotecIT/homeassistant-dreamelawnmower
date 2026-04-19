@@ -209,6 +209,55 @@ def test_status_blob_decoder_exposes_candidate_battery_byte() -> None:
     assert decoded.candidate_battery_level == 93
 
 
+def test_property_annotations_mark_runtime_status_blob_frame() -> None:
+    entry = DreameLawnMowerClient._annotate_cloud_property_entry(
+        {
+            "key": "1.4",
+            "value": [
+                206,
+                79,
+                2,
+                128,
+                77,
+                0,
+                45,
+                7,
+                1,
+                0,
+                125,
+                1,
+                34,
+                1,
+                125,
+                1,
+                50,
+                1,
+                246,
+                255,
+                234,
+                255,
+                1,
+                100,
+                94,
+                5,
+                108,
+                207,
+                0,
+                127,
+                28,
+                0,
+                206,
+            ],
+        },
+        language="en",
+    )
+
+    assert entry["property_hint"] == "runtime_status_blob"
+    assert entry["value_bytes_len"] == 33
+    assert entry["status_blob"]["frame_valid"] is True
+    assert entry["status_blob"]["notes"] == ("unexpected_length",)
+
+
 def test_scan_cloud_properties_returns_summary_with_dynamic_labels() -> None:
     client = DreameLawnMowerClient(
         username="user",

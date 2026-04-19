@@ -15,6 +15,7 @@ from .app_protocol import (
     MOWER_ERROR_PROPERTY_KEY,
     MOWER_PROPERTY_HINTS,
     MOWER_RAW_STATUS_PROPERTY_KEY,
+    MOWER_RUNTIME_STATUS_PROPERTY_KEY,
     MOWER_STATE_PROPERTY_KEY,
     decode_mower_status_blob,
     key_definition_label,
@@ -2277,7 +2278,7 @@ class DreameLawnMowerClient:
             if label:
                 rendered["decoded_label"] = label
                 rendered["decoded_label_source"] = "bundled_mower_errors"
-        elif key == MOWER_RAW_STATUS_PROPERTY_KEY:
+        elif key in {MOWER_RAW_STATUS_PROPERTY_KEY, MOWER_RUNTIME_STATUS_PROPERTY_KEY}:
             status_blob = decode_mower_status_blob(value)
             if status_blob is not None:
                 rendered["status_blob"] = status_blob.as_dict()
@@ -2924,7 +2925,11 @@ def _operation_property_summary(
                 known_keys.append(key_text)
 
         status_blob = None
-        if key_text == MOWER_RAW_STATUS_PROPERTY_KEY:
+        status_blob_keys = {
+            MOWER_RAW_STATUS_PROPERTY_KEY,
+            MOWER_RUNTIME_STATUS_PROPERTY_KEY,
+        }
+        if key_text in status_blob_keys:
             decoded = decode_mower_status_blob(property_value, source="operation")
             status_blob = decoded.as_dict() if decoded is not None else None
 

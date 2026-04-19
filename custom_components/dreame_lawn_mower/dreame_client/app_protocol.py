@@ -9,10 +9,12 @@ from typing import Final
 from .models import DreameLawnMowerStatusBlob
 
 MOWER_RAW_STATUS_PROPERTY_KEY: Final[str] = "1.1"
+MOWER_RUNTIME_STATUS_PROPERTY_KEY: Final[str] = "1.4"
 MOWER_STATE_PROPERTY_KEY: Final[str] = "2.1"
 MOWER_ERROR_PROPERTY_KEY: Final[str] = "2.2"
 MOWER_PROPERTY_HINTS: Final[dict[str, str]] = {
     MOWER_RAW_STATUS_PROPERTY_KEY: "raw_status_blob",
+    MOWER_RUNTIME_STATUS_PROPERTY_KEY: "runtime_status_blob",
     MOWER_STATE_PROPERTY_KEY: "mower_state",
     MOWER_ERROR_PROPERTY_KEY: "mower_error",
 }

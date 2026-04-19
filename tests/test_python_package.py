@@ -10,6 +10,7 @@ from dreame_lawn_mower_client import (
     MOWER_ERROR_PROPERTY_KEY,
     MOWER_PROPERTY_HINTS,
     MOWER_RAW_STATUS_PROPERTY_KEY,
+    MOWER_RUNTIME_STATUS_PROPERTY_KEY,
     MOWER_STATE_PROPERTY_KEY,
     DreameLawnMowerCameraFeatureSupport,
     DreameLawnMowerClient,
@@ -142,9 +143,11 @@ def test_public_package_exports_schedule_helpers() -> None:
 
 def test_public_package_exports_app_protocol_helpers() -> None:
     assert MOWER_RAW_STATUS_PROPERTY_KEY == "1.1"
+    assert MOWER_RUNTIME_STATUS_PROPERTY_KEY == "1.4"
     assert MOWER_STATE_PROPERTY_KEY == "2.1"
     assert MOWER_ERROR_PROPERTY_KEY == "2.2"
     assert MOWER_PROPERTY_HINTS["1.1"] == "raw_status_blob"
+    assert MOWER_PROPERTY_HINTS["1.4"] == "runtime_status_blob"
     assert mower_state_label(11) == "Mapping"
     assert mower_state_label("13") == "Charging Completed"
     assert mower_state_label(999) is None

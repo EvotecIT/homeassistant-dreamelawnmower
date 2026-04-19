@@ -25,6 +25,7 @@ REDACT_PROBE_KEYS = {
 
 MAP_PROBE_PROPERTY_KEYS = (
     "1.1",
+    "1.4",
     "2.1",
     "2.2",
     "6.1",

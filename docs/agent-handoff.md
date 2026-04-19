@@ -46,6 +46,9 @@ Last updated: 2026-04-19
   during the 2026-04-19 mowing run showed byte `11` matching the snapshot
   battery at `84`, then later matching operation captures as battery moved from
   `82` to `81`; byte `17` changed while the mower remained in `mowing`.
+- The same live mowing run surfaced realtime key `1.4` as a framed 33-byte
+  runtime blob. It is now labeled `runtime_status_blob` and decoded as framed
+  evidence, but its byte meanings are still unknown.
 - A read-only operation snapshot on 2026-04-18 collected `before` and `final`
   captures without movement. The mower stayed docked at `charging_completed`
   with battery 100%, manual-drive state safety was true, remote-control support
@@ -379,9 +382,10 @@ credentials into repo files.
   downloaded or decoded yet.
 - Keep the map camera/entity disabled by default until the renderer has stable
   fixtures from more mower states and models.
-- Keep sampling the realtime/raw status blob across transitions. Current
-  evidence suggests byte `11` is battery-like and byte `17` changes during
-  mowing, but other byte meanings are still unproven.
+- Keep sampling the realtime/raw status blobs across transitions. Current
+  evidence suggests `1.1` byte `11` is battery-like and byte `17` changes
+  during mowing. Realtime key `1.4` is a 33-byte runtime blob whose frame is
+  valid but whose byte meanings are still unproven.
 - Add a Home Assistant schedule/calendar surface only after the read-only
   schedule parser has more fixtures and clear UX for multi-map schedule slots.
 - Validate schedule enable/disable writes live before exposing Home Assistant
