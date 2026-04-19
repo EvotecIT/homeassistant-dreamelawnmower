@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from custom_components.dreame_lawn_mower.calendar import schedule_calendar_events
+from custom_components.dreame_lawn_mower.calendar import (
+    schedule_calendar_events,
+    schedule_calendar_selection,
+)
 
 
 def test_schedule_calendar_events_include_enabled_plan_tasks() -> None:
@@ -143,6 +146,79 @@ def test_schedule_calendar_events_prefer_current_task_version() -> None:
     )
 
     assert [event.start.hour for event in all_events] == [8, 10, 10]
+
+
+def test_schedule_calendar_selection_explains_active_version_filter() -> None:
+    payload = {
+        "current_task": {"version": 19383},
+        "schedules": [
+            {"idx": -1, "version": 31345, "enabled_plan_count": 1},
+            {"idx": 0, "version": 19383, "enabled_plan_count": 1},
+            {"idx": 1, "version": 4760, "enabled_plan_count": 1},
+        ],
+    }
+
+    assert schedule_calendar_selection(payload) == {
+        "mode": "active_schedule",
+        "active_version": 19383,
+        "active_version_filter_applied": True,
+        "included_schedule_count": 1,
+        "hidden_schedule_count": 2,
+        "included_schedules": [
+            {
+                "idx": 0,
+                "label": "map 0",
+                "version": 19383,
+                "enabled_plan_count": 1,
+            }
+        ],
+        "hidden_schedules": [
+            {
+                "idx": -1,
+                "label": "default schedule",
+                "version": 31345,
+                "enabled_plan_count": 1,
+            },
+            {
+                "idx": 1,
+                "label": "map 1",
+                "version": 4760,
+                "enabled_plan_count": 1,
+            },
+        ],
+    }
+
+
+def test_schedule_calendar_selection_can_include_all_schedules() -> None:
+    payload = {
+        "current_task": {"version": 19383},
+        "schedules": [
+            {"idx": -1, "version": 31345, "plans": [{"enabled": True}]},
+            {"idx": 0, "version": 19383, "plans": [{"enabled": True}]},
+        ],
+    }
+
+    selection = schedule_calendar_selection(payload, include_all_schedules=True)
+
+    assert selection["mode"] == "all_schedules"
+    assert selection["active_version"] is None
+    assert selection["active_version_filter_applied"] is False
+    assert selection["included_schedule_count"] == 2
+    assert selection["hidden_schedule_count"] == 0
+    assert selection["included_schedules"] == [
+        {
+            "idx": -1,
+            "label": "default schedule",
+            "version": 31345,
+            "enabled_plan_count": 1,
+        },
+        {
+            "idx": 0,
+            "label": "map 0",
+            "version": 19383,
+            "enabled_plan_count": 1,
+        },
+    ]
 
 
 def test_schedule_calendar_events_include_overnight_overlap() -> None:

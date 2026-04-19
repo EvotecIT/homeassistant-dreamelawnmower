@@ -139,6 +139,42 @@ def schedule_calendar_events(
     return sorted(events, key=lambda event: event.start_datetime_local)
 
 
+def schedule_calendar_selection(
+    payload: Mapping[str, Any],
+    *,
+    include_all_schedules: bool = False,
+) -> dict[str, Any]:
+    """Return why schedule slots are included or hidden by the calendar."""
+    schedules = [
+        schedule
+        for schedule in payload.get("schedules") or []
+        if isinstance(schedule, Mapping)
+    ]
+    active_version = (
+        None if include_all_schedules else _active_schedule_version(payload)
+    )
+    included_schedules: list[dict[str, Any]] = []
+    hidden_schedules: list[dict[str, Any]] = []
+
+    for schedule in schedules:
+        target = included_schedules
+        if active_version is not None and schedule.get("version") != active_version:
+            target = hidden_schedules
+        target.append(_schedule_selection_entry(schedule))
+
+    return {
+        "mode": "all_schedules" if include_all_schedules else "active_schedule",
+        "active_version": active_version,
+        "active_version_filter_applied": bool(
+            active_version is not None and not include_all_schedules
+        ),
+        "included_schedule_count": len(included_schedules),
+        "hidden_schedule_count": len(hidden_schedules),
+        "included_schedules": included_schedules,
+        "hidden_schedules": hidden_schedules,
+    }
+
+
 def _active_schedule_version(payload: Mapping[str, Any]) -> int | None:
     current_task = payload.get("current_task")
     if not isinstance(current_task, Mapping):
@@ -147,6 +183,26 @@ def _active_schedule_version(payload: Mapping[str, Any]) -> int | None:
         return int(current_task["version"])
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def _schedule_selection_entry(schedule: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "idx": schedule.get("idx"),
+        "label": _schedule_label(schedule),
+        "version": schedule.get("version"),
+        "enabled_plan_count": _enabled_plan_count(schedule),
+    }
+
+
+def _enabled_plan_count(schedule: Mapping[str, Any]) -> int:
+    value = schedule.get("enabled_plan_count")
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return sum(
+        1
+        for plan in schedule.get("plans") or []
+        if isinstance(plan, Mapping) and plan.get("enabled")
+    )
 
 
 def _task_events(

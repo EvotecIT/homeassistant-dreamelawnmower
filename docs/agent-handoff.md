@@ -167,6 +167,13 @@ Last updated: 2026-04-19
 - The calendar now follows the `SCHDT` active schedule version when present.
   Use the preview tool's `--include-all-schedules` option only for diagnostics
   when investigating default or other-map schedule slots.
+- The schedule preview now reports `schedule_selection`, including included
+  and hidden schedule slots. A live preview on 2026-04-19 for the local day
+  returned one visible event for map `0` version `19383`, while the default
+  schedule version `31345` and map `1` version `4760` were hidden by the active
+  schedule filter. This explains the earlier “extra calendar entries” issue:
+  they are real stored slots, but Home Assistant should hide them unless
+  `--include-all-schedules` or equivalent diagnostics are requested.
 - Config-flow auth failures are classified into non-secret Home Assistant
   errors for account type, region, connectivity, generic auth, 2FA, and no
   matching mower devices.

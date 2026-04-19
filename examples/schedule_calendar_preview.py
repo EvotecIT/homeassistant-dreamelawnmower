@@ -12,7 +12,10 @@ from zoneinfo import ZoneInfo
 
 from homeassistant.util import dt as dt_util
 
-from custom_components.dreame_lawn_mower.calendar import schedule_calendar_events
+from custom_components.dreame_lawn_mower.calendar import (
+    schedule_calendar_events,
+    schedule_calendar_selection,
+)
 from dreame_lawn_mower_client import DreameLawnMowerClient
 
 
@@ -173,6 +176,10 @@ async def main() -> None:
         "timezone": args.timezone,
         "start": start.isoformat(),
         "end": end.isoformat(),
+        "schedule_selection": schedule_calendar_selection(
+            payload,
+            include_all_schedules=args.include_all_schedules,
+        ),
         "event_count": len(events),
         "events": [event.as_dict() for event in events],
     }
