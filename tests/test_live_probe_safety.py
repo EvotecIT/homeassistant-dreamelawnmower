@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from examples.app_map_probe import summarize_app_map_payload
 from examples.field_trip_probe import (
     _raise_if_unsafe_execute as raise_if_unsafe_field_trip,
 )
@@ -281,3 +282,46 @@ def test_task_status_sample_summary_tracks_state_and_task_changes() -> None:
     assert summary["battery_levels"] == ["56", "55"]
     assert summary["unknown_non_empty_keys"] == ["5.106"]
     assert summary["unknown_values"] == {"5.106": ["6", "7"]}
+
+
+def test_app_map_probe_summary_keeps_compact_current_map_evidence() -> None:
+    summary = summarize_app_map_payload(
+        {
+            "available": True,
+            "source": "app_action_map",
+            "current_map_index": 0,
+            "map_count": 2,
+            "maps": [
+                {
+                    "idx": 0,
+                    "current": True,
+                    "summary": {
+                        "map_area_count": 2,
+                        "total_area": 531,
+                        "trajectory_point_count": 63,
+                    },
+                },
+                {
+                    "idx": 1,
+                    "current": False,
+                    "summary": {"map_area_count": 2},
+                },
+            ],
+            "objects": {"object_count": 2},
+            "errors": [],
+        }
+    )
+
+    assert summary == {
+        "available": True,
+        "source": "app_action_map",
+        "map_count": 2,
+        "current_map_index": 0,
+        "current_map_summary": {
+            "map_area_count": 2,
+            "total_area": 531,
+            "trajectory_point_count": 63,
+        },
+        "object_count": 2,
+        "errors": [],
+    }

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from io import BytesIO
+from typing import Any
 
-from PIL import Image
+from PIL import Image, ImageFont
 
+from custom_components.dreame_lawn_mower import image as image_helpers
 from custom_components.dreame_lawn_mower.binary_sensor import (
     DreameBinarySensorDescription,
 )
@@ -74,6 +76,24 @@ def test_client_device_property_defaults_to_none() -> None:
     client._device = None
 
     assert client.device is None
+
+
+def test_map_fonts_use_bundled_bytes(monkeypatch) -> None:
+    image_helpers._font.cache_clear()
+    image_helpers._font_bytes.cache_clear()
+    original = ImageFont.truetype
+    calls: list[Any] = []
+
+    def spy_truetype(font, *args, **kwargs):
+        calls.append(font)
+        return original(font, *args, **kwargs)
+
+    monkeypatch.setattr(ImageFont, "truetype", spy_truetype)
+
+    image_helpers._font(18)
+
+    assert calls
+    assert all(hasattr(font, "read") for font in calls)
 
 
 def test_png_bytes_to_jpeg_returns_jpeg_bytes() -> None:

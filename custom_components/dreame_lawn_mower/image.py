@@ -2,23 +2,30 @@
 
 from __future__ import annotations
 
+import base64
+import zlib
+from functools import lru_cache
 from io import BytesIO
 
 from PIL import Image, ImageDraw, ImageFont
 
+from .dreame_client.resources import MAP_FONT, MAP_FONT_LIGHT
 
+
+@lru_cache(maxsize=2)
+def _font_bytes(*, bold: bool) -> bytes:
+    """Return bundled font bytes without consulting host font directories."""
+    encoded = MAP_FONT if bold else MAP_FONT_LIGHT
+    return zlib.decompress(base64.b64decode(encoded), zlib.MAX_WBITS | 32)
+
+
+@lru_cache(maxsize=32)
 def _font(size: int, *, bold: bool = False) -> ImageFont.ImageFont:
     """Return a readable font with safe fallbacks for Home Assistant containers."""
-    candidates = (
-        ("DejaVuSans-Bold.ttf", "Arial Bold.ttf", "arialbd.ttf")
-        if bold
-        else ("DejaVuSans.ttf", "Arial.ttf", "arial.ttf")
-    )
-    for candidate in candidates:
-        try:
-            return ImageFont.truetype(candidate, size=size)
-        except OSError:
-            continue
+    try:
+        return ImageFont.truetype(BytesIO(_font_bytes(bold=bold)), size=size)
+    except OSError:
+        pass
     try:
         return ImageFont.load_default(size=size)
     except TypeError:

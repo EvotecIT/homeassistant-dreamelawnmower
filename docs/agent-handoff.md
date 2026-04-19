@@ -80,7 +80,8 @@ Last updated: 2026-04-19
   map area totals, spots, and trajectories.
 - `examples/app_map_probe.py` provides the focused read-only app-map probe.
   By default it omits raw coordinates; `--include-payload` is opt-in for local
-  parser or renderer work.
+  parser or renderer work. It adds a compact `probe_summary` with current-map
+  and object counts for quick live triage.
 - The existing map-view path now tries the app-map payload first and renders a
   simple PNG. The older legacy current-map path remains a fallback. A live run
   of `examples/map_client.py` on 2026-04-18 produced an `app_action_map` image

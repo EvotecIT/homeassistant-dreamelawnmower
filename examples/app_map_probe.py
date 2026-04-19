@@ -11,8 +11,31 @@ import asyncio
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 from dreame_lawn_mower_client import DreameLawnMowerClient
+
+
+def summarize_app_map_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact, raw-coordinate-free summary of app map probe output."""
+    maps = [item for item in payload.get("maps", []) if isinstance(item, dict)]
+    current_map = next((item for item in maps if item.get("current") is True), None)
+    objects = payload.get("objects")
+    object_count = None
+    if isinstance(objects, dict):
+        object_count = objects.get("object_count")
+
+    return {
+        "available": payload.get("available"),
+        "source": payload.get("source"),
+        "map_count": payload.get("map_count", len(maps)),
+        "current_map_index": payload.get("current_map_index"),
+        "current_map_summary": (
+            current_map.get("summary") if isinstance(current_map, dict) else None
+        ),
+        "object_count": object_count,
+        "errors": payload.get("errors", []),
+    }
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -90,6 +113,7 @@ async def main() -> None:
             include_objects=not args.skip_objects,
             include_object_urls=args.include_object_urls,
         )
+        payload["probe_summary"] = summarize_app_map_payload(payload)
         rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
         if args.out:
             args.out.write_text(rendered, encoding="utf-8")
