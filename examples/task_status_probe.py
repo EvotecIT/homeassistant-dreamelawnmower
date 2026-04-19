@@ -10,20 +10,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from custom_components.dreame_lawn_mower.task_status_probe import (
+    SERVICE_5_KEYS,
+    TASK_STATUS_PROBE_KEYS,
+    task_status_probe_summary,
+)
 from dreame_lawn_mower_client import DreameLawnMowerClient
 
-TASK_STATUS_KEYS = (
-    "2.1",
-    "2.2",
-    "2.50",
-    "2.51",
-    "3.1",
-    "5.104",
-    "5.105",
-    "5.106",
-    "5.107",
-)
-SERVICE_5_KEYS = tuple(key for key in TASK_STATUS_KEYS if key.startswith("5."))
+TASK_STATUS_KEYS = TASK_STATUS_PROBE_KEYS
 
 
 def _unique_values(values: list[Any]) -> list[Any]:
@@ -47,65 +41,51 @@ def _entry_value(entry: dict[str, Any] | None) -> Any:
     return entry.get("value", entry.get("value_preview"))
 
 
-def _error_summary(entry: dict[str, Any] | None) -> dict[str, Any] | None:
-    if not isinstance(entry, dict):
-        return None
-    value = _entry_value(entry)
-    result: dict[str, Any] = {"value": value}
-    label = entry.get("decoded_label")
-    if isinstance(label, str) and label:
-        result["label"] = label
-    source = entry.get("decoded_label_source")
-    if isinstance(source, str) and source:
-        result["label_source"] = source
-    try:
-        result["active"] = int(str(value)) not in (-1, 0)
-    except (TypeError, ValueError):
-        pass
-    return result
+def _sample_summary(sample: dict[str, Any]) -> dict[str, Any]:
+    return task_status_probe_summary(
+        {
+            "entries": sample.get("entries", []),
+            "summary": {
+                "unknown_non_empty_keys": sample.get("unknown_non_empty_keys", [])
+            },
+        }
+    )
 
 
 def summarize_task_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
     """Return compact evidence from repeated task property scans."""
+    compact_summaries = [_sample_summary(sample) for sample in samples]
     task_statuses = [
-        entry["task_status"]
-        for sample in samples
-        if isinstance(entry := _entry_by_key(sample, "2.50"), dict)
-        and isinstance(entry.get("task_status"), dict)
+        task_status
+        for summary in compact_summaries
+        if isinstance(task_status := summary.get("task_status"), dict)
     ]
     states = [
-        {
-            "value": _entry_value(entry),
-            "label": entry.get("decoded_label"),
-            "state_key": entry.get("state_key"),
-        }
-        for sample in samples
-        if isinstance(entry := _entry_by_key(sample, "2.1"), dict)
+        state
+        for summary in compact_summaries
+        if isinstance(state := summary.get("state"), dict)
     ]
     batteries = [
-        _entry_value(entry)
-        for sample in samples
-        if isinstance(entry := _entry_by_key(sample, "3.1"), dict)
+        battery
+        for summary in compact_summaries
+        if (battery := summary.get("battery_level")) is not None
     ]
     errors = [
         error
-        for sample in samples
-        if (error := _error_summary(_entry_by_key(sample, "2.2"))) is not None
+        for summary in compact_summaries
+        if isinstance(error := summary.get("error"), dict)
     ]
     service_5_values: dict[str, list[Any]] = {}
     service_5_cluster_samples: list[dict[str, Any]] = []
     for key in SERVICE_5_KEYS:
         service_5_values[key] = [
-            _entry_value(entry)
-            for sample in samples
-            if isinstance(entry := _entry_by_key(sample, key), dict)
+            value
+            for summary in compact_summaries
+            if isinstance(service_5 := summary.get("service_5_latest"), dict)
+            and (value := service_5.get(key)) is not None
         ]
-    for sample in samples:
-        cluster = {
-            key: _entry_value(entry)
-            for key in SERVICE_5_KEYS
-            if isinstance(entry := _entry_by_key(sample, key), dict)
-        }
+    for summary in compact_summaries:
+        cluster = summary.get("service_5_latest")
         if cluster:
             service_5_cluster_samples.append(cluster)
     service_5_changed_keys = [
@@ -115,8 +95,8 @@ def summarize_task_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
     ]
     unknown_keys: list[str] = []
     unknown_values: dict[str, list[Any]] = {}
-    for sample in samples:
-        for key in sample.get("unknown_non_empty_keys", []):
+    for sample, summary in zip(samples, compact_summaries, strict=False):
+        for key in summary.get("unknown_non_empty_keys", []):
             if isinstance(key, str) and key not in unknown_keys:
                 unknown_keys.append(key)
             if isinstance(key, str):
