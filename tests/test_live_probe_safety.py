@@ -22,6 +22,7 @@ from examples.remote_control_smoke import (
 from examples.remote_control_smoke import (
     _write_output as write_remote_control_output,
 )
+from examples.status_blob_probe import _summarize_samples
 
 
 def test_remote_control_smoke_blocks_low_battery() -> None:
@@ -193,3 +194,38 @@ def test_field_trip_allows_unknown_battery_level() -> None:
             }
         }
     )
+
+
+def test_status_blob_sample_summary_tracks_battery_and_changed_bytes() -> None:
+    summary = _summarize_samples(
+        [
+            {
+                "state": "mowing",
+                "activity": "mowing",
+                "battery_level": 84,
+                "status_blob": {
+                    "candidate_battery_level": 84,
+                    "hex": "ce0054bace",
+                    "bytes_by_index": {"0": 206, "11": 84, "17": 186},
+                },
+            },
+            {
+                "state": "mowing",
+                "activity": "mowing",
+                "battery_level": 84,
+                "status_blob": {
+                    "candidate_battery_level": 84,
+                    "hex": "ce0054c0ce",
+                    "bytes_by_index": {"0": 206, "11": 84, "17": 192},
+                },
+            },
+        ]
+    )
+
+    assert summary["states"] == ["mowing"]
+    assert summary["activities"] == ["mowing"]
+    assert summary["battery_levels"] == [84]
+    assert summary["candidate_battery_levels"] == [84]
+    assert summary["candidate_battery_matches_snapshot"] is True
+    assert summary["unique_status_blob_hex_count"] == 2
+    assert summary["changed_byte_indices"] == [{"index": 17, "values": [186, 192]}]

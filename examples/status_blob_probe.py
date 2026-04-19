@@ -11,6 +11,83 @@ from pathlib import Path
 from dreame_lawn_mower_client import DreameLawnMowerClient
 
 
+def _unique_values(values: list[object]) -> list[object]:
+    result: list[object] = []
+    for value in values:
+        if value not in result:
+            result.append(value)
+    return result
+
+
+def _summarize_samples(samples: list[dict[str, object]]) -> dict[str, object]:
+    """Return compact transition evidence from status blob samples."""
+    states = _unique_values([sample.get("state") for sample in samples])
+    activities = _unique_values([sample.get("activity") for sample in samples])
+    battery_levels = _unique_values(
+        [sample.get("battery_level") for sample in samples]
+    )
+    candidate_battery_levels = _unique_values(
+        [
+            (sample.get("status_blob") or {}).get("candidate_battery_level")
+            for sample in samples
+            if isinstance(sample.get("status_blob"), dict)
+        ]
+    )
+    compared_candidates = [
+        (
+            sample.get("battery_level"),
+            (sample.get("status_blob") or {}).get("candidate_battery_level"),
+        )
+        for sample in samples
+        if isinstance(sample.get("battery_level"), int)
+        and isinstance(sample.get("status_blob"), dict)
+        and isinstance(
+            (sample.get("status_blob") or {}).get("candidate_battery_level"),
+            int,
+        )
+    ]
+
+    byte_values: dict[str, list[int]] = {}
+    hex_values: list[str] = []
+    for sample in samples:
+        blob = sample.get("status_blob")
+        if not isinstance(blob, dict):
+            continue
+        hex_value = blob.get("hex")
+        if isinstance(hex_value, str):
+            hex_values.append(hex_value)
+        bytes_by_index = blob.get("bytes_by_index")
+        if not isinstance(bytes_by_index, dict):
+            continue
+        for key, value in bytes_by_index.items():
+            if isinstance(value, int):
+                byte_values.setdefault(str(key), []).append(value)
+
+    changed_bytes = [
+        {
+            "index": int(key),
+            "values": _unique_values(values),
+        }
+        for key, values in sorted(byte_values.items(), key=lambda item: int(item[0]))
+        if len(_unique_values(values)) > 1
+    ]
+
+    return {
+        "sample_count": len(samples),
+        "states": states,
+        "activities": activities,
+        "battery_levels": battery_levels,
+        "candidate_battery_levels": candidate_battery_levels,
+        "candidate_battery_matches_snapshot": (
+            all(snapshot == candidate for snapshot, candidate in compared_candidates)
+            if compared_candidates
+            else None
+        ),
+        "unique_status_blob_hex_count": len(_unique_values(hex_values)),
+        "changed_byte_indices": changed_bytes,
+    }
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Read-only probe for the Dreame mower realtime/raw status blob."
@@ -87,6 +164,7 @@ async def main() -> None:
             )
             if index + 1 < args.samples:
                 await asyncio.sleep(max(args.interval, 0))
+        output["summary"] = _summarize_samples(samples)
 
         rendered = json.dumps(output, indent=2, sort_keys=True) + "\n"
         if args.out:

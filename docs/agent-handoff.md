@@ -42,7 +42,10 @@ Last updated: 2026-04-19
 - The app realtime/raw status blob decoder exposes byte index `11` as
   `candidate_battery_level`. Live A2 samples while mowing showed this byte
   tracking near the normalized battery level, but it should remain diagnostic
-  evidence rather than an authoritative battery source.
+  evidence rather than an authoritative battery source. Repeated live samples
+  during the 2026-04-19 mowing run showed byte `11` matching the snapshot
+  battery at `84`, then later matching operation captures as battery moved from
+  `82` to `81`; byte `17` changed while the mower remained in `mowing`.
 - A read-only operation snapshot on 2026-04-18 collected `before` and `final`
   captures without movement. The mower stayed docked at `charging_completed`
   with battery 100%, manual-drive state safety was true, remote-control support
@@ -93,6 +96,9 @@ Last updated: 2026-04-19
   legacy raw `running` flag stayed false. Normalized snapshots now treat the
   mower-native mowing state as effectively mowing and preserve the raw flag for
   diagnostics.
+- The app-map render stayed stable during live mowing: current map `0`, 2 map
+  areas, 2 spot areas, and 63 trajectory points. The app-map payload did not
+  expose verified live robot or charger coordinates in those captures.
 - Mower-native schedule retrieval now works through read-only app action
   commands recovered from the downloaded Dreamehome plugin: `SCHDIV2`,
   chunked `SCHDDV2`, and `SCHDT`.
@@ -373,6 +379,9 @@ credentials into repo files.
   downloaded or decoded yet.
 - Keep the map camera/entity disabled by default until the renderer has stable
   fixtures from more mower states and models.
+- Keep sampling the realtime/raw status blob across transitions. Current
+  evidence suggests byte `11` is battery-like and byte `17` changes during
+  mowing, but other byte meanings are still unproven.
 - Add a Home Assistant schedule/calendar surface only after the read-only
   schedule parser has more fixtures and clear UX for multi-map schedule slots.
 - Validate schedule enable/disable writes live before exposing Home Assistant
