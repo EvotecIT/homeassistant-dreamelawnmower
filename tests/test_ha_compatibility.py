@@ -10,6 +10,7 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
     DreameBinarySensorDescription,
 )
 from custom_components.dreame_lawn_mower.button import (
+    DreameLawnMowerCaptureBatchDeviceDataProbeButton,
     DreameLawnMowerCapturePreferenceProbeButton,
     DreameLawnMowerCaptureScheduleProbeButton,
     DreameLawnMowerCaptureTaskStatusProbeButton,
@@ -26,12 +27,14 @@ from custom_components.dreame_lawn_mower.image import (
     png_bytes_to_jpeg,
 )
 from custom_components.dreame_lawn_mower.sensor import (
+    DreameLawnMowerLastBatchDeviceDataProbeSensor,
     DreameLawnMowerLastPreferenceProbeSensor,
     DreameLawnMowerLastScheduleProbeSensor,
     DreameLawnMowerLastScheduleWriteSensor,
     DreameLawnMowerLastTaskStatusProbeSensor,
     DreameLawnMowerLastWeatherProbeSensor,
     DreameSensorDescription,
+    batch_device_data_probe_result_attributes,
     preference_probe_result_attributes,
     schedule_probe_result_attributes,
     schedule_write_result_attributes,
@@ -85,6 +88,21 @@ def test_schedule_probe_button_is_diagnostic_disabled_by_default() -> None:
     )
     assert (
         DreameLawnMowerCaptureScheduleProbeButton.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
+    )
+
+
+def test_batch_device_data_probe_button_is_diagnostic_disabled_by_default() -> None:
+    assert (
+        DreameLawnMowerCaptureBatchDeviceDataProbeButton.__dict__[
+            "__attr_entity_category"
+        ]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerCaptureBatchDeviceDataProbeButton.__dict__[
             "__attr_entity_registry_enabled_default"
         ]
         is False
@@ -154,6 +172,22 @@ def test_last_schedule_probe_sensor_is_diagnostic_disabled_by_default() -> None:
     )
     assert (
         DreameLawnMowerLastScheduleProbeSensor.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
+    )
+
+
+def test_last_batch_device_data_probe_sensor_is_diagnostic_disabled_by_default(
+) -> None:
+    assert (
+        DreameLawnMowerLastBatchDeviceDataProbeSensor.__dict__[
+            "__attr_entity_category"
+        ]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerLastBatchDeviceDataProbeSensor.__dict__[
             "__attr_entity_registry_enabled_default"
         ]
         is False
@@ -496,6 +530,137 @@ def test_schedule_probe_result_attributes_are_compact() -> None:
             },
         ],
         "error_count": 0,
+    }
+
+
+def test_batch_device_data_probe_result_attributes_are_compact() -> None:
+    result = {
+        "captured_at": "2026-04-19T10:15:00+00:00",
+        "source": "batch_device_data_probe",
+        "batch_schedule": {
+            "source": "batch_device_data_schedule",
+            "available": True,
+            "current_task": {"start_time": "10:58", "version": 19383},
+            "schedules": [
+                {
+                    "idx": 0,
+                    "label": "map_0",
+                    "available": True,
+                    "version": 19383,
+                    "plan_count": 2,
+                    "enabled_plan_count": 1,
+                    "plans": [{"plan_id": 0}],
+                }
+            ],
+            "errors": [],
+        },
+        "batch_mowing_preferences": {
+            "source": "batch_device_data_settings",
+            "available": True,
+            "property_hint": "2.52",
+            "maps": [
+                {
+                    "idx": 0,
+                    "label": "map_0",
+                    "available": True,
+                    "mode": 0,
+                    "mode_name": "general",
+                    "area_count": 1,
+                    "preferences": [
+                        {
+                            "area_id": 0,
+                            "reported_version": 152,
+                            "version": 152,
+                            "efficient_mode_name": "efficient",
+                            "mowing_height_cm": 4.0,
+                            "edge_mowing_auto": True,
+                            "obstacle_avoidance_enabled": True,
+                            "obstacle_avoidance_ai_classes": [
+                                "people",
+                                "animals",
+                                "objects",
+                            ],
+                            "raw_payload": [152, 0, 0],
+                        }
+                    ],
+                }
+            ],
+            "errors": [],
+        },
+        "batch_ota_info": {
+            "source": "batch_device_data_ota",
+            "available": True,
+            "update_available": True,
+            "auto_upgrade_enabled": False,
+            "ota_info": [1, 0],
+            "ota_status": "update_available",
+            "errors": [],
+        },
+    }
+
+    assert batch_device_data_probe_result_attributes(result) == {
+        "captured_at": "2026-04-19T10:15:00+00:00",
+        "source": "batch_device_data_probe",
+        "batch_schedule": {
+            "source": "batch_device_data_schedule",
+            "available": True,
+            "current_task": {"start_time": "10:58", "version": 19383},
+            "schedule_count": 1,
+            "schedules": [
+                {
+                    "idx": 0,
+                    "label": "map_0",
+                    "available": True,
+                    "version": 19383,
+                    "plan_count": 2,
+                    "enabled_plan_count": 1,
+                }
+            ],
+            "error_count": 0,
+        },
+        "batch_mowing_preferences": {
+            "source": "batch_device_data_settings",
+            "available": True,
+            "property_hint": "2.52",
+            "map_count": 1,
+            "maps": [
+                {
+                    "idx": 0,
+                    "label": "map_0",
+                    "available": True,
+                    "mode": 0,
+                    "mode_name": "general",
+                    "area_count": 1,
+                    "preference_count": 1,
+                    "preferences": [
+                        {
+                            "area_id": 0,
+                            "reported_version": 152,
+                            "version": 152,
+                            "efficient_mode_name": "efficient",
+                            "mowing_height_cm": 4.0,
+                            "edge_mowing_auto": True,
+                            "obstacle_avoidance_enabled": True,
+                            "obstacle_avoidance_ai_classes": [
+                                "people",
+                                "animals",
+                                "objects",
+                            ],
+                        }
+                    ],
+                }
+            ],
+            "error_count": 0,
+        },
+        "batch_ota_info": {
+            "source": "batch_device_data_ota",
+            "available": True,
+            "update_available": True,
+            "auto_upgrade_enabled": False,
+            "ota_info": [1, 0],
+            "ota_status": "update_available",
+            "error_count": 0,
+        },
     }
 
 

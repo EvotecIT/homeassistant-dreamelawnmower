@@ -27,6 +27,10 @@ def test_extract_first_payload_from_debug_log_line() -> None:
 
 
 def test_extract_payloads_keeps_log_kind_for_multiple_entries() -> None:
+    batch_device_data_payload = {
+        "source": "batch_device_data_probe",
+        "batch_schedule": {},
+    }
     debug_payload = {"snapshot": {"state": "docked"}}
     map_payload = {"map": {"source": "placeholder"}}
     operation_payload = {"snapshot": {"label": "field_test"}}
@@ -37,6 +41,8 @@ def test_extract_payloads_keeps_log_kind_for_multiple_entries() -> None:
     log_text = "\n".join(
         [
             "noise before",
+            "Captured Dreame lawn mower batch device data probe for Dreame A2 (A2): "
+            f"{json.dumps(batch_device_data_payload)}",
             "Captured Dreame lawn mower debug snapshot for Dreame A2 (A2): "
             f"{json.dumps(debug_payload)}",
             "another logger line",
@@ -59,6 +65,7 @@ def test_extract_payloads_keeps_log_kind_for_multiple_entries() -> None:
     payloads = extract_payloads(log_text)
 
     assert [payload.kind for payload in payloads] == [
+        "batch_device_data_probe",
         "debug_snapshot",
         "operation_snapshot",
         "map_probe",
@@ -68,6 +75,7 @@ def test_extract_payloads_keeps_log_kind_for_multiple_entries() -> None:
         "weather_probe",
     ]
     assert [payload.payload for payload in payloads] == [
+        batch_device_data_payload,
         debug_payload,
         operation_payload,
         map_payload,
@@ -85,6 +93,10 @@ def test_extract_payloads_accepts_plain_json_diagnostics() -> None:
 
 
 def test_extract_payloads_can_filter_by_kind() -> None:
+    batch_device_data_payload = {
+        "source": "batch_device_data_probe",
+        "batch_schedule": {},
+    }
     debug_payload = {"snapshot": {"state": "docked"}}
     map_payload = {"map": {"source": "placeholder"}}
     preference_payload = {"source": "app_action_mowing_preferences", "maps": []}
@@ -93,6 +105,8 @@ def test_extract_payloads_can_filter_by_kind() -> None:
     weather_payload = {"source": "app_action_weather_protection", "available": True}
     log_text = "\n".join(
         [
+            "Captured Dreame lawn mower batch device data probe for Dreame A2 (A2): "
+            f"{json.dumps(batch_device_data_payload)}",
             "Captured Dreame lawn mower debug snapshot for Dreame A2 (A2): "
             f"{json.dumps(debug_payload)}",
             "Captured Dreame lawn mower map probe for Dreame A2 (A2): "
@@ -107,6 +121,15 @@ def test_extract_payloads_can_filter_by_kind() -> None:
             f"{json.dumps(weather_payload)}",
         ]
     )
+
+    batch_device_data_payloads = extract_payloads(
+        log_text,
+        kind="batch_device_data_probe",
+    )
+
+    assert len(batch_device_data_payloads) == 1
+    assert batch_device_data_payloads[0].kind == "batch_device_data_probe"
+    assert batch_device_data_payloads[0].payload == batch_device_data_payload
 
     payloads = extract_payloads(log_text, kind="map_probe")
 
@@ -852,6 +875,123 @@ def test_summarize_payload_includes_preference_probe_summary() -> None:
             }
         ],
         "error_count": 0,
+    }
+
+
+def test_summarize_payload_includes_batch_device_data_probe_summary() -> None:
+    payload = {
+        "captured_at": "2026-04-19T10:15:00+00:00",
+        "source": "batch_device_data_probe",
+        "batch_schedule": {
+            "available": True,
+            "schedules": [
+                {
+                    "idx": 0,
+                    "label": "map_0",
+                    "version": 19383,
+                    "enabled_plan_count": 1,
+                    "plans": [{"plan_id": 0, "enabled": True}],
+                }
+            ],
+            "errors": [],
+        },
+        "batch_mowing_preferences": {
+            "available": True,
+            "property_hint": "2.52",
+            "maps": [
+                {
+                    "idx": 0,
+                    "label": "map_0",
+                    "available": True,
+                    "mode_name": "global",
+                    "area_count": 1,
+                    "preferences": [
+                        {
+                            "area_id": 0,
+                            "reported_version": 152,
+                            "efficient_mode_name": "efficient",
+                            "mowing_height_cm": 4.0,
+                            "edge_mowing_auto": True,
+                            "obstacle_avoidance_enabled": True,
+                            "obstacle_avoidance_ai_classes": [
+                                "people",
+                                "animals",
+                                "objects",
+                            ],
+                            "raw_payload": [152, 0, 0],
+                        }
+                    ],
+                    "raw_payload": [0],
+                }
+            ],
+            "errors": [],
+        },
+        "batch_ota_info": {
+            "available": True,
+            "update_available": True,
+            "auto_upgrade_enabled": False,
+            "ota_info": [1, 0],
+            "ota_status": "update_available",
+            "errors": [],
+        },
+    }
+
+    assert summarize_payload(payload) == {
+        "source": "batch_device_data_probe",
+        "captured_at": "2026-04-19T10:15:00+00:00",
+        "batch_schedule": {
+            "available": True,
+            "schedule_count": 1,
+            "schedules": [
+                {
+                    "idx": 0,
+                    "label": "map_0",
+                    "version": 19383,
+                    "enabled_plan_count": 1,
+                    "plan_count": 1,
+                }
+            ],
+            "error_count": 0,
+        },
+        "batch_mowing_preferences": {
+            "available": True,
+            "property_hint": "2.52",
+            "map_count": 1,
+            "maps": [
+                {
+                    "idx": 0,
+                    "label": "map_0",
+                    "available": True,
+                    "mode_name": "global",
+                    "area_count": 1,
+                    "preference_count": 1,
+                    "preferences": [
+                        {
+                            "area_id": 0,
+                            "reported_version": 152,
+                            "efficient_mode_name": "efficient",
+                            "mowing_height_cm": 4.0,
+                            "edge_mowing_auto": True,
+                            "obstacle_avoidance_enabled": True,
+                            "obstacle_avoidance_ai_classes": [
+                                "people",
+                                "animals",
+                                "objects",
+                            ],
+                        }
+                    ],
+                }
+            ],
+            "error_count": 0,
+        },
+        "batch_ota_info": {
+            "available": True,
+            "update_available": True,
+            "auto_upgrade_enabled": False,
+            "ota_info": [1, 0],
+            "ota_status": "update_available",
+            "error_count": 0,
+        },
     }
 
 

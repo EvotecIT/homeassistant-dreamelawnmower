@@ -35,6 +35,7 @@ async def async_setup_entry(
             DreameLawnMowerCaptureDebugSnapshotButton(coordinator),
             DreameLawnMowerCaptureOperationSnapshotButton(coordinator),
             DreameLawnMowerCaptureMapProbeButton(coordinator),
+            DreameLawnMowerCaptureBatchDeviceDataProbeButton(coordinator),
             DreameLawnMowerCaptureTaskStatusProbeButton(coordinator),
             DreameLawnMowerCaptureScheduleProbeButton(coordinator),
             DreameLawnMowerCapturePreferenceProbeButton(coordinator),
@@ -205,6 +206,62 @@ class DreameLawnMowerCaptureScheduleProbeButton(
             title="Dreame Lawn Mower Schedule Probe",
             notification_id=(
                 f"{DOMAIN}_{self.coordinator.entry.entry_id}_schedule_probe"
+            ),
+        )
+
+
+class DreameLawnMowerCaptureBatchDeviceDataProbeButton(
+    DreameLawnMowerEntity,
+    ButtonEntity,
+):
+    """Capture and log read-only batch device-data diagnostics."""
+
+    _attr_name = "Capture Batch Device Data Probe"
+    _attr_icon = "mdi:database-search"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_capture_batch_device_data_probe"
+        )
+
+    async def async_press(self) -> None:
+        """Probe read-only batch device data and log the structured result."""
+        payload = {
+            "captured_at": datetime.now(UTC).isoformat(),
+            "source": "batch_device_data_probe",
+            "batch_schedule": await self.coordinator.client.async_get_batch_schedules(
+                include_raw=False,
+            ),
+            "batch_mowing_preferences": (
+                await self.coordinator.client.async_get_batch_mowing_preferences(
+                    include_raw=False,
+                )
+            ),
+            "batch_ota_info": await self.coordinator.client.async_get_batch_ota_info(
+                include_raw=False,
+            ),
+        }
+        self.coordinator.last_batch_device_data_probe_result = payload
+        self.coordinator.async_update_listeners()
+        _LOGGER.info(
+            "Captured Dreame lawn mower batch device data probe for %s: %s",
+            self.coordinator.client.descriptor.title,
+            json.dumps(payload, sort_keys=True),
+        )
+        persistent_notification.async_create(
+            self.coordinator.hass,
+            (
+                "Captured a Dreame lawn mower batch device data probe. Enable "
+                "info logging for this integration to view decoded batch "
+                "schedule, settings, and OTA JSON, or enable the Last Batch "
+                "Device Data Probe diagnostic sensor."
+            ),
+            title="Dreame Lawn Mower Batch Device Data Probe",
+            notification_id=(
+                f"{DOMAIN}_{self.coordinator.entry.entry_id}_batch_device_data_probe"
             ),
         )
 

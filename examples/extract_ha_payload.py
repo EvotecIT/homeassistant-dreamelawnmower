@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 LOG_MARKERS = {
+    "batch_device_data_probe": "Captured Dreame lawn mower batch device data probe",
     "debug_snapshot": "Captured Dreame lawn mower debug snapshot",
     "map_probe": "Captured Dreame lawn mower map probe",
     "operation_snapshot": "Captured Dreame lawn mower operation snapshot",
@@ -33,6 +34,18 @@ def summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     payload = _payload_body(payload)
     if isinstance(payload.get("captures"), list):
         return _summarize_field_trip_payload(payload)
+    if (
+        payload.get("source") == "batch_device_data_probe"
+        or any(
+            key in payload
+            for key in (
+                "batch_schedule",
+                "batch_mowing_preferences",
+                "batch_ota_info",
+            )
+        )
+    ):
+        return _summarize_batch_device_data_payload(payload)
     if (
         payload.get("source") == "app_action_mowing_preferences"
         or payload.get("property_hint") == "2.52"
@@ -482,6 +495,65 @@ def _preference_entry_summary(preference: dict[str, Any]) -> dict[str, Any]:
             "obstacle_avoidance_ai_classes": preference.get(
                 "obstacle_avoidance_ai_classes",
             ),
+        }
+    )
+
+
+def _summarize_batch_device_data_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    schedule = _as_mapping(payload.get("batch_schedule"))
+    preferences = _as_mapping(payload.get("batch_mowing_preferences"))
+    ota = _as_mapping(payload.get("batch_ota_info"))
+    schedule_errors = schedule.get("errors")
+    preference_errors = preferences.get("errors")
+    ota_errors = ota.get("errors")
+    return _drop_empty(
+        {
+            "source": payload.get("source"),
+            "captured_at": payload.get("captured_at"),
+            "batch_schedule": {
+                "available": schedule.get("available"),
+                "schedule_count": len(schedule.get("schedules", []))
+                if isinstance(schedule.get("schedules"), list)
+                else None,
+                "schedules": [
+                    _schedule_entry_summary(item)
+                    for item in schedule.get("schedules", [])
+                    if isinstance(item, dict)
+                ],
+                "error_count": (
+                    len(schedule_errors) if isinstance(schedule_errors, list) else None
+                ),
+                "errors": schedule_errors if schedule_errors else None,
+            },
+            "batch_mowing_preferences": {
+                "available": preferences.get("available"),
+                "property_hint": preferences.get("property_hint"),
+                "map_count": len(preferences.get("maps", []))
+                if isinstance(preferences.get("maps"), list)
+                else None,
+                "maps": [
+                    _preference_map_summary(item)
+                    for item in preferences.get("maps", [])
+                    if isinstance(item, dict)
+                ],
+                "error_count": (
+                    len(preference_errors)
+                    if isinstance(preference_errors, list)
+                    else None
+                ),
+                "errors": preference_errors if preference_errors else None,
+            },
+            "batch_ota_info": {
+                "available": ota.get("available"),
+                "update_available": ota.get("update_available"),
+                "auto_upgrade_enabled": ota.get("auto_upgrade_enabled"),
+                "ota_info": ota.get("ota_info"),
+                "ota_status": ota.get("ota_status"),
+                "error_count": (
+                    len(ota_errors) if isinstance(ota_errors, list) else None
+                ),
+                "errors": ota_errors if ota_errors else None,
+            },
         }
     )
 

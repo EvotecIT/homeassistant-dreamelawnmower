@@ -199,6 +199,7 @@ async def async_setup_entry(
             for description in SENSORS
         ]
         + [DreameLawnMowerLastScheduleWriteSensor(coordinator)]
+        + [DreameLawnMowerLastBatchDeviceDataProbeSensor(coordinator)]
         + [DreameLawnMowerLastScheduleProbeSensor(coordinator)]
         + [DreameLawnMowerLastTaskStatusProbeSensor(coordinator)]
         + [DreameLawnMowerLastPreferenceProbeSensor(coordinator)]
@@ -368,6 +369,91 @@ def schedule_probe_result_attributes(
     if isinstance(errors, list):
         attributes["error_count"] = len(errors)
         attributes["errors"] = errors
+    return {
+        key: value
+        for key, value in attributes.items()
+        if value not in (None, [], {})
+    }
+
+
+class DreameLawnMowerLastBatchDeviceDataProbeSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the last read-only batch device-data probe result."""
+
+    _attr_name = "Last Batch Device Data Probe"
+    _attr_icon = "mdi:database-search"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_last_batch_device_data_probe"
+        )
+
+    @property
+    def native_value(self) -> str:
+        """Return a compact state for the last batch device-data probe."""
+        return _batch_device_data_probe_state(
+            self.coordinator.last_batch_device_data_probe_result
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe details for the last batch device-data probe."""
+        return batch_device_data_probe_result_attributes(
+            self.coordinator.last_batch_device_data_probe_result
+        )
+
+
+def _batch_device_data_probe_state(result: dict[str, Any] | None) -> str:
+    if not result:
+        return "none"
+    sections = [
+        result.get("batch_schedule"),
+        result.get("batch_mowing_preferences"),
+        result.get("batch_ota_info"),
+    ]
+    if any(
+        isinstance(section, dict)
+        and isinstance(section.get("errors"), list)
+        and section["errors"]
+        for section in sections
+    ):
+        if not any(
+            isinstance(section, dict) and section.get("available")
+            for section in sections
+        ):
+            return "error"
+    return (
+        "available"
+        if any(
+            isinstance(section, dict) and section.get("available")
+            for section in sections
+        )
+        else "unavailable"
+    )
+
+
+def batch_device_data_probe_result_attributes(
+    result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return compact, non-secret attributes for a batch device-data probe."""
+    if not result:
+        return {}
+
+    schedule = result.get("batch_schedule")
+    preferences = result.get("batch_mowing_preferences")
+    ota = result.get("batch_ota_info")
+    attributes: dict[str, Any] = {
+        "captured_at": result.get("captured_at"),
+        "source": result.get("source"),
+        "batch_schedule": _batch_schedule_probe_summary(schedule),
+        "batch_mowing_preferences": _batch_preference_probe_summary(preferences),
+        "batch_ota_info": _batch_ota_probe_summary(ota),
+    }
     return {
         key: value
         for key, value in attributes.items()
@@ -633,4 +719,81 @@ def _preference_probe_entry_summary(preference: dict[str, Any]) -> dict[str, Any
         key: value
         for key, value in summary.items()
         if value not in (None, [], {})
+    }
+
+
+def _batch_schedule_probe_summary(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    schedules = [
+        _schedule_probe_entry_summary(schedule)
+        for schedule in value.get("schedules", [])
+        if isinstance(schedule, dict)
+    ]
+    summary = {
+        "source": value.get("source"),
+        "available": value.get("available"),
+        "current_task": value.get("current_task"),
+        "schedule_count": len(schedules),
+        "schedules": schedules,
+    }
+    errors = value.get("errors")
+    if isinstance(errors, list):
+        summary["error_count"] = len(errors)
+        if errors:
+            summary["errors"] = errors
+    return {
+        key: item
+        for key, item in summary.items()
+        if item not in (None, [], {})
+    }
+
+
+def _batch_preference_probe_summary(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    maps = [
+        _preference_probe_map_summary(map_entry)
+        for map_entry in value.get("maps", [])
+        if isinstance(map_entry, dict)
+    ]
+    summary = {
+        "source": value.get("source"),
+        "available": value.get("available"),
+        "property_hint": value.get("property_hint"),
+        "map_count": len(maps),
+        "maps": maps,
+    }
+    errors = value.get("errors")
+    if isinstance(errors, list):
+        summary["error_count"] = len(errors)
+        if errors:
+            summary["errors"] = errors
+    return {
+        key: item
+        for key, item in summary.items()
+        if item not in (None, [], {})
+    }
+
+
+def _batch_ota_probe_summary(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    summary = {
+        "source": value.get("source"),
+        "available": value.get("available"),
+        "update_available": value.get("update_available"),
+        "auto_upgrade_enabled": value.get("auto_upgrade_enabled"),
+        "ota_info": value.get("ota_info"),
+        "ota_status": value.get("ota_status"),
+    }
+    errors = value.get("errors")
+    if isinstance(errors, list):
+        summary["error_count"] = len(errors)
+        if errors:
+            summary["errors"] = errors
+    return {
+        key: item
+        for key, item in summary.items()
+        if item not in (None, [], {})
     }
