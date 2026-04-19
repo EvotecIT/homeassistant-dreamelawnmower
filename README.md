@@ -195,6 +195,13 @@ The quickest focused probe is:
 python examples/schedule_probe.py --out schedule-probe-current.json
 ```
 
+Preview the same decoded schedules as Home Assistant calendar events without a
+running Home Assistant instance:
+
+```bash
+python examples/schedule_calendar_preview.py --from-file schedule-probe-current.json --timezone Europe/Warsaw --out schedule-calendar-preview.json
+```
+
 Schedule write support is intentionally guarded. This builds the app-side
 `SCHDSV2` enable/disable request without sending it:
 

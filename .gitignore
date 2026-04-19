@@ -16,5 +16,6 @@ property-scan*.txt
 remote-control*.json
 schedule-probe*.json
 schedule-write*.json
+schedule-calendar*.json
 apk-scan*.json
 asset-scan*.json

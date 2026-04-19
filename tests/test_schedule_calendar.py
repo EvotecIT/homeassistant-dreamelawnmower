@@ -50,6 +50,7 @@ def test_schedule_calendar_events_include_enabled_plan_tasks() -> None:
     assert events[0].end == datetime(2026, 4, 19, 20, 57, tzinfo=UTC)
     assert "Mower: Bodzio" in (events[0].description or "")
     assert events[0].uid == "dreame-mower-0-0-2026-04-19-0"
+    assert events[0].as_dict()["all_day"] is False
 
 
 def test_schedule_calendar_events_include_overnight_overlap() -> None:
