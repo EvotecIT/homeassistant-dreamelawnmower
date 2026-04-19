@@ -157,7 +157,9 @@ Last updated: 2026-04-19
   event queries call the app schedule reader on demand and convert enabled
   per-map plans into local scheduled mowing events.
 - A disabled-by-default `Capture Schedule Probe` diagnostic button logs decoded
-  schedules from Home Assistant without raw schedule payload text.
+  schedules from Home Assistant without raw schedule payload text. It also
+  adds `schedule_selection`, so the button log explains which schedule version
+  is visible and which stored slots are hidden.
 - Home Assistant exposes a guarded `set_schedule_plan_enabled` service. It
   defaults to dry-run and only sends writes when both `execute` and
   `confirm_schedule_write` are true.

@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .calendar import schedule_calendar_selection
 from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .debug import build_debug_payload, sanitize_debug_data
@@ -180,6 +181,7 @@ class DreameLawnMowerCaptureScheduleProbeButton(
         payload = await self.coordinator.client.async_get_app_schedules(
             include_raw=False,
         )
+        payload = schedule_probe_payload(payload)
         _LOGGER.info(
             "Captured Dreame lawn mower schedule probe for %s: %s",
             self.coordinator.client.descriptor.title,
@@ -196,3 +198,10 @@ class DreameLawnMowerCaptureScheduleProbeButton(
                 f"{DOMAIN}_{self.coordinator.entry.entry_id}_schedule_probe"
             ),
         )
+
+
+def schedule_probe_payload(payload: dict[str, object]) -> dict[str, object]:
+    """Return schedule probe payload enriched with calendar selection details."""
+    enriched = dict(payload)
+    enriched.setdefault("schedule_selection", schedule_calendar_selection(payload))
+    return enriched

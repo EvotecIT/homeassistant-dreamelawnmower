@@ -11,6 +11,7 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
 )
 from custom_components.dreame_lawn_mower.button import (
     DreameLawnMowerCaptureScheduleProbeButton,
+    schedule_probe_payload,
 )
 from custom_components.dreame_lawn_mower.dreame_client.client import (
     DreameLawnMowerClient,
@@ -69,6 +70,43 @@ def test_schedule_probe_button_is_diagnostic_disabled_by_default() -> None:
         ]
         is False
     )
+
+
+def test_schedule_probe_payload_includes_calendar_selection() -> None:
+    payload = {
+        "current_task": {"version": 19383},
+        "schedules": [
+            {"idx": -1, "version": 31345, "enabled_plan_count": 1},
+            {"idx": 0, "version": 19383, "enabled_plan_count": 1},
+        ],
+    }
+
+    enriched = schedule_probe_payload(payload)
+
+    assert enriched["schedule_selection"] == {
+        "mode": "active_schedule",
+        "active_version": 19383,
+        "active_version_filter_applied": True,
+        "included_schedule_count": 1,
+        "hidden_schedule_count": 1,
+        "included_schedules": [
+            {
+                "idx": 0,
+                "label": "map 0",
+                "version": 19383,
+                "enabled_plan_count": 1,
+            }
+        ],
+        "hidden_schedules": [
+            {
+                "idx": -1,
+                "label": "default schedule",
+                "version": 31345,
+                "enabled_plan_count": 1,
+            }
+        ],
+    }
+    assert payload.get("schedule_selection") is None
 
 
 def test_client_device_property_defaults_to_none() -> None:
