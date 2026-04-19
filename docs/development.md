@@ -94,6 +94,7 @@ Useful read-only probes:
 python examples/cloud_probe.py
 python examples/app_map_probe.py --out app-map-current.json
 python examples/schedule_probe.py --out schedule-probe-current.json
+python examples/batch_device_data_probe.py --out batch-device-data-current.json
 python examples/weather_probe.py --out weather-probe-current.json
 python examples/preference_probe.py --out preference-probe-current.json
 python examples/task_status_probe.py --samples 6 --interval 10 --out task-status-live.json
@@ -112,6 +113,8 @@ python examples/remote_control_smoke.py --execute --velocity 30 --rotation 25 --
 The `.gitignore` excludes local probe outputs such as:
 
 - `app-map*.json`
+- `batch-device-data*.json`
+- `batch-extra*.json`
 - `dreame-map*.png`
 - `field-trip*.json`
 - `map-sources*.json`

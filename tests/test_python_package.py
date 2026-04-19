@@ -28,6 +28,7 @@ from dreame_lawn_mower_client import (
     analyze_decompiled_sources,
     analyze_dreamehome_apk,
     analyze_dreamehome_assets,
+    batch_data_text,
     build_camera_probe_payload,
     build_cloud_key_definition_summary,
     build_cloud_property_history_summary,
@@ -36,6 +37,9 @@ from dreame_lawn_mower_client import (
     build_map_probe_payload,
     build_schedule_enable_status_request,
     build_schedule_upload_requests,
+    decode_batch_mowing_preferences,
+    decode_batch_ota_info,
+    decode_batch_schedule_payload,
     decode_mower_status_blob,
     decode_mower_task_status,
     decode_mowing_preference_payload,
@@ -99,6 +103,10 @@ def test_public_package_exports_map_helpers() -> None:
     assert callable(build_cloud_property_summary)
     assert callable(build_jadx_command)
     assert callable(build_map_probe_payload)
+    assert callable(batch_data_text)
+    assert callable(decode_batch_mowing_preferences)
+    assert callable(decode_batch_ota_info)
+    assert callable(decode_batch_schedule_payload)
     assert callable(decode_mowing_preference_payload)
     assert callable(run_jadx_decompile)
     assert callable(summarize_mowing_preference_info)
@@ -131,7 +139,10 @@ def test_public_package_client_has_cloud_probe_helpers() -> None:
     assert hasattr(DreameLawnMowerClient, "async_remote_control_move_step")
     assert hasattr(DreameLawnMowerClient, "async_remote_control_stop")
     assert hasattr(DreameLawnMowerClient, "async_get_app_schedules")
+    assert hasattr(DreameLawnMowerClient, "async_get_batch_schedules")
     assert hasattr(DreameLawnMowerClient, "async_get_mowing_preferences")
+    assert hasattr(DreameLawnMowerClient, "async_get_batch_mowing_preferences")
+    assert hasattr(DreameLawnMowerClient, "async_get_batch_ota_info")
     assert hasattr(DreameLawnMowerClient, "async_get_weather_protection")
     assert hasattr(DreameLawnMowerClient, "async_set_app_schedule_plan_enabled")
 

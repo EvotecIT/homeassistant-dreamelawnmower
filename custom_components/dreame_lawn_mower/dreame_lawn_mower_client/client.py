@@ -28,6 +28,11 @@ from .app_protocol import (
     mower_state_key,
     mower_state_label,
 )
+from .batch_device_data import (
+    decode_batch_mowing_preferences,
+    decode_batch_ota_info,
+    decode_batch_schedule_payload,
+)
 from .camera_probe import CAMERA_PROBE_PROPERTY_KEYS, build_camera_probe_payload
 from .exceptions import DeviceException, InvalidActionException
 from .map_probe import (
@@ -491,6 +496,40 @@ class DreameLawnMowerClient:
             include_objects,
             include_object_urls,
         )
+
+    async def async_get_batch_schedules(
+        self,
+        *,
+        include_raw: bool = False,
+        map_index_hint: int | None = None,
+    ) -> dict[str, Any]:
+        """Fetch and decode schedule data from batch device data."""
+        return await asyncio.to_thread(
+            self._sync_get_batch_schedules,
+            include_raw,
+            map_index_hint,
+        )
+
+    async def async_get_batch_mowing_preferences(
+        self,
+        *,
+        include_raw: bool = False,
+        map_indices: Sequence[int] | None = None,
+    ) -> dict[str, Any]:
+        """Fetch and decode mower preferences from batch device data."""
+        return await asyncio.to_thread(
+            self._sync_get_batch_mowing_preferences,
+            include_raw,
+            map_indices,
+        )
+
+    async def async_get_batch_ota_info(
+        self,
+        *,
+        include_raw: bool = False,
+    ) -> dict[str, Any]:
+        """Fetch and decode OTA state from batch device data."""
+        return await asyncio.to_thread(self._sync_get_batch_ota_info, include_raw)
 
     async def async_get_app_map_objects(
         self,
@@ -1457,12 +1496,16 @@ class DreameLawnMowerClient:
             )
 
     def _sync_get_vector_map_batch_data(self) -> Mapping[str, Any] | None:
+        return self._sync_get_batch_device_data(_vector_map_batch_keys())
+
+    def _sync_get_batch_device_data(
+        self,
+        keys: Sequence[str] | None = None,
+    ) -> Mapping[str, Any] | None:
         cloud = self._sync_get_cloud_protocol()
-        keys = [*(f"MAP.{index}" for index in range(40)), "MAP.info"]
-        keys.extend(f"M_PATH.{index}" for index in range(10))
-        keys.append("M_PATH.info")
+        requested = list(keys or [])
         try:
-            response = cloud.get_batch_device_datas(keys)
+            response = cloud.get_batch_device_datas(requested)
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
         return response if isinstance(response, Mapping) else None
@@ -1705,6 +1748,46 @@ class DreameLawnMowerClient:
             result["response_data"] = _json_safe(response_data, max_depth=4)
         return result
 
+    def _sync_get_batch_schedules(
+        self,
+        include_raw: bool = False,
+        map_index_hint: int | None = None,
+    ) -> dict[str, Any]:
+        """Fetch and decode schedule data from batch device data."""
+        if map_index_hint is None:
+            map_index_hint = self._sync_get_current_app_map_index()
+        batch_data = self._sync_get_batch_device_data(_batch_schedule_keys())
+        if batch_data is None:
+            return {
+                "source": "batch_device_data_schedule",
+                "available": False,
+                "current_task": None,
+                "schedules": [],
+                "errors": [
+                    {
+                        "stage": "schedule",
+                        "error": "Batch device data returned no schedule payload.",
+                    }
+                ],
+            }
+        return decode_batch_schedule_payload(
+            batch_data,
+            include_raw=include_raw,
+            map_index_hint=map_index_hint,
+        )
+
+    def _sync_get_current_app_map_index(self) -> int | None:
+        try:
+            app_maps = self._sync_get_app_maps(
+                chunk_size=400,
+                include_payload=False,
+                include_objects=False,
+                include_object_urls=False,
+            )
+        except Exception:  # noqa: BLE001 - best-effort hint only
+            return None
+        return _positive_int(app_maps.get("current_map_index"))
+
     def _sync_get_mowing_preferences(
         self,
         include_raw: bool = False,
@@ -1794,6 +1877,54 @@ class DreameLawnMowerClient:
             result["maps"].append(entry)
 
         return result
+
+    def _sync_get_batch_mowing_preferences(
+        self,
+        include_raw: bool = False,
+        map_indices: Sequence[int] | None = None,
+    ) -> dict[str, Any]:
+        """Fetch and decode mower preferences from batch device data."""
+        batch_data = self._sync_get_batch_device_data(_batch_settings_keys())
+        if batch_data is None:
+            return {
+                "source": "batch_device_data_mowing_preferences",
+                "available": False,
+                "property_hint": MOWING_PREFERENCE_PROPERTY_KEY,
+                "maps": [],
+                "errors": [
+                    {
+                        "stage": "settings",
+                        "error": "Batch device data returned no settings payload.",
+                    }
+                ],
+            }
+        return decode_batch_mowing_preferences(
+            batch_data,
+            include_raw=include_raw,
+            map_indices=map_indices,
+        )
+
+    def _sync_get_batch_ota_info(
+        self,
+        include_raw: bool = False,
+    ) -> dict[str, Any]:
+        """Fetch and decode OTA state from batch device data."""
+        batch_data = self._sync_get_batch_device_data(_batch_ota_keys())
+        if batch_data is None:
+            return {
+                "source": "batch_device_data_ota_info",
+                "available": False,
+                "ota_info": None,
+                "update_available": None,
+                "auto_upgrade_enabled": None,
+                "errors": [
+                    {
+                        "stage": "ota",
+                        "error": "Batch device data returned no OTA payload.",
+                    }
+                ],
+            }
+        return decode_batch_ota_info(batch_data, include_raw=include_raw)
 
     def _sync_get_weather_protection(
         self,
@@ -2991,6 +3122,29 @@ def _select_app_map_payload(app_maps: Mapping[str, Any]) -> Mapping[str, Any] | 
         if item.get("idx") == current_idx:
             return item
     return available_maps[0] if available_maps else None
+
+
+def _vector_map_batch_keys() -> list[str]:
+    keys = [*(f"MAP.{index}" for index in range(40)), "MAP.info"]
+    keys.extend(f"M_PATH.{index}" for index in range(10))
+    keys.append("M_PATH.info")
+    return keys
+
+
+def _batch_schedule_keys() -> list[str]:
+    return [*(f"SCHEDULE.{index}" for index in range(10)), "SCHEDULE.info"]
+
+
+def _batch_settings_keys() -> list[str]:
+    return [*(f"SETTINGS.{index}" for index in range(10)), "SETTINGS.info"]
+
+
+def _batch_ota_keys() -> list[str]:
+    return [
+        *(f"OTA_INFO.{index}" for index in range(4)),
+        "OTA_INFO.info",
+        "prop.s_auto_upgrade",
+    ]
 
 
 def _weather_protection_summary(config: Mapping[str, Any]) -> dict[str, Any]:

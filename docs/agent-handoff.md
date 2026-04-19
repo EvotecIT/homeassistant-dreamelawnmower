@@ -132,6 +132,12 @@ Last updated: 2026-04-19
   fallback with source `batch_vector_map`. The same payload also exposed
   `SCHEDULE.*`, `SETTINGS.*`, `OTA_INFO.*`, and `prop.s_auto_upgrade`, which is
   useful for future schedule/preferences/firmware work.
+- The reusable client now also decodes those batch extras directly through
+  `async_get_batch_schedules()`, `async_get_batch_mowing_preferences()`, and
+  `async_get_batch_ota_info()`. A parked live A2 probe on 2026-04-19 confirmed
+  active batch schedule `map_0` version `19383`, batch mowing preferences for
+  map `0` with 5 areas and map `1` with 2 areas, plus batch OTA info
+  `[1, 0]` with `prop.s_auto_upgrade=0`.
 - The app-map helper downloads every created map returned by `MAPL`; the HA map
   camera still renders the current map image, but its attributes expose compact
   all-map metadata (`app_map_count`, `app_current_map_index`, `app_maps`, etc.).
@@ -249,6 +255,9 @@ Last updated: 2026-04-19
   Home Assistant has disabled-by-default Capture/Last Preference Probe
   diagnostics; writes (`PRE` with `m:"s"` and `PREP`) remain intentionally
   unexposed.
+- For read-only batch comparisons, use `examples/batch_device_data_probe.py`.
+  It decodes `SCHEDULE.*`, `SETTINGS.*`, and `OTA_INFO.*` without relying on
+  app-action preference or schedule commands.
 - A live read-only preference probe on 2026-04-19 returned two maps with no
   errors: map `0` in global mode with 5 preference areas and map `1` in global
   mode with 2 preference areas. Local output was stored in ignored

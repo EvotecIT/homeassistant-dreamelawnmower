@@ -10,6 +10,8 @@ firmware-update*.json
 key-definition*.json
 app-map*.json
 app-map-object*.bin
+batch-device-data*.json
+batch-extra*.json
 dreame-map*.png
 map-sources*.json
 source-scan*.json

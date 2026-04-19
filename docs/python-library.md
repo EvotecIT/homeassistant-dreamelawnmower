@@ -118,6 +118,7 @@ service, config-flow, and registry behavior in `custom_components`.
 
 - `examples/cloud_probe.py`
 - `examples/app_map_probe.py`
+- `examples/batch_device_data_probe.py`
 - `examples/schedule_probe.py`
 - `examples/schedule_write_probe.py`
 - `examples/weather_probe.py`

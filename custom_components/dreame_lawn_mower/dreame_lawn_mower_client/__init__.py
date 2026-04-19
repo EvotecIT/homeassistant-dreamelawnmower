@@ -32,6 +32,12 @@ from .app_protocol import (
     mower_state_key,
     mower_state_label,
 )
+from .batch_device_data import (
+    batch_data_text,
+    decode_batch_mowing_preferences,
+    decode_batch_ota_info,
+    decode_batch_schedule_payload,
+)
 from .camera_probe import CAMERA_PROBE_PROPERTY_KEYS, build_camera_probe_payload
 from .client import (
     DreameLawnMowerAuthError,
@@ -130,6 +136,7 @@ __all__ = [
     "analyze_decompiled_sources",
     "analyze_dreamehome_assets",
     "analyze_dreamehome_apk",
+    "batch_data_text",
     "build_jadx_command",
     "build_camera_probe_payload",
     "build_cloud_key_definition_summary",
@@ -138,6 +145,9 @@ __all__ = [
     "build_map_probe_payload",
     "build_schedule_enable_status_request",
     "build_schedule_upload_requests",
+    "decode_batch_mowing_preferences",
+    "decode_batch_ota_info",
+    "decode_batch_schedule_payload",
     "decode_mower_status_blob",
     "decode_mower_task_status",
     "decode_mowing_preference_payload",
