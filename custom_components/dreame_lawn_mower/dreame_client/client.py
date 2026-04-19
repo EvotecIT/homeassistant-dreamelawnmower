@@ -22,6 +22,8 @@ from .app_protocol import (
     decode_mower_task_status,
     key_definition_label,
     mower_error_label,
+    mower_property_hint,
+    mower_realtime_property_name,
     mower_state_key,
     mower_state_label,
 )
@@ -3337,7 +3339,10 @@ def _operation_property_summary(
     for key, value in properties.items():
         key_text = str(key)
         payload = value if isinstance(value, Mapping) else {}
-        property_name = str(payload.get("property_name") or "")
+        property_hint = mower_property_hint(key_text)
+        property_name = mower_realtime_property_name(
+            key_text, payload.get("property_name")
+        )
         property_value = payload.get("value") if isinstance(value, Mapping) else value
         value_type = _operation_value_type(property_value)
         value_type_counts[value_type] = value_type_counts.get(value_type, 0) + 1
@@ -3360,19 +3365,20 @@ def _operation_property_summary(
         if key_text == MOWER_TASK_PROPERTY_KEY:
             task_status = decode_mower_task_status(property_value)
 
-        entries.append(
-            {
-                "key": key_text,
-                "property_name": property_name or None,
-                "siid": _json_safe(payload.get("siid")),
-                "piid": _json_safe(payload.get("piid")),
-                "code": _json_safe(payload.get("code")),
-                "value_type": value_type,
-                "value_preview": _operation_short_preview(property_value),
-                "status_blob": status_blob,
-                "task_status": task_status,
-            }
-        )
+        entry = {
+            "key": key_text,
+            "property_name": property_name or None,
+            "siid": _json_safe(payload.get("siid")),
+            "piid": _json_safe(payload.get("piid")),
+            "code": _json_safe(payload.get("code")),
+            "value_type": value_type,
+            "value_preview": _operation_short_preview(property_value),
+            "status_blob": status_blob,
+            "task_status": task_status,
+        }
+        if property_hint is not None:
+            entry["property_hint"] = property_hint
+        entries.append(entry)
 
     entries.sort(key=lambda item: item["key"])
     known_keys.sort()

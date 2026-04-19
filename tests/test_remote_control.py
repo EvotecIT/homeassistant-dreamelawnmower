@@ -74,7 +74,7 @@ class _FakeRemoteControlDevice:
                 "piid": 1,
                 "code": 0,
                 "value": [206, 0, 206],
-                "property_name": "RAW_STATUS",
+                "property_name": "UNKNOWN_REALTIME_1.1",
             }
         }
         self.last_realtime_message = {
@@ -286,6 +286,14 @@ def test_operation_snapshot_combines_safe_field_test_evidence() -> None:
     assert payload["realtime_summary"]["known_keys"] == ["1.1"]
     assert payload["realtime_summary"]["unknown_keys"] == []
     assert payload["realtime_summary"]["entries"][0]["key"] == "1.1"
+    assert (
+        payload["realtime_summary"]["entries"][0]["property_name"]
+        == "raw_status_blob"
+    )
+    assert (
+        payload["realtime_summary"]["entries"][0]["property_hint"]
+        == "raw_status_blob"
+    )
     assert payload["realtime_summary"]["entries"][0]["value_type"] == "array"
     assert payload["realtime_summary"]["entries"][0]["value_preview"] == [206, 0, 206]
     assert (

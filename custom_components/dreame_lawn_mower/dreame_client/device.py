@@ -12,7 +12,7 @@ from random import randrange
 from threading import Timer
 from typing import Any, Optional
 
-from .app_protocol import MOWER_PROPERTY_HINTS
+from .app_protocol import mower_realtime_property_name
 from .types import (
     PIID,
     DIID,
@@ -523,7 +523,7 @@ class DreameMowerDevice:
         property_name = (
             property_enum.name
             if property_enum is not None
-            else MOWER_PROPERTY_HINTS.get(key, f"UNKNOWN_REALTIME_{key}")
+            else mower_realtime_property_name(key)
         )
         self.realtime_properties[key] = {
             "siid": siid,

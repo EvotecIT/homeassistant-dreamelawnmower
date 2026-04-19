@@ -60,6 +60,21 @@ MOWER_STATE_KEYS: Final[dict[str, str]] = {
 }
 
 
+def mower_property_hint(key: object) -> str | None:
+    """Return the app-derived property hint for a raw siid/piid key."""
+    return MOWER_PROPERTY_HINTS.get(str(key))
+
+
+def mower_realtime_property_name(key: object, property_name: object = None) -> str:
+    """Return a stable realtime property name, preferring known app hints."""
+    key_text = str(key)
+    hint = mower_property_hint(key_text)
+    text = str(property_name).strip() if property_name is not None else ""
+    if hint and (not text or text.startswith("UNKNOWN_REALTIME_")):
+        return hint
+    return text or f"UNKNOWN_REALTIME_{key_text}"
+
+
 def _clean_label(value: object) -> str | None:
     text = str(value).strip() if value is not None else ""
     if not text:

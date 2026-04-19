@@ -13,6 +13,8 @@ from .dreame_client.app_protocol import (
     MOWER_RAW_STATUS_PROPERTY_KEY,
     MOWER_RUNTIME_STATUS_PROPERTY_KEY,
     decode_mower_status_blob,
+    mower_property_hint,
+    mower_realtime_property_name,
 )
 from .dreame_client.map_probe import MAP_CANDIDATE_TERMS
 from .dreame_client.models import (
@@ -391,8 +393,11 @@ def _collect_realtime_summary(device: Any) -> dict[str, Any]:
 
     for key, value in realtime_properties.items():
         payload = value if isinstance(value, Mapping) else {}
-        property_name = str(payload.get("property_name") or "")
         key_text = str(key)
+        property_hint = mower_property_hint(key_text)
+        property_name = mower_realtime_property_name(
+            key_text, payload.get("property_name")
+        )
         if property_name.startswith(UNKNOWN_REALTIME_PREFIX):
             unknown_keys.append(key_text)
         else:
@@ -412,19 +417,20 @@ def _collect_realtime_summary(device: Any) -> dict[str, Any]:
         status_blob = _status_blob_summary(key_text, property_value)
         if status_blob is not None:
             status_blob_keys.append(key_text)
-        entries.append(
-            {
-                "key": key_text,
-                "property_name": property_name or None,
-                "siid": _normalize_debug_value(payload.get("siid")),
-                "piid": _normalize_debug_value(payload.get("piid")),
-                "code": _normalize_debug_value(payload.get("code")),
-                "value_type": _value_type(property_value),
-                "value_preview": _short_preview(property_value),
-                "map_candidate_reason": candidate_reason,
-                "status_blob": status_blob,
-            }
-        )
+        entry = {
+            "key": key_text,
+            "property_name": property_name or None,
+            "siid": _normalize_debug_value(payload.get("siid")),
+            "piid": _normalize_debug_value(payload.get("piid")),
+            "code": _normalize_debug_value(payload.get("code")),
+            "value_type": _value_type(property_value),
+            "value_preview": _short_preview(property_value),
+            "map_candidate_reason": candidate_reason,
+            "status_blob": status_blob,
+        }
+        if property_hint is not None:
+            entry["property_hint"] = property_hint
+        entries.append(entry)
 
     entries.sort(key=lambda item: item["key"])
     known_keys.sort()

@@ -82,6 +82,8 @@ map_diagnostics_from_device = _models.map_diagnostics_from_device
 map_summary_from_map_data = _models.map_summary_from_map_data
 map_summary_to_dict = _models.map_summary_to_dict
 mower_error_label = _app_protocol.mower_error_label
+mower_property_hint = _app_protocol.mower_property_hint
+mower_realtime_property_name = _app_protocol.mower_realtime_property_name
 mower_state_key = _app_protocol.mower_state_key
 mower_state_label = _app_protocol.mower_state_label
 remote_control_block_reason = _models.remote_control_block_reason
@@ -159,6 +161,8 @@ __all__ = [
     "map_summary_from_map_data",
     "map_summary_to_dict",
     "mower_error_label",
+    "mower_property_hint",
+    "mower_realtime_property_name",
     "mower_state_key",
     "mower_state_label",
     "remote_control_block_reason",

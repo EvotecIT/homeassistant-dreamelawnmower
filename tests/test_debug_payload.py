@@ -85,6 +85,15 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
                 "property_name": "BATTERY_LEVEL",
                 "last_seen": 123457.0,
             },
+            "2.51": {
+                "siid": 2,
+                "piid": 51,
+                "did": None,
+                "code": None,
+                "value": {"time": "1776587727", "tz": "Europe/Warsaw"},
+                "property_name": "UNKNOWN_REALTIME_2.51",
+                "last_seen": 123457.5,
+            },
             "9.4": {
                 "siid": 9,
                 "piid": 4,
@@ -183,22 +192,32 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
             }
         ],
     }
-    assert payload["device"]["realtime_property_count"] == 3
+    assert payload["device"]["realtime_property_count"] == 4
     assert (
         payload["device"]["realtime_properties"]["1.2"]["property_name"]
         == "BATTERY_LEVEL"
     )
     assert payload["device"]["realtime_properties"]["9.4"]["value"] == {"blob": 123}
-    assert payload["device"]["realtime_summary"]["known_keys"] == ["1.1", "1.2"]
+    assert payload["device"]["realtime_summary"]["known_keys"] == [
+        "1.1",
+        "1.2",
+        "2.51",
+    ]
     assert payload["device"]["realtime_summary"]["unknown_keys"] == ["9.4"]
     assert payload["device"]["realtime_summary"]["value_type_counts"] == {
         "array": 1,
         "number": 1,
-        "object": 1,
+        "object": 2,
     }
     assert payload["device"]["realtime_summary"]["status_blob_keys"] == ["1.1"]
-    assert payload["device"]["realtime_summary"]["candidate_map_property_count"] == 1
+    assert payload["device"]["realtime_summary"]["candidate_map_property_count"] == 2
     assert payload["device"]["realtime_summary"]["candidate_map_properties"] == [
+        {
+            "key": "2.51",
+            "reason": "object_payload",
+            "value_type": "object",
+            "value_preview": {"time": "1776587727", "tz": "Europe/Warsaw"},
+        },
         {
             "key": "9.4",
             "reason": "object_payload",
@@ -214,6 +233,18 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
         "bytes_by_index": {"0": 206, "1": 0, "2": 206},
     }
     assert payload["device"]["realtime_summary"]["entries"][2] == {
+        "key": "2.51",
+        "property_name": "device_time",
+        "siid": 2,
+        "piid": 51,
+        "code": None,
+        "value_type": "object",
+        "value_preview": {"time": "1776587727", "tz": "Europe/Warsaw"},
+        "map_candidate_reason": "object_payload",
+        "status_blob": None,
+        "property_hint": "device_time",
+    }
+    assert payload["device"]["realtime_summary"]["entries"][3] == {
         "key": "9.4",
         "property_name": "UNKNOWN_REALTIME_9.4",
         "siid": 9,

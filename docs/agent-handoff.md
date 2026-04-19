@@ -54,6 +54,10 @@ Last updated: 2026-04-19
   `{"t":"TASK","d":{"exe":true,"status":true,"o":6}}`, `2.51` is the device
   time/tz payload, and `3.1` mirrors the battery level. `2.50` is now decoded
   conservatively as `type`, `executing`, `status`, and `operation`.
+- Realtime summaries now prefer app-derived hints for known `siid.piid` keys
+  when cached payloads still contain `UNKNOWN_REALTIME_*` labels. This keeps
+  live captures readable for keys such as `1.1`, `1.4`, `2.50`, `2.51`, and
+  `3.1` while preserving genuinely unknown keys for discovery.
 - `examples/task_status_probe.py` repeatedly samples the task/status keys and
   summarizes whether mower state or task status changed, including values seen
   for unknown non-empty keys. Live mowing windows on 2026-04-19 stayed stable
@@ -243,6 +247,11 @@ Last updated: 2026-04-19
   `WRP=[1,8,0]`, decoded as rain protection enabled for 8 hours with sensitivity
   `0`. `CFG` did not include `WRF`, and `RPET` returned no active end time at
   capture time. Local output is ignored as `weather-probe-live*.json`.
+- A follow-up read-only weather probe on 2026-04-19 later in the day returned
+  no decoded weather switch, rain-protection tuple, or active protection end
+  time, with no probe errors. A simultaneous task/status sample showed the mower
+  charging, battery moving from `42` to `43`, task `TASK` still executing with
+  operation `6`, and unknown key `5.106=1` while charging.
 - Config-flow auth failures are classified into non-secret Home Assistant
   errors for account type, region, connectivity, generic auth, 2FA, and no
   matching mower devices.
@@ -274,8 +283,10 @@ Last updated: 2026-04-19
   conflicting across cloud metadata sources and appears to be app/plugin
   metadata rather than a verified mower OTA signal.
 - Realtime key meanings are still being learned. Known useful keys include
-  `1.1` as a raw status blob, `2.1` as mower state, and `2.2` as mower error.
-  Movement/docking also surfaced `2.50`, currently unknown.
+  `1.1` as a raw status blob, `1.4` as a runtime status blob, `2.1` as mower
+  state, `2.2` as mower error, `2.50` as task status, `2.51` as device time,
+  and `3.1` as battery. `5.106` is still unknown; live samples have shown
+  values including `6`, `7`, and `1` across mowing, docked, and charging states.
 
 ## Local Live Evidence
 

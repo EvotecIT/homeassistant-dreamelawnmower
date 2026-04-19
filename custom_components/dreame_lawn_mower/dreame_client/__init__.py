@@ -27,6 +27,8 @@ from .app_protocol import (
     decode_mower_task_status,
     key_definition_label,
     mower_error_label,
+    mower_property_hint,
+    mower_realtime_property_name,
     mower_state_key,
     mower_state_label,
 )
@@ -154,6 +156,8 @@ __all__ = [
     "remote_control_block_reason",
     "remote_control_state_safe",
     "mower_error_label",
+    "mower_property_hint",
+    "mower_realtime_property_name",
     "mower_state_key",
     "mower_state_label",
     "run_jadx_decompile",
