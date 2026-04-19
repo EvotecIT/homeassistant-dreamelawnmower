@@ -143,7 +143,9 @@ Checklist:
 - [x] add fixture-based tests for paused, returning, docked, charging, and fault transitions
 - [x] recover and validate read-only app schedule retrieval through `SCHDIV2`, `SCHDDV2`, and `SCHDT`
 - [x] add a Python-side read-only schedule probe and parser tests
+- [x] add schedule payload encoder tests and a dry-run-first enable/disable write planner
 - [ ] expose a Home Assistant schedule or calendar surface after more schedule fixtures
+- [ ] validate supervised schedule enable/disable writes before adding Home Assistant controls
 - [ ] keep adding fixture-based tests for idle and recovery transitions as captures become available
 
 Definition of done:

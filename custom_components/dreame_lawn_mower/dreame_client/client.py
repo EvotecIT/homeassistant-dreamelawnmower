@@ -51,6 +51,7 @@ from .models import (
 from .schedule import (
     EMPTY_SCHEDULE_VERSION,
     SCHEDULE_CHUNK_SIZE,
+    build_schedule_enable_status_request,
     decode_schedule_payload_text,
     schedule_task_summary,
 )
@@ -375,6 +376,25 @@ class DreameLawnMowerClient:
             include_raw,
             map_indices,
             chunk_size,
+        )
+
+    async def async_set_app_schedule_plan_enabled(
+        self,
+        *,
+        map_index: int,
+        plan_id: int,
+        enabled: bool,
+        execute: bool = False,
+        confirm_write: bool = False,
+    ) -> dict[str, Any]:
+        """Build or execute the app action request to toggle a schedule plan."""
+        return await asyncio.to_thread(
+            self._sync_set_app_schedule_plan_enabled,
+            map_index,
+            plan_id,
+            enabled,
+            execute,
+            confirm_write,
         )
 
     async def async_get_cloud_device_info(
@@ -1459,6 +1479,77 @@ class DreameLawnMowerClient:
                 )
             result["schedules"].append(schedule_result)
 
+        return result
+
+    def _sync_set_app_schedule_plan_enabled(
+        self,
+        map_index: int,
+        plan_id: int,
+        enabled: bool,
+        execute: bool = False,
+        confirm_write: bool = False,
+    ) -> dict[str, Any]:
+        """Build or execute a schedule enable-status app action request."""
+        if execute and not confirm_write:
+            raise ValueError(
+                "Schedule writes require confirm_write=True when execute=True."
+            )
+
+        schedules = self._sync_get_app_schedules(map_indices=[map_index])
+        if not schedules.get("schedules"):
+            raise DreameLawnMowerConnectionError(
+                f"No schedule metadata returned for map index {map_index}."
+            )
+        schedule = schedules["schedules"][0]
+        version = _positive_int(schedule.get("version"))
+        if version is None or version == EMPTY_SCHEDULE_VERSION:
+            raise DreameLawnMowerConnectionError(
+                f"No writable schedule version returned for map index {map_index}."
+            )
+        plans = schedule.get("plans")
+        if not isinstance(plans, list):
+            raise DreameLawnMowerConnectionError(
+                f"No decoded schedule plans returned for map index {map_index}."
+            )
+
+        updated_plans: list[dict[str, Any]] = []
+        previous_enabled: bool | None = None
+        found = False
+        for plan in plans:
+            if not isinstance(plan, Mapping):
+                continue
+            updated_plan = dict(plan)
+            if _positive_int(updated_plan.get("plan_id")) == plan_id:
+                previous_enabled = bool(updated_plan.get("enabled"))
+                updated_plan["enabled"] = bool(enabled)
+                found = True
+            updated_plans.append(updated_plan)
+        if not found:
+            raise ValueError(
+                f"Schedule plan {plan_id} was not found for map index {map_index}."
+            )
+
+        request = build_schedule_enable_status_request(
+            map_index=map_index,
+            version=version,
+            plans=updated_plans,
+        )
+        result: dict[str, Any] = {
+            "source": "app_action_schedule_write",
+            "action": "set_schedule_plan_enabled",
+            "dry_run": not execute,
+            "executed": False,
+            "map_index": map_index,
+            "plan_id": plan_id,
+            "previous_enabled": previous_enabled,
+            "enabled": bool(enabled),
+            "version": version,
+            "request": request,
+        }
+        if execute:
+            response = self._sync_call_app_action(request)
+            result["executed"] = True
+            result["response"] = _json_safe(response, max_depth=4)
         return result
 
     def _sync_get_app_schedule_text(

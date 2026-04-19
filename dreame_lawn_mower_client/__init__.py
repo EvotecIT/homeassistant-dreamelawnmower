@@ -8,6 +8,7 @@ _camera_probe = load_internal_module("camera_probe")
 _client = load_internal_module("client")
 _map_probe = load_internal_module("map_probe")
 _models = load_internal_module("models")
+_schedule = load_internal_module("schedule")
 
 DreameLawnMowerClient = _client.DreameLawnMowerClient
 DreameLawnMowerError = _client.DreameLawnMowerError
@@ -40,6 +41,8 @@ CAMERA_PROBE_PROPERTY_KEYS = _camera_probe.CAMERA_PROBE_PROPERTY_KEYS
 MAP_HISTORY_PROPERTY_KEYS = _map_probe.MAP_HISTORY_PROPERTY_KEYS
 MAP_PROBE_PROPERTY_KEYS = _map_probe.MAP_PROBE_PROPERTY_KEYS
 SUPPORTED_ACCOUNT_TYPES = _models.SUPPORTED_ACCOUNT_TYPES
+EMPTY_SCHEDULE_VERSION = _schedule.EMPTY_SCHEDULE_VERSION
+SCHEDULE_CHUNK_SIZE = _schedule.SCHEDULE_CHUNK_SIZE
 analyze_decompiled_sources = _apk_research.analyze_decompiled_sources
 analyze_dreamehome_assets = _apk_research.analyze_dreamehome_assets
 analyze_dreamehome_apk = _apk_research.analyze_dreamehome_apk
@@ -51,9 +54,17 @@ build_cloud_property_history_summary = (
 )
 build_cloud_property_summary = _map_probe.build_cloud_property_summary
 build_map_probe_payload = _map_probe.build_map_probe_payload
+build_schedule_enable_status_request = _schedule.build_schedule_enable_status_request
+build_schedule_upload_requests = _schedule.build_schedule_upload_requests
 find_jadx_executable = _apk_research.find_jadx_executable
 decode_mower_status_blob = _app_protocol.decode_mower_status_blob
+decode_schedule_payload_text = _schedule.decode_schedule_payload_text
+decode_schedule_plans = _schedule.decode_schedule_plans
+decode_schedule_week_payload = _schedule.decode_schedule_week_payload
 display_name_for_model = _models.display_name_for_model
+encode_schedule_payload_text = _schedule.encode_schedule_payload_text
+encode_schedule_plans = _schedule.encode_schedule_plans
+encode_schedule_week_payload = _schedule.encode_schedule_week_payload
 firmware_update_support_from_device = _models.firmware_update_support_from_device
 key_definition_label = _app_protocol.key_definition_label
 map_diagnostics_from_device = _models.map_diagnostics_from_device
@@ -64,6 +75,7 @@ mower_state_label = _app_protocol.mower_state_label
 remote_control_block_reason = _models.remote_control_block_reason
 remote_control_state_safe = _models.remote_control_state_safe
 run_jadx_decompile = _apk_research.run_jadx_decompile
+schedule_task_summary = _schedule.schedule_task_summary
 
 __all__ = [
     "CAMERA_PROBE_PROPERTY_KEYS",
@@ -86,6 +98,7 @@ __all__ = [
     "DreameLawnMowerSnapshot",
     "DreameLawnMowerStatusBlob",
     "DreameLawnMowerTwoFactorRequiredError",
+    "EMPTY_SCHEDULE_VERSION",
     "MODEL_NAME_MAP",
     "MAP_HISTORY_PROPERTY_KEYS",
     "MAP_PROBE_PROPERTY_KEYS",
@@ -94,6 +107,7 @@ __all__ = [
     "MOWER_RAW_STATUS_PROPERTY_KEY",
     "MOWER_STATE_LABELS",
     "MOWER_STATE_PROPERTY_KEY",
+    "SCHEDULE_CHUNK_SIZE",
     "SUPPORTED_ACCOUNT_TYPES",
     "analyze_decompiled_sources",
     "analyze_dreamehome_assets",
@@ -104,8 +118,16 @@ __all__ = [
     "build_cloud_property_history_summary",
     "build_cloud_property_summary",
     "build_map_probe_payload",
+    "build_schedule_enable_status_request",
+    "build_schedule_upload_requests",
     "decode_mower_status_blob",
+    "decode_schedule_payload_text",
+    "decode_schedule_plans",
+    "decode_schedule_week_payload",
     "display_name_for_model",
+    "encode_schedule_payload_text",
+    "encode_schedule_plans",
+    "encode_schedule_week_payload",
     "find_jadx_executable",
     "firmware_update_support_from_device",
     "key_definition_label",
@@ -117,4 +139,5 @@ __all__ = [
     "remote_control_block_reason",
     "remote_control_state_safe",
     "run_jadx_decompile",
+    "schedule_task_summary",
 ]

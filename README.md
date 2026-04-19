@@ -184,6 +184,7 @@ The reusable Python client can read mower-native schedules through confirmed
 read-only app commands:
 
 - `async_get_app_schedules()` fetches schedule metadata and decoded schedule plans
+- `async_set_app_schedule_plan_enabled()` builds a dry-run write plan by default
 - `SCHDIV2` returns schedule size/version metadata
 - chunked `SCHDDV2` returns schedule JSON
 - `SCHDT` returns the current or next scheduled task window
@@ -194,10 +195,23 @@ The quickest focused probe is:
 python examples/schedule_probe.py --out schedule-probe-current.json
 ```
 
-This does not create, enable, disable, or edit schedules. Home Assistant does
-not expose a schedule/calendar entity yet; the current UI-facing support is
-still only the diagnostic `Scheduled Task` binary sensor while a scheduled task
-is reported active.
+Schedule write support is intentionally guarded. This builds the app-side
+`SCHDSV2` enable/disable request without sending it:
+
+```bash
+python examples/schedule_write_probe.py --map-index 0 --plan-id 0 --disable --out schedule-write-dry-run.json
+```
+
+Only send a write request during a supervised test window, after reviewing the
+dry-run JSON:
+
+```bash
+python examples/schedule_write_probe.py --map-index 0 --plan-id 0 --disable --execute --confirm-schedule-write
+```
+
+Home Assistant does not expose a schedule/calendar entity yet; the current
+UI-facing support is still only the diagnostic `Scheduled Task` binary sensor
+while a scheduled task is reported active.
 
 If you want to probe the same cloud endpoints the Dreamehome app exposes for mower discovery and raw properties, use:
 

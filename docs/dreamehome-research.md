@@ -116,9 +116,16 @@ The downloaded model plugin also exposes a schedule API through the same
 - `{"m":"g","t":"SCHDT","d":{"t":0}}` returns the current or next scheduled task
   window as minute-of-day start/end values plus plan/version identifiers.
 
-The write-side commands also exist in the bundle but are intentionally not used
-by this repo yet: `SCHDIV2` with `m:"s"` prepares an update, `SCHDDV2` with
-`m:"s"` uploads schedule chunks, and `SCHDSV2` changes enabled schedule status.
+The write-side commands also exist in the bundle. The Python client now has
+dry-run-first helpers for these payload shapes:
+
+- `SCHDSV2` with `m:"s"` changes enabled schedule status.
+- `SCHDIV2` with `m:"s"` prepares a full schedule payload update.
+- `SCHDDV2` with `m:"s"` uploads schedule chunks.
+
+Only the `SCHDSV2` enable/disable path is wired to a client method, and it
+defaults to dry-run. Sending it requires both `execute=True` and
+`confirm_write=True`.
 
 On 2026-04-19, a live A2 read-only schedule probe confirmed:
 
@@ -133,6 +140,8 @@ On 2026-04-19, a live A2 read-only schedule probe confirmed:
 The schedule payload stores task days in a base64 binary block. The app decodes
 that block into `plan_id`, `enabled`, `name`, `weeks`, and per-day task entries
 with minute-of-day start/end values, type, cyclic flag, and optional regions.
+The Python encoder round-trips the known live-shaped schedule payloads and can
+build full upload request chunks, but full schedule editing is not exposed yet.
 
 ## First live probe result
 

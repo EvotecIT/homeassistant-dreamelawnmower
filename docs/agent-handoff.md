@@ -82,6 +82,11 @@ Last updated: 2026-04-19
 - `examples/schedule_probe.py` provides the focused read-only schedule probe.
   By default it omits raw schedule JSON; `--include-raw` is opt-in for parser
   work and should remain in ignored local files.
+- Schedule write work has started conservatively. The schedule encoder
+  round-trips the known live-shaped payloads, and
+  `examples/schedule_write_probe.py` builds `SCHDSV2` enable/disable requests
+  without sending them by default. Live writes require both `--execute` and
+  `--confirm-schedule-write`.
 - Config-flow auth failures are classified into non-secret Home Assistant
   errors for account type, region, connectivity, generic auth, 2FA, and no
   matching mower devices.
@@ -212,8 +217,20 @@ python examples\schedule_probe.py --out schedule-probe-current.json
 ```
 
 Only use `--include-raw` for local parser work. It includes the raw schedule
-JSON and should stay in ignored local files. Do not call write-side schedule
-commands until the read-only parser has more fixtures.
+JSON and should stay in ignored local files.
+
+Dry-run schedule enable/disable write plan:
+
+```powershell
+python examples\schedule_write_probe.py --map-index 0 --plan-id 0 --disable --out schedule-write-dry-run.json
+```
+
+Only execute schedule writes in a supervised test window after checking the
+dry-run JSON. Actual writes require both explicit gates:
+
+```powershell
+python examples\schedule_write_probe.py --map-index 0 --plan-id 0 --disable --execute --confirm-schedule-write
+```
 
 Broad read-only property scan:
 
@@ -284,3 +301,5 @@ credentials into repo files.
   fixtures from more mower states and models.
 - Add a Home Assistant schedule/calendar surface only after the read-only
   schedule parser has more fixtures and clear UX for multi-map schedule slots.
+- Validate schedule enable/disable writes live before exposing Home Assistant
+  controls, and keep full schedule time/region editing behind encoder fixtures.
