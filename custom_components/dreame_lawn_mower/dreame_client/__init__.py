@@ -39,6 +39,7 @@ from .client import (
     DreameLawnMowerConnectionError,
     DreameLawnMowerError,
     DreameLawnMowerTwoFactorRequiredError,
+    render_app_map_payload_png,
 )
 from .map_probe import (
     MAP_HISTORY_PROPERTY_KEYS,
@@ -160,6 +161,7 @@ __all__ = [
     "mower_realtime_property_name",
     "mower_state_key",
     "mower_state_label",
+    "render_app_map_payload_png",
     "run_jadx_decompile",
     "schedule_task_summary",
     "summarize_mowing_preference_info",
