@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
 
-from examples.app_map_probe import summarize_app_map_payload
+from examples.app_map_probe import (
+    probe_app_map_object_downloads,
+    redact_object_urls,
+    summarize_app_map_payload,
+)
 from examples.field_trip_probe import (
     _raise_if_unsafe_execute as raise_if_unsafe_field_trip,
 )
@@ -389,5 +394,63 @@ def test_app_map_probe_summary_keeps_compact_current_map_evidence() -> None:
             "trajectory_point_count": 63,
         },
         "object_count": 2,
+        "object_download_success_count": None,
+        "object_download_statuses": None,
         "errors": [],
     }
+
+
+def test_app_map_object_download_probe_keeps_signed_urls_out() -> None:
+    payload = {
+        "objects": {
+            "objects": [
+                {
+                    "name": "3d/current.bin",
+                    "extension": ".bin",
+                    "url": "https://example.test/current.bin?signature=secret",
+                    "url_present": True,
+                }
+            ]
+        }
+    }
+    calls: list[dict[str, object]] = []
+
+    def fetcher(
+        url: str,
+        *,
+        method: str,
+        timeout: float,
+        user_agent: str,
+        byte_range: str | None = None,
+    ) -> dict[str, object]:
+        calls.append(
+            {
+                "url": url,
+                "method": method,
+                "timeout": timeout,
+                "user_agent": user_agent,
+                "range": byte_range,
+            }
+        )
+        return {
+            "method": method,
+            "status": 206 if method == "GET" else 403,
+            "bytes_read": 1 if method == "GET" else 0,
+        }
+
+    result = probe_app_map_object_downloads(
+        payload,
+        timeout=2,
+        user_agent="test-agent",
+        fetcher=fetcher,
+    )
+    redact_object_urls(payload)
+
+    rendered = json.dumps({"payload": payload, "result": result}, sort_keys=True)
+    assert "signature=secret" not in rendered
+    assert result["object_count"] == 1
+    assert result["success_count"] == 1
+    assert len(calls) == 4
+    assert {call["method"] for call in calls} == {"HEAD", "GET"}
+    assert any(call["range"] == "bytes=0-1023" for call in calls)
+    assert payload["objects"]["objects"][0]["url_redacted"] is True

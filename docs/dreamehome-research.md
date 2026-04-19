@@ -325,10 +325,23 @@ The successful map path is the app action bridge described above. On
   returned two `.bin` object names. Opt-in signed URL generation succeeded, but
   direct HEAD/GET checks still returned XML error responses (`403`/`404`), so
   the app download context or required headers remain unsolved.
+- The decompiled Dreamehome plugin shows `getOBJ(type)` sends
+  `{"m":"g","t":"OBJ","d":{"type":type}}`. It also has a direct download flow
+  that calls `/dreame-user-iot/iotfile/getDownloadUrl` with `{filename, model}`
+  and passes the returned URL to `RNFS.downloadFile`; no custom download headers
+  are visible in that flow. A separate mower action helper sends
+  `{"m":"a","o":16,"d":{"type":type,"url":url}}`, but we have not yet verified
+  whether the A2 uses that action for 3D map binaries.
 
 Use `python examples/app_map_probe.py --out app-map-current.json` for a focused
 read-only probe that omits raw coordinates by default. Add `--include-payload`
 only for local parser/rendering work.
+
+Use
+`python examples/app_map_probe.py --probe-object-downloads --out app-map-objects.json`
+to generate object URLs internally and record sanitized HEAD/ranged GET results.
+Signed object URLs are redacted from the output unless `--include-object-urls` is
+explicitly added for local-only debugging.
 
 Use `python examples/apk_research.py <apk> --max-string-length 220` when
 testing a new Dreamehome APK.
