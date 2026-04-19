@@ -10,6 +10,7 @@ SUPPORTED_ACCOUNT_TYPES = ("dreame", "mova")
 SUPPORTED_MODEL_MARKER = ".mower."
 MIN_REMOTE_CONTROL_BATTERY_LEVEL = 20
 REMOTE_CONTROL_STATES = {"remote_control"}
+REALTIME_ERROR_PROPERTY_KEY = "2.2"
 
 MODEL_NAME_MAP = {
     "dreame.mower.p2255": "A1",
@@ -95,6 +96,30 @@ def _error_name_from_code(value: int | None) -> str | None:
         return None
 
 
+def _error_code_from_raw(value: Any) -> int | None:
+    """Return a numeric error code from raw app/status values."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _active_error_code_from_raw(value: Any) -> int | None:
+    """Return a numeric active error code from raw app/status values."""
+    code = _error_code_from_raw(value)
+    return None if code in (-1, 0) else code
+
+
+def _realtime_error_code_from_device(device: Any) -> int | None:
+    """Return the app realtime `2.2` error code when it is active."""
+    realtime_properties = getattr(device, "realtime_properties", {}) or {}
+    entry = realtime_properties.get(REALTIME_ERROR_PROPERTY_KEY)
+    value = entry.get("value") if isinstance(entry, Mapping) else entry
+    return _active_error_code_from_raw(value)
+
+
 def _friendly_error_display(
     *,
     error_code: int | None,
@@ -157,6 +182,9 @@ class DreameLawnMowerSnapshot:
     error_name: str | None = None
     error_text: str | None = None
     error_display: str | None = None
+    error_source: str | None = None
+    raw_error_code: int | None = None
+    realtime_error_code: int | None = None
     firmware_version: str | None = None
     hardware_version: str | None = None
     serial_number: str | None = None
@@ -495,9 +523,11 @@ def snapshot_from_device(
     last_realtime_method = _as_optional_str(last_realtime_payload.get("method"))
     error_name = _as_optional_str(getattr(device.status, "error_name", None))
     error_text = _as_optional_str(status_attributes.get("error"))
-    error_code = getattr(error_obj, "value", None)
+    raw_error_code = _error_code_from_raw(getattr(error_obj, "value", None))
+    realtime_error_code = _realtime_error_code_from_device(device)
+    error_code = raw_error_code
     status_has_error = bool(getattr(device.status, "has_error", False))
-    error_code_active = error_code not in (None, -1, 0)
+    error_code_active = _active_error_code_from_raw(error_code) is not None
     error_name_active = not _is_no_error_text(error_name)
     error_text_active = not _is_no_error_text(error_text)
     has_only_bare_error_flag = (
@@ -512,6 +542,11 @@ def snapshot_from_device(
         or error_text_active
         or has_only_bare_error_flag
     )
+    error_source: str | None = "status" if has_error else None
+    if not has_error and realtime_error_code is not None:
+        error_code = realtime_error_code
+        has_error = True
+        error_source = f"realtime_property_{REALTIME_ERROR_PROPERTY_KEY}"
     capability_list = status_attributes.get("capabilities") or getattr(
         getattr(device, "capability", None),
         "list",
@@ -614,6 +649,9 @@ def snapshot_from_device(
             error_name=error_name,
             error_text=error_text,
         ),
+        error_source=error_source,
+        raw_error_code=raw_error_code,
+        realtime_error_code=realtime_error_code,
         firmware_version=getattr(
             getattr(device, "info", None),
             "firmware_version",

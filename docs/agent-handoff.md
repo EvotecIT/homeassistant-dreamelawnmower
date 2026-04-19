@@ -253,6 +253,16 @@ Last updated: 2026-04-19
   charging, battery moving from `42` to `43`, task `TASK` still executing with
   operation `6`, error code `54` decoded as `Edge`, and unknown key `5.106=1`
   while charging.
+- A later read-only sample on 2026-04-19 showed the mower still charging at
+  battery `63`, task `TASK` still executing with operation `6`, and app error
+  property `2.2=54` (`Edge`) still active. Weather protection again returned
+  `WRP=[1,8,0]` with no `RPET` end time, so rain protection is configured but
+  an active rain-delay window has not yet been observed.
+- Normalized snapshots now use app realtime property `2.2` as a conservative
+  fallback when the legacy status object says `No error`. Home Assistant error
+  sensors and operation/debug snapshots expose the effective error plus
+  `error_source`, `raw_error_code`, and `realtime_error_code` so this mismatch
+  stays debuggable.
 - A narrow service-5 read-only scan on 2026-04-19 returned non-empty unknown
   values `5.104=3`, `5.105=1`, `5.106=1`, and `5.107=90`. No app bundle or
   public key-definition label has been found for these yet, so keep them as a

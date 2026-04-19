@@ -81,9 +81,12 @@ capture to take. The larger raw sections remain in the downloaded diagnostics
 for parser fixes and fixture-driven tests.
 
 The normal `Error` sensor is cleaned for humans and falls back to known numeric
-error-code labels when the vendor text says `No error`. The diagnostic `Raw
-Error` sensor keeps the vendor text exactly as reported so odd captures can
-still be investigated.
+error-code labels when the vendor text says `No error`, including the app
+realtime `2.2` error property when the legacy status object is stale. The
+diagnostic `Raw Error` sensor keeps the vendor text exactly as reported so odd
+captures can still be investigated. The mower entity attributes and downloaded
+diagnostics also include `error_source`, `raw_error_code`, and
+`realtime_error_code`.
 
 Unknown-property and realtime summaries also include value-type counts,
 map-candidate previews, and decoded `1.1` status-blob metadata where available.

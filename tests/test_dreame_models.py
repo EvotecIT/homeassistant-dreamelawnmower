@@ -283,7 +283,7 @@ def test_snapshot_falls_back_to_error_code_when_label_is_unknown() -> None:
     assert snapshot.error_display == "Error 73"
 
 
-def test_snapshot_ignores_explicit_no_error_text_when_selecting_activity() -> None:
+def test_snapshot_uses_realtime_error_when_status_says_no_error() -> None:
     descriptor = descriptor_from_cloud_record(
         {
             "did": "device-1",
@@ -317,17 +317,20 @@ def test_snapshot_ignores_explicit_no_error_text_when_selecting_activity() -> No
             "siid": 2,
             "piid": 2,
             "property_name": "ERROR",
-            "value": 73,
+            "value": 54,
         }
     }
 
     snapshot = snapshot_from_device(descriptor, device)
 
-    assert snapshot.activity == "docked"
-    assert snapshot.error_code == -1
+    assert snapshot.activity == "error"
+    assert snapshot.error_code == 54
+    assert snapshot.raw_error_code == -1
+    assert snapshot.realtime_error_code == 54
+    assert snapshot.error_source == "realtime_property_2.2"
     assert snapshot.error_name == "no_error"
     assert snapshot.error_text == "No error"
-    assert snapshot.error_display == "No error"
+    assert snapshot.error_display == "Edge"
     assert snapshot.docked is True
     assert snapshot.raw_docked is True
     assert snapshot.charging is True

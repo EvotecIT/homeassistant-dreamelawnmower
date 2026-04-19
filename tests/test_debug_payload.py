@@ -277,7 +277,7 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
         "display_model": "A2",
         "activity": "paused",
         "state": "paused",
-        "error": {"active": False, "code": None, "display": None},
+        "error": {"active": False, "code": None, "display": None, "source": None},
         "manual_drive": {"safe": True, "block_reason": None},
         "available": True,
         "capabilities": ["lidar_navigation", "map"],
@@ -410,6 +410,7 @@ def test_build_debug_payload_highlights_state_disagreements() -> None:
         "active": True,
         "code": 73,
         "display": "Error 73",
+        "source": None,
     }
     assert payload["triage"]["manual_drive"] == {
         "safe": False,

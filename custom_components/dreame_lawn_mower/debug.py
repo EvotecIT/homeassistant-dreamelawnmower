@@ -307,6 +307,15 @@ def _collect_state_reconciliation(snapshot: Any, device: Any) -> dict[str, Any]:
             "display": _normalize_debug_value(
                 getattr(snapshot, "error_display", None)
             ),
+            "source": _normalize_debug_value(
+                getattr(snapshot, "error_source", None)
+            ),
+            "raw_code": _normalize_debug_value(
+                getattr(snapshot, "raw_error_code", None)
+            ),
+            "realtime_code": _normalize_debug_value(
+                getattr(snapshot, "realtime_error_code", None)
+            ),
             "raw_attribute": _normalize_debug_value(raw_attributes.get("error")),
         },
         "flags": {
@@ -499,6 +508,9 @@ def _collect_triage_summary(
             "code": _normalize_debug_value(getattr(snapshot, "error_code", None)),
             "display": _normalize_debug_value(
                 getattr(snapshot, "error_display", None)
+            ),
+            "source": _normalize_debug_value(
+                getattr(snapshot, "error_source", None)
             ),
         },
         "manual_drive": _normalize_debug_value(
