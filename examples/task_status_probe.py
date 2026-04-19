@@ -82,6 +82,12 @@ def summarize_task_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def task_samples_changed(samples: list[dict[str, Any]]) -> bool:
+    """Return whether repeated samples show a mower state or task-status change."""
+    summary = summarize_task_samples(samples)
+    return bool(summary["state_changed"] or summary["task_status_changed"])
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Read-only sampler for live Dreame mower task/status properties."
@@ -115,6 +121,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Zero-based discovered mower index to sample.",
     )
     parser.add_argument(
+        "--stop-on-change",
+        action="store_true",
+        help="Stop after mower state or task status changes.",
+    )
+    parser.add_argument(
+        "--min-samples",
+        type=int,
+        default=2,
+        help="Minimum samples to collect before --stop-on-change can stop.",
+    )
+    parser.add_argument(
         "--out",
         type=Path,
         help="Optional JSON output file. Prints to stdout when omitted.",
@@ -126,6 +143,8 @@ async def main() -> None:
     args = _build_parser().parse_args()
     if args.samples <= 0:
         raise RuntimeError("--samples must be greater than zero.")
+    if args.min_samples <= 0:
+        raise RuntimeError("--min-samples must be greater than zero.")
 
     username = os.environ["DREAME_USERNAME"]
     password = os.environ["DREAME_PASSWORD"]
@@ -171,14 +190,23 @@ async def main() -> None:
                     ),
                 }
             )
+            if (
+                args.stop_on_change
+                and len(samples) >= args.min_samples
+                and task_samples_changed(samples)
+            ):
+                break
             if index + 1 < args.samples:
                 await asyncio.sleep(max(args.interval, 0))
 
         output = {
             "device": devices[args.device_index].title,
             "keys": keys,
-            "sample_count": args.samples,
+            "requested_sample_count": args.samples,
+            "sample_count": len(samples),
             "interval": args.interval,
+            "stop_on_change": args.stop_on_change,
+            "stopped_on_change": task_samples_changed(samples),
             "samples": samples,
             "summary": summarize_task_samples(samples),
         }

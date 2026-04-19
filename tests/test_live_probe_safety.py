@@ -24,7 +24,7 @@ from examples.remote_control_smoke import (
     _write_output as write_remote_control_output,
 )
 from examples.status_blob_probe import _summarize_samples
-from examples.task_status_probe import summarize_task_samples
+from examples.task_status_probe import summarize_task_samples, task_samples_changed
 
 
 def test_remote_control_smoke_blocks_low_battery() -> None:
@@ -282,6 +282,42 @@ def test_task_status_sample_summary_tracks_state_and_task_changes() -> None:
     assert summary["battery_levels"] == ["56", "55"]
     assert summary["unknown_non_empty_keys"] == ["5.106"]
     assert summary["unknown_values"] == {"5.106": ["6", "7"]}
+
+
+def test_task_status_change_detection_uses_state_or_task_status() -> None:
+    samples = [
+        {
+            "entries": [
+                {"key": "2.1", "value": "1", "decoded_label": "Mowing"},
+                {
+                    "key": "2.50",
+                    "task_status": {
+                        "type": "TASK",
+                        "executing": True,
+                        "status": True,
+                        "operation": 6,
+                    },
+                },
+            ],
+        },
+        {
+            "entries": [
+                {"key": "2.1", "value": "1", "decoded_label": "Mowing"},
+                {
+                    "key": "2.50",
+                    "task_status": {
+                        "type": "TASK",
+                        "executing": False,
+                        "status": False,
+                        "operation": 6,
+                    },
+                },
+            ],
+        },
+    ]
+
+    assert task_samples_changed(samples) is True
+    assert task_samples_changed(samples[:1]) is False
 
 
 def test_app_map_probe_summary_keeps_compact_current_map_evidence() -> None:

@@ -58,7 +58,18 @@ Last updated: 2026-04-19
   summarizes whether mower state or task status changed, including values seen
   for unknown non-empty keys. Live mowing windows on 2026-04-19 stayed stable
   at state `Mowing`, task `TASK`, `executing=true`, operation `6`, and
-  `5.106=6`; battery moved from `53` in the first window to `47`/`46` later.
+  `5.106=6`; battery moved from `53` in the first window to `47`/`46` later,
+  then `23` while still mowing. The probe supports `--stop-on-change` for
+  catching return/dock transitions without manually watching every sample.
+- A live `--stop-on-change` transition watcher on 2026-04-19 stopped after 7
+  of 18 requested samples when `2.1` changed from `Mowing` to
+  `Returning to station to charge` as battery moved from `18` to `15`.
+  `2.50` stayed `TASK` with `executing=true`, operation `6`, and `5.106`
+  stayed `6`, so the task object appears to mean the scheduled/app task is
+  still active while `2.1` carries the high-level mower state.
+- Follow-up returning samples on 2026-04-19 showed normalized activity/state
+  `returning`, battery `15`/`14`, and raw status blob byte `11` still matching
+  battery exactly.
 - A read-only operation snapshot on 2026-04-18 collected `before` and `final`
   captures without movement. The mower stayed docked at `charging_completed`
   with battery 100%, manual-drive state safety was true, remote-control support
@@ -333,6 +344,12 @@ Read-only task/status transition samples:
 
 ```powershell
 python examples\task_status_probe.py --samples 6 --interval 10 --out task-status-live.json
+```
+
+Read-only task/status transition watcher:
+
+```powershell
+python examples\task_status_probe.py --samples 120 --interval 15 --stop-on-change --out task-status-transition.json
 ```
 
 Firmware evidence probe:
