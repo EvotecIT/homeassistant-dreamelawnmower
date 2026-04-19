@@ -582,8 +582,7 @@ def snapshot_from_device(
     )
     effective_started = bool(raw_started and activity not in {"docked", "idle"})
     raw_returning = bool(getattr(device.status, "returning", False))
-    effective_returning = bool(raw_returning and activity == "returning")
-    raw_running = bool(getattr(device.status, "running", False))
+    effective_returning = bool(activity == "returning")
     effective_mowing = bool(activity == "mowing")
 
     child_lock = None

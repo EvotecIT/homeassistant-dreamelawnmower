@@ -70,6 +70,16 @@ Last updated: 2026-04-19
 - Follow-up returning samples on 2026-04-19 showed normalized activity/state
   `returning`, battery `15`/`14`, and raw status blob byte `11` still matching
   battery exactly.
+- Later returning samples showed the mower-native state was `returning` while
+  the legacy raw returning flag stayed false. Snapshot normalization now treats
+  `activity=returning` as `returning=True`, matching the earlier mower-state
+  fix for active mowing.
+- The same low-battery run reached dock/charge on 2026-04-19. Fresh samples
+  showed snapshot `state=charging`, `activity=docked`, `docked=True`, and app
+  property `2.1=6` (`Charging`) while `2.50` still stayed `TASK`,
+  `executing=true`, operation `6`, and `5.106=6`. The raw status blob source
+  was cloud and byte `11` changed to `142`, so the candidate battery byte is
+  intentionally unset when it is outside 0-100.
 - A read-only operation snapshot on 2026-04-18 collected `before` and `final`
   captures without movement. The mower stayed docked at `charging_completed`
   with battery 100%, manual-drive state safety was true, remote-control support
@@ -339,6 +349,10 @@ Read-only realtime/raw status blob samples:
 ```powershell
 python examples\status_blob_probe.py --samples 5 --interval 3 --out status-blob-live.json
 ```
+
+The status blob probe summary includes normalized `mowing`, `returning`, and
+`docked` flag values alongside the activity/state, making raw flag
+disagreements easier to spot.
 
 Read-only task/status transition samples:
 

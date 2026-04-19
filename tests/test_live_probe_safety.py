@@ -205,6 +205,9 @@ def test_status_blob_sample_summary_tracks_battery_and_changed_bytes() -> None:
                 "state": "mowing",
                 "activity": "mowing",
                 "battery_level": 84,
+                "mowing": True,
+                "returning": False,
+                "docked": False,
                 "status_blob": {
                     "candidate_battery_level": 84,
                     "hex": "ce0054bace",
@@ -215,6 +218,9 @@ def test_status_blob_sample_summary_tracks_battery_and_changed_bytes() -> None:
                 "state": "mowing",
                 "activity": "mowing",
                 "battery_level": 84,
+                "mowing": True,
+                "returning": False,
+                "docked": False,
                 "status_blob": {
                     "candidate_battery_level": 84,
                     "hex": "ce0054c0ce",
@@ -226,6 +232,9 @@ def test_status_blob_sample_summary_tracks_battery_and_changed_bytes() -> None:
 
     assert summary["states"] == ["mowing"]
     assert summary["activities"] == ["mowing"]
+    assert summary["mowing_flags"] == [True]
+    assert summary["returning_flags"] == [False]
+    assert summary["docked_flags"] == [False]
     assert summary["battery_levels"] == [84]
     assert summary["candidate_battery_levels"] == [84]
     assert summary["candidate_battery_matches_snapshot"] is True

@@ -23,6 +23,9 @@ def _summarize_samples(samples: list[dict[str, object]]) -> dict[str, object]:
     """Return compact transition evidence from status blob samples."""
     states = _unique_values([sample.get("state") for sample in samples])
     activities = _unique_values([sample.get("activity") for sample in samples])
+    mowing_flags = _unique_values([sample.get("mowing") for sample in samples])
+    returning_flags = _unique_values([sample.get("returning") for sample in samples])
+    docked_flags = _unique_values([sample.get("docked") for sample in samples])
     battery_levels = _unique_values(
         [sample.get("battery_level") for sample in samples]
     )
@@ -76,6 +79,9 @@ def _summarize_samples(samples: list[dict[str, object]]) -> dict[str, object]:
         "sample_count": len(samples),
         "states": states,
         "activities": activities,
+        "mowing_flags": mowing_flags,
+        "returning_flags": returning_flags,
+        "docked_flags": docked_flags,
         "battery_levels": battery_levels,
         "candidate_battery_levels": candidate_battery_levels,
         "candidate_battery_matches_snapshot": (
