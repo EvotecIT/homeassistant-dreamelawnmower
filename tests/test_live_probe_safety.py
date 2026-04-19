@@ -261,6 +261,12 @@ def test_task_status_sample_summary_tracks_state_and_task_changes() -> None:
                         "state_key": "mowing",
                     },
                     {
+                        "key": "2.2",
+                        "value": "-1",
+                        "decoded_label": "No error",
+                        "decoded_label_source": "bundled_mower_errors",
+                    },
+                    {
                         "key": "2.50",
                         "task_status": {
                             "type": "TASK",
@@ -281,6 +287,12 @@ def test_task_status_sample_summary_tracks_state_and_task_changes() -> None:
                         "value": "5",
                         "decoded_label": "Returning Charge",
                         "state_key": "returning",
+                    },
+                    {
+                        "key": "2.2",
+                        "value": "54",
+                        "decoded_label": "Edge",
+                        "decoded_label_source": "bundled_mower_errors",
                     },
                     {
                         "key": "2.50",
@@ -307,6 +319,23 @@ def test_task_status_sample_summary_tracks_state_and_task_changes() -> None:
     assert summary["task_status_changed"] is True
     assert summary["state_changed"] is True
     assert summary["battery_levels"] == ["56", "55"]
+    assert summary["errors"] == [
+        {
+            "value": "-1",
+            "label": "No error",
+            "label_source": "bundled_mower_errors",
+            "active": False,
+        },
+        {
+            "value": "54",
+            "label": "Edge",
+            "label_source": "bundled_mower_errors",
+            "active": True,
+        },
+    ]
+    assert summary["error_active"] is True
+    assert summary["error_changed"] is True
+    assert summary["service_5_values"] == {"5.106": ["6", "7"]}
     assert summary["unknown_non_empty_keys"] == ["5.106"]
     assert summary["unknown_values"] == {"5.106": ["6", "7"]}
 

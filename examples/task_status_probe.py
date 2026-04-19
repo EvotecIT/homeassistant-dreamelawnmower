@@ -12,7 +12,17 @@ from typing import Any
 
 from dreame_lawn_mower_client import DreameLawnMowerClient
 
-TASK_STATUS_KEYS = ("2.1", "2.2", "2.50", "2.51", "3.1", "5.106")
+TASK_STATUS_KEYS = (
+    "2.1",
+    "2.2",
+    "2.50",
+    "2.51",
+    "3.1",
+    "5.104",
+    "5.105",
+    "5.106",
+    "5.107",
+)
 
 
 def _unique_values(values: list[Any]) -> list[Any]:
@@ -34,6 +44,24 @@ def _entry_value(entry: dict[str, Any] | None) -> Any:
     if not isinstance(entry, dict):
         return None
     return entry.get("value", entry.get("value_preview"))
+
+
+def _error_summary(entry: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(entry, dict):
+        return None
+    value = _entry_value(entry)
+    result: dict[str, Any] = {"value": value}
+    label = entry.get("decoded_label")
+    if isinstance(label, str) and label:
+        result["label"] = label
+    source = entry.get("decoded_label_source")
+    if isinstance(source, str) and source:
+        result["label_source"] = source
+    try:
+        result["active"] = int(str(value)) not in (-1, 0)
+    except (TypeError, ValueError):
+        pass
+    return result
 
 
 def summarize_task_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
@@ -58,6 +86,20 @@ def summarize_task_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
         for sample in samples
         if isinstance(entry := _entry_by_key(sample, "3.1"), dict)
     ]
+    errors = [
+        error
+        for sample in samples
+        if (error := _error_summary(_entry_by_key(sample, "2.2"))) is not None
+    ]
+    service_5_values: dict[str, list[Any]] = {}
+    for key in TASK_STATUS_KEYS:
+        if not key.startswith("5."):
+            continue
+        service_5_values[key] = [
+            _entry_value(entry)
+            for sample in samples
+            if isinstance(entry := _entry_by_key(sample, key), dict)
+        ]
     unknown_keys: list[str] = []
     unknown_values: dict[str, list[Any]] = {}
     for sample in samples:
@@ -80,7 +122,17 @@ def summarize_task_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
             ]
         ),
         "task_statuses": _unique_values(task_statuses),
+        "errors": _unique_values(errors),
+        "error_active": any(
+            bool(error.get("active")) for error in errors if isinstance(error, dict)
+        ),
+        "error_changed": len(_unique_values(errors)) > 1,
         "battery_levels": _unique_values(batteries),
+        "service_5_values": {
+            key: _unique_values(values)
+            for key, values in service_5_values.items()
+            if values
+        },
         "unknown_non_empty_keys": unknown_keys,
         "unknown_values": {
             key: _unique_values(values) for key, values in unknown_values.items()

@@ -4,16 +4,36 @@ from __future__ import annotations
 
 import asyncio
 import json
-
-from python_client import build_client_from_env
+import os
 
 from dreame_lawn_mower_client import (
+    DreameLawnMowerClient,
     build_cloud_key_definition_summary,
 )
 
 
 async def main() -> None:
-    client = await build_client_from_env()
+    username = os.environ["DREAME_USERNAME"]
+    password = os.environ["DREAME_PASSWORD"]
+    country = os.environ.get("DREAME_COUNTRY", "eu")
+    account_type = os.environ.get("DREAME_ACCOUNT_TYPE", "dreame")
+
+    devices = await DreameLawnMowerClient.async_discover_devices(
+        username=username,
+        password=password,
+        country=country,
+        account_type=account_type,
+    )
+    if not devices:
+        raise RuntimeError("No mower devices found.")
+
+    client = DreameLawnMowerClient(
+        username=username,
+        password=password,
+        country=country,
+        account_type=account_type,
+        descriptor=devices[0],
+    )
     try:
         payload = await client.async_get_cloud_key_definition(language="en")
         print(

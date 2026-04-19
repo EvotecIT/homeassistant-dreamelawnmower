@@ -251,7 +251,12 @@ Last updated: 2026-04-19
   no decoded weather switch, rain-protection tuple, or active protection end
   time, with no probe errors. A simultaneous task/status sample showed the mower
   charging, battery moving from `42` to `43`, task `TASK` still executing with
-  operation `6`, and unknown key `5.106=1` while charging.
+  operation `6`, error code `54` decoded as `Edge`, and unknown key `5.106=1`
+  while charging.
+- A narrow service-5 read-only scan on 2026-04-19 returned non-empty unknown
+  values `5.104=3`, `5.105=1`, `5.106=1`, and `5.107=90`. No app bundle or
+  public key-definition label has been found for these yet, so keep them as a
+  discovery cluster rather than user-facing controls.
 - Config-flow auth failures are classified into non-secret Home Assistant
   errors for account type, region, connectivity, generic auth, 2FA, and no
   matching mower devices.
@@ -285,8 +290,9 @@ Last updated: 2026-04-19
 - Realtime key meanings are still being learned. Known useful keys include
   `1.1` as a raw status blob, `1.4` as a runtime status blob, `2.1` as mower
   state, `2.2` as mower error, `2.50` as task status, `2.51` as device time,
-  and `3.1` as battery. `5.106` is still unknown; live samples have shown
-  values including `6`, `7`, and `1` across mowing, docked, and charging states.
+  and `3.1` as battery. The service-5 cluster `5.104` through `5.107` is still
+  unknown; live samples have shown `5.106` values including `6`, `7`, and `1`
+  across mowing, docked, and charging states.
 
 ## Local Live Evidence
 
