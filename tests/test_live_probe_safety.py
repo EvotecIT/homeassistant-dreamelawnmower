@@ -248,6 +248,7 @@ def test_task_status_sample_summary_tracks_state_and_task_changes() -> None:
                         },
                     },
                     {"key": "3.1", "value": "56"},
+                    {"key": "5.106", "value": "6"},
                 ],
                 "unknown_non_empty_keys": ["5.106"],
             },
@@ -264,6 +265,7 @@ def test_task_status_sample_summary_tracks_state_and_task_changes() -> None:
                         },
                     },
                     {"key": "3.1", "value": "55"},
+                    {"key": "5.106", "value": "7"},
                 ],
                 "unknown_non_empty_keys": ["5.106"],
             },
@@ -278,3 +280,4 @@ def test_task_status_sample_summary_tracks_state_and_task_changes() -> None:
     assert summary["state_changed"] is True
     assert summary["battery_levels"] == ["56", "55"]
     assert summary["unknown_non_empty_keys"] == ["5.106"]
+    assert summary["unknown_values"] == {"5.106": ["6", "7"]}

@@ -55,9 +55,10 @@ Last updated: 2026-04-19
   time/tz payload, and `3.1` mirrors the battery level. `2.50` is now decoded
   conservatively as `type`, `executing`, `status`, and `operation`.
 - `examples/task_status_probe.py` repeatedly samples the task/status keys and
-  summarizes whether mower state or task status changed. A live mowing window
-  on 2026-04-19 stayed stable at state `Mowing`, task `TASK`,
-  `executing=true`, operation `6`, battery `53`, and `5.106=6`.
+  summarizes whether mower state or task status changed, including values seen
+  for unknown non-empty keys. Live mowing windows on 2026-04-19 stayed stable
+  at state `Mowing`, task `TASK`, `executing=true`, operation `6`, and
+  `5.106=6`; battery moved from `53` in the first window to `47`/`46` later.
 - A read-only operation snapshot on 2026-04-18 collected `before` and `final`
   captures without movement. The mower stayed docked at `charging_completed`
   with battery 100%, manual-drive state safety was true, remote-control support

@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -57,10 +58,15 @@ def summarize_task_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
         if isinstance(entry := _entry_by_key(sample, "3.1"), dict)
     ]
     unknown_keys: list[str] = []
+    unknown_values: dict[str, list[Any]] = {}
     for sample in samples:
         for key in sample.get("unknown_non_empty_keys", []):
             if isinstance(key, str) and key not in unknown_keys:
                 unknown_keys.append(key)
+            if isinstance(key, str):
+                unknown_values.setdefault(key, []).append(
+                    _entry_value(_entry_by_key(sample, key))
+                )
 
     return {
         "sample_count": len(samples),
@@ -68,6 +74,9 @@ def summarize_task_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
         "task_statuses": _unique_values(task_statuses),
         "battery_levels": _unique_values(batteries),
         "unknown_non_empty_keys": unknown_keys,
+        "unknown_values": {
+            key: _unique_values(values) for key, values in unknown_values.items()
+        },
         "task_status_changed": len(_unique_values(task_statuses)) > 1,
         "state_changed": len(_unique_values(states)) > 1,
     }
@@ -155,6 +164,7 @@ async def main() -> None:
             samples.append(
                 {
                     "index": index,
+                    "captured_at": datetime.now(UTC).isoformat(),
                     "entries": scan.get("entries", []),
                     "unknown_non_empty_keys": (
                         scan.get("summary", {}).get("unknown_non_empty_keys", [])
