@@ -258,6 +258,13 @@ the exact `SCHDSV2` request payload. The disabled-by-default diagnostic sensor
 `Last Schedule Write` keeps the most recent dry-run or executed result with the
 same compact attributes.
 
+Home Assistant also exposes disabled-by-default read-only weather/rain
+diagnostics. `Capture Weather Probe` reads the app `CFG` and `RPET` paths, and
+`Last Weather Probe` reports whether rain protection is configured
+(`rain_protection_enabled`) or whether an active rain-delay window was actually
+observed (`rain_protection_active` plus `rain_protect_end_time_iso`). Weather
+writes remain intentionally unexposed.
+
 If you want to probe the same cloud endpoints the Dreamehome app exposes for mower discovery and raw properties, use:
 
 ```bash

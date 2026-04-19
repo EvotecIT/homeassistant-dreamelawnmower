@@ -32,6 +32,7 @@ def test_extract_payloads_keeps_log_kind_for_multiple_entries() -> None:
     operation_payload = {"snapshot": {"label": "field_test"}}
     preference_payload = {"source": "app_action_mowing_preferences", "maps": []}
     schedule_payload = {"schedules": []}
+    weather_payload = {"source": "app_action_weather_protection", "available": True}
     log_text = "\n".join(
         [
             "noise before",
@@ -46,6 +47,8 @@ def test_extract_payloads_keeps_log_kind_for_multiple_entries() -> None:
             f"{json.dumps(preference_payload)}",
             "Captured Dreame lawn mower schedule probe for Dreame A2 (A2): "
             f"{json.dumps(schedule_payload)}",
+            "Captured Dreame lawn mower weather probe for Dreame A2 (A2): "
+            f"{json.dumps(weather_payload)}",
             "noise after",
         ]
     )
@@ -58,6 +61,7 @@ def test_extract_payloads_keeps_log_kind_for_multiple_entries() -> None:
         "map_probe",
         "preference_probe",
         "schedule_probe",
+        "weather_probe",
     ]
     assert [payload.payload for payload in payloads] == [
         debug_payload,
@@ -65,6 +69,7 @@ def test_extract_payloads_keeps_log_kind_for_multiple_entries() -> None:
         map_payload,
         preference_payload,
         schedule_payload,
+        weather_payload,
     ]
 
 
@@ -79,6 +84,7 @@ def test_extract_payloads_can_filter_by_kind() -> None:
     map_payload = {"map": {"source": "placeholder"}}
     preference_payload = {"source": "app_action_mowing_preferences", "maps": []}
     schedule_payload = {"schedules": []}
+    weather_payload = {"source": "app_action_weather_protection", "available": True}
     log_text = "\n".join(
         [
             "Captured Dreame lawn mower debug snapshot for Dreame A2 (A2): "
@@ -89,6 +95,8 @@ def test_extract_payloads_can_filter_by_kind() -> None:
             f"{json.dumps(preference_payload)}",
             "Captured Dreame lawn mower schedule probe for Dreame A2 (A2): "
             f"{json.dumps(schedule_payload)}",
+            "Captured Dreame lawn mower weather probe for Dreame A2 (A2): "
+            f"{json.dumps(weather_payload)}",
         ]
     )
 
@@ -109,6 +117,12 @@ def test_extract_payloads_can_filter_by_kind() -> None:
     assert len(preference_payloads) == 1
     assert preference_payloads[0].kind == "preference_probe"
     assert preference_payloads[0].payload == preference_payload
+
+    weather_payloads = extract_payloads(log_text, kind="weather_probe")
+
+    assert len(weather_payloads) == 1
+    assert weather_payloads[0].kind == "weather_probe"
+    assert weather_payloads[0].payload == weather_payload
 
 
 def test_extract_first_payload_raises_when_no_payload_is_found() -> None:
@@ -824,4 +838,43 @@ def test_summarize_payload_includes_preference_probe_summary() -> None:
             }
         ],
         "error_count": 0,
+    }
+
+
+def test_summarize_payload_includes_weather_probe_summary() -> None:
+    payload = {
+        "source": "app_action_weather_protection",
+        "available": True,
+        "fault_hint": "INFO_BAD_WEATHER_PROTECTING",
+        "present_config_keys": ["WRP"],
+        "weather_switch_enabled": None,
+        "rain_protection_enabled": True,
+        "rain_protection_active": True,
+        "rain_protection_duration_hours": 8,
+        "rain_sensor_sensitivity": 0,
+        "rain_protect_end_time": 1776600300,
+        "rain_protect_end_time_iso": "2026-04-19T12:05:00+00:00",
+        "rain_protect_end_time_present": True,
+        "rain_protection_raw": [1, 8, 0],
+        "raw_config": {"not": "summarized"},
+        "errors": [],
+        "warnings": [{"stage": "rain_end_time", "warning": "not protecting"}],
+    }
+
+    assert summarize_payload(payload) == {
+        "source": "app_action_weather_protection",
+        "available": True,
+        "fault_hint": "INFO_BAD_WEATHER_PROTECTING",
+        "present_config_keys": ["WRP"],
+        "rain_protection_enabled": True,
+        "rain_protection_active": True,
+        "rain_protection_duration_hours": 8,
+        "rain_sensor_sensitivity": 0,
+        "rain_protect_end_time": 1776600300,
+        "rain_protect_end_time_iso": "2026-04-19T12:05:00+00:00",
+        "rain_protect_end_time_present": True,
+        "rain_protection_raw": [1, 8, 0],
+        "error_count": 0,
+        "warning_count": 1,
+        "warnings": [{"stage": "rain_end_time", "warning": "not protecting"}],
     }

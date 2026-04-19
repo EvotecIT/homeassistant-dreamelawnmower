@@ -378,7 +378,7 @@ def test_last_weather_probe_sensor_reports_available_probe() -> None:
         }
     )
 
-    assert entity.native_value == "available"
+    assert entity.native_value == "rain_protection_enabled"
     assert entity.extra_state_attributes == {
         "source": "app_action_weather_protection",
         "available": True,
@@ -387,6 +387,34 @@ def test_last_weather_probe_sensor_reports_available_probe() -> None:
         "rain_protection_enabled": True,
         "rain_protection_duration_hours": 8,
         "rain_sensor_sensitivity": 0,
+        "error_count": 0,
+        "warning_count": 0,
+    }
+
+
+def test_last_weather_probe_sensor_reports_active_rain_delay() -> None:
+    entity = object.__new__(DreameLawnMowerLastWeatherProbeSensor)
+    entity.coordinator = SimpleNamespace(
+        last_weather_probe_result={
+            "source": "app_action_weather_protection",
+            "available": True,
+            "rain_protection_enabled": True,
+            "rain_protection_active": True,
+            "rain_protect_end_time": 1776600300,
+            "rain_protect_end_time_iso": "2026-04-19T12:05:00+00:00",
+            "errors": [],
+            "warnings": [],
+        }
+    )
+
+    assert entity.native_value == "rain_delay_active"
+    assert entity.extra_state_attributes == {
+        "source": "app_action_weather_protection",
+        "available": True,
+        "rain_protection_enabled": True,
+        "rain_protect_end_time": 1776600300,
+        "rain_protect_end_time_iso": "2026-04-19T12:05:00+00:00",
+        "rain_protection_active": True,
         "error_count": 0,
         "warning_count": 0,
     }

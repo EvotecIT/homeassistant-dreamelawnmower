@@ -14,6 +14,7 @@ LOG_MARKERS = {
     "operation_snapshot": "Captured Dreame lawn mower operation snapshot",
     "preference_probe": "Captured Dreame lawn mower preference probe",
     "schedule_probe": "Captured Dreame lawn mower schedule probe",
+    "weather_probe": "Captured Dreame lawn mower weather probe",
 }
 
 
@@ -36,6 +37,8 @@ def summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
         or payload.get("property_hint") == "2.52"
     ):
         return _summarize_preference_payload(payload)
+    if payload.get("source") == "app_action_weather_protection":
+        return _summarize_weather_payload(payload)
     if (
         isinstance(payload.get("schedules"), list)
         or isinstance(payload.get("schedule_selection"), dict)
@@ -476,6 +479,36 @@ def _preference_entry_summary(preference: dict[str, Any]) -> dict[str, Any]:
             "obstacle_avoidance_ai_classes": preference.get(
                 "obstacle_avoidance_ai_classes",
             ),
+        }
+    )
+
+
+def _summarize_weather_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    errors = payload.get("errors")
+    warnings = payload.get("warnings")
+    return _drop_empty(
+        {
+            "source": payload.get("source"),
+            "available": payload.get("available"),
+            "fault_hint": payload.get("fault_hint"),
+            "present_config_keys": payload.get("present_config_keys"),
+            "weather_switch_enabled": payload.get("weather_switch_enabled"),
+            "rain_protection_enabled": payload.get("rain_protection_enabled"),
+            "rain_protection_active": payload.get("rain_protection_active"),
+            "rain_protection_duration_hours": payload.get(
+                "rain_protection_duration_hours"
+            ),
+            "rain_sensor_sensitivity": payload.get("rain_sensor_sensitivity"),
+            "rain_protect_end_time": payload.get("rain_protect_end_time"),
+            "rain_protect_end_time_iso": payload.get("rain_protect_end_time_iso"),
+            "rain_protect_end_time_present": payload.get(
+                "rain_protect_end_time_present"
+            ),
+            "rain_protection_raw": payload.get("rain_protection_raw"),
+            "error_count": len(errors) if isinstance(errors, list) else None,
+            "warning_count": len(warnings) if isinstance(warnings, list) else None,
+            "errors": errors if errors else None,
+            "warnings": warnings if warnings else None,
         }
     )
 

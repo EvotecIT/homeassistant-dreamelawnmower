@@ -79,6 +79,8 @@ def test_get_weather_protection_uses_read_only_app_actions() -> None:
     assert result["rain_sensor_sensitivity"] == 0
     assert result["rain_protection_raw"] == [1, 8, 0]
     assert result["rain_protect_end_time"] == 1776600300
+    assert result["rain_protect_end_time_iso"] == "2026-04-19T12:05:00+00:00"
+    assert result["rain_protection_active"] is True
     assert result["errors"] == []
     assert result["warnings"] == []
     assert [call["t"] for call in cloud.calls] == ["CFG", "RPET"]
@@ -94,6 +96,7 @@ def test_get_weather_protection_keeps_config_when_rpet_is_unavailable() -> None:
     assert result["available"] is True
     assert result["present_config_keys"] == ["WRF", "WRP"]
     assert result["rain_protection_enabled"] is True
+    assert result["rain_protection_active"] is True
     assert result["errors"] == []
     assert result["warnings"] == [
         {"stage": "rain_end_time", "warning": "not protecting"}

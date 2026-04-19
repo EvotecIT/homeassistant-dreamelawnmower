@@ -493,6 +493,10 @@ def _weather_probe_state(result: dict[str, Any] | None) -> str:
     errors = result.get("errors")
     if isinstance(errors, list) and errors and not result.get("available"):
         return "error"
+    if result.get("rain_protection_active"):
+        return "rain_delay_active"
+    if result.get("rain_protection_enabled"):
+        return "rain_protection_enabled"
     return "available" if result.get("available") else "unavailable"
 
 
@@ -518,9 +522,11 @@ def weather_probe_result_attributes(
         ),
         "rain_sensor_sensitivity": result.get("rain_sensor_sensitivity"),
         "rain_protect_end_time": result.get("rain_protect_end_time"),
+        "rain_protect_end_time_iso": result.get("rain_protect_end_time_iso"),
         "rain_protect_end_time_present": result.get(
             "rain_protect_end_time_present",
         ),
+        "rain_protection_active": result.get("rain_protection_active"),
         "rain_protection_raw": result.get("rain_protection_raw"),
     }
     if isinstance(errors, list):

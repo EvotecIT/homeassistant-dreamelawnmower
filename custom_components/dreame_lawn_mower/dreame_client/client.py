@@ -1762,6 +1762,7 @@ class DreameLawnMowerClient:
         except Exception as err:  # noqa: BLE001 - RPET may only answer while protection is active
             result["warnings"].append({"stage": "rain_end_time", "warning": str(err)})
 
+        result.update(_weather_protection_active_summary(result))
         return result
 
     def _sync_get_app_schedule_text(
@@ -2650,6 +2651,17 @@ def _positive_int(value: Any) -> int | None:
     return parsed if parsed >= 0 else None
 
 
+def _epoch_to_iso(value: Any) -> str | None:
+    parsed = _positive_int(value)
+    if parsed is None:
+        return None
+    timestamp = parsed / 1000 if parsed > 10_000_000_000 else parsed
+    try:
+        return datetime.fromtimestamp(timestamp, UTC).isoformat()
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
 def _dedupe_ints(values: Sequence[int]) -> list[int]:
     result: list[int] = []
     for value in values:
@@ -2904,6 +2916,22 @@ def _weather_protection_summary(config: Mapping[str, Any]) -> dict[str, Any]:
         for key, value in summary.items()
         if value is not None
     }
+
+
+def _weather_protection_active_summary(result: Mapping[str, Any]) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    end_time = result.get("rain_protect_end_time")
+    end_time_present = bool(result.get("rain_protect_end_time_present"))
+
+    if end_time_present:
+        summary["rain_protection_active"] = True
+        end_time_iso = _epoch_to_iso(end_time)
+        if end_time_iso is not None:
+            summary["rain_protect_end_time_iso"] = end_time_iso
+    elif result.get("available"):
+        summary["rain_protection_active"] = False
+
+    return summary
 
 
 def _app_maps_view_metadata(app_maps: Mapping[str, Any]) -> dict[str, Any]:

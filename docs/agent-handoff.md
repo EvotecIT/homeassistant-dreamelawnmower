@@ -241,6 +241,9 @@ Last updated: 2026-04-19
   `INFO_BAD_WEATHER_PROTECTING` is active. The reusable client now has
   `async_get_weather_protection()` plus `examples/weather_probe.py`, and Home
   Assistant has disabled-by-default Capture/Last Weather Probe diagnostics.
+  The probe distinguishes configured rain protection from an observed active
+  rain-delay window with `rain_protection_active`; when an end time is present,
+  it also exposes `rain_protect_end_time_iso`.
   Keep writes (`setWRF`/`setWRP`) unexposed until runtime locks and safety are
   validated live.
 - A live read-only weather probe on 2026-04-19 while rain was expected returned
@@ -257,7 +260,9 @@ Last updated: 2026-04-19
   battery `63`, task `TASK` still executing with operation `6`, and app error
   property `2.2=54` (`Edge`) still active. Weather protection again returned
   `WRP=[1,8,0]` with no `RPET` end time, so rain protection is configured but
-  an active rain-delay window has not yet been observed.
+  an active rain-delay window has not yet been observed. After the active-state
+  split was added, a live read-only probe returned
+  `rain_protection_enabled=true` and `rain_protection_active=false`.
 - Normalized snapshots now use app realtime property `2.2` as a conservative
   fallback when the legacy status object says `No error`. Home Assistant error
   sensors and operation/debug snapshots expose the effective error plus
