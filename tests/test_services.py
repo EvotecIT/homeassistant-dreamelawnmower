@@ -10,6 +10,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.dreame_lawn_mower.services import (
     REMOTE_CONTROL_STEP_SCHEMA,
+    SET_SCHEDULE_PLAN_ENABLED_SCHEMA,
     _guard_remote_control_step,
 )
 
@@ -47,6 +48,46 @@ def test_remote_control_step_schema_rejects_out_of_range_values() -> None:
             {
                 "rotation": 0,
                 "velocity": 1001,
+            }
+        )
+
+
+def test_set_schedule_plan_enabled_schema_defaults_to_dry_run() -> None:
+    parsed = SET_SCHEDULE_PLAN_ENABLED_SCHEMA(
+        {
+            "map_index": "0",
+            "plan_id": "1",
+            "enabled": "false",
+        }
+    )
+
+    assert parsed == {
+        "map_index": 0,
+        "plan_id": 1,
+        "enabled": False,
+        "execute": False,
+        "confirm_schedule_write": False,
+    }
+
+
+def test_set_schedule_plan_enabled_schema_rejects_bool_indices() -> None:
+    with pytest.raises(vol.Invalid, match="map_index must be an integer"):
+        SET_SCHEDULE_PLAN_ENABLED_SCHEMA(
+            {
+                "map_index": True,
+                "plan_id": 1,
+                "enabled": False,
+            }
+        )
+
+
+def test_set_schedule_plan_enabled_schema_rejects_negative_plan_id() -> None:
+    with pytest.raises(vol.Invalid, match="plan_id must be at least 0"):
+        SET_SCHEDULE_PLAN_ENABLED_SCHEMA(
+            {
+                "map_index": 0,
+                "plan_id": -1,
+                "enabled": False,
             }
         )
 

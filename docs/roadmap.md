@@ -146,7 +146,8 @@ Checklist:
 - [x] add schedule payload encoder tests and a dry-run-first enable/disable write planner
 - [x] validate a supervised no-op `SCHDSV2` enable/disable write live
 - [x] expose a read-only Home Assistant calendar surface for decoded schedules
-- [ ] validate supervised schedule enable/disable writes before adding Home Assistant controls
+- [x] add a dry-run-first Home Assistant schedule enable/disable service
+- [ ] validate the Home Assistant schedule service in a live HA runtime
 - [ ] keep adding fixture-based tests for idle and recovery transitions as captures become available
 
 Definition of done:

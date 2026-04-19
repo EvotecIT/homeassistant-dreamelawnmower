@@ -47,3 +47,55 @@ remote_control_stop:
       description: Required only when multiple Dreame lawn mower entries are loaded.
       selector:
         text: {}
+
+set_schedule_plan_enabled:
+  name: Set schedule plan enabled
+  description: >-
+    Build or send a guarded app-schedule enable/disable request. By default this
+    is a dry run that only shows the request payload in a notification. Sending
+    the request requires execute and confirm_schedule_write to both be true.
+    Use only during supervised testing.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Required only when multiple Dreame lawn mower entries are loaded.
+      selector:
+        text: {}
+    map_index:
+      name: Map index
+      description: Schedule map index, for example 0 or -1 for the default slot.
+      required: true
+      selector:
+        number:
+          min: -1
+          max: 20
+          step: 1
+          mode: box
+    plan_id:
+      name: Plan ID
+      description: Schedule plan id to enable or disable.
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 20
+          step: 1
+          mode: box
+    enabled:
+      name: Enabled
+      description: Whether the selected schedule plan should be enabled.
+      required: true
+      selector:
+        boolean: {}
+    execute:
+      name: Execute
+      description: Send the write request instead of only building a dry-run preview.
+      default: false
+      selector:
+        boolean: {}
+    confirm_schedule_write:
+      name: Confirm schedule write
+      description: Required together with execute before the schedule write is sent.
+      default: false
+      selector:
+        boolean: {}

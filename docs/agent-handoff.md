@@ -96,6 +96,9 @@ Last updated: 2026-04-19
   per-map plans into local scheduled mowing events.
 - A disabled-by-default `Capture Schedule Probe` diagnostic button logs decoded
   schedules from Home Assistant without raw schedule payload text.
+- Home Assistant exposes a guarded `set_schedule_plan_enabled` service. It
+  defaults to dry-run and only sends writes when both `execute` and
+  `confirm_schedule_write` are true.
 - Config-flow auth failures are classified into non-secret Home Assistant
   errors for account type, region, connectivity, generic auth, 2FA, and no
   matching mower devices.
