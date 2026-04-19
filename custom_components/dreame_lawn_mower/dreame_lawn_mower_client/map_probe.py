@@ -410,6 +410,8 @@ def build_map_probe_payload(
     *,
     descriptor: DreameLawnMowerDescriptor,
     map_view: DreameLawnMowerMapView,
+    legacy_map_view: DreameLawnMowerMapView | None = None,
+    vector_map_view: DreameLawnMowerMapView | None = None,
     cloud_properties: Mapping[str, Any] | None,
     cloud_device_info: Mapping[str, Any] | None,
     cloud_device_list_page: Mapping[str, Any] | None,
@@ -420,6 +422,11 @@ def build_map_probe_payload(
     app_maps: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a JSON-safe map-source probe payload."""
+    selected_map_view = map_view.as_dict()
+    legacy_current_map = (legacy_map_view or map_view).as_dict()
+    batch_vector_map = (
+        vector_map_view.as_dict() if vector_map_view is not None else None
+    )
     return {
         "descriptor": {
             "name": descriptor.name,
@@ -428,7 +435,9 @@ def build_map_probe_payload(
             "account_type": descriptor.account_type,
             "country": descriptor.country,
         },
-        "legacy_current_map": map_view.as_dict(),
+        "selected_map_view": selected_map_view,
+        "legacy_current_map": legacy_current_map,
+        "batch_vector_map": batch_vector_map,
         "cloud_properties": dict(cloud_properties or {}),
         "cloud_property_summary": build_cloud_property_summary(cloud_properties),
         "cloud_property_history": _redact_probe_value(cloud_property_history or {}),

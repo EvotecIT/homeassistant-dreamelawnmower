@@ -7,6 +7,7 @@ import hashlib
 import json
 import time
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from io import BytesIO
 from typing import Any
@@ -65,6 +66,11 @@ from .schedule import (
     build_schedule_enable_status_request,
     decode_schedule_payload_text,
     schedule_task_summary,
+)
+from .vector_map import (
+    parse_batch_vector_map,
+    render_vector_map_png,
+    vector_map_to_summary,
 )
 
 REMOTE_CONTROL_MAX_ROTATION = 1000
@@ -1265,11 +1271,80 @@ class DreameLawnMowerClient:
         if app_view.available and app_view.image_png is not None:
             return app_view
 
+        vector_view = self._with_fallback_app_maps(
+            self._sync_refresh_vector_map_view(),
+            app_view,
+        )
+        if vector_view.available and vector_view.image_png is not None:
+            return vector_view
+
         legacy_view = self._sync_refresh_legacy_map_view(timeout, interval)
+        legacy_view = self._with_fallback_app_maps(legacy_view, app_view)
         if legacy_view.available or legacy_view.image_png is not None:
             return legacy_view
 
         return app_view
+
+    def _sync_refresh_vector_map_view(self) -> DreameLawnMowerMapView:
+        source = "batch_vector_map"
+        try:
+            batch_data = self._sync_get_vector_map_batch_data()
+        except DreameLawnMowerConnectionError as err:
+            error = str(err)
+            return DreameLawnMowerMapView(
+                source=source,
+                error=error,
+                diagnostics=self._safe_map_diagnostics(
+                    source=source,
+                    reason=error,
+                ),
+            )
+
+        vector_map = parse_batch_vector_map(batch_data)
+        if vector_map is None:
+            return DreameLawnMowerMapView(
+                source=source,
+                error="No vector map data returned by the batch map path.",
+                diagnostics=self._safe_map_diagnostics(
+                    source=source,
+                    reason="batch_vector_map_empty",
+                ),
+            )
+
+        summary = vector_map_to_summary(vector_map)
+        try:
+            image_png = render_vector_map_png(vector_map)
+        except Exception as err:  # noqa: BLE001 - diagnostics path
+            return DreameLawnMowerMapView(
+                source=source,
+                summary=summary,
+                error=f"Failed to render vector map data: {err}",
+                diagnostics=self._safe_map_diagnostics(
+                    source=source,
+                    reason="batch_vector_map_render_failed",
+                ),
+            )
+
+        if image_png is None:
+            return DreameLawnMowerMapView(
+                source=source,
+                summary=summary,
+                error="Vector map renderer did not produce an image.",
+                diagnostics=self._safe_map_diagnostics(
+                    source=source,
+                    reason="batch_vector_map_render_empty",
+                ),
+            )
+
+        return DreameLawnMowerMapView(
+            source=source,
+            summary=summary,
+            image_png=image_png,
+            diagnostics=self._safe_map_diagnostics(
+                source=source,
+                reason="batch_vector_map_rendered",
+            ),
+        )
 
     def _sync_refresh_legacy_map_view(
         self,
@@ -1381,6 +1456,17 @@ class DreameLawnMowerClient:
                 ),
             )
 
+    def _sync_get_vector_map_batch_data(self) -> Mapping[str, Any] | None:
+        cloud = self._sync_get_cloud_protocol()
+        keys = [*(f"MAP.{index}" for index in range(40)), "MAP.info"]
+        keys.extend(f"M_PATH.{index}" for index in range(10))
+        keys.append("M_PATH.info")
+        try:
+            response = cloud.get_batch_device_datas(keys)
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+        return response if isinstance(response, Mapping) else None
+
     def _sync_get_cloud_device_info(
         self,
         language: str | None = None,
@@ -1393,6 +1479,15 @@ class DreameLawnMowerClient:
             return cloud.get_device_info()
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
+
+    @staticmethod
+    def _with_fallback_app_maps(
+        map_view: DreameLawnMowerMapView,
+        app_view: DreameLawnMowerMapView,
+    ) -> DreameLawnMowerMapView:
+        if map_view.app_maps is not None or app_view.app_maps is None:
+            return map_view
+        return replace(map_view, app_maps=app_view.app_maps)
 
     def _sync_get_cloud_user_features(
         self,
@@ -2244,7 +2339,7 @@ class DreameLawnMowerClient:
         interval: float,
         language: str,
     ) -> dict[str, Any]:
-        map_view = self._sync_refresh_map_view(timeout, interval)
+        selected_map_view = self._sync_refresh_map_view(timeout, interval)
         cloud_device_info = self._sync_get_cloud_device_info(language)
         cloud_device_list_page = self._sync_get_cloud_device_list_page(
             current=1,
@@ -2303,10 +2398,20 @@ class DreameLawnMowerClient:
             )
         except DreameLawnMowerConnectionError as err:
             app_maps = {"error": str(err)}
+        legacy_map_view = self._sync_refresh_legacy_map_view(timeout, interval)
+        vector_map_view = self._sync_refresh_vector_map_view()
 
         return build_map_probe_payload(
             descriptor=self._descriptor,
-            map_view=self._map_view_with_cloud_summary(map_view, cloud_properties),
+            map_view=self._map_view_with_cloud_summary(
+                selected_map_view, cloud_properties
+            ),
+            legacy_map_view=self._map_view_with_cloud_summary(
+                legacy_map_view, cloud_properties
+            ),
+            vector_map_view=self._map_view_with_cloud_summary(
+                vector_map_view, cloud_properties
+            ),
             cloud_properties=cloud_properties,
             cloud_device_info=cloud_device_info,
             cloud_device_list_page=cloud_device_list_page,

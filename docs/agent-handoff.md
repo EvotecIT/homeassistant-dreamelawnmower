@@ -123,6 +123,15 @@ Last updated: 2026-04-19
   points. A follow-up live run on 2026-04-19 while the mower reported `mowing`
   again rendered current map `0` through `app_action_map` with the same 2 map
   areas, 2 spot areas, and 63 trajectory points.
+- The reusable client now also has a read-only `batch_vector_map` fallback fed
+  by cloud `get_batch_device_datas()` keys such as `MAP.*`, `MAP.info`,
+  `M_PATH.*`, and `M_PATH.info`. It parses polygon zones plus mowing trails and
+  renders them to PNG when the app-map payload path is missing. A parked live
+  probe on 2026-04-19 returned 45 non-empty batch keys, including `MAP.0-28`,
+  `MAP.info`, `M_PATH.0-4`, and `M_PATH.info`, and successfully rendered the
+  fallback with source `batch_vector_map`. The same payload also exposed
+  `SCHEDULE.*`, `SETTINGS.*`, `OTA_INFO.*`, and `prop.s_auto_upgrade`, which is
+  useful for future schedule/preferences/firmware work.
 - The app-map helper downloads every created map returned by `MAPL`; the HA map
   camera still renders the current map image, but its attributes expose compact
   all-map metadata (`app_map_count`, `app_current_map_index`, `app_maps`, etc.).

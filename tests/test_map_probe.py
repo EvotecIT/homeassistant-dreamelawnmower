@@ -23,13 +23,17 @@ def test_map_probe_payload_trims_cloud_records() -> None:
         country="eu",
     )
     map_view = DreameLawnMowerMapView(
-        source="legacy_current_map",
+        source="app_action_map",
         error="No map data returned.",
     )
+    legacy_map_view = DreameLawnMowerMapView(source="legacy_current_map")
+    vector_map_view = DreameLawnMowerMapView(source="batch_vector_map")
 
     payload = build_map_probe_payload(
         descriptor=descriptor,
         map_view=map_view,
+        legacy_map_view=legacy_map_view,
+        vector_map_view=vector_map_view,
         cloud_properties={
             "requested_key_count": 3,
             "returned_entry_count": 3,
@@ -112,7 +116,9 @@ def test_map_probe_payload_trims_cloud_records() -> None:
         "account_type": "dreame",
         "country": "eu",
     }
+    assert payload["selected_map_view"]["source"] == "app_action_map"
     assert payload["legacy_current_map"]["source"] == "legacy_current_map"
+    assert payload["batch_vector_map"]["source"] == "batch_vector_map"
     assert payload["legacy_current_map"]["diagnostics"] is None
     assert payload["cloud_properties"]["entries"][1]["value"] == 13
     assert payload["cloud_property_summary"]["non_empty_keys"] == [
@@ -199,6 +205,9 @@ def test_map_probe_payload_summarizes_cloud_otc_info() -> None:
         },
     }
     assert "did" not in payload["cloud_device_info"]
+    assert payload["selected_map_view"]["source"] == "legacy_current_map"
+    assert payload["legacy_current_map"]["source"] == "legacy_current_map"
+    assert payload["batch_vector_map"] is None
 
 
 def test_map_probe_keys_include_known_a2_docked_hits() -> None:

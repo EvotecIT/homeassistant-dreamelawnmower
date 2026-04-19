@@ -336,6 +336,7 @@ def test_map_view_uses_legacy_path_when_app_map_fails() -> None:
         "maps": [],
         "errors": [{"error": "no app map"}],
     }
+    client._sync_get_vector_map_batch_data = lambda: None
     client._sync_wait_for_map = lambda timeout, interval: None
     client._safe_map_diagnostics = lambda **kwargs: None
 
