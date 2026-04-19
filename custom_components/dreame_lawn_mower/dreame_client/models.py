@@ -200,6 +200,7 @@ class DreameLawnMowerStatusBlob:
     frame_valid: bool = False
     payload: tuple[int, ...] = field(default_factory=tuple)
     bytes_by_index: Mapping[str, int] = field(default_factory=dict)
+    candidate_battery_level: int | None = None
     notes: tuple[str, ...] = field(default_factory=tuple)
 
     def as_dict(self) -> dict[str, Any]:
@@ -583,7 +584,7 @@ def snapshot_from_device(
     raw_returning = bool(getattr(device.status, "returning", False))
     effective_returning = bool(raw_returning and activity == "returning")
     raw_running = bool(getattr(device.status, "running", False))
-    effective_mowing = bool(raw_running and activity == "mowing")
+    effective_mowing = bool(activity == "mowing")
 
     child_lock = None
     try:

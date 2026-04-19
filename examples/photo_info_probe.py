@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import json
 import os
+from pathlib import Path
 
 from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
@@ -23,6 +24,11 @@ def _parse_args() -> argparse.Namespace:
         "--execute",
         action="store_true",
         help="Call GET_PHOTO_INFO once. Without this flag the script is read-only.",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        help="Optional JSON output file. Prints to stdout when omitted.",
     )
     return parser.parse_args()
 
@@ -67,7 +73,11 @@ async def main() -> None:
                 output["photo_info_error"] = str(err)
         else:
             output["next_step"] = "Re-run with --execute to call GET_PHOTO_INFO once."
-        print(json.dumps(output, indent=2, sort_keys=True))
+        rendered = json.dumps(output, indent=2, sort_keys=True) + "\n"
+        if args.out:
+            args.out.write_text(rendered, encoding="utf-8")
+        else:
+            print(rendered, end="")
     finally:
         await client.async_close()
 

@@ -8,12 +8,15 @@ __pycache__/
 field-trip*.json
 firmware-update*.json
 app-map*.json
+app-map-object*.bin
 dreame-map*.png
 map-sources*.json
 source-scan*.json
 property-scan*.json
 property-scan*.txt
+photo-info*.json
 remote-control*.json
+status-blob*.json
 schedule-probe*.json
 schedule-write*.json
 schedule-calendar*.json

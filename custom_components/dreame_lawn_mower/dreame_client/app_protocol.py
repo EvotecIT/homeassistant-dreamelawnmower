@@ -146,6 +146,10 @@ def decode_mower_status_blob(
     if not frame_valid:
         notes.append("invalid_frame_markers")
 
+    candidate_battery_level = None
+    if frame_valid and len(raw) > 11 and raw[11] <= 100:
+        candidate_battery_level = raw[11]
+
     return DreameLawnMowerStatusBlob(
         supported=True,
         source=source,
@@ -157,6 +161,7 @@ def decode_mower_status_blob(
         frame_valid=frame_valid,
         payload=raw[1:-1] if len(raw) >= 2 else (),
         bytes_by_index={str(index): item for index, item in enumerate(raw)},
+        candidate_battery_level=candidate_battery_level,
         notes=tuple(notes),
     )
 

@@ -39,6 +39,10 @@ Last updated: 2026-04-19
   decoded status blob, map diagnostics, firmware evidence, and remote-control
   support. They also include the current manual-drive safety decision from the
   same reusable guard used by Home Assistant.
+- The app realtime/raw status blob decoder exposes byte index `11` as
+  `candidate_battery_level`. Live A2 samples while mowing showed this byte
+  tracking near the normalized battery level, but it should remain diagnostic
+  evidence rather than an authoritative battery source.
 - A read-only operation snapshot on 2026-04-18 collected `before` and `final`
   captures without movement. The mower stayed docked at `charging_completed`
   with battery 100%, manual-drive state safety was true, remote-control support
@@ -79,6 +83,16 @@ Last updated: 2026-04-19
   camera exposes the structured `map_view` attributes and a readable diagnostic
   card. Pillow image work is run in Home Assistant's executor so camera refresh
   does not block the event loop.
+- Camera/photo metadata is discoverable but not yet exposed. During the active
+  2026-04-19 mowing run, read-only support probing confirmed `video_tx`,
+  `pincode,video,aiobs`, `GET_PHOTO_INFO`, and stream action/property mappings.
+  A single guarded `GET_PHOTO_INFO` call while mowing returned no response, and
+  stream handshake probing remains blocked while the mower is active.
+- During the scheduled 2026-04-19 mowing run, live read-only samples exposed a
+  mower-native state shape where `state`/`activity` were `mowing` while the
+  legacy raw `running` flag stayed false. Normalized snapshots now treat the
+  mower-native mowing state as effectively mowing and preserve the raw flag for
+  diagnostics.
 - Mower-native schedule retrieval now works through read-only app action
   commands recovered from the downloaded Dreamehome plugin: `SCHDIV2`,
   chunked `SCHDDV2`, and `SCHDT`.
@@ -159,12 +173,16 @@ the workspace after live tests:
 - `firmware-update-live.json`
 - `app-map-current.json`
 - `app-map-payload-current.json`
+- `app-map-objects-live.json`
+- `app-map-object*.bin`
 - `dreame-map-current.png`
 - `map-sources-current.json`
 - `source-scan-map.json`
 - `property-scan-*.json`
 - `property-scan-*.txt`
+- `photo-info*.json`
 - `remote-control-current.json`
+- `status-blob*.json`
 - `schedule-probe-current.json`
 - `schedule-calendar-*.json`
 - `apk-scan*.json`
@@ -285,6 +303,12 @@ Read-only remote-control support probe:
 python examples\remote_control_probe.py --out remote-control-current.json
 ```
 
+Read-only realtime/raw status blob samples:
+
+```powershell
+python examples\status_blob_probe.py --samples 5 --interval 3 --out status-blob-live.json
+```
+
 Firmware evidence probe:
 
 ```powershell
@@ -294,6 +318,15 @@ $env:DREAME_COUNTRY = [Environment]::GetEnvironmentVariable('DREAME_COUNTRY','Us
 $env:DREAME_ACCOUNT_TYPE = [Environment]::GetEnvironmentVariable('DREAME_ACCOUNT_TYPE','User')
 python examples\firmware_update_probe.py | Out-File -FilePath firmware-update-live.json -Encoding utf8
 ```
+
+Camera/photo metadata probe:
+
+```powershell
+python examples\photo_info_probe.py --out photo-info-live.json
+```
+
+Only add `--execute` when intentionally testing `GET_PHOTO_INFO`; it does not
+start streaming, but the live A2 returned no response while mowing.
 
 ## Safety Notes
 

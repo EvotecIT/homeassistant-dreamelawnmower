@@ -475,6 +475,41 @@ def test_snapshot_treats_returning_running_flag_as_returning_not_mowing() -> Non
     assert snapshot.docked is False
 
 
+def test_snapshot_treats_mowing_state_as_mowing_without_running_flag() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "dreame.mower.g2408",
+            "customName": "Garage Mower",
+        },
+        account_type="dreame",
+        country="eu",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.state = SimpleNamespace(name="MOWING")
+    device.status.state_name = "mowing"
+    device.status.running = False
+    device.status.docked = False
+    device.status.attributes = {
+        **device.status.attributes,
+        "charging": False,
+        "mower_state": "mowing",
+        "running": False,
+        "started": True,
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == "mowing"
+    assert snapshot.mowing is True
+    assert snapshot.raw_started is True
+    assert snapshot.started is True
+    assert snapshot.docked is False
+
+
 def test_field_trip_returning_fixture_matches_normalized_state() -> None:
     payload, snapshot = _field_trip_fixture_snapshot(
         "field_trip_returning_summary.json"

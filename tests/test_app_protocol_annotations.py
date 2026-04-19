@@ -106,6 +106,7 @@ def test_property_annotations_mark_raw_status_blob_frame() -> None:
     assert entry["status_blob"]["frame_valid"] is True
     assert entry["status_blob"]["length"] == 20
     assert entry["status_blob"]["bytes_by_index"]["11"] == 100
+    assert entry["status_blob"]["candidate_battery_level"] == 100
     assert entry["status_blob"]["notes"] == ()
 
 
@@ -175,6 +176,37 @@ def test_client_status_blob_prefers_cached_realtime_payload() -> None:
     assert decoded is not None
     assert decoded.source == "realtime"
     assert decoded.frame_valid is True
+    assert decoded.candidate_battery_level == 100
+
+
+def test_status_blob_decoder_exposes_candidate_battery_byte() -> None:
+    decoded = decode_mower_status_blob(
+        [
+            206,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            32,
+            0,
+            0,
+            0,
+            93,
+            5,
+            35,
+            135,
+            1,
+            128,
+            186,
+            196,
+            206,
+        ]
+    )
+
+    assert decoded is not None
+    assert decoded.candidate_battery_level == 93
 
 
 def test_scan_cloud_properties_returns_summary_with_dynamic_labels() -> None:
