@@ -12,6 +12,7 @@ from custom_components.dreame_lawn_mower.services import (
     REMOTE_CONTROL_STEP_SCHEMA,
     SET_SCHEDULE_PLAN_ENABLED_SCHEMA,
     _guard_remote_control_step,
+    _guard_schedule_write_request,
 )
 
 
@@ -90,6 +91,29 @@ def test_set_schedule_plan_enabled_schema_rejects_negative_plan_id() -> None:
                 "enabled": False,
             }
         )
+
+
+def test_schedule_write_guard_blocks_execute_without_confirmation() -> None:
+    call = SimpleNamespace(
+        data={
+            "execute": True,
+            "confirm_schedule_write": False,
+        }
+    )
+
+    with pytest.raises(HomeAssistantError, match="confirm_schedule_write"):
+        _guard_schedule_write_request(call)
+
+
+def test_schedule_write_guard_allows_dry_run_without_confirmation() -> None:
+    call = SimpleNamespace(
+        data={
+            "execute": False,
+            "confirm_schedule_write": False,
+        }
+    )
+
+    _guard_schedule_write_request(call)
 
 
 def test_remote_control_guard_blocks_active_mower() -> None:

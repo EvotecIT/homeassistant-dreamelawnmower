@@ -127,6 +127,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
 
     async def async_handle_set_schedule_plan_enabled(call: ServiceCall) -> None:
         coordinator = _coordinator_from_call(hass, call)
+        _guard_schedule_write_request(call)
         result = await coordinator.client.async_set_app_schedule_plan_enabled(
             map_index=call.data[ATTR_MAP_INDEX],
             plan_id=call.data[ATTR_PLAN_ID],
@@ -208,6 +209,14 @@ def _guard_remote_control_step(coordinator: DreameLawnMowerCoordinator) -> None:
 
     if reason := remote_control_block_reason(snapshot):
         raise HomeAssistantError(reason)
+
+
+def _guard_schedule_write_request(call: ServiceCall) -> None:
+    """Block schedule writes unless the HA service confirmation gate is set."""
+    if call.data[ATTR_EXECUTE] and not call.data[ATTR_CONFIRM_SCHEDULE_WRITE]:
+        raise HomeAssistantError(
+            "Schedule writes require confirm_schedule_write when execute is true."
+        )
 
 
 def _notify_schedule_plan_enabled(
