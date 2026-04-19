@@ -22,6 +22,7 @@ from .app_protocol import (
     decode_mower_task_status,
     key_definition_label,
     mower_error_label,
+    mower_state_key,
     mower_state_label,
 )
 from .camera_probe import CAMERA_PROBE_PROPERTY_KEYS, build_camera_probe_payload
@@ -2270,11 +2271,15 @@ class DreameLawnMowerClient:
             rendered["decoded_label"] = label
             rendered["decoded_label_source"] = "cloud_key_definition"
 
-        if key == MOWER_STATE_PROPERTY_KEY and not rendered.get("decoded_label"):
-            label = mower_state_label(value, language=language)
-            if label:
-                rendered["decoded_label"] = label
-                rendered["decoded_label_source"] = "bundled_mower_protocol"
+        if key == MOWER_STATE_PROPERTY_KEY:
+            state_key = mower_state_key(value)
+            if state_key:
+                rendered["state_key"] = state_key
+            if not rendered.get("decoded_label"):
+                label = mower_state_label(value, language=language)
+                if label:
+                    rendered["decoded_label"] = label
+                    rendered["decoded_label_source"] = "bundled_mower_protocol"
         elif key == MOWER_ERROR_PROPERTY_KEY and not rendered.get("decoded_label"):
             label = mower_error_label(value)
             if label:

@@ -247,7 +247,12 @@ def test_task_status_sample_summary_tracks_state_and_task_changes() -> None:
         [
             {
                 "entries": [
-                    {"key": "2.1", "value": "1", "decoded_label": "Mowing"},
+                    {
+                        "key": "2.1",
+                        "value": "1",
+                        "decoded_label": "Mowing",
+                        "state_key": "mowing",
+                    },
                     {
                         "key": "2.50",
                         "task_status": {
@@ -264,7 +269,12 @@ def test_task_status_sample_summary_tracks_state_and_task_changes() -> None:
             },
             {
                 "entries": [
-                    {"key": "2.1", "value": "5", "decoded_label": "Returning Charge"},
+                    {
+                        "key": "2.1",
+                        "value": "5",
+                        "decoded_label": "Returning Charge",
+                        "state_key": "returning",
+                    },
                     {
                         "key": "2.50",
                         "task_status": {
@@ -283,8 +293,8 @@ def test_task_status_sample_summary_tracks_state_and_task_changes() -> None:
     )
 
     assert summary["states"] == [
-        {"value": "1", "label": "Mowing"},
-        {"value": "5", "label": "Returning Charge"},
+        {"value": "1", "label": "Mowing", "state_key": "mowing"},
+        {"value": "5", "label": "Returning Charge", "state_key": "returning"},
     ]
     assert summary["task_status_changed"] is True
     assert summary["state_changed"] is True
@@ -297,7 +307,12 @@ def test_task_status_change_detection_uses_state_or_task_status() -> None:
     samples = [
         {
             "entries": [
-                {"key": "2.1", "value": "1", "decoded_label": "Mowing"},
+                {
+                    "key": "2.1",
+                    "value": "1",
+                    "decoded_label": "Mowing",
+                    "state_key": "mowing",
+                },
                 {
                     "key": "2.50",
                     "task_status": {
@@ -311,7 +326,12 @@ def test_task_status_change_detection_uses_state_or_task_status() -> None:
         },
         {
             "entries": [
-                {"key": "2.1", "value": "1", "decoded_label": "Mowing"},
+                {
+                    "key": "2.1",
+                    "value": "1",
+                    "decoded_label": "Mowing",
+                    "state_key": "mowing",
+                },
                 {
                     "key": "2.50",
                     "task_status": {

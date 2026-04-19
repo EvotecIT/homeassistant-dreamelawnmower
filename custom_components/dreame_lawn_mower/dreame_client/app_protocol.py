@@ -48,6 +48,16 @@ MOWER_STATE_LABELS: Final[dict[str, dict[str, str]]] = {
         "14": "正在升级",
     },
 }
+MOWER_STATE_KEYS: Final[dict[str, str]] = {
+    "1": "mowing",
+    "2": "standby",
+    "4": "paused",
+    "5": "returning",
+    "6": "charging",
+    "11": "mapping",
+    "13": "charging_completed",
+    "14": "upgrading",
+}
 
 
 def _clean_label(value: object) -> str | None:
@@ -65,6 +75,14 @@ def mower_state_label(value: object, language: str = "en") -> str | None:
 
     label_map = MOWER_STATE_LABELS.get(language) or MOWER_STATE_LABELS["en"]
     return label_map.get(str(value))
+
+
+def mower_state_key(value: object) -> str | None:
+    """Return a stable app-derived mower state key for a raw `2.1` value."""
+    if value is None:
+        return None
+
+    return MOWER_STATE_KEYS.get(str(value))
 
 
 def mower_error_label(value: object) -> str | None:
@@ -150,7 +168,9 @@ def key_definition_label(
     return str(label).strip() if label is not None and str(label).strip() else None
 
 
-def _first_mapping_value(value: Mapping[object, object]) -> Mapping[object, object] | None:
+def _first_mapping_value(
+    value: Mapping[object, object],
+) -> Mapping[object, object] | None:
     for item in value.values():
         if isinstance(item, Mapping):
             return item

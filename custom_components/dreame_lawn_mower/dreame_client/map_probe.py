@@ -258,6 +258,7 @@ def build_cloud_property_summary(
     hinted_keys: dict[str, str] = {}
     decoded_labels: dict[str, str] = {}
     decoded_label_sources: dict[str, str] = {}
+    state_keys: dict[str, str] = {}
     blob_keys: dict[str, int] = {}
     unknown_non_empty_keys: list[str] = []
     value_type_counts: dict[str, int] = {}
@@ -292,6 +293,10 @@ def build_cloud_property_summary(
         if decoded_label_source:
             decoded_label_sources[key] = str(decoded_label_source)
 
+        state_key = entry.get("state_key")
+        if state_key:
+            state_keys[key] = str(state_key)
+
         value_bytes_len = entry.get("value_bytes_len")
         if isinstance(value_bytes_len, int):
             blob_keys[key] = value_bytes_len
@@ -322,6 +327,7 @@ def build_cloud_property_summary(
         "hinted_keys": hinted_keys,
         "decoded_labels": decoded_labels,
         "decoded_label_sources": decoded_label_sources,
+        "state_keys": state_keys,
         "blob_keys": blob_keys,
         "value_type_counts": value_type_counts,
         "candidate_map_properties": candidate_map_properties[:20],

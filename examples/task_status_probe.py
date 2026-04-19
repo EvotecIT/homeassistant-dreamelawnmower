@@ -48,6 +48,7 @@ def summarize_task_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
         {
             "value": _entry_value(entry),
             "label": entry.get("decoded_label"),
+            "state_key": entry.get("state_key"),
         }
         for sample in samples
         if isinstance(entry := _entry_by_key(sample, "2.1"), dict)

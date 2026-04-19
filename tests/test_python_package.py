@@ -12,6 +12,7 @@ from dreame_lawn_mower_client import (
     MOWER_PROPERTY_HINTS,
     MOWER_RAW_STATUS_PROPERTY_KEY,
     MOWER_RUNTIME_STATUS_PROPERTY_KEY,
+    MOWER_STATE_KEYS,
     MOWER_STATE_PROPERTY_KEY,
     MOWER_TASK_PROPERTY_KEY,
     MOWER_TIME_PROPERTY_KEY,
@@ -44,6 +45,7 @@ from dreame_lawn_mower_client import (
     map_summary_from_map_data,
     map_summary_to_dict,
     mower_error_label,
+    mower_state_key,
     mower_state_label,
     remote_control_block_reason,
     remote_control_state_safe,
@@ -158,6 +160,11 @@ def test_public_package_exports_app_protocol_helpers() -> None:
     assert MOWER_PROPERTY_HINTS["2.50"] == "task_status"
     assert MOWER_PROPERTY_HINTS["2.51"] == "device_time"
     assert MOWER_PROPERTY_HINTS["3.1"] == "battery_level"
+    assert MOWER_STATE_KEYS["5"] == "returning"
+    assert mower_state_key("1") == "mowing"
+    assert mower_state_key(5) == "returning"
+    assert mower_state_key("13") == "charging_completed"
+    assert mower_state_key(999) is None
     assert mower_state_label(11) == "Mapping"
     assert mower_state_label("13") == "Charging Completed"
     assert mower_state_label(999) is None

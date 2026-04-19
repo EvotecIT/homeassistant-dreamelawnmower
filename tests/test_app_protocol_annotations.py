@@ -22,6 +22,7 @@ def test_property_annotations_label_known_mower_state_and_error_keys() -> None:
     )
 
     assert state_entry["property_hint"] == "mower_state"
+    assert state_entry["state_key"] == "charging_completed"
     assert state_entry["decoded_label"] == "Charging Completed"
     assert error_entry["property_hint"] == "mower_error"
     assert error_entry["decoded_label"] == "Left wheel speed"
@@ -48,6 +49,7 @@ def test_property_annotations_prefer_cloud_key_definition_labels() -> None:
 
     assert entry["decoded_label"] == "Ladowanie zakonczone"
     assert entry["decoded_label_source"] == "cloud_key_definition"
+    assert entry["state_key"] == "charging_completed"
 
 
 def test_key_definition_label_falls_back_to_english_and_raw_payload() -> None:
@@ -329,5 +331,6 @@ def test_scan_cloud_properties_returns_summary_with_dynamic_labels() -> None:
 
     assert result["entries"][0]["decoded_label"] == "Charging Completed From Cloud"
     assert result["entries"][0]["decoded_label_source"] == "cloud_key_definition"
+    assert result["entries"][0]["state_key"] == "charging_completed"
     assert result["summary"]["candidate_map_entry_count"] == 1
     assert result["summary"]["candidate_map_properties"][0]["key"] == "9.9"

@@ -33,6 +33,7 @@ DEFAULT_DREAMEHOME_ASSET_TERMS = _apk_research.DEFAULT_DREAMEHOME_ASSET_TERMS
 DISPLAY_NAME_ALIASES = _models.DISPLAY_NAME_ALIASES
 MODEL_NAME_MAP = _models.MODEL_NAME_MAP
 MOWER_STATE_LABELS = _app_protocol.MOWER_STATE_LABELS
+MOWER_STATE_KEYS = _app_protocol.MOWER_STATE_KEYS
 MOWER_STATE_PROPERTY_KEY = _app_protocol.MOWER_STATE_PROPERTY_KEY
 MOWER_ERROR_PROPERTY_KEY = _app_protocol.MOWER_ERROR_PROPERTY_KEY
 MOWER_PROPERTY_HINTS = _app_protocol.MOWER_PROPERTY_HINTS
@@ -76,6 +77,7 @@ map_diagnostics_from_device = _models.map_diagnostics_from_device
 map_summary_from_map_data = _models.map_summary_from_map_data
 map_summary_to_dict = _models.map_summary_to_dict
 mower_error_label = _app_protocol.mower_error_label
+mower_state_key = _app_protocol.mower_state_key
 mower_state_label = _app_protocol.mower_state_label
 remote_control_block_reason = _models.remote_control_block_reason
 remote_control_state_safe = _models.remote_control_state_safe
@@ -115,6 +117,7 @@ __all__ = [
     "MOWER_TIME_PROPERTY_KEY",
     "MOWER_BATTERY_PROPERTY_KEY",
     "MOWER_STATE_LABELS",
+    "MOWER_STATE_KEYS",
     "MOWER_STATE_PROPERTY_KEY",
     "SCHEDULE_CHUNK_SIZE",
     "SUPPORTED_ACCOUNT_TYPES",
@@ -145,6 +148,7 @@ __all__ = [
     "map_summary_from_map_data",
     "map_summary_to_dict",
     "mower_error_label",
+    "mower_state_key",
     "mower_state_label",
     "remote_control_block_reason",
     "remote_control_state_safe",

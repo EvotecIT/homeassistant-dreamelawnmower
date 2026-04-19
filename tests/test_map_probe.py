@@ -42,13 +42,14 @@ def test_map_probe_payload_trims_cloud_records() -> None:
                     "value_bytes_len": 3,
                     "value_bytes_hex": "ce0000",
                 },
-                {
-                    "key": "2.1",
-                    "value": 13,
-                    "property_hint": "mower_state",
-                    "decoded_label": "Charging Completed",
-                    "decoded_label_source": "cloud_key_definition",
-                },
+                    {
+                        "key": "2.1",
+                        "value": 13,
+                        "property_hint": "mower_state",
+                        "decoded_label": "Charging Completed",
+                        "decoded_label_source": "cloud_key_definition",
+                        "state_key": "charging_completed",
+                    },
                 {
                     "key": "6.50",
                     "value": {"zones": [{"name": "front", "polygon": [[1, 2]]}]},
@@ -129,6 +130,9 @@ def test_map_probe_payload_trims_cloud_records() -> None:
     }
     assert payload["cloud_property_summary"]["decoded_label_sources"] == {
         "2.1": "cloud_key_definition",
+    }
+    assert payload["cloud_property_summary"]["state_keys"] == {
+        "2.1": "charging_completed",
     }
     assert payload["cloud_property_summary"]["blob_keys"] == {"1.1": 3}
     assert payload["cloud_property_summary"]["value_type_counts"] == {
@@ -247,6 +251,7 @@ def test_cloud_property_summary_handles_empty_or_unexpected_payloads() -> None:
         "hinted_keys": {},
         "decoded_labels": {},
         "decoded_label_sources": {},
+        "state_keys": {},
         "blob_keys": {},
         "value_type_counts": {},
         "candidate_map_properties": [],
