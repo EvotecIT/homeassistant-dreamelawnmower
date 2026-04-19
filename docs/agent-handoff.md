@@ -136,6 +136,10 @@ Last updated: 2026-04-19
   camera exposes the structured `map_view` attributes and a readable diagnostic
   card. Pillow image work is run in Home Assistant's executor so camera refresh
   does not block the event loop.
+- Home Assistant also exposes a disabled-by-default `All Maps` camera. It
+  fetches the same read-only app-map payloads and renders a contact sheet of all
+  drawable maps, which is safer than creating dynamic per-map entities while the
+  multi-map behavior is still being validated.
 - Camera/photo metadata is discoverable but not yet exposed. During the active
   2026-04-19 mowing run, read-only support probing confirmed `video_tx`,
   `pincode,video,aiobs`, `GET_PHOTO_INFO`, and stream action/property mappings.

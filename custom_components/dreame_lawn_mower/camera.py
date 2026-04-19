@@ -16,8 +16,14 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
+from .dreame_client.client import render_app_map_payload_png
 from .dreame_client.models import DreameLawnMowerMapView
-from .image import map_diagnostics_jpeg, map_placeholder_jpeg, png_bytes_to_jpeg
+from .image import (
+    app_maps_contact_sheet_jpeg,
+    map_diagnostics_jpeg,
+    map_placeholder_jpeg,
+    png_bytes_to_jpeg,
+)
 from .map_attributes import map_camera_attributes
 from .map_cache import DreameLawnMowerMapCameraCache
 
@@ -38,6 +44,7 @@ async def async_setup_entry(
     async_add_entities(
         [
             DreameLawnMowerMapCamera(coordinator, map_cache),
+            DreameLawnMowerAllMapsCamera(coordinator, map_cache),
             DreameLawnMowerMapDataCamera(coordinator, map_cache),
         ]
     )
@@ -247,3 +254,81 @@ class DreameLawnMowerMapDataCamera(DreameLawnMowerMapCamera):
         return await self.hass.async_add_executor_job(
             partial(map_diagnostics_jpeg, lines=lines)
         )
+
+
+class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
+    """Disabled-by-default contact sheet of all mower app maps."""
+
+    _attr_name = "All Maps"
+    _attr_icon = "mdi:map-multiple-outline"
+
+    def __init__(
+        self,
+        coordinator: DreameLawnMowerCoordinator,
+        map_cache: DreameLawnMowerMapCameraCache,
+    ) -> None:
+        super().__init__(coordinator, map_cache)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_all_maps"
+        self.content_type = "image/jpeg"
+
+    async def async_camera_image(
+        self,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> bytes | None:
+        """Return a JPEG contact sheet for every drawable app map."""
+        del width, height
+        try:
+            app_maps = await self.coordinator.client.async_get_app_maps(
+                include_payload=True,
+                include_objects=False,
+            )
+            return await self.hass.async_add_executor_job(
+                partial(_all_maps_contact_sheet_from_payload, app_maps)
+            )
+        except Exception as err:
+            _LOGGER.warning("Failed to refresh Dreame mower all-map image: %s", err)
+            return await self.hass.async_add_executor_job(
+                partial(
+                    map_placeholder_jpeg,
+                    title="Dreame all maps unavailable",
+                    detail=str(err),
+                )
+            )
+
+
+def _all_maps_contact_sheet_from_payload(app_maps: dict[str, Any]) -> bytes:
+    """Render all drawable app map payloads into one contact sheet."""
+    rendered: list[dict[str, object]] = []
+    maps = app_maps.get("maps")
+    if isinstance(maps, list):
+        for item in maps:
+            if not isinstance(item, dict):
+                continue
+            entry: dict[str, object] = {
+                "idx": item.get("idx"),
+                "current": item.get("current"),
+                "summary": item.get("summary"),
+            }
+            payload = item.get("payload")
+            try:
+                image_png, width, height = render_app_map_payload_png(payload)
+                entry.update(
+                    {
+                        "image_png": image_png,
+                        "width": width,
+                        "height": height,
+                    }
+                )
+            except (TypeError, ValueError) as err:
+                entry["error"] = str(err)
+            rendered.append(entry)
+    return app_maps_contact_sheet_jpeg(
+        maps=rendered,
+        map_count=_int_or_none(app_maps.get("map_count")),
+        current_map_index=_int_or_none(app_maps.get("current_map_index")),
+    )
+
+
+def _int_or_none(value: Any) -> int | None:
+    return value if isinstance(value, int) else None

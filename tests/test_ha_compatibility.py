@@ -19,6 +19,7 @@ from custom_components.dreame_lawn_mower.dreame_client.client import (
     DreameLawnMowerClient,
 )
 from custom_components.dreame_lawn_mower.image import (
+    app_maps_contact_sheet_jpeg,
     map_diagnostics_jpeg,
     map_placeholder_jpeg,
     png_bytes_to_jpeg,
@@ -497,3 +498,32 @@ def test_map_diagnostics_jpeg_returns_valid_jpeg_bytes() -> None:
     with Image.open(BytesIO(converted)) as image:
         assert image.format == "JPEG"
         assert image.size == (1280, 720)
+
+
+def test_app_maps_contact_sheet_jpeg_returns_valid_jpeg_bytes() -> None:
+    map_image = Image.new("RGB", (120, 160), (240, 250, 245))
+    buffer = BytesIO()
+    map_image.save(buffer, format="PNG")
+
+    converted = app_maps_contact_sheet_jpeg(
+        maps=[
+            {
+                "idx": 0,
+                "current": True,
+                "image_png": buffer.getvalue(),
+                "summary": {
+                    "map_area_count": 1,
+                    "spot_count": 0,
+                    "trajectory_point_count": 2,
+                },
+            }
+        ],
+        map_count=1,
+        current_map_index=0,
+    )
+
+    assert converted.startswith(b"\xff\xd8")
+    with Image.open(BytesIO(converted)) as image:
+        assert image.format == "JPEG"
+        assert image.size[0] == 1280
+        assert image.size[1] >= 720

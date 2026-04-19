@@ -76,6 +76,99 @@ def png_bytes_to_jpeg(image_bytes: bytes) -> bytes:
         return output.getvalue()
 
 
+def app_maps_contact_sheet_jpeg(
+    *,
+    maps: list[dict[str, object]] | tuple[dict[str, object], ...],
+    map_count: int | None = None,
+    current_map_index: int | None = None,
+    width: int = 1280,
+) -> bytes:
+    """Return a JPEG contact sheet for every rendered app map."""
+    title_font = _font(34, bold=True)
+    body_font = _font(22)
+    small_font = _font(18)
+    text = (235, 238, 242)
+    muted = (112, 120, 128)
+    panel = (248, 250, 252)
+    border = (80, 170, 220)
+    background = (24, 28, 33)
+    gap = 28
+    padding = 48
+    card_width = (width - padding * 2 - gap) // 2
+    card_height = 520
+    rows = max((len(maps) + 1) // 2, 1)
+    height = max(720, 150 + rows * card_height + max(rows - 1, 0) * gap + padding)
+    image = Image.new("RGB", (width, height), background)
+    draw = ImageDraw.Draw(image)
+
+    draw.text((padding, 40), "Dreame app maps", fill=text, font=title_font)
+    details = [
+        f"Map count: {map_count if map_count is not None else len(maps)}",
+        "Current map: "
+        f"{current_map_index if current_map_index is not None else 'unknown'}",
+    ]
+    draw.text(
+        (padding, 92),
+        "  |  ".join(details),
+        fill=(172, 180, 188),
+        font=small_font,
+    )
+
+    if not maps:
+        _draw_wrapped_text(
+            draw,
+            (padding, 160),
+            "No drawable app map payloads were returned.",
+            font=body_font,
+            fill=(172, 180, 188),
+            max_width=width - padding * 2,
+        )
+    for index, item in enumerate(maps):
+        col = index % 2
+        row = index // 2
+        x = padding + col * (card_width + gap)
+        y = 140 + row * (card_height + gap)
+        draw.rounded_rectangle(
+            (x, y, x + card_width, y + card_height),
+            radius=8,
+            fill=panel,
+            outline=border if item.get("current") else (210, 216, 222),
+            width=3 if item.get("current") else 2,
+        )
+        label = f"Map {item.get('idx', '?')}"
+        if item.get("current"):
+            label += " - current"
+        draw.text((x + 22, y + 20), label, fill=(15, 23, 42), font=body_font)
+        summary = item.get("summary")
+        if isinstance(summary, dict):
+            line = "Areas: {areas}  Spots: {spots}  Path points: {points}".format(
+                areas=summary.get("map_area_count", "?"),
+                spots=summary.get("spot_count", "?"),
+                points=summary.get("trajectory_point_count", "?"),
+            )
+            draw.text((x + 22, y + 56), line, fill=muted, font=small_font)
+
+        image_bytes = item.get("image_png")
+        if not isinstance(image_bytes, bytes):
+            draw.text(
+                (x + 22, y + 105),
+                str(item.get("error") or "Map image unavailable"),
+                fill=(127, 29, 29),
+                font=small_font,
+            )
+            continue
+        with Image.open(BytesIO(image_bytes)) as map_image:
+            preview = map_image.convert("RGB")
+            preview.thumbnail((card_width - 44, card_height - 130))
+            px = x + (card_width - preview.width) // 2
+            py = y + 96 + (card_height - 130 - preview.height) // 2
+            image.paste(preview, (px, py))
+
+    output = BytesIO()
+    image.save(output, format="JPEG", quality=90)
+    return output.getvalue()
+
+
 def map_placeholder_jpeg(
     *,
     title: str = "Dreame map unavailable",

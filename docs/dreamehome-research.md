@@ -349,6 +349,10 @@ to write one PNG per drawable app map without keeping raw coordinate payloads in
 the JSON output. A live A2 check rendered both current map `0` and secondary map
 `1` from the read-only `MAPD` payloads.
 
+Home Assistant mirrors this as a disabled-by-default `All Maps` diagnostic
+camera that renders the read-only app-map payloads into one contact sheet. This
+surfaces secondary maps without changing the mower-selected map.
+
 Use `python examples/apk_research.py <apk> --max-string-length 220` when
 testing a new Dreamehome APK.
 It creates a compact string index of dex/assets/resources for protocol endpoints,
