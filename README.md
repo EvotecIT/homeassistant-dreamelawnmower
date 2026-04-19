@@ -239,7 +239,9 @@ available for enable/disable testing. It defaults to dry-run and only sends the
 write request when both `execute: true` and `confirm_schedule_write: true` are
 set. Dry-run and executed notifications include the previous enabled state,
 target state, whether the request changes anything, the schedule version, and
-the exact `SCHDSV2` request payload.
+the exact `SCHDSV2` request payload. The disabled-by-default diagnostic sensor
+`Last Schedule Write` keeps the most recent dry-run or executed result with the
+same compact attributes.
 
 If you want to probe the same cloud endpoints the Dreamehome app exposes for mower discovery and raw properties, use:
 

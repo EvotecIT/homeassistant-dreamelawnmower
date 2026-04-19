@@ -21,7 +21,11 @@ from custom_components.dreame_lawn_mower.image import (
     map_placeholder_jpeg,
     png_bytes_to_jpeg,
 )
-from custom_components.dreame_lawn_mower.sensor import DreameSensorDescription
+from custom_components.dreame_lawn_mower.sensor import (
+    DreameLawnMowerLastScheduleWriteSensor,
+    DreameSensorDescription,
+    schedule_write_result_attributes,
+)
 
 
 def test_sensor_description_exposes_ha_compat_fields() -> None:
@@ -70,6 +74,79 @@ def test_schedule_probe_button_is_diagnostic_disabled_by_default() -> None:
         ]
         is False
     )
+
+
+def test_last_schedule_write_sensor_is_diagnostic_disabled_by_default() -> None:
+    assert (
+        DreameLawnMowerLastScheduleWriteSensor.__dict__["__attr_entity_category"]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerLastScheduleWriteSensor.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
+    )
+
+
+def test_schedule_write_result_attributes_are_compact() -> None:
+    result = {
+        "source": "app_action_schedule_write",
+        "action": "set_schedule_plan_enabled",
+        "dry_run": True,
+        "executed": False,
+        "changed": True,
+        "map_index": 0,
+        "plan_id": 0,
+        "previous_enabled": True,
+        "enabled": False,
+        "version": 19383,
+        "request": {"m": "s", "t": "SCHDSV2", "d": {"i": 0, "v": 19383}},
+        "schedule": {"label": "map_0", "version": 19383},
+        "target_plan": {
+            "plan_id": 0,
+            "enabled": False,
+            "first_start_time": "10:58",
+            "first_end_time": "20:57",
+        },
+        "response_data": None,
+        "ignored": None,
+    }
+
+    assert schedule_write_result_attributes(result) == {
+        "source": "app_action_schedule_write",
+        "action": "set_schedule_plan_enabled",
+        "dry_run": True,
+        "executed": False,
+        "changed": True,
+        "map_index": 0,
+        "plan_id": 0,
+        "previous_enabled": True,
+        "enabled": False,
+        "version": 19383,
+        "request": {"m": "s", "t": "SCHDSV2", "d": {"i": 0, "v": 19383}},
+        "schedule": {"label": "map_0", "version": 19383},
+        "target_plan": {
+            "plan_id": 0,
+            "enabled": False,
+            "first_start_time": "10:58",
+            "first_end_time": "20:57",
+        },
+    }
+
+
+def test_schedule_write_result_attributes_keep_response_data() -> None:
+    assert schedule_write_result_attributes(
+        {
+            "executed": True,
+            "response_data": {"r": 0, "v": 19383},
+            "request": {"t": "SCHDSV2"},
+        }
+    ) == {
+        "executed": True,
+        "request": {"t": "SCHDSV2"},
+        "response_data": {"r": 0, "v": 19383},
+    }
 
 
 def test_schedule_probe_payload_includes_calendar_selection() -> None:

@@ -10,6 +10,7 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
 )
 from custom_components.dreame_lawn_mower.sensor import (
     SENSORS,
+    DreameLawnMowerLastScheduleWriteSensor,
     DreameLawnMowerSensor,
 )
 
@@ -202,3 +203,41 @@ def test_raw_returning_binary_sensor_preserves_vendor_flag() -> None:
 
     assert entity.available is True
     assert entity.is_on is True
+
+
+def test_last_schedule_write_sensor_reports_none_before_service_call() -> None:
+    entity = object.__new__(DreameLawnMowerLastScheduleWriteSensor)
+    entity.coordinator = SimpleNamespace(last_schedule_write_result=None)
+
+    assert entity.native_value == "none"
+    assert entity.extra_state_attributes == {}
+
+
+def test_last_schedule_write_sensor_reports_dry_run_result() -> None:
+    entity = object.__new__(DreameLawnMowerLastScheduleWriteSensor)
+    entity.coordinator = SimpleNamespace(
+        last_schedule_write_result={
+            "dry_run": True,
+            "executed": False,
+            "changed": True,
+            "map_index": 0,
+            "plan_id": 0,
+            "previous_enabled": True,
+            "enabled": False,
+            "version": 19383,
+            "request": {"t": "SCHDSV2"},
+        }
+    )
+
+    assert entity.native_value == "dry_run"
+    assert entity.extra_state_attributes == {
+        "dry_run": True,
+        "executed": False,
+        "changed": True,
+        "map_index": 0,
+        "plan_id": 0,
+        "previous_enabled": True,
+        "enabled": False,
+        "version": 19383,
+        "request": {"t": "SCHDSV2"},
+    }

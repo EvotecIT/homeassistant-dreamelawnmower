@@ -135,6 +135,8 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             execute=call.data[ATTR_EXECUTE],
             confirm_write=call.data[ATTR_CONFIRM_SCHEDULE_WRITE],
         )
+        coordinator.last_schedule_write_result = result
+        coordinator.async_update_listeners()
         if call.data[ATTR_EXECUTE]:
             await coordinator.async_request_refresh()
         _notify_schedule_plan_enabled(coordinator, result)

@@ -194,6 +194,7 @@ async def async_setup_entry(
             DreameLawnMowerSensor(coordinator, description)
             for description in SENSORS
         ]
+        + [DreameLawnMowerLastScheduleWriteSensor(coordinator)]
     )
 
 
@@ -226,3 +227,72 @@ class DreameLawnMowerSensor(DreameLawnMowerEntity, SensorEntity):
         """Return whether the sensor currently has meaningful mower data."""
         snapshot = self.coordinator.data
         return snapshot is not None and self.entity_description.exists_fn(snapshot)
+
+
+class DreameLawnMowerLastScheduleWriteSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the last guarded schedule write or dry-run result."""
+
+    _attr_name = "Last Schedule Write"
+    _attr_icon = "mdi:calendar-edit"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_last_schedule_write"
+
+    @property
+    def native_value(self) -> str:
+        """Return a compact state for the last schedule write result."""
+        return _schedule_write_state(self.coordinator.last_schedule_write_result)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe details for the last schedule write result."""
+        return schedule_write_result_attributes(
+            self.coordinator.last_schedule_write_result
+        )
+
+
+def _schedule_write_state(result: dict[str, Any] | None) -> str:
+    if not result:
+        return "none"
+    return "executed" if result.get("executed") else "dry_run"
+
+
+def schedule_write_result_attributes(
+    result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return compact, non-secret attributes for a schedule write result."""
+    if not result:
+        return {}
+
+    target_plan = result.get("target_plan")
+    schedule = result.get("schedule")
+    attributes: dict[str, Any] = {
+        "source": result.get("source"),
+        "action": result.get("action"),
+        "dry_run": result.get("dry_run"),
+        "executed": result.get("executed"),
+        "changed": result.get("changed"),
+        "map_index": result.get("map_index"),
+        "plan_id": result.get("plan_id"),
+        "previous_enabled": result.get("previous_enabled"),
+        "enabled": result.get("enabled"),
+        "version": result.get("version"),
+        "request": result.get("request"),
+    }
+    if isinstance(schedule, dict):
+        attributes["schedule"] = schedule
+    if isinstance(target_plan, dict):
+        attributes["target_plan"] = target_plan
+    if result.get("response_data") is not None:
+        attributes["response_data"] = result.get("response_data")
+    return {
+        key: value
+        for key, value in attributes.items()
+        if value is not None
+    }
