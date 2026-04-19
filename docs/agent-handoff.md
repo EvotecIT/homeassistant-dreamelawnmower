@@ -58,6 +58,10 @@ Last updated: 2026-04-19
   when cached payloads still contain `UNKNOWN_REALTIME_*` labels. This keeps
   live captures readable for keys such as `1.1`, `1.4`, `2.50`, `2.51`, and
   `3.1` while preserving genuinely unknown keys for discovery.
+- Home Assistant has disabled-by-default `Capture Task Status Probe` and
+  `Last Task Status Probe` diagnostics for a one-shot read-only view of app
+  state `2.1`, error `2.2`, task object `2.50`, device time `2.51`, battery
+  `3.1`, and the service-5 discovery cluster.
 - `examples/task_status_probe.py` repeatedly samples the task/status keys and
   summarizes whether mower state or task status changed, including values seen
   for unknown non-empty keys. Live mowing windows on 2026-04-19 stayed stable

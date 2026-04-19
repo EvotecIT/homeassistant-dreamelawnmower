@@ -21,6 +21,10 @@ from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity
 from .manual_control import remote_control_block_reason
+from .task_status_probe import (
+    task_status_probe_result_attributes,
+    task_status_probe_state,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +200,7 @@ async def async_setup_entry(
         ]
         + [DreameLawnMowerLastScheduleWriteSensor(coordinator)]
         + [DreameLawnMowerLastScheduleProbeSensor(coordinator)]
+        + [DreameLawnMowerLastTaskStatusProbeSensor(coordinator)]
         + [DreameLawnMowerLastPreferenceProbeSensor(coordinator)]
         + [DreameLawnMowerLastWeatherProbeSensor(coordinator)]
     )
@@ -455,6 +460,36 @@ def preference_probe_result_attributes(
         for key, value in attributes.items()
         if value not in (None, [], {})
     }
+
+
+class DreameLawnMowerLastTaskStatusProbeSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the last read-only app task/status probe result."""
+
+    _attr_name = "Last Task Status Probe"
+    _attr_icon = "mdi:clipboard-pulse-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_last_task_status_probe"
+
+    @property
+    def native_value(self) -> str:
+        """Return a compact state for the last task/status probe."""
+        return task_status_probe_state(
+            self.coordinator.last_task_status_probe_result,
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe details for the last task/status probe."""
+        return task_status_probe_result_attributes(
+            self.coordinator.last_task_status_probe_result,
+        )
 
 
 class DreameLawnMowerLastWeatherProbeSensor(

@@ -14,6 +14,7 @@ LOG_MARKERS = {
     "operation_snapshot": "Captured Dreame lawn mower operation snapshot",
     "preference_probe": "Captured Dreame lawn mower preference probe",
     "schedule_probe": "Captured Dreame lawn mower schedule probe",
+    "task_status_probe": "Captured Dreame lawn mower task status probe",
     "weather_probe": "Captured Dreame lawn mower weather probe",
 }
 
@@ -39,6 +40,8 @@ def summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
         return _summarize_preference_payload(payload)
     if payload.get("source") == "app_action_weather_protection":
         return _summarize_weather_payload(payload)
+    if payload.get("source") == "cloud_property_task_status":
+        return _summarize_task_status_payload(payload)
     if (
         isinstance(payload.get("schedules"), list)
         or isinstance(payload.get("schedule_selection"), dict)
@@ -509,6 +512,29 @@ def _summarize_weather_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "warning_count": len(warnings) if isinstance(warnings, list) else None,
             "errors": errors if errors else None,
             "warnings": warnings if warnings else None,
+        }
+    )
+
+
+def _summarize_task_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    summary = _as_mapping(payload.get("summary"))
+    errors = payload.get("errors")
+    return _drop_empty(
+        {
+            "source": payload.get("source"),
+            "available": payload.get("available"),
+            "captured_at": payload.get("captured_at"),
+            "entry_count": payload.get("entry_count"),
+            "state": summary.get("state"),
+            "task_status": summary.get("task_status"),
+            "error": summary.get("error"),
+            "error_active": summary.get("error_active"),
+            "battery_level": summary.get("battery_level"),
+            "device_time": summary.get("device_time"),
+            "service_5_latest": summary.get("service_5_latest"),
+            "unknown_non_empty_keys": summary.get("unknown_non_empty_keys"),
+            "error_count": len(errors) if isinstance(errors, list) else None,
+            "errors": errors if errors else None,
         }
     )
 

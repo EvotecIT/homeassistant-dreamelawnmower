@@ -32,6 +32,7 @@ def test_extract_payloads_keeps_log_kind_for_multiple_entries() -> None:
     operation_payload = {"snapshot": {"label": "field_test"}}
     preference_payload = {"source": "app_action_mowing_preferences", "maps": []}
     schedule_payload = {"schedules": []}
+    task_status_payload = {"source": "cloud_property_task_status", "available": True}
     weather_payload = {"source": "app_action_weather_protection", "available": True}
     log_text = "\n".join(
         [
@@ -47,6 +48,8 @@ def test_extract_payloads_keeps_log_kind_for_multiple_entries() -> None:
             f"{json.dumps(preference_payload)}",
             "Captured Dreame lawn mower schedule probe for Dreame A2 (A2): "
             f"{json.dumps(schedule_payload)}",
+            "Captured Dreame lawn mower task status probe for Dreame A2 (A2): "
+            f"{json.dumps(task_status_payload)}",
             "Captured Dreame lawn mower weather probe for Dreame A2 (A2): "
             f"{json.dumps(weather_payload)}",
             "noise after",
@@ -61,6 +64,7 @@ def test_extract_payloads_keeps_log_kind_for_multiple_entries() -> None:
         "map_probe",
         "preference_probe",
         "schedule_probe",
+        "task_status_probe",
         "weather_probe",
     ]
     assert [payload.payload for payload in payloads] == [
@@ -69,6 +73,7 @@ def test_extract_payloads_keeps_log_kind_for_multiple_entries() -> None:
         map_payload,
         preference_payload,
         schedule_payload,
+        task_status_payload,
         weather_payload,
     ]
 
@@ -84,6 +89,7 @@ def test_extract_payloads_can_filter_by_kind() -> None:
     map_payload = {"map": {"source": "placeholder"}}
     preference_payload = {"source": "app_action_mowing_preferences", "maps": []}
     schedule_payload = {"schedules": []}
+    task_status_payload = {"source": "cloud_property_task_status", "available": True}
     weather_payload = {"source": "app_action_weather_protection", "available": True}
     log_text = "\n".join(
         [
@@ -95,6 +101,8 @@ def test_extract_payloads_can_filter_by_kind() -> None:
             f"{json.dumps(preference_payload)}",
             "Captured Dreame lawn mower schedule probe for Dreame A2 (A2): "
             f"{json.dumps(schedule_payload)}",
+            "Captured Dreame lawn mower task status probe for Dreame A2 (A2): "
+            f"{json.dumps(task_status_payload)}",
             "Captured Dreame lawn mower weather probe for Dreame A2 (A2): "
             f"{json.dumps(weather_payload)}",
         ]
@@ -117,6 +125,12 @@ def test_extract_payloads_can_filter_by_kind() -> None:
     assert len(preference_payloads) == 1
     assert preference_payloads[0].kind == "preference_probe"
     assert preference_payloads[0].payload == preference_payload
+
+    task_status_payloads = extract_payloads(log_text, kind="task_status_probe")
+
+    assert len(task_status_payloads) == 1
+    assert task_status_payloads[0].kind == "task_status_probe"
+    assert task_status_payloads[0].payload == task_status_payload
 
     weather_payloads = extract_payloads(log_text, kind="weather_probe")
 
@@ -877,4 +891,71 @@ def test_summarize_payload_includes_weather_probe_summary() -> None:
         "error_count": 0,
         "warning_count": 1,
         "warnings": [{"stage": "rain_end_time", "warning": "not protecting"}],
+    }
+
+
+def test_summarize_payload_includes_task_status_probe_summary() -> None:
+    payload = {
+        "captured_at": "2026-04-19T15:00:00+00:00",
+        "source": "cloud_property_task_status",
+        "available": True,
+        "entry_count": 9,
+        "summary": {
+            "state": {"value": "6", "label": "Charging", "state_key": "charging"},
+            "task_status": {
+                "type": "TASK",
+                "executing": True,
+                "status": True,
+                "operation": 6,
+            },
+            "error": {
+                "value": "54",
+                "label": "Edge",
+                "label_source": "bundled_mower_errors",
+                "active": True,
+            },
+            "error_active": True,
+            "battery_level": "77",
+            "device_time": {"time": "1776587727", "tz": "Europe/Warsaw"},
+            "service_5_latest": {
+                "5.104": "3",
+                "5.105": "1",
+                "5.106": "1",
+                "5.107": "90",
+            },
+            "unknown_non_empty_keys": ["5.104", "5.105", "5.106", "5.107"],
+        },
+        "entries": [{"key": "2.1", "value": "6"}],
+        "errors": [],
+    }
+
+    assert summarize_payload(payload) == {
+        "source": "cloud_property_task_status",
+        "available": True,
+        "captured_at": "2026-04-19T15:00:00+00:00",
+        "entry_count": 9,
+        "state": {"value": "6", "label": "Charging", "state_key": "charging"},
+        "task_status": {
+            "type": "TASK",
+            "executing": True,
+            "status": True,
+            "operation": 6,
+        },
+        "error": {
+            "value": "54",
+            "label": "Edge",
+            "label_source": "bundled_mower_errors",
+            "active": True,
+        },
+        "error_active": True,
+        "battery_level": "77",
+        "device_time": {"time": "1776587727", "tz": "Europe/Warsaw"},
+        "service_5_latest": {
+            "5.104": "3",
+            "5.105": "1",
+            "5.106": "1",
+            "5.107": "90",
+        },
+        "unknown_non_empty_keys": ["5.104", "5.105", "5.106", "5.107"],
+        "error_count": 0,
     }

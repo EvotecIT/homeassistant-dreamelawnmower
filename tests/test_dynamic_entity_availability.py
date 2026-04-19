@@ -13,6 +13,7 @@ from custom_components.dreame_lawn_mower.sensor import (
     DreameLawnMowerLastPreferenceProbeSensor,
     DreameLawnMowerLastScheduleProbeSensor,
     DreameLawnMowerLastScheduleWriteSensor,
+    DreameLawnMowerLastTaskStatusProbeSensor,
     DreameLawnMowerLastWeatherProbeSensor,
     DreameLawnMowerSensor,
 )
@@ -351,6 +352,87 @@ def test_last_preference_probe_sensor_reports_error_probe() -> None:
         "map_count": 0,
         "error_count": 1,
         "errors": [{"stage": "preferences", "error": "cloud unavailable"}],
+    }
+
+
+def test_last_task_status_probe_sensor_reports_none_before_probe() -> None:
+    entity = object.__new__(DreameLawnMowerLastTaskStatusProbeSensor)
+    entity.coordinator = SimpleNamespace(last_task_status_probe_result=None)
+
+    assert entity.native_value == "none"
+    assert entity.extra_state_attributes == {}
+
+
+def test_last_task_status_probe_sensor_reports_app_state() -> None:
+    entity = object.__new__(DreameLawnMowerLastTaskStatusProbeSensor)
+    entity.coordinator = SimpleNamespace(
+        last_task_status_probe_result={
+            "captured_at": "2026-04-19T15:00:00+00:00",
+            "source": "cloud_property_task_status",
+            "available": True,
+            "keys": ["2.1", "2.2", "2.50", "3.1", "5.106"],
+            "entry_count": 5,
+            "summary": {
+                "state": {
+                    "value": "6",
+                    "label": "Charging",
+                    "state_key": "charging",
+                },
+                "task_status": {
+                    "type": "TASK",
+                    "executing": True,
+                    "status": True,
+                    "operation": 6,
+                },
+                "error": {"value": "54", "label": "Edge", "active": True},
+                "error_active": True,
+                "battery_level": "77",
+                "service_5_latest": {"5.106": "1"},
+                "unknown_non_empty_keys": ["5.106"],
+            },
+            "errors": [],
+        }
+    )
+
+    assert entity.native_value == "charging"
+    assert entity.extra_state_attributes == {
+        "captured_at": "2026-04-19T15:00:00+00:00",
+        "source": "cloud_property_task_status",
+        "available": True,
+        "keys": ["2.1", "2.2", "2.50", "3.1", "5.106"],
+        "entry_count": 5,
+        "state": {"value": "6", "label": "Charging", "state_key": "charging"},
+        "task_status": {
+            "type": "TASK",
+            "executing": True,
+            "status": True,
+            "operation": 6,
+        },
+        "error": {"value": "54", "label": "Edge", "active": True},
+        "error_active": True,
+        "battery_level": "77",
+        "service_5_latest": {"5.106": "1"},
+        "unknown_non_empty_keys": ["5.106"],
+        "error_count": 0,
+    }
+
+
+def test_last_task_status_probe_sensor_reports_config_error() -> None:
+    entity = object.__new__(DreameLawnMowerLastTaskStatusProbeSensor)
+    entity.coordinator = SimpleNamespace(
+        last_task_status_probe_result={
+            "source": "cloud_property_task_status",
+            "available": False,
+            "errors": [{"stage": "properties", "error": "cloud unavailable"}],
+        }
+    )
+
+    assert entity.native_value == "error"
+    assert entity.extra_state_attributes == {
+        "source": "cloud_property_task_status",
+        "available": False,
+        "error_count": 1,
+        "errors": [{"stage": "properties", "error": "cloud unavailable"}],
     }
 
 

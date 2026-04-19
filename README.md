@@ -334,6 +334,12 @@ service-5 discovery cluster (`5.104` through `5.107`). Add
 `--stop-on-service5-change` to also stop when those unknown service-5 values
 change.
 
+Home Assistant exposes the same one-shot evidence as disabled-by-default
+diagnostics. `Capture Task Status Probe` logs the app task/status properties and
+updates `Last Task Status Probe`, whose state follows the app state key while
+attributes retain task execution, error, battery, device time, and service-5
+cluster evidence.
+
 This is still experimental and read-only. The integration exposes disabled-by-default `camera` entities named `Map` and `Map Diagnostics`. `Map` returns a rendered JPEG from the app-map source when available, or a valid placeholder image. Its attributes include `map_source`, `map_id`, dimensions, segment counts, path-point counts, `spot_area_count`, and `no_go_area_count`. In the confirmed A2 app payload, `spot` means spot-mowing areas; it is not a no-go zone list. `Map Diagnostics` returns a readable JPEG diagnostics card and keeps the structured map view in entity attributes so Home Assistant no longer tries to render JSON as a broken camera preview.
 
 The disabled-by-default `All Maps` camera renders a contact sheet from every

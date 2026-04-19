@@ -18,6 +18,7 @@ from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .debug import build_debug_payload, sanitize_debug_data
 from .entity import DreameLawnMowerEntity
+from .task_status_probe import TASK_STATUS_PROBE_KEYS, task_status_probe_payload
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ async def async_setup_entry(
             DreameLawnMowerCaptureDebugSnapshotButton(coordinator),
             DreameLawnMowerCaptureOperationSnapshotButton(coordinator),
             DreameLawnMowerCaptureMapProbeButton(coordinator),
+            DreameLawnMowerCaptureTaskStatusProbeButton(coordinator),
             DreameLawnMowerCaptureScheduleProbeButton(coordinator),
             DreameLawnMowerCapturePreferenceProbeButton(coordinator),
             DreameLawnMowerCaptureWeatherProbeButton(coordinator),
@@ -203,6 +205,54 @@ class DreameLawnMowerCaptureScheduleProbeButton(
             title="Dreame Lawn Mower Schedule Probe",
             notification_id=(
                 f"{DOMAIN}_{self.coordinator.entry.entry_id}_schedule_probe"
+            ),
+        )
+
+
+class DreameLawnMowerCaptureTaskStatusProbeButton(
+    DreameLawnMowerEntity,
+    ButtonEntity,
+):
+    """Capture and log read-only app task/status diagnostics."""
+
+    _attr_name = "Capture Task Status Probe"
+    _attr_icon = "mdi:clipboard-pulse-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_capture_task_status_probe"
+        )
+
+    async def async_press(self) -> None:
+        """Probe read-only app task/status properties and log the result."""
+        scan = await self.coordinator.client.async_scan_cloud_properties(
+            keys=TASK_STATUS_PROBE_KEYS,
+            only_values=True,
+        )
+        payload = task_status_probe_payload(
+            scan,
+            captured_at=datetime.now(UTC).isoformat(),
+        )
+        self.coordinator.last_task_status_probe_result = payload
+        self.coordinator.async_update_listeners()
+        _LOGGER.info(
+            "Captured Dreame lawn mower task status probe for %s: %s",
+            self.coordinator.client.descriptor.title,
+            json.dumps(payload, sort_keys=True),
+        )
+        persistent_notification.async_create(
+            self.coordinator.hass,
+            (
+                "Captured a Dreame lawn mower task status probe. Enable info "
+                "logging for this integration to view app state/task JSON, "
+                "or enable the Last Task Status Probe diagnostic sensor."
+            ),
+            title="Dreame Lawn Mower Task Status Probe",
+            notification_id=(
+                f"{DOMAIN}_{self.coordinator.entry.entry_id}_task_status_probe"
             ),
         )
 

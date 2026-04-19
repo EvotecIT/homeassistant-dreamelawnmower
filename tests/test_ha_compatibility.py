@@ -12,6 +12,7 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
 from custom_components.dreame_lawn_mower.button import (
     DreameLawnMowerCapturePreferenceProbeButton,
     DreameLawnMowerCaptureScheduleProbeButton,
+    DreameLawnMowerCaptureTaskStatusProbeButton,
     DreameLawnMowerCaptureWeatherProbeButton,
     schedule_probe_payload,
 )
@@ -28,12 +29,17 @@ from custom_components.dreame_lawn_mower.sensor import (
     DreameLawnMowerLastPreferenceProbeSensor,
     DreameLawnMowerLastScheduleProbeSensor,
     DreameLawnMowerLastScheduleWriteSensor,
+    DreameLawnMowerLastTaskStatusProbeSensor,
     DreameLawnMowerLastWeatherProbeSensor,
     DreameSensorDescription,
     preference_probe_result_attributes,
     schedule_probe_result_attributes,
     schedule_write_result_attributes,
     weather_probe_result_attributes,
+)
+from custom_components.dreame_lawn_mower.task_status_probe import (
+    task_status_probe_payload,
+    task_status_probe_result_attributes,
 )
 
 
@@ -79,6 +85,21 @@ def test_schedule_probe_button_is_diagnostic_disabled_by_default() -> None:
     )
     assert (
         DreameLawnMowerCaptureScheduleProbeButton.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
+    )
+
+
+def test_task_status_probe_button_is_diagnostic_disabled_by_default() -> None:
+    assert (
+        DreameLawnMowerCaptureTaskStatusProbeButton.__dict__[
+            "__attr_entity_category"
+        ]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerCaptureTaskStatusProbeButton.__dict__[
             "__attr_entity_registry_enabled_default"
         ]
         is False
@@ -152,6 +173,19 @@ def test_last_preference_probe_sensor_is_diagnostic_disabled_by_default() -> Non
     )
 
 
+def test_last_task_status_probe_sensor_is_diagnostic_disabled_by_default() -> None:
+    assert (
+        DreameLawnMowerLastTaskStatusProbeSensor.__dict__["__attr_entity_category"]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerLastTaskStatusProbeSensor.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
+    )
+
+
 def test_last_weather_probe_sensor_is_diagnostic_disabled_by_default() -> None:
     assert (
         DreameLawnMowerLastWeatherProbeSensor.__dict__["__attr_entity_category"]
@@ -163,6 +197,116 @@ def test_last_weather_probe_sensor_is_diagnostic_disabled_by_default() -> None:
         ]
         is False
     )
+
+
+def test_task_status_probe_payload_keeps_compact_app_state() -> None:
+    scan = {
+        "entries": [
+            {
+                "key": "2.1",
+                "value": "6",
+                "decoded_label": "Charging",
+                "state_key": "charging",
+            },
+            {
+                "key": "2.2",
+                "value": "54",
+                "decoded_label": "Edge",
+                "decoded_label_source": "bundled_mower_errors",
+            },
+            {
+                "key": "2.50",
+                "task_status": {
+                    "type": "TASK",
+                    "executing": True,
+                    "status": True,
+                    "operation": 6,
+                },
+            },
+            {"key": "2.51", "value": {"time": "1776587727", "tz": "Europe/Warsaw"}},
+            {"key": "3.1", "value": "77"},
+            {"key": "5.104", "value": "3"},
+            {"key": "5.105", "value": "1"},
+            {"key": "5.106", "value": "1"},
+            {"key": "5.107", "value": "90"},
+        ],
+        "summary": {"unknown_non_empty_keys": ["5.104", "5.105", "5.106", "5.107"]},
+    }
+
+    payload = task_status_probe_payload(
+        scan,
+        captured_at="2026-04-19T15:00:00+00:00",
+    )
+
+    assert payload["source"] == "cloud_property_task_status"
+    assert payload["available"] is True
+    assert payload["entry_count"] == 9
+    assert payload["summary"] == {
+        "state": {"value": "6", "label": "Charging", "state_key": "charging"},
+        "task_status": {
+            "type": "TASK",
+            "executing": True,
+            "status": True,
+            "operation": 6,
+        },
+        "error": {
+            "value": "54",
+            "label": "Edge",
+            "label_source": "bundled_mower_errors",
+            "active": True,
+        },
+        "error_active": True,
+        "battery_level": "77",
+        "device_time": {"time": "1776587727", "tz": "Europe/Warsaw"},
+        "service_5_latest": {
+            "5.104": "3",
+            "5.105": "1",
+            "5.106": "1",
+            "5.107": "90",
+        },
+        "unknown_non_empty_keys": ["5.104", "5.105", "5.106", "5.107"],
+    }
+    assert task_status_probe_result_attributes(payload) == {
+        "captured_at": "2026-04-19T15:00:00+00:00",
+        "source": "cloud_property_task_status",
+        "available": True,
+        "keys": [
+            "2.1",
+            "2.2",
+            "2.50",
+            "2.51",
+            "3.1",
+            "5.104",
+            "5.105",
+            "5.106",
+            "5.107",
+        ],
+        "entry_count": 9,
+        "state": {"value": "6", "label": "Charging", "state_key": "charging"},
+        "task_status": {
+            "type": "TASK",
+            "executing": True,
+            "status": True,
+            "operation": 6,
+        },
+        "error": {
+            "value": "54",
+            "label": "Edge",
+            "label_source": "bundled_mower_errors",
+            "active": True,
+        },
+        "error_active": True,
+        "battery_level": "77",
+        "device_time": {"time": "1776587727", "tz": "Europe/Warsaw"},
+        "service_5_latest": {
+            "5.104": "3",
+            "5.105": "1",
+            "5.106": "1",
+            "5.107": "90",
+        },
+        "unknown_non_empty_keys": ["5.104", "5.105", "5.106", "5.107"],
+        "error_count": 0,
+    }
 
 
 def test_weather_probe_result_attributes_are_compact() -> None:
