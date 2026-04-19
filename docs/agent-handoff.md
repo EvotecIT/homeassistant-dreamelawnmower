@@ -65,13 +65,20 @@ Last updated: 2026-04-19
   simple PNG. The older legacy current-map path remains a fallback. A live run
   of `examples/map_client.py` on 2026-04-18 produced an `app_action_map` image
   for current map `0` with 2 map areas, 2 spot-mowing areas, and 63 trajectory
-  points.
+  points. A follow-up live run on 2026-04-19 while the mower reported `mowing`
+  again rendered current map `0` through `app_action_map` with the same 2 map
+  areas, 2 spot areas, and 63 trajectory points.
 - `OBJ type=3dmap` is also wired as read-only object metadata through
   `async_get_app_map_objects()`. A live A2 probe returned two `.bin` object
   names. Expiring object URLs are intentionally opt-in and omitted from default
   probe output. Direct HTTP GETs against the tested generated URLs returned
   404 XML, so treat 3D objects as metadata-only until a downloadable path is
   confirmed.
+- Home Assistant now exposes disabled-by-default read-only map cameras. The
+  normal camera renders the app-action vector payload as JPEG; the diagnostics
+  camera exposes the structured `map_view` attributes and a readable diagnostic
+  card. Pillow image work is run in Home Assistant's executor so camera refresh
+  does not block the event loop.
 - Mower-native schedule retrieval now works through read-only app action
   commands recovered from the downloaded Dreamehome plugin: `SCHDIV2`,
   chunked `SCHDDV2`, and `SCHDT`.
@@ -119,11 +126,14 @@ Last updated: 2026-04-19
 
 ## Known Gaps
 
-- Real mower map retrieval is solved at the Python-client level through the
-  app action path, but Home Assistant does not yet render or expose the vector
-  map as an entity/camera.
+- Real mower map retrieval is solved through the app action path and exposed as
+  disabled-by-default Home Assistant cameras, but the renderer is intentionally
+  simple. It does not yet label areas, render no-go/pathway variants from more
+  mower families, or show a verified robot/charger position from app-map data.
 - The legacy vacuum-style current-map path still returns no data for the live
-  A2. Keep it as negative diagnostics rather than the primary mower map source.
+  A2 and may return properties without a `value` field. Keep it as negative
+  diagnostics and fallback only; the map manager now skips such partial
+  properties instead of raising `KeyError`.
 - App-style cloud property probing currently returns useful status/realtime
   fields, but no non-empty map-like fields. The confirmed map payload comes
   from app actions, not `iotstatus/props`.
@@ -148,6 +158,7 @@ the workspace after live tests:
 - `field-trip-readonly.json`
 - `firmware-update-live.json`
 - `app-map-current.json`
+- `app-map-payload-current.json`
 - `dreame-map-current.png`
 - `map-sources-current.json`
 - `source-scan-map.json`
@@ -155,6 +166,7 @@ the workspace after live tests:
 - `property-scan-*.txt`
 - `remote-control-current.json`
 - `schedule-probe-current.json`
+- `schedule-calendar-*.json`
 - `apk-scan*.json`
 - `asset-scan*.json`
 
