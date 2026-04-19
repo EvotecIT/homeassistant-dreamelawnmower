@@ -592,6 +592,7 @@ def test_schedule_probe_payload_includes_calendar_selection() -> None:
                 "enabled_plan_count": 1,
             }
         ],
+        "current_task": {"version": 19383},
     }
     assert payload.get("schedule_selection") is None
 

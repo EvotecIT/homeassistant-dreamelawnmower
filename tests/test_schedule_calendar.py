@@ -202,6 +202,7 @@ def test_schedule_calendar_selection_explains_active_version_filter() -> None:
                 "enabled_plan_count": 1,
             },
         ],
+        "current_task": {"version": 19383},
     }
 
 
@@ -221,6 +222,7 @@ def test_schedule_calendar_selection_can_include_all_schedules() -> None:
     assert selection["active_version_filter_applied"] is False
     assert selection["included_schedule_count"] == 2
     assert selection["hidden_schedule_count"] == 0
+    assert selection["current_task"] == {"version": 19383}
     assert selection["included_schedules"] == [
         {
             "idx": -1,

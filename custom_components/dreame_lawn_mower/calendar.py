@@ -200,7 +200,7 @@ def schedule_calendar_selection(
             target = hidden_schedules
         target.append(_schedule_selection_entry(schedule))
 
-    return {
+    selection = {
         "mode": "all_schedules" if include_all_schedules else "active_schedule",
         "active_version": active_version,
         "active_version_filter_applied": bool(
@@ -211,6 +211,10 @@ def schedule_calendar_selection(
         "included_schedules": included_schedules,
         "hidden_schedules": hidden_schedules,
     }
+    current_task = payload.get("current_task")
+    if isinstance(current_task, Mapping):
+        selection["current_task"] = dict(current_task)
+    return selection
 
 
 def schedule_calendar_attributes(
