@@ -54,6 +54,10 @@ Last updated: 2026-04-19
   `{"t":"TASK","d":{"exe":true,"status":true,"o":6}}`, `2.51` is the device
   time/tz payload, and `3.1` mirrors the battery level. `2.50` is now decoded
   conservatively as `type`, `executing`, `status`, and `operation`.
+- `examples/task_status_probe.py` repeatedly samples the task/status keys and
+  summarizes whether mower state or task status changed. A live mowing window
+  on 2026-04-19 stayed stable at state `Mowing`, task `TASK`,
+  `executing=true`, operation `6`, battery `53`, and `5.106=6`.
 - A read-only operation snapshot on 2026-04-18 collected `before` and `final`
   captures without movement. The mower stayed docked at `charging_completed`
   with battery 100%, manual-drive state safety was true, remote-control support
@@ -321,6 +325,12 @@ Read-only realtime/raw status blob samples:
 
 ```powershell
 python examples\status_blob_probe.py --samples 5 --interval 3 --out status-blob-live.json
+```
+
+Read-only task/status transition samples:
+
+```powershell
+python examples\task_status_probe.py --samples 6 --interval 10 --out task-status-live.json
 ```
 
 Firmware evidence probe:

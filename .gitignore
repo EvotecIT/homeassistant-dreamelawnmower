@@ -17,6 +17,7 @@ property-scan*.txt
 photo-info*.json
 remote-control*.json
 status-blob*.json
+task-status*.json
 schedule-probe*.json
 schedule-write*.json
 schedule-calendar*.json

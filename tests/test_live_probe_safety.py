@@ -23,6 +23,7 @@ from examples.remote_control_smoke import (
     _write_output as write_remote_control_output,
 )
 from examples.status_blob_probe import _summarize_samples
+from examples.task_status_probe import summarize_task_samples
 
 
 def test_remote_control_smoke_blocks_low_battery() -> None:
@@ -229,3 +230,51 @@ def test_status_blob_sample_summary_tracks_battery_and_changed_bytes() -> None:
     assert summary["candidate_battery_matches_snapshot"] is True
     assert summary["unique_status_blob_hex_count"] == 2
     assert summary["changed_byte_indices"] == [{"index": 17, "values": [186, 192]}]
+
+
+def test_task_status_sample_summary_tracks_state_and_task_changes() -> None:
+    summary = summarize_task_samples(
+        [
+            {
+                "entries": [
+                    {"key": "2.1", "value": "1", "decoded_label": "Mowing"},
+                    {
+                        "key": "2.50",
+                        "task_status": {
+                            "type": "TASK",
+                            "executing": True,
+                            "status": True,
+                            "operation": 6,
+                        },
+                    },
+                    {"key": "3.1", "value": "56"},
+                ],
+                "unknown_non_empty_keys": ["5.106"],
+            },
+            {
+                "entries": [
+                    {"key": "2.1", "value": "5", "decoded_label": "Returning Charge"},
+                    {
+                        "key": "2.50",
+                        "task_status": {
+                            "type": "TASK",
+                            "executing": False,
+                            "status": False,
+                            "operation": 6,
+                        },
+                    },
+                    {"key": "3.1", "value": "55"},
+                ],
+                "unknown_non_empty_keys": ["5.106"],
+            },
+        ]
+    )
+
+    assert summary["states"] == [
+        {"value": "1", "label": "Mowing"},
+        {"value": "5", "label": "Returning Charge"},
+    ]
+    assert summary["task_status_changed"] is True
+    assert summary["state_changed"] is True
+    assert summary["battery_levels"] == ["56", "55"]
+    assert summary["unknown_non_empty_keys"] == ["5.106"]
