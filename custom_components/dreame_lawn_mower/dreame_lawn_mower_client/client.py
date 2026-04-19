@@ -1,4 +1,4 @@
-"""Async-friendly reusable mower client facade."""
+"""Async-friendly reusable mower client."""
 
 from __future__ import annotations
 

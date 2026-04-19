@@ -16,7 +16,7 @@ from custom_components.dreame_lawn_mower.button import (
     DreameLawnMowerCaptureWeatherProbeButton,
     schedule_probe_payload,
 )
-from custom_components.dreame_lawn_mower.dreame_client.client import (
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import (
     DreameLawnMowerClient,
 )
 from custom_components.dreame_lawn_mower.image import (

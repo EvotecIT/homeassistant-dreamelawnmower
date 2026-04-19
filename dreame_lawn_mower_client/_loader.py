@@ -12,7 +12,7 @@ _INTERNAL_ROOT = (
     Path(__file__).resolve().parents[1]
     / "custom_components"
     / "dreame_lawn_mower"
-    / "dreame_client"
+    / "dreame_lawn_mower_client"
 )
 
 

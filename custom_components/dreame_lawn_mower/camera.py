@@ -16,8 +16,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
-from .dreame_client.client import render_app_map_payload_png
-from .dreame_client.models import DreameLawnMowerMapView
+from .dreame_lawn_mower_client.client import render_app_map_payload_png
+from .dreame_lawn_mower_client.models import DreameLawnMowerMapView
 from .image import (
     app_maps_contact_sheet_jpeg,
     map_diagnostics_jpeg,

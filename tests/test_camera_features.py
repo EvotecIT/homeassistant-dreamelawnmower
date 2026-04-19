@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from custom_components.dreame_lawn_mower.dreame_client.camera_probe import (
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.camera_probe import (
     build_camera_probe_payload,
 )
-from custom_components.dreame_lawn_mower.dreame_client.types import (
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
     DreameMowerAction,
     DreameMowerProperty,
     DreameMowerState,

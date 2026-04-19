@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from custom_components.dreame_lawn_mower.dreame_client.types import (
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
     DreameMowerProperty,
     DreameMowerState,
     DreameMowerStatus,

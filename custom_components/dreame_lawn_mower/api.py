@@ -1,6 +1,6 @@
 """Compatibility wrapper for the reusable mower client package."""
 
-from .dreame_client import (
+from .dreame_lawn_mower_client import (
     DreameLawnMowerAuthError,
     DreameLawnMowerClient,
     DreameLawnMowerConnectionError,

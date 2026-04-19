@@ -9,15 +9,15 @@ from enum import Enum
 from typing import Any
 
 from .const import CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
-from .dreame_client.app_protocol import (
+from .dreame_lawn_mower_client.app_protocol import (
     MOWER_RAW_STATUS_PROPERTY_KEY,
     MOWER_RUNTIME_STATUS_PROPERTY_KEY,
     decode_mower_status_blob,
     mower_property_hint,
     mower_realtime_property_name,
 )
-from .dreame_client.map_probe import MAP_CANDIDATE_TERMS
-from .dreame_client.models import (
+from .dreame_lawn_mower_client.map_probe import MAP_CANDIDATE_TERMS
+from .dreame_lawn_mower_client.models import (
     MODEL_NAME_MAP,
     SUPPORTED_MODEL_MARKER,
     remote_control_block_reason,

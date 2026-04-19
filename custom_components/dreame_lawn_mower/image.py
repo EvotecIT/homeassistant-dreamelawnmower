@@ -9,7 +9,7 @@ from io import BytesIO
 
 from PIL import Image, ImageDraw, ImageFont
 
-from .dreame_client.resources import MAP_FONT, MAP_FONT_LIGHT
+from .dreame_lawn_mower_client.resources import MAP_FONT, MAP_FONT_LIGHT
 
 
 @lru_cache(maxsize=2)

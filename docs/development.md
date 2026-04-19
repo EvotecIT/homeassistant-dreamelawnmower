@@ -8,45 +8,51 @@ small and the reverse-engineering notes in docs or ignored local captures.
 
 - `custom_components/dreame_lawn_mower`
   Home Assistant integration code.
-- `custom_components/dreame_lawn_mower/dreame_client`
+- `custom_components/dreame_lawn_mower/dreame_lawn_mower_client`
   Bundled mower client implementation. Protocol changes, payload decoders,
   mappers, and cloud/app command helpers live here.
 - `dreame_lawn_mower_client`
-  Public Python import facade. Examples and tests import this package so the
-  client can later be extracted without rewriting every probe.
+  Public Python package name. Examples, tests, and external scripts import
+  this package directly.
 - `examples`
   Read-only and safety-gated probe scripts. Output files are ignored by git.
 - `tests`
-  Unit and fixture tests for the public facade, Home Assistant entities,
+  Unit and fixture tests for the public package, Home Assistant entities,
   protocol helpers, and live-probe summarizers.
 - `docs`
   Roadmap, handoff notes, and protocol research.
 
-## Client Boundary
+## Client Package Layout
 
-There is one client implementation:
+This repo follows the same shape as the sister Home Assistant repositories:
+one reusable client package name plus a Home Assistant custom component that
+uses that client.
 
-```text
-custom_components/dreame_lawn_mower/dreame_client
-```
-
-The top-level package is a facade:
+Public imports use:
 
 ```text
 dreame_lawn_mower_client
 ```
 
-The facade loads the bundled implementation without importing Home Assistant.
-That keeps examples and tests clean while preserving the option to publish a
-standalone client package later.
+HACS still needs the implementation bundled inside the custom component, so the
+implementation currently lives here:
+
+```text
+custom_components/dreame_lawn_mower/dreame_lawn_mower_client
+```
+
+The top-level package loads the bundled implementation without importing Home
+Assistant. That keeps examples and tests clean, gives users a reusable Python
+library surface today, and preserves the option to extract or publish the
+client separately later.
 
 Rules:
 
-- add new protocol behavior to `custom_components/.../dreame_client`
+- add new protocol behavior to `custom_components/.../dreame_lawn_mower_client`
 - expose stable public imports through `dreame_lawn_mower_client`
 - keep Home Assistant-specific entity, service, and config-flow behavior outside
   the client implementation
-- avoid adding a second implementation under the facade package
+- avoid adding a second protocol implementation under the top-level package
 
 ## Local Setup
 
@@ -130,6 +136,7 @@ The README should stay user-facing:
 - primary entities and services
 - troubleshooting and diagnostics
 - links to deeper docs
+- a concise reusable Python package section
 
 Keep long probe recipes, protocol notes, app decompilation notes, and live test
 history in `docs/agent-handoff.md`, `docs/dreamehome-research.md`, or focused

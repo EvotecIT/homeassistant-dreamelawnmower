@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .dreame_client.models import (
+from .dreame_lawn_mower_client.models import (
     remote_control_block_reason,
     remote_control_state_safe,
 )

@@ -14,7 +14,7 @@ from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
-from .dreame_client.client import (
+from .dreame_lawn_mower_client.client import (
     REMOTE_CONTROL_MAX_ROTATION,
     REMOTE_CONTROL_MAX_VELOCITY,
 )

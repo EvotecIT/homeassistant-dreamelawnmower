@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from .dreame_client.models import DreameLawnMowerMapView, map_summary_to_dict
+from .dreame_lawn_mower_client.models import DreameLawnMowerMapView, map_summary_to_dict
 
 _MAP_SUMMARY_ATTRIBUTE_KEYS = (
     "map_id",

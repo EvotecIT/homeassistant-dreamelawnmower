@@ -47,7 +47,7 @@ addopts = "-q"
 [tool.ruff]
 target-version = "py313"
 line-length = 88
-exclude = ["custom_components/dreame_lawn_mower/dreame_client"]
+exclude = ["custom_components/dreame_lawn_mower/dreame_lawn_mower_client"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]

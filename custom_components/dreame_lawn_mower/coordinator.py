@@ -30,7 +30,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_SECONDS,
     DOMAIN,
 )
-from .dreame_client.models import display_name_for_model
+from .dreame_lawn_mower_client.models import display_name_for_model
 
 _LOGGER = logging.getLogger(__name__)
 

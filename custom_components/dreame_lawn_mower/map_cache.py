@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from .dreame_client.models import DreameLawnMowerMapView
+from .dreame_lawn_mower_client.models import DreameLawnMowerMapView
 
 MapViewRefresh = Callable[[], Awaitable[DreameLawnMowerMapView]]
 

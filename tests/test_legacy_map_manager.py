@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from custom_components.dreame_lawn_mower.dreame_client.const import (
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.const import (
     MAP_PARAMETER_CODE,
     MAP_PARAMETER_OUT,
 )
-from custom_components.dreame_lawn_mower.dreame_client.map import (
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map import (
     DreameMapMowerMapManager,
 )
 

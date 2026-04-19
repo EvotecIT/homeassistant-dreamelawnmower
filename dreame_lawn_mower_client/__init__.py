@@ -1,4 +1,4 @@
-"""Public Python package facade for the bundled mower client."""
+"""Public Python package for the reusable mower client."""
 
 from ._loader import load_internal_module
 

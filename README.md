@@ -1,6 +1,8 @@
 # Dreame Lawn Mower for Home Assistant
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://hacs.xyz/)
+[![Validate](https://img.shields.io/github/actions/workflow/status/EvotecIT/homeassistant-dreamelawnmower/validate.yml?branch=main&style=for-the-badge&label=Validate)](https://github.com/EvotecIT/homeassistant-dreamelawnmower/actions/workflows/validate.yml)
+[![Hassfest](https://img.shields.io/github/actions/workflow/status/EvotecIT/homeassistant-dreamelawnmower/hassfest.yml?branch=main&style=for-the-badge&label=Hassfest)](https://github.com/EvotecIT/homeassistant-dreamelawnmower/actions/workflows/hassfest.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Custom Home Assistant integration for Dreame and MOVA robotic lawn mowers.
@@ -158,18 +160,45 @@ converted to JSON with:
 python examples/extract_ha_payload.py home-assistant.log --summary
 ```
 
-## Python Client Boundary
+## Reusable Python Package
 
-This repository contains one bundled client implementation and one public import
-facade:
+This repository ships two usable layers:
 
-- `custom_components/dreame_lawn_mower/dreame_client` is the implementation used
-  by the Home Assistant integration.
-- `dreame_lawn_mower_client` is a thin facade for examples, tests, and future
-  extraction into a standalone package.
+- `dreame_lawn_mower_client` for direct Python access to Dreame/MOVA mower
+  cloud, app-action, schedule, map, and diagnostic APIs
+- the Home Assistant integration in `custom_components/dreame_lawn_mower`
 
-They are not two independent clients. Keep shared protocol behavior in the
-bundled implementation and expose stable imports through the facade.
+Library docs: [docs/python-library.md](docs/python-library.md)
+
+Runnable example: [examples/python_client.py](examples/python_client.py)
+
+Example:
+
+```python
+from dreame_lawn_mower_client import DreameLawnMowerClient
+
+devices = await DreameLawnMowerClient.async_discover_devices(
+    username=username,
+    password=password,
+    country="eu",
+    account_type="dreame",
+)
+
+client = DreameLawnMowerClient(
+    username=username,
+    password=password,
+    country="eu",
+    account_type="dreame",
+    descriptor=devices[0],
+)
+snapshot = await client.async_refresh()
+print(snapshot.descriptor.title, snapshot.state_name, snapshot.battery_level)
+```
+
+The Home Assistant integration uses the same client package name inside the
+custom component bundle, so HACS installs the protocol layer together with the
+integration while scripts and tests can still import `dreame_lawn_mower_client`
+directly.
 
 ## Development
 
@@ -188,6 +217,7 @@ pytest
 
 Useful docs:
 
+- [Python library](docs/python-library.md)
 - [Development notes](docs/development.md)
 - [Roadmap](docs/roadmap.md)
 - [Dreamehome protocol research](docs/dreamehome-research.md)

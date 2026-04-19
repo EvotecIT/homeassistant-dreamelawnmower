@@ -7,8 +7,13 @@ Last updated: 2026-04-19
 
 ## Current State
 
-- The repo contains a reusable Python client facade in `dreame_lawn_mower_client`
-  and a Home Assistant custom integration in `custom_components/dreame_lawn_mower`.
+- The repo exposes reusable Python client imports through
+  `dreame_lawn_mower_client` and a Home Assistant custom integration in
+  `custom_components/dreame_lawn_mower`.
+- The bundled client implementation lives under
+  `custom_components/dreame_lawn_mower/dreame_lawn_mower_client` so HACS
+  installs it with the integration. The top-level package name stays the public
+  script/test import surface.
 - The Python client is the source of truth for protocol behavior. Home Assistant
   should call the client rather than duplicate protocol logic.
 - The current validated real device is a Dreame A2 reported as
