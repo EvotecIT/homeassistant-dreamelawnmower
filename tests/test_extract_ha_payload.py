@@ -275,6 +275,7 @@ def test_summarize_payload_accepts_operation_snapshot() -> None:
                     "requested_key_count": 3,
                     "non_empty_keys": ["2.1"],
                     "decoded_labels": {"2.1": "Returning Charge"},
+                    "state_keys": {"2.1": "returning"},
                     "blob_keys": {"1.1": 20},
                 },
             },
@@ -334,6 +335,7 @@ def test_summarize_payload_accepts_operation_snapshot() -> None:
                 "requested_key_count": 3,
                 "non_empty_keys": ["2.1"],
                 "decoded_labels": {"2.1": "Returning Charge"},
+                "state_keys": {"2.1": "returning"},
                 "blob_keys": {"1.1": 20},
             },
         },
@@ -497,6 +499,7 @@ def test_summarize_payload_includes_map_probe_summary() -> None:
             "requested_key_count": 3,
             "non_empty_keys": ["2.1"],
             "decoded_labels": {"2.1": "Charging"},
+            "state_keys": {"2.1": "charging"},
             "blob_keys": {"1.1": 20},
         },
         "map": {
@@ -547,6 +550,7 @@ def test_summarize_payload_includes_map_probe_summary() -> None:
             "requested_key_count": 3,
             "non_empty_keys": ["2.1"],
             "decoded_labels": {"2.1": "Charging"},
+            "state_keys": {"2.1": "charging"},
             "blob_keys": {"1.1": 20},
         },
         "map": {

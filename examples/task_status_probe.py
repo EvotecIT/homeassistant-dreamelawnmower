@@ -72,6 +72,13 @@ def summarize_task_samples(samples: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "sample_count": len(samples),
         "states": _unique_values(states),
+        "state_keys": _unique_values(
+            [
+                state.get("state_key")
+                for state in states
+                if isinstance(state.get("state_key"), str)
+            ]
+        ),
         "task_statuses": _unique_values(task_statuses),
         "battery_levels": _unique_values(batteries),
         "unknown_non_empty_keys": unknown_keys,

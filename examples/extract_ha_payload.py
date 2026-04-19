@@ -113,6 +113,7 @@ def summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
             "requested_key_count": cloud_property_summary.get("requested_key_count"),
             "non_empty_keys": cloud_property_summary.get("non_empty_keys", []),
             "decoded_labels": cloud_property_summary.get("decoded_labels", {}),
+            "state_keys": cloud_property_summary.get("state_keys", {}),
             "blob_keys": cloud_property_summary.get("blob_keys", {}),
         }
 
@@ -244,6 +245,7 @@ def _map_view_summary(map_view: dict[str, Any]) -> dict[str, Any]:
                 ),
                 "non_empty_keys": cloud_property_summary.get("non_empty_keys", []),
                 "decoded_labels": cloud_property_summary.get("decoded_labels", {}),
+                "state_keys": cloud_property_summary.get("state_keys", {}),
                 "blob_keys": cloud_property_summary.get("blob_keys", {}),
             },
         }

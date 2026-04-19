@@ -296,6 +296,7 @@ def test_task_status_sample_summary_tracks_state_and_task_changes() -> None:
         {"value": "1", "label": "Mowing", "state_key": "mowing"},
         {"value": "5", "label": "Returning Charge", "state_key": "returning"},
     ]
+    assert summary["state_keys"] == ["mowing", "returning"]
     assert summary["task_status_changed"] is True
     assert summary["state_changed"] is True
     assert summary["battery_levels"] == ["56", "55"]
