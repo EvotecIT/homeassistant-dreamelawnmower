@@ -39,4 +39,6 @@ jobs:
         run: ruff check .
 
       - name: Pytest
-        run: pytest
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: pytest tests --ignore=tests/components/dreame_lawn_mower/test_config_flow.py

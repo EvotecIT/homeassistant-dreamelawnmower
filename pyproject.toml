@@ -37,7 +37,13 @@ include = [
 ]
 
 [tool.setuptools.package-data]
-"custom_components.dreame_lawn_mower" = ["manifest.json", "services.yaml", "strings.json", "translations/*.json"]
+"custom_components.dreame_lawn_mower" = [
+  "manifest.json",
+  "services.yaml",
+  "strings.json",
+  "translations/*.json",
+  "brand/*.png"
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
