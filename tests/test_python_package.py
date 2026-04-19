@@ -28,7 +28,11 @@ from dreame_lawn_mower_client import (
     build_cloud_property_summary,
     build_jadx_command,
     build_map_probe_payload,
+    build_schedule_enable_status_request,
+    build_schedule_upload_requests,
     decode_mower_status_blob,
+    decode_schedule_payload_text,
+    encode_schedule_payload_text,
     firmware_update_support_from_device,
     key_definition_label,
     map_diagnostics_from_device,
@@ -111,6 +115,29 @@ def test_public_package_client_has_cloud_probe_helpers() -> None:
     assert hasattr(DreameLawnMowerClient, "async_get_remote_control_support")
     assert hasattr(DreameLawnMowerClient, "async_remote_control_move_step")
     assert hasattr(DreameLawnMowerClient, "async_remote_control_stop")
+    assert hasattr(DreameLawnMowerClient, "async_get_app_schedules")
+    assert hasattr(DreameLawnMowerClient, "async_set_app_schedule_plan_enabled")
+
+
+def test_public_package_exports_schedule_helpers() -> None:
+    payload_text = '{"d":[[0,1,"","EODBJwAAADDgwScAAAA="]]}'
+    plans = decode_schedule_payload_text(payload_text)
+
+    assert encode_schedule_payload_text(plans) == payload_text
+    assert build_schedule_enable_status_request(
+        map_index=0,
+        version=123,
+        plans=plans,
+    ) == {"m": "s", "t": "SCHDSV2", "d": {"i": 0, "v": 123, "s": [1]}}
+    assert build_schedule_upload_requests(
+        map_index=0,
+        payload_text='{"d":[]}',
+        version=123,
+        chunk_size=100,
+    ) == [
+        {"m": "s", "t": "SCHDIV2", "d": {"i": 0, "l": 8, "v": 123}},
+        {"m": "s", "t": "SCHDDV2", "d": {"s": 0, "l": 8, "d": '{"d":[]}', "v": 123}},
+    ]
 
 
 def test_public_package_exports_app_protocol_helpers() -> None:

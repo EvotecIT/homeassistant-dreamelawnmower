@@ -29,7 +29,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up mower schedule calendar."""
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([DreameLawnMowerScheduleCalendar(coordinator)], True)
+    async_add_entities([DreameLawnMowerScheduleCalendar(coordinator)])
 
 
 class DreameLawnMowerScheduleCalendar(DreameLawnMowerEntity, CalendarEntity):
