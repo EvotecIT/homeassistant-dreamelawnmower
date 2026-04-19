@@ -11,6 +11,14 @@ The integration uses the cloud/app protocol exposed by Dreamehome and MOVAhome.
 It is being developed against real A2-family hardware and is intentionally
 conservative with anything that can move the mower or change mower settings.
 
+![Dreame Lawn Mower device overview](assets/dreame-lawn-mower-overview.png)
+
+## Screenshots
+
+![Rendered mower map](assets/dreame-lawn-mower-map.png)
+
+![Diagnostics and map entities](assets/dreame-lawn-mower-diagnostics.png)
+
 ## Status
 
 This project is usable, but still young. Core mower state, controls, schedules,
