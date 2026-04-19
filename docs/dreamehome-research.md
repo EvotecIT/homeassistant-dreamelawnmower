@@ -127,6 +127,12 @@ Only the `SCHDSV2` enable/disable path is wired to a client method, and it
 defaults to dry-run. Sending it requires both `execute=True` and
 `confirm_write=True`.
 
+On 2026-04-19, a supervised no-op A2 write validated the `SCHDSV2` path by
+disabling map `0` plan `1`, which was already disabled. The device returned
+top-level `r: 0` and payload `{"r":0,"v":19383}`. A follow-up schedule probe
+confirmed map `0` still had plan `0` enabled, plan `1` disabled, and version
+`19383`.
+
 On 2026-04-19, a live A2 read-only schedule probe confirmed:
 
 - default schedule slot `-1`: length `79`, version `31345`, one enabled plan.

@@ -87,6 +87,10 @@ Last updated: 2026-04-19
   `examples/schedule_write_probe.py` builds `SCHDSV2` enable/disable requests
   without sending them by default. Live writes require both `--execute` and
   `--confirm-schedule-write`.
+- A supervised no-op `SCHDSV2` write on 2026-04-19 disabled map `0` plan `1`
+  while it was already disabled. The mower returned success (`r: 0`, version
+  `19383`), and a follow-up read confirmed map `0` remained plan `0` enabled
+  and plan `1` disabled.
 - Config-flow auth failures are classified into non-secret Home Assistant
   errors for account type, region, connectivity, generic auth, 2FA, and no
   matching mower devices.
@@ -226,10 +230,12 @@ python examples\schedule_write_probe.py --map-index 0 --plan-id 0 --disable --ou
 ```
 
 Only execute schedule writes in a supervised test window after checking the
-dry-run JSON. Actual writes require both explicit gates:
+dry-run JSON. Actual writes require both explicit gates. Prefer first testing
+with a no-op state change, for example disabling a plan that is already
+disabled:
 
 ```powershell
-python examples\schedule_write_probe.py --map-index 0 --plan-id 0 --disable --execute --confirm-schedule-write
+python examples\schedule_write_probe.py --map-index 0 --plan-id 1 --disable --execute --confirm-schedule-write
 ```
 
 Broad read-only property scan:

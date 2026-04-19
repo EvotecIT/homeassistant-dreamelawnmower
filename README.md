@@ -209,6 +209,10 @@ dry-run JSON:
 python examples/schedule_write_probe.py --map-index 0 --plan-id 0 --disable --execute --confirm-schedule-write
 ```
 
+A no-op `SCHDSV2` write was validated live on an A2 on 2026-04-19 by disabling
+an already disabled plan and reading the schedule back unchanged. Do not use
+the execute flags from automations or unsupervised scripts.
+
 Home Assistant does not expose a schedule/calendar entity yet; the current
 UI-facing support is still only the diagnostic `Scheduled Task` binary sensor
 while a scheduled task is reported active.

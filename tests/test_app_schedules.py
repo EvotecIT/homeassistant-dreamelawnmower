@@ -6,6 +6,7 @@ import pytest
 
 from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
+    DreameLawnMowerConnectionError,
     build_schedule_upload_requests,
     decode_schedule_payload_text,
     encode_schedule_payload_text,
@@ -90,7 +91,7 @@ class _FakeAppScheduleCloud:
                 ]
             }
         if command == "SCHDSV2":
-            return {"out": [{"m": "r", "r": 0, "d": {"ok": True}}]}
+            return {"out": [{"m": "r", "r": 0, "d": {"r": 0, "v": 19383}}]}
         raise AssertionError(f"Unexpected app command: {payload}")
 
 
@@ -268,10 +269,33 @@ def test_set_app_schedule_plan_enabled_can_execute_when_confirmed() -> None:
 
     assert result["dry_run"] is False
     assert result["executed"] is True
-    assert result["response"] == {"m": "r", "r": 0, "d": {"ok": True}}
+    assert result["response"] == {"m": "r", "r": 0, "d": {"r": 0, "v": 19383}}
+    assert result["response_data"] == {"r": 0, "v": 19383}
     assert [call["t"] for call in cloud.calls] == [
         "SCHDT",
         "SCHDIV2",
         "SCHDDV2",
         "SCHDSV2",
     ]
+
+
+def test_set_app_schedule_plan_enabled_rejects_failed_write_response() -> None:
+    client = _client()
+    cloud = _FakeAppScheduleCloud()
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    def failing_call(payload: dict[str, object]) -> dict[str, object]:
+        if payload["t"] == "SCHDSV2":
+            return {"m": "r", "r": 0, "d": {"r": 1, "v": 19383}}
+        return cloud.call_app_action(payload)["out"][0]
+
+    client._sync_call_app_action = failing_call
+
+    with pytest.raises(DreameLawnMowerConnectionError, match="Schedule write failed"):
+        client._sync_set_app_schedule_plan_enabled(
+            map_index=0,
+            plan_id=1,
+            enabled=True,
+            execute=True,
+            confirm_write=True,
+        )

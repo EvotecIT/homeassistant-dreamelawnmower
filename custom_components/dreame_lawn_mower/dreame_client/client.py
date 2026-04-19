@@ -1548,8 +1548,17 @@ class DreameLawnMowerClient:
         }
         if execute:
             response = self._sync_call_app_action(request)
+            response_data = _app_action_data(response)
+            if isinstance(response_data, Mapping) and response_data.get("r") not in (
+                None,
+                0,
+            ):
+                raise DreameLawnMowerConnectionError(
+                    f"Schedule write failed: {response}"
+                )
             result["executed"] = True
             result["response"] = _json_safe(response, max_depth=4)
+            result["response_data"] = _json_safe(response_data, max_depth=4)
         return result
 
     def _sync_get_app_schedule_text(
