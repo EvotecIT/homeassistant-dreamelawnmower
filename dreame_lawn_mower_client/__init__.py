@@ -86,6 +86,7 @@ mower_state_key = _app_protocol.mower_state_key
 mower_state_label = _app_protocol.mower_state_label
 remote_control_block_reason = _models.remote_control_block_reason
 remote_control_state_safe = _models.remote_control_state_safe
+render_app_map_payload_png = _client.render_app_map_payload_png
 run_jadx_decompile = _apk_research.run_jadx_decompile
 schedule_task_summary = _schedule.schedule_task_summary
 summarize_mowing_preference_info = (
@@ -162,6 +163,7 @@ __all__ = [
     "mower_state_label",
     "remote_control_block_reason",
     "remote_control_state_safe",
+    "render_app_map_payload_png",
     "run_jadx_decompile",
     "schedule_task_summary",
     "summarize_mowing_preference_info",

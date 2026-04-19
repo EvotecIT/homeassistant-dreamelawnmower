@@ -168,6 +168,7 @@ The confirmed A2 app-map path is:
 ```bash
 python examples/app_map_probe.py --out app-map-current.json
 python examples/app_map_probe.py --probe-object-downloads --out app-map-objects.json
+python examples/app_map_probe.py --render-dir app-map-renders --out app-map-render.json
 ```
 
 By default this omits raw coordinates and writes only metadata plus summaries.
@@ -176,7 +177,9 @@ Use `--include-payload` only for local parser or renderer work. Use
 download URLs in the ignored local output file. Use `--skip-objects` when you
 only want the 2D map payload. `--probe-object-downloads` generates 3D object
 URLs internally, records sanitized HEAD/ranged GET results, and redacts signed
-URLs unless `--include-object-urls` is also set.
+URLs unless `--include-object-urls` is also set. `--render-dir` writes one PNG
+per drawable app map while still redacting raw coordinates from JSON unless
+`--include-payload` is also set.
 
 App-map summaries intentionally keep unknown map layers neutral. `spot` is
 reported as spot-mowing areas, while `semantic` is summarized as

@@ -39,6 +39,8 @@ def test_app_map_probe_parser_supports_payload_opt_in() -> None:
             "--object-download-user-agent",
             "test-agent",
             "--skip-objects",
+            "--render-dir",
+            "rendered-maps",
             "--device-index",
             "1",
             "--out",
@@ -53,5 +55,6 @@ def test_app_map_probe_parser_supports_payload_opt_in() -> None:
     assert args.object_download_timeout == 3.5
     assert args.object_download_user_agent == "test-agent"
     assert args.skip_objects is True
+    assert str(args.render_dir) == "rendered-maps"
     assert args.device_index == 1
     assert str(args.out) == "app-map-current.json"

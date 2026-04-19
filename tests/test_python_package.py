@@ -134,6 +134,12 @@ def test_public_package_client_has_cloud_probe_helpers() -> None:
     assert hasattr(DreameLawnMowerClient, "async_set_app_schedule_plan_enabled")
 
 
+def test_public_package_exports_app_map_renderer() -> None:
+    import dreame_lawn_mower_client
+
+    assert hasattr(dreame_lawn_mower_client, "render_app_map_payload_png")
+
+
 def test_public_package_exports_schedule_helpers() -> None:
     payload_text = '{"d":[[0,1,"","EODBJwAAADDgwScAAAA="]]}'
     plans = decode_schedule_payload_text(payload_text)

@@ -127,6 +127,10 @@ Last updated: 2026-04-19
 - `examples/app_map_probe.py --probe-object-downloads` performs that download
   check repeatably and redacts signed URLs by default. It records sanitized HEAD
   and ranged GET statuses for each generated object URL.
+- `examples/app_map_probe.py --render-dir <dir>` now renders every drawable app
+  map to PNG files while keeping raw coordinate payloads out of JSON unless
+  `--include-payload` is explicitly set. A live read-only A2 run rendered both
+  known maps: current map `0` and secondary map `1`.
 - Home Assistant now exposes disabled-by-default read-only map cameras. The
   normal camera renders the app-action vector payload as JPEG; the diagnostics
   camera exposes the structured `map_view` attributes and a readable diagnostic
@@ -341,6 +345,7 @@ $env:DREAME_COUNTRY = [Environment]::GetEnvironmentVariable('DREAME_COUNTRY','Us
 $env:DREAME_ACCOUNT_TYPE = [Environment]::GetEnvironmentVariable('DREAME_ACCOUNT_TYPE','User')
 python examples\app_map_probe.py --out app-map-current.json
 python examples\app_map_probe.py --probe-object-downloads --out app-map-objects.json
+python examples\app_map_probe.py --render-dir app-map-renders --out app-map-render.json
 ```
 
 Only use `--include-payload` for local parser/renderer work. It includes raw
@@ -349,6 +354,8 @@ map coordinates and should stay in ignored local files. Only use
 expiring signed URLs to the ignored output file. Use `--skip-objects` when you
 only want the 2D map payload. `--probe-object-downloads` generates URLs
 internally but redacts them unless `--include-object-urls` is also set.
+`--render-dir` writes per-map PNGs and redacts raw coordinates from JSON unless
+`--include-payload` is also set.
 
 Render the current app-map fallback PNG:
 

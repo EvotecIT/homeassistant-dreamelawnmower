@@ -343,6 +343,12 @@ to generate object URLs internally and record sanitized HEAD/ranged GET results.
 Signed object URLs are redacted from the output unless `--include-object-urls` is
 explicitly added for local-only debugging.
 
+Use
+`python examples/app_map_probe.py --render-dir app-map-renders --out app-map-render.json`
+to write one PNG per drawable app map without keeping raw coordinate payloads in
+the JSON output. A live A2 check rendered both current map `0` and secondary map
+`1` from the read-only `MAPD` payloads.
+
 Use `python examples/apk_research.py <apk> --max-string-length 220` when
 testing a new Dreamehome APK.
 It creates a compact string index of dex/assets/resources for protocol endpoints,

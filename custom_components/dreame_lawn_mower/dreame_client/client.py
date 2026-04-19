@@ -3012,6 +3012,11 @@ def _app_map_view_summary(
     )
 
 
+def render_app_map_payload_png(payload: Any) -> tuple[bytes, int, int]:
+    """Render a mower-native app map payload to PNG bytes."""
+    return _render_app_map_payload_png(payload)
+
+
 def _render_app_map_payload_png(payload: Any) -> tuple[bytes, int, int]:
     if not isinstance(payload, Mapping):
         raise ValueError("App map payload is missing.")

@@ -9,7 +9,9 @@ import pytest
 
 from examples.app_map_probe import (
     probe_app_map_object_downloads,
+    redact_app_map_payloads,
     redact_object_urls,
+    render_app_maps_to_directory,
     summarize_app_map_payload,
 )
 from examples.field_trip_probe import (
@@ -396,6 +398,7 @@ def test_app_map_probe_summary_keeps_compact_current_map_evidence() -> None:
         "object_count": 2,
         "object_download_success_count": None,
         "object_download_statuses": None,
+        "rendered_map_count": None,
         "errors": [],
     }
 
@@ -454,3 +457,49 @@ def test_app_map_object_download_probe_keeps_signed_urls_out() -> None:
     assert {call["method"] for call in calls} == {"HEAD", "GET"}
     assert any(call["range"] == "bytes=0-1023" for call in calls)
     assert payload["objects"]["objects"][0]["url_redacted"] is True
+
+
+def test_app_map_probe_can_render_all_maps_without_keeping_payloads(tmp_path) -> None:
+    payload = {
+        "available": True,
+        "source": "app_action_map",
+        "map_count": 2,
+        "current_map_index": 0,
+        "maps": [
+            {
+                "idx": 0,
+                "current": True,
+                "available": True,
+                "summary": {"map_area_count": 1},
+                "payload": {
+                    "map": [
+                        {
+                            "area": 1,
+                            "data": [[0, 0], [100, 0], [100, 100], [0, 100]],
+                        }
+                    ]
+                },
+            },
+            {
+                "idx": 1,
+                "current": False,
+                "available": False,
+                "summary": {},
+            },
+        ],
+        "errors": [],
+    }
+
+    rendered = render_app_maps_to_directory(payload, tmp_path)
+    payload["rendered_maps"] = rendered
+    redact_app_map_payloads(payload)
+    summary = summarize_app_map_payload(payload)
+
+    assert rendered[0]["rendered"] is True
+    assert rendered[0]["path"].endswith("dreame-map-0.png")
+    assert (tmp_path / "dreame-map-0.png").read_bytes().startswith(b"\x89PNG")
+    assert rendered[1]["rendered"] is False
+    assert rendered[1]["error"] == "missing_payload"
+    assert "payload" not in payload["maps"][0]
+    assert payload["maps"][0]["payload_redacted"] is True
+    assert summary["rendered_map_count"] == 1

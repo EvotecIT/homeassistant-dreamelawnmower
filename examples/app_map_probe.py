@@ -18,7 +18,10 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
-from dreame_lawn_mower_client import DreameLawnMowerClient
+from dreame_lawn_mower_client import (
+    DreameLawnMowerClient,
+    render_app_map_payload_png,
+)
 
 _DEFAULT_OBJECT_DOWNLOAD_USER_AGENT = "DreameHomeMapProbe/1.0"
 
@@ -50,6 +53,16 @@ def summarize_app_map_payload(payload: dict[str, Any]) -> dict[str, Any]:
                     if isinstance(status, int):
                         statuses[str(status)] = statuses.get(str(status), 0) + 1
         object_download_statuses = statuses or None
+    rendered_maps = payload.get("rendered_maps")
+    rendered_map_count = None
+    if isinstance(rendered_maps, list):
+        rendered_map_count = len(
+            [
+                item
+                for item in rendered_maps
+                if isinstance(item, dict) and item.get("rendered")
+            ]
+        )
 
     return {
         "available": payload.get("available"),
@@ -62,6 +75,7 @@ def summarize_app_map_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "object_count": object_count,
         "object_download_success_count": object_download_success_count,
         "object_download_statuses": object_download_statuses,
+        "rendered_map_count": rendered_map_count,
         "errors": payload.get("errors", []),
     }
 
@@ -160,6 +174,66 @@ def redact_object_urls(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def render_app_maps_to_directory(
+    payload: dict[str, Any],
+    output_dir: Path,
+) -> list[dict[str, Any]]:
+    """Render every drawable app map payload to PNG files."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    rendered: list[dict[str, Any]] = []
+    maps = payload.get("maps")
+    if not isinstance(maps, list):
+        return rendered
+
+    for index, item in enumerate(maps):
+        if not isinstance(item, dict):
+            continue
+        map_index = item.get("idx")
+        entry: dict[str, Any] = {
+            "idx": map_index,
+            "current": item.get("current"),
+            "available": item.get("available"),
+            "rendered": False,
+        }
+        map_payload = item.get("payload")
+        if not map_payload:
+            entry["error"] = "missing_payload"
+            rendered.append(entry)
+            continue
+        try:
+            image, width, height = render_app_map_payload_png(map_payload)
+        except (TypeError, ValueError) as err:
+            entry["error"] = str(err)
+            rendered.append(entry)
+            continue
+        file_name = _rendered_map_file_name(map_index, index)
+        path = output_dir / file_name
+        path.write_bytes(image)
+        entry.update(
+            {
+                "rendered": True,
+                "path": str(path),
+                "width": width,
+                "height": height,
+                "bytes": len(image),
+            }
+        )
+        rendered.append(entry)
+    return rendered
+
+
+def redact_app_map_payloads(payload: dict[str, Any]) -> dict[str, Any]:
+    """Remove raw coordinate payloads from an app map probe payload in-place."""
+    maps = payload.get("maps")
+    if not isinstance(maps, list):
+        return payload
+    for item in maps:
+        if isinstance(item, dict) and "payload" in item:
+            item.pop("payload", None)
+            item["payload_redacted"] = True
+    return payload
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Read-only probe for mower-native app map payloads."
@@ -206,6 +280,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Skip 3D map object metadata.",
     )
     parser.add_argument(
+        "--render-dir",
+        type=Path,
+        help=(
+            "Optional directory for read-only PNG renders of every drawable app "
+            "map. Raw payload coordinates are still omitted from JSON unless "
+            "--include-payload is also set."
+        ),
+    )
+    parser.add_argument(
         "--device-index",
         type=int,
         default=0,
@@ -217,6 +300,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional JSON output file. Prints to stdout when omitted.",
     )
     return parser
+
+
+def _rendered_map_file_name(map_index: Any, fallback_index: int) -> str:
+    index = map_index if isinstance(map_index, int) else fallback_index
+    return f"dreame-map-{index}.png"
 
 
 def _object_url_variants(url: str) -> list[tuple[str, str]]:
@@ -348,12 +436,19 @@ async def main() -> None:
     try:
         payload = await client.async_get_app_maps(
             chunk_size=args.chunk_size,
-            include_payload=args.include_payload,
+            include_payload=args.include_payload or args.render_dir is not None,
             include_objects=not args.skip_objects,
             include_object_urls=(
                 args.include_object_urls or args.probe_object_downloads
             ),
         )
+        if args.render_dir:
+            payload["rendered_maps"] = render_app_maps_to_directory(
+                payload,
+                args.render_dir,
+            )
+            if not args.include_payload:
+                redact_app_map_payloads(payload)
         if args.probe_object_downloads:
             payload["object_download_probe"] = probe_app_map_object_downloads(
                 payload,
