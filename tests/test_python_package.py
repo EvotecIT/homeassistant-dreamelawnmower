@@ -16,6 +16,7 @@ from dreame_lawn_mower_client import (
     MOWER_STATE_PROPERTY_KEY,
     MOWER_TASK_PROPERTY_KEY,
     MOWER_TIME_PROPERTY_KEY,
+    MOWING_PREFERENCE_PROPERTY_KEY,
     DreameLawnMowerCameraFeatureSupport,
     DreameLawnMowerClient,
     DreameLawnMowerFirmwareUpdateSupport,
@@ -37,6 +38,7 @@ from dreame_lawn_mower_client import (
     build_schedule_upload_requests,
     decode_mower_status_blob,
     decode_mower_task_status,
+    decode_mowing_preference_payload,
     decode_schedule_payload_text,
     encode_schedule_payload_text,
     firmware_update_support_from_device,
@@ -50,6 +52,7 @@ from dreame_lawn_mower_client import (
     remote_control_block_reason,
     remote_control_state_safe,
     run_jadx_decompile,
+    summarize_mowing_preference_info,
 )
 from dreame_lawn_mower_client.client import DreameLawnMowerClient as ClientFromModule
 from dreame_lawn_mower_client.models import (
@@ -94,13 +97,16 @@ def test_public_package_exports_map_helpers() -> None:
     assert callable(build_cloud_property_summary)
     assert callable(build_jadx_command)
     assert callable(build_map_probe_payload)
+    assert callable(decode_mowing_preference_payload)
     assert callable(run_jadx_decompile)
+    assert callable(summarize_mowing_preference_info)
     assert "10001.1" in CAMERA_PROBE_PROPERTY_KEYS
     assert "sendAction" in DEFAULT_APK_RESEARCH_TERMS
     assert ".java" in DEFAULT_DECOMPILED_SOURCE_SUFFIXES
     assert "object_name" in DEFAULT_DREAMEHOME_ASSET_TERMS
     assert "2.1" in MAP_PROBE_PROPERTY_KEYS
     assert "6.1" in MAP_HISTORY_PROPERTY_KEYS
+    assert MOWING_PREFERENCE_PROPERTY_KEY == "2.52"
 
 
 def test_public_package_client_has_cloud_probe_helpers() -> None:
@@ -123,6 +129,7 @@ def test_public_package_client_has_cloud_probe_helpers() -> None:
     assert hasattr(DreameLawnMowerClient, "async_remote_control_move_step")
     assert hasattr(DreameLawnMowerClient, "async_remote_control_stop")
     assert hasattr(DreameLawnMowerClient, "async_get_app_schedules")
+    assert hasattr(DreameLawnMowerClient, "async_get_mowing_preferences")
     assert hasattr(DreameLawnMowerClient, "async_set_app_schedule_plan_enabled")
 
 

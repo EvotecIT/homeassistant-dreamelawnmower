@@ -10,6 +10,7 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
     DreameBinarySensorDescription,
 )
 from custom_components.dreame_lawn_mower.button import (
+    DreameLawnMowerCapturePreferenceProbeButton,
     DreameLawnMowerCaptureScheduleProbeButton,
     schedule_probe_payload,
 )
@@ -22,9 +23,11 @@ from custom_components.dreame_lawn_mower.image import (
     png_bytes_to_jpeg,
 )
 from custom_components.dreame_lawn_mower.sensor import (
+    DreameLawnMowerLastPreferenceProbeSensor,
     DreameLawnMowerLastScheduleProbeSensor,
     DreameLawnMowerLastScheduleWriteSensor,
     DreameSensorDescription,
+    preference_probe_result_attributes,
     schedule_probe_result_attributes,
     schedule_write_result_attributes,
 )
@@ -78,6 +81,21 @@ def test_schedule_probe_button_is_diagnostic_disabled_by_default() -> None:
     )
 
 
+def test_preference_probe_button_is_diagnostic_disabled_by_default() -> None:
+    assert (
+        DreameLawnMowerCapturePreferenceProbeButton.__dict__[
+            "__attr_entity_category"
+        ]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerCapturePreferenceProbeButton.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
+    )
+
+
 def test_last_schedule_write_sensor_is_diagnostic_disabled_by_default() -> None:
     assert (
         DreameLawnMowerLastScheduleWriteSensor.__dict__["__attr_entity_category"]
@@ -102,6 +120,102 @@ def test_last_schedule_probe_sensor_is_diagnostic_disabled_by_default() -> None:
         ]
         is False
     )
+
+
+def test_last_preference_probe_sensor_is_diagnostic_disabled_by_default() -> None:
+    assert (
+        DreameLawnMowerLastPreferenceProbeSensor.__dict__["__attr_entity_category"]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerLastPreferenceProbeSensor.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
+    )
+
+
+def test_preference_probe_result_attributes_are_compact() -> None:
+    result = {
+        "captured_at": "2026-04-19T10:00:00+00:00",
+        "source": "app_action_mowing_preferences",
+        "available": True,
+        "property_hint": "2.52",
+        "maps": [
+            {
+                "idx": 0,
+                "label": "map_0",
+                "available": True,
+                "mode": 1,
+                "mode_name": "custom",
+                "area_count": 1,
+                "preferences": [
+                    {
+                        "area_id": 11,
+                        "reported_version": 8,
+                        "version": 8,
+                        "efficient_mode_name": "efficient",
+                        "mowing_height_cm": 4.0,
+                        "mowing_direction_mode_name": "checkerboard",
+                        "mowing_direction_degrees": 90,
+                        "edge_mowing_auto": True,
+                        "edge_mowing_safe": True,
+                        "obstacle_avoidance_enabled": True,
+                        "obstacle_avoidance_height_cm": 15,
+                        "obstacle_avoidance_distance_cm": 20,
+                        "obstacle_avoidance_ai_classes": [
+                            "people",
+                            "animals",
+                            "objects",
+                        ],
+                        "raw_payload": [8, 0, 11],
+                    }
+                ],
+            }
+        ],
+        "errors": [],
+    }
+
+    assert preference_probe_result_attributes(result) == {
+        "captured_at": "2026-04-19T10:00:00+00:00",
+        "source": "app_action_mowing_preferences",
+        "available": True,
+        "property_hint": "2.52",
+        "map_count": 1,
+        "maps": [
+            {
+                "idx": 0,
+                "label": "map_0",
+                "available": True,
+                "mode": 1,
+                "mode_name": "custom",
+                "area_count": 1,
+                "preference_count": 1,
+                "preferences": [
+                    {
+                        "area_id": 11,
+                        "reported_version": 8,
+                        "version": 8,
+                        "efficient_mode_name": "efficient",
+                        "mowing_height_cm": 4.0,
+                        "mowing_direction_mode_name": "checkerboard",
+                        "mowing_direction_degrees": 90,
+                        "edge_mowing_auto": True,
+                        "edge_mowing_safe": True,
+                        "obstacle_avoidance_enabled": True,
+                        "obstacle_avoidance_height_cm": 15,
+                        "obstacle_avoidance_distance_cm": 20,
+                        "obstacle_avoidance_ai_classes": [
+                            "people",
+                            "animals",
+                            "objects",
+                        ],
+                    }
+                ],
+            }
+        ],
+        "error_count": 0,
+    }
 
 
 def test_schedule_probe_result_attributes_are_compact() -> None:

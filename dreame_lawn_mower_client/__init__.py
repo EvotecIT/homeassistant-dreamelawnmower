@@ -8,6 +8,7 @@ _camera_probe = load_internal_module("camera_probe")
 _client = load_internal_module("client")
 _map_probe = load_internal_module("map_probe")
 _models = load_internal_module("models")
+_mowing_preferences = load_internal_module("mowing_preferences")
 _schedule = load_internal_module("schedule")
 
 DreameLawnMowerClient = _client.DreameLawnMowerClient
@@ -42,6 +43,7 @@ MOWER_RUNTIME_STATUS_PROPERTY_KEY = _app_protocol.MOWER_RUNTIME_STATUS_PROPERTY_
 MOWER_TASK_PROPERTY_KEY = _app_protocol.MOWER_TASK_PROPERTY_KEY
 MOWER_TIME_PROPERTY_KEY = _app_protocol.MOWER_TIME_PROPERTY_KEY
 MOWER_BATTERY_PROPERTY_KEY = _app_protocol.MOWER_BATTERY_PROPERTY_KEY
+MOWING_PREFERENCE_PROPERTY_KEY = _mowing_preferences.MOWING_PREFERENCE_PROPERTY_KEY
 CAMERA_PROBE_PROPERTY_KEYS = _camera_probe.CAMERA_PROBE_PROPERTY_KEYS
 MAP_HISTORY_PROPERTY_KEYS = _map_probe.MAP_HISTORY_PROPERTY_KEYS
 MAP_PROBE_PROPERTY_KEYS = _map_probe.MAP_PROBE_PROPERTY_KEYS
@@ -64,6 +66,9 @@ build_schedule_upload_requests = _schedule.build_schedule_upload_requests
 find_jadx_executable = _apk_research.find_jadx_executable
 decode_mower_status_blob = _app_protocol.decode_mower_status_blob
 decode_mower_task_status = _app_protocol.decode_mower_task_status
+decode_mowing_preference_payload = (
+    _mowing_preferences.decode_mowing_preference_payload
+)
 decode_schedule_payload_text = _schedule.decode_schedule_payload_text
 decode_schedule_plans = _schedule.decode_schedule_plans
 decode_schedule_week_payload = _schedule.decode_schedule_week_payload
@@ -83,6 +88,9 @@ remote_control_block_reason = _models.remote_control_block_reason
 remote_control_state_safe = _models.remote_control_state_safe
 run_jadx_decompile = _apk_research.run_jadx_decompile
 schedule_task_summary = _schedule.schedule_task_summary
+summarize_mowing_preference_info = (
+    _mowing_preferences.summarize_mowing_preference_info
+)
 
 __all__ = [
     "CAMERA_PROBE_PROPERTY_KEYS",
@@ -116,6 +124,7 @@ __all__ = [
     "MOWER_TASK_PROPERTY_KEY",
     "MOWER_TIME_PROPERTY_KEY",
     "MOWER_BATTERY_PROPERTY_KEY",
+    "MOWING_PREFERENCE_PROPERTY_KEY",
     "MOWER_STATE_LABELS",
     "MOWER_STATE_KEYS",
     "MOWER_STATE_PROPERTY_KEY",
@@ -134,6 +143,7 @@ __all__ = [
     "build_schedule_upload_requests",
     "decode_mower_status_blob",
     "decode_mower_task_status",
+    "decode_mowing_preference_payload",
     "decode_schedule_payload_text",
     "decode_schedule_plans",
     "decode_schedule_week_payload",
@@ -154,4 +164,5 @@ __all__ = [
     "remote_control_state_safe",
     "run_jadx_decompile",
     "schedule_task_summary",
+    "summarize_mowing_preference_info",
 ]

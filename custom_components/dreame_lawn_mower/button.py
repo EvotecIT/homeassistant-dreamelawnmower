@@ -35,6 +35,7 @@ async def async_setup_entry(
             DreameLawnMowerCaptureOperationSnapshotButton(coordinator),
             DreameLawnMowerCaptureMapProbeButton(coordinator),
             DreameLawnMowerCaptureScheduleProbeButton(coordinator),
+            DreameLawnMowerCapturePreferenceProbeButton(coordinator),
         ]
     )
 
@@ -201,6 +202,50 @@ class DreameLawnMowerCaptureScheduleProbeButton(
             title="Dreame Lawn Mower Schedule Probe",
             notification_id=(
                 f"{DOMAIN}_{self.coordinator.entry.entry_id}_schedule_probe"
+            ),
+        )
+
+
+class DreameLawnMowerCapturePreferenceProbeButton(
+    DreameLawnMowerEntity,
+    ButtonEntity,
+):
+    """Capture and log read-only app mowing preference diagnostics."""
+
+    _attr_name = "Capture Preference Probe"
+    _attr_icon = "mdi:tune-variant"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_capture_preference_probe"
+        )
+
+    async def async_press(self) -> None:
+        """Probe read-only app mowing preferences and log the result."""
+        payload = await self.coordinator.client.async_get_mowing_preferences(
+            include_raw=False,
+        )
+        payload.setdefault("captured_at", datetime.now(UTC).isoformat())
+        self.coordinator.last_preference_probe_result = payload
+        self.coordinator.async_update_listeners()
+        _LOGGER.info(
+            "Captured Dreame lawn mower preference probe for %s: %s",
+            self.coordinator.client.descriptor.title,
+            json.dumps(payload, sort_keys=True),
+        )
+        persistent_notification.async_create(
+            self.coordinator.hass,
+            (
+                "Captured a Dreame lawn mower preference probe. Enable info "
+                "logging for this integration to view decoded preference JSON, "
+                "or enable the Last Preference Probe diagnostic sensor."
+            ),
+            title="Dreame Lawn Mower Preference Probe",
+            notification_id=(
+                f"{DOMAIN}_{self.coordinator.entry.entry_id}_preference_probe"
             ),
         )
 

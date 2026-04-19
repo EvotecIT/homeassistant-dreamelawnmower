@@ -10,6 +10,7 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
 )
 from custom_components.dreame_lawn_mower.sensor import (
     SENSORS,
+    DreameLawnMowerLastPreferenceProbeSensor,
     DreameLawnMowerLastScheduleProbeSensor,
     DreameLawnMowerLastScheduleWriteSensor,
     DreameLawnMowerSensor,
@@ -291,4 +292,62 @@ def test_last_schedule_probe_sensor_reports_error_probe() -> None:
         "schedule_count": 0,
         "error_count": 1,
         "errors": [{"stage": "schedule", "error": "cloud unavailable"}],
+    }
+
+
+def test_last_preference_probe_sensor_reports_none_before_probe() -> None:
+    entity = object.__new__(DreameLawnMowerLastPreferenceProbeSensor)
+    entity.coordinator = SimpleNamespace(last_preference_probe_result=None)
+
+    assert entity.native_value == "none"
+    assert entity.extra_state_attributes == {}
+
+
+def test_last_preference_probe_sensor_reports_available_probe() -> None:
+    entity = object.__new__(DreameLawnMowerLastPreferenceProbeSensor)
+    entity.coordinator = SimpleNamespace(
+        last_preference_probe_result={
+            "source": "app_action_mowing_preferences",
+            "available": True,
+            "property_hint": "2.52",
+            "maps": [{"idx": 0, "mode_name": "custom", "preferences": []}],
+            "errors": [],
+        }
+    )
+
+    assert entity.native_value == "available"
+    assert entity.extra_state_attributes == {
+        "source": "app_action_mowing_preferences",
+        "available": True,
+        "property_hint": "2.52",
+        "map_count": 1,
+        "maps": [
+            {
+                "idx": 0,
+                "mode_name": "custom",
+                "preference_count": 0,
+            }
+        ],
+        "error_count": 0,
+    }
+
+
+def test_last_preference_probe_sensor_reports_error_probe() -> None:
+    entity = object.__new__(DreameLawnMowerLastPreferenceProbeSensor)
+    entity.coordinator = SimpleNamespace(
+        last_preference_probe_result={
+            "source": "app_action_mowing_preferences",
+            "available": False,
+            "maps": [],
+            "errors": [{"stage": "preferences", "error": "cloud unavailable"}],
+        }
+    )
+
+    assert entity.native_value == "error"
+    assert entity.extra_state_attributes == {
+        "source": "app_action_mowing_preferences",
+        "available": False,
+        "map_count": 0,
+        "error_count": 1,
+        "errors": [{"stage": "preferences", "error": "cloud unavailable"}],
     }

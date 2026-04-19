@@ -67,6 +67,11 @@ from .models import (
     remote_control_block_reason,
     remote_control_state_safe,
 )
+from .mowing_preferences import (
+    MOWING_PREFERENCE_PROPERTY_KEY,
+    decode_mowing_preference_payload,
+    summarize_mowing_preference_info,
+)
 from .schedule import (
     EMPTY_SCHEDULE_VERSION,
     SCHEDULE_CHUNK_SIZE,
@@ -115,6 +120,7 @@ __all__ = [
     "MOWER_TASK_PROPERTY_KEY",
     "MOWER_TIME_PROPERTY_KEY",
     "MOWER_BATTERY_PROPERTY_KEY",
+    "MOWING_PREFERENCE_PROPERTY_KEY",
     "SUPPORTED_ACCOUNT_TYPES",
     "EMPTY_SCHEDULE_VERSION",
     "SCHEDULE_CHUNK_SIZE",
@@ -131,6 +137,7 @@ __all__ = [
     "build_schedule_upload_requests",
     "decode_mower_status_blob",
     "decode_mower_task_status",
+    "decode_mowing_preference_payload",
     "decode_schedule_payload_text",
     "decode_schedule_plans",
     "decode_schedule_week_payload",
@@ -151,4 +158,5 @@ __all__ = [
     "mower_state_label",
     "run_jadx_decompile",
     "schedule_task_summary",
+    "summarize_mowing_preference_info",
 ]

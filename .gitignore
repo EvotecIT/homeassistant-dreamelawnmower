@@ -21,5 +21,6 @@ task-status*.json
 schedule-probe*.json
 schedule-write*.json
 schedule-calendar*.json
+preference-probe*.json
 apk-scan*.json
 asset-scan*.json

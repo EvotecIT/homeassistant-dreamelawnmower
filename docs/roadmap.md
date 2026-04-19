@@ -148,6 +148,9 @@ Checklist:
 - [x] expose a read-only Home Assistant calendar surface for decoded schedules
 - [x] add a dry-run-first Home Assistant schedule enable/disable service
 - [ ] validate the Home Assistant schedule service in a live HA runtime
+- [x] discover read-only app-action and cloud-property sources for per-map/general mowing preferences
+- [x] add a Python-side read-only mowing preference probe and decoder tests
+- [x] expose disabled-by-default Home Assistant preference diagnostics after read-only app actions were identified
 - [ ] keep adding fixture-based tests for idle and recovery transitions as captures become available
 
 Definition of done:

@@ -151,6 +151,63 @@ build full upload request chunks, but full schedule editing is not exposed yet.
 Home Assistant exposes decoded enabled plans through a read-only calendar
 entity; calendar queries fetch the app schedule data on demand.
 
+## Observed app mower preferences
+
+User-provided Dreamehome A2 screenshots from 2026-04-19 show that the app
+separates mowing preferences from schedule slots:
+
+- The app exposes at least two preference scopes labelled "general mode" and
+  "custom mode" in the Polish UI (`Tryb ogólny` and `Tryb własny`).
+- Multiple maps can exist, and each map can carry its own schedules. This
+  matches the live schedule evidence where the default slot `-1`, map `0`, and
+  map `1` each had separate schedule versions.
+- Visible preference groups include mowing efficiency, cutting height, mowing
+  direction, automatic edge mowing, safe edge mowing, EdgeMaster, edge-obstacle
+  avoidance, LiDAR obstacle recognition, obstacle avoidance height, AI obstacle
+  classes for people/animals/objects, and obstacle avoidance distance.
+- Some controls appear unavailable while the mower is active or in a constrained
+  state. Future write-capable preference support should therefore keep the same
+  style of state guards used by manual control and schedule writes.
+
+These screenshots are UI evidence only; they do not identify the exact
+app-action commands or cloud properties. Treat these preference families as
+read-only discovery targets until a live probe or plugin source scan confirms
+the command names, payload shapes, and whether values are global, per-map, or
+per-custom-profile.
+
+A follow-up scan of the downloaded A2 plugin bundle connected those UI controls
+to the app-action preference protocol:
+
+- Read-only commands are `PREI` (`{"m":"g","t":"PREI","d":{"idx":map}}`) for
+  preference metadata and `PRE` (`{"m":"g","t":"PRE","d":{"idx":map,"region":area}}`)
+  for one area/custom-region preference payload.
+- Write-capable commands exist as `PRE` with `m:"s"` for settings and `PREP`
+  for preference mode, but the client intentionally does not expose those yet.
+- The decoded payload fields line up with the UI: efficient mode, cutting
+  height, mowing direction mode/direction, automatic and safe edge mowing,
+  EdgeMaster/cutter position, edge obstacle avoidance, LiDAR obstacle
+  avoidance, avoidance height/distance, and AI obstacle class bitmask.
+- The app logs `prop.2.52 mowing preference update`, so cloud property `2.52`
+  is a useful read-only hint during future live captures.
+
+The Python client now exposes a read-only `async_get_mowing_preferences()`
+helper and `examples/preference_probe.py` to fetch and decode `PREI`/`PRE`
+without touching the write commands. Home Assistant mirrors this as
+disabled-by-default diagnostic entities: `Capture Preference Probe` and
+`Last Preference Probe`.
+
+A live read-only A2 run of `examples/preference_probe.py` on 2026-04-19
+validated the commands:
+
+- map `0`: available, global preference mode, 5 preference areas
+- map `1`: available, global preference mode, 2 preference areas
+- no probe errors
+
+Notable live decoded values included efficient/default area preferences,
+cutting heights from `3.5` to `6.0` cm, rotation/none direction modes,
+obstacle avoidance enabled, obstacle avoidance heights from `5` to `20` cm,
+distances from `10` to `20` cm, and all three AI classes enabled.
+
 ## First live probe result
 
 A live A2 probe through the new Python helper confirmed that:

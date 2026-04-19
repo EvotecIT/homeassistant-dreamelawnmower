@@ -12,6 +12,7 @@ LOG_MARKERS = {
     "debug_snapshot": "Captured Dreame lawn mower debug snapshot",
     "map_probe": "Captured Dreame lawn mower map probe",
     "operation_snapshot": "Captured Dreame lawn mower operation snapshot",
+    "preference_probe": "Captured Dreame lawn mower preference probe",
     "schedule_probe": "Captured Dreame lawn mower schedule probe",
 }
 
@@ -30,6 +31,11 @@ def summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     payload = _payload_body(payload)
     if isinstance(payload.get("captures"), list):
         return _summarize_field_trip_payload(payload)
+    if (
+        payload.get("source") == "app_action_mowing_preferences"
+        or payload.get("property_hint") == "2.52"
+    ):
+        return _summarize_preference_payload(payload)
     if (
         isinstance(payload.get("schedules"), list)
         or isinstance(payload.get("schedule_selection"), dict)
@@ -397,6 +403,79 @@ def _schedule_entry_summary(schedule: dict[str, Any]) -> dict[str, Any]:
             "enabled_plan_count": schedule.get("enabled_plan_count"),
             "plan_count": len(plans),
             "error": schedule.get("error"),
+        }
+    )
+
+
+def _summarize_preference_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    maps = [
+        map_entry
+        for map_entry in payload.get("maps", [])
+        if isinstance(map_entry, dict)
+    ]
+    errors = payload.get("errors", [])
+
+    return _drop_empty(
+        {
+            "source": payload.get("source"),
+            "available": payload.get("available"),
+            "property_hint": payload.get("property_hint"),
+            "map_count": len(maps),
+            "maps": [_preference_map_summary(map_entry) for map_entry in maps],
+            "error_count": len(errors) if isinstance(errors, list) else None,
+            "errors": errors,
+        }
+    )
+
+
+def _preference_map_summary(map_entry: dict[str, Any]) -> dict[str, Any]:
+    preferences = [
+        preference
+        for preference in map_entry.get("preferences", [])
+        if isinstance(preference, dict)
+    ]
+    return _drop_empty(
+        {
+            "idx": map_entry.get("idx"),
+            "label": map_entry.get("label"),
+            "available": map_entry.get("available"),
+            "mode_name": map_entry.get("mode_name"),
+            "area_count": map_entry.get("area_count"),
+            "preference_count": len(preferences),
+            "preferences": [
+                _preference_entry_summary(preference)
+                for preference in preferences
+            ],
+            "error": map_entry.get("error"),
+        }
+    )
+
+
+def _preference_entry_summary(preference: dict[str, Any]) -> dict[str, Any]:
+    return _drop_empty(
+        {
+            "area_id": preference.get("area_id"),
+            "reported_version": preference.get("reported_version"),
+            "efficient_mode_name": preference.get("efficient_mode_name"),
+            "mowing_height_cm": preference.get("mowing_height_cm"),
+            "mowing_direction_mode_name": preference.get(
+                "mowing_direction_mode_name"
+            ),
+            "mowing_direction_degrees": preference.get("mowing_direction_degrees"),
+            "edge_mowing_auto": preference.get("edge_mowing_auto"),
+            "edge_mowing_safe": preference.get("edge_mowing_safe"),
+            "obstacle_avoidance_enabled": preference.get(
+                "obstacle_avoidance_enabled"
+            ),
+            "obstacle_avoidance_height_cm": preference.get(
+                "obstacle_avoidance_height_cm"
+            ),
+            "obstacle_avoidance_distance_cm": preference.get(
+                "obstacle_avoidance_distance_cm"
+            ),
+            "obstacle_avoidance_ai_classes": preference.get(
+                "obstacle_avoidance_ai_classes",
+            ),
         }
     )
 

@@ -196,6 +196,7 @@ async def async_setup_entry(
         ]
         + [DreameLawnMowerLastScheduleWriteSensor(coordinator)]
         + [DreameLawnMowerLastScheduleProbeSensor(coordinator)]
+        + [DreameLawnMowerLastPreferenceProbeSensor(coordinator)]
     )
 
 
@@ -382,4 +383,133 @@ def _schedule_probe_entry_summary(schedule: dict[str, Any]) -> dict[str, Any]:
         key: value
         for key, value in summary.items()
         if value is not None
+    }
+
+
+class DreameLawnMowerLastPreferenceProbeSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the last read-only mowing preference probe result."""
+
+    _attr_name = "Last Preference Probe"
+    _attr_icon = "mdi:tune-variant"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_last_preference_probe"
+
+    @property
+    def native_value(self) -> str:
+        """Return a compact state for the last preference probe."""
+        return _preference_probe_state(
+            self.coordinator.last_preference_probe_result,
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe details for the last preference probe."""
+        return preference_probe_result_attributes(
+            self.coordinator.last_preference_probe_result,
+        )
+
+
+def _preference_probe_state(result: dict[str, Any] | None) -> str:
+    if not result:
+        return "none"
+    errors = result.get("errors")
+    if isinstance(errors, list) and errors:
+        return "error"
+    return "available" if result.get("available") else "unavailable"
+
+
+def preference_probe_result_attributes(
+    result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return compact, non-secret attributes for a preference probe result."""
+    if not result:
+        return {}
+
+    errors = result.get("errors")
+    maps = [
+        _preference_probe_map_summary(map_entry)
+        for map_entry in result.get("maps", [])
+        if isinstance(map_entry, dict)
+    ]
+    attributes: dict[str, Any] = {
+        "captured_at": result.get("captured_at"),
+        "source": result.get("source"),
+        "available": result.get("available"),
+        "property_hint": result.get("property_hint"),
+        "map_count": len(maps),
+        "maps": maps,
+    }
+    if isinstance(errors, list):
+        attributes["error_count"] = len(errors)
+        attributes["errors"] = errors
+    return {
+        key: value
+        for key, value in attributes.items()
+        if value not in (None, [], {})
+    }
+
+
+def _preference_probe_map_summary(map_entry: dict[str, Any]) -> dict[str, Any]:
+    preferences = [
+        _preference_probe_entry_summary(preference)
+        for preference in map_entry.get("preferences", [])
+        if isinstance(preference, dict)
+    ]
+    summary = {
+        "idx": map_entry.get("idx"),
+        "label": map_entry.get("label"),
+        "available": map_entry.get("available"),
+        "mode": map_entry.get("mode"),
+        "mode_name": map_entry.get("mode_name"),
+        "area_count": map_entry.get("area_count"),
+        "preference_count": len(preferences),
+        "preferences": preferences,
+        "error": map_entry.get("error"),
+    }
+    return {
+        key: value
+        for key, value in summary.items()
+        if value not in (None, [], {})
+    }
+
+
+def _preference_probe_entry_summary(preference: dict[str, Any]) -> dict[str, Any]:
+    summary = {
+        "area_id": preference.get("area_id"),
+        "reported_version": preference.get("reported_version"),
+        "version": preference.get("version"),
+        "efficient_mode_name": preference.get("efficient_mode_name"),
+        "mowing_height_cm": preference.get("mowing_height_cm"),
+        "mowing_direction_mode_name": preference.get("mowing_direction_mode_name"),
+        "mowing_direction_degrees": preference.get("mowing_direction_degrees"),
+        "edge_mowing_auto": preference.get("edge_mowing_auto"),
+        "edge_mowing_safe": preference.get("edge_mowing_safe"),
+        "edge_mowing_walk_mode_name": preference.get("edge_mowing_walk_mode_name"),
+        "cutter_position_name": preference.get("cutter_position_name"),
+        "edge_mowing_num": preference.get("edge_mowing_num"),
+        "edge_mowing_obstacle_avoidance": preference.get(
+            "edge_mowing_obstacle_avoidance",
+        ),
+        "obstacle_avoidance_enabled": preference.get("obstacle_avoidance_enabled"),
+        "obstacle_avoidance_height_cm": preference.get(
+            "obstacle_avoidance_height_cm",
+        ),
+        "obstacle_avoidance_distance_cm": preference.get(
+            "obstacle_avoidance_distance_cm",
+        ),
+        "obstacle_avoidance_ai_classes": preference.get(
+            "obstacle_avoidance_ai_classes",
+        ),
+    }
+    return {
+        key: value
+        for key, value in summary.items()
+        if value not in (None, [], {})
     }

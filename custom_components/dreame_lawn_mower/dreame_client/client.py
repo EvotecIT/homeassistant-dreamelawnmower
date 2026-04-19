@@ -52,6 +52,11 @@ from .models import (
     remote_control_state_safe,
     snapshot_from_device,
 )
+from .mowing_preferences import (
+    MOWING_PREFERENCE_PROPERTY_KEY,
+    decode_mowing_preference_payload,
+    summarize_mowing_preference_info,
+)
 from .schedule import (
     EMPTY_SCHEDULE_VERSION,
     SCHEDULE_CHUNK_SIZE,
@@ -399,6 +404,19 @@ class DreameLawnMowerClient:
             enabled,
             execute,
             confirm_write,
+        )
+
+    async def async_get_mowing_preferences(
+        self,
+        *,
+        include_raw: bool = False,
+        map_indices: Sequence[int] | None = None,
+    ) -> dict[str, Any]:
+        """Return read-only mower preference settings from app actions."""
+        return await asyncio.to_thread(
+            self._sync_get_mowing_preferences,
+            include_raw,
+            map_indices,
         )
 
     async def async_get_cloud_device_info(
@@ -1576,6 +1594,96 @@ class DreameLawnMowerClient:
             result["response_data"] = _json_safe(response_data, max_depth=4)
         return result
 
+    def _sync_get_mowing_preferences(
+        self,
+        include_raw: bool = False,
+        map_indices: Sequence[int] | None = None,
+    ) -> dict[str, Any]:
+        """Fetch and decode read-only mower preference settings."""
+        result: dict[str, Any] = {
+            "source": "app_action_mowing_preferences",
+            "available": False,
+            "property_hint": MOWING_PREFERENCE_PROPERTY_KEY,
+            "maps": [],
+            "errors": [],
+        }
+
+        for map_index in self._app_map_indices(map_indices):
+            entry: dict[str, Any] = {
+                "idx": map_index,
+                "label": f"map_{map_index}",
+                "available": False,
+                "preferences": [],
+            }
+            try:
+                info_result = self._sync_call_app_action(
+                    {"m": "g", "t": "PREI", "d": {"idx": map_index}}
+                )
+                if include_raw:
+                    entry["raw_info"] = _json_safe(info_result, max_depth=4)
+                info = _app_action_data(info_result)
+                info_summary = summarize_mowing_preference_info(info)
+                entry["mode"] = info_summary.get("mode")
+                entry["mode_name"] = info_summary.get("mode_name")
+                entry["area_count"] = info_summary.get("area_count")
+
+                areas = info_summary.get("areas")
+                if not isinstance(areas, Sequence) or isinstance(
+                    areas,
+                    str | bytes | bytearray,
+                ):
+                    areas = []
+
+                preferences: list[dict[str, Any]] = []
+                for area in areas:
+                    if not isinstance(area, Mapping):
+                        continue
+                    area_id = _positive_int(area.get("area_id"))
+                    if area_id is None:
+                        continue
+                    preference_result = self._sync_call_app_action(
+                        {
+                            "m": "g",
+                            "t": "PRE",
+                            "d": {"idx": map_index, "region": area_id},
+                        }
+                    )
+                    preference_data = _app_action_data(preference_result)
+                    if not isinstance(preference_data, Sequence) or isinstance(
+                        preference_data,
+                        str | bytes | bytearray,
+                    ):
+                        raise DreameLawnMowerConnectionError(
+                            f"PRE returned invalid preference data for map {map_index} "
+                            f"area {area_id}."
+                        )
+                    preference = decode_mowing_preference_payload(preference_data)
+                    preference["area_id"] = area_id
+                    preference["reported_version"] = area.get("version")
+                    if include_raw:
+                        preference["raw_response"] = _json_safe(
+                            preference_result,
+                            max_depth=4,
+                        )
+                        preference["raw_payload"] = _json_safe(
+                            list(preference_data),
+                            max_depth=2,
+                        )
+                    preferences.append(preference)
+
+                entry["preferences"] = preferences
+                entry["available"] = bool(preferences)
+                if preferences:
+                    result["available"] = True
+            except Exception as err:  # noqa: BLE001 - keep probing other maps
+                entry["error"] = str(err)
+                result["errors"].append(
+                    {"idx": map_index, "stage": "preferences", "error": str(err)}
+                )
+            result["maps"].append(entry)
+
+        return result
+
     def _sync_get_app_schedule_text(
         self,
         *,
@@ -1622,15 +1730,23 @@ class DreameLawnMowerClient:
     ) -> list[int]:
         if map_indices is not None:
             return _dedupe_ints(map_indices)
+        return _dedupe_ints([-1, *self._app_map_indices(None)])
+
+    def _app_map_indices(
+        self,
+        map_indices: Sequence[int] | None,
+    ) -> list[int]:
+        if map_indices is not None:
+            return [idx for idx in _dedupe_ints(map_indices) if idx >= 0]
         try:
             map_list_result = self._sync_call_app_action({"m": "g", "t": "MAPL"})
             detected = [
                 entry["idx"]
                 for entry in _normalize_app_map_entries(map_list_result)
             ]
-        except Exception:  # noqa: BLE001 - fall back to the two app schedule slots
+        except Exception:  # noqa: BLE001 - fall back to the two likely map slots
             detected = [0, 1]
-        return _dedupe_ints([-1, *detected])
+        return _dedupe_ints(detected)
 
     def _sync_get_app_maps(
         self,

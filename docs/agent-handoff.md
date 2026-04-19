@@ -190,6 +190,24 @@ Last updated: 2026-04-19
   after an event query: `event_count`, `schedule_selection`, and `last_error`
   when schedule retrieval fails. This makes the same active-version filtering
   visible from the entity state attributes, not just the standalone preview.
+- User-provided Dreamehome screenshots on 2026-04-19 confirm the app presents
+  separate general/custom mowing preference scopes and settings such as cutting
+  height, mowing efficiency, mowing direction, edge mowing, LiDAR obstacle
+  recognition, AI obstacle classes, and obstacle avoidance distance/height.
+  Treat those as preference-discovery targets, not schedule payload fields, and
+  keep them read-only until app-action commands and runtime write locks are
+  proven.
+- The downloaded A2 plugin bundle identifies the preference read path as
+  `PREI` for per-map metadata and `PRE` for per-area data. It also logs
+  `prop.2.52 mowing preference update`. The reusable client now has
+  `async_get_mowing_preferences()` plus `examples/preference_probe.py`, and
+  Home Assistant has disabled-by-default Capture/Last Preference Probe
+  diagnostics; writes (`PRE` with `m:"s"` and `PREP`) remain intentionally
+  unexposed.
+- A live read-only preference probe on 2026-04-19 returned two maps with no
+  errors: map `0` in global mode with 5 preference areas and map `1` in global
+  mode with 2 preference areas. Local output was stored in ignored
+  `preference-probe-live.json`.
 - Config-flow auth failures are classified into non-secret Home Assistant
   errors for account type, region, connectivity, generic auth, 2FA, and no
   matching mower devices.

@@ -30,6 +30,7 @@ def test_extract_payloads_keeps_log_kind_for_multiple_entries() -> None:
     debug_payload = {"snapshot": {"state": "docked"}}
     map_payload = {"map": {"source": "placeholder"}}
     operation_payload = {"snapshot": {"label": "field_test"}}
+    preference_payload = {"source": "app_action_mowing_preferences", "maps": []}
     schedule_payload = {"schedules": []}
     log_text = "\n".join(
         [
@@ -41,6 +42,8 @@ def test_extract_payloads_keeps_log_kind_for_multiple_entries() -> None:
             f"{json.dumps(operation_payload)}",
             "Captured Dreame lawn mower map probe for Dreame A2 (A2): "
             f"{json.dumps(map_payload)}",
+            "Captured Dreame lawn mower preference probe for Dreame A2 (A2): "
+            f"{json.dumps(preference_payload)}",
             "Captured Dreame lawn mower schedule probe for Dreame A2 (A2): "
             f"{json.dumps(schedule_payload)}",
             "noise after",
@@ -53,12 +56,14 @@ def test_extract_payloads_keeps_log_kind_for_multiple_entries() -> None:
         "debug_snapshot",
         "operation_snapshot",
         "map_probe",
+        "preference_probe",
         "schedule_probe",
     ]
     assert [payload.payload for payload in payloads] == [
         debug_payload,
         operation_payload,
         map_payload,
+        preference_payload,
         schedule_payload,
     ]
 
@@ -72,6 +77,7 @@ def test_extract_payloads_accepts_plain_json_diagnostics() -> None:
 def test_extract_payloads_can_filter_by_kind() -> None:
     debug_payload = {"snapshot": {"state": "docked"}}
     map_payload = {"map": {"source": "placeholder"}}
+    preference_payload = {"source": "app_action_mowing_preferences", "maps": []}
     schedule_payload = {"schedules": []}
     log_text = "\n".join(
         [
@@ -79,6 +85,8 @@ def test_extract_payloads_can_filter_by_kind() -> None:
             f"{json.dumps(debug_payload)}",
             "Captured Dreame lawn mower map probe for Dreame A2 (A2): "
             f"{json.dumps(map_payload)}",
+            "Captured Dreame lawn mower preference probe for Dreame A2 (A2): "
+            f"{json.dumps(preference_payload)}",
             "Captured Dreame lawn mower schedule probe for Dreame A2 (A2): "
             f"{json.dumps(schedule_payload)}",
         ]
@@ -95,6 +103,12 @@ def test_extract_payloads_can_filter_by_kind() -> None:
     assert len(schedule_payloads) == 1
     assert schedule_payloads[0].kind == "schedule_probe"
     assert schedule_payloads[0].payload == schedule_payload
+
+    preference_payloads = extract_payloads(log_text, kind="preference_probe")
+
+    assert len(preference_payloads) == 1
+    assert preference_payloads[0].kind == "preference_probe"
+    assert preference_payloads[0].payload == preference_payload
 
 
 def test_extract_first_payload_raises_when_no_payload_is_found() -> None:
@@ -731,6 +745,83 @@ def test_summarize_payload_includes_schedule_probe_summary() -> None:
                 "enabled_plan_count": 1,
                 "plan_count": 1,
             },
+        ],
+        "error_count": 0,
+    }
+
+
+def test_summarize_payload_includes_preference_probe_summary() -> None:
+    payload = {
+        "source": "app_action_mowing_preferences",
+        "available": True,
+        "property_hint": "2.52",
+        "maps": [
+            {
+                "idx": 0,
+                "label": "map_0",
+                "available": True,
+                "mode_name": "global",
+                "area_count": 1,
+                "preferences": [
+                    {
+                        "area_id": 0,
+                        "reported_version": 152,
+                        "efficient_mode_name": "efficient",
+                        "mowing_height_cm": 4.0,
+                        "mowing_direction_mode_name": "rotation",
+                        "mowing_direction_degrees": 40,
+                        "edge_mowing_auto": True,
+                        "edge_mowing_safe": True,
+                        "obstacle_avoidance_enabled": True,
+                        "obstacle_avoidance_height_cm": 5,
+                        "obstacle_avoidance_distance_cm": 15,
+                        "obstacle_avoidance_ai_classes": [
+                            "people",
+                            "animals",
+                            "objects",
+                        ],
+                        "raw_payload": [152, 0, 0],
+                    }
+                ],
+            }
+        ],
+        "errors": [],
+    }
+
+    assert summarize_payload(payload) == {
+        "source": "app_action_mowing_preferences",
+        "available": True,
+        "property_hint": "2.52",
+        "map_count": 1,
+        "maps": [
+            {
+                "idx": 0,
+                "label": "map_0",
+                "available": True,
+                "mode_name": "global",
+                "area_count": 1,
+                "preference_count": 1,
+                "preferences": [
+                    {
+                        "area_id": 0,
+                        "reported_version": 152,
+                        "efficient_mode_name": "efficient",
+                        "mowing_height_cm": 4.0,
+                        "mowing_direction_mode_name": "rotation",
+                        "mowing_direction_degrees": 40,
+                        "edge_mowing_auto": True,
+                        "edge_mowing_safe": True,
+                        "obstacle_avoidance_enabled": True,
+                        "obstacle_avoidance_height_cm": 5,
+                        "obstacle_avoidance_distance_cm": 15,
+                        "obstacle_avoidance_ai_classes": [
+                            "people",
+                            "animals",
+                            "objects",
+                        ],
+                    }
+                ],
+            }
         ],
         "error_count": 0,
     }
