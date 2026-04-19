@@ -174,6 +174,10 @@ Last updated: 2026-04-19
   schedule filter. This explains the earlier “extra calendar entries” issue:
   they are real stored slots, but Home Assistant should hide them unless
   `--include-all-schedules` or equivalent diagnostics are requested.
+- The Home Assistant schedule calendar now exposes cached diagnostic attributes
+  after an event query: `event_count`, `schedule_selection`, and `last_error`
+  when schedule retrieval fails. This makes the same active-version filtering
+  visible from the entity state attributes, not just the standalone preview.
 - Config-flow auth failures are classified into non-secret Home Assistant
   errors for account type, region, connectivity, generic auth, 2FA, and no
   matching mower devices.

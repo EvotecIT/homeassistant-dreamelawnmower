@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from custom_components.dreame_lawn_mower.calendar import (
+    schedule_calendar_attributes,
     schedule_calendar_events,
     schedule_calendar_selection,
 )
@@ -219,6 +220,35 @@ def test_schedule_calendar_selection_can_include_all_schedules() -> None:
             "enabled_plan_count": 1,
         },
     ]
+
+
+def test_schedule_calendar_attributes_expose_cached_selection() -> None:
+    selection = {
+        "mode": "active_schedule",
+        "active_version": 19383,
+        "included_schedule_count": 1,
+        "hidden_schedule_count": 2,
+    }
+
+    assert schedule_calendar_attributes(
+        selection=selection,
+        event_count=1,
+        last_error=None,
+    ) == {
+        "event_count": 1,
+        "schedule_selection": selection,
+    }
+
+
+def test_schedule_calendar_attributes_expose_last_error() -> None:
+    assert schedule_calendar_attributes(
+        selection=None,
+        event_count=0,
+        last_error="cloud unavailable",
+    ) == {
+        "event_count": 0,
+        "last_error": "cloud unavailable",
+    }
 
 
 def test_schedule_calendar_events_include_overnight_overlap() -> None:

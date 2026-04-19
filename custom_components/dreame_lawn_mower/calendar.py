@@ -42,12 +42,23 @@ class DreameLawnMowerScheduleCalendar(DreameLawnMowerEntity, CalendarEntity):
         super().__init__(coordinator)
         self._attr_unique_id = f"{self._descriptor.unique_id}_schedule_calendar"
         self._cached_event: CalendarEvent | None = None
+        self._cached_event_count: int | None = None
+        self._cached_selection: dict[str, Any] | None = None
         self._last_error: str | None = None
 
     @property
     def event(self) -> CalendarEvent | None:
         """Return the current or next schedule event."""
         return self._cached_event
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return cached schedule diagnostics for the calendar entity."""
+        return schedule_calendar_attributes(
+            selection=self._cached_selection,
+            event_count=self._cached_event_count,
+            last_error=self._last_error,
+        )
 
     @property
     def available(self) -> bool:
@@ -75,15 +86,19 @@ class DreameLawnMowerScheduleCalendar(DreameLawnMowerEntity, CalendarEntity):
             payload = await self.coordinator.client.async_get_app_schedules()
         except Exception as err:  # noqa: BLE001 - calendar should stay read-only
             self._last_error = str(err)
+            self._cached_event_count = 0
+            self._cached_selection = None
             _LOGGER.debug("Failed to fetch mower schedules: %s", err)
             return []
         self._last_error = None
+        self._cached_selection = schedule_calendar_selection(payload)
         events = schedule_calendar_events(
             payload,
             start_date,
             end_date,
             mower_name=self._descriptor.name,
         )
+        self._cached_event_count = len(events)
         self._cached_event = events[0] if events else None
         return events
 
@@ -173,6 +188,23 @@ def schedule_calendar_selection(
         "included_schedules": included_schedules,
         "hidden_schedules": hidden_schedules,
     }
+
+
+def schedule_calendar_attributes(
+    *,
+    selection: Mapping[str, Any] | None,
+    event_count: int | None,
+    last_error: str | None,
+) -> dict[str, Any]:
+    """Return compact Home Assistant attributes for schedule diagnostics."""
+    attributes: dict[str, Any] = {}
+    if event_count is not None:
+        attributes["event_count"] = event_count
+    if selection:
+        attributes["schedule_selection"] = dict(selection)
+    if last_error:
+        attributes["last_error"] = last_error
+    return attributes
 
 
 def _active_schedule_version(payload: Mapping[str, Any]) -> int | None:
