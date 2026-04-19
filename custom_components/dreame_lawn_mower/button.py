@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, datetime
 
 from homeassistant.components import persistent_notification
 from homeassistant.components.button import ButtonEntity
@@ -182,6 +183,9 @@ class DreameLawnMowerCaptureScheduleProbeButton(
             include_raw=False,
         )
         payload = schedule_probe_payload(payload)
+        payload.setdefault("captured_at", datetime.now(UTC).isoformat())
+        self.coordinator.last_schedule_probe_result = payload
+        self.coordinator.async_update_listeners()
         _LOGGER.info(
             "Captured Dreame lawn mower schedule probe for %s: %s",
             self.coordinator.client.descriptor.title,
@@ -191,7 +195,8 @@ class DreameLawnMowerCaptureScheduleProbeButton(
             self.coordinator.hass,
             (
                 "Captured a Dreame lawn mower schedule probe. Enable info "
-                "logging for this integration to view decoded schedule JSON."
+                "logging for this integration to view decoded schedule JSON, "
+                "or enable the Last Schedule Probe diagnostic sensor."
             ),
             title="Dreame Lawn Mower Schedule Probe",
             notification_id=(

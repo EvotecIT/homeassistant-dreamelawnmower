@@ -234,6 +234,9 @@ data on demand, and the diagnostic `Scheduled Task` binary sensor still reports
 whether the mower says a scheduled task is currently active.
 A disabled-by-default diagnostic `Capture Schedule Probe` button can log decoded
 schedule JSON from Home Assistant without including raw schedule payload text.
+The same press updates the disabled-by-default diagnostic sensor
+`Last Schedule Probe` with compact attributes for the current task,
+active-version selection, visible/hidden schedule slots, and probe errors.
 The guarded `dreame_lawn_mower.set_schedule_plan_enabled` service is also
 available for enable/disable testing. It defaults to dry-run and only sends the
 write request when both `execute: true` and `confirm_schedule_write: true` are

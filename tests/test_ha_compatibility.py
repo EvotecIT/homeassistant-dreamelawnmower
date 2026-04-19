@@ -22,8 +22,10 @@ from custom_components.dreame_lawn_mower.image import (
     png_bytes_to_jpeg,
 )
 from custom_components.dreame_lawn_mower.sensor import (
+    DreameLawnMowerLastScheduleProbeSensor,
     DreameLawnMowerLastScheduleWriteSensor,
     DreameSensorDescription,
+    schedule_probe_result_attributes,
     schedule_write_result_attributes,
 )
 
@@ -87,6 +89,83 @@ def test_last_schedule_write_sensor_is_diagnostic_disabled_by_default() -> None:
         ]
         is False
     )
+
+
+def test_last_schedule_probe_sensor_is_diagnostic_disabled_by_default() -> None:
+    assert (
+        DreameLawnMowerLastScheduleProbeSensor.__dict__["__attr_entity_category"]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerLastScheduleProbeSensor.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
+    )
+
+
+def test_schedule_probe_result_attributes_are_compact() -> None:
+    result = {
+        "captured_at": "2026-04-19T10:00:00+00:00",
+        "source": "app_action_schedule",
+        "available": True,
+        "current_task": {"start_time": "10:58", "version": 19383},
+        "schedule_selection": {
+            "active_version": 19383,
+            "included_schedule_count": 1,
+            "hidden_schedule_count": 1,
+        },
+        "schedules": [
+            {
+                "idx": 0,
+                "label": "map_0",
+                "available": True,
+                "version": 19383,
+                "plan_count": 2,
+                "enabled_plan_count": 1,
+                "plans": [{"plan_id": 0}],
+            },
+            {
+                "idx": 1,
+                "label": "map_1",
+                "available": False,
+                "version": 4760,
+                "error": "hash mismatch",
+            },
+        ],
+        "errors": [],
+    }
+
+    assert schedule_probe_result_attributes(result) == {
+        "captured_at": "2026-04-19T10:00:00+00:00",
+        "source": "app_action_schedule",
+        "available": True,
+        "current_task": {"start_time": "10:58", "version": 19383},
+        "schedule_selection": {
+            "active_version": 19383,
+            "included_schedule_count": 1,
+            "hidden_schedule_count": 1,
+        },
+        "schedule_count": 2,
+        "schedules": [
+            {
+                "idx": 0,
+                "label": "map_0",
+                "available": True,
+                "version": 19383,
+                "plan_count": 2,
+                "enabled_plan_count": 1,
+            },
+            {
+                "idx": 1,
+                "label": "map_1",
+                "available": False,
+                "version": 4760,
+                "error": "hash mismatch",
+            },
+        ],
+        "error_count": 0,
+    }
 
 
 def test_schedule_write_result_attributes_are_compact() -> None:

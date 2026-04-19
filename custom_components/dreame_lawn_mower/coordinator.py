@@ -59,6 +59,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             descriptor=descriptor,
         )
         self.entry = entry
+        self.last_schedule_probe_result: dict[str, Any] | None = None
         self.last_schedule_write_result: dict[str, Any] | None = None
 
         super().__init__(

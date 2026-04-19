@@ -159,7 +159,10 @@ Last updated: 2026-04-19
 - A disabled-by-default `Capture Schedule Probe` diagnostic button logs decoded
   schedules from Home Assistant without raw schedule payload text. It also
   adds `schedule_selection`, so the button log explains which schedule version
-  is visible and which stored slots are hidden.
+  is visible and which stored slots are hidden. Pressing the button also
+  updates a disabled-by-default `Last Schedule Probe` diagnostic sensor with
+  compact current-task, schedule-selection, schedule-slot, and error
+  attributes.
 - `examples/extract_ha_payload.py` recognizes those schedule-probe log lines
   via `--kind schedule_probe`; `--summary` preserves the active-version
   selection, visible schedule count, and hidden schedule slots.

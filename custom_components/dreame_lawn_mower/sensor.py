@@ -195,6 +195,7 @@ async def async_setup_entry(
             for description in SENSORS
         ]
         + [DreameLawnMowerLastScheduleWriteSensor(coordinator)]
+        + [DreameLawnMowerLastScheduleProbeSensor(coordinator)]
     )
 
 
@@ -294,5 +295,91 @@ def schedule_write_result_attributes(
     return {
         key: value
         for key, value in attributes.items()
+        if value is not None
+    }
+
+
+class DreameLawnMowerLastScheduleProbeSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the last read-only schedule probe result."""
+
+    _attr_name = "Last Schedule Probe"
+    _attr_icon = "mdi:calendar-search"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_last_schedule_probe"
+
+    @property
+    def native_value(self) -> str:
+        """Return a compact state for the last schedule probe."""
+        return _schedule_probe_state(self.coordinator.last_schedule_probe_result)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe details for the last schedule probe."""
+        return schedule_probe_result_attributes(
+            self.coordinator.last_schedule_probe_result
+        )
+
+
+def _schedule_probe_state(result: dict[str, Any] | None) -> str:
+    if not result:
+        return "none"
+    errors = result.get("errors")
+    if isinstance(errors, list) and errors:
+        return "error"
+    return "available" if result.get("available") else "unavailable"
+
+
+def schedule_probe_result_attributes(
+    result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return compact, non-secret attributes for a schedule probe result."""
+    if not result:
+        return {}
+
+    errors = result.get("errors")
+    schedules = [
+        _schedule_probe_entry_summary(schedule)
+        for schedule in result.get("schedules", [])
+        if isinstance(schedule, dict)
+    ]
+    attributes: dict[str, Any] = {
+        "captured_at": result.get("captured_at"),
+        "source": result.get("source"),
+        "available": result.get("available"),
+        "current_task": result.get("current_task"),
+        "schedule_selection": result.get("schedule_selection"),
+        "schedule_count": len(schedules),
+        "schedules": schedules,
+    }
+    if isinstance(errors, list):
+        attributes["error_count"] = len(errors)
+        attributes["errors"] = errors
+    return {
+        key: value
+        for key, value in attributes.items()
+        if value not in (None, [], {})
+    }
+
+
+def _schedule_probe_entry_summary(schedule: dict[str, Any]) -> dict[str, Any]:
+    summary = {
+        "idx": schedule.get("idx"),
+        "label": schedule.get("label"),
+        "available": schedule.get("available"),
+        "version": schedule.get("version"),
+        "plan_count": schedule.get("plan_count"),
+        "enabled_plan_count": schedule.get("enabled_plan_count"),
+        "error": schedule.get("error"),
+    }
+    return {
+        key: value
+        for key, value in summary.items()
         if value is not None
     }

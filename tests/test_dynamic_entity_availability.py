@@ -10,6 +10,7 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
 )
 from custom_components.dreame_lawn_mower.sensor import (
     SENSORS,
+    DreameLawnMowerLastScheduleProbeSensor,
     DreameLawnMowerLastScheduleWriteSensor,
     DreameLawnMowerSensor,
 )
@@ -240,4 +241,54 @@ def test_last_schedule_write_sensor_reports_dry_run_result() -> None:
         "enabled": False,
         "version": 19383,
         "request": {"t": "SCHDSV2"},
+    }
+
+
+def test_last_schedule_probe_sensor_reports_none_before_probe() -> None:
+    entity = object.__new__(DreameLawnMowerLastScheduleProbeSensor)
+    entity.coordinator = SimpleNamespace(last_schedule_probe_result=None)
+
+    assert entity.native_value == "none"
+    assert entity.extra_state_attributes == {}
+
+
+def test_last_schedule_probe_sensor_reports_available_probe() -> None:
+    entity = object.__new__(DreameLawnMowerLastScheduleProbeSensor)
+    entity.coordinator = SimpleNamespace(
+        last_schedule_probe_result={
+            "source": "app_action_schedule",
+            "available": True,
+            "schedules": [{"idx": 0, "version": 19383}],
+            "errors": [],
+        }
+    )
+
+    assert entity.native_value == "available"
+    assert entity.extra_state_attributes == {
+        "source": "app_action_schedule",
+        "available": True,
+        "schedule_count": 1,
+        "schedules": [{"idx": 0, "version": 19383}],
+        "error_count": 0,
+    }
+
+
+def test_last_schedule_probe_sensor_reports_error_probe() -> None:
+    entity = object.__new__(DreameLawnMowerLastScheduleProbeSensor)
+    entity.coordinator = SimpleNamespace(
+        last_schedule_probe_result={
+            "source": "app_action_schedule",
+            "available": False,
+            "schedules": [],
+            "errors": [{"stage": "schedule", "error": "cloud unavailable"}],
+        }
+    )
+
+    assert entity.native_value == "error"
+    assert entity.extra_state_attributes == {
+        "source": "app_action_schedule",
+        "available": False,
+        "schedule_count": 0,
+        "error_count": 1,
+        "errors": [{"stage": "schedule", "error": "cloud unavailable"}],
     }
