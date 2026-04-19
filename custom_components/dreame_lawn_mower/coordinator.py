@@ -36,6 +36,7 @@ from .dreame_lawn_mower_client.models import display_name_for_model
 _LOGGER = logging.getLogger(__name__)
 
 BATCH_DEVICE_DATA_REFRESH_INTERVAL = timedelta(minutes=15)
+APP_MAP_OBJECT_REFRESH_INTERVAL = timedelta(minutes=30)
 
 
 class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot]):
@@ -62,6 +63,8 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             descriptor=descriptor,
         )
         self.entry = entry
+        self.app_map_objects: dict[str, Any] | None = None
+        self.app_map_objects_refreshed_at: datetime | None = None
         self.batch_device_data: dict[str, Any] | None = None
         self.batch_device_data_refreshed_at: datetime | None = None
         self.last_batch_device_data_probe_result: dict[str, Any] | None = None
@@ -90,6 +93,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         except DreameLawnMowerConnectionError as err:
             raise UpdateFailed(str(err)) from err
         await self.async_refresh_batch_device_data(force=False)
+        await self.async_refresh_app_map_objects(force=False)
         return snapshot
 
     async def async_refresh_batch_device_data(
@@ -137,6 +141,40 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             self.client.async_get_batch_mowing_preferences(include_raw=False),
             self.client.async_get_batch_ota_info(include_raw=False),
         )
+
+    async def async_refresh_app_map_objects(
+        self,
+        *,
+        force: bool = False,
+        source: str = "app_map_objects_auto",
+    ) -> dict[str, Any] | None:
+        """Refresh cached read-only 3D map object metadata."""
+        now = datetime.now(UTC)
+        if (
+            not force
+            and self.app_map_objects is not None
+            and self.app_map_objects_refreshed_at is not None
+            and now - self.app_map_objects_refreshed_at
+            < APP_MAP_OBJECT_REFRESH_INTERVAL
+        ):
+            return self.app_map_objects
+
+        try:
+            app_map_objects = await self.client.async_get_app_map_objects(
+                include_urls=False,
+            )
+        except Exception as err:  # noqa: BLE001 - best-effort extra metadata
+            _LOGGER.debug("Failed to refresh app map objects: %s", err)
+            return self.app_map_objects
+
+        payload = {
+            "captured_at": now.isoformat(),
+            "source": source,
+            "app_map_objects": app_map_objects,
+        }
+        self.app_map_objects = payload
+        self.app_map_objects_refreshed_at = now
+        return payload
 
     async def async_shutdown(self) -> None:
         """Disconnect client resources."""

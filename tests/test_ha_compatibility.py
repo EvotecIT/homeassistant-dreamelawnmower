@@ -29,6 +29,7 @@ from custom_components.dreame_lawn_mower.image import (
     png_bytes_to_jpeg,
 )
 from custom_components.dreame_lawn_mower.sensor import (
+    DreameLawnMowerAppMapObjectCountSensor,
     DreameLawnMowerConfiguredScheduleCountSensor,
     DreameLawnMowerFirmwareUpdateStatusSensor,
     DreameLawnMowerLastBatchDeviceDataProbeSensor,
@@ -39,6 +40,7 @@ from custom_components.dreame_lawn_mower.sensor import (
     DreameLawnMowerLastWeatherProbeSensor,
     DreameLawnMowerPreferenceMapCountSensor,
     DreameSensorDescription,
+    app_map_object_attributes,
     batch_device_data_probe_result_attributes,
     batch_ota_attributes,
     batch_preference_attributes,
@@ -201,6 +203,13 @@ def test_last_schedule_write_sensor_is_diagnostic_disabled_by_default() -> None:
 def test_firmware_update_status_sensor_is_diagnostic() -> None:
     assert (
         DreameLawnMowerFirmwareUpdateStatusSensor.__dict__["__attr_entity_category"]
+        == "diagnostic"
+    )
+
+
+def test_app_map_object_count_sensor_is_diagnostic() -> None:
+    assert (
+        DreameLawnMowerAppMapObjectCountSensor.__dict__["__attr_entity_category"]
         == "diagnostic"
     )
 
@@ -774,6 +783,55 @@ def test_batch_schedule_attributes_are_compact() -> None:
                 }
             ],
             "error_count": 0,
+        },
+    }
+
+
+def test_app_map_object_attributes_are_compact() -> None:
+    result = {
+        "captured_at": "2026-04-19T11:00:00+00:00",
+        "source": "app_map_objects_auto",
+        "app_map_objects": {
+            "source": "app_action_obj_3dmap",
+            "object_count": 2,
+            "objects": [
+                {
+                    "name": "ali_dreame/2025/04/23/device/map-one.0233.bin",
+                    "extension": "bin",
+                    "url_present": False,
+                },
+                {
+                    "name": "ali_dreame/2025/04/23/device/model.obj",
+                    "extension": "obj",
+                    "url_present": False,
+                },
+            ],
+            "raw": {"r": 0, "d": {"name": ["one", "two"]}},
+            "urls_included": False,
+        },
+    }
+
+    assert app_map_object_attributes(result) == {
+        "captured_at": "2026-04-19T11:00:00+00:00",
+        "source": "app_map_objects_auto",
+        "app_map_objects": {
+            "source": "app_action_obj_3dmap",
+            "object_count": 2,
+            "urls_included": False,
+            "extension_counts": {"bin": 1, "obj": 1},
+            "objects": [
+                {
+                    "name": "ali_dreame/2025/04/23/device/map-one.0233.bin",
+                    "extension": "bin",
+                    "url_present": False,
+                },
+                {
+                    "name": "ali_dreame/2025/04/23/device/model.obj",
+                    "extension": "obj",
+                    "url_present": False,
+                },
+            ],
+            "raw_keys": ["d", "r"],
         },
     }
 

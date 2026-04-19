@@ -198,6 +198,7 @@ async def async_setup_entry(
             DreameLawnMowerSensor(coordinator, description)
             for description in SENSORS
         ]
+        + [DreameLawnMowerAppMapObjectCountSensor(coordinator)]
         + [DreameLawnMowerFirmwareUpdateStatusSensor(coordinator)]
         + [DreameLawnMowerConfiguredScheduleCountSensor(coordinator)]
         + [DreameLawnMowerPreferenceMapCountSensor(coordinator)]
@@ -342,6 +343,36 @@ class DreameLawnMowerFirmwareUpdateStatusSensor(
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return safe cached OTA attributes."""
         return batch_ota_attributes(self.coordinator.batch_device_data)
+
+
+class DreameLawnMowerAppMapObjectCountSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose cached 3D app-map object metadata."""
+
+    _attr_name = "3D Map Object Count"
+    _attr_icon = "mdi:cube-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_app_map_object_count"
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the number of cached 3D map objects."""
+        return _app_map_object_count(self.coordinator.app_map_objects)
+
+    @property
+    def available(self) -> bool:
+        """Return whether cached 3D map object data is available."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe cached 3D map object attributes."""
+        return app_map_object_attributes(self.coordinator.app_map_objects)
 
 
 class DreameLawnMowerConfiguredScheduleCountSensor(
@@ -579,6 +610,23 @@ def batch_schedule_attributes(result: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def app_map_object_attributes(result: dict[str, Any] | None) -> dict[str, Any]:
+    """Return compact cached 3D app-map object attributes."""
+    summary = _app_map_object_summary(_app_map_object_section(result))
+    if not summary:
+        return {}
+    attributes = {
+        "captured_at": result.get("captured_at") if result else None,
+        "source": result.get("source") if result else None,
+        "app_map_objects": summary,
+    }
+    return {
+        key: value
+        for key, value in attributes.items()
+        if value not in (None, [], {})
+    }
+
+
 def batch_preference_attributes(result: dict[str, Any] | None) -> dict[str, Any]:
     """Return compact cached batch preference attributes."""
     summary = _batch_preference_probe_summary(_batch_preference_section(result))
@@ -622,6 +670,14 @@ def _batch_schedule_count(result: dict[str, Any] | None) -> int | None:
     return value if isinstance(value, int) else None
 
 
+def _app_map_object_count(result: dict[str, Any] | None) -> int | None:
+    summary = _app_map_object_summary(_app_map_object_section(result))
+    if not isinstance(summary, dict):
+        return None
+    value = summary.get("object_count")
+    return value if isinstance(value, int) else None
+
+
 def _batch_preference_map_count(result: dict[str, Any] | None) -> int | None:
     summary = _batch_preference_probe_summary(_batch_preference_section(result))
     if not isinstance(summary, dict):
@@ -632,6 +688,11 @@ def _batch_preference_map_count(result: dict[str, Any] | None) -> int | None:
 
 def _batch_schedule_section(result: dict[str, Any] | None) -> dict[str, Any] | None:
     value = result.get("batch_schedule") if isinstance(result, dict) else None
+    return value if isinstance(value, dict) else None
+
+
+def _app_map_object_section(result: dict[str, Any] | None) -> dict[str, Any] | None:
+    value = result.get("app_map_objects") if isinstance(result, dict) else None
     return value if isinstance(value, dict) else None
 
 
@@ -663,6 +724,43 @@ def _batch_ota_status_name(result: dict[str, Any] | None) -> str | None:
     if ota.get("available"):
         return "no_update"
     return None
+
+
+def _app_map_object_summary(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    objects = [
+        {
+            key: item.get(key)
+            for key in ("name", "extension", "url_present", "error")
+            if item.get(key) is not None
+        }
+        for item in value.get("objects", [])
+        if isinstance(item, dict)
+    ]
+    extension_counts: dict[str, int] = {}
+    for item in objects:
+        extension = item.get("extension")
+        if isinstance(extension, str) and extension:
+            extension_counts[extension] = extension_counts.get(extension, 0) + 1
+    summary = {
+        "source": value.get("source"),
+        "object_count": value.get("object_count", len(objects)),
+        "urls_included": value.get("urls_included"),
+        "extension_counts": extension_counts,
+        "objects": objects,
+    }
+    raw = value.get("raw")
+    if isinstance(raw, dict):
+        summary["raw_keys"] = sorted(raw.keys())
+    error = value.get("error")
+    if error is not None:
+        summary["error"] = error
+    return {
+        key: item
+        for key, item in summary.items()
+        if item not in (None, [], {})
+    }
 
 
 def _schedule_probe_entry_summary(schedule: dict[str, Any]) -> dict[str, Any]:
