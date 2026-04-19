@@ -118,7 +118,12 @@ Last updated: 2026-04-19
   names. Expiring object URLs are intentionally opt-in and omitted from default
   probe output. Direct HTTP GETs against the tested generated URLs returned
   404 XML, so treat 3D objects as metadata-only until a downloadable path is
-  confirmed.
+  confirmed. HA map camera attributes expose safe 3D object metadata through
+  `app_map_object_count` and `app_map_objects`, without signed URLs.
+- A follow-up live check while the 3D map was visible in Dreamehome again
+  returned two `.bin` object names. Opt-in signed URL generation succeeded, but
+  direct HEAD/GET checks still returned XML error responses (`403`/`404`), so
+  do not treat the 3D binary download path as solved.
 - Home Assistant now exposes disabled-by-default read-only map cameras. The
   normal camera renders the app-action vector payload as JPEG; the diagnostics
   camera exposes the structured `map_view` attributes and a readable diagnostic

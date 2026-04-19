@@ -66,6 +66,9 @@ def map_camera_attributes(
             "app_available_map_count": app_maps.get("available_map_count"),
             "app_created_map_count": app_maps.get("created_map_count"),
             "app_map_error_count": app_maps.get("error_count"),
+            "app_map_object_count": app_maps.get("object_count"),
+            "app_map_object_error": app_maps.get("object_error"),
+            "app_map_objects": app_maps.get("objects"),
             "app_maps": app_maps.get("maps"),
         }
     )

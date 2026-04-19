@@ -282,6 +282,15 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
         "current_map_index": 0,
         "available_map_count": 1,
         "created_map_count": 1,
+        "object_count": 1,
+        "object_error": None,
+        "objects": [
+            {
+                "name": "ali_dreame/2025/04/23/device/map-one.0233.bin",
+                "extension": "bin",
+                "url_present": False,
+            }
+        ],
         "maps": [
             {
                 "idx": 0,
@@ -317,7 +326,7 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
         ],
         "error_count": 0,
     }
-    assert "OBJ" not in [call["t"] for call in cloud.calls]
+    assert "OBJ" in [call["t"] for call in cloud.calls]
 
 
 def test_map_view_uses_legacy_path_when_app_map_fails() -> None:

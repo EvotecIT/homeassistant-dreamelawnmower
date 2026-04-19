@@ -226,6 +226,7 @@ class DreameLawnMowerMapDataCamera(DreameLawnMowerMapCamera):
                     f"App map count: {view.app_maps.get('map_count')}",
                     f"Current app map: {view.app_maps.get('current_map_index')}",
                     f"Available app maps: {view.app_maps.get('available_map_count')}",
+                    f"3D map objects: {view.app_maps.get('object_count')}",
                 ]
             )
             if isinstance(maps, list):

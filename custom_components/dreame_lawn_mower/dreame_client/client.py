@@ -1341,7 +1341,8 @@ class DreameLawnMowerClient:
             app_maps = self._sync_get_app_maps(
                 chunk_size=400,
                 include_payload=True,
-                include_objects=False,
+                include_objects=True,
+                include_object_urls=False,
             )
             selected = _select_app_map_payload(app_maps)
             if selected is None:
@@ -2913,6 +2914,7 @@ def _app_maps_view_metadata(app_maps: Mapping[str, Any]) -> dict[str, Any]:
         for item in maps
         if isinstance(item, Mapping)
     ]
+    objects = _app_map_objects_view_metadata(app_maps.get("objects"))
     return {
         "source": app_maps.get("source"),
         "available": bool(app_maps.get("available")),
@@ -2921,7 +2923,35 @@ def _app_maps_view_metadata(app_maps: Mapping[str, Any]) -> dict[str, Any]:
         "available_map_count": sum(1 for item in entries if item.get("available")),
         "created_map_count": sum(1 for item in entries if item.get("created")),
         "maps": entries,
+        "objects": objects.get("objects"),
+        "object_count": objects.get("object_count"),
+        "object_error": objects.get("error"),
         "error_count": len(app_maps.get("errors", []) or []),
+    }
+
+
+def _app_map_objects_view_metadata(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {"objects": None, "object_count": None, "error": None}
+    objects = value.get("objects")
+    if not isinstance(objects, Sequence) or isinstance(
+        objects,
+        str | bytes | bytearray,
+    ):
+        objects = []
+    entries = [
+        {
+            key: item.get(key)
+            for key in ("name", "extension", "url_present", "error")
+            if item.get(key) is not None
+        }
+        for item in objects
+        if isinstance(item, Mapping)
+    ]
+    return {
+        "objects": entries,
+        "object_count": value.get("object_count", len(entries)),
+        "error": value.get("error"),
     }
 
 

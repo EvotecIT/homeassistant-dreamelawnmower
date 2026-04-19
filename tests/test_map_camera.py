@@ -59,6 +59,8 @@ def test_map_camera_attributes_include_app_map_summary_counts() -> None:
     assert attributes["last_map_refresh"] == "2026-04-18T12:30:00+00:00"
     assert attributes["app_map_count"] is None
     assert attributes["app_maps"] is None
+    assert attributes["app_map_object_count"] is None
+    assert attributes["app_map_objects"] is None
 
 
 def test_map_camera_attributes_include_all_app_map_metadata() -> None:
@@ -71,6 +73,12 @@ def test_map_camera_attributes_include_all_app_map_metadata() -> None:
             "available_map_count": 2,
             "created_map_count": 2,
             "error_count": 0,
+            "object_count": 2,
+            "object_error": None,
+            "objects": [
+                {"name": "map-a.bin", "extension": "bin", "url_present": False},
+                {"name": "map-b.bin", "extension": "bin", "url_present": False},
+            ],
             "maps": [
                 {"idx": 0, "current": True, "available": True},
                 {"idx": 1, "current": False, "available": True},
@@ -90,6 +98,12 @@ def test_map_camera_attributes_include_all_app_map_metadata() -> None:
     assert attributes["app_available_map_count"] == 2
     assert attributes["app_created_map_count"] == 2
     assert attributes["app_map_error_count"] == 0
+    assert attributes["app_map_object_count"] == 2
+    assert attributes["app_map_object_error"] is None
+    assert attributes["app_map_objects"] == [
+        {"name": "map-a.bin", "extension": "bin", "url_present": False},
+        {"name": "map-b.bin", "extension": "bin", "url_present": False},
+    ]
     assert attributes["app_maps"] == [
         {"idx": 0, "current": True, "available": True},
         {"idx": 1, "current": False, "available": True},

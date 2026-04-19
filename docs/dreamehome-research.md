@@ -319,7 +319,12 @@ The successful map path is the app action bridge described above. On
 - `OBJ type=3dmap`: two `.bin` object names. Calling the app-side
   `/dreame-user-iot/iotfile/getDownloadUrl` helper with those names returns
   OSS-looking URLs, but direct GETs against the tested URLs returned 404 XML.
-  The binary format is therefore not downloaded or decoded yet.
+  HA map attributes now expose object count and object names/extensions without
+  signed URLs. The binary format is therefore not downloaded or decoded yet.
+- A follow-up live check while the 3D map was visible in Dreamehome again
+  returned two `.bin` object names. Opt-in signed URL generation succeeded, but
+  direct HEAD/GET checks still returned XML error responses (`403`/`404`), so
+  the app download context or required headers remain unsolved.
 
 Use `python examples/app_map_probe.py --out app-map-current.json` for a focused
 read-only probe that omits raw coordinates by default. Add `--include-payload`
