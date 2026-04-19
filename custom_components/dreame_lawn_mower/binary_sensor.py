@@ -25,6 +25,7 @@ from .const import (
 from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity
 from .manual_control import remote_control_state_safe
+from .sensor import batch_ota_attributes
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,6 +235,8 @@ async def async_setup_entry(
             DreameLawnMowerBinarySensor(coordinator, description)
             for description in BINARY_SENSORS
         ]
+        + [DreameLawnMowerFirmwareUpdateAvailableBinarySensor(coordinator)]
+        + [DreameLawnMowerAutomaticFirmwareUpdatesBinarySensor(coordinator)]
     )
 
 
@@ -265,3 +268,81 @@ class DreameLawnMowerBinarySensor(DreameLawnMowerEntity, BinarySensorEntity):
         """Return whether the binary sensor currently has meaningful mower data."""
         snapshot = self.coordinator.data
         return snapshot is not None and self.entity_description.exists_fn(snapshot)
+
+
+class DreameLawnMowerFirmwareUpdateAvailableBinarySensor(
+    DreameLawnMowerEntity,
+    BinarySensorEntity,
+):
+    """Expose whether cached batch OTA data reports an available update."""
+
+    _attr_name = "Firmware Update Available"
+    _attr_icon = "mdi:update"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_firmware_update_available"
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return whether an update is currently reported as available."""
+        ota = _batch_ota_section(self.coordinator.batch_device_data)
+        if ota is None:
+            return None
+        value = ota.get("update_available")
+        return value if isinstance(value, bool) else None
+
+    @property
+    def available(self) -> bool:
+        """Return whether cached OTA data exists."""
+        return self.coordinator.data is not None and self.is_on is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe cached OTA attributes."""
+        return batch_ota_attributes(self.coordinator.batch_device_data)
+
+
+class DreameLawnMowerAutomaticFirmwareUpdatesBinarySensor(
+    DreameLawnMowerEntity,
+    BinarySensorEntity,
+):
+    """Expose the cached auto-upgrade switch state."""
+
+    _attr_name = "Automatic Firmware Updates"
+    _attr_icon = "mdi:update-auto"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_automatic_firmware_updates"
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return whether automatic firmware updates are enabled."""
+        ota = _batch_ota_section(self.coordinator.batch_device_data)
+        if ota is None:
+            return None
+        value = ota.get("auto_upgrade_enabled")
+        return value if isinstance(value, bool) else None
+
+    @property
+    def available(self) -> bool:
+        """Return whether cached OTA data exists."""
+        return self.coordinator.data is not None and self.is_on is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe cached OTA attributes."""
+        return batch_ota_attributes(self.coordinator.batch_device_data)
+
+
+def _batch_ota_section(result: dict[str, Any] | None) -> dict[str, Any] | None:
+    value = result.get("batch_ota_info") if isinstance(result, dict) else None
+    return value if isinstance(value, dict) else None

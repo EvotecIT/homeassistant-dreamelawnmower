@@ -198,6 +198,9 @@ async def async_setup_entry(
             DreameLawnMowerSensor(coordinator, description)
             for description in SENSORS
         ]
+        + [DreameLawnMowerFirmwareUpdateStatusSensor(coordinator)]
+        + [DreameLawnMowerConfiguredScheduleCountSensor(coordinator)]
+        + [DreameLawnMowerPreferenceMapCountSensor(coordinator)]
         + [DreameLawnMowerLastScheduleWriteSensor(coordinator)]
         + [DreameLawnMowerLastBatchDeviceDataProbeSensor(coordinator)]
         + [DreameLawnMowerLastScheduleProbeSensor(coordinator)]
@@ -305,6 +308,104 @@ def schedule_write_result_attributes(
         for key, value in attributes.items()
         if value is not None
     }
+
+
+class DreameLawnMowerFirmwareUpdateStatusSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose cached firmware update status from batch device data."""
+
+    _attr_name = "Firmware Update Status"
+    _attr_icon = "mdi:update"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_firmware_update_status"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return a compact firmware update state."""
+        return _batch_ota_status_name(self.coordinator.batch_device_data)
+
+    @property
+    def available(self) -> bool:
+        """Return whether cached OTA state is available."""
+        return (
+            self.coordinator.data is not None
+            and _batch_ota_section(self.coordinator.batch_device_data) is not None
+            and self.native_value is not None
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe cached OTA attributes."""
+        return batch_ota_attributes(self.coordinator.batch_device_data)
+
+
+class DreameLawnMowerConfiguredScheduleCountSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the cached batch schedule count."""
+
+    _attr_name = "Configured Schedule Count"
+    _attr_icon = "mdi:calendar-multiple"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_configured_schedule_count"
+        )
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the number of decoded cached schedules."""
+        return _batch_schedule_count(self.coordinator.batch_device_data)
+
+    @property
+    def available(self) -> bool:
+        """Return whether cached schedule data is available."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe cached schedule attributes."""
+        return batch_schedule_attributes(self.coordinator.batch_device_data)
+
+
+class DreameLawnMowerPreferenceMapCountSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the cached batch preference map count."""
+
+    _attr_name = "Preference Map Count"
+    _attr_icon = "mdi:map-marker-multiple-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_preference_map_count"
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the number of maps with cached preference data."""
+        return _batch_preference_map_count(self.coordinator.batch_device_data)
+
+    @property
+    def available(self) -> bool:
+        """Return whether cached preference data is available."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe cached preference attributes."""
+        return batch_preference_attributes(self.coordinator.batch_device_data)
 
 
 class DreameLawnMowerLastScheduleProbeSensor(
@@ -459,6 +560,109 @@ def batch_device_data_probe_result_attributes(
         for key, value in attributes.items()
         if value not in (None, [], {})
     }
+
+
+def batch_schedule_attributes(result: dict[str, Any] | None) -> dict[str, Any]:
+    """Return compact cached batch schedule attributes."""
+    summary = _batch_schedule_probe_summary(_batch_schedule_section(result))
+    if not summary:
+        return {}
+    attributes = {
+        "captured_at": result.get("captured_at") if result else None,
+        "source": result.get("source") if result else None,
+        "batch_schedule": summary,
+    }
+    return {
+        key: value
+        for key, value in attributes.items()
+        if value not in (None, [], {})
+    }
+
+
+def batch_preference_attributes(result: dict[str, Any] | None) -> dict[str, Any]:
+    """Return compact cached batch preference attributes."""
+    summary = _batch_preference_probe_summary(_batch_preference_section(result))
+    if not summary:
+        return {}
+    attributes = {
+        "captured_at": result.get("captured_at") if result else None,
+        "source": result.get("source") if result else None,
+        "batch_mowing_preferences": summary,
+    }
+    return {
+        key: value
+        for key, value in attributes.items()
+        if value not in (None, [], {})
+    }
+
+
+def batch_ota_attributes(result: dict[str, Any] | None) -> dict[str, Any]:
+    """Return compact cached batch OTA attributes."""
+    summary = _batch_ota_probe_summary(_batch_ota_section(result))
+    if not summary:
+        return {}
+    attributes = {
+        "captured_at": result.get("captured_at") if result else None,
+        "source": result.get("source") if result else None,
+        "batch_ota_info": summary,
+        "ota_status_name": _batch_ota_status_name(result),
+    }
+    return {
+        key: value
+        for key, value in attributes.items()
+        if value not in (None, [], {})
+    }
+
+
+def _batch_schedule_count(result: dict[str, Any] | None) -> int | None:
+    summary = _batch_schedule_probe_summary(_batch_schedule_section(result))
+    if not isinstance(summary, dict):
+        return None
+    value = summary.get("schedule_count")
+    return value if isinstance(value, int) else None
+
+
+def _batch_preference_map_count(result: dict[str, Any] | None) -> int | None:
+    summary = _batch_preference_probe_summary(_batch_preference_section(result))
+    if not isinstance(summary, dict):
+        return None
+    value = summary.get("map_count")
+    return value if isinstance(value, int) else None
+
+
+def _batch_schedule_section(result: dict[str, Any] | None) -> dict[str, Any] | None:
+    value = result.get("batch_schedule") if isinstance(result, dict) else None
+    return value if isinstance(value, dict) else None
+
+
+def _batch_preference_section(
+    result: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    value = result.get("batch_mowing_preferences") if isinstance(result, dict) else None
+    return value if isinstance(value, dict) else None
+
+
+def _batch_ota_section(result: dict[str, Any] | None) -> dict[str, Any] | None:
+    value = result.get("batch_ota_info") if isinstance(result, dict) else None
+    return value if isinstance(value, dict) else None
+
+
+def _batch_ota_status_name(result: dict[str, Any] | None) -> str | None:
+    ota = _batch_ota_section(result)
+    if ota is None:
+        return None
+    status = ota.get("ota_status")
+    if isinstance(status, str) and status:
+        return status
+    if isinstance(status, int):
+        if ota.get("update_available") and status == 0:
+            return "update_available"
+        return f"status_{status}"
+    if ota.get("update_available") is True:
+        return "update_available"
+    if ota.get("available"):
+        return "no_update"
+    return None
 
 
 def _schedule_probe_entry_summary(schedule: dict[str, Any]) -> dict[str, Any]:

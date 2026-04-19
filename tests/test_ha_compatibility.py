@@ -8,6 +8,8 @@ from PIL import Image, ImageFont
 from custom_components.dreame_lawn_mower import image as image_helpers
 from custom_components.dreame_lawn_mower.binary_sensor import (
     DreameBinarySensorDescription,
+    DreameLawnMowerAutomaticFirmwareUpdatesBinarySensor,
+    DreameLawnMowerFirmwareUpdateAvailableBinarySensor,
 )
 from custom_components.dreame_lawn_mower.button import (
     DreameLawnMowerCaptureBatchDeviceDataProbeButton,
@@ -27,14 +29,20 @@ from custom_components.dreame_lawn_mower.image import (
     png_bytes_to_jpeg,
 )
 from custom_components.dreame_lawn_mower.sensor import (
+    DreameLawnMowerConfiguredScheduleCountSensor,
+    DreameLawnMowerFirmwareUpdateStatusSensor,
     DreameLawnMowerLastBatchDeviceDataProbeSensor,
     DreameLawnMowerLastPreferenceProbeSensor,
     DreameLawnMowerLastScheduleProbeSensor,
     DreameLawnMowerLastScheduleWriteSensor,
     DreameLawnMowerLastTaskStatusProbeSensor,
     DreameLawnMowerLastWeatherProbeSensor,
+    DreameLawnMowerPreferenceMapCountSensor,
     DreameSensorDescription,
     batch_device_data_probe_result_attributes,
+    batch_ota_attributes,
+    batch_preference_attributes,
+    batch_schedule_attributes,
     preference_probe_result_attributes,
     schedule_probe_result_attributes,
     schedule_write_result_attributes,
@@ -109,6 +117,31 @@ def test_batch_device_data_probe_button_is_diagnostic_disabled_by_default() -> N
     )
 
 
+def test_firmware_update_available_binary_sensor_is_diagnostic() -> None:
+    assert (
+        DreameLawnMowerFirmwareUpdateAvailableBinarySensor.__dict__[
+            "__attr_entity_category"
+        ]
+        == "diagnostic"
+    )
+
+
+def test_automatic_firmware_updates_binary_sensor_is_diagnostic_disabled_by_default(
+) -> None:
+    assert (
+        DreameLawnMowerAutomaticFirmwareUpdatesBinarySensor.__dict__[
+            "__attr_entity_category"
+        ]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerAutomaticFirmwareUpdatesBinarySensor.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
+    )
+
+
 def test_task_status_probe_button_is_diagnostic_disabled_by_default() -> None:
     assert (
         DreameLawnMowerCaptureTaskStatusProbeButton.__dict__[
@@ -159,6 +192,41 @@ def test_last_schedule_write_sensor_is_diagnostic_disabled_by_default() -> None:
     )
     assert (
         DreameLawnMowerLastScheduleWriteSensor.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
+    )
+
+
+def test_firmware_update_status_sensor_is_diagnostic() -> None:
+    assert (
+        DreameLawnMowerFirmwareUpdateStatusSensor.__dict__["__attr_entity_category"]
+        == "diagnostic"
+    )
+
+
+def test_configured_schedule_count_sensor_is_diagnostic_disabled_by_default() -> None:
+    assert (
+        DreameLawnMowerConfiguredScheduleCountSensor.__dict__[
+            "__attr_entity_category"
+        ]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerConfiguredScheduleCountSensor.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
+    )
+
+
+def test_preference_map_count_sensor_is_diagnostic_disabled_by_default() -> None:
+    assert (
+        DreameLawnMowerPreferenceMapCountSensor.__dict__["__attr_entity_category"]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerPreferenceMapCountSensor.__dict__[
             "__attr_entity_registry_enabled_default"
         ]
         is False
@@ -661,6 +729,162 @@ def test_batch_device_data_probe_result_attributes_are_compact() -> None:
             "ota_status": "update_available",
             "error_count": 0,
         },
+    }
+
+
+def test_batch_schedule_attributes_are_compact() -> None:
+    result = {
+        "captured_at": "2026-04-19T10:15:00+00:00",
+        "source": "batch_device_data_auto",
+        "batch_schedule": {
+            "source": "batch_device_data_schedule",
+            "available": True,
+            "current_task": {"start_time": "10:58", "version": 19383},
+            "schedules": [
+                {
+                    "idx": 0,
+                    "label": "map_0",
+                    "available": True,
+                    "version": 19383,
+                    "plan_count": 2,
+                    "enabled_plan_count": 1,
+                    "plans": [{"plan_id": 0}],
+                }
+            ],
+            "errors": [],
+        },
+    }
+
+    assert batch_schedule_attributes(result) == {
+        "captured_at": "2026-04-19T10:15:00+00:00",
+        "source": "batch_device_data_auto",
+        "batch_schedule": {
+            "source": "batch_device_data_schedule",
+            "available": True,
+            "current_task": {"start_time": "10:58", "version": 19383},
+            "schedule_count": 1,
+            "schedules": [
+                {
+                    "idx": 0,
+                    "label": "map_0",
+                    "available": True,
+                    "version": 19383,
+                    "plan_count": 2,
+                    "enabled_plan_count": 1,
+                }
+            ],
+            "error_count": 0,
+        },
+    }
+
+
+def test_batch_preference_attributes_are_compact() -> None:
+    result = {
+        "captured_at": "2026-04-19T10:15:00+00:00",
+        "source": "batch_device_data_auto",
+        "batch_mowing_preferences": {
+            "source": "batch_device_data_mowing_preferences",
+            "available": True,
+            "property_hint": "2.52",
+            "maps": [
+                {
+                    "idx": 0,
+                    "label": "map_0",
+                    "available": True,
+                    "mode": 0,
+                    "mode_name": "global",
+                    "area_count": 1,
+                    "preferences": [
+                        {
+                            "area_id": 0,
+                            "reported_version": 152,
+                            "version": 152,
+                            "efficient_mode_name": "efficient",
+                            "mowing_height_cm": 4.0,
+                            "edge_mowing_auto": True,
+                            "obstacle_avoidance_enabled": True,
+                            "obstacle_avoidance_ai_classes": [
+                                "people",
+                                "animals",
+                                "objects",
+                            ],
+                            "raw_payload": [152, 0, 0],
+                        }
+                    ],
+                }
+            ],
+            "errors": [],
+        },
+    }
+
+    assert batch_preference_attributes(result) == {
+        "captured_at": "2026-04-19T10:15:00+00:00",
+        "source": "batch_device_data_auto",
+        "batch_mowing_preferences": {
+            "source": "batch_device_data_mowing_preferences",
+            "available": True,
+            "property_hint": "2.52",
+            "map_count": 1,
+            "maps": [
+                {
+                    "idx": 0,
+                    "label": "map_0",
+                    "available": True,
+                    "mode": 0,
+                    "mode_name": "global",
+                    "area_count": 1,
+                    "preference_count": 1,
+                    "preferences": [
+                        {
+                            "area_id": 0,
+                            "reported_version": 152,
+                            "version": 152,
+                            "efficient_mode_name": "efficient",
+                            "mowing_height_cm": 4.0,
+                            "edge_mowing_auto": True,
+                            "obstacle_avoidance_enabled": True,
+                            "obstacle_avoidance_ai_classes": [
+                                "people",
+                                "animals",
+                                "objects",
+                            ],
+                        }
+                    ],
+                }
+            ],
+            "error_count": 0,
+        },
+    }
+
+
+def test_batch_ota_attributes_are_compact() -> None:
+    result = {
+        "captured_at": "2026-04-19T10:15:00+00:00",
+        "source": "batch_device_data_auto",
+        "batch_ota_info": {
+            "source": "batch_device_data_ota_info",
+            "available": True,
+            "update_available": True,
+            "auto_upgrade_enabled": False,
+            "ota_info": [1, 0],
+            "ota_status": 0,
+            "errors": [],
+        },
+    }
+
+    assert batch_ota_attributes(result) == {
+        "captured_at": "2026-04-19T10:15:00+00:00",
+        "source": "batch_device_data_auto",
+        "batch_ota_info": {
+            "source": "batch_device_data_ota_info",
+            "available": True,
+            "update_available": True,
+            "auto_upgrade_enabled": False,
+            "ota_info": [1, 0],
+            "ota_status": 0,
+            "error_count": 0,
+        },
+        "ota_status_name": "update_available",
     }
 
 

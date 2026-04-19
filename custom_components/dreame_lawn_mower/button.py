@@ -229,21 +229,21 @@ class DreameLawnMowerCaptureBatchDeviceDataProbeButton(
 
     async def async_press(self) -> None:
         """Probe read-only batch device data and log the structured result."""
-        payload = {
-            "captured_at": datetime.now(UTC).isoformat(),
-            "source": "batch_device_data_probe",
-            "batch_schedule": await self.coordinator.client.async_get_batch_schedules(
-                include_raw=False,
-            ),
-            "batch_mowing_preferences": (
-                await self.coordinator.client.async_get_batch_mowing_preferences(
-                    include_raw=False,
-                )
-            ),
-            "batch_ota_info": await self.coordinator.client.async_get_batch_ota_info(
-                include_raw=False,
-            ),
-        }
+        payload = await self.coordinator.async_refresh_batch_device_data(
+            force=True,
+            source="batch_device_data_probe",
+        )
+        if payload is None:
+            payload = {
+                "captured_at": datetime.now(UTC).isoformat(),
+                "source": "batch_device_data_probe",
+                "batch_schedule": {"available": False, "errors": ["refresh_failed"]},
+                "batch_mowing_preferences": {
+                    "available": False,
+                    "errors": ["refresh_failed"],
+                },
+                "batch_ota_info": {"available": False, "errors": ["refresh_failed"]},
+            }
         self.coordinator.last_batch_device_data_probe_result = payload
         self.coordinator.async_update_listeners()
         _LOGGER.info(

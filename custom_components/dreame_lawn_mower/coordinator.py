@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -34,6 +35,8 @@ from .dreame_lawn_mower_client.models import display_name_for_model
 
 _LOGGER = logging.getLogger(__name__)
 
+BATCH_DEVICE_DATA_REFRESH_INTERVAL = timedelta(minutes=15)
+
 
 class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot]):
     """Manage mower state updates for a single config entry."""
@@ -59,6 +62,8 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             descriptor=descriptor,
         )
         self.entry = entry
+        self.batch_device_data: dict[str, Any] | None = None
+        self.batch_device_data_refreshed_at: datetime | None = None
         self.last_batch_device_data_probe_result: dict[str, Any] | None = None
         self.last_preference_probe_result: dict[str, Any] | None = None
         self.last_schedule_probe_result: dict[str, Any] | None = None
@@ -81,9 +86,57 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
     async def _async_update_data(self) -> DreameLawnMowerSnapshot:
         """Fetch the latest mower snapshot."""
         try:
-            return await self.client.async_refresh()
+            snapshot = await self.client.async_refresh()
         except DreameLawnMowerConnectionError as err:
             raise UpdateFailed(str(err)) from err
+        await self.async_refresh_batch_device_data(force=False)
+        return snapshot
+
+    async def async_refresh_batch_device_data(
+        self,
+        *,
+        force: bool = False,
+        source: str = "batch_device_data_auto",
+    ) -> dict[str, Any] | None:
+        """Refresh cached batch device data without failing the main poll."""
+        now = datetime.now(UTC)
+        if (
+            not force
+            and self.batch_device_data is not None
+            and self.batch_device_data_refreshed_at is not None
+            and now - self.batch_device_data_refreshed_at
+            < BATCH_DEVICE_DATA_REFRESH_INTERVAL
+        ):
+            return self.batch_device_data
+
+        try:
+            batch_schedule, batch_mowing_preferences, batch_ota_info = await (
+                self._async_fetch_batch_device_data()
+            )
+        except Exception as err:  # noqa: BLE001 - best-effort extra metadata
+            _LOGGER.debug("Failed to refresh batch device data: %s", err)
+            return self.batch_device_data
+
+        payload = {
+            "captured_at": now.isoformat(),
+            "source": source,
+            "batch_schedule": batch_schedule,
+            "batch_mowing_preferences": batch_mowing_preferences,
+            "batch_ota_info": batch_ota_info,
+        }
+        self.batch_device_data = payload
+        self.batch_device_data_refreshed_at = now
+        return payload
+
+    async def _async_fetch_batch_device_data(
+        self,
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        """Fetch batch schedule, settings, and OTA payloads in parallel."""
+        return await asyncio.gather(
+            self.client.async_get_batch_schedules(include_raw=False),
+            self.client.async_get_batch_mowing_preferences(include_raw=False),
+            self.client.async_get_batch_ota_info(include_raw=False),
+        )
 
     async def async_shutdown(self) -> None:
         """Disconnect client resources."""
