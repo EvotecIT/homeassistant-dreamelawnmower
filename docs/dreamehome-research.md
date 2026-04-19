@@ -148,6 +148,8 @@ that block into `plan_id`, `enabled`, `name`, `weeks`, and per-day task entries
 with minute-of-day start/end values, type, cyclic flag, and optional regions.
 The Python encoder round-trips the known live-shaped schedule payloads and can
 build full upload request chunks, but full schedule editing is not exposed yet.
+Home Assistant exposes decoded enabled plans through a read-only calendar
+entity; calendar queries fetch the app schedule data on demand.
 
 ## First live probe result
 

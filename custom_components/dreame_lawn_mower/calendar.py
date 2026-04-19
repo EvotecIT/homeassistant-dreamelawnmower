@@ -1,0 +1,242 @@
+"""Read-only schedule calendar for Dreame lawn mower."""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Mapping
+from datetime import date, datetime, time, timedelta
+from typing import Any
+
+from homeassistant.components.calendar import CalendarEntity, CalendarEvent
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
+
+from .const import DOMAIN
+from .coordinator import DreameLawnMowerCoordinator
+from .entity import DreameLawnMowerEntity
+
+_LOGGER = logging.getLogger(__name__)
+
+SCHEDULE_LOOKAHEAD_DAYS = 14
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up mower schedule calendar."""
+    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    async_add_entities([DreameLawnMowerScheduleCalendar(coordinator)], True)
+
+
+class DreameLawnMowerScheduleCalendar(DreameLawnMowerEntity, CalendarEntity):
+    """Read-only calendar built from mower-native app schedules."""
+
+    _attr_name = "Schedule"
+    _attr_icon = "mdi:calendar-clock"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_schedule_calendar"
+        self._cached_event: CalendarEvent | None = None
+        self._last_error: str | None = None
+
+    @property
+    def event(self) -> CalendarEvent | None:
+        """Return the current or next schedule event."""
+        return self._cached_event
+
+    @property
+    def available(self) -> bool:
+        """Return whether the calendar can currently serve schedule data."""
+        return self.coordinator.data is not None and self._last_error is None
+
+    async def async_update(self) -> None:
+        """Refresh the cached upcoming schedule event."""
+        now = dt_util.now()
+        events = await self.async_get_events(
+            self.hass,
+            now,
+            now + timedelta(days=SCHEDULE_LOOKAHEAD_DAYS),
+        )
+        self._cached_event = events[0] if events else None
+
+    async def async_get_events(
+        self,
+        hass: HomeAssistant,
+        start_date: datetime,
+        end_date: datetime,
+    ) -> list[CalendarEvent]:
+        """Return mower schedule events in the requested time window."""
+        try:
+            payload = await self.coordinator.client.async_get_app_schedules()
+        except Exception as err:  # noqa: BLE001 - calendar should stay read-only
+            self._last_error = str(err)
+            _LOGGER.debug("Failed to fetch mower schedules: %s", err)
+            return []
+        self._last_error = None
+        events = schedule_calendar_events(
+            payload,
+            start_date,
+            end_date,
+            mower_name=self._descriptor.name,
+        )
+        self._cached_event = events[0] if events else None
+        return events
+
+
+def schedule_calendar_events(
+    payload: Mapping[str, Any],
+    start_date: datetime,
+    end_date: datetime,
+    *,
+    mower_name: str | None = None,
+) -> list[CalendarEvent]:
+    """Build Home Assistant calendar events from decoded app schedule data."""
+    local_start = _as_local(start_date)
+    local_end = _as_local(end_date)
+    if local_end <= local_start:
+        return []
+
+    events: list[CalendarEvent] = []
+    for day in _candidate_days(local_start.date(), local_end.date()):
+        week_day = _schedule_week_day(day)
+        for schedule in payload.get("schedules") or []:
+            if not isinstance(schedule, Mapping):
+                continue
+            map_index = schedule.get("idx")
+            map_label = _schedule_label(schedule)
+            for plan in schedule.get("plans") or []:
+                if not isinstance(plan, Mapping) or not plan.get("enabled"):
+                    continue
+                for week in plan.get("weeks") or []:
+                    if (
+                        not isinstance(week, Mapping)
+                        or week.get("week_day") != week_day
+                    ):
+                        continue
+                    events.extend(
+                        _task_events(
+                            day=day,
+                            week=week,
+                            plan=plan,
+                            map_index=map_index,
+                            map_label=map_label,
+                            local_start=local_start,
+                            local_end=local_end,
+                            mower_name=mower_name,
+                        )
+                    )
+    return sorted(events, key=lambda event: event.start_datetime_local)
+
+
+def _task_events(
+    *,
+    day: date,
+    week: Mapping[str, Any],
+    plan: Mapping[str, Any],
+    map_index: Any,
+    map_label: str,
+    local_start: datetime,
+    local_end: datetime,
+    mower_name: str | None,
+) -> list[CalendarEvent]:
+    events: list[CalendarEvent] = []
+    for task_index, task in enumerate(week.get("tasks") or []):
+        if not isinstance(task, Mapping):
+            continue
+        start_minute = _schedule_minute(task.get("start"))
+        end_minute = _schedule_minute(task.get("end"))
+        if start_minute is None or end_minute is None:
+            continue
+        event_start = _combine_schedule_time(day, start_minute)
+        event_end = _combine_schedule_time(day, end_minute)
+        if event_end <= event_start:
+            event_end += timedelta(days=1)
+        if event_end <= local_start or event_start >= local_end:
+            continue
+        type_name = str(task.get("type_name") or "mowing").replace("_", " ")
+        summary = f"{type_name.capitalize()} ({map_label} plan {plan.get('plan_id')})"
+        description = _event_description(
+            mower_name=mower_name,
+            map_label=map_label,
+            plan=plan,
+            task=task,
+        )
+        events.append(
+            CalendarEvent(
+                start=event_start,
+                end=event_end,
+                summary=summary,
+                description=description,
+                uid=(
+                    f"dreame-mower-{map_index}-{plan.get('plan_id')}-"
+                    f"{day.isoformat()}-{task_index}"
+                ),
+            )
+        )
+    return events
+
+
+def _event_description(
+    *,
+    mower_name: str | None,
+    map_label: str,
+    plan: Mapping[str, Any],
+    task: Mapping[str, Any],
+) -> str:
+    lines = [
+        f"Mower: {mower_name or 'Dreame lawn mower'}",
+        f"Schedule: {map_label}",
+        f"Plan: {plan.get('plan_id')}",
+        f"Task: {str(task.get('type_name') or 'mowing').replace('_', ' ')}",
+    ]
+    if task.get("cyclic"):
+        lines.append("Cyclic: yes")
+    if task.get("regions"):
+        lines.append(f"Regions: {task.get('regions')}")
+    return "\n".join(lines)
+
+
+def _candidate_days(start_day: date, end_day: date) -> list[date]:
+    first_day = start_day - timedelta(days=1)
+    day_count = (end_day - first_day).days + 1
+    return [first_day + timedelta(days=offset) for offset in range(day_count)]
+
+
+def _schedule_week_day(value: date) -> int:
+    return (value.weekday() + 1) % 7
+
+
+def _schedule_label(schedule: Mapping[str, Any]) -> str:
+    idx = schedule.get("idx")
+    if idx == -1:
+        return "default schedule"
+    return f"map {idx}"
+
+
+def _schedule_minute(value: Any) -> int | None:
+    try:
+        minute = int(value)
+    except (TypeError, ValueError):
+        return None
+    if minute < 0 or minute >= 24 * 60:
+        return None
+    return minute
+
+
+def _combine_schedule_time(value: date, minute: int) -> datetime:
+    return datetime.combine(
+        value,
+        time(minute // 60, minute % 60),
+        tzinfo=dt_util.DEFAULT_TIME_ZONE,
+    )
+
+
+def _as_local(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+    return dt_util.as_local(value)

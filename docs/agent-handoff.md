@@ -91,6 +91,9 @@ Last updated: 2026-04-19
   while it was already disabled. The mower returned success (`r: 0`, version
   `19383`), and a follow-up read confirmed map `0` remained plan `0` enabled
   and plan `1` disabled.
+- Home Assistant now has a read-only `Schedule` calendar entity. Calendar
+  event queries call the app schedule reader on demand and convert enabled
+  per-map plans into local scheduled mowing events.
 - Config-flow auth failures are classified into non-secret Home Assistant
   errors for account type, region, connectivity, generic auth, 2FA, and no
   matching mower devices.

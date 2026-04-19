@@ -213,9 +213,10 @@ A no-op `SCHDSV2` write was validated live on an A2 on 2026-04-19 by disabling
 an already disabled plan and reading the schedule back unchanged. Do not use
 the execute flags from automations or unsupervised scripts.
 
-Home Assistant does not expose a schedule/calendar entity yet; the current
-UI-facing support is still only the diagnostic `Scheduled Task` binary sensor
-while a scheduled task is reported active.
+Home Assistant now exposes a read-only `Schedule` calendar entity backed by the
+same app schedule commands. Calendar event queries fetch current app schedule
+data on demand, and the diagnostic `Scheduled Task` binary sensor still reports
+whether the mower says a scheduled task is currently active.
 
 If you want to probe the same cloud endpoints the Dreamehome app exposes for mower discovery and raw properties, use:
 

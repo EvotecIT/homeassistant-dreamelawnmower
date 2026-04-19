@@ -145,7 +145,7 @@ Checklist:
 - [x] add a Python-side read-only schedule probe and parser tests
 - [x] add schedule payload encoder tests and a dry-run-first enable/disable write planner
 - [x] validate a supervised no-op `SCHDSV2` enable/disable write live
-- [ ] expose a Home Assistant schedule or calendar surface after more schedule fixtures
+- [x] expose a read-only Home Assistant calendar surface for decoded schedules
 - [ ] validate supervised schedule enable/disable writes before adding Home Assistant controls
 - [ ] keep adding fixture-based tests for idle and recovery transitions as captures become available
 
