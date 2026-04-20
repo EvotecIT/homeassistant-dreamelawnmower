@@ -7,6 +7,8 @@ from types import SimpleNamespace
 from custom_components.dreame_lawn_mower.binary_sensor import (
     BINARY_SENSORS,
     DreameLawnMowerBinarySensor,
+    DreameLawnMowerRainDelayActiveBinarySensor,
+    DreameLawnMowerRainProtectionEnabledBinarySensor,
 )
 from custom_components.dreame_lawn_mower.sensor import (
     SENSORS,
@@ -15,7 +17,10 @@ from custom_components.dreame_lawn_mower.sensor import (
     DreameLawnMowerLastScheduleWriteSensor,
     DreameLawnMowerLastTaskStatusProbeSensor,
     DreameLawnMowerLastWeatherProbeSensor,
+    DreameLawnMowerRainDelayEndTimeSensor,
+    DreameLawnMowerRainProtectionDurationSensor,
     DreameLawnMowerSensor,
+    DreameLawnMowerWeatherProtectionStatusSensor,
 )
 
 
@@ -521,3 +526,120 @@ def test_last_weather_probe_sensor_reports_config_error() -> None:
         "errors": [{"stage": "config", "error": "cloud unavailable"}],
         "warning_count": 0,
     }
+
+
+def test_weather_protection_status_sensor_uses_cached_weather_state() -> None:
+    entity = object.__new__(DreameLawnMowerWeatherProtectionStatusSensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(),
+        weather_protection={
+            "source": "weather_protection_auto",
+            "available": True,
+            "rain_protection_enabled": True,
+            "rain_protection_active": False,
+            "rain_protection_duration_hours": 8,
+            "warnings": [],
+            "errors": [],
+        },
+    )
+
+    assert entity.available is True
+    assert entity.native_value == "rain_protection_enabled"
+    assert entity.extra_state_attributes == {
+        "source": "weather_protection_auto",
+        "available": True,
+        "rain_protection_enabled": True,
+        "rain_protection_active": False,
+        "rain_protection_duration_hours": 8,
+        "error_count": 0,
+        "warning_count": 0,
+    }
+
+
+def test_rain_protection_enabled_binary_sensor_uses_cached_weather_state() -> None:
+    entity = object.__new__(DreameLawnMowerRainProtectionEnabledBinarySensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(),
+        weather_protection={
+            "source": "weather_protection_auto",
+            "available": True,
+            "rain_protection_enabled": True,
+            "rain_protection_active": False,
+            "warnings": [],
+            "errors": [],
+        },
+    )
+
+    assert entity.available is True
+    assert entity.is_on is True
+    assert entity.extra_state_attributes == {
+        "source": "weather_protection_auto",
+        "available": True,
+        "rain_protection_enabled": True,
+        "rain_protection_active": False,
+        "error_count": 0,
+        "warning_count": 0,
+    }
+
+
+def test_rain_delay_active_binary_sensor_uses_cached_weather_state() -> None:
+    entity = object.__new__(DreameLawnMowerRainDelayActiveBinarySensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(),
+        weather_protection={
+            "source": "weather_protection_auto",
+            "available": True,
+            "rain_protection_enabled": True,
+            "rain_protection_active": True,
+            "rain_protect_end_time_iso": "2026-04-19T12:05:00+00:00",
+            "warnings": [],
+            "errors": [],
+        },
+    )
+
+    assert entity.available is True
+    assert entity.is_on is True
+    assert entity.extra_state_attributes == {
+        "source": "weather_protection_auto",
+        "available": True,
+        "rain_protection_enabled": True,
+        "rain_protect_end_time_iso": "2026-04-19T12:05:00+00:00",
+        "rain_protection_active": True,
+        "error_count": 0,
+        "warning_count": 0,
+    }
+
+
+def test_rain_protection_duration_sensor_uses_cached_weather_state() -> None:
+    entity = object.__new__(DreameLawnMowerRainProtectionDurationSensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(),
+        weather_protection={
+            "source": "weather_protection_auto",
+            "available": True,
+            "rain_protection_duration_hours": 8,
+            "warnings": [],
+            "errors": [],
+        },
+    )
+
+    assert entity.available is True
+    assert entity.native_value == 8
+
+
+def test_rain_delay_end_time_sensor_uses_cached_weather_state() -> None:
+    entity = object.__new__(DreameLawnMowerRainDelayEndTimeSensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(),
+        weather_protection={
+            "source": "weather_protection_auto",
+            "available": True,
+            "rain_protect_end_time_iso": "2026-04-19T12:05:00+00:00",
+            "rain_protection_active": True,
+            "warnings": [],
+            "errors": [],
+        },
+    )
+
+    assert entity.available is True
+    assert entity.native_value.isoformat() == "2026-04-19T12:05:00+00:00"

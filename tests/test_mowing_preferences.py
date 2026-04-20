@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
+    apply_mowing_preference_changes,
     decode_mowing_preference_payload,
+    encode_mowing_preference_payload,
     summarize_mowing_preference_info,
 )
 from dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
@@ -166,4 +168,110 @@ def test_get_mowing_preferences_can_limit_maps_and_include_raw() -> None:
     assert [entry["idx"] for entry in result["maps"]] == [0]
     assert "raw_info" in result["maps"][0]
     assert "raw_response" in result["maps"][0]["preferences"][0]
+    assert [call["t"] for call in cloud.calls] == ["PREI", "PRE", "PRE"]
+
+
+def test_encode_mowing_preference_payload_round_trips_decoded_values() -> None:
+    decoded = decode_mowing_preference_payload(
+        [8, 0, 11, 1, 40, 2, 90, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1]
+    )
+    decoded["reported_version"] = 8
+
+    assert encode_mowing_preference_payload(decoded) == [
+        8,
+        0,
+        11,
+        1,
+        40,
+        2,
+        90,
+        1,
+        0,
+        1,
+        1,
+        2,
+        1,
+        15,
+        20,
+        7,
+        1,
+    ]
+
+
+def test_apply_mowing_preference_changes_updates_labels_and_ai_classes() -> None:
+    current = decode_mowing_preference_payload(
+        [8, 0, 11, 1, 40, 2, 90, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1]
+    )
+    current["reported_version"] = 8
+
+    updated, changed_fields = apply_mowing_preference_changes(
+        current,
+        {
+            "mowing_height_cm": 5,
+            "efficient_mode": 0,
+            "obstacle_avoidance_ai_classes": ["animals"],
+        },
+    )
+
+    assert changed_fields == [
+        "mowing_height_cm",
+        "efficient_mode",
+        "obstacle_avoidance_ai_classes",
+    ]
+    assert updated["mowing_height_cm"] == 5.0
+    assert updated["efficient_mode"] == 0
+    assert updated["efficient_mode_name"] == "standard"
+    assert updated["obstacle_avoidance_ai"] == 2
+    assert updated["obstacle_avoidance_ai_classes"] == ["animals"]
+
+
+def test_plan_app_mowing_preference_update_builds_candidate_request() -> None:
+    client = _client()
+    cloud = _FakePreferenceCloud()
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_plan_app_mowing_preference_update(
+        map_index=0,
+        area_id=11,
+        changes={
+            "mowing_height_cm": 5,
+            "edge_mowing_auto": False,
+            "obstacle_avoidance_ai_classes": ["people", "objects"],
+        },
+    )
+
+    assert result["dry_run"] is True
+    assert result["executed"] is False
+    assert result["execute_supported"] is False
+    assert result["request_verified"] is False
+    assert result["changed"] is True
+    assert result["changed_fields"] == [
+        "mowing_height_cm",
+        "edge_mowing_auto",
+        "obstacle_avoidance_ai_classes",
+    ]
+    assert result["mode_name"] == "custom"
+    assert result["map"] == {
+        "idx": 0,
+        "label": "map_0",
+        "available": True,
+        "mode": 1,
+        "mode_name": "custom",
+        "area_count": 2,
+        "preference_count": 2,
+    }
+    assert result["previous_preference"]["mowing_height_cm"] == 4.0
+    assert result["updated_preference"]["mowing_height_cm"] == 5.0
+    assert result["updated_preference"]["edge_mowing_auto"] is False
+    assert result["updated_preference"]["obstacle_avoidance_ai"] == 5
+    assert result["updated_preference"]["obstacle_avoidance_ai_classes"] == [
+        "people",
+        "objects",
+    ]
+    assert result["payload"] == [8, 0, 11, 1, 50, 2, 90, 0, 0, 1, 1, 2, 1, 15, 20, 5, 1]
+    assert result["request_candidate"] == {
+        "m": "s",
+        "t": "PRE",
+        "d": [8, 0, 11, 1, 50, 2, 90, 0, 0, 1, 1, 2, 1, 15, 20, 5, 1],
+    }
     assert [call["t"] for call in cloud.calls] == ["PREI", "PRE", "PRE"]

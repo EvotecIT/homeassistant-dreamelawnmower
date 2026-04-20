@@ -79,6 +79,8 @@ The same flow is available as `examples/python_client.py`.
 - read-only schedule retrieval and calendar-friendly task summaries
 - dry-run schedule enable/disable planning, with explicit gates required before
   live writes
+- dry-run mowing-preference planning from current app payloads, without sending
+  PRE or PREP writes
 - read-only app-map retrieval, all-map summaries, and simple map rendering
 - weather/rain-protection and mowing-preference diagnostics
 - firmware/update evidence gathering without claiming unverified OTA support
@@ -121,6 +123,7 @@ service, config-flow, and registry behavior in `custom_components`.
 - `examples/batch_device_data_probe.py`
 - `examples/schedule_probe.py`
 - `examples/schedule_write_probe.py`
+- `examples/preference_write_probe.py`
 - `examples/weather_probe.py`
 - `examples/preference_probe.py`
 - `examples/task_status_probe.py`

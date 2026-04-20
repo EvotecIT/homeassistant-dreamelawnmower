@@ -37,6 +37,7 @@ _LOGGER = logging.getLogger(__name__)
 
 BATCH_DEVICE_DATA_REFRESH_INTERVAL = timedelta(minutes=15)
 APP_MAP_OBJECT_REFRESH_INTERVAL = timedelta(minutes=30)
+WEATHER_PROTECTION_REFRESH_INTERVAL = timedelta(minutes=5)
 
 
 class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot]):
@@ -67,8 +68,11 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         self.app_map_objects_refreshed_at: datetime | None = None
         self.batch_device_data: dict[str, Any] | None = None
         self.batch_device_data_refreshed_at: datetime | None = None
+        self.weather_protection: dict[str, Any] | None = None
+        self.weather_protection_refreshed_at: datetime | None = None
         self.last_batch_device_data_probe_result: dict[str, Any] | None = None
         self.last_preference_probe_result: dict[str, Any] | None = None
+        self.last_preference_write_result: dict[str, Any] | None = None
         self.last_schedule_probe_result: dict[str, Any] | None = None
         self.last_schedule_write_result: dict[str, Any] | None = None
         self.last_task_status_probe_result: dict[str, Any] | None = None
@@ -94,6 +98,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             raise UpdateFailed(str(err)) from err
         await self.async_refresh_batch_device_data(force=False)
         await self.async_refresh_app_map_objects(force=False)
+        await self.async_refresh_weather_protection(force=False)
         return snapshot
 
     async def async_refresh_batch_device_data(
@@ -174,6 +179,38 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         }
         self.app_map_objects = payload
         self.app_map_objects_refreshed_at = now
+        return payload
+
+    async def async_refresh_weather_protection(
+        self,
+        *,
+        force: bool = False,
+        source: str = "weather_protection_auto",
+    ) -> dict[str, Any] | None:
+        """Refresh cached read-only weather and rain-protection state."""
+        now = datetime.now(UTC)
+        if (
+            not force
+            and self.weather_protection is not None
+            and self.weather_protection_refreshed_at is not None
+            and now - self.weather_protection_refreshed_at
+            < WEATHER_PROTECTION_REFRESH_INTERVAL
+        ):
+            return self.weather_protection
+
+        try:
+            weather_protection = await self.client.async_get_weather_protection(
+                include_raw=False,
+            )
+        except Exception as err:  # noqa: BLE001 - best-effort extra metadata
+            _LOGGER.debug("Failed to refresh weather protection: %s", err)
+            return self.weather_protection
+
+        payload = dict(weather_protection)
+        payload.setdefault("captured_at", now.isoformat())
+        payload["source"] = source
+        self.weather_protection = payload
+        self.weather_protection_refreshed_at = now
         return payload
 
     async def async_shutdown(self) -> None:

@@ -25,7 +25,7 @@ from .const import (
 from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity
 from .manual_control import remote_control_state_safe
-from .sensor import batch_ota_attributes
+from .sensor import batch_ota_attributes, weather_probe_result_attributes
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,6 +237,8 @@ async def async_setup_entry(
         ]
         + [DreameLawnMowerFirmwareUpdateAvailableBinarySensor(coordinator)]
         + [DreameLawnMowerAutomaticFirmwareUpdatesBinarySensor(coordinator)]
+        + [DreameLawnMowerRainProtectionEnabledBinarySensor(coordinator)]
+        + [DreameLawnMowerRainDelayActiveBinarySensor(coordinator)]
     )
 
 
@@ -341,6 +343,82 @@ class DreameLawnMowerAutomaticFirmwareUpdatesBinarySensor(
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return safe cached OTA attributes."""
         return batch_ota_attributes(self.coordinator.batch_device_data)
+
+
+class DreameLawnMowerRainProtectionEnabledBinarySensor(
+    DreameLawnMowerEntity,
+    BinarySensorEntity,
+):
+    """Expose whether rain protection is configured as enabled."""
+
+    _attr_name = "Rain Protection Enabled"
+    _attr_icon = "mdi:weather-rainy"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_rain_protection_enabled"
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return whether rain protection is configured as enabled."""
+        value = _weather_flag(
+            self.coordinator.weather_protection,
+            "rain_protection_enabled",
+        )
+        return value
+
+    @property
+    def available(self) -> bool:
+        """Return whether cached weather state exists."""
+        return self.coordinator.data is not None and self.is_on is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe cached weather attributes."""
+        return weather_probe_result_attributes(self.coordinator.weather_protection)
+
+
+class DreameLawnMowerRainDelayActiveBinarySensor(
+    DreameLawnMowerEntity,
+    BinarySensorEntity,
+):
+    """Expose whether an active rain-delay window is currently reported."""
+
+    _attr_name = "Rain Delay Active"
+    _attr_icon = "mdi:weather-pouring"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_rain_delay_active"
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return whether an active rain-delay window is currently reported."""
+        return _weather_flag(
+            self.coordinator.weather_protection,
+            "rain_protection_active",
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return whether cached weather state exists."""
+        return self.coordinator.data is not None and self.is_on is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe cached weather attributes."""
+        return weather_probe_result_attributes(self.coordinator.weather_protection)
+
+
+def _weather_flag(result: dict[str, Any] | None, key: str) -> bool | None:
+    if not isinstance(result, dict):
+        return None
+    value = result.get(key)
+    return value if isinstance(value, bool) else None
 
 
 def _batch_ota_section(result: dict[str, Any] | None) -> dict[str, Any] | None:

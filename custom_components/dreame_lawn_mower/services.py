@@ -22,14 +22,30 @@ from .manual_control import remote_control_block_reason
 
 ATTR_ENTRY_ID = "entry_id"
 ATTR_CONFIRM_SCHEDULE_WRITE = "confirm_schedule_write"
+ATTR_CUTTER_POSITION = "cutter_position"
+ATTR_EDGE_MOWING_AUTO = "edge_mowing_auto"
+ATTR_EDGE_MOWING_NUM = "edge_mowing_num"
+ATTR_EDGE_MOWING_OBSTACLE_AVOIDANCE = "edge_mowing_obstacle_avoidance"
+ATTR_EDGE_MOWING_SAFE = "edge_mowing_safe"
+ATTR_EDGE_MOWING_WALK_MODE = "edge_mowing_walk_mode"
 ATTR_ENABLED = "enabled"
+ATTR_EFFICIENT_MODE = "efficient_mode"
 ATTR_EXECUTE = "execute"
+ATTR_AREA_ID = "area_id"
 ATTR_MAP_INDEX = "map_index"
+ATTR_MOWING_DIRECTION_DEGREES = "mowing_direction_degrees"
+ATTR_MOWING_DIRECTION_MODE = "mowing_direction_mode"
+ATTR_MOWING_HEIGHT_CM = "mowing_height_cm"
+ATTR_OBSTACLE_AVOIDANCE_AI_CLASSES = "obstacle_avoidance_ai_classes"
+ATTR_OBSTACLE_AVOIDANCE_DISTANCE_CM = "obstacle_avoidance_distance_cm"
+ATTR_OBSTACLE_AVOIDANCE_ENABLED = "obstacle_avoidance_enabled"
+ATTR_OBSTACLE_AVOIDANCE_HEIGHT_CM = "obstacle_avoidance_height_cm"
 ATTR_PLAN_ID = "plan_id"
 ATTR_PROMPT = "prompt"
 ATTR_ROTATION = "rotation"
 ATTR_VELOCITY = "velocity"
 
+SERVICE_PLAN_MOWING_PREFERENCE_UPDATE = "plan_mowing_preference_update"
 SERVICE_REMOTE_CONTROL_STEP = "remote_control_step"
 SERVICE_REMOTE_CONTROL_STOP = "remote_control_stop"
 SERVICE_SET_SCHEDULE_PLAN_ENABLED = "set_schedule_plan_enabled"
@@ -103,6 +119,55 @@ SET_SCHEDULE_PLAN_ENABLED_SCHEMA = vol.Schema(
     }
 )
 
+PLAN_MOWING_PREFERENCE_UPDATE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Required(ATTR_MAP_INDEX): _int_range(name=ATTR_MAP_INDEX, minimum=0),
+        vol.Required(ATTR_AREA_ID): _int_range(name=ATTR_AREA_ID, minimum=0),
+        vol.Optional(ATTR_EFFICIENT_MODE): _int_range(
+            name=ATTR_EFFICIENT_MODE,
+            minimum=0,
+        ),
+        vol.Optional(ATTR_MOWING_HEIGHT_CM): vol.Coerce(float),
+        vol.Optional(ATTR_MOWING_DIRECTION_MODE): _int_range(
+            name=ATTR_MOWING_DIRECTION_MODE,
+            minimum=0,
+        ),
+        vol.Optional(ATTR_MOWING_DIRECTION_DEGREES): _int_range(
+            name=ATTR_MOWING_DIRECTION_DEGREES,
+            minimum=0,
+        ),
+        vol.Optional(ATTR_EDGE_MOWING_AUTO): cv.boolean,
+        vol.Optional(ATTR_EDGE_MOWING_WALK_MODE): _int_range(
+            name=ATTR_EDGE_MOWING_WALK_MODE,
+            minimum=0,
+        ),
+        vol.Optional(ATTR_EDGE_MOWING_OBSTACLE_AVOIDANCE): cv.boolean,
+        vol.Optional(ATTR_CUTTER_POSITION): _int_range(
+            name=ATTR_CUTTER_POSITION,
+            minimum=0,
+        ),
+        vol.Optional(ATTR_EDGE_MOWING_NUM): _int_range(
+            name=ATTR_EDGE_MOWING_NUM,
+            minimum=0,
+        ),
+        vol.Optional(ATTR_OBSTACLE_AVOIDANCE_ENABLED): cv.boolean,
+        vol.Optional(ATTR_OBSTACLE_AVOIDANCE_HEIGHT_CM): _int_range(
+            name=ATTR_OBSTACLE_AVOIDANCE_HEIGHT_CM,
+            minimum=0,
+        ),
+        vol.Optional(ATTR_OBSTACLE_AVOIDANCE_DISTANCE_CM): _int_range(
+            name=ATTR_OBSTACLE_AVOIDANCE_DISTANCE_CM,
+            minimum=0,
+        ),
+        vol.Optional(ATTR_OBSTACLE_AVOIDANCE_AI_CLASSES): vol.All(
+            cv.ensure_list,
+            [vol.In(["people", "animals", "objects"])],
+        ),
+        vol.Optional(ATTR_EDGE_MOWING_SAFE): cv.boolean,
+    }
+)
+
 
 async def async_setup_services(hass: HomeAssistant) -> None:
     """Register domain services once."""
@@ -141,6 +206,20 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             await coordinator.async_request_refresh()
         _notify_schedule_plan_enabled(coordinator, result)
 
+    async def async_handle_plan_mowing_preference_update(
+        call: ServiceCall,
+    ) -> None:
+        coordinator = _coordinator_from_call(hass, call)
+        changes = _preference_change_request(call)
+        result = await coordinator.client.async_plan_app_mowing_preference_update(
+            map_index=call.data[ATTR_MAP_INDEX],
+            area_id=call.data[ATTR_AREA_ID],
+            changes=changes,
+        )
+        coordinator.last_preference_write_result = result
+        coordinator.async_update_listeners()
+        _notify_mowing_preference_update(coordinator, result)
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_REMOTE_CONTROL_STEP,
@@ -159,6 +238,12 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         async_handle_set_schedule_plan_enabled,
         schema=SET_SCHEDULE_PLAN_ENABLED_SCHEMA,
     )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_PLAN_MOWING_PREFERENCE_UPDATE,
+        async_handle_plan_mowing_preference_update,
+        schema=PLAN_MOWING_PREFERENCE_UPDATE_SCHEMA,
+    )
     domain_data[_SERVICES_REGISTERED] = True
 
 
@@ -171,6 +256,7 @@ async def async_unload_services(hass: HomeAssistant) -> None:
     hass.services.async_remove(DOMAIN, SERVICE_REMOTE_CONTROL_STEP)
     hass.services.async_remove(DOMAIN, SERVICE_REMOTE_CONTROL_STOP)
     hass.services.async_remove(DOMAIN, SERVICE_SET_SCHEDULE_PLAN_ENABLED)
+    hass.services.async_remove(DOMAIN, SERVICE_PLAN_MOWING_PREFERENCE_UPDATE)
     domain_data.pop(_SERVICES_REGISTERED, None)
 
 
@@ -221,6 +307,36 @@ def _guard_schedule_write_request(call: ServiceCall) -> None:
         )
 
 
+def _preference_change_request(call: ServiceCall) -> dict[str, Any]:
+    """Return requested preference field updates from a service call."""
+    supported_fields = (
+        ATTR_EFFICIENT_MODE,
+        ATTR_MOWING_HEIGHT_CM,
+        ATTR_MOWING_DIRECTION_MODE,
+        ATTR_MOWING_DIRECTION_DEGREES,
+        ATTR_EDGE_MOWING_AUTO,
+        ATTR_EDGE_MOWING_WALK_MODE,
+        ATTR_EDGE_MOWING_OBSTACLE_AVOIDANCE,
+        ATTR_CUTTER_POSITION,
+        ATTR_EDGE_MOWING_NUM,
+        ATTR_OBSTACLE_AVOIDANCE_ENABLED,
+        ATTR_OBSTACLE_AVOIDANCE_HEIGHT_CM,
+        ATTR_OBSTACLE_AVOIDANCE_DISTANCE_CM,
+        ATTR_OBSTACLE_AVOIDANCE_AI_CLASSES,
+        ATTR_EDGE_MOWING_SAFE,
+    )
+    changes = {
+        key: call.data[key]
+        for key in supported_fields
+        if key in call.data
+    }
+    if not changes:
+        raise HomeAssistantError(
+            "At least one mowing preference field must be provided for planning."
+        )
+    return changes
+
+
 def _notify_schedule_plan_enabled(
     coordinator: DreameLawnMowerCoordinator,
     result: dict[str, Any],
@@ -233,6 +349,22 @@ def _notify_schedule_plan_enabled(
         title=title,
         notification_id=(
             f"{DOMAIN}_{coordinator.entry.entry_id}_schedule_plan_enabled"
+        ),
+    )
+
+
+def _notify_mowing_preference_update(
+    coordinator: DreameLawnMowerCoordinator,
+    result: dict[str, Any],
+) -> None:
+    """Create a user-visible notification for a preference dry-run plan."""
+    title, message = _mowing_preference_notification(result)
+    persistent_notification.async_create(
+        coordinator.hass,
+        message,
+        title=title,
+        notification_id=(
+            f"{DOMAIN}_{coordinator.entry.entry_id}_plan_mowing_preference_update"
         ),
     )
 
@@ -271,3 +403,25 @@ def _schedule_write_notification(result: dict[str, Any]) -> tuple[str, str]:
         response = json.dumps(result.get("response_data"), sort_keys=True)
         message = f"{message} Response: `{response}`"
     return title, message
+
+
+def _mowing_preference_notification(result: dict[str, Any]) -> tuple[str, str]:
+    """Return title and message for a mowing-preference dry-run plan."""
+    request = json.dumps(result.get("request_candidate"), sort_keys=True)
+    previous = result.get("previous_preference")
+    updated = result.get("updated_preference")
+    previous_height = (
+        previous.get("mowing_height_cm") if isinstance(previous, dict) else None
+    )
+    updated_height = (
+        updated.get("mowing_height_cm") if isinstance(updated, dict) else None
+    )
+    changed_fields = ", ".join(result.get("changed_fields") or []) or "none"
+    message = (
+        "Built dry-run mowing preference update for "
+        f"map {result.get('map_index')} area {result.get('area_id')}: "
+        f"mode={result.get('mode_name')}, changed_fields={changed_fields}, "
+        f"height {previous_height} -> {updated_height}. "
+        f"Candidate request: `{request}`"
+    )
+    return "Dreame Lawn Mower Preference Dry Run", message

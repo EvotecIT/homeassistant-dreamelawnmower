@@ -202,6 +202,10 @@ async def async_setup_entry(
         + [DreameLawnMowerFirmwareUpdateStatusSensor(coordinator)]
         + [DreameLawnMowerConfiguredScheduleCountSensor(coordinator)]
         + [DreameLawnMowerPreferenceMapCountSensor(coordinator)]
+        + [DreameLawnMowerWeatherProtectionStatusSensor(coordinator)]
+        + [DreameLawnMowerRainProtectionDurationSensor(coordinator)]
+        + [DreameLawnMowerRainDelayEndTimeSensor(coordinator)]
+        + [DreameLawnMowerLastPreferenceWriteSensor(coordinator)]
         + [DreameLawnMowerLastScheduleWriteSensor(coordinator)]
         + [DreameLawnMowerLastBatchDeviceDataProbeSensor(coordinator)]
         + [DreameLawnMowerLastScheduleProbeSensor(coordinator)]
@@ -311,6 +315,79 @@ def schedule_write_result_attributes(
     }
 
 
+class DreameLawnMowerLastPreferenceWriteSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the last dry-run mowing preference plan."""
+
+    _attr_name = "Last Preference Write"
+    _attr_icon = "mdi:tune-variant"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_last_preference_write"
+
+    @property
+    def native_value(self) -> str:
+        """Return a compact state for the last preference write plan."""
+        return _preference_write_state(self.coordinator.last_preference_write_result)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe details for the last preference write plan."""
+        return preference_write_result_attributes(
+            self.coordinator.last_preference_write_result
+        )
+
+
+def _preference_write_state(result: dict[str, Any] | None) -> str:
+    if not result:
+        return "none"
+    return "planned"
+
+
+def preference_write_result_attributes(
+    result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return compact, non-secret attributes for a preference write plan."""
+    if not result:
+        return {}
+
+    attributes: dict[str, Any] = {
+        "source": result.get("source"),
+        "action": result.get("action"),
+        "dry_run": result.get("dry_run"),
+        "executed": result.get("executed"),
+        "execute_supported": result.get("execute_supported"),
+        "request_verified": result.get("request_verified"),
+        "map_index": result.get("map_index"),
+        "area_id": result.get("area_id"),
+        "mode": result.get("mode"),
+        "mode_name": result.get("mode_name"),
+        "changed": result.get("changed"),
+        "changed_fields": result.get("changed_fields"),
+        "changes": result.get("changes"),
+        "payload": result.get("payload"),
+        "request_candidate": result.get("request_candidate"),
+        "write_commands": result.get("write_commands"),
+        "notes": result.get("notes"),
+    }
+    if isinstance(result.get("map"), dict):
+        attributes["map"] = result.get("map")
+    if isinstance(result.get("previous_preference"), dict):
+        attributes["previous_preference"] = result.get("previous_preference")
+    if isinstance(result.get("updated_preference"), dict):
+        attributes["updated_preference"] = result.get("updated_preference")
+    return {
+        key: value
+        for key, value in attributes.items()
+        if value is not None
+    }
+
+
 class DreameLawnMowerFirmwareUpdateStatusSensor(
     DreameLawnMowerEntity,
     SensorEntity,
@@ -343,6 +420,120 @@ class DreameLawnMowerFirmwareUpdateStatusSensor(
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return safe cached OTA attributes."""
         return batch_ota_attributes(self.coordinator.batch_device_data)
+
+
+class DreameLawnMowerWeatherProtectionStatusSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose cached read-only weather/rain protection state."""
+
+    _attr_name = "Weather Protection Status"
+    _attr_icon = "mdi:weather-pouring"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_weather_protection_status"
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        """Return a compact weather/rain protection state."""
+        result = _weather_section(self.coordinator.weather_protection)
+        if result is None:
+            return None
+        state = _weather_probe_state(result)
+        return None if state == "none" else state
+
+    @property
+    def available(self) -> bool:
+        """Return whether cached weather state is available."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe cached weather attributes."""
+        return weather_probe_result_attributes(self.coordinator.weather_protection)
+
+
+class DreameLawnMowerRainProtectionDurationSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the configured rain protection duration."""
+
+    _attr_name = "Rain Protection Duration"
+    _attr_icon = "mdi:timer-outline"
+    _attr_native_unit_of_measurement = "h"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_rain_protection_duration"
+        )
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the configured rain protection duration in hours."""
+        result = _weather_section(self.coordinator.weather_protection)
+        if result is None:
+            return None
+        value = result.get("rain_protection_duration_hours")
+        return value if isinstance(value, int) else None
+
+    @property
+    def available(self) -> bool:
+        """Return whether a configured rain protection duration exists."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe cached weather attributes."""
+        return weather_probe_result_attributes(self.coordinator.weather_protection)
+
+
+class DreameLawnMowerRainDelayEndTimeSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the active rain-delay end time when the mower reports one."""
+
+    _attr_name = "Rain Delay End Time"
+    _attr_icon = "mdi:clock-end"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_rain_delay_end_time"
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the active rain-delay end time when available."""
+        result = _weather_section(self.coordinator.weather_protection)
+        if result is None:
+            return None
+        value = result.get("rain_protect_end_time_iso")
+        if not isinstance(value, str) or value == "":
+            return None
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+
+    @property
+    def available(self) -> bool:
+        """Return whether an active rain-delay end time exists."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe cached weather attributes."""
+        return weather_probe_result_attributes(self.coordinator.weather_protection)
 
 
 class DreameLawnMowerAppMapObjectCountSensor(
@@ -921,6 +1112,12 @@ def _weather_probe_state(result: dict[str, Any] | None) -> str:
     if result.get("rain_protection_enabled"):
         return "rain_protection_enabled"
     return "available" if result.get("available") else "unavailable"
+
+
+def _weather_section(result: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(result, dict):
+        return None
+    return result
 
 
 def weather_probe_result_attributes(

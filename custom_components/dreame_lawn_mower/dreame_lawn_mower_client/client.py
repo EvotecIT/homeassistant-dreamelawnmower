@@ -62,7 +62,9 @@ from .models import (
 )
 from .mowing_preferences import (
     MOWING_PREFERENCE_PROPERTY_KEY,
+    apply_mowing_preference_changes,
     decode_mowing_preference_payload,
+    encode_mowing_preference_payload,
     summarize_mowing_preference_info,
 )
 from .schedule import (
@@ -430,6 +432,21 @@ class DreameLawnMowerClient:
             self._sync_get_mowing_preferences,
             include_raw,
             map_indices,
+        )
+
+    async def async_plan_app_mowing_preference_update(
+        self,
+        *,
+        map_index: int,
+        area_id: int,
+        changes: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Build a dry-run mower preference update from the current app state."""
+        return await asyncio.to_thread(
+            self._sync_plan_app_mowing_preference_update,
+            map_index,
+            area_id,
+            changes,
         )
 
     async def async_get_weather_protection(
@@ -1748,6 +1765,95 @@ class DreameLawnMowerClient:
             result["response_data"] = _json_safe(response_data, max_depth=4)
         return result
 
+    def _sync_plan_app_mowing_preference_update(
+        self,
+        map_index: int,
+        area_id: int,
+        changes: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Build an unverified dry-run payload for mower preference changes."""
+        if not isinstance(changes, Mapping) or not changes:
+            raise ValueError("At least one mowing preference change is required.")
+
+        preferences = self._sync_get_mowing_preferences(map_indices=[map_index])
+        maps = preferences.get("maps")
+        if not isinstance(maps, list) or not maps:
+            raise DreameLawnMowerConnectionError(
+                f"No mowing preference metadata returned for map index {map_index}."
+            )
+
+        preference_map = maps[0]
+        raw_preferences = preference_map.get("preferences")
+        if not isinstance(raw_preferences, list):
+            raise DreameLawnMowerConnectionError(
+                f"No decoded mowing preferences returned for map index {map_index}."
+            )
+
+        current_preference: Mapping[str, Any] | None = None
+        for item in raw_preferences:
+            if not isinstance(item, Mapping):
+                continue
+            if _positive_int(item.get("area_id")) == area_id:
+                current_preference = item
+                break
+        if current_preference is None:
+            available_area_ids = [
+                _positive_int(item.get("area_id"))
+                for item in raw_preferences
+                if isinstance(item, Mapping)
+            ]
+            raise ValueError(
+                f"Mowing preference area {area_id} was not found for map index "
+                f"{map_index}. Available areas: {available_area_ids}"
+            )
+
+        updated_preference, changed_fields = apply_mowing_preference_changes(
+            current_preference,
+            changes,
+        )
+        payload = encode_mowing_preference_payload(updated_preference)
+        mode = _positive_int(preference_map.get("mode"))
+        result: dict[str, Any] = {
+            "source": "app_action_mowing_preference_write",
+            "action": "plan_mowing_preference_update",
+            "dry_run": True,
+            "executed": False,
+            "execute_supported": False,
+            "request_verified": False,
+            "write_commands": {
+                "settings": "PRE",
+                "mode": "PREP",
+            },
+            "map_index": map_index,
+            "area_id": area_id,
+            "mode": mode,
+            "mode_name": preference_map.get("mode_name"),
+            "changed": bool(changed_fields),
+            "changed_fields": changed_fields,
+            "changes": {
+                key: updated_preference.get("obstacle_avoidance_ai_classes")
+                if key == "obstacle_avoidance_ai_classes"
+                else updated_preference.get(key)
+                for key in changes
+            },
+            "map": _mowing_preference_map_overview(preference_map),
+            "previous_preference": _mowing_preference_overview(current_preference),
+            "updated_preference": _mowing_preference_overview(updated_preference),
+            "payload": payload,
+            "request_candidate": {
+                "m": "s",
+                "t": "PRE",
+                "d": payload,
+            },
+            "notes": [
+                "Settings write command names were identified from the plugin bundle, "
+                "but live mower execution is not validated yet.",
+                "This planner returns the candidate PRE payload only and does not send "
+                "PRE or PREP to the mower.",
+            ],
+        }
+        return result
+
     def _sync_get_batch_schedules(
         self,
         include_raw: bool = False,
@@ -2968,6 +3074,60 @@ def _schedule_plan_overview(
         "plan_id": plan_id,
         "previous_enabled": previous_enabled,
         "enabled": enabled,
+    }
+
+
+def _mowing_preference_map_overview(entry: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "idx": entry.get("idx"),
+        "label": entry.get("label"),
+        "available": entry.get("available"),
+        "mode": entry.get("mode"),
+        "mode_name": entry.get("mode_name"),
+        "area_count": entry.get("area_count"),
+        "preference_count": len(
+            [
+                item
+                for item in entry.get("preferences", [])
+                if isinstance(item, Mapping)
+            ]
+        ),
+    }
+
+
+def _mowing_preference_overview(preference: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "reported_version": preference.get("reported_version"),
+        "version": preference.get("version"),
+        "map_index": preference.get("map_index"),
+        "area_id": preference.get("area_id"),
+        "efficient_mode": preference.get("efficient_mode"),
+        "efficient_mode_name": preference.get("efficient_mode_name"),
+        "mowing_height_cm": preference.get("mowing_height_cm"),
+        "mowing_direction_mode": preference.get("mowing_direction_mode"),
+        "mowing_direction_mode_name": preference.get("mowing_direction_mode_name"),
+        "mowing_direction_degrees": preference.get("mowing_direction_degrees"),
+        "edge_mowing_auto": preference.get("edge_mowing_auto"),
+        "edge_mowing_walk_mode": preference.get("edge_mowing_walk_mode"),
+        "edge_mowing_walk_mode_name": preference.get("edge_mowing_walk_mode_name"),
+        "edge_mowing_obstacle_avoidance": preference.get(
+            "edge_mowing_obstacle_avoidance"
+        ),
+        "cutter_position": preference.get("cutter_position"),
+        "cutter_position_name": preference.get("cutter_position_name"),
+        "edge_mowing_num": preference.get("edge_mowing_num"),
+        "obstacle_avoidance_enabled": preference.get("obstacle_avoidance_enabled"),
+        "obstacle_avoidance_height_cm": preference.get(
+            "obstacle_avoidance_height_cm"
+        ),
+        "obstacle_avoidance_distance_cm": preference.get(
+            "obstacle_avoidance_distance_cm"
+        ),
+        "obstacle_avoidance_ai": preference.get("obstacle_avoidance_ai"),
+        "obstacle_avoidance_ai_classes": preference.get(
+            "obstacle_avoidance_ai_classes"
+        ),
+        "edge_mowing_safe": preference.get("edge_mowing_safe"),
     }
 
 

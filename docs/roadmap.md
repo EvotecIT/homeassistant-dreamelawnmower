@@ -58,16 +58,16 @@ Definition of done:
 
 - a newly reported mower should degrade gracefully into a minimal working device instead of failing setup
 
-## Phase 2: A2 and A2 Pro Telemetry Expansion
+## Phase 2: A2 and Newer A-Series Telemetry Expansion
 
 Why this is next:
 
-- the A2 family appears to expose richer runtime and maintenance data than the current cloud-property surface
+- the A2 family and newer A-series variants appear to expose richer runtime and maintenance data than the current cloud-property surface
 - upstream reports strongly suggest important data lives in MQTT status blobs rather than the simple cloud snapshot
 
 Targets:
 
-- identify and decode A2-family runtime blobs
+- identify and decode A2-family and newer A-series runtime blobs
 - expose maintenance and statistics sensors only when verified by payloads
 - improve understanding of contradictory states like paused-plus-error or dock-contact wobble
 
@@ -79,11 +79,11 @@ Checklist:
 - [ ] add normalized snapshot fields only after fixture validation
 - [ ] expose maintenance/statistics sensors behind data-driven existence checks
 - [x] add fixtures for docked-charging, paused, and paused-with-error A2 states
-- [ ] add fixtures for idle and additional A2/A2 Pro transition states
+- [ ] add fixtures for idle and additional A2/newer A-series transition states
 
 Definition of done:
 
-- A2 and A2 Pro users get richer sensors without introducing guesswork for other models
+- A2 and newer A-series users get richer sensors without introducing guesswork for other models
 
 ## Phase 3: Read-Only Vector Map Support
 

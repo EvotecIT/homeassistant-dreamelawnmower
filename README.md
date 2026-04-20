@@ -25,15 +25,34 @@ This project is usable, but still young. Core mower state, controls, schedules,
 maps, and diagnostics are available. Some features remain diagnostic or
 disabled by default while the protocol is validated across more models.
 
-Tested most heavily with:
+## Support Matrix
 
-- Dreame A2 (`dreame.mower.g2408`)
+Support levels in this table mean:
+
+- `Validated`: exercised against real hardware and fixtures in this repository
+- `Recognized`: model strings, account types, or rebadges are known and should
+  degrade gracefully, but still need more real-world confirmation
+- `Needs reports`: intended target, but not yet proven enough to claim support
+
+| Scope | Status | Notes |
+| --- | --- | --- |
+| Dreame A2 (`dreame.mower.g2408`) | Validated | Primary live development device, including schedules, maps, remote control, and diagnostics |
+| Newer A-series mower (`dreame.mower.g3255`) | Recognized | Raw model has been observed in code mapping, but the public retail name is still unverified |
+| Dreame A1 (`dreame.mower.p2255`) | Recognized | Model mapping is present; needs fixtures and live validation |
+| Dreame A1 Pro (`dreame.mower.g2422`) | Recognized | Model mapping is present; needs fixtures and live validation |
+| MOVAhome accounts | Recognized | Login flow and account type are supported; needs broader live confirmation |
+| MOVA-branded mower rebadges | Needs reports | Expected to follow the same protocol family, but still needs sanitized fixtures and user reports |
+| Regional / firmware variants of known A-series models | Needs reports | Should avoid crashing, but behavior can still vary by firmware and region |
+
+Current live validation is still centered on:
+
 - Dreamehome account in the EU region
+- A2-family hardware
 
-Expected to support, but still needing more fixtures and real-world reports:
-
-- MOVA-branded accounts and mower rebadges
-- additional A-series firmware and regional variants
+If you have a mower model not listed as `Validated`, please open an issue or PR.
+Model reports with sanitized diagnostics, screenshots, raw model identifiers, and
+region/account details are especially helpful for moving a device from
+`Recognized` or `Needs reports` to `Validated`.
 
 ## Features
 
@@ -45,9 +64,11 @@ Expected to support, but still needing more fixtures and real-world reports:
 - read-only schedule calendar using the mower-native app schedule protocol
 - disabled-by-default all-schedules calendar for default and per-map schedule diagnosis
 - guarded schedule enable/disable service with dry-run mode by default
+- dry-run mowing-preference planning service with candidate PRE payload output
 - read-only map camera using the app-map payload when available
 - disabled-by-default all-maps and map-diagnostics cameras
 - read-only weather/rain-protection diagnostics
+- read-only weather/rain-protection entities from cached app settings
 - read-only mowing-preference diagnostics
 - supervised remote-control service for short validation pulses
 - sanitized diagnostics and debug snapshot helpers
@@ -59,6 +80,9 @@ The following areas are intentionally cautious:
 - firmware OTA availability is reported as unknown unless a verified mower OTA
   signal is found
 - preference and rain-protection writes are not exposed yet
+- preference updates can be planned, but live PRE or PREP writes are still blocked
+- map rendering is read-only; interactive map switching, zone targeting, no-go editing,
+  and virtual-wall editing are not exposed yet
 - camera/photo/video paths are probe-only until runtime safety is clearer
 - 3D map object downloads are metadata-first and not treated as stable
 - manual driving must stay supervised and uses strict state and battery guards
@@ -91,6 +115,22 @@ The config flow asks for:
 The integration stores Home Assistant config-entry data only. Do not put
 credentials into repository files, fixtures, or issue attachments.
 
+## Help Expand Support
+
+Support across Dreame, MOVA, and rebadged mower variants will improve fastest
+with real-world reports. If your mower is recognized but not yet validated, or
+if it exposes a different raw model string than this README shows, please open a
+GitHub issue or PR with:
+
+- the retail product name and raw app/cloud model identifier
+- account type (`dreame` or `mova`) and region
+- a sanitized diagnostics capture or Home Assistant debug snapshot
+- screenshots of the product page, app model name, or device information page
+- notes about what works, what is missing, and any errors you see
+
+Please redact credentials, tokens, serial numbers, exact coordinates, and any
+other secrets before attaching files.
+
 ## Entities
 
 The primary entity is:
@@ -103,9 +143,11 @@ Common user-facing helpers include:
 - `sensor.<device>_state_name`
 - `sensor.<device>_error`
 - `sensor.<device>_battery`
+- `sensor.<device>_weather_protection_status`
 - `binary_sensor.<device>_docked`
 - `binary_sensor.<device>_charging`
 - `binary_sensor.<device>_mowing`
+- `binary_sensor.<device>_rain_delay_active`
 - `binary_sensor.<device>_returning`
 - `calendar.<device>_schedule`
 
@@ -115,6 +157,7 @@ them from the entity registry only when troubleshooting:
 - map and all-map cameras
 - map diagnostics camera
 - all-schedules calendar
+- rain delay end time sensor
 - last schedule probe/write sensors
 - last task-status, weather, and preference probe sensors
 - raw vendor flag sensors
@@ -135,6 +178,12 @@ The guarded `dreame_lawn_mower.set_schedule_plan_enabled` service is dry-run
 first. It sends a write only when both `execute: true` and
 `confirm_schedule_write: true` are set.
 
+`dreame_lawn_mower.plan_mowing_preference_update` is also dry-run only. It
+reads the current app preference payload, applies the requested field changes
+locally, and exposes the candidate `PRE` request in a notification plus the
+disabled-by-default `Last Preference Write` diagnostic sensor. It does not send
+`PRE` or `PREP` to the mower yet.
+
 ## Maps
 
 The map camera uses the confirmed app-map JSON path first. The renderer is
@@ -144,6 +193,14 @@ payload.
 If the mower has multiple maps, enable the disabled `All Maps` camera to render
 a contact sheet. Use `Map Diagnostics` when the map image is missing or when you
 need source, counts, and parser evidence.
+
+The current map support is intentionally diagnostic-first:
+
+- the main `Map` camera is read-only
+- `All Maps` is a read-only contact sheet, not a selector
+- map data is exposed for visibility and reverse-engineering, not interactive editing
+- zone selection, no-go editing, virtual walls, and active-map switching are not
+  available from Home Assistant yet
 
 ## Troubleshooting
 

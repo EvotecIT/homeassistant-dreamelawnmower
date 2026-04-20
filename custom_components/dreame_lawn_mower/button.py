@@ -380,6 +380,8 @@ class DreameLawnMowerCaptureWeatherProbeButton(
         )
         payload.setdefault("captured_at", datetime.now(UTC).isoformat())
         self.coordinator.last_weather_probe_result = payload
+        self.coordinator.weather_protection = dict(payload)
+        self.coordinator.weather_protection_refreshed_at = datetime.now(UTC)
         self.coordinator.async_update_listeners()
         _LOGGER.info(
             "Captured Dreame lawn mower weather probe for %s: %s",

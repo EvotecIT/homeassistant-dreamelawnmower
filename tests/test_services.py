@@ -9,10 +9,13 @@ import voluptuous as vol
 from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.dreame_lawn_mower.services import (
+    PLAN_MOWING_PREFERENCE_UPDATE_SCHEMA,
     REMOTE_CONTROL_STEP_SCHEMA,
     SET_SCHEDULE_PLAN_ENABLED_SCHEMA,
     _guard_remote_control_step,
     _guard_schedule_write_request,
+    _mowing_preference_notification,
+    _preference_change_request,
     _schedule_write_notification,
 )
 
@@ -94,6 +97,24 @@ def test_set_schedule_plan_enabled_schema_rejects_negative_plan_id() -> None:
         )
 
 
+def test_plan_mowing_preference_update_schema_parses_numeric_values() -> None:
+    parsed = PLAN_MOWING_PREFERENCE_UPDATE_SCHEMA(
+        {
+            "map_index": "0",
+            "area_id": "11",
+            "mowing_height_cm": "4.5",
+            "obstacle_avoidance_ai_classes": ["people", "animals"],
+        }
+    )
+
+    assert parsed == {
+        "map_index": 0,
+        "area_id": 11,
+        "mowing_height_cm": 4.5,
+        "obstacle_avoidance_ai_classes": ["people", "animals"],
+    }
+
+
 def test_schedule_write_guard_blocks_execute_without_confirmation() -> None:
     call = SimpleNamespace(
         data={
@@ -115,6 +136,32 @@ def test_schedule_write_guard_allows_dry_run_without_confirmation() -> None:
     )
 
     _guard_schedule_write_request(call)
+
+
+def test_preference_change_request_requires_at_least_one_field() -> None:
+    call = SimpleNamespace(data={"map_index": 0, "area_id": 11})
+
+    with pytest.raises(
+        HomeAssistantError,
+        match="At least one mowing preference field",
+    ):
+        _preference_change_request(call)
+
+
+def test_preference_change_request_extracts_supported_fields() -> None:
+    call = SimpleNamespace(
+        data={
+            "map_index": 0,
+            "area_id": 11,
+            "mowing_height_cm": 5.0,
+            "edge_mowing_auto": False,
+        }
+    )
+
+    assert _preference_change_request(call) == {
+        "mowing_height_cm": 5.0,
+        "edge_mowing_auto": False,
+    }
 
 
 def test_schedule_write_notification_summarizes_dry_run_change() -> None:
@@ -141,6 +188,30 @@ def test_schedule_write_notification_summarizes_dry_run_change() -> None:
     assert "Built dry-run schedule enable request for map_0 Evening trim" in message
     assert "previous=False, target=True (will change), version=19383" in message
     assert '"t": "SCHDSV2"' in message
+
+
+def test_mowing_preference_notification_summarizes_candidate_request() -> None:
+    title, message = _mowing_preference_notification(
+        {
+            "map_index": 0,
+            "area_id": 11,
+            "mode_name": "custom",
+            "changed_fields": ["mowing_height_cm", "edge_mowing_auto"],
+            "previous_preference": {"mowing_height_cm": 4.0},
+            "updated_preference": {"mowing_height_cm": 5.0},
+            "request_candidate": {
+                "m": "s",
+                "t": "PRE",
+                "d": [8, 0, 11],
+            },
+        }
+    )
+
+    assert title == "Dreame Lawn Mower Preference Dry Run"
+    assert "Built dry-run mowing preference update for map 0 area 11" in message
+    assert "changed_fields=mowing_height_cm, edge_mowing_auto" in message
+    assert "height 4.0 -> 5.0" in message
+    assert '"t": "PRE"' in message
 
 
 def test_schedule_write_notification_summarizes_executed_noop() -> None:

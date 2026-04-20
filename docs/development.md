@@ -97,6 +97,7 @@ python examples/schedule_probe.py --out schedule-probe-current.json
 python examples/batch_device_data_probe.py --out batch-device-data-current.json
 python examples/weather_probe.py --out weather-probe-current.json
 python examples/preference_probe.py --out preference-probe-current.json
+python examples/preference_write_probe.py --map-index 0 --area-id 11 --mowing-height-cm 5 --out preference-write-dry-run.json
 python examples/task_status_probe.py --samples 6 --interval 10 --out task-status-live.json
 ```
 
@@ -119,6 +120,7 @@ The `.gitignore` excludes local probe outputs such as:
 - `field-trip*.json`
 - `map-sources*.json`
 - `preference-probe*.json`
+- `preference-write*.json`
 - `property-scan*.json`
 - `remote-control*.json`
 - `schedule-probe*.json`

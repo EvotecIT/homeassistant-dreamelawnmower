@@ -78,7 +78,10 @@ from .models import (
 )
 from .mowing_preferences import (
     MOWING_PREFERENCE_PROPERTY_KEY,
+    MOWING_PREFERENCE_UPDATE_FIELDS,
+    apply_mowing_preference_changes,
     decode_mowing_preference_payload,
+    encode_mowing_preference_payload,
     summarize_mowing_preference_info,
 )
 from .schedule import (
@@ -130,9 +133,11 @@ __all__ = [
     "MOWER_TIME_PROPERTY_KEY",
     "MOWER_BATTERY_PROPERTY_KEY",
     "MOWING_PREFERENCE_PROPERTY_KEY",
+    "MOWING_PREFERENCE_UPDATE_FIELDS",
     "SUPPORTED_ACCOUNT_TYPES",
     "EMPTY_SCHEDULE_VERSION",
     "SCHEDULE_CHUNK_SIZE",
+    "apply_mowing_preference_changes",
     "analyze_decompiled_sources",
     "analyze_dreamehome_assets",
     "analyze_dreamehome_apk",
@@ -151,6 +156,7 @@ __all__ = [
     "decode_mower_status_blob",
     "decode_mower_task_status",
     "decode_mowing_preference_payload",
+    "encode_mowing_preference_payload",
     "decode_schedule_payload_text",
     "decode_schedule_plans",
     "decode_schedule_week_payload",

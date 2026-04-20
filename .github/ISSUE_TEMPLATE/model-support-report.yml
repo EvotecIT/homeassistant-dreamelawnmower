@@ -1,0 +1,75 @@
+name: Model support report
+description: Help verify support for a Dreame, MOVA, or rebadged mower model.
+title: "[Model]: "
+labels:
+  - model-support
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping expand mower support.
+
+        Please share only sanitized data. Do not include credentials, tokens, exact GPS coordinates, or other secrets.
+  - type: input
+    id: retail_name
+    attributes:
+      label: Retail product name
+      description: The product name shown on the box, store page, or app.
+      placeholder: Dreame A2 3000
+    validations:
+      required: true
+  - type: input
+    id: raw_model
+    attributes:
+      label: Raw model identifier
+      description: The model string reported by the app, cloud, or diagnostics.
+      placeholder: dreame.mower.g2408
+    validations:
+      required: true
+  - type: dropdown
+    id: account_type
+    attributes:
+      label: Account type
+      options:
+        - dreame
+        - mova
+        - other / rebadge
+    validations:
+      required: true
+  - type: input
+    id: region
+    attributes:
+      label: Region
+      description: App region or country used for login.
+      placeholder: eu / pl
+    validations:
+      required: true
+  - type: textarea
+    id: works
+    attributes:
+      label: What currently works
+      description: Tell us what entities, features, or actions are working.
+      placeholder: Discovery, snapshot refresh, dock, start, battery sensor...
+  - type: textarea
+    id: missing
+    attributes:
+      label: What is missing or broken
+      description: Tell us what does not work yet or looks wrong.
+      placeholder: Map camera empty, schedule not shown, unknown sensors...
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics or debug notes
+      description: Paste sanitized details or describe attached files/screenshots.
+      placeholder: Attached Home Assistant diagnostics and screenshots with tokens removed.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety checks
+      options:
+        - label: I removed credentials, tokens, serial numbers, and other secrets.
+          required: true
+        - label: I understand write and drive features may need careful supervision on unvalidated models.
+          required: true

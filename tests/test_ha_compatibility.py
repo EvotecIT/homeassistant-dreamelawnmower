@@ -10,6 +10,8 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
     DreameBinarySensorDescription,
     DreameLawnMowerAutomaticFirmwareUpdatesBinarySensor,
     DreameLawnMowerFirmwareUpdateAvailableBinarySensor,
+    DreameLawnMowerRainDelayActiveBinarySensor,
+    DreameLawnMowerRainProtectionEnabledBinarySensor,
 )
 from custom_components.dreame_lawn_mower.button import (
     DreameLawnMowerCaptureBatchDeviceDataProbeButton,
@@ -34,11 +36,15 @@ from custom_components.dreame_lawn_mower.sensor import (
     DreameLawnMowerFirmwareUpdateStatusSensor,
     DreameLawnMowerLastBatchDeviceDataProbeSensor,
     DreameLawnMowerLastPreferenceProbeSensor,
+    DreameLawnMowerLastPreferenceWriteSensor,
     DreameLawnMowerLastScheduleProbeSensor,
     DreameLawnMowerLastScheduleWriteSensor,
     DreameLawnMowerLastTaskStatusProbeSensor,
     DreameLawnMowerLastWeatherProbeSensor,
     DreameLawnMowerPreferenceMapCountSensor,
+    DreameLawnMowerRainDelayEndTimeSensor,
+    DreameLawnMowerRainProtectionDurationSensor,
+    DreameLawnMowerWeatherProtectionStatusSensor,
     DreameSensorDescription,
     app_map_object_attributes,
     batch_device_data_probe_result_attributes,
@@ -46,6 +52,7 @@ from custom_components.dreame_lawn_mower.sensor import (
     batch_preference_attributes,
     batch_schedule_attributes,
     preference_probe_result_attributes,
+    preference_write_result_attributes,
     schedule_probe_result_attributes,
     schedule_write_result_attributes,
     weather_probe_result_attributes,
@@ -144,6 +151,35 @@ def test_automatic_firmware_updates_binary_sensor_is_diagnostic_disabled_by_defa
     )
 
 
+def test_last_preference_write_sensor_is_diagnostic_disabled_by_default() -> None:
+    assert (
+        DreameLawnMowerLastPreferenceWriteSensor.__dict__["__attr_entity_category"]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerLastPreferenceWriteSensor.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
+    )
+
+
+def test_rain_protection_enabled_binary_sensor_is_diagnostic() -> None:
+    assert (
+        DreameLawnMowerRainProtectionEnabledBinarySensor.__dict__[
+            "__attr_entity_category"
+        ]
+        == "diagnostic"
+    )
+
+
+def test_rain_delay_active_binary_sensor_is_diagnostic() -> None:
+    assert (
+        DreameLawnMowerRainDelayActiveBinarySensor.__dict__["__attr_entity_category"]
+        == "diagnostic"
+    )
+
+
 def test_task_status_probe_button_is_diagnostic_disabled_by_default() -> None:
     assert (
         DreameLawnMowerCaptureTaskStatusProbeButton.__dict__[
@@ -204,6 +240,37 @@ def test_firmware_update_status_sensor_is_diagnostic() -> None:
     assert (
         DreameLawnMowerFirmwareUpdateStatusSensor.__dict__["__attr_entity_category"]
         == "diagnostic"
+    )
+
+
+def test_weather_protection_status_sensor_is_diagnostic() -> None:
+    assert (
+        DreameLawnMowerWeatherProtectionStatusSensor.__dict__[
+            "__attr_entity_category"
+        ]
+        == "diagnostic"
+    )
+
+
+def test_rain_protection_duration_sensor_is_diagnostic() -> None:
+    assert (
+        DreameLawnMowerRainProtectionDurationSensor.__dict__[
+            "__attr_entity_category"
+        ]
+        == "diagnostic"
+    )
+
+
+def test_rain_delay_end_time_sensor_is_diagnostic_disabled_by_default() -> None:
+    assert (
+        DreameLawnMowerRainDelayEndTimeSensor.__dict__["__attr_entity_category"]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerRainDelayEndTimeSensor.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
     )
 
 
@@ -1003,6 +1070,55 @@ def test_schedule_write_result_attributes_keep_response_data() -> None:
         "executed": True,
         "request": {"t": "SCHDSV2"},
         "response_data": {"r": 0, "v": 19383},
+    }
+
+
+def test_preference_write_result_attributes_are_compact() -> None:
+    result = {
+        "source": "app_action_mowing_preference_write",
+        "action": "plan_mowing_preference_update",
+        "dry_run": True,
+        "executed": False,
+        "execute_supported": False,
+        "request_verified": False,
+        "map_index": 0,
+        "area_id": 11,
+        "mode": 1,
+        "mode_name": "custom",
+        "changed": True,
+        "changed_fields": ["mowing_height_cm"],
+        "changes": {"mowing_height_cm": 5.0},
+        "payload": [8, 0, 11],
+        "request_candidate": {"m": "s", "t": "PRE", "d": [8, 0, 11]},
+        "write_commands": {"settings": "PRE", "mode": "PREP"},
+        "map": {"label": "map_0", "area_count": 2},
+        "previous_preference": {"mowing_height_cm": 4.0},
+        "updated_preference": {"mowing_height_cm": 5.0},
+        "notes": ["not executed"],
+        "ignored": None,
+    }
+
+    assert preference_write_result_attributes(result) == {
+        "source": "app_action_mowing_preference_write",
+        "action": "plan_mowing_preference_update",
+        "dry_run": True,
+        "executed": False,
+        "execute_supported": False,
+        "request_verified": False,
+        "map_index": 0,
+        "area_id": 11,
+        "mode": 1,
+        "mode_name": "custom",
+        "changed": True,
+        "changed_fields": ["mowing_height_cm"],
+        "changes": {"mowing_height_cm": 5.0},
+        "payload": [8, 0, 11],
+        "request_candidate": {"m": "s", "t": "PRE", "d": [8, 0, 11]},
+        "write_commands": {"settings": "PRE", "mode": "PREP"},
+        "map": {"label": "map_0", "area_count": 2},
+        "previous_preference": {"mowing_height_cm": 4.0},
+        "updated_preference": {"mowing_height_cm": 5.0},
+        "notes": ["not executed"],
     }
 
 

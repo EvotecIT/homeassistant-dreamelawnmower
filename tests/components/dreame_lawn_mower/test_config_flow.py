@@ -24,7 +24,7 @@ class _FakeDevice:
         self.did = "device-1"
         self.name = "Garage Mower"
         self.model = "dreame.mower.g3255"
-        self.display_model = "A2 Pro"
+        self.display_model = "A3 AWD Pro"
         self.account_type = ACCOUNT_TYPE_DREAME
         self.country = "eu"
         self.host = "example.invalid"
@@ -33,7 +33,7 @@ class _FakeDevice:
 
     @property
     def title(self) -> str:
-        return "Garage Mower (A2 Pro)"
+        return "Garage Mower (A3 AWD Pro)"
 
     @property
     def unique_id(self) -> str:
@@ -62,7 +62,7 @@ async def test_user_flow_creates_entry(hass, monkeypatch) -> None:
     )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == "Garage Mower (A2 Pro)"
+    assert result["title"] == "Garage Mower (A3 AWD Pro)"
     assert result["data"][CONF_DID] == "device-1"
     assert result["data"][CONF_MODEL] == "dreame.mower.g3255"
     assert result["data"][CONF_NAME] == "Garage Mower"

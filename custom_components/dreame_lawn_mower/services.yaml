@@ -99,3 +99,141 @@ set_schedule_plan_enabled:
       default: false
       selector:
         boolean: {}
+
+plan_mowing_preference_update:
+  name: Plan mowing preference update
+  description: >-
+    Build a dry-run mower preference update from the current app preference
+    payload. This service does not send PRE or PREP to the mower yet. It only
+    shows the candidate request payload in a notification and the diagnostic
+    sensor.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Required only when multiple Dreame lawn mower entries are loaded.
+      selector:
+        text: {}
+    map_index:
+      name: Map index
+      description: App preference map index, for example 0.
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 20
+          step: 1
+          mode: box
+    area_id:
+      name: Area ID
+      description: Preference area id returned by the mower app protocol.
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          mode: box
+    efficient_mode:
+      name: Efficiency mode
+      description: Integer mode value, typically 0 for standard or 1 for efficient.
+      selector:
+        number:
+          min: 0
+          max: 5
+          step: 1
+          mode: box
+    mowing_height_cm:
+      name: Mowing height (cm)
+      description: Target cutting height in centimeters.
+      selector:
+        number:
+          min: 1
+          max: 20
+          step: 0.1
+          mode: box
+    mowing_direction_mode:
+      name: Mowing direction mode
+      description: Integer mode value, for example 0 none, 1 rotation, 2 checkerboard.
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 1
+          mode: box
+    mowing_direction_degrees:
+      name: Mowing direction degrees
+      description: Direction angle from 0 to 180 degrees.
+      selector:
+        number:
+          min: 0
+          max: 180
+          step: 1
+          mode: box
+    edge_mowing_auto:
+      name: Automatic edge mowing
+      selector:
+        boolean: {}
+    edge_mowing_walk_mode:
+      name: Edge mowing walk mode
+      description: Integer mode value, typically 0 line or 1 side.
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 1
+          mode: box
+    edge_mowing_obstacle_avoidance:
+      name: Edge obstacle avoidance
+      selector:
+        boolean: {}
+    cutter_position:
+      name: Cutter position
+      description: Integer cutter position, typically 0 center or 1 left.
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 1
+          mode: box
+    edge_mowing_num:
+      name: Edge mowing passes
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 1
+          mode: box
+    obstacle_avoidance_enabled:
+      name: Obstacle avoidance enabled
+      selector:
+        boolean: {}
+    obstacle_avoidance_height_cm:
+      name: Obstacle avoidance height (cm)
+      selector:
+        number:
+          min: 0
+          max: 50
+          step: 1
+          mode: box
+    obstacle_avoidance_distance_cm:
+      name: Obstacle avoidance distance (cm)
+      selector:
+        number:
+          min: 0
+          max: 50
+          step: 1
+          mode: box
+    obstacle_avoidance_ai_classes:
+      name: AI obstacle classes
+      description: Choose any of people, animals, and objects.
+      selector:
+        select:
+          multiple: true
+          options:
+            - people
+            - animals
+            - objects
+    edge_mowing_safe:
+      name: Safe edge mowing
+      selector:
+        boolean: {}
