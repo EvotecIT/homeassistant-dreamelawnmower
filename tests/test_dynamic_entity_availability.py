@@ -13,8 +13,8 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
     DreameLawnMowerRainProtectionEnabledBinarySensor,
 )
 from custom_components.dreame_lawn_mower.sensor import (
-    DreameLawnMowerAvailableVectorMapCountSensor,
     DreameLawnMowerAppMapCountSensor,
+    DreameLawnMowerAvailableVectorMapCountSensor,
     DreameLawnMowerCurrentAppMapAreaSensor,
     DreameLawnMowerCurrentAppMapCutRelationCountSensor,
     DreameLawnMowerCurrentAppMapEdgeCountSensor,
@@ -25,28 +25,31 @@ from custom_components.dreame_lawn_mower.sensor import (
     DreameLawnMowerCurrentAppMapTrajectoryLengthSensor,
     DreameLawnMowerCurrentAppMapTrajectoryPointCountSensor,
     DreameLawnMowerCurrentAppMapZoneCountSensor,
-    DreameLawnMowerCurrentVectorMapNameSensor,
     DreameLawnMowerCurrentVectorMapIdSensor,
-    DreameLawnMowerMowingProgressSensor,
-    DreameLawnMowerRuntimeCurrentAreaSensor,
-    DreameLawnMowerRuntimeHeadingSensor,
-    DreameLawnMowerRuntimeTrackLengthSensor,
-    DreameLawnMowerRuntimeTrackPointCountSensor,
-    DreameLawnMowerRuntimeTrackSegmentCountSensor,
-    DreameLawnMowerRuntimeMissionProgressSensor,
-    DreameLawnMowerRuntimePositionXSensor,
-    DreameLawnMowerRuntimePositionYSensor,
-    DreameLawnMowerRuntimeTotalAreaSensor,
-    SENSORS,
+    DreameLawnMowerCurrentVectorMapNameSensor,
     DreameLawnMowerLastPreferenceProbeSensor,
     DreameLawnMowerLastScheduleProbeSensor,
     DreameLawnMowerLastScheduleWriteSensor,
     DreameLawnMowerLastTaskStatusProbeSensor,
     DreameLawnMowerLastWeatherProbeSensor,
+    DreameLawnMowerMowingProgressSensor,
     DreameLawnMowerRainDelayEndTimeSensor,
     DreameLawnMowerRainProtectionDurationSensor,
+    DreameLawnMowerRuntimeCurrentAreaSensor,
+    DreameLawnMowerRuntimeHeadingSensor,
+    DreameLawnMowerRuntimeMissionProgressSensor,
+    DreameLawnMowerRuntimePositionXSensor,
+    DreameLawnMowerRuntimePositionYSensor,
+    DreameLawnMowerRuntimeTotalAreaSensor,
+    DreameLawnMowerRuntimeTrackLengthSensor,
+    DreameLawnMowerRuntimeTrackPointCountSensor,
+    DreameLawnMowerRuntimeTrackSegmentCountSensor,
+    DreameLawnMowerSelectedMapSensor,
+    DreameLawnMowerSelectedMowingActionSensor,
+    DreameLawnMowerSelectedTargetSensor,
     DreameLawnMowerSensor,
     DreameLawnMowerWeatherProtectionStatusSensor,
+    SENSORS,
 )
 
 
@@ -1537,4 +1540,154 @@ def test_runtime_live_track_sensors_use_current_vector_map_runtime_overlay() -> 
             "runtime_heading_deg": 91.5,
             "has_live_path": True,
         },
+    }
+
+
+def test_selected_scope_sensors_follow_selected_zone_on_selected_map() -> None:
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(activity="paused"),
+        selected_mowing_action="zone",
+        selected_map_index=1,
+        selected_zone_id=3,
+        selected_spot_id=None,
+        selected_contour_id=None,
+        app_maps={
+            "current_map_index": 0,
+            "maps": [
+                {"idx": 0, "current": True, "name": "Front", "available": True},
+                {"idx": 1, "current": False, "name": "Back", "available": True},
+            ],
+        },
+        batch_device_data={
+            "batch_mowing_preferences": {
+                "maps": [
+                    {
+                        "idx": 0,
+                        "preferences": [{"area_id": 1}, {"area_id": 2}],
+                    },
+                    {
+                        "idx": 1,
+                        "preferences": [{"area_id": 3}, {"area_id": 4}],
+                    },
+                ]
+            }
+        },
+        vector_map_details=None,
+    )
+
+    action_entity = object.__new__(DreameLawnMowerSelectedMowingActionSensor)
+    action_entity.coordinator = coordinator
+    map_entity = object.__new__(DreameLawnMowerSelectedMapSensor)
+    map_entity.coordinator = coordinator
+    target_entity = object.__new__(DreameLawnMowerSelectedTargetSensor)
+    target_entity.coordinator = coordinator
+
+    assert action_entity.available is True
+    assert action_entity.native_value == "Zone"
+    assert map_entity.available is True
+    assert map_entity.native_value == "Back (#2)"
+    assert target_entity.available is True
+    assert target_entity.native_value == "Zone #3"
+    assert target_entity.extra_state_attributes == {
+        "selected_mowing_action": "zone",
+        "selected_mowing_action_label": "Zone",
+        "selected_map_index": 1,
+        "selected_map_label": "Back (#2)",
+        "target_type": "zone",
+        "target_id": 3,
+        "target_label": "Zone #3",
+        "available_target_count": 2,
+    }
+
+
+def test_selected_target_sensor_falls_back_to_first_spot() -> None:
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(activity="paused"),
+        selected_mowing_action="spot",
+        selected_map_index=0,
+        selected_zone_id=None,
+        selected_spot_id=None,
+        selected_contour_id=None,
+        app_maps={
+            "current_map_index": 0,
+            "maps": [
+                {
+                    "idx": 0,
+                    "current": True,
+                    "name": "Front",
+                    "available": True,
+                    "payload": {
+                        "spot": [
+                            {
+                                "id": 9,
+                                "data": [[0, 0], [100, 0], [100, 100], [0, 100]],
+                            },
+                            {
+                                "id": 11,
+                                "data": [[200, 0], [300, 0], [300, 100], [200, 100]],
+                            },
+                        ]
+                    },
+                }
+            ],
+        },
+        batch_device_data=None,
+        vector_map_details=None,
+    )
+
+    target_entity = object.__new__(DreameLawnMowerSelectedTargetSensor)
+    target_entity.coordinator = coordinator
+
+    assert target_entity.available is True
+    assert target_entity.native_value == "Spot #9"
+    assert target_entity.extra_state_attributes == {
+        "selected_mowing_action": "spot",
+        "selected_mowing_action_label": "Spot",
+        "selected_map_index": 0,
+        "selected_map_label": "Front (#1)",
+        "target_type": "spot",
+        "target_id": 9,
+        "target_label": "Spot #9",
+        "available_target_count": 2,
+    }
+
+
+def test_selected_target_sensor_uses_selected_edge_on_current_vector_map() -> None:
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(activity="paused"),
+        selected_mowing_action="edge",
+        selected_map_index=1,
+        selected_zone_id=None,
+        selected_spot_id=None,
+        selected_contour_id=(5, 0),
+        app_maps={
+            "current_map_index": 1,
+            "maps": [
+                {"idx": 0, "current": False, "name": "Front", "available": True},
+                {"idx": 1, "current": True, "name": "Back", "available": True},
+            ],
+        },
+        batch_device_data=None,
+        vector_map_details={
+            "maps": [
+                {"map_index": 0, "contour_ids": [(1, 0), (3, 0)]},
+                {"map_index": 1, "contour_ids": [(5, 0), (6, 0)]},
+            ]
+        },
+    )
+
+    target_entity = object.__new__(DreameLawnMowerSelectedTargetSensor)
+    target_entity.coordinator = coordinator
+
+    assert target_entity.available is True
+    assert target_entity.native_value == "Edge (5, 0)"
+    assert target_entity.extra_state_attributes == {
+        "selected_mowing_action": "edge",
+        "selected_mowing_action_label": "Edge",
+        "selected_map_index": 1,
+        "selected_map_label": "Back (#2)",
+        "target_type": "edge",
+        "target_id": [5, 0],
+        "target_label": "Edge (5, 0)",
+        "available_target_count": 2,
     }

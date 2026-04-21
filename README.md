@@ -71,6 +71,7 @@ region/account details are especially helpful for moving a device from
 - read-only map camera using the app-map payload when available
 - disabled-by-default all-maps and map-diagnostics cameras
 - runtime telemetry sensors for mission progress, mission area, mower pose, and live-track length
+- selected-run sensors for mowing action, chosen map, and scoped zone/spot/edge target
 - read-only weather/rain-protection diagnostics
 - read-only weather/rain-protection entities from cached app settings
 - read-only mowing-preference diagnostics
@@ -148,6 +149,9 @@ Common user-facing helpers include:
 - `sensor.<device>_error`
 - `sensor.<device>_battery`
 - `sensor.<device>_mowing_progress`
+- `sensor.<device>_selected_mowing_action`
+- `sensor.<device>_selected_map`
+- `sensor.<device>_selected_target`
 - `sensor.<device>_runtime_mission_progress`
 - `sensor.<device>_runtime_current_area`
 - `sensor.<device>_runtime_total_area`

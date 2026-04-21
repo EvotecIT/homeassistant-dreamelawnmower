@@ -19,7 +19,20 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .control_options import current_map_index as selected_current_map_index
+from .control_options import (
+    MOWING_ACTION_EDGE,
+    MOWING_ACTION_SPOT,
+    MOWING_ACTION_ZONE,
+    contour_label,
+    current_contour_entries,
+    current_map_index as selected_current_map_index,
+    current_spot_entries,
+    current_zone_entries,
+    map_entries,
+    mowing_action_label,
+    spot_label,
+    zone_label,
+)
 from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity
 from .manual_control import remote_control_block_reason
@@ -244,6 +257,9 @@ async def async_setup_entry(
         ]
         + [DreameLawnMowerAppMapCountSensor(coordinator)]
         + [DreameLawnMowerAvailableVectorMapCountSensor(coordinator)]
+        + [DreameLawnMowerSelectedMowingActionSensor(coordinator)]
+        + [DreameLawnMowerSelectedMapSensor(coordinator)]
+        + [DreameLawnMowerSelectedTargetSensor(coordinator)]
         + [DreameLawnMowerCurrentAppMapIndexSensor(coordinator)]
         + [DreameLawnMowerCurrentVectorMapNameSensor(coordinator)]
         + [DreameLawnMowerCurrentAppMapAreaSensor(coordinator)]
@@ -733,6 +749,97 @@ class DreameLawnMowerCurrentAppMapIndexSensor(
         )
 
 
+class DreameLawnMowerSelectedMowingActionSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the currently selected mowing action label."""
+
+    _attr_name = "Selected Mowing Action"
+    _attr_icon = "mdi:play-box-outline"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_selected_mowing_action"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the selected mowing action label."""
+        return _selected_mowing_action_label(self.coordinator)
+
+    @property
+    def available(self) -> bool:
+        """Return whether selected action metadata is available."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the selected-run metadata used for this sensor."""
+        return _selected_run_scope_attributes(self.coordinator)
+
+
+class DreameLawnMowerSelectedMapSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the currently selected app map label."""
+
+    _attr_name = "Selected Map"
+    _attr_icon = "mdi:map-marker-radius"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_selected_map"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the selected app map label."""
+        return _selected_map_label(
+            self.coordinator.app_maps,
+            self.coordinator.batch_device_data,
+            getattr(self.coordinator, "selected_map_index", None),
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return whether selected map metadata is available."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the selected-run metadata used for this sensor."""
+        return _selected_run_scope_attributes(self.coordinator)
+
+
+class DreameLawnMowerSelectedTargetSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the currently selected scoped mowing target label."""
+
+    _attr_name = "Selected Target"
+    _attr_icon = "mdi:crosshairs-gps"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_selected_target"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the selected zone, spot, or edge label."""
+        return _selected_target_label(self.coordinator)
+
+    @property
+    def available(self) -> bool:
+        """Return whether a scoped target is selected."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the selected-run metadata used for this sensor."""
+        return _selected_run_scope_attributes(self.coordinator)
+
+
 class DreameLawnMowerCurrentVectorMapNameSensor(
     DreameLawnMowerEntity,
     SensorEntity,
@@ -1171,7 +1278,9 @@ class DreameLawnMowerMowingProgressSensor(
     def native_value(self) -> float | int | None:
         """Return the current mowing progress percentage."""
         snapshot = self.coordinator.data
-        cleaned_area = None if snapshot is None else getattr(snapshot, "cleaned_area", None)
+        cleaned_area = (
+            None if snapshot is None else getattr(snapshot, "cleaned_area", None)
+        )
         current_map_area = _current_app_map_total_area(
             self.coordinator.app_maps,
             self.coordinator.batch_device_data,
@@ -2089,6 +2198,198 @@ def _current_app_map_index(
         return None
     value = summary.get("idx")
     return value if isinstance(value, int) else None
+
+
+def _selected_mowing_action_label(coordinator: Any) -> str | None:
+    action = getattr(coordinator, "selected_mowing_action", None)
+    if not isinstance(action, str) or not action.strip():
+        return None
+    return mowing_action_label(action)
+
+
+def _selected_map_index(
+    app_maps: dict[str, Any] | None,
+    batch_device_data: dict[str, Any] | None,
+    selected_map_index: int | None,
+) -> int | None:
+    entries = map_entries(app_maps, batch_device_data)
+    if not entries:
+        return None
+    normalized = selected_current_map_index(
+        app_maps,
+        batch_device_data,
+        selected_map_index=selected_map_index,
+    )
+    if any(entry["map_index"] == normalized for entry in entries):
+        return normalized
+    return None
+
+
+def _selected_map_label(
+    app_maps: dict[str, Any] | None,
+    batch_device_data: dict[str, Any] | None,
+    selected_map_index: int | None,
+) -> str | None:
+    normalized = _selected_map_index(app_maps, batch_device_data, selected_map_index)
+    if normalized is None:
+        return None
+    for entry in map_entries(app_maps, batch_device_data):
+        if entry["map_index"] == normalized:
+            return str(entry["label"])
+    return None
+
+
+def _selected_contour_id(value: Any) -> tuple[int, int] | None:
+    if (
+        isinstance(value, (list, tuple))
+        and len(value) >= 2
+        and isinstance(value[0], int)
+        and isinstance(value[1], int)
+    ):
+        return (int(value[0]), int(value[1]))
+    return None
+
+
+def _selected_target_summary(coordinator: Any) -> dict[str, Any]:
+    action = getattr(coordinator, "selected_mowing_action", None)
+    selected_map_index = _selected_map_index(
+        getattr(coordinator, "app_maps", None),
+        getattr(coordinator, "batch_device_data", None),
+        getattr(coordinator, "selected_map_index", None),
+    )
+    selected_map = _selected_map_label(
+        getattr(coordinator, "app_maps", None),
+        getattr(coordinator, "batch_device_data", None),
+        getattr(coordinator, "selected_map_index", None),
+    )
+    if action == MOWING_ACTION_ZONE:
+        entries = current_zone_entries(
+            getattr(coordinator, "batch_device_data", None),
+            getattr(coordinator, "app_maps", None),
+            selected_map_index=selected_map_index,
+        )
+        selected_zone_id = getattr(coordinator, "selected_zone_id", None)
+        if isinstance(selected_zone_id, int):
+            for entry in entries:
+                if entry["area_id"] == selected_zone_id:
+                    return {
+                        "target_type": "zone",
+                        "target_id": selected_zone_id,
+                        "target_label": str(entry["label"]),
+                        "available_target_count": len(entries),
+                        "selected_map_index": selected_map_index,
+                        "selected_map_label": selected_map,
+                    }
+        if entries:
+            fallback = int(entries[0]["area_id"])
+            return {
+                "target_type": "zone",
+                "target_id": fallback,
+                "target_label": zone_label(fallback),
+                "available_target_count": len(entries),
+                "selected_map_index": selected_map_index,
+                "selected_map_label": selected_map,
+            }
+        return {}
+
+    if action == MOWING_ACTION_SPOT:
+        entries = current_spot_entries(
+            getattr(coordinator, "app_maps", None),
+            getattr(coordinator, "batch_device_data", None),
+            selected_map_index=selected_map_index,
+        )
+        selected_spot_id = getattr(coordinator, "selected_spot_id", None)
+        if isinstance(selected_spot_id, int):
+            for entry in entries:
+                if entry["spot_id"] == selected_spot_id:
+                    return {
+                        "target_type": "spot",
+                        "target_id": selected_spot_id,
+                        "target_label": str(entry["label"]),
+                        "available_target_count": len(entries),
+                        "selected_map_index": selected_map_index,
+                        "selected_map_label": selected_map,
+                    }
+        if entries:
+            fallback = int(entries[0]["spot_id"])
+            return {
+                "target_type": "spot",
+                "target_id": fallback,
+                "target_label": spot_label(fallback),
+                "available_target_count": len(entries),
+                "selected_map_index": selected_map_index,
+                "selected_map_label": selected_map,
+            }
+        return {}
+
+    if action == MOWING_ACTION_EDGE:
+        entries = current_contour_entries(
+            getattr(coordinator, "vector_map_details", None),
+            getattr(coordinator, "app_maps", None),
+            getattr(coordinator, "batch_device_data", None),
+            selected_map_index=selected_map_index,
+        )
+        selected_contour_id = _selected_contour_id(
+            getattr(coordinator, "selected_contour_id", None)
+        )
+        if selected_contour_id is not None:
+            for entry in entries:
+                if entry["contour_id"] == selected_contour_id:
+                    return {
+                        "target_type": "edge",
+                        "target_id": list(selected_contour_id),
+                        "target_label": str(entry["label"]),
+                        "available_target_count": len(entries),
+                        "selected_map_index": selected_map_index,
+                        "selected_map_label": selected_map,
+                    }
+        if entries:
+            entry_id = entries[0]["contour_id"]
+            if isinstance(entry_id, tuple):
+                return {
+                    "target_type": "edge",
+                    "target_id": list(entry_id),
+                    "target_label": contour_label(entry_id),
+                    "available_target_count": len(entries),
+                    "selected_map_index": selected_map_index,
+                    "selected_map_label": selected_map,
+                }
+        return {}
+
+    return {
+        "selected_map_index": selected_map_index,
+        "selected_map_label": selected_map,
+    }
+
+
+def _selected_target_label(coordinator: Any) -> str | None:
+    summary = _selected_target_summary(coordinator)
+    value = summary.get("target_label")
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _selected_run_scope_attributes(coordinator: Any) -> dict[str, Any]:
+    action = getattr(coordinator, "selected_mowing_action", None)
+    attributes = {
+        "selected_mowing_action": action,
+        "selected_mowing_action_label": _selected_mowing_action_label(coordinator),
+        "selected_map_index": _selected_map_index(
+            getattr(coordinator, "app_maps", None),
+            getattr(coordinator, "batch_device_data", None),
+            getattr(coordinator, "selected_map_index", None),
+        ),
+        "selected_map_label": _selected_map_label(
+            getattr(coordinator, "app_maps", None),
+            getattr(coordinator, "batch_device_data", None),
+            getattr(coordinator, "selected_map_index", None),
+        ),
+    }
+    attributes.update(_selected_target_summary(coordinator))
+    return {
+        key: value
+        for key, value in attributes.items()
+        if value not in (None, [], {})
+    }
 
 
 def _current_app_map_total_area(
