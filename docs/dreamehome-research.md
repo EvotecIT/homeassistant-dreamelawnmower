@@ -123,8 +123,9 @@ dry-run-first helpers for these payload shapes:
 - `SCHDIV2` with `m:"s"` prepares a full schedule payload update.
 - `SCHDDV2` with `m:"s"` uploads schedule chunks.
 
-Only the `SCHDSV2` enable/disable path is wired to a client method, and it
-defaults to dry-run. Sending it requires both `execute=True` and
+The reusable client now wires both the `SCHDSV2` enable/disable path and a
+guarded full-upload planner for `SCHDIV2` plus chunked `SCHDDV2`. Both default
+to dry-run, and sending either path requires both `execute=True` and
 `confirm_write=True`.
 
 On 2026-04-19, a supervised no-op A2 write validated the `SCHDSV2` path by
@@ -132,6 +133,12 @@ disabling map `0` plan `1`, which was already disabled. The device returned
 top-level `r: 0` and payload `{"r":0,"v":19383}`. A follow-up schedule probe
 confirmed map `0` still had plan `0` enabled, plan `1` disabled, and version
 `19383`.
+
+On 2026-04-21, a live A2 dry-run upload plan reused the current map `0`
+schedule without sending any write. The planner rebuilt a one-chunk
+`SCHDIV2`/`SCHDDV2` sequence for version `56815`, payload size `96`, and
+reported `changed=false`, which confirms the full-upload planner matches the
+current mower schedule when given the decoded live plan objects.
 
 On 2026-04-19, a live A2 read-only schedule probe confirmed:
 

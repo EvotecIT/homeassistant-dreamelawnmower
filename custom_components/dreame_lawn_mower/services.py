@@ -22,9 +22,15 @@ from .dreame_lawn_mower_client.mowing_preferences import (
     MOWING_PREFERENCE_MODE_FIELD,
     normalize_mowing_preference_mode,
 )
+from .dreame_lawn_mower_client.schedule import (
+    SCHEDULE_CHUNK_SIZE,
+    decode_schedule_payload_text,
+    encode_schedule_payload_text,
+)
 from .manual_control import remote_control_block_reason
 
 ATTR_ENTRY_ID = "entry_id"
+ATTR_CHUNK_SIZE = "chunk_size"
 ATTR_CONFIRM_PREFERENCE_WRITE = "confirm_preference_write"
 ATTR_CONFIRM_SCHEDULE_WRITE = "confirm_schedule_write"
 ATTR_CUTTER_POSITION = "cutter_position"
@@ -47,12 +53,14 @@ ATTR_OBSTACLE_AVOIDANCE_ENABLED = "obstacle_avoidance_enabled"
 ATTR_OBSTACLE_AVOIDANCE_HEIGHT_CM = "obstacle_avoidance_height_cm"
 ATTR_PREFERENCE_MODE = MOWING_PREFERENCE_MODE_FIELD
 ATTR_PLAN_ID = "plan_id"
+ATTR_PLANS = "plans"
 ATTR_PROMPT = "prompt"
 ATTR_ROTATION = "rotation"
 ATTR_VELOCITY = "velocity"
 ATTR_ZONE_ID = "zone_id"
 
 SERVICE_PLAN_MOWING_PREFERENCE_UPDATE = "plan_mowing_preference_update"
+SERVICE_PLAN_SCHEDULE_UPLOAD = "plan_schedule_upload"
 SERVICE_REMOTE_CONTROL_STEP = "remote_control_step"
 SERVICE_REMOTE_CONTROL_STOP = "remote_control_stop"
 SERVICE_SET_SCHEDULE_PLAN_ENABLED = "set_schedule_plan_enabled"
@@ -102,6 +110,16 @@ def _preference_mode_validator(value: Any) -> int:
         raise vol.Invalid(str(err)) from err
 
 
+def _schedule_plans_validator(value: Any) -> list[dict[str, Any]]:
+    """Validate editable schedule plans by round-tripping the encoder."""
+    if not isinstance(value, list):
+        raise vol.Invalid("plans must be a list of schedule plan mappings.")
+    try:
+        return decode_schedule_payload_text(encode_schedule_payload_text(value))
+    except Exception as err:  # noqa: BLE001 - expose readable validation text
+        raise vol.Invalid(str(err)) from err
+
+
 REMOTE_CONTROL_STEP_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_ENTRY_ID): cv.string,
@@ -129,6 +147,20 @@ SET_SCHEDULE_PLAN_ENABLED_SCHEMA = vol.Schema(
         vol.Required(ATTR_MAP_INDEX): _int_range(name=ATTR_MAP_INDEX, minimum=-1),
         vol.Required(ATTR_PLAN_ID): _int_range(name=ATTR_PLAN_ID, minimum=0),
         vol.Required(ATTR_ENABLED): cv.boolean,
+        vol.Optional(ATTR_EXECUTE, default=False): cv.boolean,
+        vol.Optional(ATTR_CONFIRM_SCHEDULE_WRITE, default=False): cv.boolean,
+    }
+)
+
+PLAN_SCHEDULE_UPLOAD_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Required(ATTR_MAP_INDEX): _int_range(name=ATTR_MAP_INDEX, minimum=-1),
+        vol.Required(ATTR_PLANS): _schedule_plans_validator,
+        vol.Optional(ATTR_CHUNK_SIZE, default=SCHEDULE_CHUNK_SIZE): _int_range(
+            name=ATTR_CHUNK_SIZE,
+            minimum=1,
+        ),
         vol.Optional(ATTR_EXECUTE, default=False): cv.boolean,
         vol.Optional(ATTR_CONFIRM_SCHEDULE_WRITE, default=False): cv.boolean,
     }
@@ -228,6 +260,22 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             await coordinator.async_request_refresh()
         _notify_schedule_plan_enabled(coordinator, result)
 
+    async def async_handle_plan_schedule_upload(call: ServiceCall) -> None:
+        coordinator = _coordinator_from_call(hass, call)
+        _guard_schedule_write_request(call)
+        result = await coordinator.client.async_plan_app_schedule_upload(
+            map_index=call.data[ATTR_MAP_INDEX],
+            plans=call.data[ATTR_PLANS],
+            chunk_size=call.data[ATTR_CHUNK_SIZE],
+            execute=call.data[ATTR_EXECUTE],
+            confirm_write=call.data[ATTR_CONFIRM_SCHEDULE_WRITE],
+        )
+        coordinator.last_schedule_write_result = result
+        coordinator.async_update_listeners()
+        if call.data[ATTR_EXECUTE]:
+            await coordinator.async_request_refresh()
+        _notify_schedule_plan_enabled(coordinator, result)
+
     async def async_handle_plan_mowing_preference_update(
         call: ServiceCall,
     ) -> None:
@@ -267,6 +315,12 @@ async def async_setup_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(
         DOMAIN,
+        SERVICE_PLAN_SCHEDULE_UPLOAD,
+        async_handle_plan_schedule_upload,
+        schema=PLAN_SCHEDULE_UPLOAD_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
         SERVICE_PLAN_MOWING_PREFERENCE_UPDATE,
         async_handle_plan_mowing_preference_update,
         schema=PLAN_MOWING_PREFERENCE_UPDATE_SCHEMA,
@@ -283,6 +337,7 @@ async def async_unload_services(hass: HomeAssistant) -> None:
     hass.services.async_remove(DOMAIN, SERVICE_REMOTE_CONTROL_STEP)
     hass.services.async_remove(DOMAIN, SERVICE_REMOTE_CONTROL_STOP)
     hass.services.async_remove(DOMAIN, SERVICE_SET_SCHEDULE_PLAN_ENABLED)
+    hass.services.async_remove(DOMAIN, SERVICE_PLAN_SCHEDULE_UPLOAD)
     hass.services.async_remove(DOMAIN, SERVICE_PLAN_MOWING_PREFERENCE_UPDATE)
     domain_data.pop(_SERVICES_REGISTERED, None)
 
@@ -415,6 +470,7 @@ def _schedule_write_notification(result: dict[str, Any]) -> tuple[str, str]:
     request = json.dumps(result.get("request"), sort_keys=True)
     schedule = result.get("schedule")
     target_plan = result.get("target_plan")
+    target_schedule = result.get("target_schedule")
     schedule_label = (
         schedule.get("label")
         if isinstance(schedule, dict)
@@ -434,12 +490,31 @@ def _schedule_write_notification(result: dict[str, Any]) -> tuple[str, str]:
         title = "Dreame Lawn Mower Schedule Dry Run"
         action = "Built dry-run"
 
-    message = (
-        f"{action} schedule enable request for {schedule_label} {plan_name}: "
-        f"previous={result.get('previous_enabled')}, "
-        f"target={result.get('enabled')} ({change_text}), "
-        f"version={result.get('version')}. Request: `{request}`"
-    )
+    if result.get("action") == "upload_schedule_plans":
+        target_plan_count = (
+            target_schedule.get("plan_count")
+            if isinstance(target_schedule, dict)
+            else None
+        )
+        target_enabled_count = (
+            target_schedule.get("enabled_plan_count")
+            if isinstance(target_schedule, dict)
+            else None
+        )
+        message = (
+            f"{action} schedule upload for {schedule_label}: "
+            f"plans={target_plan_count}, enabled={target_enabled_count} "
+            f"({change_text}), version={result.get('version')}, "
+            f"payload_size={result.get('payload_size')}, "
+            f"chunk_count={result.get('chunk_count')}. Request: `{request}`"
+        )
+    else:
+        message = (
+            f"{action} schedule enable request for {schedule_label} {plan_name}: "
+            f"previous={result.get('previous_enabled')}, "
+            f"target={result.get('enabled')} ({change_text}), "
+            f"version={result.get('version')}. Request: `{request}`"
+        )
     if result.get("executed") and result.get("response_data") is not None:
         response = json.dumps(result.get("response_data"), sort_keys=True)
         message = f"{message} Response: `{response}`"

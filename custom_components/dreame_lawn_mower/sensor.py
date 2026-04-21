@@ -385,6 +385,7 @@ def schedule_write_result_attributes(
 
     target_plan = result.get("target_plan")
     schedule = result.get("schedule")
+    target_schedule = result.get("target_schedule")
     attributes: dict[str, Any] = {
         "source": result.get("source"),
         "action": result.get("action"),
@@ -396,12 +397,17 @@ def schedule_write_result_attributes(
         "previous_enabled": result.get("previous_enabled"),
         "enabled": result.get("enabled"),
         "version": result.get("version"),
+        "chunk_size": result.get("chunk_size"),
+        "chunk_count": result.get("chunk_count"),
+        "payload_size": result.get("payload_size"),
         "request": result.get("request"),
     }
     if isinstance(schedule, dict):
         attributes["schedule"] = schedule
     if isinstance(target_plan, dict):
         attributes["target_plan"] = target_plan
+    if isinstance(target_schedule, dict):
+        attributes["target_schedule"] = target_schedule
     if result.get("response_data") is not None:
         attributes["response_data"] = result.get("response_data")
     return {

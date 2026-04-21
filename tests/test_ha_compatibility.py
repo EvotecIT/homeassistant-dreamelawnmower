@@ -1257,6 +1257,26 @@ def test_schedule_write_result_attributes_keep_response_data() -> None:
     }
 
 
+def test_schedule_write_result_attributes_include_upload_details() -> None:
+    assert schedule_write_result_attributes(
+        {
+            "action": "upload_schedule_plans",
+            "chunk_size": 100,
+            "chunk_count": 2,
+            "payload_size": 161,
+            "target_schedule": {"plan_count": 2, "enabled_plan_count": 1},
+            "request": {"sequence": [{"t": "SCHDIV2"}, {"t": "SCHDDV2"}]},
+        }
+    ) == {
+        "action": "upload_schedule_plans",
+        "chunk_size": 100,
+        "chunk_count": 2,
+        "payload_size": 161,
+        "target_schedule": {"plan_count": 2, "enabled_plan_count": 1},
+        "request": {"sequence": [{"t": "SCHDIV2"}, {"t": "SCHDDV2"}]},
+    }
+
+
 def test_preference_write_result_attributes_are_compact() -> None:
     result = {
         "source": "app_action_mowing_preference_write",

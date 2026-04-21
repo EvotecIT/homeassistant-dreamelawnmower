@@ -367,6 +367,64 @@ set_schedule_plan_enabled:
       selector:
         boolean: {}
 
+plan_schedule_upload:
+  name: Plan schedule upload
+  description: >-
+    Build or send a guarded full schedule upload for one map slot. Provide a
+    list of decoded schedule plans in the same readable shape returned by the
+    schedule probe and calendar helpers. By default this is a dry run that only
+    stores the candidate SCHDIV2/SCHDDV2 request sequence in the last schedule
+    write diagnostic sensor. Sending the upload requires execute and
+    confirm_schedule_write to both be true.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Required only when multiple Dreame lawn mower entries are loaded.
+      selector:
+        text: {}
+    map_index:
+      name: Map index
+      description: Schedule map index, for example 0 or -1 for the default slot.
+      required: true
+      selector:
+        number:
+          min: -1
+          max: 20
+          step: 1
+          mode: box
+    plans:
+      name: Plans
+      description: >-
+        Full readable schedule plan list to upload. Each plan should include
+        plan_id, enabled, name, and optional weeks/tasks entries.
+      required: true
+      selector:
+        object: {}
+    chunk_size:
+      name: Chunk size
+      description: >-
+        Optional UTF-8 upload chunk size in bytes. Leave at the default unless
+        you are debugging chunk boundaries.
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 500
+          step: 1
+          mode: box
+    execute:
+      name: Execute
+      description: Send the upload request sequence instead of only building a dry-run preview.
+      default: false
+      selector:
+        boolean: {}
+    confirm_schedule_write:
+      name: Confirm schedule write
+      description: Required together with execute before the schedule upload is sent.
+      default: false
+      selector:
+        boolean: {}
+
 plan_mowing_preference_update:
   name: Plan mowing preference update
   description: >-

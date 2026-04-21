@@ -19,6 +19,7 @@ class _FakeAppScheduleCloud:
 
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
+        self._pending_uploads: dict[int, dict[str, object]] = {}
         self.payloads = {
             -1: {"version": 31345, "text": '{"d":[[0,1,"","EODBJwAAADDgwScAAAA="]]}'},
             0: {
@@ -55,6 +56,17 @@ class _FakeAppScheduleCloud:
         if command == "SCHDT":
             return {"out": [{"m": "r", "r": 0, "d": [658, 1257, 0, 19383]}]}
         if command == "SCHDIV2":
+            if payload.get("m") == "s":
+                data = payload["d"]
+                idx = int(data["i"])
+                version = int(data["v"])
+                length = int(data["l"])
+                self._pending_uploads[version] = {
+                    "idx": idx,
+                    "length": length,
+                    "chunks": [],
+                }
+                return {"out": [{"m": "r", "r": 0, "d": {"r": 0, "v": version}}]}
             idx = int(payload["d"]["i"])
             entry = self.payloads[idx]
             return {
@@ -73,6 +85,17 @@ class _FakeAppScheduleCloud:
         if command == "SCHDDV2":
             data = payload["d"]
             version = int(data["v"])
+            if payload.get("m") == "s":
+                upload = self._pending_uploads[version]
+                upload["chunks"].append(str(data["d"]))
+                combined = "".join(upload["chunks"])
+                if len(combined.encode("utf-8")) >= int(upload["length"]):
+                    idx = int(upload["idx"])
+                    self.payloads[idx] = {
+                        "version": version,
+                        "text": combined,
+                    }
+                return {"out": [{"m": "r", "r": 0, "d": {"r": 0, "v": version}}]}
             start = int(data["s"])
             size = int(data["l"])
             text = next(
@@ -321,3 +344,113 @@ def test_set_app_schedule_plan_enabled_rejects_failed_write_response() -> None:
             execute=True,
             confirm_write=True,
         )
+
+
+def test_plan_app_schedule_upload_builds_dry_run_sequence() -> None:
+    client = _client()
+    cloud = _FakeAppScheduleCloud()
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_plan_app_schedule_upload(
+        map_index=0,
+        plans=[
+            {
+                "plan_id": 0,
+                "enabled": True,
+                "name": "",
+                "weeks": [
+                    {
+                        "week_day": 0,
+                        "tasks": [
+                            {
+                                "type": 0,
+                                "start": 658,
+                                "end": 1257,
+                                "real_end": 802,
+                                "regions": [],
+                            }
+                        ],
+                    }
+                ],
+            },
+            {"plan_id": 1, "enabled": True, "name": ""},
+        ],
+    )
+
+    assert result["dry_run"] is True
+    assert result["executed"] is False
+    assert result["changed"] is True
+    assert result["schedule"] == {
+        "idx": 0,
+        "label": "map_0",
+        "available": True,
+        "version": 19383,
+        "plan_count": 2,
+        "enabled_plan_count": 1,
+    }
+    assert result["target_schedule"] == {
+        "plan_count": 2,
+        "enabled_plan_count": 2,
+        "week_count": 1,
+        "task_count": 1,
+        "plan_ids": [0, 1],
+    }
+    assert result["chunk_count"] == 1
+    assert result["request"] == {
+        "sequence": [
+            {"m": "s", "t": "SCHDIV2", "d": {"i": 0, "l": 40, "v": 19383}},
+            {
+                "m": "s",
+                "t": "SCHDDV2",
+                "d": {
+                    "s": 0,
+                    "l": 40,
+                    "d": '{"d":[[0,1,"","AJKSTiIDAA=="],[1,1,""]]}',
+                    "v": 19383,
+                },
+            },
+        ]
+    }
+    assert [call["t"] for call in cloud.calls] == ["SCHDT", "SCHDIV2", "SCHDDV2"]
+
+
+def test_plan_app_schedule_upload_requires_confirmation_to_execute() -> None:
+    client = _client()
+    cloud = _FakeAppScheduleCloud()
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    with pytest.raises(ValueError, match="confirm_write=True"):
+        client._sync_plan_app_schedule_upload(
+            map_index=0,
+            plans=[{"plan_id": 0, "enabled": True, "name": ""}],
+            execute=True,
+        )
+
+
+def test_plan_app_schedule_upload_can_execute_when_confirmed() -> None:
+    client = _client()
+    cloud = _FakeAppScheduleCloud()
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_plan_app_schedule_upload(
+        map_index=0,
+        plans=[{"plan_id": 0, "enabled": False, "name": ""}],
+        execute=True,
+        confirm_write=True,
+    )
+
+    assert result["dry_run"] is False
+    assert result["executed"] is True
+    assert result["changed"] is True
+    assert result["response_data"] == [
+        {"r": 0, "v": 19383},
+        {"r": 0, "v": 19383},
+    ]
+    assert cloud.payloads[0]["text"] == '{"d":[[0,0,""]]}'
+    assert [call["t"] for call in cloud.calls] == [
+        "SCHDT",
+        "SCHDIV2",
+        "SCHDDV2",
+        "SCHDIV2",
+        "SCHDDV2",
+    ]

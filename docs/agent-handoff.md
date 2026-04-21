@@ -199,10 +199,19 @@ Last updated: 2026-04-21
   `examples/schedule_write_probe.py` builds `SCHDSV2` enable/disable requests
   without sending them by default. Live writes require both `--execute` and
   `--confirm-schedule-write`.
+- The reusable client and Home Assistant service layer now also expose guarded
+  full schedule upload planning through `async_plan_app_schedule_upload()` and
+  `plan_schedule_upload`. This builds `SCHDIV2` plus chunked `SCHDDV2`
+  request sequences from readable decoded plan objects and keeps execute behind
+  the same explicit confirmation gate as other writes.
 - A supervised no-op `SCHDSV2` write on 2026-04-19 disabled map `0` plan `1`
   while it was already disabled. The mower returned success (`r: 0`, version
   `19383`), and a follow-up read confirmed map `0` remained plan `0` enabled
   and plan `1` disabled.
+- On 2026-04-21, a live A2 dry-run upload plan against map `0` reused the
+  current plans without sending a write. The mower returned version `56815`,
+  one upload chunk, payload size `96`, and `changed=false`, confirming the new
+  full-upload planner can safely mirror the current schedule state.
 - Home Assistant now has a read-only `Schedule` calendar entity. Calendar
   event queries call the app schedule reader on demand and convert enabled
   per-map plans into local scheduled mowing events.

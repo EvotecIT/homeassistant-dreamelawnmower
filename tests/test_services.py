@@ -9,6 +9,7 @@ import voluptuous as vol
 from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.dreame_lawn_mower.services import (
+    PLAN_SCHEDULE_UPLOAD_SCHEMA,
     PLAN_MOWING_PREFERENCE_UPDATE_SCHEMA,
     REMOTE_CONTROL_STEP_SCHEMA,
     SET_SCHEDULE_PLAN_ENABLED_SCHEMA,
@@ -135,6 +136,79 @@ def test_plan_mowing_preference_update_schema_accepts_mode_only_request() -> Non
     }
 
 
+def test_plan_schedule_upload_schema_accepts_readable_plans() -> None:
+    parsed = PLAN_SCHEDULE_UPLOAD_SCHEMA(
+        {
+            "map_index": "0",
+            "plans": [
+                {
+                    "plan_id": 0,
+                    "enabled": True,
+                    "name": "",
+                    "weeks": [
+                        {
+                            "week_day": 0,
+                            "tasks": [
+                                {
+                                    "type": 0,
+                                    "start": 658,
+                                    "end": 1257,
+                                    "real_end": 802,
+                                    "regions": [],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert parsed == {
+        "map_index": 0,
+        "plans": [
+            {
+                "plan_id": 0,
+                "enabled": True,
+                "name": "",
+                "weeks": [
+                    {
+                        "week_day": 0,
+                        "week_day_name": "sun",
+                        "tasks": [
+                            {
+                                "type": 0,
+                                "type_name": "all_area_mowing",
+                                "cyclic": False,
+                                "start": 658,
+                                "start_time": "10:58",
+                                "end": 1257,
+                                "end_time": "20:57",
+                                "real_end": 802,
+                                "real_end_time": "13:22",
+                                "regions": [],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+        "chunk_size": 100,
+        "execute": False,
+        "confirm_schedule_write": False,
+    }
+
+
+def test_plan_schedule_upload_schema_rejects_invalid_plans() -> None:
+    with pytest.raises(vol.Invalid, match="plan_id must be an integer"):
+        PLAN_SCHEDULE_UPLOAD_SCHEMA(
+            {
+                "map_index": 0,
+                "plans": [{"enabled": True}],
+            }
+        )
+
+
 def test_schedule_write_guard_blocks_execute_without_confirmation() -> None:
     call = SimpleNamespace(
         data={
@@ -244,6 +318,34 @@ def test_schedule_write_notification_summarizes_dry_run_change() -> None:
     assert "Built dry-run schedule enable request for map_0 Evening trim" in message
     assert "previous=False, target=True (will change), version=19383" in message
     assert '"t": "SCHDSV2"' in message
+
+
+def test_schedule_write_notification_summarizes_upload_plan() -> None:
+    title, message = _schedule_write_notification(
+        {
+            "action": "upload_schedule_plans",
+            "executed": False,
+            "changed": True,
+            "map_index": 0,
+            "version": 19383,
+            "schedule": {"label": "map_0"},
+            "target_schedule": {"plan_count": 2, "enabled_plan_count": 1},
+            "payload_size": 70,
+            "chunk_count": 1,
+            "request": {
+                "sequence": [
+                    {"m": "s", "t": "SCHDIV2", "d": {"i": 0, "l": 70, "v": 19383}},
+                    {"m": "s", "t": "SCHDDV2", "d": {"s": 0, "l": 70, "v": 19383}},
+                ]
+            },
+        }
+    )
+
+    assert title == "Dreame Lawn Mower Schedule Dry Run"
+    assert "Built dry-run schedule upload for map_0" in message
+    assert "plans=2, enabled=1 (will change)" in message
+    assert "payload_size=70, chunk_count=1" in message
+    assert '"t": "SCHDIV2"' in message
 
 
 def test_mowing_preference_notification_summarizes_candidate_request() -> None:

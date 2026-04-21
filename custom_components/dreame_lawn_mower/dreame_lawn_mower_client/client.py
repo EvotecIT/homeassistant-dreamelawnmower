@@ -76,7 +76,9 @@ from .schedule import (
     EMPTY_SCHEDULE_VERSION,
     SCHEDULE_CHUNK_SIZE,
     build_schedule_enable_status_request,
+    build_schedule_upload_requests,
     decode_schedule_payload_text,
+    encode_schedule_payload_text,
     schedule_task_summary,
 )
 from .vector_map import (
@@ -532,6 +534,25 @@ class DreameLawnMowerClient:
             enabled,
             execute,
             confirm_write,
+        )
+
+    async def async_plan_app_schedule_upload(
+        self,
+        *,
+        map_index: int,
+        plans: Sequence[Mapping[str, Any]],
+        execute: bool = False,
+        confirm_write: bool = False,
+        chunk_size: int = SCHEDULE_CHUNK_SIZE,
+    ) -> dict[str, Any]:
+        """Build or execute a full schedule upload from readable plans."""
+        return await asyncio.to_thread(
+            self._sync_plan_app_schedule_upload,
+            map_index,
+            plans,
+            execute,
+            confirm_write,
+            chunk_size,
         )
 
     async def async_get_mowing_preferences(
@@ -2056,6 +2077,96 @@ class DreameLawnMowerClient:
             result["response_data"] = _json_safe(response_data, max_depth=4)
         return result
 
+    def _sync_plan_app_schedule_upload(
+        self,
+        map_index: int,
+        plans: Sequence[Mapping[str, Any]],
+        execute: bool = False,
+        confirm_write: bool = False,
+        chunk_size: int = SCHEDULE_CHUNK_SIZE,
+    ) -> dict[str, Any]:
+        """Build or execute a full schedule upload request sequence."""
+        if execute and not confirm_write:
+            raise ValueError(
+                "Schedule writes require confirm_write=True when execute=True."
+            )
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be greater than zero.")
+        if not isinstance(plans, Sequence) or isinstance(plans, str | bytes):
+            raise ValueError("plans must be a sequence of schedule plan mappings.")
+
+        schedules = self._sync_get_app_schedules(map_indices=[map_index])
+        if not schedules.get("schedules"):
+            raise DreameLawnMowerConnectionError(
+                f"No schedule metadata returned for map index {map_index}."
+            )
+        schedule = schedules["schedules"][0]
+        version = _positive_int(schedule.get("version"))
+        if version is None or version == EMPTY_SCHEDULE_VERSION:
+            raise DreameLawnMowerConnectionError(
+                f"No writable schedule version returned for map index {map_index}."
+            )
+        current_plans = schedule.get("plans")
+        if not isinstance(current_plans, list):
+            raise DreameLawnMowerConnectionError(
+                f"No decoded schedule plans returned for map index {map_index}."
+            )
+
+        try:
+            payload_text = encode_schedule_payload_text(list(plans))
+            normalized_plans = decode_schedule_payload_text(payload_text)
+        except Exception as err:  # noqa: BLE001 - caller gets readable validator text
+            raise ValueError(f"Invalid schedule plans: {err}") from err
+
+        current_payload_text = encode_schedule_payload_text(current_plans)
+        requests = build_schedule_upload_requests(
+            map_index=map_index,
+            payload_text=payload_text,
+            version=version,
+            chunk_size=chunk_size,
+        )
+        request_candidate: dict[str, Any] | None = (
+            requests[0]
+            if len(requests) == 1
+            else {"sequence": requests}
+            if requests
+            else None
+        )
+        result: dict[str, Any] = {
+            "source": "app_action_schedule_write",
+            "action": "upload_schedule_plans",
+            "dry_run": not execute,
+            "executed": False,
+            "map_index": map_index,
+            "changed": current_payload_text != payload_text,
+            "version": version,
+            "chunk_size": chunk_size,
+            "chunk_count": max(len(requests) - 1, 0),
+            "payload_size": len(payload_text.encode("utf-8")),
+            "schedule": _schedule_entry_overview(schedule),
+            "target_schedule": _schedule_upload_overview(normalized_plans),
+            "request": request_candidate,
+        }
+        if execute:
+            responses: list[Any] = []
+            response_data_items: list[Any] = []
+            for request in requests:
+                response = self._sync_call_app_action(request)
+                response_data = _app_action_data(response)
+                if isinstance(response_data, Mapping) and response_data.get("r") not in (
+                    None,
+                    0,
+                ):
+                    raise DreameLawnMowerConnectionError(
+                        f"Schedule upload failed: {response}"
+                    )
+                responses.append(_json_safe(response, max_depth=4))
+                response_data_items.append(_json_safe(response_data, max_depth=4))
+            result["executed"] = True
+            result["response"] = responses
+            result["response_data"] = response_data_items
+        return result
+
     def _sync_plan_app_mowing_preference_update(
         self,
         map_index: int,
@@ -3491,6 +3602,44 @@ def _schedule_plan_overview(
         "plan_id": plan_id,
         "previous_enabled": previous_enabled,
         "enabled": enabled,
+    }
+
+
+def _schedule_upload_overview(
+    plans: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    plan_ids: list[int] = []
+    week_count = 0
+    task_count = 0
+    enabled_plan_count = 0
+    for plan in plans:
+        plan_id = _positive_int(plan.get("plan_id"))
+        if plan_id is not None:
+            plan_ids.append(plan_id)
+        if plan.get("enabled"):
+            enabled_plan_count += 1
+        weeks = plan.get("weeks")
+        if not isinstance(weeks, Sequence) or isinstance(
+            weeks,
+            str | bytes | bytearray,
+        ):
+            continue
+        week_count += len(weeks)
+        for week in weeks:
+            if not isinstance(week, Mapping):
+                continue
+            tasks = week.get("tasks")
+            if isinstance(tasks, Sequence) and not isinstance(
+                tasks,
+                str | bytes | bytearray,
+            ):
+                task_count += len(tasks)
+    return {
+        "plan_count": len(plans),
+        "enabled_plan_count": enabled_plan_count,
+        "week_count": week_count,
+        "task_count": task_count,
+        "plan_ids": plan_ids,
     }
 
 

@@ -147,6 +147,7 @@ Checklist:
 - [x] validate a supervised no-op `SCHDSV2` enable/disable write live
 - [x] expose a read-only Home Assistant calendar surface for decoded schedules
 - [x] add a dry-run-first Home Assistant schedule enable/disable service
+- [x] add a dry-run-first full schedule upload planner for decoded schedule plans
 - [ ] validate the Home Assistant schedule service in a live HA runtime
 - [x] discover read-only app-action and cloud-property sources for per-map/general mowing preferences
 - [x] add a Python-side read-only mowing preference probe and decoder tests
