@@ -259,10 +259,11 @@ Last updated: 2026-04-21
   diagnostics. Guarded write planning and execution for `PRE` with `m:"s"` are
   now exposed through `async_plan_app_mowing_preference_update()`,
   `examples/preference_write_probe.py`, and the Home Assistant
-  `plan_mowing_preference_update` / `plan_zone_mowing_preference_update`
-  surfaces. Guarded `PREP` mode writes are now exposed as well, including
-  mode-only dry runs and combined `PREP` plus `PRE` sequences when a map must
-  switch into custom mode before zone-specific settings are sent.
+  `plan_mowing_preference_update`, `plan_zone_mowing_preference_update`, and
+  mower-entity `plan_map_preference_mode_update` surfaces. Guarded `PREP` mode
+  writes are now exposed as well, including dedicated map-mode dry runs and
+  combined `PREP` plus `PRE` sequences when a map must switch into custom mode
+  before zone-specific settings are sent.
 - For read-only batch comparisons, use `examples/batch_device_data_probe.py`.
   It decodes `SCHEDULE.*`, `SETTINGS.*`, and `OTA_INFO.*` without relying on
   app-action preference or schedule commands.

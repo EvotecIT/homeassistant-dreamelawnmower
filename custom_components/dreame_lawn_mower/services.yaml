@@ -68,6 +68,46 @@ switch_current_map:
           step: 1
           mode: box
 
+plan_map_preference_mode_update:
+  name: Plan map preference mode update
+  description: >-
+    Build or send a guarded preference-mode update for the selected map on the
+    mower entity. This only changes the selected map between global and custom
+    preference mode and does not require any zone selection. By default this is
+    a dry run that only stores the candidate PREP request in the last
+    preference write diagnostic sensor. Sending the request requires execute
+    and confirm_preference_write to both be true.
+  target:
+    entity:
+      integration: dreame_lawn_mower
+      domain: lawn_mower
+  fields:
+    preference_mode:
+      name: Preference mode
+      description: >-
+        Map preference mode, either global/custom or 0/1. This sends the
+        guarded PREP mode request for the selected map.
+      required: true
+      selector:
+        select:
+          options:
+            - label: global
+              value: global
+            - label: custom
+              value: custom
+    execute:
+      name: Execute
+      description: Send the write request instead of only building a dry-run preview.
+      default: false
+      selector:
+        boolean: {}
+    confirm_preference_write:
+      name: Confirm preference write
+      description: Required together with execute before the preference write is sent.
+      default: false
+      selector:
+        boolean: {}
+
 plan_zone_mowing_preference_update:
   name: Plan zone mowing preference update
   description: >-

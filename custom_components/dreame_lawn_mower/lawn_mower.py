@@ -43,6 +43,9 @@ from .control_options import (
     mowing_action_label,
 )
 from .coordinator import DreameLawnMowerCoordinator
+from .dreame_lawn_mower_client.mowing_preferences import (
+    normalize_mowing_preference_mode,
+)
 from .entity import DreameLawnMowerEntity
 from .services import (
     ATTR_CONFIRM_PREFERENCE_WRITE,
@@ -97,6 +100,14 @@ def _validate_contour_ids(contour_ids: Any) -> list[list[int]]:
         raise vol.Invalid(str(err)) from err
 
 
+def _validate_preference_mode(preference_mode: Any) -> int:
+    """Validate a map preference mode label or integer."""
+    try:
+        return normalize_mowing_preference_mode(preference_mode)
+    except ValueError as err:
+        raise vol.Invalid(str(err)) from err
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -124,6 +135,15 @@ async def async_setup_entry(
         "switch_current_map",
         {vol.Required("map_index"): vol.Coerce(int)},
         "async_switch_current_map",
+    )
+    platform.async_register_entity_service(
+        "plan_map_preference_mode_update",
+        {
+            vol.Required(ATTR_PREFERENCE_MODE): _validate_preference_mode,
+            vol.Optional(ATTR_EXECUTE, default=False): cv.boolean,
+            vol.Optional(ATTR_CONFIRM_PREFERENCE_WRITE, default=False): cv.boolean,
+        },
+        "async_plan_map_preference_mode_update",
     )
     platform.async_register_entity_service(
         "plan_zone_mowing_preference_update",
@@ -508,6 +528,19 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         self.coordinator.async_update_listeners()
         if execute:
             await self.coordinator.async_request_refresh()
+
+    async def async_plan_map_preference_mode_update(
+        self,
+        preference_mode: Any,
+        execute: bool = False,
+        confirm_preference_write: bool = False,
+    ) -> None:
+        """Build or execute a map-scoped preference-mode update."""
+        await self.async_plan_zone_mowing_preference_update(
+            preference_mode=normalize_mowing_preference_mode(preference_mode),
+            execute=execute,
+            confirm_preference_write=confirm_preference_write,
+        )
 
     async def async_pause(self) -> None:
         """Pause mowing."""

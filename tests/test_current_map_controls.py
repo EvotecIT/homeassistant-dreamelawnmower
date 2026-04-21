@@ -955,6 +955,129 @@ def test_lawn_mower_plan_zone_preference_update_allows_map_mode_only_request() -
     coordinator.async_request_refresh.assert_not_awaited()
 
 
+def test_lawn_mower_plan_map_preference_mode_update_uses_selected_map() -> None:
+    client = SimpleNamespace(
+        async_plan_app_mowing_preference_update=AsyncMock(
+            return_value={
+                "source": "app_action_mowing_preference_write",
+                "action": "plan_mowing_preference_update",
+                "map_index": 1,
+                "area_id": None,
+                "changed_fields": ["preference_mode"],
+                "target_mode_name": "custom",
+            }
+        ),
+    )
+    coordinator = SimpleNamespace(
+        client=client,
+        app_maps=_app_maps(current_map_index=1),
+        batch_device_data={"batch_mowing_preferences": {"maps": []}},
+        selected_map_index=1,
+        selected_contour_id=None,
+        selected_zone_id=5,
+        selected_spot_id=None,
+        last_preference_write_result=None,
+        async_request_refresh=AsyncMock(),
+        async_update_listeners=lambda: None,
+    )
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = coordinator
+
+    asyncio.run(entity.async_plan_map_preference_mode_update("custom"))
+
+    client.async_plan_app_mowing_preference_update.assert_awaited_once_with(
+        map_index=1,
+        area_id=None,
+        changes={"preference_mode": 1},
+        execute=False,
+        confirm_write=False,
+    )
+    assert coordinator.last_preference_write_result["selection_scope"] == {
+        "selected_map_index": 1,
+        "selected_map_label": "Back Lawn (#2)",
+    }
+    coordinator.async_request_refresh.assert_not_awaited()
+
+
+def test_lawn_mower_plan_map_preference_mode_update_can_execute_confirmed_write() -> None:
+    client = SimpleNamespace(
+        async_plan_app_mowing_preference_update=AsyncMock(
+            return_value={
+                "source": "app_action_mowing_preference_write",
+                "action": "plan_mowing_preference_update",
+                "map_index": 1,
+                "area_id": None,
+                "executed": True,
+                "response_data": {"r": 0},
+                "changed_fields": ["preference_mode"],
+                "target_mode_name": "custom",
+            }
+        ),
+    )
+    coordinator = SimpleNamespace(
+        client=client,
+        app_maps=_app_maps(current_map_index=1),
+        batch_device_data={"batch_mowing_preferences": {"maps": []}},
+        selected_map_index=1,
+        selected_contour_id=None,
+        selected_zone_id=None,
+        selected_spot_id=None,
+        last_preference_write_result=None,
+        async_request_refresh=AsyncMock(),
+        async_update_listeners=lambda: None,
+    )
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = coordinator
+
+    asyncio.run(
+        entity.async_plan_map_preference_mode_update(
+            "custom",
+            execute=True,
+            confirm_preference_write=True,
+        )
+    )
+
+    client.async_plan_app_mowing_preference_update.assert_awaited_once_with(
+        map_index=1,
+        area_id=None,
+        changes={"preference_mode": 1},
+        execute=True,
+        confirm_write=True,
+    )
+    coordinator.async_request_refresh.assert_awaited_once()
+
+
+def test_lawn_mower_plan_map_preference_mode_update_blocks_unconfirmed_write() -> None:
+    client = SimpleNamespace(
+        async_plan_app_mowing_preference_update=AsyncMock(),
+    )
+    coordinator = SimpleNamespace(
+        client=client,
+        app_maps=_app_maps(current_map_index=1),
+        batch_device_data={"batch_mowing_preferences": {"maps": []}},
+        selected_map_index=1,
+        selected_contour_id=None,
+        selected_zone_id=None,
+        selected_spot_id=None,
+        last_preference_write_result=None,
+        async_request_refresh=AsyncMock(),
+        async_update_listeners=lambda: None,
+    )
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = coordinator
+
+    with pytest.raises(HomeAssistantError, match="confirm_preference_write"):
+        asyncio.run(
+            entity.async_plan_map_preference_mode_update(
+                "custom",
+                execute=True,
+                confirm_preference_write=False,
+            )
+        )
+
+    client.async_plan_app_mowing_preference_update.assert_not_called()
+
+
 def test_lawn_mower_start_uses_selected_zone() -> None:
     client = SimpleNamespace(
         async_clean_segments=AsyncMock(),
