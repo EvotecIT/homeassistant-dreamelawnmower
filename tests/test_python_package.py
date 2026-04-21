@@ -8,6 +8,7 @@ from dreame_lawn_mower_client import (
     MAP_HISTORY_PROPERTY_KEYS,
     MAP_PROBE_PROPERTY_KEYS,
     MOWER_BATTERY_PROPERTY_KEY,
+    MOWER_BLUETOOTH_PROPERTY_KEY,
     MOWER_ERROR_PROPERTY_KEY,
     MOWER_PROPERTY_HINTS,
     MOWER_RAW_STATUS_PROPERTY_KEY,
@@ -189,8 +190,10 @@ def test_public_package_exports_app_protocol_helpers() -> None:
     assert MOWER_TASK_PROPERTY_KEY == "2.50"
     assert MOWER_TIME_PROPERTY_KEY == "2.51"
     assert MOWER_BATTERY_PROPERTY_KEY == "3.1"
+    assert MOWER_BLUETOOTH_PROPERTY_KEY == "1.53"
     assert MOWER_PROPERTY_HINTS["1.1"] == "raw_status_blob"
     assert MOWER_PROPERTY_HINTS["1.4"] == "runtime_status_blob"
+    assert MOWER_PROPERTY_HINTS["1.53"] == "bluetooth_connected"
     assert MOWER_PROPERTY_HINTS["2.50"] == "task_status"
     assert MOWER_PROPERTY_HINTS["2.51"] == "device_time"
     assert MOWER_PROPERTY_HINTS["3.1"] == "battery_level"

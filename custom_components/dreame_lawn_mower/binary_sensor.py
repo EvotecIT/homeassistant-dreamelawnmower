@@ -25,7 +25,12 @@ from .const import (
 from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity
 from .manual_control import remote_control_state_safe
-from .sensor import batch_ota_attributes, weather_probe_result_attributes
+from .sensor import (
+    _current_vector_map_summary,
+    batch_ota_attributes,
+    current_vector_map_attributes,
+    weather_probe_result_attributes,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +96,24 @@ BINARY_SENSORS = [
         else snapshot.available,
         device_class=BinarySensorDeviceClass.CONNECTIVITY,
         entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    DreameBinarySensorDescription(
+        key="device_connected",
+        name="Device Connected",
+        value_fn=lambda snapshot: snapshot.device_connected,
+        exists_fn=lambda snapshot: snapshot.device_connected is not None,
+        device_class=BinarySensorDeviceClass.CONNECTIVITY,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+    ),
+    DreameBinarySensorDescription(
+        key="cloud_connected",
+        name="Cloud Connected",
+        value_fn=lambda snapshot: snapshot.cloud_connected,
+        exists_fn=lambda snapshot: snapshot.cloud_connected is not None,
+        device_class=BinarySensorDeviceClass.CONNECTIVITY,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
     ),
     DreameBinarySensorDescription(
         key="charging",
@@ -235,6 +258,8 @@ async def async_setup_entry(
             DreameLawnMowerBinarySensor(coordinator, description)
             for description in BINARY_SENSORS
         ]
+        + [DreameLawnMowerBluetoothConnectedBinarySensor(coordinator)]
+        + [DreameLawnMowerCurrentAppMapLivePathBinarySensor(coordinator)]
         + [DreameLawnMowerFirmwareUpdateAvailableBinarySensor(coordinator)]
         + [DreameLawnMowerAutomaticFirmwareUpdatesBinarySensor(coordinator)]
         + [DreameLawnMowerRainProtectionEnabledBinarySensor(coordinator)]
@@ -306,6 +331,81 @@ class DreameLawnMowerFirmwareUpdateAvailableBinarySensor(
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return safe cached OTA attributes."""
         return batch_ota_attributes(self.coordinator.batch_device_data)
+
+
+class DreameLawnMowerBluetoothConnectedBinarySensor(
+    DreameLawnMowerEntity,
+    BinarySensorEntity,
+):
+    """Expose whether the cloud currently reports an active Bluetooth session."""
+
+    _attr_name = "Bluetooth Connected"
+    _attr_icon = "mdi:bluetooth"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_bluetooth_connected"
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return whether Bluetooth is currently reported as connected."""
+        return getattr(self.coordinator, "bluetooth_connected", None)
+
+    @property
+    def available(self) -> bool:
+        """Return whether cached Bluetooth state exists."""
+        return self.coordinator.data is not None and self.is_on is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe Bluetooth diagnostic attributes."""
+        return {"property_key": "1.53", "source": "cloud_property_scan"}
+
+
+class DreameLawnMowerCurrentAppMapLivePathBinarySensor(
+    DreameLawnMowerEntity,
+    BinarySensorEntity,
+):
+    """Expose whether the current vector map includes a live mow path."""
+
+    _attr_name = "Current App Map Live Path"
+    _attr_icon = "mdi:map-marker-path"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_current_app_map_live_path"
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return whether the current vector map has a live path."""
+        summary = _current_vector_map_summary(
+            self.coordinator.vector_map_details,
+            self.coordinator.app_maps,
+            self.coordinator.batch_device_data,
+        )
+        if not isinstance(summary, dict):
+            return None
+        value = summary.get("has_live_path")
+        return value if isinstance(value, bool) else None
+
+    @property
+    def available(self) -> bool:
+        """Return whether current-map vector map metadata exists."""
+        return self.coordinator.data is not None and self.is_on is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe cached current vector-map attributes."""
+        return current_vector_map_attributes(
+            self.coordinator.vector_map_details,
+            self.coordinator.app_maps,
+            self.coordinator.batch_device_data,
+        )
 
 
 class DreameLawnMowerAutomaticFirmwareUpdatesBinarySensor(

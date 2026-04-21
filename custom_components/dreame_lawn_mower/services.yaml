@@ -1,3 +1,200 @@
+start_zone_mowing:
+  name: Start zone mowing
+  description: Start mowing for one or more explicit current-map zone IDs.
+  target:
+    entity:
+      integration: dreame_lawn_mower
+      domain: lawn_mower
+  fields:
+    zone_ids:
+      name: Zone IDs
+      description: List of zone IDs to mow, for example [1, 3].
+      required: true
+      example: [1, 3]
+
+start_spot_mowing:
+  name: Start spot mowing
+  description: Start mowing for one or more explicit current-map spot IDs.
+  target:
+    entity:
+      integration: dreame_lawn_mower
+      domain: lawn_mower
+  fields:
+    spot_ids:
+      name: Spot IDs
+      description: List of spot IDs to mow, for example [2, 4].
+      required: true
+      example: [2, 4]
+
+start_edge_mowing:
+  name: Start edge mowing
+  description: >-
+    Start mowing for one or more explicit current-map edge contour IDs. Each
+    contour ID is a two-item list in the form [edge_id, contour_index].
+  target:
+    entity:
+      integration: dreame_lawn_mower
+      domain: lawn_mower
+  fields:
+    contour_ids:
+      name: Contour IDs
+      description: List of edge contour ids, for example [[1, 0]].
+      required: true
+      example: [[1, 0]]
+      selector:
+        object: {}
+
+switch_current_map:
+  name: Switch current map
+  description: >-
+    Switch the mower's active app map by app map index. This updates the real
+    active mower map, not just the local Home Assistant selection scope. Use
+    while the mower is docked or otherwise idle; the vendor protocol may reject
+    the request while mowing.
+  target:
+    entity:
+      integration: dreame_lawn_mower
+      domain: lawn_mower
+  fields:
+    map_index:
+      name: Map index
+      description: App map index to activate, for example 0 or 1.
+      required: true
+      example: 1
+      selector:
+        number:
+          min: 0
+          max: 20
+          step: 1
+          mode: box
+
+plan_zone_mowing_preference_update:
+  name: Plan zone mowing preference update
+  description: >-
+    Build a dry-run mowing preference update for the selected or current map
+    zone on the mower entity. This uses the current Home Assistant map/zone
+    selection scope unless zone_id is provided explicitly. The request is not
+    sent to the mower; it only builds the candidate PRE payload and stores the
+    result in the last preference write diagnostic sensor.
+  target:
+    entity:
+      integration: dreame_lawn_mower
+      domain: lawn_mower
+  fields:
+    zone_id:
+      name: Zone ID
+      description: Optional explicit current-map zone id. Defaults to the selected zone.
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          mode: box
+    efficient_mode:
+      name: Efficiency mode
+      description: Integer mode value, typically 0 for standard or 1 for efficient.
+      selector:
+        number:
+          min: 0
+          max: 5
+          step: 1
+          mode: box
+    mowing_height_cm:
+      name: Mowing height (cm)
+      description: Target cutting height in centimeters.
+      selector:
+        number:
+          min: 1
+          max: 20
+          step: 0.1
+          mode: box
+    mowing_direction_mode:
+      name: Mowing direction mode
+      description: Integer mode value, for example 0 none, 1 rotation, 2 checkerboard.
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 1
+          mode: box
+    mowing_direction_degrees:
+      name: Mowing direction degrees
+      description: Direction angle from 0 to 180 degrees.
+      selector:
+        number:
+          min: 0
+          max: 180
+          step: 1
+          mode: box
+    edge_mowing_auto:
+      name: Automatic edge mowing
+      selector:
+        boolean: {}
+    edge_mowing_walk_mode:
+      name: Edge mowing walk mode
+      description: Integer mode value, typically 0 line or 1 side.
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 1
+          mode: box
+    edge_mowing_obstacle_avoidance:
+      name: Edge obstacle avoidance
+      selector:
+        boolean: {}
+    cutter_position:
+      name: Cutter position
+      description: Integer cutter position, typically 0 center or 1 left.
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 1
+          mode: box
+    edge_mowing_num:
+      name: Edge mowing passes
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 1
+          mode: box
+    obstacle_avoidance_enabled:
+      name: Obstacle avoidance enabled
+      selector:
+        boolean: {}
+    obstacle_avoidance_height_cm:
+      name: Obstacle avoidance height (cm)
+      selector:
+        number:
+          min: 0
+          max: 50
+          step: 1
+          mode: box
+    obstacle_avoidance_distance_cm:
+      name: Obstacle avoidance distance (cm)
+      selector:
+        number:
+          min: 0
+          max: 50
+          step: 1
+          mode: box
+    obstacle_avoidance_ai_classes:
+      name: AI obstacle classes
+      description: Choose any of people, animals, and objects.
+      selector:
+        select:
+          multiple: true
+          options:
+            - people
+            - animals
+            - objects
+    edge_mowing_safe:
+      name: Safe edge mowing
+      selector:
+        boolean: {}
+
 remote_control_step:
   name: Remote control step
   description: >-

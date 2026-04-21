@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 from collections.abc import Mapping, Sequence
@@ -25,6 +26,9 @@ _PATH_COLOR = (180, 180, 180, 200)
 _PATH_WIDTH = 3
 _MOW_PATH_COLOR = (50, 120, 50, 180)
 _MOW_PATH_WIDTH = 2
+_RUNTIME_PATH_COLOR = (55, 145, 220, 220)
+_RUNTIME_PATH_WIDTH = 4
+_RUNTIME_POSITION_COLOR = (255, 140, 0, 255)
 _SPOT_COLOR = (110, 170, 225, 120)
 _SPOT_OUTLINE_COLOR = (70, 130, 190, 220)
 _POINT_COLOR = (55, 55, 55, 255)
@@ -81,6 +85,26 @@ class DreameLawnMowerVectorPath:
 
 
 @dataclass(slots=True)
+class DreameLawnMowerVectorContour:
+    """Contour entry used by edge mowing."""
+
+    contour_id: tuple[int, int]
+    points: tuple[tuple[int, int], ...]
+    contour_type: int = 0
+    shape_type: int = 0
+
+
+@dataclass(slots=True)
+class DreameLawnMowerAvailableMap:
+    """Map descriptor discovered in batch vector-map data."""
+
+    map_id: int
+    map_index: int
+    name: str = ""
+    total_area: float = 0
+
+
+@dataclass(slots=True)
 class DreameLawnMowerVectorMowPath:
     """Historical mowing trail segments."""
 
@@ -98,15 +122,23 @@ class DreameLawnMowerVectorMap:
     )
     spot_areas: tuple[DreameLawnMowerVectorZone, ...] = field(default_factory=tuple)
     paths: tuple[DreameLawnMowerVectorPath, ...] = field(default_factory=tuple)
+    contours: tuple[DreameLawnMowerVectorContour, ...] = field(default_factory=tuple)
     clean_points: tuple[tuple[int, int], ...] = field(default_factory=tuple)
     cruise_points: tuple[tuple[int, int], ...] = field(default_factory=tuple)
     obstacles: tuple[Mapping[str, Any], ...] = field(default_factory=tuple)
     boundary: DreameLawnMowerVectorBoundary | None = None
     total_area: float = 0
     name: str = ""
+    map_id: int = 1
     map_index: int = 0
+    current_map_id: int | None = None
+    available_maps: tuple[DreameLawnMowerAvailableMap, ...] = field(default_factory=tuple)
     last_updated: float | None = None
     mow_paths: tuple[DreameLawnMowerVectorMowPath, ...] = field(default_factory=tuple)
+    maps: Mapping[int, "DreameLawnMowerVectorMap"] = field(
+        default_factory=dict,
+        repr=False,
+    )
 
 
 def parse_batch_vector_map(
@@ -129,26 +161,52 @@ def parse_batch_vector_map(
         if isinstance(decoded, list):
             entries.extend(item for item in decoded if isinstance(item, str))
 
-    primary: DreameLawnMowerVectorMap | None = None
+    parsed_maps: list[DreameLawnMowerVectorMap] = []
     for entry in entries:
         try:
             vector_map = _parse_vector_map_json(entry)
         except (json.JSONDecodeError, KeyError, TypeError, ValueError):
             continue
-        if primary is None:
-            primary = vector_map
-        if vector_map.map_index == 0:
-            primary = vector_map
-            break
+        parsed_maps.append(vector_map)
 
-    if primary is None:
+    if not parsed_maps:
         return None
 
-    primary.mow_paths = _parse_mow_paths(batch_data)
+    primary = next(
+        (vector_map for vector_map in parsed_maps if vector_map.map_index == 0),
+        parsed_maps[0],
+    )
+
+    available_maps = tuple(
+        DreameLawnMowerAvailableMap(
+            map_id=vector_map.map_id,
+            map_index=vector_map.map_index,
+            name=vector_map.name,
+            total_area=vector_map.total_area,
+        )
+        for vector_map in sorted(parsed_maps, key=lambda item: item.map_id)
+    )
+
+    mow_paths = _parse_mow_paths(batch_data)
+    parsed_maps_by_id: dict[int, DreameLawnMowerVectorMap] = {
+        vector_map.map_id: vector_map for vector_map in parsed_maps
+    }
+    for vector_map in parsed_maps_by_id.values():
+        vector_map.available_maps = available_maps
+        vector_map.mow_paths = mow_paths
+
+    primary.available_maps = available_maps
+    primary.mow_paths = mow_paths
+    primary.maps = parsed_maps_by_id
     return primary
 
 
-def render_vector_map_png(vector_map: DreameLawnMowerVectorMap | None) -> bytes | None:
+def render_vector_map_png(
+    vector_map: DreameLawnMowerVectorMap | None,
+    *,
+    runtime_track_segments: Sequence[Sequence[tuple[int, int]]] | None = None,
+    runtime_position: tuple[int, int] | None = None,
+) -> bytes | None:
     """Render a mower vector map to PNG bytes."""
     if vector_map is None or vector_map.boundary is None:
         return None
@@ -212,6 +270,15 @@ def render_vector_map_png(vector_map: DreameLawnMowerVectorMap | None) -> bytes 
                 width=_MOW_PATH_WIDTH,
             )
 
+    for segment in runtime_track_segments or ():
+        if len(segment) < 2:
+            continue
+        draw.line(
+            [to_pixel(x, y) for x, y in segment],
+            fill=_RUNTIME_PATH_COLOR,
+            width=_RUNTIME_PATH_WIDTH,
+        )
+
     for path in vector_map.paths:
         if len(path.points) < 2:
             continue
@@ -224,6 +291,10 @@ def render_vector_map_png(vector_map: DreameLawnMowerVectorMap | None) -> bytes 
     for point in (*vector_map.clean_points, *vector_map.cruise_points):
         px, py = to_pixel(point[0], point[1])
         draw.ellipse((px - 4, py - 4, px + 4, py + 4), fill=_POINT_COLOR)
+
+    if runtime_position is not None:
+        px, py = to_pixel(runtime_position[0], runtime_position[1])
+        draw.ellipse((px - 6, py - 6, px + 6, py + 6), fill=_RUNTIME_POSITION_COLOR)
 
     for zone in vector_map.zones:
         if len(zone.points) < 3 or not zone.name:
@@ -285,6 +356,121 @@ def vector_map_to_summary(
     )
 
 
+def vector_map_to_details(
+    vector_map: DreameLawnMowerVectorMap | None,
+) -> dict[str, Any]:
+    """Return JSON-safe details for live/vector mower maps."""
+    if vector_map is None:
+        return {}
+
+    mow_path_segment_count = sum(
+        len(mow_path.segments) for mow_path in vector_map.mow_paths
+    )
+    mow_path_point_count = sum(
+        len(segment)
+        for mow_path in vector_map.mow_paths
+        for segment in mow_path.segments
+    )
+    mow_path_length_m = sum(
+        _coordinate_path_length_m(segment)
+        for mow_path in vector_map.mow_paths
+        for segment in mow_path.segments
+    )
+    zone_names = [
+        zone.name
+        for zone in vector_map.zones
+        if zone.name
+    ]
+    contour_ids = [list(contour.contour_id) for contour in vector_map.contours]
+    available_maps = [
+        {
+            "map_id": map_entry.map_id,
+            "map_index": map_entry.map_index,
+            "name": map_entry.name or None,
+            "total_area": map_entry.total_area or None,
+        }
+        for map_entry in vector_map.available_maps
+    ]
+    parsed_maps = (
+        vector_map.maps.values()
+        if isinstance(vector_map.maps, Mapping) and vector_map.maps
+        else (vector_map,)
+    )
+    maps = [
+        {
+            "map_id": parsed_map.map_id,
+            "map_index": parsed_map.map_index,
+            "map_name": parsed_map.name or None,
+            "total_area": parsed_map.total_area or None,
+            "zone_ids": [zone.zone_id for zone in parsed_map.zones],
+            "zone_names": [zone.name for zone in parsed_map.zones if zone.name],
+            "spot_ids": [spot.zone_id for spot in parsed_map.spot_areas],
+            "contour_ids": [list(contour.contour_id) for contour in parsed_map.contours],
+            "contour_count": len(parsed_map.contours),
+            "clean_point_count": len(parsed_map.clean_points),
+            "cruise_point_count": len(parsed_map.cruise_points),
+            "mow_path_count": len(parsed_map.mow_paths),
+            "mow_path_segment_count": sum(
+                len(mow_path.segments) for mow_path in parsed_map.mow_paths
+            ),
+            "mow_path_point_count": sum(
+                len(segment)
+                for mow_path in parsed_map.mow_paths
+                for segment in mow_path.segments
+            ),
+            "mow_path_length_m": round(
+                sum(
+                    _coordinate_path_length_m(segment)
+                    for mow_path in parsed_map.mow_paths
+                    for segment in mow_path.segments
+                ),
+                2,
+            ),
+            "has_live_path": any(mow_path.segments for mow_path in parsed_map.mow_paths),
+        }
+        for parsed_map in sorted(parsed_maps, key=lambda item: item.map_index)
+    ]
+    return {
+        "map_name": vector_map.name or None,
+        "map_id": vector_map.map_id,
+        "map_index": vector_map.map_index,
+        "current_map_id": vector_map.current_map_id,
+        "total_area": vector_map.total_area or None,
+        "zone_count": len(vector_map.zones),
+        "zone_names": zone_names,
+        "forbidden_area_count": len(vector_map.forbidden_areas),
+        "spot_area_count": len(vector_map.spot_areas),
+        "pathway_count": len(vector_map.paths),
+        "contour_count": len(vector_map.contours),
+        "contour_ids": contour_ids,
+        "clean_point_count": len(vector_map.clean_points),
+        "cruise_point_count": len(vector_map.cruise_points),
+        "mow_path_count": len(vector_map.mow_paths),
+        "mow_path_segment_count": mow_path_segment_count,
+        "mow_path_point_count": mow_path_point_count,
+        "mow_path_length_m": round(mow_path_length_m, 2),
+        "has_live_path": mow_path_point_count > 0,
+        "obstacle_count": len(vector_map.obstacles),
+        "available_map_count": len(available_maps),
+        "available_maps": available_maps,
+        "maps": maps,
+        "last_updated": vector_map.last_updated,
+    }
+
+
+def _coordinate_path_length_m(points: Sequence[tuple[int, int]]) -> float:
+    """Return an approximate path length in meters for centimeter coordinates."""
+    if len(points) < 2:
+        return 0.0
+
+    total = 0.0
+    previous = points[0]
+    for current in points[1:]:
+        total += math.hypot(current[0] - previous[0], current[1] - previous[1])
+        previous = current
+    return total / 100.0
+
+
 def _reassemble_batch_chunks(
     batch_data: Mapping[str, Any],
     prefix: str,
@@ -334,20 +520,23 @@ def _parse_vector_map_json(value: str) -> DreameLawnMowerVectorMap:
         forbidden_areas=_parse_zone_collection(data.get("forbiddenAreas")),
         spot_areas=_parse_zone_collection(data.get("spotAreas")),
         paths=_parse_path_collection(data.get("paths")),
+        contours=_parse_contour_collection(data.get("contours")),
         clean_points=_parse_point_collection(data.get("cleanPoints")),
         cruise_points=_parse_point_collection(data.get("cruisePoints")),
         obstacles=_parse_object_collection(data.get("obstacles")),
         boundary=boundary,
         total_area=float(data.get("totalArea") or 0),
         name=str(data.get("name") or ""),
+        map_id=_map_id_from_index(int(data.get("mapIndex") or 0)),
         map_index=int(data.get("mapIndex") or 0),
+        current_map_id=_coerce_int(data.get("currentMapId")),
         last_updated=time.time(),
     )
 
 
 def _parse_zone_collection(value: Any) -> tuple[DreameLawnMowerVectorZone, ...]:
     result: list[DreameLawnMowerVectorZone] = []
-    for zone_id, zone_data in _parse_map_value_entries(value):
+    for zone_id, zone_data in _parse_map_entries(value):
         if not isinstance(zone_data, Mapping):
             continue
         result.append(
@@ -367,7 +556,7 @@ def _parse_zone_collection(value: Any) -> tuple[DreameLawnMowerVectorZone, ...]:
 
 def _parse_path_collection(value: Any) -> tuple[DreameLawnMowerVectorPath, ...]:
     result: list[DreameLawnMowerVectorPath] = []
-    for path_id, path_data in _parse_map_value_entries(value):
+    for path_id, path_data in _parse_map_entries(value):
         if not isinstance(path_data, Mapping):
             continue
         result.append(
@@ -380,9 +569,33 @@ def _parse_path_collection(value: Any) -> tuple[DreameLawnMowerVectorPath, ...]:
     return tuple(result)
 
 
+def _parse_contour_collection(
+    value: Any,
+) -> tuple[DreameLawnMowerVectorContour, ...]:
+    result: list[DreameLawnMowerVectorContour] = []
+    for raw_contour_id, contour_data in _parse_map_entries_with_mode(
+        value,
+        coerce_key=False,
+    ):
+        if not isinstance(contour_data, Mapping):
+            continue
+        contour_id = _extract_contour_id(raw_contour_id)
+        if contour_id is None:
+            continue
+        result.append(
+            DreameLawnMowerVectorContour(
+                contour_id=contour_id,
+                points=_extract_path_coords(contour_data.get("path")),
+                contour_type=int(contour_data.get("type") or 0),
+                shape_type=int(contour_data.get("shapeType") or 0),
+            )
+        )
+    return tuple(result)
+
+
 def _parse_point_collection(value: Any) -> tuple[tuple[int, int], ...]:
     points: list[tuple[int, int]] = []
-    for _, point_data in _parse_map_value_entries(value):
+    for _, point_data in _parse_map_entries(value):
         if isinstance(point_data, Mapping):
             point = _extract_single_point(point_data)
             if point is not None:
@@ -392,13 +605,21 @@ def _parse_point_collection(value: Any) -> tuple[tuple[int, int], ...]:
 
 def _parse_object_collection(value: Any) -> tuple[Mapping[str, Any], ...]:
     objects: list[Mapping[str, Any]] = []
-    for _, entry in _parse_map_value_entries(value):
+    for _, entry in _parse_map_entries(value):
         if isinstance(entry, Mapping):
             objects.append(entry)
     return tuple(objects)
 
 
-def _parse_map_value_entries(value: Any) -> tuple[tuple[int, Any], ...]:
+def _parse_map_entries(value: Any) -> tuple[tuple[int, Any], ...]:
+    return _parse_map_entries_with_mode(value, coerce_key=True)
+
+
+def _parse_map_entries_with_mode(
+    value: Any,
+    *,
+    coerce_key: bool,
+) -> tuple[tuple[Any, Any], ...]:
     if not isinstance(value, Mapping) or value.get("dataType") != "Map":
         return ()
     entries = value.get("value")
@@ -407,17 +628,19 @@ def _parse_map_value_entries(value: Any) -> tuple[tuple[int, Any], ...]:
     ):
         return ()
 
-    result: list[tuple[int, Any]] = []
+    result: list[tuple[Any, Any]] = []
     for entry in entries:
         if (
             isinstance(entry, Sequence)
             and not isinstance(entry, (str, bytes, bytearray))
             and len(entry) >= 2
         ):
-            try:
-                key = int(entry[0])
-            except (TypeError, ValueError):
-                continue
+            key = entry[0]
+            if coerce_key:
+                try:
+                    key = int(key)
+                except (TypeError, ValueError):
+                    continue
             result.append((key, entry[1]))
     return tuple(result)
 
@@ -482,6 +705,31 @@ def _parse_mow_paths(
         return ()
 
     return (DreameLawnMowerVectorMowPath(zone_id=0, segments=tuple(segments)),)
+
+
+def _extract_contour_id(value: Any) -> tuple[int, int] | None:
+    if isinstance(value, str):
+        parts = [part.strip() for part in value.split(",")]
+        if len(parts) != 2:
+            return None
+        try:
+            return int(parts[0]), int(parts[1])
+        except ValueError:
+            return None
+
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        if len(value) != 2:
+            return None
+        try:
+            return int(value[0]), int(value[1])
+        except (TypeError, ValueError):
+            return None
+
+    return None
+
+
+def _map_id_from_index(map_index: int) -> int:
+    return map_index + 1
 
 
 def _coerce_text(value: Any) -> str | None:

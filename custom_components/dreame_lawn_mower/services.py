@@ -44,6 +44,7 @@ ATTR_PLAN_ID = "plan_id"
 ATTR_PROMPT = "prompt"
 ATTR_ROTATION = "rotation"
 ATTR_VELOCITY = "velocity"
+ATTR_ZONE_ID = "zone_id"
 
 SERVICE_PLAN_MOWING_PREFERENCE_UPDATE = "plan_mowing_preference_update"
 SERVICE_REMOTE_CONTROL_STEP = "remote_control_step"
@@ -119,52 +120,56 @@ SET_SCHEDULE_PLAN_ENABLED_SCHEMA = vol.Schema(
     }
 )
 
+MOWING_PREFERENCE_CHANGE_FIELDS = {
+    vol.Optional(ATTR_EFFICIENT_MODE): _int_range(
+        name=ATTR_EFFICIENT_MODE,
+        minimum=0,
+    ),
+    vol.Optional(ATTR_MOWING_HEIGHT_CM): vol.Coerce(float),
+    vol.Optional(ATTR_MOWING_DIRECTION_MODE): _int_range(
+        name=ATTR_MOWING_DIRECTION_MODE,
+        minimum=0,
+    ),
+    vol.Optional(ATTR_MOWING_DIRECTION_DEGREES): _int_range(
+        name=ATTR_MOWING_DIRECTION_DEGREES,
+        minimum=0,
+    ),
+    vol.Optional(ATTR_EDGE_MOWING_AUTO): cv.boolean,
+    vol.Optional(ATTR_EDGE_MOWING_WALK_MODE): _int_range(
+        name=ATTR_EDGE_MOWING_WALK_MODE,
+        minimum=0,
+    ),
+    vol.Optional(ATTR_EDGE_MOWING_OBSTACLE_AVOIDANCE): cv.boolean,
+    vol.Optional(ATTR_CUTTER_POSITION): _int_range(
+        name=ATTR_CUTTER_POSITION,
+        minimum=0,
+    ),
+    vol.Optional(ATTR_EDGE_MOWING_NUM): _int_range(
+        name=ATTR_EDGE_MOWING_NUM,
+        minimum=0,
+    ),
+    vol.Optional(ATTR_OBSTACLE_AVOIDANCE_ENABLED): cv.boolean,
+    vol.Optional(ATTR_OBSTACLE_AVOIDANCE_HEIGHT_CM): _int_range(
+        name=ATTR_OBSTACLE_AVOIDANCE_HEIGHT_CM,
+        minimum=0,
+    ),
+    vol.Optional(ATTR_OBSTACLE_AVOIDANCE_DISTANCE_CM): _int_range(
+        name=ATTR_OBSTACLE_AVOIDANCE_DISTANCE_CM,
+        minimum=0,
+    ),
+    vol.Optional(ATTR_OBSTACLE_AVOIDANCE_AI_CLASSES): vol.All(
+        cv.ensure_list,
+        [vol.In(["people", "animals", "objects"])],
+    ),
+    vol.Optional(ATTR_EDGE_MOWING_SAFE): cv.boolean,
+}
+
 PLAN_MOWING_PREFERENCE_UPDATE_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_ENTRY_ID): cv.string,
         vol.Required(ATTR_MAP_INDEX): _int_range(name=ATTR_MAP_INDEX, minimum=0),
         vol.Required(ATTR_AREA_ID): _int_range(name=ATTR_AREA_ID, minimum=0),
-        vol.Optional(ATTR_EFFICIENT_MODE): _int_range(
-            name=ATTR_EFFICIENT_MODE,
-            minimum=0,
-        ),
-        vol.Optional(ATTR_MOWING_HEIGHT_CM): vol.Coerce(float),
-        vol.Optional(ATTR_MOWING_DIRECTION_MODE): _int_range(
-            name=ATTR_MOWING_DIRECTION_MODE,
-            minimum=0,
-        ),
-        vol.Optional(ATTR_MOWING_DIRECTION_DEGREES): _int_range(
-            name=ATTR_MOWING_DIRECTION_DEGREES,
-            minimum=0,
-        ),
-        vol.Optional(ATTR_EDGE_MOWING_AUTO): cv.boolean,
-        vol.Optional(ATTR_EDGE_MOWING_WALK_MODE): _int_range(
-            name=ATTR_EDGE_MOWING_WALK_MODE,
-            minimum=0,
-        ),
-        vol.Optional(ATTR_EDGE_MOWING_OBSTACLE_AVOIDANCE): cv.boolean,
-        vol.Optional(ATTR_CUTTER_POSITION): _int_range(
-            name=ATTR_CUTTER_POSITION,
-            minimum=0,
-        ),
-        vol.Optional(ATTR_EDGE_MOWING_NUM): _int_range(
-            name=ATTR_EDGE_MOWING_NUM,
-            minimum=0,
-        ),
-        vol.Optional(ATTR_OBSTACLE_AVOIDANCE_ENABLED): cv.boolean,
-        vol.Optional(ATTR_OBSTACLE_AVOIDANCE_HEIGHT_CM): _int_range(
-            name=ATTR_OBSTACLE_AVOIDANCE_HEIGHT_CM,
-            minimum=0,
-        ),
-        vol.Optional(ATTR_OBSTACLE_AVOIDANCE_DISTANCE_CM): _int_range(
-            name=ATTR_OBSTACLE_AVOIDANCE_DISTANCE_CM,
-            minimum=0,
-        ),
-        vol.Optional(ATTR_OBSTACLE_AVOIDANCE_AI_CLASSES): vol.All(
-            cv.ensure_list,
-            [vol.In(["people", "animals", "objects"])],
-        ),
-        vol.Optional(ATTR_EDGE_MOWING_SAFE): cv.boolean,
+        **MOWING_PREFERENCE_CHANGE_FIELDS,
     }
 )
 
@@ -309,6 +314,11 @@ def _guard_schedule_write_request(call: ServiceCall) -> None:
 
 def _preference_change_request(call: ServiceCall) -> dict[str, Any]:
     """Return requested preference field updates from a service call."""
+    return preference_change_request(call.data)
+
+
+def preference_change_request(data: dict[str, Any]) -> dict[str, Any]:
+    """Return requested preference field updates from parsed service data."""
     supported_fields = (
         ATTR_EFFICIENT_MODE,
         ATTR_MOWING_HEIGHT_CM,
@@ -326,9 +336,9 @@ def _preference_change_request(call: ServiceCall) -> dict[str, Any]:
         ATTR_EDGE_MOWING_SAFE,
     )
     changes = {
-        key: call.data[key]
+        key: data[key]
         for key in supported_fields
-        if key in call.data
+        if key in data
     }
     if not changes:
         raise HomeAssistantError(

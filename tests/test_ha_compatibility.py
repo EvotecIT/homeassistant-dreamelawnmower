@@ -9,6 +9,7 @@ from custom_components.dreame_lawn_mower import image as image_helpers
 from custom_components.dreame_lawn_mower.binary_sensor import (
     DreameBinarySensorDescription,
     DreameLawnMowerAutomaticFirmwareUpdatesBinarySensor,
+    DreameLawnMowerBluetoothConnectedBinarySensor,
     DreameLawnMowerFirmwareUpdateAvailableBinarySensor,
     DreameLawnMowerRainDelayActiveBinarySensor,
     DreameLawnMowerRainProtectionEnabledBinarySensor,
@@ -44,6 +45,9 @@ from custom_components.dreame_lawn_mower.sensor import (
     DreameLawnMowerPreferenceMapCountSensor,
     DreameLawnMowerRainDelayEndTimeSensor,
     DreameLawnMowerRainProtectionDurationSensor,
+    DreameLawnMowerRuntimeHeadingSensor,
+    DreameLawnMowerRuntimePositionXSensor,
+    DreameLawnMowerRuntimePositionYSensor,
     DreameLawnMowerWeatherProtectionStatusSensor,
     DreameSensorDescription,
     app_map_object_attributes,
@@ -132,6 +136,43 @@ def test_firmware_update_available_binary_sensor_is_diagnostic() -> None:
             "__attr_entity_category"
         ]
         == "diagnostic"
+    )
+
+
+def test_bluetooth_connected_binary_sensor_is_diagnostic() -> None:
+    assert (
+        DreameLawnMowerBluetoothConnectedBinarySensor.__dict__[
+            "__attr_entity_category"
+        ]
+        == "diagnostic"
+    )
+
+
+def test_runtime_pose_sensors_are_diagnostic_disabled_by_default() -> None:
+    x_sensor = object.__new__(DreameLawnMowerRuntimePositionXSensor)
+    y_sensor = object.__new__(DreameLawnMowerRuntimePositionYSensor)
+    heading_sensor = object.__new__(DreameLawnMowerRuntimeHeadingSensor)
+
+    assert (
+        x_sensor._attr_entity_category == "diagnostic"
+    )
+    assert (
+        x_sensor._attr_entity_registry_enabled_default
+        is False
+    )
+    assert (
+        y_sensor._attr_entity_category == "diagnostic"
+    )
+    assert (
+        y_sensor._attr_entity_registry_enabled_default
+        is False
+    )
+    assert (
+        heading_sensor._attr_entity_category == "diagnostic"
+    )
+    assert (
+        heading_sensor._attr_entity_registry_enabled_default
+        is False
     )
 
 
@@ -381,6 +422,72 @@ def test_task_status_probe_payload_keeps_compact_app_state() -> None:
     scan = {
         "entries": [
             {
+                "key": "1.4",
+                "value": [
+                    206,
+                    79,
+                    2,
+                    128,
+                    77,
+                    0,
+                    45,
+                    7,
+                    1,
+                    0,
+                    125,
+                    1,
+                    34,
+                    1,
+                    125,
+                    1,
+                    50,
+                    1,
+                    246,
+                    255,
+                    234,
+                    255,
+                    1,
+                    100,
+                    94,
+                    5,
+                    108,
+                    207,
+                    0,
+                    127,
+                    28,
+                    0,
+                    206,
+                ],
+                "status_blob": {
+                    "supported": True,
+                    "source": None,
+                    "raw": (),
+                    "length": 33,
+                    "hex": "ce4f02804d002d0701007d0122017d013201f6ffeaff01645e056ccf007f1c00ce",
+                    "frame_start": 206,
+                    "frame_end": 206,
+                    "frame_valid": True,
+                    "payload": (),
+                    "bytes_by_index": {},
+                    "candidate_battery_level": None,
+                    "candidate_runtime_region_id": 1,
+                    "candidate_runtime_task_id": 100,
+                    "candidate_runtime_area_progress_percent": 13.7,
+                    "candidate_runtime_current_area_sqm": 72.95,
+                    "candidate_runtime_total_area_sqm": 531.0,
+                    "candidate_runtime_pose_x": 5910,
+                    "candidate_runtime_pose_y": 12400,
+                    "candidate_runtime_heading_deg": 63.5,
+                    "candidate_runtime_track_segments": (
+                        ((9720, 15300), (9720, 15460), (5810, 12180)),
+                    ),
+                    "notes": (
+                        "unexpected_length",
+                        "unexpected_runtime_progress_value",
+                    ),
+                },
+            },
+            {
                 "key": "2.1",
                 "value": "6",
                 "decoded_label": "Charging",
@@ -401,14 +508,28 @@ def test_task_status_probe_payload_keeps_compact_app_state() -> None:
                     "operation": 6,
                 },
             },
+            {"key": "1.53", "value": "false"},
             {"key": "2.51", "value": {"time": "1776587727", "tz": "Europe/Warsaw"}},
+            {"key": "2.56", "value": '{"status":[[1,4]]}'},
+            {"key": "2.60", "value": "1"},
             {"key": "3.1", "value": "77"},
+            {"key": "3.2", "value": "1"},
             {"key": "5.104", "value": "3"},
             {"key": "5.105", "value": "1"},
             {"key": "5.106", "value": "1"},
             {"key": "5.107", "value": "90"},
         ],
-        "summary": {"unknown_non_empty_keys": ["5.104", "5.105", "5.106", "5.107"]},
+        "summary": {
+            "unknown_non_empty_keys": [
+                "2.56",
+                "2.60",
+                "3.2",
+                "5.104",
+                "5.105",
+                "5.106",
+                "5.107",
+            ]
+        },
     }
 
     payload = task_status_probe_payload(
@@ -418,9 +539,24 @@ def test_task_status_probe_payload_keeps_compact_app_state() -> None:
 
     assert payload["source"] == "cloud_property_task_status"
     assert payload["available"] is True
-    assert payload["entry_count"] == 9
+    assert payload["entry_count"] == 14
     assert payload["summary"] == {
         "state": {"value": "6", "label": "Charging", "state_key": "charging"},
+        "runtime_status": {
+            "length": 33,
+            "hex": "ce4f02804d002d0701007d0122017d013201f6ffeaff01645e056ccf007f1c00ce",
+            "frame_valid": True,
+            "candidate_runtime_area_progress_percent": 13.7,
+            "candidate_runtime_current_area_sqm": 72.95,
+            "candidate_runtime_total_area_sqm": 531.0,
+            "candidate_runtime_region_id": 1,
+            "candidate_runtime_task_id": 100,
+            "candidate_runtime_pose_x": 5910,
+            "candidate_runtime_pose_y": 12400,
+            "candidate_runtime_heading_deg": 63.5,
+            "notes": ["unexpected_length", "unexpected_runtime_progress_value"],
+        },
+        "bluetooth_connected": "false",
         "task_status": {
             "type": "TASK",
             "executing": True,
@@ -436,31 +572,65 @@ def test_task_status_probe_payload_keeps_compact_app_state() -> None:
         "error_active": True,
         "battery_level": "77",
         "device_time": {"time": "1776587727", "tz": "Europe/Warsaw"},
+        "status_matrix": {
+            "keys": ["status"],
+            "status_pairs": [[1, 4]],
+            "status_count": 1,
+        },
+        "auxiliary_live_properties": {"2.60": "1", "3.2": "1"},
         "service_5_latest": {
             "5.104": "3",
             "5.105": "1",
             "5.106": "1",
             "5.107": "90",
         },
-        "unknown_non_empty_keys": ["5.104", "5.105", "5.106", "5.107"],
+        "unknown_non_empty_keys": [
+            "2.56",
+            "2.60",
+            "3.2",
+            "5.104",
+            "5.105",
+            "5.106",
+            "5.107",
+        ],
     }
     assert task_status_probe_result_attributes(payload) == {
         "captured_at": "2026-04-19T15:00:00+00:00",
         "source": "cloud_property_task_status",
         "available": True,
         "keys": [
+            "1.4",
+            "1.53",
             "2.1",
             "2.2",
             "2.50",
             "2.51",
+            "2.56",
+            "2.60",
             "3.1",
+            "3.2",
             "5.104",
             "5.105",
             "5.106",
             "5.107",
         ],
-        "entry_count": 9,
+        "entry_count": 14,
         "state": {"value": "6", "label": "Charging", "state_key": "charging"},
+        "runtime_status": {
+            "length": 33,
+            "hex": "ce4f02804d002d0701007d0122017d013201f6ffeaff01645e056ccf007f1c00ce",
+            "frame_valid": True,
+            "candidate_runtime_area_progress_percent": 13.7,
+            "candidate_runtime_current_area_sqm": 72.95,
+            "candidate_runtime_total_area_sqm": 531.0,
+            "candidate_runtime_region_id": 1,
+            "candidate_runtime_task_id": 100,
+            "candidate_runtime_pose_x": 5910,
+            "candidate_runtime_pose_y": 12400,
+            "candidate_runtime_heading_deg": 63.5,
+            "notes": ["unexpected_length", "unexpected_runtime_progress_value"],
+        },
+        "bluetooth_connected": "false",
         "task_status": {
             "type": "TASK",
             "executing": True,
@@ -476,13 +646,27 @@ def test_task_status_probe_payload_keeps_compact_app_state() -> None:
         "error_active": True,
         "battery_level": "77",
         "device_time": {"time": "1776587727", "tz": "Europe/Warsaw"},
+        "status_matrix": {
+            "keys": ["status"],
+            "status_pairs": [[1, 4]],
+            "status_count": 1,
+        },
+        "auxiliary_live_properties": {"2.60": "1", "3.2": "1"},
         "service_5_latest": {
             "5.104": "3",
             "5.105": "1",
             "5.106": "1",
             "5.107": "90",
         },
-        "unknown_non_empty_keys": ["5.104", "5.105", "5.106", "5.107"],
+        "unknown_non_empty_keys": [
+            "2.56",
+            "2.60",
+            "3.2",
+            "5.104",
+            "5.105",
+            "5.106",
+            "5.107",
+        ],
         "error_count": 0,
     }
 

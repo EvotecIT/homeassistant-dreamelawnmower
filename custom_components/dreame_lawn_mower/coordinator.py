@@ -16,6 +16,7 @@ from .api import (
     DreameLawnMowerDescriptor,
     DreameLawnMowerSnapshot,
 )
+from .dreame_lawn_mower_client.models import DreameLawnMowerStatusBlob
 from .const import (
     CONF_ACCOUNT_TYPE,
     CONF_COUNTRY,
@@ -36,7 +37,9 @@ from .dreame_lawn_mower_client.models import display_name_for_model
 _LOGGER = logging.getLogger(__name__)
 
 BATCH_DEVICE_DATA_REFRESH_INTERVAL = timedelta(minutes=15)
+APP_MAP_REFRESH_INTERVAL = timedelta(minutes=5)
 APP_MAP_OBJECT_REFRESH_INTERVAL = timedelta(minutes=30)
+VECTOR_MAP_REFRESH_INTERVAL = timedelta(minutes=5)
 WEATHER_PROTECTION_REFRESH_INTERVAL = timedelta(minutes=5)
 
 
@@ -65,11 +68,22 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         )
         self.entry = entry
         self.app_map_objects: dict[str, Any] | None = None
+        self.app_maps: dict[str, Any] | None = None
+        self.app_maps_refreshed_at: datetime | None = None
         self.app_map_objects_refreshed_at: datetime | None = None
         self.batch_device_data: dict[str, Any] | None = None
         self.batch_device_data_refreshed_at: datetime | None = None
+        self.vector_map_details: dict[str, Any] | None = None
+        self.vector_map_details_refreshed_at: datetime | None = None
         self.weather_protection: dict[str, Any] | None = None
         self.weather_protection_refreshed_at: datetime | None = None
+        self.selected_mowing_action = "all_area"
+        self.selected_map_index: int | None = None
+        self.selected_contour_id: tuple[int, int] | None = None
+        self.selected_zone_id: int | None = None
+        self.selected_spot_id: int | None = None
+        self.bluetooth_connected: bool | None = None
+        self.runtime_status_blob: DreameLawnMowerStatusBlob | None = None
         self.last_batch_device_data_probe_result: dict[str, Any] | None = None
         self.last_preference_probe_result: dict[str, Any] | None = None
         self.last_preference_write_result: dict[str, Any] | None = None
@@ -96,8 +110,32 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             snapshot = await self.client.async_refresh()
         except DreameLawnMowerConnectionError as err:
             raise UpdateFailed(str(err)) from err
+        try:
+            self.runtime_status_blob = await self.client.async_get_runtime_status_blob(
+                refresh=False,
+                include_cloud=True,
+            )
+            self.client.update_runtime_live_tracking(
+                self.runtime_status_blob,
+                active=getattr(snapshot, "activity", None)
+                in {"mowing", "paused", "returning"},
+            )
+        except Exception as err:  # noqa: BLE001 - best-effort extra metadata
+            _LOGGER.debug("Failed to refresh runtime status blob: %s", err)
+            self.runtime_status_blob = None
+            self.client.update_runtime_live_tracking(None, active=False)
+        try:
+            self.bluetooth_connected = await self.client.async_get_bluetooth_connected(
+                refresh=False,
+                include_cloud=True,
+            )
+        except Exception as err:  # noqa: BLE001 - best-effort extra metadata
+            _LOGGER.debug("Failed to refresh Bluetooth connection state: %s", err)
+            self.bluetooth_connected = None
         await self.async_refresh_batch_device_data(force=False)
+        await self.async_refresh_app_maps(force=False)
         await self.async_refresh_app_map_objects(force=False)
+        await self.async_refresh_vector_map_details(force=False)
         await self.async_refresh_weather_protection(force=False)
         return snapshot
 
@@ -179,6 +217,68 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         }
         self.app_map_objects = payload
         self.app_map_objects_refreshed_at = now
+        return payload
+
+    async def async_refresh_vector_map_details(
+        self,
+        *,
+        force: bool = False,
+        source: str = "vector_map_auto",
+    ) -> dict[str, Any] | None:
+        """Refresh cached batch vector-map details without failing the main poll."""
+        now = datetime.now(UTC)
+        if (
+            not force
+            and self.vector_map_details is not None
+            and self.vector_map_details_refreshed_at is not None
+            and now - self.vector_map_details_refreshed_at < VECTOR_MAP_REFRESH_INTERVAL
+        ):
+            return self.vector_map_details
+
+        try:
+            vector_map_details = await self.client.async_get_vector_map_details()
+        except Exception as err:  # noqa: BLE001 - best-effort extra metadata
+            _LOGGER.debug("Failed to refresh vector map details: %s", err)
+            return self.vector_map_details
+
+        payload = dict(vector_map_details)
+        payload.setdefault("captured_at", now.isoformat())
+        payload["source"] = source
+        self.vector_map_details = payload
+        self.vector_map_details_refreshed_at = now
+        return payload
+
+    async def async_refresh_app_maps(
+        self,
+        *,
+        force: bool = False,
+        source: str = "app_maps_auto",
+    ) -> dict[str, Any] | None:
+        """Refresh cached app-map payloads without failing the main poll."""
+        now = datetime.now(UTC)
+        if (
+            not force
+            and self.app_maps is not None
+            and self.app_maps_refreshed_at is not None
+            and now - self.app_maps_refreshed_at < APP_MAP_REFRESH_INTERVAL
+        ):
+            return self.app_maps
+
+        try:
+            app_maps = await self.client.async_get_app_maps(
+                include_payload=True,
+                include_objects=False,
+                include_object_urls=False,
+            )
+        except Exception as err:  # noqa: BLE001 - best-effort extra metadata
+            _LOGGER.debug("Failed to refresh app maps: %s", err)
+            return self.app_maps
+
+        payload = dict(app_maps)
+        payload.setdefault("captured_at", now.isoformat())
+        payload["source"] = source
+        self.app_maps = payload
+        self.app_maps_refreshed_at = now
         return payload
 
     async def async_refresh_weather_protection(

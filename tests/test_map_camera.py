@@ -108,6 +108,132 @@ def test_map_camera_attributes_include_all_app_map_metadata() -> None:
         {"idx": 0, "current": True, "available": True},
         {"idx": 1, "current": False, "available": True},
     ]
+    assert attributes["map_has_live_path"] is None
+    assert attributes["map_details"] is None
+
+
+def test_map_camera_attributes_include_live_path_metadata() -> None:
+    """Camera attributes expose vector live-path details when present."""
+    view = DreameLawnMowerMapView(
+        source="batch_vector_map",
+        details={
+            "map_name": "Primary",
+            "map_id": 1,
+            "map_index": 0,
+            "current_map_id": 2,
+            "total_area": 10.5,
+            "zone_count": 2,
+            "zone_names": ["Front Yard", "Back Yard"],
+            "contour_count": 1,
+            "contour_ids": [[1, 0]],
+            "clean_point_count": 1,
+            "cruise_point_count": 0,
+            "mow_path_count": 1,
+            "mow_path_segment_count": 3,
+            "mow_path_point_count": 18,
+            "mow_path_length_m": 9.87,
+            "has_live_path": True,
+            "available_map_count": 2,
+            "available_maps": [
+                {"map_id": 1, "map_index": 0, "name": "Primary", "total_area": 10.5},
+                {"map_id": 2, "map_index": 1, "name": "Back", "total_area": 8.0},
+            ],
+        },
+    )
+
+    attributes = map_camera_attributes(
+        view,
+        image_cached=False,
+        refreshed_at=None,
+        last_error=None,
+    )
+
+    assert attributes["map_name"] == "Primary"
+    assert attributes["map_index"] == 0
+    assert attributes["map_current_map_id"] == 2
+    assert attributes["map_total_area"] == 10.5
+    assert attributes["map_zone_count"] == 2
+    assert attributes["map_zone_names"] == ["Front Yard", "Back Yard"]
+    assert attributes["map_contour_count"] == 1
+    assert attributes["map_contour_ids"] == [[1, 0]]
+    assert attributes["map_clean_point_count"] == 1
+    assert attributes["map_cruise_point_count"] == 0
+    assert attributes["map_trajectory_count"] is None
+    assert attributes["map_trajectory_point_count"] is None
+    assert attributes["map_cut_relation_count"] is None
+    assert attributes["mow_path_count"] == 1
+    assert attributes["mow_path_segment_count"] == 3
+    assert attributes["mow_path_point_count"] == 18
+    assert attributes["mow_path_length_m"] == 9.87
+    assert attributes["map_has_live_path"] is True
+    assert attributes["map_available_vector_map_count"] == 2
+    assert attributes["map_available_vector_maps"] == [
+        {"map_id": 1, "map_index": 0, "name": "Primary", "total_area": 10.5},
+        {"map_id": 2, "map_index": 1, "name": "Back", "total_area": 8.0},
+    ]
+    assert attributes["map_details"] == {
+        "map_name": "Primary",
+        "map_id": 1,
+        "map_index": 0,
+        "current_map_id": 2,
+        "total_area": 10.5,
+        "zone_count": 2,
+        "zone_names": ["Front Yard", "Back Yard"],
+        "contour_count": 1,
+        "contour_ids": [[1, 0]],
+        "clean_point_count": 1,
+        "cruise_point_count": 0,
+        "mow_path_count": 1,
+        "mow_path_segment_count": 3,
+        "mow_path_point_count": 18,
+        "mow_path_length_m": 9.87,
+        "has_live_path": True,
+        "available_map_count": 2,
+        "available_maps": [
+            {"map_id": 1, "map_index": 0, "name": "Primary", "total_area": 10.5},
+            {"map_id": 2, "map_index": 1, "name": "Back", "total_area": 8.0},
+        ],
+    }
+
+
+def test_map_camera_attributes_include_app_trajectory_details() -> None:
+    """App-map trajectory metadata is promoted into camera attributes."""
+    view = DreameLawnMowerMapView(
+        source="app_action_map",
+        details={
+            "map_name": "Garden",
+            "map_index": 1,
+            "total_area": 550,
+            "map_area_total": 550.0,
+            "zone_count": 2,
+            "spot_area_count": 0,
+            "clean_point_count": 0,
+            "trajectory_count": 1,
+            "trajectory_point_count": 64,
+            "trajectory_length_m": 12.34,
+            "cut_relation_count": 0,
+            "has_live_path": True,
+            "current": True,
+            "created": True,
+        },
+    )
+
+    attributes = map_camera_attributes(
+        view,
+        image_cached=False,
+        refreshed_at=None,
+        last_error=None,
+    )
+
+    assert attributes["map_name"] == "Garden"
+    assert attributes["map_total_area"] == 550
+    assert attributes["map_zone_count"] == 2
+    assert attributes["map_clean_point_count"] == 0
+    assert attributes["map_trajectory_count"] == 1
+    assert attributes["map_trajectory_point_count"] == 64
+    assert attributes["map_trajectory_length_m"] == 12.34
+    assert attributes["map_cut_relation_count"] == 0
+    assert attributes["map_has_live_path"] is True
 
 
 def test_map_camera_attributes_report_placeholder_without_view() -> None:

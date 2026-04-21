@@ -10,6 +10,7 @@ from .models import DreameLawnMowerStatusBlob
 
 MOWER_RAW_STATUS_PROPERTY_KEY: Final[str] = "1.1"
 MOWER_RUNTIME_STATUS_PROPERTY_KEY: Final[str] = "1.4"
+MOWER_BLUETOOTH_PROPERTY_KEY: Final[str] = "1.53"
 MOWER_STATE_PROPERTY_KEY: Final[str] = "2.1"
 MOWER_ERROR_PROPERTY_KEY: Final[str] = "2.2"
 MOWER_TASK_PROPERTY_KEY: Final[str] = "2.50"
@@ -18,6 +19,7 @@ MOWER_BATTERY_PROPERTY_KEY: Final[str] = "3.1"
 MOWER_PROPERTY_HINTS: Final[dict[str, str]] = {
     MOWER_RAW_STATUS_PROPERTY_KEY: "raw_status_blob",
     MOWER_RUNTIME_STATUS_PROPERTY_KEY: "runtime_status_blob",
+    MOWER_BLUETOOTH_PROPERTY_KEY: "bluetooth_connected",
     MOWER_STATE_PROPERTY_KEY: "mower_state",
     MOWER_ERROR_PROPERTY_KEY: "mower_error",
     MOWER_TASK_PROPERTY_KEY: "task_status",
@@ -197,7 +199,7 @@ def decode_mower_status_blob(
     *,
     source: str | None = None,
 ) -> DreameLawnMowerStatusBlob | None:
-    """Return a conservative structure for the app realtime `1.1` byte blob.
+    """Return a conservative structure for app realtime/status byte blobs.
 
     The Dreamehome app exposes this as a framed byte array. We preserve indexed
     bytes for cross-device comparison, but intentionally avoid assigning
@@ -221,6 +223,9 @@ def decode_mower_status_blob(
     if frame_valid and len(raw) > 11 and raw[11] <= 100:
         candidate_battery_level = raw[11]
 
+    runtime_telemetry = _decode_runtime_blob_candidates(raw, frame_valid=frame_valid)
+    notes.extend(runtime_telemetry.pop("notes", ()))
+
     return DreameLawnMowerStatusBlob(
         supported=True,
         source=source,
@@ -233,8 +238,192 @@ def decode_mower_status_blob(
         payload=raw[1:-1] if len(raw) >= 2 else (),
         bytes_by_index={str(index): item for index, item in enumerate(raw)},
         candidate_battery_level=candidate_battery_level,
+        candidate_runtime_region_id=runtime_telemetry.get("region_id"),
+        candidate_runtime_task_id=runtime_telemetry.get("task_id"),
+        candidate_runtime_progress_percent=runtime_telemetry.get("progress_percent"),
+        candidate_runtime_area_progress_percent=runtime_telemetry.get(
+            "area_progress_percent"
+        ),
+        candidate_runtime_current_area_sqm=runtime_telemetry.get(
+            "current_area_sqm"
+        ),
+        candidate_runtime_total_area_sqm=runtime_telemetry.get("total_area_sqm"),
+        candidate_runtime_pose_x=runtime_telemetry.get("pose_x"),
+        candidate_runtime_pose_y=runtime_telemetry.get("pose_y"),
+        candidate_runtime_heading_deg=runtime_telemetry.get("heading_deg"),
+        candidate_runtime_track_segments=runtime_telemetry.get("track_segments", ()),
         notes=tuple(notes),
     )
+
+
+def _decode_runtime_blob_candidates(
+    raw: Sequence[int],
+    *,
+    frame_valid: bool,
+) -> dict[str, object]:
+    """Return conservative pose/progress hints from runtime-status payloads."""
+    result: dict[str, object] = {"notes": []}
+    if not frame_valid:
+        return result
+
+    pose = _decode_runtime_pose(raw)
+    if pose is not None:
+        result.update(pose)
+
+    track = _decode_runtime_track_segments(raw, pose)
+    if track is not None:
+        result.update(track)
+
+    task = _decode_runtime_task_block(raw)
+    if task is not None:
+        result.update(task)
+
+    return result
+
+
+def _decode_runtime_pose(raw: Sequence[int]) -> dict[str, object] | None:
+    """Decode the 6-byte overlapping 20-bit pose used in app runtime payloads."""
+    if len(raw) not in (13, 22, 33, 44) or raw[0] != 0xCE:
+        return None
+
+    b0 = raw[1]
+    b1 = raw[2]
+    b2 = raw[3]
+    b3 = raw[4]
+    b4 = raw[5]
+    b5 = raw[6]
+
+    raw_x = ((b2 << 28) | (b1 << 20) | (b0 << 12)) & 0xFFFFFFFF
+    if raw_x & 0x80000000:
+        raw_x -= 0x100000000
+    pose_x = raw_x >> 12
+
+    raw_y = ((b4 << 24) | (b3 << 16) | (b2 << 8)) & 0xFFFFFFFF
+    if raw_y & 0x80000000:
+        raw_y -= 0x100000000
+    pose_y = raw_y >> 12
+
+    return {
+        "pose_x": int(pose_x * 10),
+        "pose_y": int(pose_y * 10),
+        "heading_deg": round((b5 / 255.0) * 360.0, 1),
+    }
+
+
+def _decode_runtime_task_block(raw: Sequence[int]) -> dict[str, object] | None:
+    """Decode the 10-byte mission/progress block from framed runtime payloads."""
+    if len(raw) not in (33, 44):
+        return None
+    if raw[0] != 0xCE or raw[-1] != 0xCE:
+        return None
+
+    offset = 22
+    region_id = raw[offset]
+    task_id = raw[offset + 1]
+    raw_percent = raw[offset + 2] | (raw[offset + 3] << 8)
+    total_area_raw = raw[offset + 4] | (raw[offset + 5] << 8) | (raw[offset + 6] << 16)
+    current_area_raw = raw[offset + 7] | (raw[offset + 8] << 8) | (raw[offset + 9] << 16)
+
+    total_area_sqm = round(total_area_raw / 100.0, 2) if total_area_raw else 0.0
+    current_area_sqm = round(current_area_raw / 100.0, 2) if current_area_raw else 0.0
+
+    progress_percent = None
+    notes: list[str] = []
+    if 0 <= raw_percent <= 1000:
+        progress_percent = round(raw_percent / 10.0, 1)
+    elif raw_percent:
+        notes.append("unexpected_runtime_progress_value")
+
+    area_progress_percent = None
+    if total_area_sqm > 0 and 0.0 <= current_area_sqm <= total_area_sqm:
+        area_progress_percent = round((current_area_sqm / total_area_sqm) * 100.0, 1)
+
+    return {
+        "region_id": region_id,
+        "task_id": task_id,
+        "progress_percent": progress_percent,
+        "area_progress_percent": area_progress_percent,
+        "current_area_sqm": current_area_sqm,
+        "total_area_sqm": total_area_sqm,
+        "notes": tuple(notes),
+    }
+
+
+def _decode_runtime_track_segments(
+    raw: Sequence[int],
+    pose: Mapping[str, object] | None,
+) -> dict[str, object] | None:
+    """Decode runtime trace chunks into map-unit coordinate segments."""
+    if not pose:
+        return None
+
+    base_x = pose.get("pose_x")
+    base_y = pose.get("pose_y")
+    if not isinstance(base_x, int) or not isinstance(base_y, int):
+        return None
+
+    chunks: list[tuple[int, int]] = []
+    if len(raw) == 22 and raw[0] == 0xCE and raw[-1] == 0xCE:
+        chunks.append((7, 15))
+    elif len(raw) == 33 and raw[0] == 0xCE and raw[-1] == 0xCE:
+        chunks.append((7, 15))
+    elif len(raw) == 44 and raw[0] == 0xCE and raw[-1] == 0xCE:
+        chunks.append((7, 15))
+        chunks.append((32, 11))
+    else:
+        return None
+
+    segments: list[tuple[tuple[int, int], ...]] = []
+    for offset, length in chunks:
+        segments.extend(_decode_runtime_track_chunk(raw, offset, length, base_x, base_y))
+
+    if not segments:
+        return None
+    return {"track_segments": tuple(segments)}
+
+
+def _decode_runtime_track_chunk(
+    raw: Sequence[int],
+    offset: int,
+    length: int,
+    base_x: int,
+    base_y: int,
+) -> list[tuple[tuple[int, int], ...]]:
+    """Decode one runtime trace chunk into contiguous point segments."""
+    if len(raw) < offset + length or length < 7:
+        return []
+
+    segments: list[list[tuple[int, int]]] = []
+    current_segment: list[tuple[int, int]] = []
+    pair_count = (length - 3) // 4
+    pair_offset = offset + 3
+
+    for _ in range(pair_count):
+        if pair_offset + 4 > len(raw):
+            break
+        dx = _signed_int16(raw[pair_offset], raw[pair_offset + 1])
+        dy = _signed_int16(raw[pair_offset + 2], raw[pair_offset + 3])
+        pair_offset += 4
+
+        if abs(dx) > 32766 and abs(dy) > 32766:
+            if current_segment:
+                segments.append(current_segment)
+                current_segment = []
+            continue
+
+        current_segment.append((base_x + dx * 10, base_y + dy * 10))
+
+    if current_segment:
+        segments.append(current_segment)
+
+    return [tuple(segment) for segment in segments if segment]
+
+
+def _signed_int16(low: int, high: int) -> int:
+    value = low | (high << 8)
+    if value & 0x8000:
+        value -= 0x10000
+    return value
 
 
 def _normalize_byte_array(value: object) -> tuple[int, ...] | None:

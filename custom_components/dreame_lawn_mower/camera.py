@@ -41,9 +41,11 @@ async def async_setup_entry(
     """Set up the mower map camera."""
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
     map_cache = DreameLawnMowerMapCameraCache(ttl=_MAP_CACHE_TTL)
+    live_map_cache = DreameLawnMowerMapCameraCache(ttl=_MAP_CACHE_TTL)
     async_add_entities(
         [
             DreameLawnMowerMapCamera(coordinator, map_cache),
+            DreameLawnMowerLivePathMapCamera(coordinator, live_map_cache),
             DreameLawnMowerAllMapsCamera(coordinator, map_cache),
             DreameLawnMowerMapDataCamera(coordinator, map_cache),
         ]
@@ -166,6 +168,35 @@ class DreameLawnMowerMapCamera(
         except Exception as err:
             _LOGGER.warning("Failed to refresh Dreame mower map image: %s", err)
             view = self._map_cache.store_error(str(err))
+            self.async_write_ha_state()
+            return view
+
+
+class DreameLawnMowerLivePathMapCamera(DreameLawnMowerMapCamera):
+    """Disabled-by-default camera dedicated to live vector/path rendering."""
+
+    _attr_name = "Live Path Map"
+    _attr_icon = "mdi:map-marker-path"
+
+    def __init__(
+        self,
+        coordinator: DreameLawnMowerCoordinator,
+        map_cache: DreameLawnMowerMapCameraCache,
+    ) -> None:
+        super().__init__(coordinator, map_cache)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_live_path_map"
+
+    async def _async_refresh_map_view(self) -> DreameLawnMowerMapView:
+        """Return a cached live/vector map view or refresh it on demand."""
+        try:
+            view = await self._map_cache.async_get_view(
+                self.coordinator.client.async_refresh_vector_map_view
+            )
+            self.async_write_ha_state()
+            return view
+        except Exception as err:
+            _LOGGER.warning("Failed to refresh Dreame mower live-path map image: %s", err)
+            view = self._map_cache.store_error(str(err), source="batch_vector_map")
             self.async_write_ha_state()
             return view
 

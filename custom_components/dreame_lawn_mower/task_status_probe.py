@@ -2,15 +2,30 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from .dreame_lawn_mower_client.app_protocol import (
+    MOWER_BATTERY_PROPERTY_KEY,
+    MOWER_BLUETOOTH_PROPERTY_KEY,
+    MOWER_RUNTIME_STATUS_PROPERTY_KEY,
+    MOWER_STATE_PROPERTY_KEY,
+    MOWER_TASK_PROPERTY_KEY,
+    MOWER_TIME_PROPERTY_KEY,
+)
+
 TASK_STATUS_PROBE_KEYS = (
-    "2.1",
+    MOWER_RUNTIME_STATUS_PROPERTY_KEY,
+    MOWER_BLUETOOTH_PROPERTY_KEY,
+    MOWER_STATE_PROPERTY_KEY,
     "2.2",
-    "2.50",
-    "2.51",
-    "3.1",
+    MOWER_TASK_PROPERTY_KEY,
+    MOWER_TIME_PROPERTY_KEY,
+    "2.56",
+    "2.60",
+    MOWER_BATTERY_PROPERTY_KEY,
+    "3.2",
     "5.104",
     "5.105",
     "5.106",
@@ -55,14 +70,22 @@ def task_status_probe_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(scan_summary, Mapping):
         scan_summary = {}
 
-    state_entry = _entry_by_key(entries, "2.1")
+    state_entry = _entry_by_key(entries, MOWER_STATE_PROPERTY_KEY)
     error_entry = _entry_by_key(entries, "2.2")
-    task_entry = _entry_by_key(entries, "2.50")
-    time_entry = _entry_by_key(entries, "2.51")
-    battery_entry = _entry_by_key(entries, "3.1")
+    task_entry = _entry_by_key(entries, MOWER_TASK_PROPERTY_KEY)
+    time_entry = _entry_by_key(entries, MOWER_TIME_PROPERTY_KEY)
+    runtime_status_entry = _entry_by_key(entries, MOWER_RUNTIME_STATUS_PROPERTY_KEY)
+    bluetooth_entry = _entry_by_key(entries, MOWER_BLUETOOTH_PROPERTY_KEY)
+    status_matrix_entry = _entry_by_key(entries, "2.56")
+    battery_entry = _entry_by_key(entries, MOWER_BATTERY_PROPERTY_KEY)
     service_5_latest = {
         key: _entry_value(entry)
         for key in SERVICE_5_KEYS
+        if isinstance(entry := _entry_by_key(entries, key), Mapping)
+    }
+    auxiliary_live_properties = {
+        key: _entry_value(entry)
+        for key in ("2.60", "3.2")
         if isinstance(entry := _entry_by_key(entries, key), Mapping)
     }
     unknown_keys = scan_summary.get("unknown_non_empty_keys", [])
@@ -70,13 +93,17 @@ def task_status_probe_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
     return _drop_empty(
         {
             "state": _state_summary(state_entry),
+            "runtime_status": _status_blob_summary(runtime_status_entry),
+            "bluetooth_connected": _entry_value(bluetooth_entry),
             "task_status": task_entry.get("task_status")
             if isinstance(task_entry, Mapping)
             else None,
             "error": _error_summary(error_entry),
             "error_active": _error_active(error_entry),
             "battery_level": _entry_value(battery_entry),
-            "device_time": _entry_value(time_entry),
+            "device_time": _entry_json_value(time_entry),
+            "status_matrix": _status_matrix_summary(status_matrix_entry),
+            "auxiliary_live_properties": auxiliary_live_properties,
             "service_5_latest": service_5_latest,
             "unknown_non_empty_keys": unknown_keys,
         }
@@ -120,11 +147,15 @@ def task_status_probe_result_attributes(
         "keys": result.get("keys"),
         "entry_count": result.get("entry_count"),
         "state": summary.get("state"),
+        "runtime_status": summary.get("runtime_status"),
+        "bluetooth_connected": summary.get("bluetooth_connected"),
         "task_status": summary.get("task_status"),
         "error": summary.get("error"),
         "error_active": summary.get("error_active"),
         "battery_level": summary.get("battery_level"),
         "device_time": summary.get("device_time"),
+        "status_matrix": summary.get("status_matrix"),
+        "auxiliary_live_properties": summary.get("auxiliary_live_properties"),
         "service_5_latest": summary.get("service_5_latest"),
         "unknown_non_empty_keys": summary.get("unknown_non_empty_keys"),
     }
@@ -154,6 +185,21 @@ def _entry_value(entry: Mapping[str, Any] | None) -> Any:
     if not isinstance(entry, Mapping):
         return None
     return entry.get("value", entry.get("value_preview"))
+
+
+def _entry_json_value(entry: Mapping[str, Any] | None) -> Any:
+    value = _entry_value(entry)
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text:
+        return None
+    if not ((text.startswith("{") and text.endswith("}")) or text.startswith("[")):
+        return value
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
 
 
 def _state_summary(entry: Mapping[str, Any] | None) -> dict[str, Any] | None:
@@ -189,6 +235,77 @@ def _error_active(entry: Mapping[str, Any] | None) -> bool | None:
         return int(str(value)) not in (-1, 0)
     except (TypeError, ValueError):
         return None
+
+
+def _status_blob_summary(entry: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(entry, Mapping):
+        return None
+    blob = entry.get("status_blob")
+    if not isinstance(blob, Mapping):
+        return None
+    notes = blob.get("notes")
+    return _drop_empty(
+        {
+            "length": blob.get("length"),
+            "hex": blob.get("hex"),
+            "frame_valid": blob.get("frame_valid"),
+            "candidate_battery_level": blob.get("candidate_battery_level"),
+            "candidate_runtime_progress_percent": blob.get(
+                "candidate_runtime_progress_percent"
+            ),
+            "candidate_runtime_area_progress_percent": blob.get(
+                "candidate_runtime_area_progress_percent"
+            ),
+            "candidate_runtime_current_area_sqm": blob.get(
+                "candidate_runtime_current_area_sqm"
+            ),
+            "candidate_runtime_total_area_sqm": blob.get(
+                "candidate_runtime_total_area_sqm"
+            ),
+            "candidate_runtime_region_id": blob.get("candidate_runtime_region_id"),
+            "candidate_runtime_task_id": blob.get("candidate_runtime_task_id"),
+            "candidate_runtime_pose_x": blob.get("candidate_runtime_pose_x"),
+            "candidate_runtime_pose_y": blob.get("candidate_runtime_pose_y"),
+            "candidate_runtime_heading_deg": blob.get("candidate_runtime_heading_deg"),
+            "notes": list(notes)
+            if isinstance(notes, Sequence)
+            and not isinstance(notes, str | bytes | bytearray)
+            else None,
+        }
+    )
+
+
+def _status_matrix_summary(entry: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    value = _entry_json_value(entry)
+    if isinstance(value, Mapping):
+        status_pairs = _status_pairs(value.get("status"))
+        return _drop_empty(
+            {
+                "keys": sorted(str(key) for key in value.keys()),
+                "status_pairs": status_pairs,
+                "status_count": len(status_pairs),
+            }
+        )
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        status_pairs = _status_pairs(value)
+        return _drop_empty(
+            {
+                "status_pairs": status_pairs,
+                "status_count": len(status_pairs),
+            }
+        )
+    return None
+
+
+def _status_pairs(value: Any) -> list[list[Any]]:
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes | bytearray):
+        return []
+    pairs: list[list[Any]] = []
+    for item in value:
+        if not isinstance(item, Sequence) or isinstance(item, str | bytes | bytearray):
+            continue
+        pairs.append(list(item[:2]))
+    return pairs
 
 
 def _drop_empty(value: Any) -> Any:

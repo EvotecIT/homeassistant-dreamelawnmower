@@ -67,6 +67,8 @@ class _FakeStatus:
 class _FakeDevice:
     def __init__(self) -> None:
         self.available = True
+        self.device_connected = True
+        self.cloud_connected = True
         self.status = _FakeStatus()
         self.info = _FakeInfo()
         self.capability = SimpleNamespace(list=["lidar_navigation", "map"])
@@ -193,6 +195,8 @@ def test_snapshot_uses_state_name_before_boolean_helpers() -> None:
     assert snapshot.raw_charging is False
     assert snapshot.mapping_available is True
     assert snapshot.online is True
+    assert snapshot.device_connected is True
+    assert snapshot.cloud_connected is True
     assert snapshot.serial_number == "G2408051LEE0090632"
     assert snapshot.cloud_update_time == "2025-04-22 10:03:44"
     assert snapshot.unknown_property_count == 0
@@ -549,6 +553,52 @@ def test_snapshot_treats_mowing_state_as_mowing_without_running_flag() -> None:
     assert snapshot.raw_started is True
     assert snapshot.started is True
     assert snapshot.docked is False
+
+
+def test_snapshot_exposes_live_session_metrics_and_current_zone() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "dreame.mower.g2408",
+            "customName": "Garage Mower",
+        },
+        account_type="dreame",
+        country="eu",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.state = SimpleNamespace(name="MOWING")
+    device.status.state_name = "mowing"
+    device.status.running = True
+    device.status.attributes = {
+        **device.status.attributes,
+        "charging": False,
+        "mower_state": "mowing",
+        "running": True,
+        "started": True,
+        "cleaned_area": 42,
+        "cleaning_time": 58,
+        "current_segment": 7,
+    }
+    device.status.current_zone = SimpleNamespace(segment_id=7, name="Front Lawn")
+    device.status.current_map = SimpleNamespace(
+        cleaned_area=42,
+        cleaning_time=58,
+        active_segments=[7, 9],
+        robot_segment=7,
+        empty_map=False,
+    )
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == "mowing"
+    assert snapshot.cleaned_area == 42
+    assert snapshot.cleaning_time == 58
+    assert snapshot.active_segment_count == 2
+    assert snapshot.current_zone_id == 7
+    assert snapshot.current_zone_name == "Front Lawn"
 
 
 def test_field_trip_returning_fixture_matches_normalized_state() -> None:

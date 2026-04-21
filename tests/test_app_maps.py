@@ -9,7 +9,11 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
     DreameLawnMowerConnectionError,
 )
-from dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
+from dreame_lawn_mower_client.models import (
+    DreameLawnMowerDescriptor,
+    DreameLawnMowerMapSummary,
+    DreameLawnMowerMapView,
+)
 
 
 class _FakeAppMapCloud:
@@ -162,6 +166,7 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
         "semantic_key_counts": {"data": 1, "label": 1, "type": 2},
         "trajectory_count": 1,
         "trajectory_point_count": 1,
+        "trajectory_length_m": 0.0,
         "cut_relation_count": 0,
     }
     assert result["maps"][0]["payload"]["name"] == "Garden"
@@ -256,6 +261,8 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
         }
     )
     client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_vector_map_batch_data = lambda: None
+
     def fail_if_legacy_map_is_called(timeout, interval):  # noqa: ARG001
         raise AssertionError("legacy map path should not run when app map works")
 
@@ -312,6 +319,7 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
                 "point_count": 1,
                 "trajectory_count": 1,
                 "trajectory_point_count": 3,
+                "trajectory_length_m": 1.41,
                 "semantic_count": 0,
                 "cut_relation_count": 0,
             },
@@ -327,6 +335,65 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
         "error_count": 0,
     }
     assert "OBJ" in [call["t"] for call in cloud.calls]
+
+
+def test_map_view_prefers_vector_render_when_live_path_is_available() -> None:
+    client = _client()
+    app_view = DreameLawnMowerMapView(
+        source="app_action_map",
+        summary=DreameLawnMowerMapSummary(available=True, map_id=0),
+        image_png=b"app",
+        app_maps={"source": "app_action_map", "map_count": 2},
+        details={"has_live_path": False},
+    )
+    vector_view = DreameLawnMowerMapView(
+        source="batch_vector_map",
+        summary=DreameLawnMowerMapSummary(available=True, map_id=0),
+        image_png=b"vector",
+        details={"has_live_path": True, "mow_path_point_count": 42},
+    )
+
+    client._sync_refresh_app_map_view = lambda **kwargs: app_view
+    client._sync_refresh_vector_map_view = lambda: vector_view
+    client._sync_refresh_legacy_map_view = lambda timeout, interval: (_ for _ in ()).throw(  # noqa: ARG005
+        AssertionError("legacy map path should not run when live vector data exists")
+    )
+
+    view = client._sync_refresh_map_view(timeout=0, interval=0)
+
+    assert view.source == "batch_vector_map"
+    assert view.image_png == b"vector"
+    assert view.details == {"has_live_path": True, "mow_path_point_count": 42}
+    assert view.app_maps == {"source": "app_action_map", "map_count": 2}
+
+
+def test_map_view_keeps_app_render_when_vector_has_no_live_path() -> None:
+    client = _client()
+    app_view = DreameLawnMowerMapView(
+        source="app_action_map",
+        summary=DreameLawnMowerMapSummary(available=True, map_id=0),
+        image_png=b"app",
+        app_maps={"source": "app_action_map", "map_count": 2},
+        details={"has_live_path": False, "trajectory_point_count": 3},
+    )
+    vector_view = DreameLawnMowerMapView(
+        source="batch_vector_map",
+        summary=DreameLawnMowerMapSummary(available=True, map_id=0),
+        image_png=b"vector",
+        details={"has_live_path": False, "mow_path_point_count": 0},
+    )
+
+    client._sync_refresh_app_map_view = lambda **kwargs: app_view
+    client._sync_refresh_vector_map_view = lambda: vector_view
+    client._sync_refresh_legacy_map_view = lambda timeout, interval: (_ for _ in ()).throw(  # noqa: ARG005
+        AssertionError("legacy map path should not run when app map works")
+    )
+
+    view = client._sync_refresh_map_view(timeout=0, interval=0)
+
+    assert view is app_view
+    assert view.source == "app_action_map"
+    assert view.image_png == b"app"
 
 
 def test_map_view_uses_legacy_path_when_app_map_fails() -> None:

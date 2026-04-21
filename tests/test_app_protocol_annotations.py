@@ -29,6 +29,15 @@ def test_property_annotations_label_known_mower_state_and_error_keys() -> None:
     assert error_entry["decoded_label_source"] == "bundled_mower_errors"
 
 
+def test_property_annotations_mark_bluetooth_property_hint() -> None:
+    entry = DreameLawnMowerClient._annotate_cloud_property_entry(
+        {"key": "1.53", "value": "false"},
+        language="en",
+    )
+
+    assert entry["property_hint"] == "bluetooth_connected"
+
+
 def test_property_annotations_prefer_cloud_key_definition_labels() -> None:
     key_definition = {
         "payload": {
@@ -110,6 +119,8 @@ def test_property_annotations_mark_raw_status_blob_frame() -> None:
     assert entry["status_blob"]["length"] == 20
     assert entry["status_blob"]["bytes_by_index"]["11"] == 100
     assert entry["status_blob"]["candidate_battery_level"] == 100
+    assert "candidate_runtime_pose_x" not in entry["status_blob"]
+    assert "candidate_runtime_area_progress_percent" not in entry["status_blob"]
     assert entry["status_blob"]["notes"] == ()
 
 
@@ -258,7 +269,145 @@ def test_property_annotations_mark_runtime_status_blob_frame() -> None:
     assert entry["property_hint"] == "runtime_status_blob"
     assert entry["value_bytes_len"] == 33
     assert entry["status_blob"]["frame_valid"] is True
-    assert entry["status_blob"]["notes"] == ("unexpected_length",)
+    assert entry["status_blob"]["candidate_runtime_region_id"] == 1
+    assert entry["status_blob"]["candidate_runtime_task_id"] == 100
+    assert entry["status_blob"]["candidate_runtime_current_area_sqm"] == 72.95
+    assert entry["status_blob"]["candidate_runtime_total_area_sqm"] == 531.0
+    assert entry["status_blob"]["candidate_runtime_area_progress_percent"] == 13.7
+    assert "candidate_runtime_progress_percent" not in entry["status_blob"]
+    assert entry["status_blob"]["candidate_runtime_pose_x"] == 5910
+    assert entry["status_blob"]["candidate_runtime_pose_y"] == 12400
+    assert entry["status_blob"]["candidate_runtime_heading_deg"] == 63.5
+    assert entry["status_blob"]["candidate_runtime_track_segments"] == (
+        ((9720, 15300), (9720, 15460), (5810, 12180)),
+    )
+    assert entry["status_blob"]["notes"] == (
+        "unexpected_length",
+        "unexpected_runtime_progress_value",
+    )
+
+
+def test_client_runtime_status_blob_prefers_cached_realtime_payload() -> None:
+    client = DreameLawnMowerClient(
+        username="user",
+        password="pass",
+        country="eu",
+        account_type="dreame",
+        descriptor=DreameLawnMowerDescriptor(
+            did="1",
+            name="Mower",
+            model="dreame.mower.g2408",
+            display_model="A2",
+            account_type="dreame",
+            country="eu",
+        ),
+    )
+    client._device = type(
+        "FakeDevice",
+        (),
+        {
+            "realtime_properties": {
+                "1.4": {
+                    "value": [
+                        206,
+                        79,
+                        2,
+                        128,
+                        77,
+                        0,
+                        45,
+                        7,
+                        1,
+                        0,
+                        125,
+                        1,
+                        34,
+                        1,
+                        125,
+                        1,
+                        50,
+                        1,
+                        246,
+                        255,
+                        234,
+                        255,
+                        1,
+                        100,
+                        94,
+                        5,
+                        108,
+                        207,
+                        0,
+                        127,
+                        28,
+                        0,
+                        206,
+                    ]
+                },
+            }
+        },
+    )()
+
+    decoded = client._sync_get_runtime_status_blob(include_cloud=False)
+
+    assert decoded is not None
+    assert decoded.source == "realtime"
+    assert decoded.frame_valid is True
+    assert decoded.candidate_runtime_area_progress_percent == 13.7
+    assert decoded.candidate_runtime_track_segments == (
+        ((9720, 15300), (9720, 15460), (5810, 12180)),
+    )
+
+
+def test_client_bluetooth_connected_prefers_cached_realtime_payload() -> None:
+    client = DreameLawnMowerClient(
+        username="user",
+        password="pass",
+        country="eu",
+        account_type="dreame",
+        descriptor=DreameLawnMowerDescriptor(
+            did="1",
+            name="Mower",
+            model="dreame.mower.g2408",
+            display_model="A2",
+            account_type="dreame",
+            country="eu",
+        ),
+    )
+    client._device = type(
+        "FakeDevice",
+        (),
+        {
+            "realtime_properties": {
+                "1.53": {"value": "true"},
+            }
+        },
+    )()
+
+    assert client._sync_get_bluetooth_connected(include_cloud=False) is True
+
+
+def test_client_bluetooth_connected_reads_cloud_property_strings() -> None:
+    client = DreameLawnMowerClient(
+        username="user",
+        password="pass",
+        country="eu",
+        account_type="dreame",
+        descriptor=DreameLawnMowerDescriptor(
+            did="1",
+            name="Mower",
+            model="dreame.mower.g2408",
+            display_model="A2",
+            account_type="dreame",
+            country="eu",
+        ),
+    )
+    client._device = type("FakeDevice", (), {"realtime_properties": {}})()
+    client._sync_get_cloud_properties = lambda keys: [
+        {"key": "1.53", "value": "false"}
+    ]
+
+    assert client._sync_get_bluetooth_connected(include_cloud=True) is False
 
 
 def test_task_status_decoder_keeps_obvious_task_fields() -> None:

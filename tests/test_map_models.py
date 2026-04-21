@@ -136,6 +136,7 @@ def test_map_view_as_dict_omits_image_bytes() -> None:
         image_png=b"not-json-safe",
         error="test",
         diagnostics=diagnostics,
+        details={"mow_path_count": 2, "has_live_path": True},
     )
 
     assert view.has_image is True
@@ -168,6 +169,10 @@ def test_map_view_as_dict_omits_image_bytes() -> None:
             "cloud_property_summary": None,
         },
         "app_maps": {},
+        "details": {
+            "mow_path_count": 2,
+            "has_live_path": True,
+        },
     }
 
 

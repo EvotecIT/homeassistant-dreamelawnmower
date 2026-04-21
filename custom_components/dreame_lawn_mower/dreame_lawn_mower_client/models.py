@@ -191,6 +191,8 @@ class DreameLawnMowerSnapshot:
     realtime_property_count: int = 0
     last_realtime_method: str | None = None
     online: bool | None = None
+    device_connected: bool | None = None
+    cloud_connected: bool | None = None
     child_lock: bool | None = None
     charging: bool = False
     raw_charging: bool | None = None
@@ -207,6 +209,11 @@ class DreameLawnMowerSnapshot:
     mapping_available: bool = False
     cleaning_mode: int | None = None
     cleaning_mode_name: str | None = None
+    cleaned_area: int | float | None = None
+    cleaning_time: int | None = None
+    active_segment_count: int | None = None
+    current_zone_id: int | None = None
+    current_zone_name: str | None = None
     capabilities: tuple[str, ...] = field(default_factory=tuple)
     raw_attributes: Mapping[str, Any] = field(default_factory=dict, repr=False)
     raw_info: Mapping[str, Any] = field(default_factory=dict, repr=False)
@@ -227,11 +234,26 @@ class DreameLawnMowerStatusBlob:
     payload: tuple[int, ...] = field(default_factory=tuple)
     bytes_by_index: Mapping[str, int] = field(default_factory=dict)
     candidate_battery_level: int | None = None
+    candidate_runtime_region_id: int | None = None
+    candidate_runtime_task_id: int | None = None
+    candidate_runtime_progress_percent: float | None = None
+    candidate_runtime_area_progress_percent: float | None = None
+    candidate_runtime_current_area_sqm: float | None = None
+    candidate_runtime_total_area_sqm: float | None = None
+    candidate_runtime_pose_x: int | None = None
+    candidate_runtime_pose_y: int | None = None
+    candidate_runtime_heading_deg: float | None = None
+    candidate_runtime_track_segments: tuple[
+        tuple[tuple[int, int], ...],
+        ...,
+    ] = field(default_factory=tuple)
     notes: tuple[str, ...] = field(default_factory=tuple)
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-safe status blob payload."""
-        return asdict(self)
+        return {
+            key: value for key, value in asdict(self).items() if value is not None
+        }
 
 
 @dataclass(slots=True, frozen=True)
@@ -331,6 +353,7 @@ class DreameLawnMowerMapView:
     error: str | None = None
     diagnostics: DreameLawnMowerMapDiagnostics | None = None
     app_maps: Mapping[str, Any] | None = None
+    details: Mapping[str, Any] | None = None
 
     @property
     def available(self) -> bool:
@@ -354,6 +377,7 @@ class DreameLawnMowerMapView:
                 self.diagnostics.as_dict() if self.diagnostics is not None else None
             ),
             "app_maps": dict(self.app_maps or {}),
+            "details": dict(self.details or {}),
         }
 
 
@@ -630,6 +654,31 @@ def snapshot_from_device(
     except Exception:
         child_lock = None
 
+    current_map = getattr(device.status, "current_map", None)
+    current_zone = getattr(device.status, "current_zone", None)
+    cleaned_area = _first_number(
+        status_attributes.get("cleaned_area"),
+        getattr(device.status, "cleaned_area", None),
+        getattr(current_map, "cleaned_area", None),
+    )
+    cleaning_time = _first_int(
+        status_attributes.get("cleaning_time"),
+        getattr(device.status, "cleaning_time", None),
+        getattr(current_map, "cleaning_time", None),
+    )
+    active_segments = _coerce_sequence(
+        status_attributes.get("active_segments"),
+        getattr(device.status, "active_segments", None),
+        getattr(current_map, "active_segments", None),
+    )
+    active_segment_count = len(active_segments) if active_segments is not None else None
+    current_zone_id = _first_int(
+        status_attributes.get("current_segment"),
+        getattr(current_zone, "segment_id", None),
+        getattr(current_map, "robot_segment", None),
+    )
+    current_zone_name = _as_optional_str(getattr(current_zone, "name", None))
+
     return DreameLawnMowerSnapshot(
         descriptor=descriptor,
         available=bool(getattr(device, "available", False)),
@@ -666,6 +715,12 @@ def snapshot_from_device(
         realtime_property_count=len(getattr(device, "realtime_properties", {}) or {}),
         last_realtime_method=last_realtime_method,
         online=info_raw.get("online"),
+        device_connected=bool(getattr(device, "device_connected", False))
+        if hasattr(device, "device_connected")
+        else None,
+        cloud_connected=bool(getattr(device, "cloud_connected", False))
+        if hasattr(device, "cloud_connected")
+        else None,
         child_lock=child_lock,
         charging=effective_charging,
         raw_charging=raw_charging,
@@ -687,6 +742,11 @@ def snapshot_from_device(
         ),
         cleaning_mode=getattr(cleaning_mode, "value", cleaning_mode),
         cleaning_mode_name=getattr(device.status, "cleaning_mode_name", None),
+        cleaned_area=cleaned_area,
+        cleaning_time=cleaning_time,
+        active_segment_count=active_segment_count,
+        current_zone_id=current_zone_id,
+        current_zone_name=current_zone_name,
         capabilities=capabilities,
         raw_attributes=status_attributes,
         raw_info=info_raw,
@@ -908,6 +968,54 @@ def _optional_bool_from_raw(value: Any) -> bool | None:
     if value is None:
         return None
     return bool(value)
+
+
+def _optional_int_from_raw(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_number_from_raw(value: Any) -> int | float | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return value
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return int(number) if number.is_integer() else number
+
+
+def _first_int(*values: Any) -> int | None:
+    for value in values:
+        parsed = _optional_int_from_raw(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _first_number(*values: Any) -> int | float | None:
+    for value in values:
+        parsed = _optional_number_from_raw(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _coerce_sequence(*values: Any) -> list[Any] | None:
+    for value in values:
+        if isinstance(value, list):
+            return value
+        if isinstance(value, tuple):
+            return list(value)
+    return None
 
 
 def _lower_optional_name(value: Any) -> str | None:

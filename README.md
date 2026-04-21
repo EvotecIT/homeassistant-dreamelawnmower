@@ -60,13 +60,17 @@ region/account details are especially helpful for moving a device from
 - automatic mower discovery from the cloud account
 - `lawn_mower` entity for start, pause, and dock
 - battery, activity, state, task, firmware, and error sensors
+- current-map selector entities for map, mowing action, edge, zone, and spot scope
+- current-map services for switching maps and starting explicit zone, spot, or edge runs
 - binary sensors for docked, charging, mowing, paused, returning, and error state
+- binary sensor for Bluetooth-connected runtime state
 - read-only schedule calendar using the mower-native app schedule protocol
 - disabled-by-default all-schedules calendar for default and per-map schedule diagnosis
 - guarded schedule enable/disable service with dry-run mode by default
 - dry-run mowing-preference planning service with candidate PRE payload output
 - read-only map camera using the app-map payload when available
 - disabled-by-default all-maps and map-diagnostics cameras
+- runtime telemetry sensors for mission progress, mission area, mower pose, and live-track length
 - read-only weather/rain-protection diagnostics
 - read-only weather/rain-protection entities from cached app settings
 - read-only mowing-preference diagnostics
@@ -81,8 +85,8 @@ The following areas are intentionally cautious:
   signal is found
 - preference and rain-protection writes are not exposed yet
 - preference updates can be planned, but live PRE or PREP writes are still blocked
-- map rendering is read-only; interactive map switching, zone targeting, no-go editing,
-  and virtual-wall editing are not exposed yet
+- map rendering is read-only; no-go editing, virtual-wall editing, and other map
+  editing flows are not exposed yet
 - camera/photo/video paths are probe-only until runtime safety is clearer
 - 3D map object downloads are metadata-first and not treated as stable
 - manual driving must stay supervised and uses strict state and battery guards
@@ -143,9 +147,21 @@ Common user-facing helpers include:
 - `sensor.<device>_state_name`
 - `sensor.<device>_error`
 - `sensor.<device>_battery`
+- `sensor.<device>_mowing_progress`
+- `sensor.<device>_runtime_mission_progress`
+- `sensor.<device>_runtime_current_area`
+- `sensor.<device>_runtime_total_area`
+- `sensor.<device>_runtime_live_track_length`
+- `sensor.<device>_runtime_live_track_point_count`
 - `sensor.<device>_weather_protection_status`
+- `select.<device>_map`
+- `select.<device>_mowing_action`
+- `select.<device>_edge`
+- `select.<device>_zone`
+- `select.<device>_spot`
 - `binary_sensor.<device>_docked`
 - `binary_sensor.<device>_charging`
+- `binary_sensor.<device>_bluetooth_connected`
 - `binary_sensor.<device>_mowing`
 - `binary_sensor.<device>_rain_delay_active`
 - `binary_sensor.<device>_returning`
@@ -156,6 +172,7 @@ them from the entity registry only when troubleshooting:
 
 - map and all-map cameras
 - map diagnostics camera
+- runtime pose / heading / segment-count sensors
 - all-schedules calendar
 - rain delay end time sensor
 - last schedule probe/write sensors
@@ -194,13 +211,36 @@ If the mower has multiple maps, enable the disabled `All Maps` camera to render
 a contact sheet. Use `Map Diagnostics` when the map image is missing or when you
 need source, counts, and parser evidence.
 
-The current map support is intentionally diagnostic-first:
+Current map support now includes:
 
-- the main `Map` camera is read-only
-- `All Maps` is a read-only contact sheet, not a selector
-- map data is exposed for visibility and reverse-engineering, not interactive editing
-- zone selection, no-go editing, virtual walls, and active-map switching are not
-  available from Home Assistant yet
+- a read-only `Map` camera for the active map
+- a read-only `All Maps` contact sheet for quick map inventory
+- `select` entities for map, mowing action, edge, zone, and spot scope
+- services for switching the active mower map and starting explicit zone, spot,
+  or edge jobs
+- runtime live-track telemetry surfaced through sensors and map-camera attributes
+
+Interactive map editing is still intentionally out of scope for now:
+
+- no-go editing
+- virtual-wall editing
+- zone geometry edits
+- other direct map mutations
+
+## Services
+
+The integration now exposes guarded current-map services on the `lawn_mower`
+entity:
+
+- `dreame_lawn_mower.switch_current_map`
+- `dreame_lawn_mower.start_zone_mowing`
+- `dreame_lawn_mower.start_spot_mowing`
+- `dreame_lawn_mower.start_edge_mowing`
+
+These use current decoded app-map and vector-map metadata. Map switching updates
+the real active mower map, while zone, spot, and edge starts target explicit
+current-map ids rather than relying only on the generic Home Assistant
+`start_mowing` action.
 
 ## Troubleshooting
 

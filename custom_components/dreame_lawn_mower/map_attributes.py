@@ -59,6 +59,7 @@ def map_camera_attributes(
         }
     )
     app_maps = {} if view is None or view.app_maps is None else dict(view.app_maps)
+    details = {} if view is None or view.details is None else dict(view.details)
     attributes.update(
         {
             "app_map_count": app_maps.get("map_count"),
@@ -70,6 +71,37 @@ def map_camera_attributes(
             "app_map_object_error": app_maps.get("object_error"),
             "app_map_objects": app_maps.get("objects"),
             "app_maps": app_maps.get("maps"),
+            "map_name": details.get("map_name"),
+            "map_id": details.get("map_id"),
+            "map_index": details.get("map_index"),
+            "map_current_map_id": details.get("current_map_id"),
+            "map_total_area": details.get("total_area"),
+            "map_zone_count": details.get("zone_count"),
+            "map_zone_names": details.get("zone_names"),
+            "map_contour_count": details.get("contour_count"),
+            "map_contour_ids": details.get("contour_ids"),
+            "map_clean_point_count": details.get("clean_point_count"),
+            "map_cruise_point_count": details.get("cruise_point_count"),
+            "map_trajectory_count": details.get("trajectory_count"),
+            "map_trajectory_point_count": details.get("trajectory_point_count"),
+            "map_trajectory_length_m": details.get("trajectory_length_m"),
+            "map_cut_relation_count": details.get("cut_relation_count"),
+            "mow_path_count": details.get("mow_path_count"),
+            "mow_path_segment_count": details.get("mow_path_segment_count"),
+            "mow_path_point_count": details.get("mow_path_point_count"),
+            "mow_path_length_m": details.get("mow_path_length_m"),
+            "runtime_track_segment_count": details.get("runtime_track_segment_count"),
+            "runtime_track_point_count": details.get("runtime_track_point_count"),
+            "runtime_track_length_m": details.get("runtime_track_length_m"),
+            "runtime_pose_x": details.get("runtime_pose_x"),
+            "runtime_pose_y": details.get("runtime_pose_y"),
+            "runtime_heading_deg": details.get("runtime_heading_deg"),
+            "map_has_live_path": details.get("has_live_path"),
+            "map_available_vector_map_count": details.get("available_map_count"),
+            "map_available_vector_maps": details.get("available_maps"),
+            "map_details": details or None,
         }
     )
+    if summary is not None and attributes.get("map_id") is None:
+        attributes["map_id"] = summary["map_id"]
     return attributes

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
@@ -13,6 +14,7 @@ from io import BytesIO
 from typing import Any
 
 from .app_protocol import (
+    MOWER_BLUETOOTH_PROPERTY_KEY,
     MOWER_ERROR_PROPERTY_KEY,
     MOWER_PROPERTY_HINTS,
     MOWER_RAW_STATUS_PROPERTY_KEY,
@@ -77,6 +79,7 @@ from .schedule import (
 from .vector_map import (
     parse_batch_vector_map,
     render_vector_map_png,
+    vector_map_to_details,
     vector_map_to_summary,
 )
 
@@ -125,6 +128,12 @@ class DreameLawnMowerClient:
         self._account_type = account_type
         self._descriptor = descriptor
         self._device: Any | None = None
+        self._latest_runtime_status_blob: DreameLawnMowerStatusBlob | None = None
+        self._runtime_live_track_segments: tuple[
+            tuple[tuple[int, int], ...],
+            ...,
+        ] = ()
+        self._last_runtime_track_blob_hex: str | None = None
 
     @property
     def descriptor(self) -> DreameLawnMowerDescriptor:
@@ -135,6 +144,41 @@ class DreameLawnMowerClient:
     def device(self) -> Any | None:
         """Return the currently connected upstream device instance."""
         return self._device
+
+    def update_runtime_live_tracking(
+        self,
+        status_blob: DreameLawnMowerStatusBlob | None,
+        *,
+        active: bool,
+    ) -> None:
+        """Cache active-session runtime track history for live map overlays."""
+        self._latest_runtime_status_blob = status_blob
+        if not active:
+            self._runtime_live_track_segments = ()
+            self._last_runtime_track_blob_hex = None
+            return
+
+        if status_blob is None:
+            return
+
+        blob_hex = getattr(status_blob, "hex", None)
+        if blob_hex and blob_hex == self._last_runtime_track_blob_hex:
+            return
+
+        segments = getattr(status_blob, "candidate_runtime_track_segments", ()) or ()
+        if not segments:
+            if blob_hex:
+                self._last_runtime_track_blob_hex = blob_hex
+            return
+
+        self._runtime_live_track_segments = (
+            *self._runtime_live_track_segments,
+            *tuple(tuple(tuple(point) for point in segment) for segment in segments),
+        )
+        if len(self._runtime_live_track_segments) > 64:
+            self._runtime_live_track_segments = self._runtime_live_track_segments[-64:]
+        if blob_hex:
+            self._last_runtime_track_blob_hex = blob_hex
 
     @classmethod
     async def async_discover_devices(
@@ -192,6 +236,42 @@ class DreameLawnMowerClient:
     async def async_dock(self) -> None:
         """Return the mower to base."""
         await self._async_call_device_method("dock")
+
+    async def async_clean_segments(self, segment_ids: Sequence[int]) -> Any:
+        """Start segment or zone mowing for explicit map area ids."""
+        return await asyncio.to_thread(self._sync_clean_segments, list(segment_ids))
+
+    async def async_start_edge_mowing(
+        self,
+        contour_ids: Sequence[Sequence[int]],
+    ) -> Any:
+        """Start edge mowing for one or more contour id pairs."""
+        normalized = [
+            [int(contour_id[0]), int(contour_id[1])]
+            for contour_id in contour_ids
+            if len(contour_id) >= 2
+        ]
+        return await asyncio.to_thread(self._sync_start_edge_mowing, normalized)
+
+    async def async_clean_spots(
+        self,
+        points: Sequence[tuple[int, int] | list[int]],
+    ) -> Any:
+        """Start spot mowing for one or more center points."""
+        normalized = [
+            [int(point[0]), int(point[1])]
+            for point in points
+            if len(point) >= 2
+        ]
+        return await asyncio.to_thread(self._sync_clean_spots, normalized)
+
+    async def async_switch_current_map(self, map_index: int) -> Any:
+        """Switch the active mower map through the app task path."""
+        return await asyncio.to_thread(self._sync_switch_current_map, int(map_index))
+
+    async def async_get_vector_map_details(self) -> dict[str, Any]:
+        """Return JSON-safe parsed batch vector-map details."""
+        return await asyncio.to_thread(self._sync_get_vector_map_details)
 
     async def async_get_remote_control_support(
         self,
@@ -272,6 +352,32 @@ class DreameLawnMowerClient:
         """Return the latest decoded raw realtime status blob, if available."""
         return await asyncio.to_thread(
             self._sync_get_status_blob,
+            refresh,
+            include_cloud,
+        )
+
+    async def async_get_runtime_status_blob(
+        self,
+        *,
+        refresh: bool = False,
+        include_cloud: bool = True,
+    ) -> DreameLawnMowerStatusBlob | None:
+        """Return the latest decoded runtime-status blob, if available."""
+        return await asyncio.to_thread(
+            self._sync_get_runtime_status_blob,
+            refresh,
+            include_cloud,
+        )
+
+    async def async_get_bluetooth_connected(
+        self,
+        *,
+        refresh: bool = False,
+        include_cloud: bool = True,
+    ) -> bool | None:
+        """Return whether the mower reports an active Bluetooth connection."""
+        return await asyncio.to_thread(
+            self._sync_get_bluetooth_connected,
             refresh,
             include_cloud,
         )
@@ -386,6 +492,10 @@ class DreameLawnMowerClient:
             timeout,
             interval,
         )
+
+    async def async_refresh_vector_map_view(self) -> DreameLawnMowerMapView:
+        """Refresh the batch/vector map path used for live mowing overlays."""
+        return await asyncio.to_thread(self._sync_refresh_vector_map_view)
 
     async def async_get_app_schedules(
         self,
@@ -929,13 +1039,69 @@ class DreameLawnMowerClient:
         refresh: bool = False,
         include_cloud: bool = True,
     ) -> DreameLawnMowerStatusBlob | None:
+        return self._sync_get_decoded_status_blob(
+            MOWER_RAW_STATUS_PROPERTY_KEY,
+            refresh=refresh,
+            include_cloud=include_cloud,
+        )
+
+    def _sync_get_runtime_status_blob(
+        self,
+        refresh: bool = False,
+        include_cloud: bool = True,
+    ) -> DreameLawnMowerStatusBlob | None:
+        blob = self._sync_get_decoded_status_blob(
+            MOWER_RUNTIME_STATUS_PROPERTY_KEY,
+            refresh=refresh,
+            include_cloud=include_cloud,
+        )
+        self._latest_runtime_status_blob = blob
+        return blob
+
+    def _sync_get_bluetooth_connected(
+        self,
+        refresh: bool = False,
+        include_cloud: bool = True,
+    ) -> bool | None:
         if refresh:
             device = self._sync_update_device()
         else:
             device = self._ensure_device()
 
         realtime_entry = (getattr(device, "realtime_properties", {}) or {}).get(
-            MOWER_RAW_STATUS_PROPERTY_KEY
+            MOWER_BLUETOOTH_PROPERTY_KEY
+        )
+        if isinstance(realtime_entry, Mapping):
+            parsed = self._coerce_property_bool(realtime_entry.get("value"))
+            if parsed is not None:
+                return parsed
+
+        if not include_cloud:
+            return None
+
+        response = self._sync_get_cloud_properties(MOWER_BLUETOOTH_PROPERTY_KEY)
+        for entry in self._normalize_cloud_property_entries(response):
+            if str(entry.get("key", "")) != MOWER_BLUETOOTH_PROPERTY_KEY:
+                continue
+            parsed = self._coerce_property_bool(entry.get("value"))
+            if parsed is not None:
+                return parsed
+        return None
+
+    def _sync_get_decoded_status_blob(
+        self,
+        property_key: str,
+        *,
+        refresh: bool,
+        include_cloud: bool,
+    ) -> DreameLawnMowerStatusBlob | None:
+        if refresh:
+            device = self._sync_update_device()
+        else:
+            device = self._ensure_device()
+
+        realtime_entry = (getattr(device, "realtime_properties", {}) or {}).get(
+            property_key
         )
         if isinstance(realtime_entry, Mapping):
             decoded = decode_mower_status_blob(
@@ -948,9 +1114,9 @@ class DreameLawnMowerClient:
         if not include_cloud:
             return None
 
-        response = self._sync_get_cloud_properties(MOWER_RAW_STATUS_PROPERTY_KEY)
+        response = self._sync_get_cloud_properties(property_key)
         for entry in self._normalize_cloud_property_entries(response):
-            if str(entry.get("key", "")) == MOWER_RAW_STATUS_PROPERTY_KEY:
+            if str(entry.get("key", "")) == property_key:
                 decoded = decode_mower_status_blob(
                     entry.get("value"),
                     source="cloud",
@@ -1032,6 +1198,86 @@ class DreameLawnMowerClient:
                 errors.append({"section": "firmware_update", "error": str(err)})
 
         return payload
+
+    def _sync_clean_segments(self, segment_ids: Sequence[int]) -> Any:
+        """Start segment or zone mowing for the provided area ids."""
+        if not segment_ids:
+            raise ValueError("At least one segment id is required.")
+        device = self._ensure_device()
+        try:
+            return device.clean_segment([int(segment_id) for segment_id in segment_ids])
+        except (DeviceException, InvalidActionException, ValueError) as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+
+    def _sync_start_edge_mowing(self, contour_ids: Sequence[Sequence[int]]) -> Any:
+        """Start edge mowing for the provided contour id pairs."""
+        normalized = _normalize_contour_ids(contour_ids)
+        if not normalized:
+            raise ValueError("At least one contour id pair is required.")
+        try:
+            return self._sync_call_app_action(
+                {
+                    "m": "a",
+                    "p": 0,
+                    "o": 101,
+                    "d": {"edge": normalized},
+                }
+            )
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+
+    def _sync_clean_spots(self, points: Sequence[Sequence[int]]) -> Any:
+        """Start spot mowing for the provided center points."""
+        if not points:
+            raise ValueError("At least one spot point is required.")
+        device = self._ensure_device()
+        try:
+            return device.clean_spot(
+                [[int(point[0]), int(point[1])] for point in points],
+                1,
+            )
+        except (DeviceException, InvalidActionException, ValueError) as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+
+    def _sync_switch_current_map(self, map_index: int) -> Any:
+        """Switch the active mower map by app map index."""
+        if map_index < 0:
+            raise ValueError("map_index must be zero or greater.")
+        try:
+            return self._sync_call_app_action(
+                {
+                    "m": "a",
+                    "p": 0,
+                    "o": 200,
+                    "d": {"idx": int(map_index)},
+                }
+            )
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+
+    def _sync_get_vector_map_details(self) -> dict[str, Any]:
+        """Return parsed batch vector-map details without rendering an image."""
+        try:
+            batch_data = self._sync_get_vector_map_batch_data()
+        except DreameLawnMowerConnectionError as err:
+            return {
+                "available": False,
+                "source": "batch_vector_map",
+                "error": str(err),
+            }
+
+        vector_map = parse_batch_vector_map(batch_data)
+        if vector_map is None:
+            return {
+                "available": False,
+                "source": "batch_vector_map",
+                "error": "No vector map data returned by the batch map path.",
+            }
+
+        details = vector_map_to_details(vector_map)
+        details["available"] = True
+        details["source"] = "batch_vector_map"
+        return details
 
     def _sync_request_photo_info(self, parameters: Any = None) -> Any:
         support = self._sync_get_camera_feature_support(
@@ -1324,13 +1570,17 @@ class DreameLawnMowerClient:
             legacy_error=None,
             legacy_reason="app_action_map_primary",
         )
-        if app_view.available and app_view.image_png is not None:
-            return app_view
 
         vector_view = self._with_fallback_app_maps(
             self._sync_refresh_vector_map_view(),
             app_view,
         )
+        if _map_view_has_live_path(vector_view):
+            return vector_view
+
+        if app_view.available and app_view.image_png is not None:
+            return app_view
+
         if vector_view.available and vector_view.image_png is not None:
             return vector_view
 
@@ -1368,12 +1618,43 @@ class DreameLawnMowerClient:
             )
 
         summary = vector_map_to_summary(vector_map)
+        details = vector_map_to_details(vector_map)
+        runtime_blob = self._latest_runtime_status_blob
+        runtime_track_segments = self._runtime_live_track_segments
+        runtime_track_point_count = sum(
+            len(segment) for segment in runtime_track_segments
+        )
+        if runtime_track_point_count:
+            details["runtime_track_segment_count"] = len(runtime_track_segments)
+            details["runtime_track_point_count"] = runtime_track_point_count
+            details["runtime_track_length_m"] = round(
+                sum(_coordinate_path_length_m(segment) for segment in runtime_track_segments),
+                2,
+            )
+            details["runtime_pose_x"] = getattr(runtime_blob, "candidate_runtime_pose_x", None)
+            details["runtime_pose_y"] = getattr(runtime_blob, "candidate_runtime_pose_y", None)
+            details["runtime_heading_deg"] = getattr(
+                runtime_blob,
+                "candidate_runtime_heading_deg",
+                None,
+            )
+            details["has_live_path"] = True
+            if summary is not None:
+                summary = replace(
+                    summary,
+                    path_point_count=summary.path_point_count + runtime_track_point_count,
+                )
         try:
-            image_png = render_vector_map_png(vector_map)
+            image_png = render_vector_map_png(
+                vector_map,
+                runtime_track_segments=runtime_track_segments,
+                runtime_position=_runtime_blob_position(runtime_blob),
+            )
         except Exception as err:  # noqa: BLE001 - diagnostics path
             return DreameLawnMowerMapView(
                 source=source,
                 summary=summary,
+                details=details,
                 error=f"Failed to render vector map data: {err}",
                 diagnostics=self._safe_map_diagnostics(
                     source=source,
@@ -1385,6 +1666,7 @@ class DreameLawnMowerClient:
             return DreameLawnMowerMapView(
                 source=source,
                 summary=summary,
+                details=details,
                 error="Vector map renderer did not produce an image.",
                 diagnostics=self._safe_map_diagnostics(
                     source=source,
@@ -1396,6 +1678,7 @@ class DreameLawnMowerClient:
             source=source,
             summary=summary,
             image_png=image_png,
+            details=details,
             diagnostics=self._safe_map_diagnostics(
                 source=source,
                 reason="batch_vector_map_rendered",
@@ -1495,6 +1778,7 @@ class DreameLawnMowerClient:
                 source=source,
                 summary=_app_map_view_summary(selected, payload, width, height),
                 image_png=image_png,
+                details=_app_map_view_details(selected, payload),
                 app_maps=_app_maps_view_metadata(app_maps),
                 diagnostics=self._safe_map_diagnostics(
                     source=source,
@@ -2766,6 +3050,20 @@ class DreameLawnMowerClient:
         return []
 
     @staticmethod
+    def _coerce_property_bool(value: Any) -> bool | None:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int) and value in (0, 1):
+            return bool(value)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "on", "yes"}:
+                return True
+            if normalized in {"false", "0", "off", "no"}:
+                return False
+        return None
+
+    @staticmethod
     def _entry_has_meaningful_value(entry: dict[str, Any]) -> bool:
         value = entry.get("value")
         if value not in (None, "", [], {}):
@@ -3190,7 +3488,7 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
 
     maps = value.get("map") if isinstance(value.get("map"), list) else []
     spots = value.get("spot") if isinstance(value.get("spot"), list) else []
-    points = value.get("point") if isinstance(value.get("point"), list) else []
+    point_entries = value.get("point") if isinstance(value.get("point"), list) else []
     semantic = value.get("semantic") if isinstance(value.get("semantic"), list) else []
     trajectories = (
         value.get("trajectory") if isinstance(value.get("trajectory"), list) else []
@@ -3203,6 +3501,7 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
     spot_boundary_point_count = 0
     semantic_boundary_point_count = 0
     trajectory_point_count = 0
+    trajectory_length_m = 0.0
     semantic_key_counts: dict[str, int] = {}
     total_area = value.get("total_area")
     map_area_total = 0.0
@@ -3246,7 +3545,9 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
             coordinates,
             str | bytes | bytearray,
         ):
-            trajectory_point_count += len(coordinates)
+            trajectory_points = _app_map_points(coordinates)
+            trajectory_point_count += len(trajectory_points)
+            trajectory_length_m += _coordinate_path_length_m(trajectory_points)
 
     return {
         "name": value.get("name"),
@@ -3256,12 +3557,13 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
         "boundary_point_count": boundary_point_count,
         "spot_count": len(spots),
         "spot_boundary_point_count": spot_boundary_point_count,
-        "point_count": len(points),
+        "point_count": len(point_entries),
         "semantic_count": len(semantic),
         "semantic_boundary_point_count": semantic_boundary_point_count,
         "semantic_key_counts": dict(sorted(semantic_key_counts.items())),
         "trajectory_count": len(trajectories),
         "trajectory_point_count": trajectory_point_count,
+        "trajectory_length_m": round(trajectory_length_m, 2),
         "cut_relation_count": len(cut_relation),
     }
 
@@ -3428,6 +3730,7 @@ def _app_map_entry_view_metadata(entry: Mapping[str, Any]) -> dict[str, Any]:
         "point_count": summary.get("point_count"),
         "trajectory_count": summary.get("trajectory_count"),
         "trajectory_point_count": summary.get("trajectory_point_count"),
+        "trajectory_length_m": summary.get("trajectory_length_m"),
         "semantic_count": summary.get("semantic_count"),
         "cut_relation_count": summary.get("cut_relation_count"),
         "error": entry.get("error"),
@@ -3459,6 +3762,29 @@ def _app_map_view_summary(
         path_point_count=int(payload_summary.get("trajectory_point_count") or 0),
         spot_area_count=int(payload_summary.get("spot_count") or 0),
     )
+
+
+def _app_map_view_details(
+    selected: Mapping[str, Any],
+    payload: Any,
+) -> dict[str, Any]:
+    payload_summary = _app_map_payload_summary(payload)
+    return {
+        "map_name": payload_summary.get("name"),
+        "map_index": selected.get("idx"),
+        "total_area": payload_summary.get("total_area"),
+        "map_area_total": payload_summary.get("map_area_total"),
+        "zone_count": payload_summary.get("map_area_count"),
+        "spot_area_count": payload_summary.get("spot_count"),
+        "clean_point_count": payload_summary.get("point_count"),
+        "trajectory_count": payload_summary.get("trajectory_count"),
+        "trajectory_point_count": payload_summary.get("trajectory_point_count"),
+        "trajectory_length_m": payload_summary.get("trajectory_length_m"),
+        "cut_relation_count": payload_summary.get("cut_relation_count"),
+        "has_live_path": bool(payload_summary.get("trajectory_point_count")),
+        "current": bool(selected.get("current")),
+        "created": bool(selected.get("created")),
+    }
 
 
 def render_app_map_payload_png(payload: Any) -> tuple[bytes, int, int]:
@@ -3567,6 +3893,31 @@ def _app_map_points(value: Any) -> list[tuple[float, float]]:
         if isinstance(x, int | float) and isinstance(y, int | float):
             points.append((float(x), float(y)))
     return points
+
+
+def _coordinate_path_length_m(points: Sequence[tuple[float, float]]) -> float:
+    """Return an approximate path length in meters for centimeter coordinates."""
+    if len(points) < 2:
+        return 0.0
+
+    total = 0.0
+    previous = points[0]
+    for current in points[1:]:
+        total += math.hypot(current[0] - previous[0], current[1] - previous[1])
+        previous = current
+    return total / 100.0
+
+
+def _runtime_blob_position(
+    blob: DreameLawnMowerStatusBlob | None,
+) -> tuple[int, int] | None:
+    if blob is None:
+        return None
+    x = getattr(blob, "candidate_runtime_pose_x", None)
+    y = getattr(blob, "candidate_runtime_pose_y", None)
+    if isinstance(x, int) and not isinstance(x, bool) and isinstance(y, int) and not isinstance(y, bool):
+        return (x, y)
+    return None
 
 
 def _key_define_from_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
@@ -3872,6 +4223,29 @@ def _operation_short_preview(value: Any) -> Any:
     if isinstance(normalized, Mapping):
         return {key: normalized[key] for key in list(normalized.keys())[:10]}
     return normalized
+
+
+def _map_view_has_live_path(map_view: DreameLawnMowerMapView) -> bool:
+    """Return whether a map view exposes an active live mowing trail."""
+    if not map_view.available or map_view.image_png is None:
+        return False
+
+    details = map_view.details
+    if not isinstance(details, Mapping):
+        return False
+
+    return bool(details.get("has_live_path"))
+
+
+def _normalize_contour_ids(
+    contour_ids: Sequence[Sequence[int]],
+) -> list[list[int]]:
+    result: list[list[int]] = []
+    for contour_id in contour_ids:
+        if len(contour_id) < 2:
+            continue
+        result.append([int(contour_id[0]), int(contour_id[1])])
+    return result
 
 
 def _json_safe(value: Any, *, max_depth: int = 4) -> Any:
