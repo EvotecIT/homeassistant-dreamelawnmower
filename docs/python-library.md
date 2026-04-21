@@ -79,8 +79,8 @@ The same flow is available as `examples/python_client.py`.
 - read-only schedule retrieval and calendar-friendly task summaries
 - dry-run schedule enable/disable planning, with explicit gates required before
   live writes
-- dry-run mowing-preference planning from current app payloads, without sending
-  PRE or PREP writes
+- guarded mowing-preference planning and optional live PRE writes from current
+  app payloads, with explicit confirmation required before execution
 - read-only app-map retrieval, all-map summaries, and simple map rendering
 - weather/rain-protection and mowing-preference diagnostics
 - firmware/update evidence gathering without claiming unverified OTA support

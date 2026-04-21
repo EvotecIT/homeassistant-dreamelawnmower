@@ -185,7 +185,8 @@ to the app-action preference protocol:
   preference metadata and `PRE` (`{"m":"g","t":"PRE","d":{"idx":map,"region":area}}`)
   for one area/custom-region preference payload.
 - Write-capable commands exist as `PRE` with `m:"s"` for settings and `PREP`
-  for preference mode, but the client intentionally does not expose those yet.
+  for preference mode. The client now exposes guarded planning/execution for
+  `PRE`, while `PREP` remains intentionally unexposed.
 - The decoded payload fields line up with the UI: efficient mode, cutting
   height, mowing direction mode/direction, automatic and safe edge mowing,
   EdgeMaster/cutter position, edge obstacle avoidance, LiDAR obstacle
@@ -193,11 +194,13 @@ to the app-action preference protocol:
 - The app logs `prop.2.52 mowing preference update`, so cloud property `2.52`
   is a useful read-only hint during future live captures.
 
-The Python client now exposes a read-only `async_get_mowing_preferences()`
-helper and `examples/preference_probe.py` to fetch and decode `PREI`/`PRE`
-without touching the write commands. Home Assistant mirrors this as
-disabled-by-default diagnostic entities: `Capture Preference Probe` and
-`Last Preference Probe`.
+The Python client now exposes `async_get_mowing_preferences()`,
+`async_plan_app_mowing_preference_update()`, `examples/preference_probe.py`,
+and `examples/preference_write_probe.py`. Home Assistant mirrors the read path
+as disabled-by-default diagnostic entities (`Capture Preference Probe` and
+`Last Preference Probe`) and exposes guarded dry-run-first preference write
+services that require explicit execute and confirmation flags before sending a
+live `PRE` request.
 
 A live read-only A2 run of `examples/preference_probe.py` on 2026-04-19
 validated the commands:
@@ -210,6 +213,12 @@ Notable live decoded values included efficient/default area preferences,
 cutting heights from `3.5` to `6.0` cm, rotation/none direction modes,
 obstacle avoidance enabled, obstacle avoidance heights from `5` to `20` cm,
 distances from `10` to `20` cm, and all three AI classes enabled.
+
+On 2026-04-21, a supervised no-op A2 `PRE` write validated the live settings
+path using map `0`, area `1`, and the already-current
+`mowing_height_cm=6.0` value. The mower returned top-level `r: 0`; the client
+recorded `executed=true` and `request_verified=true` without changing the
+effective mower settings.
 
 ## Observed weather and rain protection settings
 

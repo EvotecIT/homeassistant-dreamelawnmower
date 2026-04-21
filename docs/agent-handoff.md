@@ -3,7 +3,7 @@
 This file is for future coding sessions after context is cleared. It captures
 the current project state, live-device findings, safe commands, and known gaps.
 
-Last updated: 2026-04-19
+Last updated: 2026-04-21
 
 ## Current State
 
@@ -36,6 +36,9 @@ Last updated: 2026-04-19
 - Home Assistant exposes guarded manual-drive services plus diagnostic
   `Manual Drive Safe` and `Manual Drive Block Reason` entities that share the
   same state guard.
+- Guarded mowing-preference writes are now available through the reusable
+  client, Home Assistant services, and the live probe helper. Execution
+  remains opt-in and requires explicit confirmation flags.
 - A supervised no-mow test drive was run successfully:
   stop, forward, turn right, turn left, backward, stop after each step, then
   dock.
@@ -253,8 +256,11 @@ Last updated: 2026-04-19
   `prop.2.52 mowing preference update`. The reusable client now has
   `async_get_mowing_preferences()` plus `examples/preference_probe.py`, and
   Home Assistant has disabled-by-default Capture/Last Preference Probe
-  diagnostics; writes (`PRE` with `m:"s"` and `PREP`) remain intentionally
-  unexposed.
+  diagnostics. Guarded write planning and execution for `PRE` with `m:"s"` are
+  now exposed through `async_plan_app_mowing_preference_update()`,
+  `examples/preference_write_probe.py`, and the Home Assistant
+  `plan_mowing_preference_update` / `plan_zone_mowing_preference_update`
+  surfaces. `PREP` mode writes remain intentionally unexposed.
 - For read-only batch comparisons, use `examples/batch_device_data_probe.py`.
   It decodes `SCHEDULE.*`, `SETTINGS.*`, and `OTA_INFO.*` without relying on
   app-action preference or schedule commands.
@@ -262,6 +268,11 @@ Last updated: 2026-04-19
   errors: map `0` in global mode with 5 preference areas and map `1` in global
   mode with 2 preference areas. Local output was stored in ignored
   `preference-probe-live.json`.
+- On 2026-04-21, a supervised no-op A2 `PRE` write validated the guarded
+  mowing-preference settings path. The test used map `0`, area `1`, and the
+  already-current `mowing_height_cm=6.0` value. The mower returned top-level
+  `r: 0` and the client recorded `executed=true` with `request_verified=true`
+  in ignored `preference-write-live-noop.json`.
 - The downloaded A2 plugin bundle identifies weather/rain protection settings
   in read-only `CFG`: `WRF` is the weather switch and `WRP` is the rain
   protection tuple. `RPET` returns `endTime` while
@@ -361,6 +372,8 @@ the workspace after live tests:
 - `status-blob*.json`
 - `schedule-probe-current.json`
 - `schedule-calendar-*.json`
+- `preference-probe*.json`
+- `preference-write*.json`
 - `apk-scan*.json`
 - `asset-scan*.json`
 

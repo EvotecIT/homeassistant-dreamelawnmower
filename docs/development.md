@@ -106,6 +106,8 @@ Safety-gated examples:
 ```bash
 python examples/schedule_write_probe.py --map-index 0 --plan-id 0 --disable --out schedule-write-dry-run.json
 python examples/schedule_write_probe.py --map-index 0 --plan-id 0 --disable --execute --confirm-schedule-write
+python examples/preference_write_probe.py --map-index 0 --area-id 11 --mowing-height-cm 5 --out preference-write-dry-run.json
+python examples/preference_write_probe.py --map-index 0 --area-id 11 --mowing-height-cm 5 --execute --confirm-write
 python examples/remote_control_smoke.py --execute --velocity 30 --rotation 25 --duration 0.35 --dock
 ```
 

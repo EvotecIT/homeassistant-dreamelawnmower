@@ -1,4 +1,4 @@
-"""Dry-run planner for mower-native mowing preference updates."""
+"""Dry-run first probe for mower-native mowing preference updates."""
 
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ from dreame_lawn_mower_client import DreameLawnMowerClient
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Build a dry-run Dreame mower mowing-preference update from the "
-            "current app preference payload."
+            "Build, and optionally execute, a Dreame mower mowing-preference "
+            "update from the current app preference payload."
         )
     )
     parser.add_argument(
@@ -116,6 +116,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Zero-based discovered mower index to inspect.",
     )
     parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Send the preference write request. Defaults to dry-run.",
+    )
+    parser.add_argument(
+        "--confirm-write",
+        action="store_true",
+        help="Required together with --execute before any preference write is sent.",
+    )
+    parser.add_argument(
         "--out",
         type=Path,
         help="Optional JSON output file. Prints to stdout when omitted.",
@@ -186,6 +196,8 @@ async def main() -> None:
             map_index=args.map_index,
             area_id=args.area_id,
             changes=changes,
+            execute=args.execute,
+            confirm_write=args.confirm_write,
         )
         result["descriptor"] = {
             "title": devices[args.device_index].title,

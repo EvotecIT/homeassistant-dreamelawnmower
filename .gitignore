@@ -25,6 +25,7 @@ schedule-probe*.json
 schedule-write*.json
 schedule-calendar*.json
 preference-probe*.json
+preference-write*.json
 weather-probe*.json
 weather-*.json
 apk-scan*.json

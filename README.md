@@ -36,7 +36,7 @@ Support levels in this table mean:
 
 | Scope | Status | Notes |
 | --- | --- | --- |
-| Dreame A2 (`dreame.mower.g2408`) | Validated | Primary live development device, including schedules, maps, remote control, and diagnostics |
+| Dreame A2 (`dreame.mower.g2408`) | Validated | Primary live development device, including schedules, maps, remote control, guarded preference writes, and diagnostics |
 | Newer A-series mower (`dreame.mower.g3255`) | Recognized | Raw model has been observed in code mapping, but the public retail name is still unverified |
 | Dreame A1 (`dreame.mower.p2255`) | Recognized | Model mapping is present; needs fixtures and live validation |
 | Dreame A1 Pro (`dreame.mower.g2422`) | Recognized | Model mapping is present; needs fixtures and live validation |
@@ -86,7 +86,7 @@ The following areas are intentionally cautious:
 - firmware OTA availability is reported as unknown unless a verified mower OTA
   signal is found
 - rain-protection writes are not exposed yet
-- mowing-preference writes are guarded and still need broader model and firmware validation
+- mowing-preference writes are guarded, validated on a supervised A2 no-op write, and still need broader model and firmware validation
 - map rendering is read-only; no-go editing, virtual-wall editing, and other map
   editing flows are not exposed yet
 - camera/photo/video paths are probe-only until runtime safety is clearer
