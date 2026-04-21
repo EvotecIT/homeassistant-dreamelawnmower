@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import voluptuous as vol
+from types import SimpleNamespace
 from typing import Any
 
+import voluptuous as vol
 from homeassistant.components.lawn_mower import (
     LawnMowerActivity,
     LawnMowerEntity,
@@ -13,8 +14,11 @@ from homeassistant.components.lawn_mower import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.entity_platform import async_get_current_platform
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.entity_platform import (
+    AddEntitiesCallback,
+    async_get_current_platform,
+)
 
 from .const import (
     ACTIVITY_DOCKED,
@@ -26,7 +30,6 @@ from .const import (
     DOMAIN,
 )
 from .control_options import (
-    MOWING_ACTION_ALL_AREA,
     MOWING_ACTION_EDGE,
     MOWING_ACTION_SPOT,
     MOWING_ACTION_ZONE,
@@ -42,8 +45,11 @@ from .control_options import (
 from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity
 from .services import (
+    ATTR_CONFIRM_PREFERENCE_WRITE,
+    ATTR_EXECUTE,
     ATTR_ZONE_ID,
     MOWING_PREFERENCE_CHANGE_FIELDS,
+    _guard_preference_write_request,
     preference_change_request,
 )
 
@@ -122,6 +128,8 @@ async def async_setup_entry(
         "plan_zone_mowing_preference_update",
         {
             vol.Optional(ATTR_ZONE_ID): vol.Coerce(int),
+            vol.Optional(ATTR_EXECUTE, default=False): cv.boolean,
+            vol.Optional(ATTR_CONFIRM_PREFERENCE_WRITE, default=False): cv.boolean,
             **MOWING_PREFERENCE_CHANGE_FIELDS,
         },
         "async_plan_zone_mowing_preference_update",
@@ -414,9 +422,11 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
     async def async_plan_zone_mowing_preference_update(
         self,
         zone_id: int | None = None,
+        execute: bool = False,
+        confirm_preference_write: bool = False,
         **changes: Any,
     ) -> None:
-        """Build a dry-run mowing preference update for the selected/current zone."""
+        """Build or execute a mowing preference update for the selected/current zone."""
         maps = map_entries(
             self.coordinator.app_maps,
             self.coordinator.batch_device_data,
@@ -433,10 +443,20 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             selected_map_index=self.coordinator.selected_map_index,
         )
         target_zone_id = self._resolve_zone_id(zone_entries, zone_id=zone_id)
+        _guard_preference_write_request(
+            SimpleNamespace(
+                data={
+                    ATTR_EXECUTE: execute,
+                    ATTR_CONFIRM_PREFERENCE_WRITE: confirm_preference_write,
+                }
+            )
+        )
         result = await self.coordinator.client.async_plan_app_mowing_preference_update(
             map_index=selected_map_index,
             area_id=target_zone_id,
             changes=preference_change_request(changes),
+            execute=execute,
+            confirm_write=confirm_preference_write,
         )
         result["selection_scope"] = {
             "selected_map_index": selected_map_index,
@@ -449,6 +469,8 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         }
         self.coordinator.last_preference_write_result = result
         self.coordinator.async_update_listeners()
+        if execute:
+            await self.coordinator.async_request_refresh()
 
     async def async_pause(self) -> None:
         """Pause mowing."""

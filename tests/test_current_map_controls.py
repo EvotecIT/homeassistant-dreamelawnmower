@@ -753,6 +753,7 @@ def test_lawn_mower_plan_zone_preference_update_uses_selected_scope() -> None:
         selected_zone_id=5,
         selected_spot_id=None,
         last_preference_write_result=None,
+        async_request_refresh=AsyncMock(),
         async_update_listeners=lambda: None,
     )
     entity = object.__new__(DreameLawnMower)
@@ -772,6 +773,8 @@ def test_lawn_mower_plan_zone_preference_update_uses_selected_scope() -> None:
             "mowing_height_cm": 4.5,
             "edge_mowing_auto": False,
         },
+        execute=False,
+        confirm_write=False,
     )
     assert coordinator.last_preference_write_result["selection_scope"] == {
         "selected_map_index": 1,
@@ -779,6 +782,87 @@ def test_lawn_mower_plan_zone_preference_update_uses_selected_scope() -> None:
         "selected_zone_id": 5,
         "selected_zone_label": "Zone #5",
     }
+    coordinator.async_request_refresh.assert_not_awaited()
+
+
+def test_lawn_mower_plan_zone_preference_update_can_execute_confirmed_write() -> None:
+    client = SimpleNamespace(
+        async_plan_app_mowing_preference_update=AsyncMock(
+            return_value={
+                "source": "app_action_mowing_preference_write",
+                "action": "plan_mowing_preference_update",
+                "map_index": 1,
+                "area_id": 5,
+                "executed": True,
+                "response_data": {"r": 0},
+                "changed_fields": ["mowing_height_cm"],
+            }
+        ),
+    )
+    coordinator = SimpleNamespace(
+        client=client,
+        app_maps=_app_maps(current_map_index=0),
+        batch_device_data=_batch_device_data(),
+        selected_map_index=1,
+        selected_contour_id=None,
+        selected_zone_id=5,
+        selected_spot_id=None,
+        last_preference_write_result=None,
+        async_request_refresh=AsyncMock(),
+        async_update_listeners=lambda: None,
+    )
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = coordinator
+
+    asyncio.run(
+        entity.async_plan_zone_mowing_preference_update(
+            mowing_height_cm=4.5,
+            execute=True,
+            confirm_preference_write=True,
+        )
+    )
+
+    client.async_plan_app_mowing_preference_update.assert_awaited_once_with(
+        map_index=1,
+        area_id=5,
+        changes={
+            "mowing_height_cm": 4.5,
+        },
+        execute=True,
+        confirm_write=True,
+    )
+    coordinator.async_request_refresh.assert_awaited_once()
+
+
+def test_lawn_mower_plan_zone_preference_update_blocks_unconfirmed_write() -> None:
+    client = SimpleNamespace(
+        async_plan_app_mowing_preference_update=AsyncMock(),
+    )
+    coordinator = SimpleNamespace(
+        client=client,
+        app_maps=_app_maps(current_map_index=0),
+        batch_device_data=_batch_device_data(),
+        selected_map_index=1,
+        selected_contour_id=None,
+        selected_zone_id=5,
+        selected_spot_id=None,
+        last_preference_write_result=None,
+        async_request_refresh=AsyncMock(),
+        async_update_listeners=lambda: None,
+    )
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = coordinator
+
+    with pytest.raises(HomeAssistantError, match="confirm_preference_write"):
+        asyncio.run(
+            entity.async_plan_zone_mowing_preference_update(
+                mowing_height_cm=4.5,
+                execute=True,
+                confirm_preference_write=False,
+            )
+        )
+
+    client.async_plan_app_mowing_preference_update.assert_not_called()
 
 
 def test_lawn_mower_plan_zone_preference_update_rejects_unknown_zone() -> None:

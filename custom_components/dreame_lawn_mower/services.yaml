@@ -71,11 +71,12 @@ switch_current_map:
 plan_zone_mowing_preference_update:
   name: Plan zone mowing preference update
   description: >-
-    Build a dry-run mowing preference update for the selected or current map
-    zone on the mower entity. This uses the current Home Assistant map/zone
-    selection scope unless zone_id is provided explicitly. The request is not
-    sent to the mower; it only builds the candidate PRE payload and stores the
-    result in the last preference write diagnostic sensor.
+    Build or send a guarded mowing preference update for the selected or
+    current map zone on the mower entity. This uses the current Home Assistant
+    map/zone selection scope unless zone_id is provided explicitly. By default
+    this is a dry run that only stores the candidate PRE payload in the last
+    preference write diagnostic sensor. Sending the request requires execute
+    and confirm_preference_write to both be true.
   target:
     entity:
       integration: dreame_lawn_mower
@@ -90,6 +91,18 @@ plan_zone_mowing_preference_update:
           max: 100
           step: 1
           mode: box
+    execute:
+      name: Execute
+      description: Send the write request instead of only building a dry-run preview.
+      default: false
+      selector:
+        boolean: {}
+    confirm_preference_write:
+      name: Confirm preference write
+      description: Required together with execute before the preference write is sent.
+      default: false
+      selector:
+        boolean: {}
     efficient_mode:
       name: Efficiency mode
       description: Integer mode value, typically 0 for standard or 1 for efficient.
@@ -300,10 +313,11 @@ set_schedule_plan_enabled:
 plan_mowing_preference_update:
   name: Plan mowing preference update
   description: >-
-    Build a dry-run mower preference update from the current app preference
-    payload. This service does not send PRE or PREP to the mower yet. It only
-    shows the candidate request payload in a notification and the diagnostic
-    sensor.
+    Build or send a guarded mower preference update from the current app
+    preference payload. By default this is a dry run that only shows the
+    candidate request payload in a notification and the diagnostic sensor.
+    Sending the request requires execute and confirm_preference_write to both
+    be true.
   fields:
     entry_id:
       name: Config entry ID
@@ -330,6 +344,18 @@ plan_mowing_preference_update:
           max: 100
           step: 1
           mode: box
+    execute:
+      name: Execute
+      description: Send the write request instead of only building a dry-run preview.
+      default: false
+      selector:
+        boolean: {}
+    confirm_preference_write:
+      name: Confirm preference write
+      description: Required together with execute before the preference write is sent.
+      default: false
+      selector:
+        boolean: {}
     efficient_mode:
       name: Efficiency mode
       description: Integer mode value, typically 0 for standard or 1 for efficient.

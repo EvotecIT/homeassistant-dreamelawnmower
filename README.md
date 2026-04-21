@@ -67,7 +67,7 @@ region/account details are especially helpful for moving a device from
 - read-only schedule calendar using the mower-native app schedule protocol
 - disabled-by-default all-schedules calendar for default and per-map schedule diagnosis
 - guarded schedule enable/disable service with dry-run mode by default
-- dry-run mowing-preference planning service with candidate PRE payload output
+- guarded mowing-preference update service with dry-run mode by default
 - read-only map camera using the app-map payload when available
 - disabled-by-default all-maps and map-diagnostics cameras
 - runtime telemetry sensors for mission progress, mission area, mower pose, and live-track length
@@ -85,8 +85,8 @@ The following areas are intentionally cautious:
 
 - firmware OTA availability is reported as unknown unless a verified mower OTA
   signal is found
-- preference and rain-protection writes are not exposed yet
-- preference updates can be planned, but live PRE or PREP writes are still blocked
+- rain-protection writes are not exposed yet
+- mowing-preference writes are guarded and still need broader model and firmware validation
 - map rendering is read-only; no-go editing, virtual-wall editing, and other map
   editing flows are not exposed yet
 - camera/photo/video paths are probe-only until runtime safety is clearer
@@ -207,11 +207,12 @@ The guarded `dreame_lawn_mower.set_schedule_plan_enabled` service is dry-run
 first. It sends a write only when both `execute: true` and
 `confirm_schedule_write: true` are set.
 
-`dreame_lawn_mower.plan_mowing_preference_update` is also dry-run only. It
-reads the current app preference payload, applies the requested field changes
+`dreame_lawn_mower.plan_mowing_preference_update` is dry-run first. It reads
+the current app preference payload, applies the requested field changes
 locally, and exposes the candidate `PRE` request in a notification plus the
-disabled-by-default `Last Preference Write` diagnostic sensor. It does not send
-`PRE` or `PREP` to the mower yet.
+disabled-by-default `Last Preference Write` diagnostic sensor. It sends a live
+preference write only when both `execute: true` and
+`confirm_preference_write: true` are provided.
 
 ## Maps
 

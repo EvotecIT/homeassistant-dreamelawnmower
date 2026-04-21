@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
     apply_mowing_preference_changes,
@@ -47,6 +49,8 @@ class _FakePreferenceCloud:
             }
             return {"out": [{"m": "r", "r": 0, "d": data}]}
         if command == "PRE":
+            if payload.get("m") == "s":
+                return {"out": [{"m": "r", "r": 0, "d": {"r": 0, "ok": True}}]}
             region = int(payload["d"]["region"])
             payload_data = [
                 8,
@@ -242,7 +246,7 @@ def test_plan_app_mowing_preference_update_builds_candidate_request() -> None:
 
     assert result["dry_run"] is True
     assert result["executed"] is False
-    assert result["execute_supported"] is False
+    assert result["execute_supported"] is True
     assert result["request_verified"] is False
     assert result["changed"] is True
     assert result["changed_fields"] == [
@@ -275,3 +279,39 @@ def test_plan_app_mowing_preference_update_builds_candidate_request() -> None:
         "d": [8, 0, 11, 1, 50, 2, 90, 0, 0, 1, 1, 2, 1, 15, 20, 5, 1],
     }
     assert [call["t"] for call in cloud.calls] == ["PREI", "PRE", "PRE"]
+
+
+def test_plan_app_mowing_preference_update_can_execute_confirmed_request() -> None:
+    client = _client()
+    cloud = _FakePreferenceCloud()
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_plan_app_mowing_preference_update(
+        map_index=0,
+        area_id=11,
+        changes={
+            "mowing_height_cm": 5,
+        },
+        execute=True,
+        confirm_write=True,
+    )
+
+    assert result["dry_run"] is False
+    assert result["executed"] is True
+    assert result["execute_supported"] is True
+    assert result["request_verified"] is True
+    assert result["response_data"] == {"r": 0, "ok": True}
+    assert [call["t"] for call in cloud.calls] == ["PREI", "PRE", "PRE", "PRE"]
+
+
+def test_plan_app_mowing_preference_update_rejects_unconfirmed_execute() -> None:
+    client = _client()
+
+    with pytest.raises(ValueError, match="confirm_write=True"):
+        client._sync_plan_app_mowing_preference_update(
+            map_index=0,
+            area_id=11,
+            changes={"mowing_height_cm": 5},
+            execute=True,
+            confirm_write=False,
+        )

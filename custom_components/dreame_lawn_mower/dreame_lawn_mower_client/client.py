@@ -550,13 +550,17 @@ class DreameLawnMowerClient:
         map_index: int,
         area_id: int,
         changes: Mapping[str, Any],
+        execute: bool = False,
+        confirm_write: bool = False,
     ) -> dict[str, Any]:
-        """Build a dry-run mower preference update from the current app state."""
+        """Build or execute a mower preference update from the current app state."""
         return await asyncio.to_thread(
             self._sync_plan_app_mowing_preference_update,
             map_index,
             area_id,
             changes,
+            execute,
+            confirm_write,
         )
 
     async def async_get_weather_protection(
@@ -2054,8 +2058,14 @@ class DreameLawnMowerClient:
         map_index: int,
         area_id: int,
         changes: Mapping[str, Any],
+        execute: bool = False,
+        confirm_write: bool = False,
     ) -> dict[str, Any]:
-        """Build an unverified dry-run payload for mower preference changes."""
+        """Build or execute an app-action payload for mower preference changes."""
+        if execute and not confirm_write:
+            raise ValueError(
+                "Preference writes require confirm_write=True when execute=True."
+            )
         if not isinstance(changes, Mapping) or not changes:
             raise ValueError("At least one mowing preference change is required.")
 
@@ -2097,12 +2107,17 @@ class DreameLawnMowerClient:
         )
         payload = encode_mowing_preference_payload(updated_preference)
         mode = _positive_int(preference_map.get("mode"))
+        request = {
+            "m": "s",
+            "t": "PRE",
+            "d": payload,
+        }
         result: dict[str, Any] = {
             "source": "app_action_mowing_preference_write",
             "action": "plan_mowing_preference_update",
-            "dry_run": True,
+            "dry_run": not execute,
             "executed": False,
-            "execute_supported": False,
+            "execute_supported": True,
             "request_verified": False,
             "write_commands": {
                 "settings": "PRE",
@@ -2124,18 +2139,34 @@ class DreameLawnMowerClient:
             "previous_preference": _mowing_preference_overview(current_preference),
             "updated_preference": _mowing_preference_overview(updated_preference),
             "payload": payload,
-            "request_candidate": {
-                "m": "s",
-                "t": "PRE",
-                "d": payload,
-            },
-            "notes": [
-                "Settings write command names were identified from the plugin bundle, "
-                "but live mower execution is not validated yet.",
-                "This planner returns the candidate PRE payload only and does not send "
-                "PRE or PREP to the mower.",
-            ],
+            "request_candidate": request,
+            "notes": (
+                [
+                    "Preference write prepared but not executed.",
+                    "Send the candidate PRE request only with execute=true and an "
+                    "explicit confirmation gate.",
+                ]
+                if not execute
+                else [
+                    "Preference write executed through the PRE settings request after "
+                    "explicit confirmation.",
+                ]
+            ),
         }
+        if execute:
+            response = self._sync_call_app_action(request)
+            response_data = _app_action_data(response)
+            if isinstance(response_data, Mapping) and response_data.get("r") not in (
+                None,
+                0,
+            ):
+                raise DreameLawnMowerConnectionError(
+                    f"Preference write failed: {response}"
+                )
+            result["executed"] = True
+            result["request_verified"] = True
+            result["response"] = _json_safe(response, max_depth=4)
+            result["response_data"] = _json_safe(response_data, max_depth=4)
         return result
 
     def _sync_get_batch_schedules(

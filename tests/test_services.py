@@ -12,6 +12,7 @@ from custom_components.dreame_lawn_mower.services import (
     PLAN_MOWING_PREFERENCE_UPDATE_SCHEMA,
     REMOTE_CONTROL_STEP_SCHEMA,
     SET_SCHEDULE_PLAN_ENABLED_SCHEMA,
+    _guard_preference_write_request,
     _guard_remote_control_step,
     _guard_schedule_write_request,
     _mowing_preference_notification,
@@ -110,6 +111,8 @@ def test_plan_mowing_preference_update_schema_parses_numeric_values() -> None:
     assert parsed == {
         "map_index": 0,
         "area_id": 11,
+        "execute": False,
+        "confirm_preference_write": False,
         "mowing_height_cm": 4.5,
         "obstacle_avoidance_ai_classes": ["people", "animals"],
     }
@@ -136,6 +139,29 @@ def test_schedule_write_guard_allows_dry_run_without_confirmation() -> None:
     )
 
     _guard_schedule_write_request(call)
+
+
+def test_preference_write_guard_blocks_execute_without_confirmation() -> None:
+    call = SimpleNamespace(
+        data={
+            "execute": True,
+            "confirm_preference_write": False,
+        }
+    )
+
+    with pytest.raises(HomeAssistantError, match="confirm_preference_write"):
+        _guard_preference_write_request(call)
+
+
+def test_preference_write_guard_allows_dry_run_without_confirmation() -> None:
+    call = SimpleNamespace(
+        data={
+            "execute": False,
+            "confirm_preference_write": False,
+        }
+    )
+
+    _guard_preference_write_request(call)
 
 
 def test_preference_change_request_requires_at_least_one_field() -> None:
@@ -212,6 +238,32 @@ def test_mowing_preference_notification_summarizes_candidate_request() -> None:
     assert "changed_fields=mowing_height_cm, edge_mowing_auto" in message
     assert "height 4.0 -> 5.0" in message
     assert '"t": "PRE"' in message
+
+
+def test_mowing_preference_notification_summarizes_executed_request() -> None:
+    title, message = _mowing_preference_notification(
+        {
+            "executed": True,
+            "changed": False,
+            "map_index": 0,
+            "area_id": 11,
+            "mode_name": "custom",
+            "changed_fields": [],
+            "previous_preference": {"mowing_height_cm": 4.0},
+            "updated_preference": {"mowing_height_cm": 4.0},
+            "request_candidate": {
+                "m": "s",
+                "t": "PRE",
+                "d": [8, 0, 11],
+            },
+            "response_data": {"r": 0, "ok": True},
+        }
+    )
+
+    assert title == "Dreame Lawn Mower Preference Updated"
+    assert "Sent mowing preference update for map 0 area 11" in message
+    assert "height 4.0 -> 4.0 (was already matched)" in message
+    assert 'Response: `{"ok": true, "r": 0}`' in message
 
 
 def test_schedule_write_notification_summarizes_executed_noop() -> None:

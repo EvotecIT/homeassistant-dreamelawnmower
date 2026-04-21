@@ -1306,6 +1306,40 @@ def test_preference_write_result_attributes_are_compact() -> None:
     }
 
 
+def test_preference_write_result_attributes_keep_response_and_selection_scope() -> None:
+    result = {
+        "source": "app_action_mowing_preference_write",
+        "action": "plan_mowing_preference_update",
+        "dry_run": False,
+        "executed": True,
+        "execute_supported": True,
+        "request_verified": True,
+        "map_index": 1,
+        "area_id": 5,
+        "response_data": {"r": 0},
+        "selection_scope": {
+            "selected_map_index": 1,
+            "selected_zone_id": 5,
+        },
+    }
+
+    assert preference_write_result_attributes(result) == {
+        "source": "app_action_mowing_preference_write",
+        "action": "plan_mowing_preference_update",
+        "dry_run": False,
+        "executed": True,
+        "execute_supported": True,
+        "request_verified": True,
+        "map_index": 1,
+        "area_id": 5,
+        "selection_scope": {
+            "selected_map_index": 1,
+            "selected_zone_id": 5,
+        },
+        "response_data": {"r": 0},
+    }
+
+
 def test_schedule_probe_payload_includes_calendar_selection() -> None:
     payload = {
         "current_task": {"version": 19383},

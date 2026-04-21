@@ -21,6 +21,7 @@ from .dreame_lawn_mower_client.client import (
 from .manual_control import remote_control_block_reason
 
 ATTR_ENTRY_ID = "entry_id"
+ATTR_CONFIRM_PREFERENCE_WRITE = "confirm_preference_write"
 ATTR_CONFIRM_SCHEDULE_WRITE = "confirm_schedule_write"
 ATTR_CUTTER_POSITION = "cutter_position"
 ATTR_EDGE_MOWING_AUTO = "edge_mowing_auto"
@@ -169,6 +170,8 @@ PLAN_MOWING_PREFERENCE_UPDATE_SCHEMA = vol.Schema(
         vol.Optional(ATTR_ENTRY_ID): cv.string,
         vol.Required(ATTR_MAP_INDEX): _int_range(name=ATTR_MAP_INDEX, minimum=0),
         vol.Required(ATTR_AREA_ID): _int_range(name=ATTR_AREA_ID, minimum=0),
+        vol.Optional(ATTR_EXECUTE, default=False): cv.boolean,
+        vol.Optional(ATTR_CONFIRM_PREFERENCE_WRITE, default=False): cv.boolean,
         **MOWING_PREFERENCE_CHANGE_FIELDS,
     }
 )
@@ -215,14 +218,19 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         call: ServiceCall,
     ) -> None:
         coordinator = _coordinator_from_call(hass, call)
+        _guard_preference_write_request(call)
         changes = _preference_change_request(call)
         result = await coordinator.client.async_plan_app_mowing_preference_update(
             map_index=call.data[ATTR_MAP_INDEX],
             area_id=call.data[ATTR_AREA_ID],
             changes=changes,
+            execute=call.data[ATTR_EXECUTE],
+            confirm_write=call.data[ATTR_CONFIRM_PREFERENCE_WRITE],
         )
         coordinator.last_preference_write_result = result
         coordinator.async_update_listeners()
+        if call.data[ATTR_EXECUTE]:
+            await coordinator.async_request_refresh()
         _notify_mowing_preference_update(coordinator, result)
 
     hass.services.async_register(
@@ -312,6 +320,14 @@ def _guard_schedule_write_request(call: ServiceCall) -> None:
         )
 
 
+def _guard_preference_write_request(call: ServiceCall) -> None:
+    """Block preference writes unless the HA service confirmation gate is set."""
+    if call.data[ATTR_EXECUTE] and not call.data[ATTR_CONFIRM_PREFERENCE_WRITE]:
+        raise HomeAssistantError(
+            "Preference writes require confirm_preference_write when execute is true."
+        )
+
+
 def _preference_change_request(call: ServiceCall) -> dict[str, Any]:
     """Return requested preference field updates from a service call."""
     return preference_change_request(call.data)
@@ -367,7 +383,7 @@ def _notify_mowing_preference_update(
     coordinator: DreameLawnMowerCoordinator,
     result: dict[str, Any],
 ) -> None:
-    """Create a user-visible notification for a preference dry-run plan."""
+    """Create a user-visible notification for a preference plan or write."""
     title, message = _mowing_preference_notification(result)
     persistent_notification.async_create(
         coordinator.hass,
@@ -416,7 +432,7 @@ def _schedule_write_notification(result: dict[str, Any]) -> tuple[str, str]:
 
 
 def _mowing_preference_notification(result: dict[str, Any]) -> tuple[str, str]:
-    """Return title and message for a mowing-preference dry-run plan."""
+    """Return title and message for a mowing-preference dry run or write."""
     request = json.dumps(result.get("request_candidate"), sort_keys=True)
     previous = result.get("previous_preference")
     updated = result.get("updated_preference")
@@ -427,11 +443,22 @@ def _mowing_preference_notification(result: dict[str, Any]) -> tuple[str, str]:
         updated.get("mowing_height_cm") if isinstance(updated, dict) else None
     )
     changed_fields = ", ".join(result.get("changed_fields") or []) or "none"
+    if result.get("executed"):
+        title = "Dreame Lawn Mower Preference Updated"
+        action = "Sent"
+        change_text = "changed" if result.get("changed") else "was already matched"
+    else:
+        title = "Dreame Lawn Mower Preference Dry Run"
+        action = "Built dry-run"
+        change_text = "will change" if result.get("changed") else "already matched"
+
     message = (
-        "Built dry-run mowing preference update for "
-        f"map {result.get('map_index')} area {result.get('area_id')}: "
-        f"mode={result.get('mode_name')}, changed_fields={changed_fields}, "
-        f"height {previous_height} -> {updated_height}. "
-        f"Candidate request: `{request}`"
+        f"{action} mowing preference update for map {result.get('map_index')} "
+        f"area {result.get('area_id')}: mode={result.get('mode_name')}, "
+        f"changed_fields={changed_fields}, height {previous_height} -> "
+        f"{updated_height} ({change_text}). Candidate request: `{request}`"
     )
-    return "Dreame Lawn Mower Preference Dry Run", message
+    if result.get("executed") and result.get("response_data") is not None:
+        response = json.dumps(result.get("response_data"), sort_keys=True)
+        message = f"{message} Response: `{response}`"
+    return title, message

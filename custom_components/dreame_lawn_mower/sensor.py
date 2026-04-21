@@ -412,7 +412,7 @@ class DreameLawnMowerLastPreferenceWriteSensor(
     DreameLawnMowerEntity,
     SensorEntity,
 ):
-    """Expose the last dry-run mowing preference plan."""
+    """Expose the last mowing preference plan or executed write."""
 
     _attr_name = "Last Preference Write"
     _attr_icon = "mdi:tune-variant"
@@ -425,7 +425,7 @@ class DreameLawnMowerLastPreferenceWriteSensor(
 
     @property
     def native_value(self) -> str:
-        """Return a compact state for the last preference write plan."""
+        """Return a compact state for the last preference write result."""
         return _preference_write_state(self.coordinator.last_preference_write_result)
 
     @property
@@ -439,6 +439,8 @@ class DreameLawnMowerLastPreferenceWriteSensor(
 def _preference_write_state(result: dict[str, Any] | None) -> str:
     if not result:
         return "none"
+    if result.get("executed"):
+        return "executed"
     return "planned"
 
 
@@ -474,6 +476,10 @@ def preference_write_result_attributes(
         attributes["previous_preference"] = result.get("previous_preference")
     if isinstance(result.get("updated_preference"), dict):
         attributes["updated_preference"] = result.get("updated_preference")
+    if isinstance(result.get("selection_scope"), dict):
+        attributes["selection_scope"] = result.get("selection_scope")
+    if result.get("response_data") is not None:
+        attributes["response_data"] = result.get("response_data")
     return {
         key: value
         for key, value in attributes.items()
