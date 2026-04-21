@@ -1340,6 +1340,34 @@ def test_preference_write_result_attributes_keep_response_and_selection_scope() 
     }
 
 
+def test_preference_write_result_attributes_include_mode_sequence_fields() -> None:
+    result = {
+        "map_index": 1,
+        "mode": 0,
+        "mode_name": "global",
+        "target_mode": 1,
+        "target_mode_name": "custom",
+        "mode_changed": True,
+        "request_candidates": [
+            {"t": "PREP"},
+            {"t": "PRE"},
+        ],
+    }
+
+    assert preference_write_result_attributes(result) == {
+        "map_index": 1,
+        "mode": 0,
+        "mode_name": "global",
+        "target_mode": 1,
+        "target_mode_name": "custom",
+        "mode_changed": True,
+        "request_candidates": [
+            {"t": "PREP"},
+            {"t": "PRE"},
+        ],
+    }
+
+
 def test_schedule_probe_payload_includes_calendar_selection() -> None:
     payload = {
         "current_task": {"version": 19383},

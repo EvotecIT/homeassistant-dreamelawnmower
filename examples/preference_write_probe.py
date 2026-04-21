@@ -27,8 +27,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--area-id",
         type=int,
-        required=True,
-        help="Preference area id returned by the mower app protocol.",
+        help=(
+            "Preference area id returned by the mower app protocol. Required "
+            "for per-area settings updates, optional for preference-mode-only "
+            "requests."
+        ),
+    )
+    parser.add_argument(
+        "--preference-mode",
+        help="Map preference mode, for example global, custom, 0, or 1.",
     )
     parser.add_argument(
         "--efficient-mode",
@@ -135,6 +142,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def _changes_from_args(args: argparse.Namespace) -> dict[str, object]:
     changes = {
+        "preference_mode": args.preference_mode,
         "efficient_mode": args.efficient_mode,
         "mowing_height_cm": args.mowing_height_cm,
         "mowing_direction_mode": args.mowing_direction_mode,
@@ -169,6 +177,9 @@ async def main() -> None:
     country = os.environ.get("DREAME_COUNTRY", "eu")
     account_type = os.environ.get("DREAME_ACCOUNT_TYPE", "dreame")
     changes = _changes_from_args(args)
+    zone_scoped_change = any(key != "preference_mode" for key in changes)
+    if zone_scoped_change and args.area_id is None:
+        raise RuntimeError("--area-id is required for per-area settings updates.")
 
     devices = await DreameLawnMowerClient.async_discover_devices(
         username=username,

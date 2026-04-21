@@ -78,11 +78,14 @@ from .models import (
     remote_control_state_safe,
 )
 from .mowing_preferences import (
+    MOWING_PREFERENCE_MODE_FIELD,
     MOWING_PREFERENCE_PROPERTY_KEY,
     MOWING_PREFERENCE_UPDATE_FIELDS,
     apply_mowing_preference_changes,
     decode_mowing_preference_payload,
     encode_mowing_preference_payload,
+    mowing_preference_mode_name,
+    normalize_mowing_preference_mode,
     summarize_mowing_preference_info,
 )
 from .schedule import (
@@ -134,6 +137,7 @@ __all__ = [
     "MOWER_TASK_PROPERTY_KEY",
     "MOWER_TIME_PROPERTY_KEY",
     "MOWER_BATTERY_PROPERTY_KEY",
+    "MOWING_PREFERENCE_MODE_FIELD",
     "MOWING_PREFERENCE_PROPERTY_KEY",
     "MOWING_PREFERENCE_UPDATE_FIELDS",
     "SUPPORTED_ACCOUNT_TYPES",
@@ -172,6 +176,8 @@ __all__ = [
     "map_diagnostics_from_device",
     "map_summary_from_map_data",
     "map_summary_to_dict",
+    "mowing_preference_mode_name",
+    "normalize_mowing_preference_mode",
     "remote_control_block_reason",
     "remote_control_state_safe",
     "mower_error_label",

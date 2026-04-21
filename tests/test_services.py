@@ -12,6 +12,7 @@ from custom_components.dreame_lawn_mower.services import (
     PLAN_MOWING_PREFERENCE_UPDATE_SCHEMA,
     REMOTE_CONTROL_STEP_SCHEMA,
     SET_SCHEDULE_PLAN_ENABLED_SCHEMA,
+    ATTR_PREFERENCE_MODE,
     _guard_preference_write_request,
     _guard_remote_control_step,
     _guard_schedule_write_request,
@@ -118,6 +119,22 @@ def test_plan_mowing_preference_update_schema_parses_numeric_values() -> None:
     }
 
 
+def test_plan_mowing_preference_update_schema_accepts_mode_only_request() -> None:
+    parsed = PLAN_MOWING_PREFERENCE_UPDATE_SCHEMA(
+        {
+            "map_index": "1",
+            "preference_mode": "custom",
+        }
+    )
+
+    assert parsed == {
+        "map_index": 1,
+        "preference_mode": 1,
+        "execute": False,
+        "confirm_preference_write": False,
+    }
+
+
 def test_schedule_write_guard_blocks_execute_without_confirmation() -> None:
     call = SimpleNamespace(
         data={
@@ -190,6 +207,19 @@ def test_preference_change_request_extracts_supported_fields() -> None:
     }
 
 
+def test_preference_change_request_extracts_preference_mode() -> None:
+    call = SimpleNamespace(
+        data={
+            "map_index": 0,
+            ATTR_PREFERENCE_MODE: 0,
+        }
+    )
+
+    assert _preference_change_request(call) == {
+        ATTR_PREFERENCE_MODE: 0,
+    }
+
+
 def test_schedule_write_notification_summarizes_dry_run_change() -> None:
     title, message = _schedule_write_notification(
         {
@@ -238,6 +268,30 @@ def test_mowing_preference_notification_summarizes_candidate_request() -> None:
     assert "changed_fields=mowing_height_cm, edge_mowing_auto" in message
     assert "height 4.0 -> 5.0" in message
     assert '"t": "PRE"' in message
+
+
+def test_mowing_preference_notification_summarizes_mode_only_request() -> None:
+    title, message = _mowing_preference_notification(
+        {
+            "map_index": 1,
+            "area_id": None,
+            "mode_name": "global",
+            "target_mode_name": "custom",
+            "changed_fields": ["preference_mode"],
+            "changed": True,
+            "request_candidate": {
+                "m": "s",
+                "t": "PREP",
+                "d": {"idx": 1, "value": 1},
+            },
+        }
+    )
+
+    assert title == "Dreame Lawn Mower Preference Dry Run"
+    assert "Built dry-run mowing preference update for map 1" in message
+    assert "mode global -> custom" in message
+    assert "changed_fields=preference_mode" in message
+    assert '"t": "PREP"' in message
 
 
 def test_mowing_preference_notification_summarizes_executed_request() -> None:

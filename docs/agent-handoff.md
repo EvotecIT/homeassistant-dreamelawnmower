@@ -260,7 +260,9 @@ Last updated: 2026-04-21
   now exposed through `async_plan_app_mowing_preference_update()`,
   `examples/preference_write_probe.py`, and the Home Assistant
   `plan_mowing_preference_update` / `plan_zone_mowing_preference_update`
-  surfaces. `PREP` mode writes remain intentionally unexposed.
+  surfaces. Guarded `PREP` mode writes are now exposed as well, including
+  mode-only dry runs and combined `PREP` plus `PRE` sequences when a map must
+  switch into custom mode before zone-specific settings are sent.
 - For read-only batch comparisons, use `examples/batch_device_data_probe.py`.
   It decodes `SCHEDULE.*`, `SETTINGS.*`, and `OTA_INFO.*` without relying on
   app-action preference or schedule commands.

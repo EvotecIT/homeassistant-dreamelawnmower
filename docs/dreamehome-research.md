@@ -186,7 +186,9 @@ to the app-action preference protocol:
   for one area/custom-region preference payload.
 - Write-capable commands exist as `PRE` with `m:"s"` for settings and `PREP`
   for preference mode. The client now exposes guarded planning/execution for
-  `PRE`, while `PREP` remains intentionally unexposed.
+  both `PRE` and `PREP`, including mode-only dry runs and combined
+  `PREP` then `PRE` request sequences when switching a map into custom mode
+  before applying zone-specific settings.
 - The decoded payload fields line up with the UI: efficient mode, cutting
   height, mowing direction mode/direction, automatic and safe edge mowing,
   EdgeMaster/cutter position, edge obstacle avoidance, LiDAR obstacle

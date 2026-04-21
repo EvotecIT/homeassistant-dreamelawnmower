@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 MOWING_PREFERENCE_PROPERTY_KEY = "2.52"
+MOWING_PREFERENCE_MODE_FIELD = "preference_mode"
 
 MOWING_PREFERENCE_MODE_NAMES = {
     0: "global",
@@ -120,6 +121,31 @@ def summarize_mowing_preference_info(info: Any) -> dict[str, Any]:
         "area_count": len(versions),
         "areas": versions,
     }
+
+
+def mowing_preference_mode_name(value: Any) -> str | None:
+    """Return a normalized mode label when available."""
+    return _label(MOWING_PREFERENCE_MODE_NAMES, _to_int(value))
+
+
+def normalize_mowing_preference_mode(value: Any) -> int:
+    """Normalize a mower preference mode value from int or label."""
+    if isinstance(value, bool):
+        raise ValueError(f"{MOWING_PREFERENCE_MODE_FIELD} must be an integer or label.")
+    if isinstance(value, str):
+        normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+        for mode, label in MOWING_PREFERENCE_MODE_NAMES.items():
+            if normalized == label:
+                return mode
+        if normalized.isdigit():
+            value = normalized
+    mode = _to_int(value)
+    if mode not in MOWING_PREFERENCE_MODE_NAMES:
+        supported = ", ".join(MOWING_PREFERENCE_MODE_NAMES.values())
+        raise ValueError(
+            f"{MOWING_PREFERENCE_MODE_FIELD} supports only {supported}, 0, or 1."
+        )
+    return mode
 
 
 def encode_mowing_preference_payload(preference: Mapping[str, Any]) -> list[int]:

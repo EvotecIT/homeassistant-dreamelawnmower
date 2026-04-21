@@ -18,6 +18,10 @@ from .dreame_lawn_mower_client.client import (
     REMOTE_CONTROL_MAX_ROTATION,
     REMOTE_CONTROL_MAX_VELOCITY,
 )
+from .dreame_lawn_mower_client.mowing_preferences import (
+    MOWING_PREFERENCE_MODE_FIELD,
+    normalize_mowing_preference_mode,
+)
 from .manual_control import remote_control_block_reason
 
 ATTR_ENTRY_ID = "entry_id"
@@ -41,6 +45,7 @@ ATTR_OBSTACLE_AVOIDANCE_AI_CLASSES = "obstacle_avoidance_ai_classes"
 ATTR_OBSTACLE_AVOIDANCE_DISTANCE_CM = "obstacle_avoidance_distance_cm"
 ATTR_OBSTACLE_AVOIDANCE_ENABLED = "obstacle_avoidance_enabled"
 ATTR_OBSTACLE_AVOIDANCE_HEIGHT_CM = "obstacle_avoidance_height_cm"
+ATTR_PREFERENCE_MODE = MOWING_PREFERENCE_MODE_FIELD
 ATTR_PLAN_ID = "plan_id"
 ATTR_PROMPT = "prompt"
 ATTR_ROTATION = "rotation"
@@ -89,6 +94,14 @@ def _int_range(*, name: str, minimum: int | None = None) -> Any:
     return validator
 
 
+def _preference_mode_validator(value: Any) -> int:
+    """Validate a map preference mode label or integer."""
+    try:
+        return normalize_mowing_preference_mode(value)
+    except ValueError as err:
+        raise vol.Invalid(str(err)) from err
+
+
 REMOTE_CONTROL_STEP_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_ENTRY_ID): cv.string,
@@ -122,6 +135,7 @@ SET_SCHEDULE_PLAN_ENABLED_SCHEMA = vol.Schema(
 )
 
 MOWING_PREFERENCE_CHANGE_FIELDS = {
+    vol.Optional(ATTR_PREFERENCE_MODE): _preference_mode_validator,
     vol.Optional(ATTR_EFFICIENT_MODE): _int_range(
         name=ATTR_EFFICIENT_MODE,
         minimum=0,
@@ -169,7 +183,7 @@ PLAN_MOWING_PREFERENCE_UPDATE_SCHEMA = vol.Schema(
     {
         vol.Optional(ATTR_ENTRY_ID): cv.string,
         vol.Required(ATTR_MAP_INDEX): _int_range(name=ATTR_MAP_INDEX, minimum=0),
-        vol.Required(ATTR_AREA_ID): _int_range(name=ATTR_AREA_ID, minimum=0),
+        vol.Optional(ATTR_AREA_ID): _int_range(name=ATTR_AREA_ID, minimum=0),
         vol.Optional(ATTR_EXECUTE, default=False): cv.boolean,
         vol.Optional(ATTR_CONFIRM_PREFERENCE_WRITE, default=False): cv.boolean,
         **MOWING_PREFERENCE_CHANGE_FIELDS,
@@ -222,7 +236,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         changes = _preference_change_request(call)
         result = await coordinator.client.async_plan_app_mowing_preference_update(
             map_index=call.data[ATTR_MAP_INDEX],
-            area_id=call.data[ATTR_AREA_ID],
+            area_id=call.data.get(ATTR_AREA_ID),
             changes=changes,
             execute=call.data[ATTR_EXECUTE],
             confirm_write=call.data[ATTR_CONFIRM_PREFERENCE_WRITE],
@@ -336,6 +350,7 @@ def _preference_change_request(call: ServiceCall) -> dict[str, Any]:
 def preference_change_request(data: dict[str, Any]) -> dict[str, Any]:
     """Return requested preference field updates from parsed service data."""
     supported_fields = (
+        ATTR_PREFERENCE_MODE,
         ATTR_EFFICIENT_MODE,
         ATTR_MOWING_HEIGHT_CM,
         ATTR_MOWING_DIRECTION_MODE,
@@ -434,6 +449,8 @@ def _schedule_write_notification(result: dict[str, Any]) -> tuple[str, str]:
 def _mowing_preference_notification(result: dict[str, Any]) -> tuple[str, str]:
     """Return title and message for a mowing-preference dry run or write."""
     request = json.dumps(result.get("request_candidate"), sort_keys=True)
+    map_index = result.get("map_index")
+    area_id = result.get("area_id")
     previous = result.get("previous_preference")
     updated = result.get("updated_preference")
     previous_height = (
@@ -442,6 +459,8 @@ def _mowing_preference_notification(result: dict[str, Any]) -> tuple[str, str]:
     updated_height = (
         updated.get("mowing_height_cm") if isinstance(updated, dict) else None
     )
+    current_mode = result.get("mode_name") or result.get("mode")
+    target_mode = result.get("target_mode_name") or current_mode
     changed_fields = ", ".join(result.get("changed_fields") or []) or "none"
     if result.get("executed"):
         title = "Dreame Lawn Mower Preference Updated"
@@ -452,11 +471,26 @@ def _mowing_preference_notification(result: dict[str, Any]) -> tuple[str, str]:
         action = "Built dry-run"
         change_text = "will change" if result.get("changed") else "already matched"
 
+    scope = f"map {map_index}"
+    if area_id is not None:
+        scope = f"{scope} area {area_id}"
+
+    if current_mode is not None and target_mode is not None and current_mode != target_mode:
+        mode_text = f"mode {current_mode} -> {target_mode}"
+    elif target_mode is not None:
+        mode_text = f"mode={target_mode}"
+    else:
+        mode_text = "mode=unknown"
+
+    details = [mode_text, f"changed_fields={changed_fields}"]
+    if previous_height is not None or updated_height is not None:
+        details.append(f"height {previous_height} -> {updated_height} ({change_text})")
+    else:
+        details.append(change_text)
+
     message = (
-        f"{action} mowing preference update for map {result.get('map_index')} "
-        f"area {result.get('area_id')}: mode={result.get('mode_name')}, "
-        f"changed_fields={changed_fields}, height {previous_height} -> "
-        f"{updated_height} ({change_text}). Candidate request: `{request}`"
+        f"{action} mowing preference update for {scope}: "
+        f"{', '.join(details)}. Candidate request: `{request}`"
     )
     if result.get("executed") and result.get("response_data") is not None:
         response = json.dumps(result.get("response_data"), sort_keys=True)

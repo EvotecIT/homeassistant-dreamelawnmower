@@ -71,12 +71,13 @@ switch_current_map:
 plan_zone_mowing_preference_update:
   name: Plan zone mowing preference update
   description: >-
-    Build or send a guarded mowing preference update for the selected or
-    current map zone on the mower entity. This uses the current Home Assistant
-    map/zone selection scope unless zone_id is provided explicitly. By default
-    this is a dry run that only stores the candidate PRE payload in the last
-    preference write diagnostic sensor. Sending the request requires execute
-    and confirm_preference_write to both be true.
+    Build or send a guarded mowing preference update for the selected map on
+    the mower entity. Zone-scoped settings use the current Home Assistant
+    map/zone selection scope unless zone_id is provided explicitly. Map-level
+    preference_mode updates can be planned without any zone selection. By
+    default this is a dry run that only stores the candidate PRE/PREP request
+    in the last preference write diagnostic sensor. Sending the request
+    requires execute and confirm_preference_write to both be true.
   target:
     entity:
       integration: dreame_lawn_mower
@@ -84,13 +85,29 @@ plan_zone_mowing_preference_update:
   fields:
     zone_id:
       name: Zone ID
-      description: Optional explicit current-map zone id. Defaults to the selected zone.
+      description: >-
+        Optional explicit current-map zone id. Defaults to the selected zone
+        when changing per-area preference settings. Not required for
+        preference_mode-only requests.
       selector:
         number:
           min: 0
           max: 100
           step: 1
           mode: box
+    preference_mode:
+      name: Preference mode
+      description: >-
+        Map preference mode, either global/custom or 0/1. This sends the
+        guarded PREP mode request and can be combined with per-area settings
+        only when switching to custom mode.
+      selector:
+        select:
+          options:
+            - label: global
+              value: global
+            - label: custom
+              value: custom
     execute:
       name: Execute
       description: Send the write request instead of only building a dry-run preview.

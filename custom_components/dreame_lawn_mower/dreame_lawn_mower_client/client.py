@@ -63,10 +63,13 @@ from .models import (
     snapshot_from_device,
 )
 from .mowing_preferences import (
+    MOWING_PREFERENCE_MODE_FIELD,
     MOWING_PREFERENCE_PROPERTY_KEY,
     apply_mowing_preference_changes,
     decode_mowing_preference_payload,
     encode_mowing_preference_payload,
+    mowing_preference_mode_name,
+    normalize_mowing_preference_mode,
     summarize_mowing_preference_info,
 )
 from .schedule import (
@@ -548,7 +551,7 @@ class DreameLawnMowerClient:
         self,
         *,
         map_index: int,
-        area_id: int,
+        area_id: int | None,
         changes: Mapping[str, Any],
         execute: bool = False,
         confirm_write: bool = False,
@@ -2056,7 +2059,7 @@ class DreameLawnMowerClient:
     def _sync_plan_app_mowing_preference_update(
         self,
         map_index: int,
-        area_id: int,
+        area_id: int | None,
         changes: Mapping[str, Any],
         execute: bool = False,
         confirm_write: bool = False,
@@ -2083,35 +2086,99 @@ class DreameLawnMowerClient:
                 f"No decoded mowing preferences returned for map index {map_index}."
             )
 
-        current_preference: Mapping[str, Any] | None = None
-        for item in raw_preferences:
-            if not isinstance(item, Mapping):
-                continue
-            if _positive_int(item.get("area_id")) == area_id:
-                current_preference = item
-                break
-        if current_preference is None:
-            available_area_ids = [
-                _positive_int(item.get("area_id"))
-                for item in raw_preferences
-                if isinstance(item, Mapping)
-            ]
+        mode = _positive_int(preference_map.get("mode"))
+        requested_mode = None
+        if MOWING_PREFERENCE_MODE_FIELD in changes:
+            requested_mode = normalize_mowing_preference_mode(
+                changes[MOWING_PREFERENCE_MODE_FIELD]
+            )
+        mode_changed = requested_mode is not None and requested_mode != mode
+
+        setting_changes = {
+            key: value
+            for key, value in changes.items()
+            if key != MOWING_PREFERENCE_MODE_FIELD
+        }
+        if (
+            requested_mode is not None
+            and requested_mode == 0
+            and setting_changes
+            and mode_changed
+        ):
             raise ValueError(
-                f"Mowing preference area {area_id} was not found for map index "
-                f"{map_index}. Available areas: {available_area_ids}"
+                "preference_mode=global cannot be combined with per-area setting "
+                "changes in the same request."
             )
 
-        updated_preference, changed_fields = apply_mowing_preference_changes(
-            current_preference,
-            changes,
+        current_preference: Mapping[str, Any] | None = None
+        updated_preference: Mapping[str, Any] | None = None
+        changed_fields: list[str] = []
+        payload: list[int] | None = None
+        settings_request: dict[str, Any] | None = None
+
+        if setting_changes:
+            if not isinstance(area_id, int):
+                raise ValueError(
+                    "area_id is required when planning per-area mowing preference "
+                    "setting changes."
+                )
+            for item in raw_preferences:
+                if not isinstance(item, Mapping):
+                    continue
+                if _positive_int(item.get("area_id")) == area_id:
+                    current_preference = item
+                    break
+            if current_preference is None:
+                available_area_ids = [
+                    _positive_int(item.get("area_id"))
+                    for item in raw_preferences
+                    if isinstance(item, Mapping)
+                ]
+                raise ValueError(
+                    f"Mowing preference area {area_id} was not found for map index "
+                    f"{map_index}. Available areas: {available_area_ids}"
+                )
+
+            updated_preference, changed_fields = apply_mowing_preference_changes(
+                current_preference,
+                setting_changes,
+            )
+            payload = encode_mowing_preference_payload(updated_preference)
+            settings_request = {
+                "m": "s",
+                "t": "PRE",
+                "d": payload,
+            }
+
+        mode_request = None
+        if requested_mode is not None and (mode_changed or not setting_changes):
+            mode_request = {
+                "m": "s",
+                "t": "PREP",
+                "d": {
+                    "idx": map_index,
+                    "value": requested_mode,
+                },
+            }
+
+        request_sequence = [
+            request
+            for request in [mode_request, settings_request]
+            if isinstance(request, dict)
+        ]
+        if not request_sequence:
+            request_sequence = [settings_request] if settings_request else []
+
+        combined_changed_fields = (
+            [MOWING_PREFERENCE_MODE_FIELD] if mode_changed else []
+        ) + changed_fields
+        primary_request = (
+            request_sequence[0]
+            if len(request_sequence) == 1
+            else {"sequence": request_sequence}
+            if request_sequence
+            else None
         )
-        payload = encode_mowing_preference_payload(updated_preference)
-        mode = _positive_int(preference_map.get("mode"))
-        request = {
-            "m": "s",
-            "t": "PRE",
-            "d": payload,
-        }
         result: dict[str, Any] = {
             "source": "app_action_mowing_preference_write",
             "action": "plan_mowing_preference_update",
@@ -2127,46 +2194,67 @@ class DreameLawnMowerClient:
             "area_id": area_id,
             "mode": mode,
             "mode_name": preference_map.get("mode_name"),
-            "changed": bool(changed_fields),
-            "changed_fields": changed_fields,
+            "target_mode": requested_mode,
+            "target_mode_name": mowing_preference_mode_name(requested_mode),
+            "mode_changed": mode_changed,
+            "changed": bool(combined_changed_fields),
+            "changed_fields": combined_changed_fields,
             "changes": {
-                key: updated_preference.get("obstacle_avoidance_ai_classes")
+                key: mowing_preference_mode_name(requested_mode)
+                if key == MOWING_PREFERENCE_MODE_FIELD
+                else updated_preference.get("obstacle_avoidance_ai_classes")
                 if key == "obstacle_avoidance_ai_classes"
                 else updated_preference.get(key)
+                if updated_preference is not None
+                else None
                 for key in changes
             },
             "map": _mowing_preference_map_overview(preference_map),
-            "previous_preference": _mowing_preference_overview(current_preference),
-            "updated_preference": _mowing_preference_overview(updated_preference),
+            "previous_preference": _mowing_preference_overview(current_preference)
+            if current_preference is not None
+            else None,
+            "updated_preference": _mowing_preference_overview(updated_preference)
+            if updated_preference is not None
+            else None,
             "payload": payload,
-            "request_candidate": request,
+            "request_candidate": primary_request,
+            "request_candidates": request_sequence,
             "notes": (
                 [
                     "Preference write prepared but not executed.",
-                    "Send the candidate PRE request only with execute=true and an "
+                    "Send the candidate PRE/PREP request only with execute=true and an "
                     "explicit confirmation gate.",
                 ]
                 if not execute
                 else [
-                    "Preference write executed through the PRE settings request after "
+                    "Preference write executed through the PRE/PREP request sequence after "
                     "explicit confirmation.",
                 ]
             ),
         }
         if execute:
-            response = self._sync_call_app_action(request)
-            response_data = _app_action_data(response)
-            if isinstance(response_data, Mapping) and response_data.get("r") not in (
-                None,
-                0,
-            ):
-                raise DreameLawnMowerConnectionError(
-                    f"Preference write failed: {response}"
-                )
+            responses: list[Any] = []
+            response_payloads: list[Any] = []
+            for request in request_sequence:
+                response = self._sync_call_app_action(request)
+                response_data = _app_action_data(response)
+                if isinstance(response_data, Mapping) and response_data.get("r") not in (
+                    None,
+                    0,
+                ):
+                    raise DreameLawnMowerConnectionError(
+                        f"Preference write failed: {response}"
+                    )
+                responses.append(_json_safe(response, max_depth=4))
+                response_payloads.append(_json_safe(response_data, max_depth=4))
             result["executed"] = True
             result["request_verified"] = True
-            result["response"] = _json_safe(response, max_depth=4)
-            result["response_data"] = _json_safe(response_data, max_depth=4)
+            if len(responses) == 1:
+                result["response"] = responses[0]
+                result["response_data"] = response_payloads[0]
+            else:
+                result["responses"] = responses
+                result["response_data"] = response_payloads
         return result
 
     def _sync_get_batch_schedules(
