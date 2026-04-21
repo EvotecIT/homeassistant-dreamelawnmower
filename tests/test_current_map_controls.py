@@ -35,6 +35,7 @@ def _batch_device_data() -> dict:
                     "idx": 0,
                     "mode": 1,
                     "mode_name": "custom",
+                    "area_count": 4,
                     "preferences": [
                         {"area_id": 0, "map_index": 0},
                         {
@@ -82,6 +83,7 @@ def _batch_device_data() -> dict:
                     "idx": 1,
                     "mode": 0,
                     "mode_name": "global",
+                    "area_count": 3,
                     "preferences": [
                         {"area_id": 0, "map_index": 1},
                         {
@@ -550,6 +552,18 @@ def test_lawn_mower_attributes_include_current_vector_map_state() -> None:
         "Front Lawn Map",
         "Back Lawn Map",
     ]
+    assert attributes["selected_map_preference_available"] is True
+    assert attributes["selected_map_preference"] == {
+        "map_index": 1,
+        "label": "Back Lawn (#2)",
+        "mode": 0,
+        "mode_name": "global",
+        "area_count": 3,
+        "preference_count": 3,
+    }
+    assert attributes["selected_map_preference_mode"] == "global"
+    assert attributes["selected_map_preference_area_count"] == 3
+    assert attributes["selected_map_preference_count"] == 3
     assert attributes["selected_zone_preference_available"] is True
     assert attributes["selected_zone_preference"] == {
         "map_index": 1,

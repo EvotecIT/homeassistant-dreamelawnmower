@@ -46,6 +46,9 @@ from custom_components.dreame_lawn_mower.sensor import (
     DreameLawnMowerRuntimeTrackPointCountSensor,
     DreameLawnMowerRuntimeTrackSegmentCountSensor,
     DreameLawnMowerSelectedMapSensor,
+    DreameLawnMowerSelectedMapPreferenceAreaCountSensor,
+    DreameLawnMowerSelectedMapPreferenceCountSensor,
+    DreameLawnMowerSelectedMapPreferenceModeSensor,
     DreameLawnMowerSelectedMowingActionSensor,
     DreameLawnMowerSelectedTargetSensor,
     DreameLawnMowerSelectedZoneDirectionModeSensor,
@@ -1605,6 +1608,9 @@ def test_selected_scope_sensors_follow_selected_zone_on_selected_map() -> None:
                     },
                     {
                         "idx": 1,
+                        "mode": 0,
+                        "mode_name": "global",
+                        "area_count": 2,
                         "preferences": [{"area_id": 3}, {"area_id": 4}],
                     },
                 ]
@@ -1617,6 +1623,16 @@ def test_selected_scope_sensors_follow_selected_zone_on_selected_map() -> None:
     action_entity.coordinator = coordinator
     map_entity = object.__new__(DreameLawnMowerSelectedMapSensor)
     map_entity.coordinator = coordinator
+    mode_entity = object.__new__(DreameLawnMowerSelectedMapPreferenceModeSensor)
+    mode_entity.coordinator = coordinator
+    area_count_entity = object.__new__(
+        DreameLawnMowerSelectedMapPreferenceAreaCountSensor
+    )
+    area_count_entity.coordinator = coordinator
+    preference_count_entity = object.__new__(
+        DreameLawnMowerSelectedMapPreferenceCountSensor
+    )
+    preference_count_entity.coordinator = coordinator
     target_entity = object.__new__(DreameLawnMowerSelectedTargetSensor)
     target_entity.coordinator = coordinator
 
@@ -1624,8 +1640,22 @@ def test_selected_scope_sensors_follow_selected_zone_on_selected_map() -> None:
     assert action_entity.native_value == "Zone"
     assert map_entity.available is True
     assert map_entity.native_value == "Back (#2)"
+    assert mode_entity.available is True
+    assert mode_entity.native_value == "global"
+    assert area_count_entity.available is True
+    assert area_count_entity.native_value == 2
+    assert preference_count_entity.available is True
+    assert preference_count_entity.native_value == 2
     assert target_entity.available is True
     assert target_entity.native_value == "Zone #3"
+    assert mode_entity.extra_state_attributes == {
+        "selected_map_index": 1,
+        "selected_map_label": "Back (#2)",
+        "mode": 0,
+        "mode_name": "global",
+        "area_count": 2,
+        "preference_count": 2,
+    }
     assert target_entity.extra_state_attributes == {
         "selected_mowing_action": "zone",
         "selected_mowing_action_label": "Zone",
@@ -1750,6 +1780,7 @@ def test_selected_zone_preference_sensors_expose_read_only_zone_settings() -> No
                         "idx": 1,
                         "mode": 0,
                         "mode_name": "global",
+                        "area_count": 1,
                         "preferences": [
                             {
                                 "area_id": 3,

@@ -261,6 +261,9 @@ async def async_setup_entry(
         + [DreameLawnMowerAvailableVectorMapCountSensor(coordinator)]
         + [DreameLawnMowerSelectedMowingActionSensor(coordinator)]
         + [DreameLawnMowerSelectedMapSensor(coordinator)]
+        + [DreameLawnMowerSelectedMapPreferenceModeSensor(coordinator)]
+        + [DreameLawnMowerSelectedMapPreferenceAreaCountSensor(coordinator)]
+        + [DreameLawnMowerSelectedMapPreferenceCountSensor(coordinator)]
         + [DreameLawnMowerSelectedTargetSensor(coordinator)]
         + [DreameLawnMowerSelectedZoneMowingHeightSensor(coordinator)]
         + [DreameLawnMowerSelectedZoneEfficiencyModeSensor(coordinator)]
@@ -824,6 +827,102 @@ class DreameLawnMowerSelectedMapSensor(
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the selected-run metadata used for this sensor."""
         return _selected_run_scope_attributes(self.coordinator)
+
+
+class DreameLawnMowerSelectedMapPreferenceModeSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the selected/current map preference mode."""
+
+    _attr_name = "Selected Map Preference Mode"
+    _attr_icon = "mdi:tune-variant"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_selected_map_preference_mode"
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the selected/current map preference mode label."""
+        value = _selected_map_preference_value(self.coordinator, "mode_name")
+        return value if isinstance(value, str) and value.strip() else None
+
+    @property
+    def available(self) -> bool:
+        """Return whether selected/current map preference data is available."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the compact selected/current map preference summary."""
+        return _selected_map_preference_summary(self.coordinator)
+
+
+class DreameLawnMowerSelectedMapPreferenceAreaCountSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the selected/current map preference area count."""
+
+    _attr_name = "Selected Map Preference Area Count"
+    _attr_icon = "mdi:map-marker-multiple-outline"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_selected_map_preference_area_count"
+        )
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the selected/current map preference area count."""
+        value = _selected_map_preference_value(self.coordinator, "area_count")
+        return value if isinstance(value, int) else None
+
+    @property
+    def available(self) -> bool:
+        """Return whether selected/current map preference data is available."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the compact selected/current map preference summary."""
+        return _selected_map_preference_summary(self.coordinator)
+
+
+class DreameLawnMowerSelectedMapPreferenceCountSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the selected/current map decoded preference count."""
+
+    _attr_name = "Selected Map Preference Count"
+    _attr_icon = "mdi:format-list-numbered"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_selected_map_preference_count"
+        )
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the selected/current map decoded preference count."""
+        value = _selected_map_preference_value(self.coordinator, "preference_count")
+        return value if isinstance(value, int) else None
+
+    @property
+    def available(self) -> bool:
+        """Return whether selected/current map preference data is available."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the compact selected/current map preference summary."""
+        return _selected_map_preference_summary(self.coordinator)
 
 
 class DreameLawnMowerSelectedTargetSensor(
@@ -2632,6 +2731,54 @@ def _selected_target_label(coordinator: Any) -> str | None:
     summary = _selected_target_summary(coordinator)
     value = summary.get("target_label")
     return value if isinstance(value, str) and value.strip() else None
+
+
+def _selected_map_preference_summary(coordinator: Any) -> dict[str, Any]:
+    selected_map_index = _selected_map_index(
+        getattr(coordinator, "app_maps", None),
+        getattr(coordinator, "batch_device_data", None),
+        getattr(coordinator, "selected_map_index", None),
+    )
+    if selected_map_index is None:
+        return {}
+
+    preference_maps = (
+        getattr(coordinator, "batch_device_data", {}).get("batch_mowing_preferences")
+        if isinstance(getattr(coordinator, "batch_device_data", None), dict)
+        else None
+    )
+    maps = preference_maps.get("maps") if isinstance(preference_maps, dict) else None
+    if not isinstance(maps, list):
+        return {}
+
+    selected_map_label = _selected_map_label(
+        getattr(coordinator, "app_maps", None),
+        getattr(coordinator, "batch_device_data", None),
+        getattr(coordinator, "selected_map_index", None),
+    )
+
+    for map_entry in maps:
+        if not isinstance(map_entry, dict) or map_entry.get("idx") != selected_map_index:
+            continue
+        preferences = map_entry.get("preferences")
+        summary = {
+            "selected_map_index": selected_map_index,
+            "selected_map_label": selected_map_label,
+            "mode": map_entry.get("mode"),
+            "mode_name": map_entry.get("mode_name"),
+            "area_count": map_entry.get("area_count"),
+            "preference_count": len(preferences) if isinstance(preferences, list) else None,
+        }
+        return {
+            key: value
+            for key, value in summary.items()
+            if value not in (None, [], {})
+        }
+    return {}
+
+
+def _selected_map_preference_value(coordinator: Any, key: str) -> Any:
+    return _selected_map_preference_summary(coordinator).get(key)
 
 
 def _selected_zone_preference_summary(coordinator: Any) -> dict[str, Any]:

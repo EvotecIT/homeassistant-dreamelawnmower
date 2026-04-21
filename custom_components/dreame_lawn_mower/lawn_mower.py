@@ -205,6 +205,10 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             selected_map_index,
             zone_entries,
         )
+        current_map_preference = self._selected_map_preference(
+            selected_map_index,
+            maps,
+        )
         available_vector_map_names = self._available_vector_map_names(vector_map_details)
         return {
             "state": snapshot.state,
@@ -260,6 +264,23 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
                 selected_map_index == active_app_map_index
                 if isinstance(selected_map_index, int)
                 and isinstance(active_app_map_index, int)
+                else None
+            ),
+            "selected_map_preference_available": current_map_preference is not None,
+            "selected_map_preference": current_map_preference,
+            "selected_map_preference_mode": (
+                current_map_preference.get("mode_name")
+                if isinstance(current_map_preference, dict)
+                else None
+            ),
+            "selected_map_preference_area_count": (
+                current_map_preference.get("area_count")
+                if isinstance(current_map_preference, dict)
+                else None
+            ),
+            "selected_map_preference_count": (
+                current_map_preference.get("preference_count")
+                if isinstance(current_map_preference, dict)
                 else None
             ),
             "selected_contour_id": self._selected_contour_id(contour_entries),
@@ -693,6 +714,34 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
                 if value not in (None, [], {})
             }
         return None
+
+    def _selected_map_preference(
+        self,
+        selected_map_index: int | None,
+        maps: list[dict[str, object]],
+    ) -> dict[str, Any] | None:
+        """Return a compact preference summary for the selected/current map."""
+        if selected_map_index is None:
+            return None
+
+        preference_map = self._batch_preference_map_entry(selected_map_index)
+        if preference_map is None:
+            return None
+
+        preferences = preference_map.get("preferences")
+        summary = {
+            "map_index": selected_map_index,
+            "label": self._selected_map_label(maps, selected_map_index),
+            "mode": preference_map.get("mode"),
+            "mode_name": preference_map.get("mode_name"),
+            "area_count": preference_map.get("area_count"),
+            "preference_count": len(preferences) if isinstance(preferences, list) else None,
+        }
+        return {
+            key: value
+            for key, value in summary.items()
+            if value not in (None, [], {})
+        }
 
     def _batch_preference_map_entry(
         self,
