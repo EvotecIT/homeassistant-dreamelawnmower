@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-import math
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -25,13 +25,15 @@ from .control_options import (
     MOWING_ACTION_ZONE,
     contour_label,
     current_contour_entries,
-    current_map_index as selected_current_map_index,
     current_spot_entries,
     current_zone_entries,
     map_entries,
     mowing_action_label,
     spot_label,
     zone_label,
+)
+from .control_options import (
+    current_map_index as selected_current_map_index,
 )
 from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity
@@ -260,6 +262,13 @@ async def async_setup_entry(
         + [DreameLawnMowerSelectedMowingActionSensor(coordinator)]
         + [DreameLawnMowerSelectedMapSensor(coordinator)]
         + [DreameLawnMowerSelectedTargetSensor(coordinator)]
+        + [DreameLawnMowerSelectedZoneMowingHeightSensor(coordinator)]
+        + [DreameLawnMowerSelectedZoneEfficiencyModeSensor(coordinator)]
+        + [DreameLawnMowerSelectedZoneDirectionModeSensor(coordinator)]
+        + [DreameLawnMowerSelectedZoneObstacleAvoidanceSensor(coordinator)]
+        + [DreameLawnMowerSelectedZoneObstacleDistanceSensor(coordinator)]
+        + [DreameLawnMowerSelectedZoneObstacleHeightSensor(coordinator)]
+        + [DreameLawnMowerSelectedZoneObstacleClassSensor(coordinator)]
         + [DreameLawnMowerCurrentAppMapIndexSensor(coordinator)]
         + [DreameLawnMowerCurrentVectorMapNameSensor(coordinator)]
         + [DreameLawnMowerCurrentAppMapAreaSensor(coordinator)]
@@ -838,6 +847,257 @@ class DreameLawnMowerSelectedTargetSensor(
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the selected-run metadata used for this sensor."""
         return _selected_run_scope_attributes(self.coordinator)
+
+
+class DreameLawnMowerSelectedZoneMowingHeightSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the selected/current zone mowing height."""
+
+    _attr_name = "Selected Zone Mowing Height"
+    _attr_icon = "mdi:ruler"
+    _attr_native_unit_of_measurement = "cm"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_selected_zone_mowing_height"
+        )
+
+    @property
+    def native_value(self) -> float | int | None:
+        """Return the selected/current zone mowing height in centimeters."""
+        value = _selected_zone_preference_value(self.coordinator, "mowing_height_cm")
+        return value if isinstance(value, int | float) else None
+
+    @property
+    def available(self) -> bool:
+        """Return whether selected/current zone preference data is available."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the compact selected/current zone preference summary."""
+        return _selected_zone_preference_summary(self.coordinator)
+
+
+class DreameLawnMowerSelectedZoneEfficiencyModeSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the selected/current zone efficiency mode."""
+
+    _attr_name = "Selected Zone Efficiency Mode"
+    _attr_icon = "mdi:run-fast"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_selected_zone_efficiency_mode"
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the selected/current zone efficiency mode label."""
+        value = _selected_zone_preference_value(self.coordinator, "efficient_mode_name")
+        return value if isinstance(value, str) and value.strip() else None
+
+    @property
+    def available(self) -> bool:
+        """Return whether selected/current zone preference data is available."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the compact selected/current zone preference summary."""
+        return _selected_zone_preference_summary(self.coordinator)
+
+
+class DreameLawnMowerSelectedZoneDirectionModeSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the selected/current zone mowing direction mode."""
+
+    _attr_name = "Selected Zone Direction Mode"
+    _attr_icon = "mdi:compass-rose"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_selected_zone_direction_mode"
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the selected/current zone mowing direction mode label."""
+        value = _selected_zone_preference_value(
+            self.coordinator,
+            "mowing_direction_mode_name",
+        )
+        return value if isinstance(value, str) and value.strip() else None
+
+    @property
+    def available(self) -> bool:
+        """Return whether selected/current zone preference data is available."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the compact selected/current zone preference summary."""
+        return _selected_zone_preference_summary(self.coordinator)
+
+
+class DreameLawnMowerSelectedZoneObstacleAvoidanceSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose whether obstacle avoidance is enabled for the selected/current zone."""
+
+    _attr_name = "Selected Zone Obstacle Avoidance"
+    _attr_icon = "mdi:shield-check-outline"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_selected_zone_obstacle_avoidance"
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        """Return whether obstacle avoidance is enabled for the zone."""
+        value = _selected_zone_preference_value(
+            self.coordinator,
+            "obstacle_avoidance_enabled",
+        )
+        if isinstance(value, bool):
+            return "enabled" if value else "disabled"
+        return None
+
+    @property
+    def available(self) -> bool:
+        """Return whether selected/current zone preference data is available."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the compact selected/current zone preference summary."""
+        return _selected_zone_preference_summary(self.coordinator)
+
+
+class DreameLawnMowerSelectedZoneObstacleDistanceSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose obstacle avoidance distance for the selected/current zone."""
+
+    _attr_name = "Selected Zone Obstacle Distance"
+    _attr_icon = "mdi:map-marker-distance"
+    _attr_native_unit_of_measurement = "cm"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_selected_zone_obstacle_distance"
+        )
+
+    @property
+    def native_value(self) -> float | int | None:
+        """Return obstacle avoidance distance in centimeters."""
+        value = _selected_zone_preference_value(
+            self.coordinator,
+            "obstacle_avoidance_distance_cm",
+        )
+        return value if isinstance(value, int | float) else None
+
+    @property
+    def available(self) -> bool:
+        """Return whether selected/current zone preference data is available."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the compact selected/current zone preference summary."""
+        return _selected_zone_preference_summary(self.coordinator)
+
+
+class DreameLawnMowerSelectedZoneObstacleHeightSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose obstacle avoidance height for the selected/current zone."""
+
+    _attr_name = "Selected Zone Obstacle Height"
+    _attr_icon = "mdi:arrow-expand-vertical"
+    _attr_native_unit_of_measurement = "cm"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_selected_zone_obstacle_height"
+        )
+
+    @property
+    def native_value(self) -> float | int | None:
+        """Return obstacle avoidance height in centimeters."""
+        value = _selected_zone_preference_value(
+            self.coordinator,
+            "obstacle_avoidance_height_cm",
+        )
+        return value if isinstance(value, int | float) else None
+
+    @property
+    def available(self) -> bool:
+        """Return whether selected/current zone preference data is available."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the compact selected/current zone preference summary."""
+        return _selected_zone_preference_summary(self.coordinator)
+
+
+class DreameLawnMowerSelectedZoneObstacleClassSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the enabled AI obstacle classes for the selected/current zone."""
+
+    _attr_name = "Selected Zone Obstacle Classes"
+    _attr_icon = "mdi:shape-outline"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_selected_zone_obstacle_classes"
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        """Return a comma-separated list of enabled AI obstacle classes."""
+        value = _selected_zone_preference_value(
+            self.coordinator,
+            "obstacle_avoidance_ai_classes",
+        )
+        if not isinstance(value, list):
+            return None
+        labels = [
+            item.replace("_", " ").strip().title()
+            for item in value
+            if isinstance(item, str) and item.strip()
+        ]
+        return ", ".join(labels) if labels else None
+
+    @property
+    def available(self) -> bool:
+        """Return whether selected/current zone preference data is available."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the compact selected/current zone preference summary."""
+        return _selected_zone_preference_summary(self.coordinator)
 
 
 class DreameLawnMowerCurrentVectorMapNameSensor(
@@ -2366,6 +2626,125 @@ def _selected_target_label(coordinator: Any) -> str | None:
     summary = _selected_target_summary(coordinator)
     value = summary.get("target_label")
     return value if isinstance(value, str) and value.strip() else None
+
+
+def _selected_zone_preference_summary(coordinator: Any) -> dict[str, Any]:
+    selected_map_index = _selected_map_index(
+        getattr(coordinator, "app_maps", None),
+        getattr(coordinator, "batch_device_data", None),
+        getattr(coordinator, "selected_map_index", None),
+    )
+    if selected_map_index is None:
+        return {}
+
+    zone_entries = current_zone_entries(
+        getattr(coordinator, "batch_device_data", None),
+        getattr(coordinator, "app_maps", None),
+        selected_map_index=getattr(coordinator, "selected_map_index", None),
+    )
+    selected_zone_id = getattr(coordinator, "selected_zone_id", None)
+    if not isinstance(selected_zone_id, int) or not any(
+        entry["area_id"] == selected_zone_id for entry in zone_entries
+    ):
+        selected_zone_id = (
+            int(zone_entries[0]["area_id"]) if zone_entries else None
+        )
+    if selected_zone_id is None:
+        return {}
+
+    preference_maps = (
+        getattr(coordinator, "batch_device_data", {}).get("batch_mowing_preferences")
+        if isinstance(getattr(coordinator, "batch_device_data", None), dict)
+        else None
+    )
+    maps = preference_maps.get("maps") if isinstance(preference_maps, dict) else None
+    if not isinstance(maps, list):
+        return {}
+
+    selected_map_label = _selected_map_label(
+        getattr(coordinator, "app_maps", None),
+        getattr(coordinator, "batch_device_data", None),
+        getattr(coordinator, "selected_map_index", None),
+    )
+    zone_entry = next(
+        (
+            entry
+            for entry in zone_entries
+            if entry["area_id"] == selected_zone_id
+        ),
+        None,
+    )
+    zone_label_value = (
+        str(zone_entry["label"])
+        if isinstance(zone_entry, dict)
+        else zone_label(selected_zone_id)
+    )
+
+    for map_entry in maps:
+        if (
+            not isinstance(map_entry, dict)
+            or map_entry.get("idx") != selected_map_index
+        ):
+            continue
+        preferences = map_entry.get("preferences")
+        if not isinstance(preferences, list):
+            return {}
+        for preference in preferences:
+            if (
+                not isinstance(preference, dict)
+                or preference.get("area_id") != selected_zone_id
+            ):
+                continue
+            summary = {
+                "selected_map_index": selected_map_index,
+                "selected_map_label": selected_map_label,
+                "selected_zone_id": selected_zone_id,
+                "selected_zone_label": zone_label_value,
+                "mode": map_entry.get("mode"),
+                "mode_name": map_entry.get("mode_name"),
+                "reported_version": preference.get("reported_version"),
+                "mowing_height_cm": preference.get("mowing_height_cm"),
+                "efficient_mode_name": preference.get("efficient_mode_name"),
+                "mowing_direction_mode_name": preference.get(
+                    "mowing_direction_mode_name"
+                ),
+                "mowing_direction_degrees": preference.get(
+                    "mowing_direction_degrees"
+                ),
+                "edge_mowing_auto": preference.get("edge_mowing_auto"),
+                "edge_mowing_walk_mode_name": preference.get(
+                    "edge_mowing_walk_mode_name"
+                ),
+                "edge_mowing_obstacle_avoidance": preference.get(
+                    "edge_mowing_obstacle_avoidance"
+                ),
+                "cutter_position_name": preference.get("cutter_position_name"),
+                "edge_mowing_num": preference.get("edge_mowing_num"),
+                "obstacle_avoidance_enabled": preference.get(
+                    "obstacle_avoidance_enabled"
+                ),
+                "obstacle_avoidance_height_cm": preference.get(
+                    "obstacle_avoidance_height_cm"
+                ),
+                "obstacle_avoidance_distance_cm": preference.get(
+                    "obstacle_avoidance_distance_cm"
+                ),
+                "obstacle_avoidance_ai_classes": preference.get(
+                    "obstacle_avoidance_ai_classes"
+                ),
+                "edge_mowing_safe": preference.get("edge_mowing_safe"),
+            }
+            return {
+                key: value
+                for key, value in summary.items()
+                if value not in (None, [], {})
+            }
+        return {}
+    return {}
+
+
+def _selected_zone_preference_value(coordinator: Any, key: str) -> Any:
+    return _selected_zone_preference_summary(coordinator).get(key)
 
 
 def _selected_run_scope_attributes(coordinator: Any) -> dict[str, Any]:

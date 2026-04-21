@@ -13,6 +13,7 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
     DreameLawnMowerRainProtectionEnabledBinarySensor,
 )
 from custom_components.dreame_lawn_mower.sensor import (
+    SENSORS,
     DreameLawnMowerAppMapCountSensor,
     DreameLawnMowerAvailableVectorMapCountSensor,
     DreameLawnMowerCurrentAppMapAreaSensor,
@@ -47,9 +48,15 @@ from custom_components.dreame_lawn_mower.sensor import (
     DreameLawnMowerSelectedMapSensor,
     DreameLawnMowerSelectedMowingActionSensor,
     DreameLawnMowerSelectedTargetSensor,
+    DreameLawnMowerSelectedZoneDirectionModeSensor,
+    DreameLawnMowerSelectedZoneEfficiencyModeSensor,
+    DreameLawnMowerSelectedZoneMowingHeightSensor,
+    DreameLawnMowerSelectedZoneObstacleAvoidanceSensor,
+    DreameLawnMowerSelectedZoneObstacleClassSensor,
+    DreameLawnMowerSelectedZoneObstacleDistanceSensor,
+    DreameLawnMowerSelectedZoneObstacleHeightSensor,
     DreameLawnMowerSensor,
     DreameLawnMowerWeatherProtectionStatusSensor,
-    SENSORS,
 )
 
 
@@ -427,7 +434,8 @@ def test_bluetooth_connected_binary_sensor_uses_cached_cloud_state() -> None:
     }
 
 
-def test_bluetooth_connected_binary_sensor_is_unavailable_without_cached_value() -> None:
+def test_bluetooth_connected_binary_sensor_is_unavailable_without_cached_value(
+    ) -> None:
     entity = object.__new__(DreameLawnMowerBluetoothConnectedBinarySensor)
     entity.coordinator = SimpleNamespace(
         data=SimpleNamespace(),
@@ -599,7 +607,18 @@ def test_last_task_status_probe_sensor_reports_app_state() -> None:
             "captured_at": "2026-04-19T15:00:00+00:00",
             "source": "cloud_property_task_status",
             "available": True,
-            "keys": ["1.4", "1.53", "2.1", "2.2", "2.50", "2.56", "2.60", "3.1", "3.2", "5.106"],
+            "keys": [
+                "1.4",
+                "1.53",
+                "2.1",
+                "2.2",
+                "2.50",
+                "2.56",
+                "2.60",
+                "3.1",
+                "3.2",
+                "5.106",
+            ],
             "entry_count": 10,
             "summary": {
                 "state": {
@@ -648,7 +667,18 @@ def test_last_task_status_probe_sensor_reports_app_state() -> None:
         "captured_at": "2026-04-19T15:00:00+00:00",
         "source": "cloud_property_task_status",
         "available": True,
-        "keys": ["1.4", "1.53", "2.1", "2.2", "2.50", "2.56", "2.60", "3.1", "3.2", "5.106"],
+        "keys": [
+            "1.4",
+            "1.53",
+            "2.1",
+            "2.2",
+            "2.50",
+            "2.56",
+            "2.60",
+            "3.1",
+            "3.2",
+            "5.106",
+        ],
         "entry_count": 10,
         "state": {"value": "6", "label": "Charging", "state_key": "charging"},
         "runtime_status": {
@@ -1053,13 +1083,17 @@ def test_current_app_map_sensors_use_cached_current_map_state() -> None:
     zone_entity.coordinator = coordinator
     spot_entity = object.__new__(DreameLawnMowerCurrentAppMapSpotCountSensor)
     spot_entity.coordinator = coordinator
-    trajectory_entity = object.__new__(DreameLawnMowerCurrentAppMapTrajectoryPointCountSensor)
+    trajectory_entity = object.__new__(
+        DreameLawnMowerCurrentAppMapTrajectoryPointCountSensor
+    )
     trajectory_entity.coordinator = coordinator
     trajectory_length_entity = object.__new__(
         DreameLawnMowerCurrentAppMapTrajectoryLengthSensor
     )
     trajectory_length_entity.coordinator = coordinator
-    cut_relation_entity = object.__new__(DreameLawnMowerCurrentAppMapCutRelationCountSensor)
+    cut_relation_entity = object.__new__(
+        DreameLawnMowerCurrentAppMapCutRelationCountSensor
+    )
     cut_relation_entity.coordinator = coordinator
 
     assert index_entity.available is True
@@ -1152,9 +1186,13 @@ def test_current_vector_map_sensors_follow_active_map() -> None:
         },
     )
 
-    available_vector_entity = object.__new__(DreameLawnMowerAvailableVectorMapCountSensor)
+    available_vector_entity = object.__new__(
+        DreameLawnMowerAvailableVectorMapCountSensor
+    )
     available_vector_entity.coordinator = coordinator
-    current_vector_name_entity = object.__new__(DreameLawnMowerCurrentVectorMapNameSensor)
+    current_vector_name_entity = object.__new__(
+        DreameLawnMowerCurrentVectorMapNameSensor
+    )
     current_vector_name_entity.coordinator = coordinator
     current_vector_id_entity = object.__new__(DreameLawnMowerCurrentVectorMapIdSensor)
     current_vector_id_entity.coordinator = coordinator
@@ -1691,3 +1729,130 @@ def test_selected_target_sensor_uses_selected_edge_on_current_vector_map() -> No
         "target_label": "Edge (5, 0)",
         "available_target_count": 2,
     }
+
+
+def test_selected_zone_preference_sensors_expose_read_only_zone_settings() -> None:
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(activity="paused"),
+        selected_map_index=1,
+        selected_zone_id=3,
+        app_maps={
+            "current_map_index": 1,
+            "maps": [
+                {"idx": 0, "current": False, "name": "Front", "available": True},
+                {"idx": 1, "current": True, "name": "Back", "available": True},
+            ],
+        },
+        batch_device_data={
+            "batch_mowing_preferences": {
+                "maps": [
+                    {
+                        "idx": 1,
+                        "mode": 0,
+                        "mode_name": "global",
+                        "preferences": [
+                            {
+                                "area_id": 3,
+                                "reported_version": 17,
+                                "mowing_height_cm": 4.0,
+                                "efficient_mode_name": "efficient",
+                                "mowing_direction_mode_name": "auto",
+                                "mowing_direction_degrees": 90,
+                                "obstacle_avoidance_enabled": True,
+                                "obstacle_avoidance_height_cm": 5.0,
+                                "obstacle_avoidance_distance_cm": 15.0,
+                                "obstacle_avoidance_ai_classes": [
+                                    "people",
+                                    "animals",
+                                    "objects",
+                                ],
+                                "edge_mowing_auto": True,
+                            }
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    height_entity = object.__new__(
+        DreameLawnMowerSelectedZoneMowingHeightSensor
+    )
+    height_entity.coordinator = coordinator
+    efficiency_entity = object.__new__(
+        DreameLawnMowerSelectedZoneEfficiencyModeSensor
+    )
+    efficiency_entity.coordinator = coordinator
+    direction_entity = object.__new__(
+        DreameLawnMowerSelectedZoneDirectionModeSensor
+    )
+    direction_entity.coordinator = coordinator
+    avoidance_entity = object.__new__(
+        DreameLawnMowerSelectedZoneObstacleAvoidanceSensor
+    )
+    avoidance_entity.coordinator = coordinator
+    distance_entity = object.__new__(
+        DreameLawnMowerSelectedZoneObstacleDistanceSensor
+    )
+    distance_entity.coordinator = coordinator
+    height_limit_entity = object.__new__(
+        DreameLawnMowerSelectedZoneObstacleHeightSensor
+    )
+    height_limit_entity.coordinator = coordinator
+    classes_entity = object.__new__(
+        DreameLawnMowerSelectedZoneObstacleClassSensor
+    )
+    classes_entity.coordinator = coordinator
+
+    assert height_entity.available is True
+    assert height_entity.native_value == 4.0
+    assert efficiency_entity.available is True
+    assert efficiency_entity.native_value == "efficient"
+    assert direction_entity.available is True
+    assert direction_entity.native_value == "auto"
+    assert avoidance_entity.available is True
+    assert avoidance_entity.native_value == "enabled"
+    assert distance_entity.available is True
+    assert distance_entity.native_value == 15.0
+    assert height_limit_entity.available is True
+    assert height_limit_entity.native_value == 5.0
+    assert classes_entity.available is True
+    assert classes_entity.native_value == "People, Animals, Objects"
+    assert height_entity.extra_state_attributes == {
+        "selected_map_index": 1,
+        "selected_map_label": "Back (#2)",
+        "selected_zone_id": 3,
+        "selected_zone_label": "Zone #3",
+        "mode": 0,
+        "mode_name": "global",
+        "reported_version": 17,
+        "mowing_height_cm": 4.0,
+        "efficient_mode_name": "efficient",
+        "mowing_direction_mode_name": "auto",
+        "mowing_direction_degrees": 90,
+        "edge_mowing_auto": True,
+        "obstacle_avoidance_enabled": True,
+        "obstacle_avoidance_height_cm": 5.0,
+        "obstacle_avoidance_distance_cm": 15.0,
+        "obstacle_avoidance_ai_classes": ["people", "animals", "objects"],
+    }
+
+
+def test_selected_zone_preference_sensors_hide_unavailable_zone_settings() -> None:
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(activity="paused"),
+        selected_map_index=0,
+        selected_zone_id=None,
+        app_maps={"current_map_index": 0, "maps": [{"idx": 0, "current": True}]},
+        batch_device_data={"batch_mowing_preferences": {"maps": []}},
+    )
+
+    height_entity = object.__new__(DreameLawnMowerSelectedZoneMowingHeightSensor)
+    height_entity.coordinator = coordinator
+    classes_entity = object.__new__(DreameLawnMowerSelectedZoneObstacleClassSensor)
+    classes_entity.coordinator = coordinator
+
+    assert height_entity.available is False
+    assert height_entity.native_value is None
+    assert classes_entity.available is False
+    assert classes_entity.native_value is None
