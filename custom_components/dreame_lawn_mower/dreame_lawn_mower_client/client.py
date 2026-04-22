@@ -320,9 +320,7 @@ class DreameLawnMowerClient:
     ) -> Any:
         """Start spot mowing for one or more center points."""
         normalized = [
-            [int(point[0]), int(point[1])]
-            for point in points
-            if len(point) >= 2
+            [int(point[0]), int(point[1])] for point in points if len(point) >= 2
         ]
         return await asyncio.to_thread(self._sync_clean_spots, normalized)
 
@@ -394,6 +392,7 @@ class DreameLawnMowerClient:
         *,
         refresh: bool = False,
         include_cloud: bool = True,
+        include_debug_ota_catalog: bool = False,
         language: str | None = "en",
     ) -> DreameLawnMowerFirmwareUpdateSupport:
         """Return firmware/update evidence without guessing availability."""
@@ -401,6 +400,7 @@ class DreameLawnMowerClient:
             self._sync_get_firmware_update_support,
             refresh,
             include_cloud,
+            include_debug_ota_catalog,
             language,
         )
 
@@ -1160,6 +1160,7 @@ class DreameLawnMowerClient:
         self,
         refresh: bool = False,
         include_cloud: bool = True,
+        include_debug_ota_catalog: bool = False,
         language: str | None = "en",
     ) -> DreameLawnMowerFirmwareUpdateSupport:
         if refresh:
@@ -1191,7 +1192,7 @@ class DreameLawnMowerClient:
         except DreameLawnMowerConnectionError as err:
             if cloud_error is None:
                 cloud_error = str(err)
-        if include_cloud:
+        if include_debug_ota_catalog:
             try:
                 debug_ota_catalog = self._sync_get_debug_ota_catalog(
                     current_version=_as_optional_text(
@@ -1372,6 +1373,7 @@ class DreameLawnMowerClient:
                 payload["firmware_update"] = self._sync_get_firmware_update_support(
                     refresh=False,
                     include_cloud=True,
+                    include_debug_ota_catalog=True,
                     language=language,
                 ).as_dict()
             except Exception as err:  # noqa: BLE001 - probe snapshots keep evidence
@@ -1477,9 +1479,7 @@ class DreameLawnMowerClient:
         except (DeviceException, InvalidActionException) as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
         if result is None:
-            raise DreameLawnMowerConnectionError(
-                "GET_PHOTO_INFO returned no response."
-            )
+            raise DreameLawnMowerConnectionError("GET_PHOTO_INFO returned no response.")
         return result
 
     def _sync_probe_camera_sources(
@@ -1634,8 +1634,7 @@ class DreameLawnMowerClient:
         status = getattr(device, "status", None)
         snapshot = snapshot_from_device(self._descriptor, device)
         raw_running = bool(
-            snapshot.raw_attributes.get("running")
-            or getattr(status, "running", False)
+            snapshot.raw_attributes.get("running") or getattr(status, "running", False)
         )
         if snapshot.mowing or snapshot.returning or raw_running:
             raise DreameLawnMowerConnectionError(
@@ -1809,11 +1808,18 @@ class DreameLawnMowerClient:
             details["runtime_track_segment_count"] = len(runtime_track_segments)
             details["runtime_track_point_count"] = runtime_track_point_count
             details["runtime_track_length_m"] = round(
-                sum(_coordinate_path_length_m(segment) for segment in runtime_track_segments),
+                sum(
+                    _coordinate_path_length_m(segment)
+                    for segment in runtime_track_segments
+                ),
                 2,
             )
-            details["runtime_pose_x"] = getattr(runtime_blob, "candidate_runtime_pose_x", None)
-            details["runtime_pose_y"] = getattr(runtime_blob, "candidate_runtime_pose_y", None)
+            details["runtime_pose_x"] = getattr(
+                runtime_blob, "candidate_runtime_pose_x", None
+            )
+            details["runtime_pose_y"] = getattr(
+                runtime_blob, "candidate_runtime_pose_y", None
+            )
             details["runtime_heading_deg"] = getattr(
                 runtime_blob,
                 "candidate_runtime_heading_deg",
@@ -1823,7 +1829,8 @@ class DreameLawnMowerClient:
             if summary is not None:
                 summary = replace(
                     summary,
-                    path_point_count=summary.path_point_count + runtime_track_point_count,
+                    path_point_count=summary.path_point_count
+                    + runtime_track_point_count,
                 )
         try:
             image_png = render_vector_map_png(
@@ -2053,7 +2060,11 @@ class DreameLawnMowerClient:
         result = _normalize_cloud_firmware_check(
             raw,
             current_version=_as_optional_text(
-                getattr(getattr(self._ensure_device(), "info", None), "firmware_version", None)
+                getattr(
+                    getattr(self._ensure_device(), "info", None),
+                    "firmware_version",
+                    None,
+                )
             ),
         )
         if include_raw:
@@ -2082,9 +2093,7 @@ class DreameLawnMowerClient:
             success = raw.get("success")
             data = raw.get("data")
             inner_code = data.get("code") if isinstance(data, Mapping) else None
-            inner_success = (
-                data.get("success") if isinstance(data, Mapping) else None
-            )
+            inner_success = data.get("success") if isinstance(data, Mapping) else None
             accepted = bool(success) if isinstance(success, bool) else code == 0
             result.update(
                 {
@@ -2372,7 +2381,9 @@ class DreameLawnMowerClient:
             for request in requests:
                 response = self._sync_call_app_action(request)
                 response_data = _app_action_data(response)
-                if isinstance(response_data, Mapping) and response_data.get("r") not in (
+                if isinstance(response_data, Mapping) and response_data.get(
+                    "r"
+                ) not in (
                     None,
                     0,
                 ):
@@ -2557,7 +2568,8 @@ class DreameLawnMowerClient:
                 ]
                 if not execute
                 else [
-                    "Preference write executed through the PRE/PREP request sequence after "
+                    "Preference write executed through the PRE/PREP request "
+                    "sequence after "
                     "explicit confirmation.",
                 ]
             ),
@@ -2568,7 +2580,9 @@ class DreameLawnMowerClient:
             for request in request_sequence:
                 response = self._sync_call_app_action(request)
                 response_data = _app_action_data(response)
-                if isinstance(response_data, Mapping) and response_data.get("r") not in (
+                if isinstance(response_data, Mapping) and response_data.get(
+                    "r"
+                ) not in (
                     None,
                     0,
                 ):
@@ -2909,7 +2923,7 @@ class DreameLawnMowerClient:
                 key for key in result["config_keys"] if key in config
             ]
             result.update(_voice_settings_summary(config))
-            result["available"] = True
+            result["available"] = bool(result["present_config_keys"])
         except Exception as err:  # noqa: BLE001 - diagnostic probe should return evidence
             result["errors"].append({"stage": "config", "error": str(err)})
 
@@ -3058,8 +3072,7 @@ class DreameLawnMowerClient:
         try:
             map_list_result = self._sync_call_app_action({"m": "g", "t": "MAPL"})
             detected = [
-                entry["idx"]
-                for entry in _normalize_app_map_entries(map_list_result)
+                entry["idx"] for entry in _normalize_app_map_entries(map_list_result)
             ]
         except Exception:  # noqa: BLE001 - fall back to the two likely map slots
             detected = [0, 1]
@@ -3115,9 +3128,7 @@ class DreameLawnMowerClient:
                             chunk_size=chunk_size,
                         )
                     )
-                    payload_hash = hashlib.md5(
-                        payload_text.encode("utf-8")
-                    ).hexdigest()
+                    payload_hash = hashlib.md5(payload_text.encode("utf-8")).hexdigest()
                     parsed_payload = json.loads(payload_text)
                     hash_match = (
                         expected_hash == payload_hash
@@ -3350,7 +3361,7 @@ class DreameLawnMowerClient:
 
         all_entries: list[dict[str, Any]] = []
         for offset in range(0, len(normalized_keys), max(chunk_size, 1)):
-            chunk = normalized_keys[offset: offset + max(chunk_size, 1)]
+            chunk = normalized_keys[offset : offset + max(chunk_size, 1)]
             response = self._sync_get_cloud_properties(chunk)
             all_entries.extend(self._normalize_cloud_property_entries(response))
 
@@ -3464,9 +3475,7 @@ class DreameLawnMowerClient:
 
         try:
             text = (
-                content.decode("utf-8")
-                if isinstance(content, bytes)
-                else str(content)
+                content.decode("utf-8") if isinstance(content, bytes) else str(content)
             )
             result["payload"] = json.loads(text)
             result["fetched"] = True
@@ -3893,11 +3902,15 @@ def _parse_firmware_description(
         if (isinstance(success, bool) and not success) or (
             isinstance(code, int) and code != 0
         ):
-            return None, False, {
-                "code": code,
-                "success": success,
-                "msg": msg,
-            }
+            return (
+                None,
+                False,
+                {
+                    "code": code,
+                    "success": success,
+                    "msg": msg,
+                },
+            )
 
     return text, True, None
 
@@ -4052,11 +4065,7 @@ def _schedule_plan_overview(
             str | bytes | bytearray,
         ):
             week_items = [week for week in weeks if isinstance(week, Mapping)]
-        tasks = [
-            task
-            for week in week_items
-            for task in _schedule_week_tasks(week)
-        ]
+        tasks = [task for week in week_items for task in _schedule_week_tasks(week)]
         type_names = sorted(
             {
                 str(task["type_name"])
@@ -4131,11 +4140,7 @@ def _mowing_preference_map_overview(entry: Mapping[str, Any]) -> dict[str, Any]:
         "mode_name": entry.get("mode_name"),
         "area_count": entry.get("area_count"),
         "preference_count": len(
-            [
-                item
-                for item in entry.get("preferences", [])
-                if isinstance(item, Mapping)
-            ]
+            [item for item in entry.get("preferences", []) if isinstance(item, Mapping)]
         ),
     }
 
@@ -4162,9 +4167,7 @@ def _mowing_preference_overview(preference: Mapping[str, Any]) -> dict[str, Any]
         "cutter_position_name": preference.get("cutter_position_name"),
         "edge_mowing_num": preference.get("edge_mowing_num"),
         "obstacle_avoidance_enabled": preference.get("obstacle_avoidance_enabled"),
-        "obstacle_avoidance_height_cm": preference.get(
-            "obstacle_avoidance_height_cm"
-        ),
+        "obstacle_avoidance_height_cm": preference.get("obstacle_avoidance_height_cm"),
         "obstacle_avoidance_distance_cm": preference.get(
             "obstacle_avoidance_distance_cm"
         ),
@@ -4388,11 +4391,7 @@ def _weather_protection_summary(config: Mapping[str, Any]) -> dict[str, Any]:
     if end_time is not None:
         summary["rain_protect_end_time"] = end_time
         summary["rain_protect_end_time_present"] = True
-    return {
-        key: value
-        for key, value in summary.items()
-        if value is not None
-    }
+    return {key: value for key, value in summary.items() if value is not None}
 
 
 def _weather_protection_active_summary(result: Mapping[str, Any]) -> dict[str, Any]:
@@ -4419,12 +4418,8 @@ def _voice_settings_summary(config: Mapping[str, Any]) -> dict[str, Any]:
         str | bytes | bytearray,
     ):
         values = list(language)
-        text_language_index = (
-            _as_optional_int(values[0]) if len(values) > 0 else None
-        )
-        voice_language_index = (
-            _as_optional_int(values[1]) if len(values) > 1 else None
-        )
+        text_language_index = _as_optional_int(values[0]) if len(values) > 0 else None
+        voice_language_index = _as_optional_int(values[1]) if len(values) > 1 else None
         summary["text_language_index"] = text_language_index
         summary["voice_language_index"] = voice_language_index
         summary["voice_language_name"] = VOICE_LANGUAGE_INDEX_TO_LABEL.get(
@@ -4438,10 +4433,11 @@ def _voice_settings_summary(config: Mapping[str, Any]) -> dict[str, Any]:
     if volume is not None:
         summary["volume"] = volume
 
-    voice_prompts = _normalize_voice_prompt_flags(config.get("VOICE"))
-    summary["voice_prompts"] = voice_prompts
-    for field_name, enabled in zip(VOICE_PROMPT_FIELDS, voice_prompts, strict=True):
-        summary[field_name] = bool(enabled)
+    if "VOICE" in config:
+        voice_prompts = _normalize_voice_prompt_flags(config.get("VOICE"))
+        summary["voice_prompts"] = voice_prompts
+        for field_name, enabled in zip(VOICE_PROMPT_FIELDS, voice_prompts, strict=True):
+            summary[field_name] = bool(enabled)
 
     return summary
 
@@ -4452,9 +4448,7 @@ def _app_maps_view_metadata(app_maps: Mapping[str, Any]) -> dict[str, Any]:
         maps = []
 
     entries = [
-        _app_map_entry_view_metadata(item)
-        for item in maps
-        if isinstance(item, Mapping)
+        _app_map_entry_view_metadata(item) for item in maps if isinstance(item, Mapping)
     ]
     objects = _app_map_objects_view_metadata(app_maps.get("objects"))
     return {
@@ -4526,11 +4520,7 @@ def _app_map_entry_view_metadata(entry: Mapping[str, Any]) -> dict[str, Any]:
         "cut_relation_count": summary.get("cut_relation_count"),
         "error": entry.get("error"),
     }
-    return {
-        key: value
-        for key, value in result.items()
-        if value not in (None, [], {})
-    }
+    return {key: value for key, value in result.items() if value not in (None, [], {})}
 
 
 def _app_map_view_summary(
@@ -4706,7 +4696,12 @@ def _runtime_blob_position(
         return None
     x = getattr(blob, "candidate_runtime_pose_x", None)
     y = getattr(blob, "candidate_runtime_pose_y", None)
-    if isinstance(x, int) and not isinstance(x, bool) and isinstance(y, int) and not isinstance(y, bool):
+    if (
+        isinstance(x, int)
+        and not isinstance(x, bool)
+        and isinstance(y, int)
+        and not isinstance(y, bool)
+    ):
         return (x, y)
     return None
 
@@ -4775,9 +4770,7 @@ def _camera_feature_advertised(
     video_status: Any,
 ) -> bool:
     permit_tokens = {
-        item.strip().casefold()
-        for item in (permit or "").split(",")
-        if item.strip()
+        item.strip().casefold() for item in (permit or "").split(",") if item.strip()
     }
     return bool(
         camera_streaming
