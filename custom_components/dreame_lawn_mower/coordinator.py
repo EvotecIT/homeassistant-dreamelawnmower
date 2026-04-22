@@ -44,6 +44,7 @@ APP_MAP_REFRESH_INTERVAL = timedelta(minutes=5)
 APP_MAP_OBJECT_REFRESH_INTERVAL = timedelta(minutes=30)
 VECTOR_MAP_REFRESH_INTERVAL = timedelta(minutes=5)
 WEATHER_PROTECTION_REFRESH_INTERVAL = timedelta(minutes=5)
+VOICE_SETTINGS_REFRESH_INTERVAL = timedelta(minutes=5)
 FIRMWARE_UPDATE_REFRESH_INTERVAL = timedelta(minutes=15)
 
 
@@ -83,6 +84,8 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         self.vector_map_details_refreshed_at: datetime | None = None
         self.weather_protection: dict[str, Any] | None = None
         self.weather_protection_refreshed_at: datetime | None = None
+        self.voice_settings: dict[str, Any] | None = None
+        self.voice_settings_refreshed_at: datetime | None = None
         self.selected_mowing_action = "all_area"
         self.selected_map_index: int | None = None
         self.selected_contour_id: tuple[int, int] | None = None
@@ -144,6 +147,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         await self.async_refresh_app_map_objects(force=False)
         await self.async_refresh_vector_map_details(force=False)
         await self.async_refresh_weather_protection(force=False)
+        await self.async_refresh_voice_settings(force=False)
         return snapshot
 
     async def async_refresh_batch_device_data(
@@ -164,9 +168,11 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             return self.batch_device_data
 
         try:
-            batch_schedule, batch_mowing_preferences, batch_ota_info = await (
-                self._async_fetch_batch_device_data()
-            )
+            (
+                batch_schedule,
+                batch_mowing_preferences,
+                batch_ota_info,
+            ) = await self._async_fetch_batch_device_data()
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh batch device data: %s", err)
             return self.batch_device_data
@@ -348,6 +354,39 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         payload["source"] = source
         self.weather_protection = payload
         self.weather_protection_refreshed_at = now
+        return payload
+
+    async def async_refresh_voice_settings(
+        self,
+        *,
+        force: bool = False,
+        source: str = "voice_settings_auto",
+    ) -> dict[str, Any] | None:
+        """Refresh cached voice/language settings without failing the main poll."""
+        now = datetime.now(UTC)
+        if (
+            not force
+            and self.voice_settings is not None
+            and self.voice_settings_refreshed_at is not None
+            and now - self.voice_settings_refreshed_at < VOICE_SETTINGS_REFRESH_INTERVAL
+        ):
+            return self.voice_settings
+
+        try:
+            voice_settings = await self.client.async_get_voice_settings(
+                include_raw=False
+            )
+        except Exception as err:  # noqa: BLE001 - best-effort extra metadata
+            _LOGGER.debug("Failed to refresh voice settings: %s", err)
+            return self.voice_settings
+
+        payload = {
+            "captured_at": now.isoformat(),
+            "source": source,
+            "voice_settings": voice_settings,
+        }
+        self.voice_settings = payload
+        self.voice_settings_refreshed_at = now
         return payload
 
     async def async_shutdown(self) -> None:

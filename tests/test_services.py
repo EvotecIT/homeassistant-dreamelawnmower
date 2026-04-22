@@ -9,11 +9,11 @@ import voluptuous as vol
 from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.dreame_lawn_mower.services import (
-    PLAN_SCHEDULE_UPLOAD_SCHEMA,
+    ATTR_PREFERENCE_MODE,
     PLAN_MOWING_PREFERENCE_UPDATE_SCHEMA,
+    PLAN_SCHEDULE_UPLOAD_SCHEMA,
     REMOTE_CONTROL_STEP_SCHEMA,
     SET_SCHEDULE_PLAN_ENABLED_SCHEMA,
-    ATTR_PREFERENCE_MODE,
     _guard_preference_write_request,
     _guard_remote_control_step,
     _guard_schedule_write_request,

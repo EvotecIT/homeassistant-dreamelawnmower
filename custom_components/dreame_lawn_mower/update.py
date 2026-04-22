@@ -45,18 +45,18 @@ class DreameLawnMowerFirmwareUpdateEntity(
     def available(self) -> bool:
         """Return whether the entity is currently available."""
         return (
-            super().available
-            and self.coordinator.firmware_update_support is not None
+            super().available and self.coordinator.firmware_update_support is not None
         )
 
     @property
     def installed_version(self) -> str | None:
         """Return the currently installed firmware version."""
+        if version := _snapshot_firmware_version(self.coordinator):
+            return version
         support = self.coordinator.firmware_update_support
         if support is not None and support.current_version:
             return support.current_version
-        snapshot = self.coordinator.data
-        return getattr(snapshot, "firmware_version", None)
+        return None
 
     @property
     def latest_version(self) -> str | None:
@@ -67,6 +67,8 @@ class DreameLawnMowerFirmwareUpdateEntity(
     @property
     def in_progress(self) -> bool | int | None:
         """Return whether the mower reports an update in progress."""
+        if live_state := _snapshot_update_state(self.coordinator):
+            return live_state in {"upgrading", "updating"}
         support = self.coordinator.firmware_update_support
         if support is None:
             return None
@@ -134,3 +136,28 @@ class DreameLawnMowerFirmwareUpdateEntity(
             source="firmware_update_install",
         )
         await self.coordinator.async_request_refresh()
+
+
+def _snapshot_firmware_version(coordinator: DreameLawnMowerCoordinator) -> str | None:
+    """Return the latest firmware version from the live coordinator snapshot."""
+    snapshot = coordinator.data
+    version = getattr(snapshot, "firmware_version", None)
+    if isinstance(version, str) and version.strip():
+        return version
+    return None
+
+
+def _snapshot_update_state(coordinator: DreameLawnMowerCoordinator) -> str | None:
+    """Return the current live update state when the snapshot exposes one."""
+    snapshot = coordinator.data
+    for value in (
+        getattr(snapshot, "state_name", None),
+        getattr(snapshot, "activity", None),
+        getattr(snapshot, "task_status_name", None),
+    ):
+        if not isinstance(value, str):
+            continue
+        normalized = value.strip().lower()
+        if normalized in {"upgrading", "updating"}:
+            return normalized
+    return None

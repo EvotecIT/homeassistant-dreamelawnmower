@@ -95,6 +95,57 @@ from .vector_map import (
 
 REMOTE_CONTROL_MAX_ROTATION = 1000
 REMOTE_CONTROL_MAX_VELOCITY = 1000
+VOICE_LANGUAGE_CODES = (
+    "en",
+    "cn",
+    "de",
+    "fr",
+    "it",
+    "es",
+    "pt",
+    "no",
+    "sv",
+    "da",
+    "fi",
+    "nl",
+    "tr",
+    "pl",
+    "ru",
+    "lt",
+)
+VOICE_LANGUAGE_LABELS = (
+    "English",
+    "Chinese",
+    "German",
+    "French",
+    "Italian",
+    "Spanish",
+    "Portuguese",
+    "Norwegian",
+    "Swedish",
+    "Danish",
+    "Finnish",
+    "Dutch",
+    "Turkish",
+    "Polish",
+    "Russian",
+    "Lithuanian",
+)
+VOICE_LANGUAGE_INDEX_TO_LABEL = {
+    index: label for index, label in enumerate(VOICE_LANGUAGE_LABELS)
+}
+VOICE_LANGUAGE_INDEX_TO_CODE = {
+    index: code for index, code in enumerate(VOICE_LANGUAGE_CODES)
+}
+VOICE_LANGUAGE_LABEL_TO_INDEX = {
+    label: index for index, label in enumerate(VOICE_LANGUAGE_LABELS)
+}
+VOICE_PROMPT_FIELDS = (
+    "general_prompt_voice_enabled",
+    "working_voice_enabled",
+    "special_status_voice_enabled",
+    "fault_voice_enabled",
+)
 
 
 class DreameLawnMowerError(Exception):
@@ -601,6 +652,42 @@ class DreameLawnMowerClient:
         return await asyncio.to_thread(
             self._sync_get_weather_protection,
             include_raw,
+        )
+
+    async def async_get_voice_settings(
+        self,
+        *,
+        include_raw: bool = False,
+    ) -> dict[str, Any]:
+        """Return read-only voice and language settings from app actions."""
+        return await asyncio.to_thread(
+            self._sync_get_voice_settings,
+            include_raw,
+        )
+
+    async def async_set_voice_language(self, voice_language: int) -> dict[str, Any]:
+        """Set the mower voice language by app language-pack index."""
+        return await asyncio.to_thread(
+            self._sync_set_voice_language,
+            int(voice_language),
+        )
+
+    async def async_set_voice_volume(self, volume: int) -> dict[str, Any]:
+        """Set the mower voice volume from 0 to 100."""
+        return await asyncio.to_thread(
+            self._sync_set_voice_volume,
+            int(volume),
+        )
+
+    async def async_set_voice_prompts(
+        self,
+        prompts: Sequence[int | bool],
+    ) -> dict[str, Any]:
+        """Set the four mower voice prompt toggles."""
+        normalized = _normalize_voice_prompt_flags(prompts)
+        return await asyncio.to_thread(
+            self._sync_set_voice_prompts,
+            normalized,
         )
 
     async def async_get_cloud_device_info(
@@ -2785,6 +2872,135 @@ class DreameLawnMowerClient:
         result.update(_weather_protection_active_summary(result))
         return result
 
+    def _sync_get_voice_settings(
+        self,
+        include_raw: bool = False,
+    ) -> dict[str, Any]:
+        """Fetch read-only voice and language settings from CFG."""
+        result: dict[str, Any] = {
+            "source": "app_action_voice_settings",
+            "available": False,
+            "config_keys": ["LANG", "VOL", "VOICE"],
+            "errors": [],
+            "warnings": [],
+        }
+
+        try:
+            config_result = self._sync_call_app_action({"m": "g", "t": "CFG"})
+            config = _app_action_data(config_result)
+            if not isinstance(config, Mapping):
+                weather_result = self._sync_get_weather_protection(include_raw=True)
+                weather_raw_config = (
+                    weather_result.get("raw_config")
+                    if isinstance(weather_result, Mapping)
+                    else None
+                )
+                weather_data = _app_action_data(weather_raw_config)
+                if isinstance(weather_data, Mapping):
+                    config_result = weather_raw_config
+                    config = weather_data
+            if include_raw:
+                result["raw_config"] = _json_safe(config_result, max_depth=4)
+            if not isinstance(config, Mapping):
+                raise DreameLawnMowerConnectionError(
+                    f"CFG returned invalid voice config: {config_result}"
+                )
+            result["present_config_keys"] = [
+                key for key in result["config_keys"] if key in config
+            ]
+            result.update(_voice_settings_summary(config))
+            result["available"] = True
+        except Exception as err:  # noqa: BLE001 - diagnostic probe should return evidence
+            result["errors"].append({"stage": "config", "error": str(err)})
+
+        return result
+
+    def _sync_set_voice_language(self, voice_language: int) -> dict[str, Any]:
+        """Set the mower voice language and return the confirmed response."""
+        request = {
+            "m": "s",
+            "t": "LANG",
+            "d": {
+                "type": "voice",
+                "value": int(voice_language),
+            },
+        }
+        response = self._sync_call_app_action(request)
+        data = _app_action_data(response)
+        if not isinstance(data, Mapping):
+            raise DreameLawnMowerConnectionError(
+                f"LANG voice write returned invalid data: {response}"
+            )
+        confirmed_voice_language = _as_optional_int(data.get("voice"))
+        confirmed_text_language = _as_optional_int(data.get("text"))
+        return {
+            "source": "app_action_voice_settings_write",
+            "action": "set_voice_language",
+            "request": _json_safe(request, max_depth=4),
+            "response_data": _json_safe(response, max_depth=4),
+            "text_language_index": confirmed_text_language,
+            "voice_language_index": confirmed_voice_language,
+            "voice_language_name": VOICE_LANGUAGE_INDEX_TO_LABEL.get(
+                confirmed_voice_language
+            ),
+            "voice_language_code": VOICE_LANGUAGE_INDEX_TO_CODE.get(
+                confirmed_voice_language
+            ),
+        }
+
+    def _sync_set_voice_volume(self, volume: int) -> dict[str, Any]:
+        """Set the mower voice volume and return the confirmed response."""
+        if volume < 0 or volume > 100:
+            raise ValueError("volume must be between 0 and 100")
+        request = {
+            "m": "s",
+            "t": "VOL",
+            "d": {
+                "value": int(volume),
+            },
+        }
+        response = self._sync_call_app_action(request)
+        data = _app_action_data(response)
+        if not isinstance(data, Mapping):
+            raise DreameLawnMowerConnectionError(
+                f"VOL write returned invalid data: {response}"
+            )
+        return {
+            "source": "app_action_voice_settings_write",
+            "action": "set_voice_volume",
+            "request": _json_safe(request, max_depth=4),
+            "response_data": _json_safe(response, max_depth=4),
+            "volume": _as_optional_int(data.get("value")),
+        }
+
+    def _sync_set_voice_prompts(self, prompts: Sequence[int]) -> dict[str, Any]:
+        """Set the mower voice prompt flags and return the confirmed response."""
+        normalized = _normalize_voice_prompt_flags(prompts)
+        request = {
+            "m": "s",
+            "t": "VOICE",
+            "d": {
+                "value": normalized,
+            },
+        }
+        response = self._sync_call_app_action(request)
+        data = _app_action_data(response)
+        if not isinstance(data, Mapping):
+            raise DreameLawnMowerConnectionError(
+                f"VOICE write returned invalid data: {response}"
+            )
+        confirmed = _normalize_voice_prompt_flags(data.get("value"))
+        result = {
+            "source": "app_action_voice_settings_write",
+            "action": "set_voice_prompts",
+            "request": _json_safe(request, max_depth=4),
+            "response_data": _json_safe(response, max_depth=4),
+            "voice_prompts": confirmed,
+        }
+        for field_name, enabled in zip(VOICE_PROMPT_FIELDS, confirmed, strict=True):
+            result[field_name] = bool(enabled)
+        return result
+
     def _sync_get_app_schedule_text(
         self,
         *,
@@ -4195,6 +4411,41 @@ def _weather_protection_active_summary(result: Mapping[str, Any]) -> dict[str, A
     return summary
 
 
+def _voice_settings_summary(config: Mapping[str, Any]) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    language = config.get("LANG")
+    if isinstance(language, Sequence) and not isinstance(
+        language,
+        str | bytes | bytearray,
+    ):
+        values = list(language)
+        text_language_index = (
+            _as_optional_int(values[0]) if len(values) > 0 else None
+        )
+        voice_language_index = (
+            _as_optional_int(values[1]) if len(values) > 1 else None
+        )
+        summary["text_language_index"] = text_language_index
+        summary["voice_language_index"] = voice_language_index
+        summary["voice_language_name"] = VOICE_LANGUAGE_INDEX_TO_LABEL.get(
+            voice_language_index
+        )
+        summary["voice_language_code"] = VOICE_LANGUAGE_INDEX_TO_CODE.get(
+            voice_language_index
+        )
+
+    volume = _as_optional_int(config.get("VOL"))
+    if volume is not None:
+        summary["volume"] = volume
+
+    voice_prompts = _normalize_voice_prompt_flags(config.get("VOICE"))
+    summary["voice_prompts"] = voice_prompts
+    for field_name, enabled in zip(VOICE_PROMPT_FIELDS, voice_prompts, strict=True):
+        summary[field_name] = bool(enabled)
+
+    return summary
+
+
 def _app_maps_view_metadata(app_maps: Mapping[str, Any]) -> dict[str, Any]:
     maps = app_maps.get("maps") if isinstance(app_maps, Mapping) else None
     if not isinstance(maps, Sequence) or isinstance(maps, str | bytes | bytearray):
@@ -4804,6 +5055,28 @@ def _json_safe(value: Any, *, max_depth: int = 4) -> Any:
     if name is not None:
         return str(name).lower()
     return str(value)
+
+
+def _as_optional_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_voice_prompt_flags(value: Any) -> list[int]:
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes | bytearray):
+        return [0, 0, 0, 0]
+    normalized: list[int] = []
+    for item in list(value)[:4]:
+        normalized.append(1 if bool(item) else 0)
+    if len(normalized) < 4:
+        normalized.extend([0] * (4 - len(normalized)))
+    return normalized
 
 
 def _validate_remote_control_step(*, rotation: int, velocity: int) -> None:

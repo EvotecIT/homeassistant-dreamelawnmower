@@ -230,7 +230,9 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             selected_map_index,
             maps,
         )
-        available_vector_map_names = self._available_vector_map_names(vector_map_details)
+        available_vector_map_names = self._available_vector_map_names(
+            vector_map_details
+        )
         return {
             "state": snapshot.state,
             "state_name": snapshot.state_name,
@@ -312,7 +314,9 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             "selected_spot_id": self._selected_spot_id(spot_entries),
             "available_map_indices": [entry["map_index"] for entry in maps],
             "available_map_labels": [entry["label"] for entry in maps],
-            "available_contour_ids": [list(entry["contour_id"]) for entry in contour_entries],
+            "available_contour_ids": [
+                list(entry["contour_id"]) for entry in contour_entries
+            ],
             "available_contour_labels": [entry["label"] for entry in contour_entries],
             "available_zone_ids": [entry["area_id"] for entry in zone_entries],
             "available_spot_ids": [entry["spot_id"] for entry in spot_entries],
@@ -341,14 +345,10 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             "current_vector_map_name": self._current_vector_map_name(
                 current_vector_map
             ),
-            "current_vector_map_contour_count": current_vector_map.get(
-                "contour_count"
-            )
+            "current_vector_map_contour_count": current_vector_map.get("contour_count")
             if current_vector_map
             else None,
-            "current_vector_map_has_live_path": current_vector_map.get(
-                "has_live_path"
-            )
+            "current_vector_map_has_live_path": current_vector_map.get("has_live_path")
             if current_vector_map
             else None,
             "current_vector_map_mow_path_point_count": current_vector_map.get(
@@ -371,7 +371,9 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             )
             contour_id = self._selected_contour_id(contour_entries)
             if contour_id is None:
-                raise HomeAssistantError("No current-map edge contour is available to start.")
+                raise HomeAssistantError(
+                    "No current-map edge contour is available to start."
+                )
             await self.coordinator.client.async_start_edge_mowing([list(contour_id)])
         elif action == MOWING_ACTION_ZONE:
             self._ensure_selected_map_matches_active()
@@ -476,13 +478,13 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         selected_map_index = self._selected_map_index(maps)
         if selected_map_index is None:
             raise HomeAssistantError(
-                "No selected or current map is available for mowing preference planning."
+                "No selected or current map is available for mowing "
+                "preference planning."
             )
 
         requested_changes = preference_change_request(changes)
         zone_scoped_change = any(
-            key != ATTR_PREFERENCE_MODE
-            for key in requested_changes
+            key != ATTR_PREFERENCE_MODE for key in requested_changes
         )
 
         zone_entries: list[dict[str, object]] = []
@@ -731,9 +733,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
                 "mowing_direction_mode_name": preference.get(
                     "mowing_direction_mode_name"
                 ),
-                "mowing_direction_degrees": preference.get(
-                    "mowing_direction_degrees"
-                ),
+                "mowing_direction_degrees": preference.get("mowing_direction_degrees"),
                 "edge_mowing_auto": preference.get("edge_mowing_auto"),
                 "edge_mowing_walk_mode_name": preference.get(
                     "edge_mowing_walk_mode_name"
@@ -784,12 +784,12 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             "mode": preference_map.get("mode"),
             "mode_name": preference_map.get("mode_name"),
             "area_count": preference_map.get("area_count"),
-            "preference_count": len(preferences) if isinstance(preferences, list) else None,
+            "preference_count": len(preferences)
+            if isinstance(preferences, list)
+            else None,
         }
         return {
-            key: value
-            for key, value in summary.items()
-            if value not in (None, [], {})
+            key: value for key, value in summary.items() if value not in (None, [], {})
         }
 
     def _batch_preference_map_entry(
@@ -868,9 +868,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         names = vector_map_details.get("map_names")
         if isinstance(names, list):
             return [
-                name.strip()
-                for name in names
-                if isinstance(name, str) and name.strip()
+                name.strip() for name in names if isinstance(name, str) and name.strip()
             ]
 
         result: list[str] = []

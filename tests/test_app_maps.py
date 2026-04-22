@@ -92,9 +92,7 @@ class _FakeAppMapCloud:
                         "m": "r",
                         "r": 0,
                         "d": {
-                            "name": [
-                                "ali_dreame/2025/04/23/device/map-one.0233.bin"
-                            ]
+                            "name": ["ali_dreame/2025/04/23/device/map-one.0233.bin"]
                         },
                     }
                 ]
@@ -355,7 +353,9 @@ def test_map_view_prefers_vector_render_when_live_path_is_available() -> None:
 
     client._sync_refresh_app_map_view = lambda **kwargs: app_view
     client._sync_refresh_vector_map_view = lambda: vector_view
-    client._sync_refresh_legacy_map_view = lambda timeout, interval: (_ for _ in ()).throw(  # noqa: ARG005
+    client._sync_refresh_legacy_map_view = lambda timeout, interval: (
+        _ for _ in ()
+    ).throw(  # noqa: ARG005
         AssertionError("legacy map path should not run when live vector data exists")
     )
 
@@ -385,7 +385,9 @@ def test_map_view_keeps_app_render_when_vector_has_no_live_path() -> None:
 
     client._sync_refresh_app_map_view = lambda **kwargs: app_view
     client._sync_refresh_vector_map_view = lambda: vector_view
-    client._sync_refresh_legacy_map_view = lambda timeout, interval: (_ for _ in ()).throw(  # noqa: ARG005
+    client._sync_refresh_legacy_map_view = lambda timeout, interval: (
+        _ for _ in ()
+    ).throw(  # noqa: ARG005
         AssertionError("legacy map path should not run when app map works")
     )
 

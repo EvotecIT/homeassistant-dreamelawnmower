@@ -13,14 +13,19 @@ from custom_components.dreame_lawn_mower.update import (
 )
 
 
-def test_firmware_update_entity_uses_cached_support() -> None:
+def test_firmware_update_entity_prefers_live_snapshot_state() -> None:
     entity = object.__new__(DreameLawnMowerFirmwareUpdateEntity)
     entity.coordinator = SimpleNamespace(
         last_update_success=True,
-        data=SimpleNamespace(firmware_version="4.3.6_0320"),
+        data=SimpleNamespace(
+            firmware_version="4.3.6_0447",
+            state_name="upgrading",
+            activity="mowing",
+            task_status_name=None,
+        ),
         firmware_update_support=SimpleNamespace(
             current_version="4.3.6_0320",
-            latest_version="4.3.6_0447",
+            latest_version="4.3.6_0550",
             update_state=None,
             release_summary=None,
             release_summary_available=False,
@@ -39,9 +44,9 @@ def test_firmware_update_entity_uses_cached_support() -> None:
     )
 
     assert entity.available is True
-    assert entity.installed_version == "4.3.6_0320"
-    assert entity.latest_version == "4.3.6_0447"
-    assert entity.in_progress is False
+    assert entity.installed_version == "4.3.6_0447"
+    assert entity.latest_version == "4.3.6_0550"
+    assert entity.in_progress is True
     assert entity.release_summary is None
     assert entity.extra_state_attributes["cloud_check_update_available"] is True
     assert entity.extra_state_attributes["batch_ota_available"] is True
