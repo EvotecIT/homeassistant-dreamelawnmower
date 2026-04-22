@@ -421,11 +421,7 @@ def preference_change_request(data: dict[str, Any]) -> dict[str, Any]:
         ATTR_OBSTACLE_AVOIDANCE_AI_CLASSES,
         ATTR_EDGE_MOWING_SAFE,
     )
-    changes = {
-        key: data[key]
-        for key in supported_fields
-        if key in data
-    }
+    changes = {key: data[key] for key in supported_fields if key in data}
     if not changes:
         raise HomeAssistantError(
             "At least one mowing preference field must be provided for planning."
@@ -550,7 +546,11 @@ def _mowing_preference_notification(result: dict[str, Any]) -> tuple[str, str]:
     if area_id is not None:
         scope = f"{scope} area {area_id}"
 
-    if current_mode is not None and target_mode is not None and current_mode != target_mode:
+    if (
+        current_mode is not None
+        and target_mode is not None
+        and current_mode != target_mode
+    ):
         mode_text = f"mode {current_mode} -> {target_mode}"
     elif target_mode is not None:
         mode_text = f"mode={target_mode}"

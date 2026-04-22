@@ -2,6 +2,8 @@
 
 from dreame_lawn_mower_client import (
     CAMERA_PROBE_PROPERTY_KEYS,
+    DEBUG_OTA_LIST_URL,
+    DEBUG_OTA_TRACKS,
     DEFAULT_APK_RESEARCH_TERMS,
     DEFAULT_DECOMPILED_SOURCE_SUFFIXES,
     DEFAULT_DREAMEHOME_ASSET_TERMS,
@@ -36,6 +38,7 @@ from dreame_lawn_mower_client import (
     build_cloud_key_definition_summary,
     build_cloud_property_history_summary,
     build_cloud_property_summary,
+    build_debug_ota_catalog_url,
     build_jadx_command,
     build_map_probe_payload,
     build_schedule_enable_status_request,
@@ -59,6 +62,7 @@ from dreame_lawn_mower_client import (
     mower_realtime_property_name,
     mower_state_key,
     mower_state_label,
+    normalize_debug_ota_catalog_payload,
     remote_control_block_reason,
     remote_control_state_safe,
     run_jadx_decompile,
@@ -102,6 +106,7 @@ def test_public_package_exports_map_helpers() -> None:
     assert callable(analyze_dreamehome_assets)
     assert callable(analyze_dreamehome_apk)
     assert callable(build_camera_probe_payload)
+    assert callable(build_debug_ota_catalog_url)
     assert callable(build_cloud_key_definition_summary)
     assert callable(build_cloud_property_history_summary)
     assert callable(build_cloud_property_summary)
@@ -114,9 +119,12 @@ def test_public_package_exports_map_helpers() -> None:
     assert callable(decode_batch_schedule_payload)
     assert callable(decode_mowing_preference_payload)
     assert callable(encode_mowing_preference_payload)
+    assert callable(normalize_debug_ota_catalog_payload)
     assert callable(run_jadx_decompile)
     assert callable(summarize_mowing_preference_info)
     assert "10001.1" in CAMERA_PROBE_PROPERTY_KEYS
+    assert "BUILD" in DEBUG_OTA_TRACKS
+    assert "https://ota.tsingting.tech/api/version/" in DEBUG_OTA_LIST_URL
     assert "sendAction" in DEFAULT_APK_RESEARCH_TERMS
     assert ".java" in DEFAULT_DECOMPILED_SOURCE_SUFFIXES
     assert "object_name" in DEFAULT_DREAMEHOME_ASSET_TERMS
@@ -134,6 +142,8 @@ def test_public_package_client_has_cloud_probe_helpers() -> None:
     assert hasattr(DreameLawnMowerClient, "async_get_cloud_properties")
     assert hasattr(DreameLawnMowerClient, "async_scan_cloud_properties")
     assert hasattr(DreameLawnMowerClient, "async_get_cloud_key_definition")
+    assert hasattr(DreameLawnMowerClient, "async_get_cloud_firmware_check")
+    assert hasattr(DreameLawnMowerClient, "async_approve_firmware_update")
     assert hasattr(DreameLawnMowerClient, "async_probe_map_sources")
     assert hasattr(DreameLawnMowerClient, "async_get_camera_feature_support")
     assert hasattr(DreameLawnMowerClient, "async_get_firmware_update_support")
@@ -152,6 +162,7 @@ def test_public_package_client_has_cloud_probe_helpers() -> None:
     assert hasattr(DreameLawnMowerClient, "async_plan_app_schedule_upload")
     assert hasattr(DreameLawnMowerClient, "async_get_batch_mowing_preferences")
     assert hasattr(DreameLawnMowerClient, "async_get_batch_ota_info")
+    assert hasattr(DreameLawnMowerClient, "async_get_debug_ota_catalog")
     assert hasattr(DreameLawnMowerClient, "async_get_weather_protection")
     assert hasattr(DreameLawnMowerClient, "async_set_app_schedule_plan_enabled")
 

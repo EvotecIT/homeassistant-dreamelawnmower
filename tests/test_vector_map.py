@@ -210,7 +210,10 @@ def test_parse_batch_vector_map_handles_map_info_split_and_mow_paths() -> None:
     assert len(vector_map.contours) == 1
     assert vector_map.contours[0].contour_id == (1, 0)
     assert vector_map.clean_points == ((25, 25),)
-    assert [(entry.map_id, entry.map_index, entry.name) for entry in vector_map.available_maps] == [
+    assert [
+        (entry.map_id, entry.map_index, entry.name)
+        for entry in vector_map.available_maps
+    ] == [
         (1, 0, "Primary"),
         (2, 1, ""),
     ]
@@ -312,9 +315,12 @@ def test_vector_map_details_report_live_path_counts() -> None:
 def test_client_edge_and_map_actions_use_expected_app_task_payloads() -> None:
     client = _client()
     recorded_payloads: list[dict] = []
-    client._sync_call_app_action = lambda payload, **kwargs: recorded_payloads.append(  # type: ignore[method-assign]  # noqa: ARG005
-        payload
-    ) or {"ok": True}
+    client._sync_call_app_action = lambda payload, **kwargs: (
+        recorded_payloads.append(  # type: ignore[method-assign]  # noqa: ARG005
+            payload
+        )
+        or {"ok": True}
+    )
 
     assert client._sync_start_edge_mowing([[1, 0]]) == {"ok": True}
     assert client._sync_switch_current_map(1) == {"ok": True}
@@ -365,9 +371,7 @@ def test_vector_map_view_includes_cached_runtime_track_overlay() -> None:
     client.update_runtime_live_tracking(
         SimpleNamespace(
             hex="runtime-1",
-            candidate_runtime_track_segments=(
-                ((10, 20), (30, 40), (50, 40)),
-            ),
+            candidate_runtime_track_segments=(((10, 20), (30, 40), (50, 40)),),
             candidate_runtime_pose_x=50,
             candidate_runtime_pose_y=40,
             candidate_runtime_heading_deg=90.0,

@@ -44,10 +44,14 @@ class _FakePreferenceCloud:
             }
         if command == "PREI":
             idx = int(payload["d"]["idx"])
-            data = {"type": 1, "ver": [[11, 8], [12, 9]]} if idx == 0 else {
-                "type": 0,
-                "ver": [],
-            }
+            data = (
+                {"type": 1, "ver": [[11, 8], [12, 9]]}
+                if idx == 0
+                else {
+                    "type": 0,
+                    "ver": [],
+                }
+            )
             return {"out": [{"m": "r", "r": 0, "d": data}]}
         if command == "PRE":
             if payload.get("m") == "s":
@@ -363,7 +367,9 @@ def test_plan_app_mowing_preference_update_can_execute_mode_only_request() -> No
     assert [call["t"] for call in cloud.calls] == ["PREI", "PRE", "PRE", "PREP"]
 
 
-def test_plan_app_mowing_preference_update_can_execute_mode_and_settings_sequence() -> None:
+def test_plan_app_mowing_preference_update_can_execute_mode_and_settings_sequence() -> (
+    None
+):
     client = _client()
     requests: list[dict[str, object]] = []
     client._sync_get_mowing_preferences = lambda *args, **kwargs: {
@@ -421,18 +427,28 @@ def test_plan_app_mowing_preference_update_can_execute_mode_and_settings_sequenc
     assert result["request_candidate"] == {
         "sequence": [
             {"m": "s", "t": "PREP", "d": {"idx": 1, "value": 1}},
-            {"m": "s", "t": "PRE", "d": [10, 1, 5, 1, 40, 1, 170, 1, 0, 1, 0, 1, 1, 5, 10, 7, 1]},
+            {
+                "m": "s",
+                "t": "PRE",
+                "d": [10, 1, 5, 1, 40, 1, 170, 1, 0, 1, 0, 1, 1, 5, 10, 7, 1],
+            },
         ]
     }
     assert result["request_candidates"] == [
         {"m": "s", "t": "PREP", "d": {"idx": 1, "value": 1}},
-        {"m": "s", "t": "PRE", "d": [10, 1, 5, 1, 40, 1, 170, 1, 0, 1, 0, 1, 1, 5, 10, 7, 1]},
+        {
+            "m": "s",
+            "t": "PRE",
+            "d": [10, 1, 5, 1, 40, 1, 170, 1, 0, 1, 0, 1, 1, 5, 10, 7, 1],
+        },
     ]
     assert result["response_data"] == [{"r": 0, "ok": True}, {"r": 0, "ok": True}]
     assert [request["t"] for request in requests] == ["PREP", "PRE"]
 
 
-def test_plan_app_mowing_preference_update_rejects_global_mode_with_zone_changes() -> None:
+def test_plan_app_mowing_preference_update_rejects_global_mode_with_zone_changes() -> (
+    None
+):
     client = _client()
     cloud = _FakePreferenceCloud()
     client._sync_get_cloud_protocol = lambda: cloud

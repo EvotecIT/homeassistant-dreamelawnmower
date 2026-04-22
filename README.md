@@ -83,8 +83,19 @@ region/account details are especially helpful for moving a device from
 
 The following areas are intentionally cautious:
 
-- firmware OTA availability is reported as unknown unless a verified mower OTA
-  signal is found
+- firmware OTA now exposes a Home Assistant update entity using the app's
+  approved `checkDeviceVersion` target and `manualFirmwareUpdate` approval
+  step, but release notes remain best-effort because the live A2 endpoint still
+  embeds a `missing lang` error string in the changelog field
+  the live Dreame A2 verification on April 22, 2026 completed from
+  `4.3.6_0320` to `4.3.6_0447`
+- a read-only debug OTA catalog probe exists for version-trace work, but it is
+  not treated as authoritative latest-version, changelog, or install approval
+  data because it is a manual catalog rather than the mobile app's approved OTA
+  response
+- firmware diagnostics now include those debug-catalog candidate versions when
+  available, so operation snapshots can show plausible newer builds without
+  conflating them with the app-approved update target
 - rain-protection writes are not exposed yet
 - mowing-preference writes are guarded, validated on a supervised A2 no-op write, and still need broader model and firmware validation
 - map rendering is read-only; no-go editing, virtual-wall editing, and other map

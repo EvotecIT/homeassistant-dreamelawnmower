@@ -195,7 +195,9 @@ class DreameLawnMowerLivePathMapCamera(DreameLawnMowerMapCamera):
             self.async_write_ha_state()
             return view
         except Exception as err:
-            _LOGGER.warning("Failed to refresh Dreame mower live-path map image: %s", err)
+            _LOGGER.warning(
+                "Failed to refresh Dreame mower live-path map image: %s", err
+            )
             view = self._map_cache.store_error(str(err), source="batch_vector_map")
             self.async_write_ha_state()
             return view

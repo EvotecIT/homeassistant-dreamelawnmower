@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -15,16 +18,21 @@ from .control_options import (
     MOWING_ACTION_ZONE,
     contour_label,
     current_contour_entries,
-    map_entries,
+    current_map_index,
     current_spot_entries,
     current_zone_entries,
-    current_map_index,
+    map_entries,
     map_label,
     mowing_action_label,
     spot_label,
     zone_label,
 )
 from .coordinator import DreameLawnMowerCoordinator
+from .dreame_lawn_mower_client.client import (
+    VOICE_LANGUAGE_INDEX_TO_LABEL,
+    VOICE_LANGUAGE_LABEL_TO_INDEX,
+    VOICE_LANGUAGE_LABELS,
+)
 from .entity import DreameLawnMowerEntity
 
 
@@ -37,6 +45,7 @@ async def async_setup_entry(
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
+            DreameLawnMowerVoiceLanguageSelect(coordinator),
             DreameLawnMowerMapSelect(coordinator),
             DreameLawnMowerMowingActionSelect(coordinator),
             DreameLawnMowerEdgeSelect(coordinator),
@@ -48,6 +57,50 @@ async def async_setup_entry(
 
 class DreameLawnMowerSelectEntity(DreameLawnMowerEntity, SelectEntity):
     """Shared base class for current-map selector entities."""
+
+
+class DreameLawnMowerVoiceLanguageSelect(DreameLawnMowerSelectEntity):
+    """Choose the mower voice prompt language."""
+
+    _attr_name = "Voice Language"
+    _attr_icon = "mdi:translate"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_voice_language"
+
+    @property
+    def available(self) -> bool:
+        """Return whether cached voice settings are available."""
+        return (
+            self.coordinator.data is not None
+            and _voice_settings_section(self.coordinator.voice_settings) is not None
+        )
+
+    @property
+    def options(self) -> list[str]:
+        """Return the known mower voice languages."""
+        return list(VOICE_LANGUAGE_LABELS)
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the selected mower voice language label."""
+        section = _voice_settings_section(self.coordinator.voice_settings)
+        if section is None:
+            return None
+        value = section.get("voice_language_index")
+        return VOICE_LANGUAGE_INDEX_TO_LABEL.get(value)
+
+    async def async_select_option(self, option: str) -> None:
+        """Persist the selected mower voice language."""
+        if option not in VOICE_LANGUAGE_LABEL_TO_INDEX:
+            raise ValueError(f"Unknown voice language option: {option}")
+        await self.coordinator.client.async_set_voice_language(
+            VOICE_LANGUAGE_LABEL_TO_INDEX[option]
+        )
+        await self.coordinator.async_refresh_voice_settings(force=True)
+        self.coordinator.async_update_listeners()
 
 
 class DreameLawnMowerMapSelect(DreameLawnMowerSelectEntity):
@@ -331,3 +384,8 @@ class DreameLawnMowerSpotSelect(DreameLawnMowerSelectEntity):
                 self.coordinator.async_update_listeners()
                 return
         raise ValueError(f"Unknown spot option: {option}")
+
+
+def _voice_settings_section(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    section = value.get("voice_settings") if isinstance(value, dict) else None
+    return section if isinstance(section, dict) and section.get("available") else None

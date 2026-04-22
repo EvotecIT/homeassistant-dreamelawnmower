@@ -3,6 +3,7 @@ from __future__ import annotations
 from io import BytesIO
 from typing import Any
 
+from homeassistant.const import Platform
 from PIL import Image, ImageFont
 
 from custom_components.dreame_lawn_mower import image as image_helpers
@@ -22,6 +23,7 @@ from custom_components.dreame_lawn_mower.button import (
     DreameLawnMowerCaptureWeatherProbeButton,
     schedule_probe_payload,
 )
+from custom_components.dreame_lawn_mower.const import PLATFORMS
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import (
     DreameLawnMowerClient,
 )
@@ -65,6 +67,9 @@ from custom_components.dreame_lawn_mower.task_status_probe import (
     task_status_probe_payload,
     task_status_probe_result_attributes,
 )
+from custom_components.dreame_lawn_mower.update import (
+    DreameLawnMowerFirmwareUpdateEntity,
+)
 
 
 def test_sensor_description_exposes_ha_compat_fields() -> None:
@@ -102,6 +107,10 @@ def test_binary_sensor_description_exposes_ha_compat_fields() -> None:
     assert description.unit_of_measurement is None
 
 
+def test_platforms_include_update() -> None:
+    assert Platform.UPDATE in PLATFORMS
+
+
 def test_schedule_probe_button_is_diagnostic_disabled_by_default() -> None:
     assert (
         DreameLawnMowerCaptureScheduleProbeButton.__dict__["__attr_entity_category"]
@@ -127,6 +136,15 @@ def test_batch_device_data_probe_button_is_diagnostic_disabled_by_default() -> N
             "__attr_entity_registry_enabled_default"
         ]
         is False
+    )
+
+
+def test_firmware_update_entity_supports_install() -> None:
+    assert DreameLawnMowerFirmwareUpdateEntity.__dict__["__attr_device_class"] == (
+        "firmware"
+    )
+    assert (
+        DreameLawnMowerFirmwareUpdateEntity.__dict__["__attr_supported_features"] > 0
     )
 
 
@@ -463,7 +481,10 @@ def test_task_status_probe_payload_keeps_compact_app_state() -> None:
                     "source": None,
                     "raw": (),
                     "length": 33,
-                    "hex": "ce4f02804d002d0701007d0122017d013201f6ffeaff01645e056ccf007f1c00ce",
+                    "hex": (
+                        "ce4f02804d002d0701007d0122017d013201f6ffeaff01645e056ccf"
+                        "007f1c00ce"
+                    ),
                     "frame_start": 206,
                     "frame_end": 206,
                     "frame_valid": True,

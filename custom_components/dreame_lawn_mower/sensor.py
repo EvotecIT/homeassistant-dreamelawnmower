@@ -120,9 +120,9 @@ SENSORS = [
     DreameSensorDescription(
         key="error_code",
         name="Error Code",
-        value_fn=lambda snapshot: "none"
-        if snapshot.error_code in (None, -1, 0)
-        else snapshot.error_code,
+        value_fn=lambda snapshot: (
+            "none" if snapshot.error_code in (None, -1, 0) else snapshot.error_code
+        ),
         icon="mdi:numeric",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
@@ -199,32 +199,36 @@ SENSORS = [
         key="cleaning_mode",
         name="Cleaning Mode",
         value_fn=lambda snapshot: snapshot.cleaning_mode_name,
-        exists_fn=lambda snapshot: bool(snapshot.cleaning_mode_name)
-        and snapshot.cleaning_mode_name != "unknown",
+        exists_fn=lambda snapshot: (
+            bool(snapshot.cleaning_mode_name)
+            and snapshot.cleaning_mode_name != "unknown"
+        ),
         icon="mdi:grass",
         entity_registry_enabled_default=False,
     ),
     DreameSensorDescription(
         key="current_cleaned_area",
         name="Current Cleaned Area",
-        value_fn=lambda snapshot: snapshot.cleaned_area,
-        exists_fn=lambda snapshot: snapshot.cleaned_area is not None,
+        value_fn=lambda snapshot: getattr(snapshot, "cleaned_area", None),
+        exists_fn=lambda snapshot: getattr(snapshot, "cleaned_area", None) is not None,
         icon="mdi:texture-box",
         native_unit_of_measurement="m²",
     ),
     DreameSensorDescription(
         key="current_cleaning_time",
         name="Current Cleaning Time",
-        value_fn=lambda snapshot: snapshot.cleaning_time,
-        exists_fn=lambda snapshot: snapshot.cleaning_time is not None,
+        value_fn=lambda snapshot: getattr(snapshot, "cleaning_time", None),
+        exists_fn=lambda snapshot: getattr(snapshot, "cleaning_time", None) is not None,
         icon="mdi:timer-sand",
         native_unit_of_measurement="min",
     ),
     DreameSensorDescription(
         key="active_segment_count",
         name="Active Segment Count",
-        value_fn=lambda snapshot: snapshot.active_segment_count,
-        exists_fn=lambda snapshot: snapshot.active_segment_count is not None,
+        value_fn=lambda snapshot: getattr(snapshot, "active_segment_count", None),
+        exists_fn=lambda snapshot: (
+            getattr(snapshot, "active_segment_count", None) is not None
+        ),
         icon="mdi:vector-square",
     ),
     DreameSensorDescription(
@@ -253,10 +257,7 @@ async def async_setup_entry(
     """Set up mower sensors."""
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
-        [
-            DreameLawnMowerSensor(coordinator, description)
-            for description in SENSORS
-        ]
+        [DreameLawnMowerSensor(coordinator, description) for description in SENSORS]
         + [DreameLawnMowerAppMapCountSensor(coordinator)]
         + [DreameLawnMowerAvailableVectorMapCountSensor(coordinator)]
         + [DreameLawnMowerSelectedMowingActionSensor(coordinator)]
@@ -410,11 +411,7 @@ def schedule_write_result_attributes(
         attributes["target_schedule"] = target_schedule
     if result.get("response_data") is not None:
         attributes["response_data"] = result.get("response_data")
-    return {
-        key: value
-        for key, value in attributes.items()
-        if value is not None
-    }
+    return {key: value for key, value in attributes.items() if value is not None}
 
 
 class DreameLawnMowerLastPreferenceWriteSensor(
@@ -493,11 +490,7 @@ def preference_write_result_attributes(
         attributes["selection_scope"] = result.get("selection_scope")
     if result.get("response_data") is not None:
         attributes["response_data"] = result.get("response_data")
-    return {
-        key: value
-        for key, value in attributes.items()
-        if value is not None
-    }
+    return {key: value for key, value in attributes.items() if value is not None}
 
 
 class DreameLawnMowerFirmwareUpdateStatusSensor(
@@ -546,9 +539,7 @@ class DreameLawnMowerWeatherProtectionStatusSensor(
 
     def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = (
-            f"{self._descriptor.unique_id}_weather_protection_status"
-        )
+        self._attr_unique_id = f"{self._descriptor.unique_id}_weather_protection_status"
 
     @property
     def native_value(self) -> str | None:
@@ -583,9 +574,7 @@ class DreameLawnMowerRainProtectionDurationSensor(
 
     def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = (
-            f"{self._descriptor.unique_id}_rain_protection_duration"
-        )
+        self._attr_unique_id = f"{self._descriptor.unique_id}_rain_protection_duration"
 
     @property
     def native_value(self) -> int | None:
@@ -1977,9 +1966,7 @@ class DreameLawnMowerRuntimeTrackLengthSensor(
 
     def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = (
-            f"{self._descriptor.unique_id}_runtime_live_track_length"
-        )
+        self._attr_unique_id = f"{self._descriptor.unique_id}_runtime_live_track_length"
 
     @property
     def native_value(self) -> float | int | None:
@@ -2059,9 +2046,7 @@ class DreameLawnMowerConfiguredScheduleCountSensor(
 
     def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
         super().__init__(coordinator)
-        self._attr_unique_id = (
-            f"{self._descriptor.unique_id}_configured_schedule_count"
-        )
+        self._attr_unique_id = f"{self._descriptor.unique_id}_configured_schedule_count"
 
     @property
     def native_value(self) -> int | None:
@@ -2173,9 +2158,7 @@ def schedule_probe_result_attributes(
         attributes["error_count"] = len(errors)
         attributes["errors"] = errors
     return {
-        key: value
-        for key, value in attributes.items()
-        if value not in (None, [], {})
+        key: value for key, value in attributes.items() if value not in (None, [], {})
     }
 
 
@@ -2258,9 +2241,7 @@ def batch_device_data_probe_result_attributes(
         "batch_ota_info": _batch_ota_probe_summary(ota),
     }
     return {
-        key: value
-        for key, value in attributes.items()
-        if value not in (None, [], {})
+        key: value for key, value in attributes.items() if value not in (None, [], {})
     }
 
 
@@ -2275,9 +2256,7 @@ def batch_schedule_attributes(result: dict[str, Any] | None) -> dict[str, Any]:
         "batch_schedule": summary,
     }
     return {
-        key: value
-        for key, value in attributes.items()
-        if value not in (None, [], {})
+        key: value for key, value in attributes.items() if value not in (None, [], {})
     }
 
 
@@ -2292,9 +2271,7 @@ def app_map_object_attributes(result: dict[str, Any] | None) -> dict[str, Any]:
         "app_map_objects": summary,
     }
     return {
-        key: value
-        for key, value in attributes.items()
-        if value not in (None, [], {})
+        key: value for key, value in attributes.items() if value not in (None, [], {})
     }
 
 
@@ -2312,9 +2289,7 @@ def app_map_attributes(
         "app_maps": summary,
     }
     return {
-        key: value
-        for key, value in attributes.items()
-        if value not in (None, [], {})
+        key: value for key, value in attributes.items() if value not in (None, [], {})
     }
 
 
@@ -2329,9 +2304,7 @@ def vector_map_attributes(result: dict[str, Any] | None) -> dict[str, Any]:
         "vector_maps": summary,
     }
     return {
-        key: value
-        for key, value in attributes.items()
-        if value not in (None, [], {})
+        key: value for key, value in attributes.items() if value not in (None, [], {})
     }
 
 
@@ -2349,9 +2322,7 @@ def current_app_map_attributes(
         "current_app_map": summary,
     }
     return {
-        key: value
-        for key, value in attributes.items()
-        if value not in (None, [], {})
+        key: value for key, value in attributes.items() if value not in (None, [], {})
     }
 
 
@@ -2370,9 +2341,7 @@ def current_vector_map_attributes(
         "current_vector_map": summary,
     }
     return {
-        key: value
-        for key, value in attributes.items()
-        if value not in (None, [], {})
+        key: value for key, value in attributes.items() if value not in (None, [], {})
     }
 
 
@@ -2387,9 +2356,7 @@ def batch_preference_attributes(result: dict[str, Any] | None) -> dict[str, Any]
         "batch_mowing_preferences": summary,
     }
     return {
-        key: value
-        for key, value in attributes.items()
-        if value not in (None, [], {})
+        key: value for key, value in attributes.items() if value not in (None, [], {})
     }
 
 
@@ -2405,9 +2372,7 @@ def batch_ota_attributes(result: dict[str, Any] | None) -> dict[str, Any]:
         "ota_status_name": _batch_ota_status_name(result),
     }
     return {
-        key: value
-        for key, value in attributes.items()
-        if value not in (None, [], {})
+        key: value for key, value in attributes.items() if value not in (None, [], {})
     }
 
 
@@ -2429,18 +2394,20 @@ def _runtime_status_blob_summary(blob: Any) -> dict[str, Any]:
         return {}
     track_segments = getattr(blob, "candidate_runtime_track_segments", ()) or ()
     track_point_count = sum(
-        len(segment)
-        for segment in track_segments
-        if isinstance(segment, (list, tuple))
+        len(segment) for segment in track_segments if isinstance(segment, (list, tuple))
     )
-    track_length_m = round(
-        sum(
-            _coordinate_path_length_m(segment)
-            for segment in track_segments
-            if isinstance(segment, (list, tuple))
-        ),
-        2,
-    ) if track_point_count else None
+    track_length_m = (
+        round(
+            sum(
+                _coordinate_path_length_m(segment)
+                for segment in track_segments
+                if isinstance(segment, (list, tuple))
+            ),
+            2,
+        )
+        if track_point_count
+        else None
+    )
     attributes = {
         "source": getattr(blob, "source", None),
         "length": getattr(blob, "length", None),
@@ -2464,9 +2431,7 @@ def _runtime_status_blob_summary(blob: Any) -> dict[str, Any]:
         "notes": list(getattr(blob, "notes", ()) or ()),
     }
     return {
-        key: value
-        for key, value in attributes.items()
-        if value not in (None, [], {})
+        key: value for key, value in attributes.items() if value not in (None, [], {})
     }
 
 
@@ -2768,7 +2733,10 @@ def _selected_map_preference_summary(coordinator: Any) -> dict[str, Any]:
     )
 
     for map_entry in maps:
-        if not isinstance(map_entry, dict) or map_entry.get("idx") != selected_map_index:
+        if (
+            not isinstance(map_entry, dict)
+            or map_entry.get("idx") != selected_map_index
+        ):
             continue
         preferences = map_entry.get("preferences")
         summary = {
@@ -2777,12 +2745,12 @@ def _selected_map_preference_summary(coordinator: Any) -> dict[str, Any]:
             "mode": map_entry.get("mode"),
             "mode_name": map_entry.get("mode_name"),
             "area_count": map_entry.get("area_count"),
-            "preference_count": len(preferences) if isinstance(preferences, list) else None,
+            "preference_count": len(preferences)
+            if isinstance(preferences, list)
+            else None,
         }
         return {
-            key: value
-            for key, value in summary.items()
-            if value not in (None, [], {})
+            key: value for key, value in summary.items() if value not in (None, [], {})
         }
     return {}
 
@@ -2809,9 +2777,7 @@ def _selected_zone_preference_summary(coordinator: Any) -> dict[str, Any]:
     if not isinstance(selected_zone_id, int) or not any(
         entry["area_id"] == selected_zone_id for entry in zone_entries
     ):
-        selected_zone_id = (
-            int(zone_entries[0]["area_id"]) if zone_entries else None
-        )
+        selected_zone_id = int(zone_entries[0]["area_id"]) if zone_entries else None
     if selected_zone_id is None:
         return {}
 
@@ -2830,11 +2796,7 @@ def _selected_zone_preference_summary(coordinator: Any) -> dict[str, Any]:
         getattr(coordinator, "selected_map_index", None),
     )
     zone_entry = next(
-        (
-            entry
-            for entry in zone_entries
-            if entry["area_id"] == selected_zone_id
-        ),
+        (entry for entry in zone_entries if entry["area_id"] == selected_zone_id),
         None,
     )
     zone_label_value = (
@@ -2871,9 +2833,7 @@ def _selected_zone_preference_summary(coordinator: Any) -> dict[str, Any]:
                 "mowing_direction_mode_name": preference.get(
                     "mowing_direction_mode_name"
                 ),
-                "mowing_direction_degrees": preference.get(
-                    "mowing_direction_degrees"
-                ),
+                "mowing_direction_degrees": preference.get("mowing_direction_degrees"),
                 "edge_mowing_auto": preference.get("edge_mowing_auto"),
                 "edge_mowing_walk_mode_name": preference.get(
                     "edge_mowing_walk_mode_name"
@@ -2928,9 +2888,7 @@ def _selected_run_scope_attributes(coordinator: Any) -> dict[str, Any]:
     }
     attributes.update(_selected_target_summary(coordinator))
     return {
-        key: value
-        for key, value in attributes.items()
-        if value not in (None, [], {})
+        key: value for key, value in attributes.items() if value not in (None, [], {})
     }
 
 
@@ -3162,11 +3120,7 @@ def _app_map_object_summary(value: Any) -> dict[str, Any] | None:
     error = value.get("error")
     if error is not None:
         summary["error"] = error
-    return {
-        key: item
-        for key, item in summary.items()
-        if item not in (None, [], {})
-    }
+    return {key: item for key, item in summary.items() if item not in (None, [], {})}
 
 
 def _app_maps_summary(
@@ -3192,11 +3146,7 @@ def _app_maps_summary(
         summary["error_count"] = len(errors)
         if errors:
             summary["errors"] = errors
-    return {
-        key: item
-        for key, item in summary.items()
-        if item not in (None, [], {})
-    }
+    return {key: item for key, item in summary.items() if item not in (None, [], {})}
 
 
 def _vector_map_summary(value: Any) -> dict[str, Any] | None:
@@ -3221,11 +3171,7 @@ def _vector_map_summary(value: Any) -> dict[str, Any] | None:
         ],
         "maps": maps,
     }
-    return {
-        key: item
-        for key, item in summary.items()
-        if item not in (None, [], {})
-    }
+    return {key: item for key, item in summary.items() if item not in (None, [], {})}
 
 
 def _current_app_map_summary(
@@ -3294,11 +3240,7 @@ def _app_map_entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
         "has_live_path": bool(summary.get("trajectory_point_count")),
         "error": entry.get("error"),
     }
-    return {
-        key: item
-        for key, item in result.items()
-        if item not in (None, [], {})
-    }
+    return {key: item for key, item in result.items() if item not in (None, [], {})}
 
 
 def _vector_map_entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
@@ -3326,11 +3268,7 @@ def _vector_map_entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
         "runtime_heading_deg": entry.get("runtime_heading_deg"),
         "has_live_path": entry.get("has_live_path"),
     }
-    return {
-        key: item
-        for key, item in result.items()
-        if item not in (None, [], {})
-    }
+    return {key: item for key, item in result.items() if item not in (None, [], {})}
 
 
 def _schedule_probe_entry_summary(schedule: dict[str, Any]) -> dict[str, Any]:
@@ -3343,11 +3281,7 @@ def _schedule_probe_entry_summary(schedule: dict[str, Any]) -> dict[str, Any]:
         "enabled_plan_count": schedule.get("enabled_plan_count"),
         "error": schedule.get("error"),
     }
-    return {
-        key: value
-        for key, value in summary.items()
-        if value is not None
-    }
+    return {key: value for key, value in summary.items() if value is not None}
 
 
 class DreameLawnMowerLastPreferenceProbeSensor(
@@ -3414,9 +3348,7 @@ def preference_probe_result_attributes(
         attributes["error_count"] = len(errors)
         attributes["errors"] = errors
     return {
-        key: value
-        for key, value in attributes.items()
-        if value not in (None, [], {})
+        key: value for key, value in attributes.items() if value not in (None, [], {})
     }
 
 
@@ -3535,9 +3467,7 @@ def weather_probe_result_attributes(
         attributes["warning_count"] = len(warnings)
         attributes["warnings"] = warnings
     return {
-        key: value
-        for key, value in attributes.items()
-        if value not in (None, [], {})
+        key: value for key, value in attributes.items() if value not in (None, [], {})
     }
 
 
@@ -3558,11 +3488,7 @@ def _preference_probe_map_summary(map_entry: dict[str, Any]) -> dict[str, Any]:
         "preferences": preferences,
         "error": map_entry.get("error"),
     }
-    return {
-        key: value
-        for key, value in summary.items()
-        if value not in (None, [], {})
-    }
+    return {key: value for key, value in summary.items() if value not in (None, [], {})}
 
 
 def _preference_probe_entry_summary(preference: dict[str, Any]) -> dict[str, Any]:
@@ -3593,11 +3519,7 @@ def _preference_probe_entry_summary(preference: dict[str, Any]) -> dict[str, Any
             "obstacle_avoidance_ai_classes",
         ),
     }
-    return {
-        key: value
-        for key, value in summary.items()
-        if value not in (None, [], {})
-    }
+    return {key: value for key, value in summary.items() if value not in (None, [], {})}
 
 
 def _batch_schedule_probe_summary(value: Any) -> dict[str, Any] | None:
@@ -3620,11 +3542,7 @@ def _batch_schedule_probe_summary(value: Any) -> dict[str, Any] | None:
         summary["error_count"] = len(errors)
         if errors:
             summary["errors"] = errors
-    return {
-        key: item
-        for key, item in summary.items()
-        if item not in (None, [], {})
-    }
+    return {key: item for key, item in summary.items() if item not in (None, [], {})}
 
 
 def _batch_preference_probe_summary(value: Any) -> dict[str, Any] | None:
@@ -3647,11 +3565,7 @@ def _batch_preference_probe_summary(value: Any) -> dict[str, Any] | None:
         summary["error_count"] = len(errors)
         if errors:
             summary["errors"] = errors
-    return {
-        key: item
-        for key, item in summary.items()
-        if item not in (None, [], {})
-    }
+    return {key: item for key, item in summary.items() if item not in (None, [], {})}
 
 
 def _batch_ota_probe_summary(value: Any) -> dict[str, Any] | None:
@@ -3670,8 +3584,4 @@ def _batch_ota_probe_summary(value: Any) -> dict[str, Any] | None:
         summary["error_count"] = len(errors)
         if errors:
             summary["errors"] = errors
-    return {
-        key: item
-        for key, item in summary.items()
-        if item not in (None, [], {})
-    }
+    return {key: item for key, item in summary.items() if item not in (None, [], {})}

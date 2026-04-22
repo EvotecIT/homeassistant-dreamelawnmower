@@ -100,8 +100,10 @@ BINARY_SENSORS = [
     DreameBinarySensorDescription(
         key="device_connected",
         name="Device Connected",
-        value_fn=lambda snapshot: snapshot.device_connected,
-        exists_fn=lambda snapshot: snapshot.device_connected is not None,
+        value_fn=lambda snapshot: getattr(snapshot, "device_connected", None),
+        exists_fn=lambda snapshot: (
+            getattr(snapshot, "device_connected", None) is not None
+        ),
         device_class=BinarySensorDeviceClass.CONNECTIVITY,
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
@@ -109,8 +111,9 @@ BINARY_SENSORS = [
     DreameBinarySensorDescription(
         key="cloud_connected",
         name="Cloud Connected",
-        value_fn=lambda snapshot: snapshot.cloud_connected,
-        exists_fn=lambda snapshot: snapshot.cloud_connected is not None,
+        value_fn=lambda snapshot: getattr(snapshot, "cloud_connected", None),
+        exists_fn=lambda snapshot: getattr(snapshot, "cloud_connected", None)
+        is not None,
         device_class=BinarySensorDeviceClass.CONNECTIVITY,
         entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
@@ -214,8 +217,8 @@ BINARY_SENSORS = [
     DreameBinarySensorDescription(
         key="child_lock",
         name="Child Lock",
-        value_fn=lambda snapshot: snapshot.child_lock,
-        exists_fn=lambda snapshot: snapshot.child_lock is not None,
+        value_fn=lambda snapshot: getattr(snapshot, "child_lock", None),
+        exists_fn=lambda snapshot: getattr(snapshot, "child_lock", None) is not None,
         icon="mdi:lock-outline",
         entity_registry_enabled_default=False,
     ),

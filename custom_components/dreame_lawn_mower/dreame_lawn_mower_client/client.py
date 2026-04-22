@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import time
+import urllib.request
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -36,6 +37,10 @@ from .batch_device_data import (
     decode_batch_schedule_payload,
 )
 from .camera_probe import CAMERA_PROBE_PROPERTY_KEYS, build_camera_probe_payload
+from .debug_ota_catalog import (
+    build_debug_ota_catalog_url,
+    normalize_debug_ota_catalog_payload,
+)
 from .exceptions import DeviceException, InvalidActionException
 from .map_probe import (
     MAP_HISTORY_PROPERTY_KEYS,
@@ -90,6 +95,57 @@ from .vector_map import (
 
 REMOTE_CONTROL_MAX_ROTATION = 1000
 REMOTE_CONTROL_MAX_VELOCITY = 1000
+VOICE_LANGUAGE_CODES = (
+    "en",
+    "cn",
+    "de",
+    "fr",
+    "it",
+    "es",
+    "pt",
+    "no",
+    "sv",
+    "da",
+    "fi",
+    "nl",
+    "tr",
+    "pl",
+    "ru",
+    "lt",
+)
+VOICE_LANGUAGE_LABELS = (
+    "English",
+    "Chinese",
+    "German",
+    "French",
+    "Italian",
+    "Spanish",
+    "Portuguese",
+    "Norwegian",
+    "Swedish",
+    "Danish",
+    "Finnish",
+    "Dutch",
+    "Turkish",
+    "Polish",
+    "Russian",
+    "Lithuanian",
+)
+VOICE_LANGUAGE_INDEX_TO_LABEL = {
+    index: label for index, label in enumerate(VOICE_LANGUAGE_LABELS)
+}
+VOICE_LANGUAGE_INDEX_TO_CODE = {
+    index: code for index, code in enumerate(VOICE_LANGUAGE_CODES)
+}
+VOICE_LANGUAGE_LABEL_TO_INDEX = {
+    label: index for index, label in enumerate(VOICE_LANGUAGE_LABELS)
+}
+VOICE_PROMPT_FIELDS = (
+    "general_prompt_voice_enabled",
+    "working_voice_enabled",
+    "special_status_voice_enabled",
+    "fault_voice_enabled",
+)
 
 
 class DreameLawnMowerError(Exception):
@@ -264,9 +320,7 @@ class DreameLawnMowerClient:
     ) -> Any:
         """Start spot mowing for one or more center points."""
         normalized = [
-            [int(point[0]), int(point[1])]
-            for point in points
-            if len(point) >= 2
+            [int(point[0]), int(point[1])] for point in points if len(point) >= 2
         ]
         return await asyncio.to_thread(self._sync_clean_spots, normalized)
 
@@ -338,6 +392,7 @@ class DreameLawnMowerClient:
         *,
         refresh: bool = False,
         include_cloud: bool = True,
+        include_debug_ota_catalog: bool = False,
         language: str | None = "en",
     ) -> DreameLawnMowerFirmwareUpdateSupport:
         """Return firmware/update evidence without guessing availability."""
@@ -345,6 +400,7 @@ class DreameLawnMowerClient:
             self._sync_get_firmware_update_support,
             refresh,
             include_cloud,
+            include_debug_ota_catalog,
             language,
         )
 
@@ -598,6 +654,42 @@ class DreameLawnMowerClient:
             include_raw,
         )
 
+    async def async_get_voice_settings(
+        self,
+        *,
+        include_raw: bool = False,
+    ) -> dict[str, Any]:
+        """Return read-only voice and language settings from app actions."""
+        return await asyncio.to_thread(
+            self._sync_get_voice_settings,
+            include_raw,
+        )
+
+    async def async_set_voice_language(self, voice_language: int) -> dict[str, Any]:
+        """Set the mower voice language by app language-pack index."""
+        return await asyncio.to_thread(
+            self._sync_set_voice_language,
+            int(voice_language),
+        )
+
+    async def async_set_voice_volume(self, volume: int) -> dict[str, Any]:
+        """Set the mower voice volume from 0 to 100."""
+        return await asyncio.to_thread(
+            self._sync_set_voice_volume,
+            int(volume),
+        )
+
+    async def async_set_voice_prompts(
+        self,
+        prompts: Sequence[int | bool],
+    ) -> dict[str, Any]:
+        """Set the four mower voice prompt toggles."""
+        normalized = _normalize_voice_prompt_flags(prompts)
+        return await asyncio.to_thread(
+            self._sync_set_voice_prompts,
+            normalized,
+        )
+
     async def async_get_cloud_device_info(
         self,
         *,
@@ -621,6 +713,27 @@ class DreameLawnMowerClient:
     ) -> Any:
         """Fetch read-only cloud OTC metadata from the mobile app endpoint."""
         return await asyncio.to_thread(self._sync_get_cloud_device_otc_info, language)
+
+    async def async_get_cloud_firmware_check(
+        self,
+        *,
+        language: str | None = None,
+        include_raw: bool = False,
+    ) -> dict[str, Any]:
+        """Fetch the app-approved mower firmware check payload."""
+        return await asyncio.to_thread(
+            self._sync_get_cloud_firmware_check,
+            language,
+            include_raw,
+        )
+
+    async def async_approve_firmware_update(
+        self,
+        *,
+        language: str | None = None,
+    ) -> dict[str, Any]:
+        """Trigger the cloud firmware approval step used by the mobile app."""
+        return await asyncio.to_thread(self._sync_approve_firmware_update, language)
 
     async def async_get_app_plugin_version(
         self,
@@ -685,6 +798,21 @@ class DreameLawnMowerClient:
     ) -> dict[str, Any]:
         """Fetch and decode OTA state from batch device data."""
         return await asyncio.to_thread(self._sync_get_batch_ota_info, include_raw)
+
+    async def async_get_debug_ota_catalog(
+        self,
+        *,
+        model_name: str | None = None,
+        current_version: str | None = None,
+        include_raw: bool = False,
+    ) -> dict[str, Any]:
+        """Fetch the public debug/manual OTA catalog for the mower model."""
+        return await asyncio.to_thread(
+            self._sync_get_debug_ota_catalog,
+            model_name,
+            current_version,
+            include_raw,
+        )
 
     async def async_get_app_map_objects(
         self,
@@ -1032,6 +1160,7 @@ class DreameLawnMowerClient:
         self,
         refresh: bool = False,
         include_cloud: bool = True,
+        include_debug_ota_catalog: bool = False,
         language: str | None = "en",
     ) -> DreameLawnMowerFirmwareUpdateSupport:
         if refresh:
@@ -1041,10 +1170,20 @@ class DreameLawnMowerClient:
 
         cloud_device_info = None
         cloud_device_list_page = None
+        cloud_firmware_check = None
+        batch_ota_info = None
+        debug_ota_catalog = None
         cloud_error = None
         if include_cloud:
             try:
                 cloud_device_info = self._sync_get_cloud_device_info(language)
+            except DreameLawnMowerConnectionError as err:
+                cloud_error = _merge_error_text(
+                    cloud_error,
+                    "cloud_device_info",
+                    str(err),
+                )
+            try:
                 cloud_device_list_page = self._sync_get_cloud_device_list_page(
                     current=1,
                     size=20,
@@ -1053,12 +1192,48 @@ class DreameLawnMowerClient:
                     shared_status=None,
                 )
             except DreameLawnMowerConnectionError as err:
-                cloud_error = str(err)
+                cloud_error = _merge_error_text(
+                    cloud_error,
+                    "cloud_device_list_page",
+                    str(err),
+                )
+            try:
+                cloud_firmware_check = self._sync_get_cloud_firmware_check(language)
+            except DreameLawnMowerConnectionError as err:
+                cloud_error = _merge_error_text(
+                    cloud_error,
+                    "cloud_firmware_check",
+                    str(err),
+                )
+        try:
+            batch_ota_info = self._sync_get_batch_ota_info()
+        except DreameLawnMowerConnectionError as err:
+            cloud_error = _merge_error_text(
+                cloud_error,
+                "batch_ota_info",
+                str(err),
+            )
+        if include_debug_ota_catalog:
+            try:
+                debug_ota_catalog = self._sync_get_debug_ota_catalog(
+                    current_version=_as_optional_text(
+                        getattr(getattr(device, "info", None), "firmware_version", None)
+                    )
+                )
+            except DreameLawnMowerConnectionError as err:
+                debug_ota_catalog = {
+                    "source": "debug_ota_catalog",
+                    "available": False,
+                    "errors": [{"stage": "fetch", "error": str(err)}],
+                }
 
         return firmware_update_support_from_device(
             device,
             cloud_device_info=cloud_device_info,
             cloud_device_list_page=cloud_device_list_page,
+            cloud_firmware_check=cloud_firmware_check,
+            batch_ota_info=batch_ota_info,
+            debug_ota_catalog=debug_ota_catalog,
             cloud_error=cloud_error,
         )
 
@@ -1219,6 +1394,7 @@ class DreameLawnMowerClient:
                 payload["firmware_update"] = self._sync_get_firmware_update_support(
                     refresh=False,
                     include_cloud=True,
+                    include_debug_ota_catalog=True,
                     language=language,
                 ).as_dict()
             except Exception as err:  # noqa: BLE001 - probe snapshots keep evidence
@@ -1324,9 +1500,7 @@ class DreameLawnMowerClient:
         except (DeviceException, InvalidActionException) as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
         if result is None:
-            raise DreameLawnMowerConnectionError(
-                "GET_PHOTO_INFO returned no response."
-            )
+            raise DreameLawnMowerConnectionError("GET_PHOTO_INFO returned no response.")
         return result
 
     def _sync_probe_camera_sources(
@@ -1481,8 +1655,7 @@ class DreameLawnMowerClient:
         status = getattr(device, "status", None)
         snapshot = snapshot_from_device(self._descriptor, device)
         raw_running = bool(
-            snapshot.raw_attributes.get("running")
-            or getattr(status, "running", False)
+            snapshot.raw_attributes.get("running") or getattr(status, "running", False)
         )
         if snapshot.mowing or snapshot.returning or raw_running:
             raise DreameLawnMowerConnectionError(
@@ -1656,11 +1829,18 @@ class DreameLawnMowerClient:
             details["runtime_track_segment_count"] = len(runtime_track_segments)
             details["runtime_track_point_count"] = runtime_track_point_count
             details["runtime_track_length_m"] = round(
-                sum(_coordinate_path_length_m(segment) for segment in runtime_track_segments),
+                sum(
+                    _coordinate_path_length_m(segment)
+                    for segment in runtime_track_segments
+                ),
                 2,
             )
-            details["runtime_pose_x"] = getattr(runtime_blob, "candidate_runtime_pose_x", None)
-            details["runtime_pose_y"] = getattr(runtime_blob, "candidate_runtime_pose_y", None)
+            details["runtime_pose_x"] = getattr(
+                runtime_blob, "candidate_runtime_pose_x", None
+            )
+            details["runtime_pose_y"] = getattr(
+                runtime_blob, "candidate_runtime_pose_y", None
+            )
             details["runtime_heading_deg"] = getattr(
                 runtime_blob,
                 "candidate_runtime_heading_deg",
@@ -1670,7 +1850,8 @@ class DreameLawnMowerClient:
             if summary is not None:
                 summary = replace(
                     summary,
-                    path_point_count=summary.path_point_count + runtime_track_point_count,
+                    path_point_count=summary.path_point_count
+                    + runtime_track_point_count,
                 )
         try:
             image_png = render_vector_map_png(
@@ -1884,6 +2065,74 @@ class DreameLawnMowerClient:
             return None
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
+
+    def _sync_get_cloud_firmware_check(
+        self,
+        language: str | None = None,
+        include_raw: bool = False,
+    ) -> dict[str, Any]:
+        cloud = self._sync_get_cloud_protocol()
+
+        try:
+            raw = cloud.check_device_version(language)
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+
+        result = _normalize_cloud_firmware_check(
+            raw,
+            current_version=_as_optional_text(
+                getattr(
+                    getattr(self._ensure_device(), "info", None),
+                    "firmware_version",
+                    None,
+                )
+            ),
+        )
+        if include_raw:
+            result["raw"] = _json_safe(raw, max_depth=4)
+        return result
+
+    def _sync_approve_firmware_update(
+        self,
+        language: str | None = None,
+    ) -> dict[str, Any]:
+        cloud = self._sync_get_cloud_protocol()
+
+        try:
+            raw = cloud.manual_firmware_update(language)
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+
+        result: dict[str, Any] = {
+            "source": "cloud_manual_firmware_update",
+            "available": isinstance(raw, Mapping),
+            "accepted": False,
+            "success": False,
+        }
+        if isinstance(raw, Mapping):
+            code = raw.get("code")
+            success = raw.get("success")
+            data = raw.get("data")
+            inner_code = data.get("code") if isinstance(data, Mapping) else None
+            inner_success = data.get("success") if isinstance(data, Mapping) else None
+            accepted = bool(success) if isinstance(success, bool) else code == 0
+            result.update(
+                {
+                    "code": code,
+                    "accepted": accepted,
+                    "success": accepted,
+                    "msg": _as_optional_text(raw.get("msg")),
+                    "data": _json_safe(data, max_depth=3),
+                    "wrapper_success": success if isinstance(success, bool) else None,
+                    "inner_code": inner_code,
+                    "inner_success": (
+                        inner_success if isinstance(inner_success, bool) else None
+                    ),
+                }
+            )
+        else:
+            result["errors"] = [{"stage": "response", "error": "invalid_response"}]
+        return result
 
     def _sync_get_app_plugin_version(
         self,
@@ -2153,7 +2402,9 @@ class DreameLawnMowerClient:
             for request in requests:
                 response = self._sync_call_app_action(request)
                 response_data = _app_action_data(response)
-                if isinstance(response_data, Mapping) and response_data.get("r") not in (
+                if isinstance(response_data, Mapping) and response_data.get(
+                    "r"
+                ) not in (
                     None,
                     0,
                 ):
@@ -2338,7 +2589,8 @@ class DreameLawnMowerClient:
                 ]
                 if not execute
                 else [
-                    "Preference write executed through the PRE/PREP request sequence after "
+                    "Preference write executed through the PRE/PREP request "
+                    "sequence after "
                     "explicit confirmation.",
                 ]
             ),
@@ -2349,7 +2601,9 @@ class DreameLawnMowerClient:
             for request in request_sequence:
                 response = self._sync_call_app_action(request)
                 response_data = _app_action_data(response)
-                if isinstance(response_data, Mapping) and response_data.get("r") not in (
+                if isinstance(response_data, Mapping) and response_data.get(
+                    "r"
+                ) not in (
                     None,
                     0,
                 ):
@@ -2546,6 +2800,48 @@ class DreameLawnMowerClient:
             }
         return decode_batch_ota_info(batch_data, include_raw=include_raw)
 
+    def _sync_get_debug_ota_catalog(
+        self,
+        model_name: str | None = None,
+        current_version: str | None = None,
+        include_raw: bool = False,
+    ) -> dict[str, Any]:
+        """Fetch the public debug/manual OTA catalog for the mower model."""
+        short_model = _debug_ota_model_name(model_name or self._descriptor.model)
+        if not short_model:
+            raise DreameLawnMowerConnectionError(
+                "Could not determine a short model name for the debug OTA catalog."
+            )
+
+        resolved_current_version = current_version
+        if resolved_current_version is None:
+            try:
+                device = self._sync_update_device()
+            except DreameLawnMowerConnectionError:
+                device = None
+            if device is not None:
+                resolved_current_version = _as_optional_text(
+                    getattr(getattr(device, "info", None), "firmware_version", None)
+                )
+
+        url = build_debug_ota_catalog_url(short_model)
+        try:
+            with urllib.request.urlopen(url, timeout=20) as response:
+                payload = json.load(response)
+        except Exception as err:  # noqa: BLE001 - network/protocol errors vary here
+            raise DreameLawnMowerConnectionError(
+                f"Debug OTA catalog fetch failed: {err}"
+            ) from err
+
+        result = normalize_debug_ota_catalog_payload(
+            payload,
+            model_name=short_model,
+            current_version=resolved_current_version,
+            include_raw=include_raw,
+        )
+        result["url"] = url
+        return result
+
     def _sync_get_weather_protection(
         self,
         include_raw: bool = False,
@@ -2611,6 +2907,135 @@ class DreameLawnMowerClient:
         result.update(_weather_protection_active_summary(result))
         return result
 
+    def _sync_get_voice_settings(
+        self,
+        include_raw: bool = False,
+    ) -> dict[str, Any]:
+        """Fetch read-only voice and language settings from CFG."""
+        result: dict[str, Any] = {
+            "source": "app_action_voice_settings",
+            "available": False,
+            "config_keys": ["LANG", "VOL", "VOICE"],
+            "errors": [],
+            "warnings": [],
+        }
+
+        try:
+            config_result = self._sync_call_app_action({"m": "g", "t": "CFG"})
+            config = _app_action_data(config_result)
+            if not isinstance(config, Mapping):
+                weather_result = self._sync_get_weather_protection(include_raw=True)
+                weather_raw_config = (
+                    weather_result.get("raw_config")
+                    if isinstance(weather_result, Mapping)
+                    else None
+                )
+                weather_data = _app_action_data(weather_raw_config)
+                if isinstance(weather_data, Mapping):
+                    config_result = weather_raw_config
+                    config = weather_data
+            if include_raw:
+                result["raw_config"] = _json_safe(config_result, max_depth=4)
+            if not isinstance(config, Mapping):
+                raise DreameLawnMowerConnectionError(
+                    f"CFG returned invalid voice config: {config_result}"
+                )
+            result["present_config_keys"] = [
+                key for key in result["config_keys"] if key in config
+            ]
+            result.update(_voice_settings_summary(config))
+            result["available"] = bool(result["present_config_keys"])
+        except Exception as err:  # noqa: BLE001 - diagnostic probe should return evidence
+            result["errors"].append({"stage": "config", "error": str(err)})
+
+        return result
+
+    def _sync_set_voice_language(self, voice_language: int) -> dict[str, Any]:
+        """Set the mower voice language and return the confirmed response."""
+        request = {
+            "m": "s",
+            "t": "LANG",
+            "d": {
+                "type": "voice",
+                "value": int(voice_language),
+            },
+        }
+        response = self._sync_call_app_action(request)
+        data = _app_action_data(response)
+        if not isinstance(data, Mapping):
+            raise DreameLawnMowerConnectionError(
+                f"LANG voice write returned invalid data: {response}"
+            )
+        confirmed_voice_language = _as_optional_int(data.get("voice"))
+        confirmed_text_language = _as_optional_int(data.get("text"))
+        return {
+            "source": "app_action_voice_settings_write",
+            "action": "set_voice_language",
+            "request": _json_safe(request, max_depth=4),
+            "response_data": _json_safe(response, max_depth=4),
+            "text_language_index": confirmed_text_language,
+            "voice_language_index": confirmed_voice_language,
+            "voice_language_name": VOICE_LANGUAGE_INDEX_TO_LABEL.get(
+                confirmed_voice_language
+            ),
+            "voice_language_code": VOICE_LANGUAGE_INDEX_TO_CODE.get(
+                confirmed_voice_language
+            ),
+        }
+
+    def _sync_set_voice_volume(self, volume: int) -> dict[str, Any]:
+        """Set the mower voice volume and return the confirmed response."""
+        if volume < 0 or volume > 100:
+            raise ValueError("volume must be between 0 and 100")
+        request = {
+            "m": "s",
+            "t": "VOL",
+            "d": {
+                "value": int(volume),
+            },
+        }
+        response = self._sync_call_app_action(request)
+        data = _app_action_data(response)
+        if not isinstance(data, Mapping):
+            raise DreameLawnMowerConnectionError(
+                f"VOL write returned invalid data: {response}"
+            )
+        return {
+            "source": "app_action_voice_settings_write",
+            "action": "set_voice_volume",
+            "request": _json_safe(request, max_depth=4),
+            "response_data": _json_safe(response, max_depth=4),
+            "volume": _as_optional_int(data.get("value")),
+        }
+
+    def _sync_set_voice_prompts(self, prompts: Sequence[int]) -> dict[str, Any]:
+        """Set the mower voice prompt flags and return the confirmed response."""
+        normalized = _normalize_voice_prompt_flags(prompts)
+        request = {
+            "m": "s",
+            "t": "VOICE",
+            "d": {
+                "value": normalized,
+            },
+        }
+        response = self._sync_call_app_action(request)
+        data = _app_action_data(response)
+        if not isinstance(data, Mapping):
+            raise DreameLawnMowerConnectionError(
+                f"VOICE write returned invalid data: {response}"
+            )
+        confirmed = _normalize_voice_prompt_flags(data.get("value"))
+        result = {
+            "source": "app_action_voice_settings_write",
+            "action": "set_voice_prompts",
+            "request": _json_safe(request, max_depth=4),
+            "response_data": _json_safe(response, max_depth=4),
+            "voice_prompts": confirmed,
+        }
+        for field_name, enabled in zip(VOICE_PROMPT_FIELDS, confirmed, strict=True):
+            result[field_name] = bool(enabled)
+        return result
+
     def _sync_get_app_schedule_text(
         self,
         *,
@@ -2668,8 +3093,7 @@ class DreameLawnMowerClient:
         try:
             map_list_result = self._sync_call_app_action({"m": "g", "t": "MAPL"})
             detected = [
-                entry["idx"]
-                for entry in _normalize_app_map_entries(map_list_result)
+                entry["idx"] for entry in _normalize_app_map_entries(map_list_result)
             ]
         except Exception:  # noqa: BLE001 - fall back to the two likely map slots
             detected = [0, 1]
@@ -2725,9 +3149,7 @@ class DreameLawnMowerClient:
                             chunk_size=chunk_size,
                         )
                     )
-                    payload_hash = hashlib.md5(
-                        payload_text.encode("utf-8")
-                    ).hexdigest()
+                    payload_hash = hashlib.md5(payload_text.encode("utf-8")).hexdigest()
                     parsed_payload = json.loads(payload_text)
                     hash_match = (
                         expected_hash == payload_hash
@@ -2960,7 +3382,7 @@ class DreameLawnMowerClient:
 
         all_entries: list[dict[str, Any]] = []
         for offset in range(0, len(normalized_keys), max(chunk_size, 1)):
-            chunk = normalized_keys[offset: offset + max(chunk_size, 1)]
+            chunk = normalized_keys[offset : offset + max(chunk_size, 1)]
             response = self._sync_get_cloud_properties(chunk)
             all_entries.extend(self._normalize_cloud_property_entries(response))
 
@@ -3074,9 +3496,7 @@ class DreameLawnMowerClient:
 
         try:
             text = (
-                content.decode("utf-8")
-                if isinstance(content, bytes)
-                else str(content)
+                content.decode("utf-8") if isinstance(content, bytes) else str(content)
             )
             result["payload"] = json.loads(text)
             result["fetched"] = True
@@ -3484,6 +3904,126 @@ def _as_optional_text(value: Any) -> str | None:
     return text or None
 
 
+def _parse_firmware_description(
+    value: Any,
+) -> tuple[str | None, bool, Mapping[str, Any] | None]:
+    text = _as_optional_text(value)
+    if text is None:
+        return None, False, None
+
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError):
+        return text, True, None
+
+    if isinstance(parsed, Mapping):
+        code = parsed.get("code")
+        success = parsed.get("success")
+        msg = _as_optional_text(parsed.get("msg"))
+        if (isinstance(success, bool) and not success) or (
+            isinstance(code, int) and code != 0
+        ):
+            return (
+                None,
+                False,
+                {
+                    "code": code,
+                    "success": success,
+                    "msg": msg,
+                },
+            )
+
+    return text, True, None
+
+
+def _normalize_cloud_firmware_check(
+    value: Any,
+    *,
+    current_version: str | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "source": "cloud_check_device_version",
+        "available": False,
+        "update_available": None,
+        "current_version": current_version,
+        "latest_version": None,
+        "firmware_type": None,
+        "force_update": None,
+        "status": None,
+        "changelog": None,
+        "changelog_available": False,
+    }
+    if not isinstance(value, Mapping):
+        result["errors"] = [{"stage": "response", "error": "invalid_response"}]
+        return result
+
+    code = value.get("code")
+    success = value.get("success")
+    if (isinstance(code, int) and code != 0) or (
+        isinstance(success, bool) and not success
+    ):
+        result["errors"] = [
+            {
+                "stage": "response",
+                "error": "cloud_error",
+                "code": code,
+                "success": success if isinstance(success, bool) else None,
+                "msg": _as_optional_text(value.get("msg")),
+            }
+        ]
+        return result
+
+    result["available"] = True
+    current_version_value = _as_optional_text(value.get("curVersion"))
+    if current_version_value is not None:
+        result["current_version"] = current_version_value
+
+    latest_version = _as_optional_text(value.get("newVersion"))
+    if latest_version is not None:
+        result["latest_version"] = latest_version
+
+    firmware_type = _as_optional_text(value.get("firmwareType"))
+    if firmware_type is not None:
+        result["firmware_type"] = firmware_type
+
+    force_update = value.get("force")
+    if isinstance(force_update, bool):
+        result["force_update"] = force_update
+
+    result["status"] = value.get("status")
+
+    has_new_firmware = value.get("hasNewFirmware")
+    if isinstance(has_new_firmware, bool):
+        result["update_available"] = has_new_firmware
+    elif (
+        latest_version is not None
+        and result["current_version"] is not None
+        and latest_version != result["current_version"]
+    ):
+        result["update_available"] = True
+
+    changelog, changelog_available, changelog_error = _parse_firmware_description(
+        value.get("description")
+    )
+    result["changelog"] = changelog
+    result["changelog_available"] = changelog_available
+    if changelog_error is not None:
+        result["changelog_error"] = dict(changelog_error)
+
+    return result
+
+
+def _merge_error_text(
+    existing: str | None,
+    stage: str,
+    error: str,
+) -> str:
+    entry = f"{stage}: {error}"
+    if existing:
+        return f"{existing}; {entry}"
+    return entry
+
+
 def _optional_bool(value: Any) -> bool | None:
     if value is None:
         return None
@@ -3573,11 +4113,7 @@ def _schedule_plan_overview(
             str | bytes | bytearray,
         ):
             week_items = [week for week in weeks if isinstance(week, Mapping)]
-        tasks = [
-            task
-            for week in week_items
-            for task in _schedule_week_tasks(week)
-        ]
+        tasks = [task for week in week_items for task in _schedule_week_tasks(week)]
         type_names = sorted(
             {
                 str(task["type_name"])
@@ -3652,11 +4188,7 @@ def _mowing_preference_map_overview(entry: Mapping[str, Any]) -> dict[str, Any]:
         "mode_name": entry.get("mode_name"),
         "area_count": entry.get("area_count"),
         "preference_count": len(
-            [
-                item
-                for item in entry.get("preferences", [])
-                if isinstance(item, Mapping)
-            ]
+            [item for item in entry.get("preferences", []) if isinstance(item, Mapping)]
         ),
     }
 
@@ -3683,9 +4215,7 @@ def _mowing_preference_overview(preference: Mapping[str, Any]) -> dict[str, Any]
         "cutter_position_name": preference.get("cutter_position_name"),
         "edge_mowing_num": preference.get("edge_mowing_num"),
         "obstacle_avoidance_enabled": preference.get("obstacle_avoidance_enabled"),
-        "obstacle_avoidance_height_cm": preference.get(
-            "obstacle_avoidance_height_cm"
-        ),
+        "obstacle_avoidance_height_cm": preference.get("obstacle_avoidance_height_cm"),
         "obstacle_avoidance_distance_cm": preference.get(
             "obstacle_avoidance_distance_cm"
         ),
@@ -3877,6 +4407,15 @@ def _batch_ota_keys() -> list[str]:
     ]
 
 
+def _debug_ota_model_name(model_name: Any) -> str | None:
+    text = _as_optional_text(model_name)
+    if not text:
+        return None
+    if "." in text:
+        text = text.rsplit(".", 1)[-1]
+    return text.lower()
+
+
 def _weather_protection_summary(config: Mapping[str, Any]) -> dict[str, Any]:
     summary: dict[str, Any] = {}
     weather_switch = _setting_bool(config.get("WRF"))
@@ -3900,11 +4439,7 @@ def _weather_protection_summary(config: Mapping[str, Any]) -> dict[str, Any]:
     if end_time is not None:
         summary["rain_protect_end_time"] = end_time
         summary["rain_protect_end_time_present"] = True
-    return {
-        key: value
-        for key, value in summary.items()
-        if value is not None
-    }
+    return {key: value for key, value in summary.items() if value is not None}
 
 
 def _weather_protection_active_summary(result: Mapping[str, Any]) -> dict[str, Any]:
@@ -3923,15 +4458,45 @@ def _weather_protection_active_summary(result: Mapping[str, Any]) -> dict[str, A
     return summary
 
 
+def _voice_settings_summary(config: Mapping[str, Any]) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    language = config.get("LANG")
+    if isinstance(language, Sequence) and not isinstance(
+        language,
+        str | bytes | bytearray,
+    ):
+        values = list(language)
+        text_language_index = _as_optional_int(values[0]) if len(values) > 0 else None
+        voice_language_index = _as_optional_int(values[1]) if len(values) > 1 else None
+        summary["text_language_index"] = text_language_index
+        summary["voice_language_index"] = voice_language_index
+        summary["voice_language_name"] = VOICE_LANGUAGE_INDEX_TO_LABEL.get(
+            voice_language_index
+        )
+        summary["voice_language_code"] = VOICE_LANGUAGE_INDEX_TO_CODE.get(
+            voice_language_index
+        )
+
+    volume = _as_optional_int(config.get("VOL"))
+    if volume is not None:
+        summary["volume"] = volume
+
+    if "VOICE" in config:
+        voice_prompts = _normalize_voice_prompt_flags(config.get("VOICE"))
+        summary["voice_prompts"] = voice_prompts
+        for field_name, enabled in zip(VOICE_PROMPT_FIELDS, voice_prompts, strict=True):
+            summary[field_name] = bool(enabled)
+
+    return summary
+
+
 def _app_maps_view_metadata(app_maps: Mapping[str, Any]) -> dict[str, Any]:
     maps = app_maps.get("maps") if isinstance(app_maps, Mapping) else None
     if not isinstance(maps, Sequence) or isinstance(maps, str | bytes | bytearray):
         maps = []
 
     entries = [
-        _app_map_entry_view_metadata(item)
-        for item in maps
-        if isinstance(item, Mapping)
+        _app_map_entry_view_metadata(item) for item in maps if isinstance(item, Mapping)
     ]
     objects = _app_map_objects_view_metadata(app_maps.get("objects"))
     return {
@@ -4003,11 +4568,7 @@ def _app_map_entry_view_metadata(entry: Mapping[str, Any]) -> dict[str, Any]:
         "cut_relation_count": summary.get("cut_relation_count"),
         "error": entry.get("error"),
     }
-    return {
-        key: value
-        for key, value in result.items()
-        if value not in (None, [], {})
-    }
+    return {key: value for key, value in result.items() if value not in (None, [], {})}
 
 
 def _app_map_view_summary(
@@ -4183,7 +4744,12 @@ def _runtime_blob_position(
         return None
     x = getattr(blob, "candidate_runtime_pose_x", None)
     y = getattr(blob, "candidate_runtime_pose_y", None)
-    if isinstance(x, int) and not isinstance(x, bool) and isinstance(y, int) and not isinstance(y, bool):
+    if (
+        isinstance(x, int)
+        and not isinstance(x, bool)
+        and isinstance(y, int)
+        and not isinstance(y, bool)
+    ):
         return (x, y)
     return None
 
@@ -4252,9 +4818,7 @@ def _camera_feature_advertised(
     video_status: Any,
 ) -> bool:
     permit_tokens = {
-        item.strip().casefold()
-        for item in (permit or "").split(",")
-        if item.strip()
+        item.strip().casefold() for item in (permit or "").split(",") if item.strip()
     }
     return bool(
         camera_streaming
@@ -4532,6 +5096,28 @@ def _json_safe(value: Any, *, max_depth: int = 4) -> Any:
     if name is not None:
         return str(name).lower()
     return str(value)
+
+
+def _as_optional_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_voice_prompt_flags(value: Any) -> list[int]:
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes | bytearray):
+        return [0, 0, 0, 0]
+    normalized: list[int] = []
+    for item in list(value)[:4]:
+        normalized.append(1 if bool(item) else 0)
+    if len(normalized) < 4:
+        normalized.extend([0] * (4 - len(normalized)))
+    return normalized
 
 
 def _validate_remote_control_step(*, rotation: int, velocity: int) -> None:

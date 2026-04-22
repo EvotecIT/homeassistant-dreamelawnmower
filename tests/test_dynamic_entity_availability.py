@@ -45,10 +45,10 @@ from custom_components.dreame_lawn_mower.sensor import (
     DreameLawnMowerRuntimeTrackLengthSensor,
     DreameLawnMowerRuntimeTrackPointCountSensor,
     DreameLawnMowerRuntimeTrackSegmentCountSensor,
-    DreameLawnMowerSelectedMapSensor,
     DreameLawnMowerSelectedMapPreferenceAreaCountSensor,
     DreameLawnMowerSelectedMapPreferenceCountSensor,
     DreameLawnMowerSelectedMapPreferenceModeSensor,
+    DreameLawnMowerSelectedMapSensor,
     DreameLawnMowerSelectedMowingActionSensor,
     DreameLawnMowerSelectedTargetSensor,
     DreameLawnMowerSelectedZoneDirectionModeSensor,
@@ -437,8 +437,9 @@ def test_bluetooth_connected_binary_sensor_uses_cached_cloud_state() -> None:
     }
 
 
-def test_bluetooth_connected_binary_sensor_is_unavailable_without_cached_value(
-    ) -> None:
+def test_bluetooth_connected_binary_sensor_is_unavailable_without_cached_value() -> (
+    None
+):
     entity = object.__new__(DreameLawnMowerBluetoothConnectedBinarySensor)
     entity.coordinator = SimpleNamespace(
         data=SimpleNamespace(),
@@ -1806,33 +1807,23 @@ def test_selected_zone_preference_sensors_expose_read_only_zone_settings() -> No
         },
     )
 
-    height_entity = object.__new__(
-        DreameLawnMowerSelectedZoneMowingHeightSensor
-    )
+    height_entity = object.__new__(DreameLawnMowerSelectedZoneMowingHeightSensor)
     height_entity.coordinator = coordinator
-    efficiency_entity = object.__new__(
-        DreameLawnMowerSelectedZoneEfficiencyModeSensor
-    )
+    efficiency_entity = object.__new__(DreameLawnMowerSelectedZoneEfficiencyModeSensor)
     efficiency_entity.coordinator = coordinator
-    direction_entity = object.__new__(
-        DreameLawnMowerSelectedZoneDirectionModeSensor
-    )
+    direction_entity = object.__new__(DreameLawnMowerSelectedZoneDirectionModeSensor)
     direction_entity.coordinator = coordinator
     avoidance_entity = object.__new__(
         DreameLawnMowerSelectedZoneObstacleAvoidanceSensor
     )
     avoidance_entity.coordinator = coordinator
-    distance_entity = object.__new__(
-        DreameLawnMowerSelectedZoneObstacleDistanceSensor
-    )
+    distance_entity = object.__new__(DreameLawnMowerSelectedZoneObstacleDistanceSensor)
     distance_entity.coordinator = coordinator
     height_limit_entity = object.__new__(
         DreameLawnMowerSelectedZoneObstacleHeightSensor
     )
     height_limit_entity.coordinator = coordinator
-    classes_entity = object.__new__(
-        DreameLawnMowerSelectedZoneObstacleClassSensor
-    )
+    classes_entity = object.__new__(DreameLawnMowerSelectedZoneObstacleClassSensor)
     classes_entity.coordinator = coordinator
 
     assert height_entity.available is True

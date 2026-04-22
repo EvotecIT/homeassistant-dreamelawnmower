@@ -138,7 +138,10 @@ def current_contour_entries(
 
     result: list[dict[str, Any]] = []
     for map_entry in maps:
-        if not isinstance(map_entry, Mapping) or map_entry.get("map_index") != current_idx:
+        if (
+            not isinstance(map_entry, Mapping)
+            or map_entry.get("map_index") != current_idx
+        ):
             continue
         contour_ids = map_entry.get("contour_ids")
         if not isinstance(contour_ids, Sequence) or isinstance(
@@ -264,7 +267,9 @@ def map_entries(
 
 def mowing_action_label(action: str) -> str:
     """Return the display label for a mowing action key."""
-    return MOWING_ACTION_LABELS.get(action, MOWING_ACTION_LABELS[MOWING_ACTION_ALL_AREA])
+    return MOWING_ACTION_LABELS.get(
+        action, MOWING_ACTION_LABELS[MOWING_ACTION_ALL_AREA]
+    )
 
 
 def map_label(map_index: int, name: str | None = None) -> str:

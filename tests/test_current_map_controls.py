@@ -111,7 +111,7 @@ def _batch_device_data() -> dict:
                         },
                         {"area_id": 202, "map_index": 1},
                     ],
-                }
+                },
             ]
         }
     }
@@ -999,7 +999,9 @@ def test_lawn_mower_plan_map_preference_mode_update_uses_selected_map() -> None:
     coordinator.async_request_refresh.assert_not_awaited()
 
 
-def test_lawn_mower_plan_map_preference_mode_update_can_execute_confirmed_write() -> None:
+def test_lawn_mower_plan_map_preference_mode_update_can_execute_confirmed_write() -> (
+    None
+):
     client = SimpleNamespace(
         async_plan_app_mowing_preference_update=AsyncMock(
             return_value={
