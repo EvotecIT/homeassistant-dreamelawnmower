@@ -6,6 +6,7 @@ from .dreame_lawn_mower_client import (
     DreameLawnMowerConnectionError,
     DreameLawnMowerDescriptor,
     DreameLawnMowerError,
+    DreameLawnMowerFirmwareUpdateSupport,
     DreameLawnMowerSnapshot,
     DreameLawnMowerTwoFactorRequiredError,
 )
@@ -16,7 +17,7 @@ __all__ = [
     "DreameLawnMowerConnectionError",
     "DreameLawnMowerDescriptor",
     "DreameLawnMowerError",
+    "DreameLawnMowerFirmwareUpdateSupport",
     "DreameLawnMowerSnapshot",
     "DreameLawnMowerTwoFactorRequiredError",
 ]
-

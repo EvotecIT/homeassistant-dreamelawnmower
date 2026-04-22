@@ -1155,3 +1155,80 @@ def test_summarize_payload_includes_task_status_probe_summary() -> None:
         ],
         "error_count": 0,
     }
+
+
+def test_summarize_payload_includes_debug_catalog_firmware_summary() -> None:
+    payload = {
+        "firmware_update": {
+            "current_version": "4.3.6_0320",
+            "update_available": True,
+            "debug_catalog_available": True,
+            "debug_catalog_current_version_present": False,
+            "debug_catalog_changelog_available": False,
+            "debug_catalog_latest_release_candidates": [
+                {
+                    "track": "BUILD",
+                    "latest_release_version": "4.3.6_0562",
+                },
+                {
+                    "track": "PREBUILD",
+                    "latest_release_version": "4.3.6_0550",
+                },
+            ],
+            "warnings": ["plugin_force_update_conflict"],
+            "reason": (
+                "Batch OTA info reports that a mower firmware update is available."
+            ),
+        }
+    }
+
+    assert summarize_payload(payload) == {
+        "firmware_update": {
+            "current_version": "4.3.6_0320",
+            "update_available": True,
+            "debug_catalog_available": True,
+            "debug_catalog_current_version_present": False,
+            "debug_catalog_changelog_available": False,
+            "debug_catalog_latest_release_versions": [
+                "4.3.6_0562",
+                "4.3.6_0550",
+            ],
+            "warnings": ["plugin_force_update_conflict"],
+            "reason": (
+                "Batch OTA info reports that a mower firmware update is available."
+            ),
+        }
+    }
+
+
+def test_summarize_payload_includes_cloud_firmware_check_summary() -> None:
+    payload = {
+        "firmware_update": {
+            "current_version": "4.3.6_0320",
+            "latest_version": "4.3.6_0447",
+            "update_available": True,
+            "cloud_check_available": True,
+            "cloud_check_update_available": True,
+            "release_summary_available": False,
+            "warnings": [],
+            "reason": (
+                "Cloud checkDeviceVersion and batch OTA info both report that a "
+                "mower firmware update is available."
+            ),
+        }
+    }
+
+    assert summarize_payload(payload) == {
+        "firmware_update": {
+            "current_version": "4.3.6_0320",
+            "latest_version": "4.3.6_0447",
+            "update_available": True,
+            "cloud_check_available": True,
+            "cloud_check_update_available": True,
+            "release_summary_available": False,
+            "reason": (
+                "Cloud checkDeviceVersion and batch OTA info both report that a "
+                "mower firmware update is available."
+            ),
+        }
+    }

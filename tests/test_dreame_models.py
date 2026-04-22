@@ -884,6 +884,184 @@ def test_firmware_update_support_marks_update_state() -> None:
     assert support.reason == "Mower reports an update-related state."
 
 
+def test_firmware_update_support_uses_verified_batch_ota_signal() -> None:
+    device = _FakeDevice()
+
+    support = firmware_update_support_from_device(
+        device,
+        cloud_device_info={
+            "ver": "4.3.6_0320",
+            "deviceInfo": {"pluginForceUpdate": False},
+        },
+        batch_ota_info={
+            "source": "batch_device_data_ota_info",
+            "available": True,
+            "update_available": True,
+            "auto_upgrade_enabled": False,
+            "ota_status": 0,
+        },
+    )
+
+    assert support.update_available is True
+    assert support.batch_ota_available is True
+    assert support.auto_upgrade_enabled is False
+    assert support.ota_status == 0
+    assert support.reason == (
+        "Batch OTA info reports that a mower firmware update is available."
+    )
+    assert support.candidate_update_fields["batch_ota_info.update_available"] is True
+    assert (
+        support.candidate_update_fields["batch_ota_info.auto_upgrade_enabled"]
+        is False
+    )
+    assert support.candidate_update_fields["batch_ota_info.ota_status"] == 0
+    assert support.evidence["batch_ota_info"] == {
+        "source": "batch_device_data_ota_info",
+        "available": True,
+        "update_available": True,
+        "auto_upgrade_enabled": False,
+        "ota_status": 0,
+    }
+    assert support.plugin_force_update_sources == {
+        "cached_device_info": True,
+        "cloud_device_info": False,
+    }
+    assert support.warnings == ("plugin_force_update_conflict",)
+
+
+def test_firmware_update_support_uses_cloud_firmware_check_target() -> None:
+    device = _FakeDevice()
+
+    support = firmware_update_support_from_device(
+        device,
+        cloud_firmware_check={
+            "source": "cloud_check_device_version",
+            "available": True,
+            "update_available": True,
+            "current_version": "4.3.6_0320",
+            "latest_version": "4.3.6_0447",
+            "firmware_type": "PLATFORM",
+            "force_update": False,
+            "status": 1,
+            "changelog": None,
+            "changelog_available": False,
+            "changelog_error": {
+                "code": 10005,
+                "msg": "missing required request parameter: lang",
+                "success": False,
+            },
+        },
+        batch_ota_info={
+            "source": "batch_device_data_ota_info",
+            "available": True,
+            "update_available": True,
+            "auto_upgrade_enabled": False,
+            "ota_status": 0,
+        },
+    )
+
+    assert support.update_available is True
+    assert support.cloud_check_available is True
+    assert support.cloud_check_update_available is True
+    assert support.latest_version == "4.3.6_0447"
+    assert support.release_summary is None
+    assert support.release_summary_available is False
+    assert support.reason == (
+        "Cloud checkDeviceVersion and batch OTA info both report that a mower "
+        "firmware update is available."
+    )
+    assert support.candidate_update_fields["cloud_firmware_check.latest_version"] == (
+        "4.3.6_0447"
+    )
+    assert support.evidence["cloud_firmware_check"]["firmware_type"] == "PLATFORM"
+    assert support.evidence["cloud_firmware_check"]["changelog_available"] is False
+
+
+def test_firmware_update_support_uses_batch_ota_no_update_signal() -> None:
+    device = _FakeDevice()
+
+    support = firmware_update_support_from_device(
+        device,
+        batch_ota_info={
+            "source": "batch_device_data_ota_info",
+            "available": True,
+            "update_available": False,
+            "auto_upgrade_enabled": True,
+            "ota_status": 1,
+        },
+    )
+
+    assert support.update_available is False
+    assert support.batch_ota_available is True
+    assert support.auto_upgrade_enabled is True
+    assert support.ota_status == 1
+    assert support.reason == (
+        "Batch OTA info reports that no mower firmware update is available."
+    )
+
+
+def test_firmware_update_support_tracks_debug_catalog_candidates() -> None:
+    device = _FakeDevice()
+
+    support = firmware_update_support_from_device(
+        device,
+        batch_ota_info={
+            "source": "batch_device_data_ota_info",
+            "available": True,
+            "update_available": True,
+            "auto_upgrade_enabled": False,
+            "ota_status": 0,
+        },
+        debug_ota_catalog={
+            "source": "debug_ota_catalog",
+            "available": True,
+            "model_name": "g2408",
+            "current_version": "4.3.6_0320",
+            "current_version_present": False,
+            "changelog_available": False,
+            "latest_release_candidates": [
+                {
+                    "track": "BUILD",
+                    "latest_release_version": "4.3.6_0562",
+                },
+                {
+                    "track": "PREBUILD",
+                    "latest_release_version": "4.3.6_0550",
+                },
+            ],
+            "warnings": [
+                "debug_catalog_unverified",
+                "debug_catalog_not_device_approved",
+                "debug_catalog_has_no_changelog",
+            ],
+        },
+    )
+
+    assert support.update_available is True
+    assert support.debug_catalog_available is True
+    assert support.debug_catalog_current_version_present is False
+    assert support.debug_catalog_changelog_available is False
+    assert support.debug_catalog_latest_release_candidates == (
+        {
+            "track": "BUILD",
+            "latest_release_version": "4.3.6_0562",
+        },
+        {
+            "track": "PREBUILD",
+            "latest_release_version": "4.3.6_0550",
+        },
+    )
+    assert (
+        support.candidate_update_fields[
+            "debug_ota_catalog.latest_release_candidates[0].latest_release_version"
+        ]
+        == "4.3.6_0562"
+    )
+    assert support.evidence["debug_ota_catalog"]["model_name"] == "g2408"
+    assert support.evidence["debug_ota_catalog"]["current_version_present"] is False
+    assert support.evidence["debug_ota_catalog"]["changelog_available"] is False
+
+
 def test_firmware_update_support_summarizes_root_records() -> None:
     device = _FakeDevice()
 

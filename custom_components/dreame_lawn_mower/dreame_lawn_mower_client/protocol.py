@@ -413,6 +413,29 @@ class DreameMowerDreameHomeCloudProtocol:
             return response["data"]
         return None
 
+    def check_device_version(self, lang: str | None = None) -> Any:
+        params = {"did": self._did}
+        if lang:
+            params["lang"] = lang
+
+        response = self.request(
+            f"{self.get_api_url()}/dreame-user-iot/iotuserbind/checkDeviceVersion",
+            json.dumps(params, separators=(",", ":")),
+        )
+        if response and response.get("code") == 0 and "data" in response:
+            return response["data"]
+        return response
+
+    def manual_firmware_update(self, lang: str | None = None) -> Any:
+        params = {"did": self._did}
+        if lang:
+            params["lang"] = lang
+
+        return self.request(
+            f"{self.get_api_url()}/dreame-user-iot/iotuserbind/manualFirmwareUpdate",
+            json.dumps(params, separators=(",", ":")),
+        )
+
     def get_device_otc_info(self, lang: str | None = None) -> Any:
         params = {"did": self._did}
         if lang:

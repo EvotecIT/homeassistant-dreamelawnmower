@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -261,8 +261,11 @@ class DreameLawnMowerFirmwareUpdateSupport:
     """Read-only firmware/update evidence from device and cloud metadata."""
 
     current_version: str | None = None
+    latest_version: str | None = None
     hardware_version: str | None = None
     cloud_update_time: str | None = None
+    release_summary: str | None = None
+    release_summary_available: bool | None = None
     latest_status: int | str | None = None
     plugin_force_update: bool | None = None
     plugin_force_update_sources: Mapping[str, bool] = field(default_factory=dict)
@@ -270,6 +273,17 @@ class DreameLawnMowerFirmwareUpdateSupport:
     firmware_develop_type: str | None = None
     device_info_release_at: str | None = None
     device_info_updated_at: str | None = None
+    cloud_check_available: bool | None = None
+    cloud_check_update_available: bool | None = None
+    batch_ota_available: bool | None = None
+    auto_upgrade_enabled: bool | None = None
+    ota_status: int | str | None = None
+    debug_catalog_available: bool | None = None
+    debug_catalog_current_version_present: bool | None = None
+    debug_catalog_changelog_available: bool | None = None
+    debug_catalog_latest_release_candidates: Sequence[Mapping[str, Any]] = field(
+        default_factory=tuple
+    )
     update_state: str | None = None
     update_available: bool | None = None
     cloud_error: str | None = None
@@ -758,6 +772,9 @@ def firmware_update_support_from_device(
     *,
     cloud_device_info: Mapping[str, Any] | None = None,
     cloud_device_list_page: Mapping[str, Any] | None = None,
+    cloud_firmware_check: Mapping[str, Any] | None = None,
+    batch_ota_info: Mapping[str, Any] | None = None,
+    debug_ota_catalog: Mapping[str, Any] | None = None,
     cloud_error: str | None = None,
 ) -> DreameLawnMowerFirmwareUpdateSupport:
     """Build firmware/update evidence without guessing OTA availability."""
@@ -799,6 +816,53 @@ def firmware_update_support_from_device(
         evidence["cloud_device_list_page"] = _compact_mapping_evidence(
             cloud_device_list_page
         )
+    if cloud_firmware_check is not None:
+        evidence["cloud_firmware_check"] = {
+            key: _compact_update_candidate_value(cloud_firmware_check.get(key))
+            for key in (
+                "source",
+                "available",
+                "update_available",
+                "current_version",
+                "latest_version",
+                "firmware_type",
+                "force_update",
+                "status",
+                "changelog",
+                "changelog_available",
+                "changelog_error",
+                "errors",
+            )
+            if key in cloud_firmware_check
+        }
+    if batch_ota_info is not None:
+        evidence["batch_ota_info"] = {
+            key: batch_ota_info.get(key)
+            for key in (
+                "source",
+                "available",
+                "update_available",
+                "auto_upgrade_enabled",
+                "ota_status",
+            )
+            if key in batch_ota_info
+        }
+    if debug_ota_catalog is not None:
+        evidence["debug_ota_catalog"] = {
+            key: _compact_update_candidate_value(debug_ota_catalog.get(key))
+            for key in (
+                "source",
+                "available",
+                "model_name",
+                "current_version",
+                "current_version_present",
+                "changelog_available",
+                "latest_release_candidates",
+                "warnings",
+                "errors",
+            )
+            if key in debug_ota_catalog
+        }
 
     candidate_update_fields = _collect_update_candidate_fields(
         {
@@ -806,6 +870,9 @@ def firmware_update_support_from_device(
             "deviceInfo": device_info,
             "cloud_device_info": cloud_device_info,
             "cloud_device_list_page": cloud_device_list_page,
+            "cloud_firmware_check": cloud_firmware_check,
+            "batch_ota_info": batch_ota_info,
+            "debug_ota_catalog": debug_ota_catalog,
         }
     )
 
@@ -825,8 +892,91 @@ def firmware_update_support_from_device(
         if len(unique_plugin_values) > 1:
             warnings.append("plugin_force_update_conflict")
 
+    batch_ota_available = None
+    auto_upgrade_enabled = None
+    ota_status = None
+    latest_version = None
+    release_summary = None
+    release_summary_available = None
+    cloud_check_available = None
+    cloud_check_update_available = None
+    debug_catalog_available = None
+    debug_catalog_current_version_present = None
+    debug_catalog_changelog_available = None
+    debug_catalog_latest_release_candidates: tuple[Mapping[str, Any], ...] = ()
+    update_available = None
+    if isinstance(cloud_firmware_check, Mapping):
+        available = cloud_firmware_check.get("available")
+        if isinstance(available, bool):
+            cloud_check_available = available
+
+        check_update_available = cloud_firmware_check.get("update_available")
+        if isinstance(check_update_available, bool):
+            cloud_check_update_available = check_update_available
+            update_available = check_update_available
+
+        latest_version = _as_optional_str(cloud_firmware_check.get("latest_version"))
+        release_summary = _as_optional_str(cloud_firmware_check.get("changelog"))
+
+        changelog_available = cloud_firmware_check.get("changelog_available")
+        if isinstance(changelog_available, bool):
+            release_summary_available = changelog_available
+
+    if isinstance(batch_ota_info, Mapping):
+        available = batch_ota_info.get("available")
+        if isinstance(available, bool):
+            batch_ota_available = available
+
+        auto_upgrade = batch_ota_info.get("auto_upgrade_enabled")
+        if isinstance(auto_upgrade, bool):
+            auto_upgrade_enabled = auto_upgrade
+
+        ota_status = batch_ota_info.get("ota_status")
+        batch_update_available = batch_ota_info.get("update_available")
+        if isinstance(batch_update_available, bool) and update_available is None:
+            update_available = batch_update_available
+    if isinstance(debug_ota_catalog, Mapping):
+        available = debug_ota_catalog.get("available")
+        if isinstance(available, bool):
+            debug_catalog_available = available
+
+        current_version_present = debug_ota_catalog.get("current_version_present")
+        if isinstance(current_version_present, bool):
+            debug_catalog_current_version_present = current_version_present
+
+        changelog_available = debug_ota_catalog.get("changelog_available")
+        if isinstance(changelog_available, bool):
+            debug_catalog_changelog_available = changelog_available
+
+        latest_candidates = debug_ota_catalog.get("latest_release_candidates")
+        if isinstance(latest_candidates, Sequence) and not isinstance(
+            latest_candidates, str | bytes | bytearray
+        ):
+            debug_catalog_latest_release_candidates = tuple(
+                item for item in latest_candidates if isinstance(item, Mapping)
+            )
+
     reason = "No verified mower firmware update availability signal was found."
-    if "plugin_force_update_conflict" in warnings:
+    if cloud_check_update_available is True and batch_ota_info is not None:
+        reason = (
+            "Cloud checkDeviceVersion and batch OTA info both report that a mower "
+            "firmware update is available."
+        )
+    elif cloud_check_update_available is True:
+        reason = (
+            "Cloud checkDeviceVersion reports that a mower firmware update is "
+            "available."
+        )
+    elif cloud_check_update_available is False and batch_ota_info is None:
+        reason = (
+            "Cloud checkDeviceVersion reports that no mower firmware update is "
+            "available."
+        )
+    elif update_available is True:
+        reason = "Batch OTA info reports that a mower firmware update is available."
+    elif update_available is False:
+        reason = "Batch OTA info reports that no mower firmware update is available."
+    elif "plugin_force_update_conflict" in warnings:
         reason = (
             "pluginForceUpdate differs across cloud metadata sources, so it is "
             "not treated as verified mower firmware update availability."
@@ -842,8 +992,11 @@ def firmware_update_support_from_device(
     return DreameLawnMowerFirmwareUpdateSupport(
         current_version=_as_optional_str(info_raw.get("ver"))
         or _as_optional_str(getattr(info, "firmware_version", None)),
+        latest_version=latest_version,
         hardware_version=_as_optional_str(getattr(info, "hardware_version", None)),
         cloud_update_time=_as_optional_str(info_raw.get("updateTime")),
+        release_summary=release_summary,
+        release_summary_available=release_summary_available,
         latest_status=info_raw.get("latestStatus"),
         plugin_force_update=plugin_force_update,
         plugin_force_update_sources=plugin_force_update_sources,
@@ -853,8 +1006,17 @@ def firmware_update_support_from_device(
         ),
         device_info_release_at=_as_optional_str(device_info.get("releaseAt")),
         device_info_updated_at=_as_optional_str(device_info.get("updatedAt")),
+        cloud_check_available=cloud_check_available,
+        cloud_check_update_available=cloud_check_update_available,
+        batch_ota_available=batch_ota_available,
+        auto_upgrade_enabled=auto_upgrade_enabled,
+        ota_status=ota_status,
+        debug_catalog_available=debug_catalog_available,
+        debug_catalog_current_version_present=debug_catalog_current_version_present,
+        debug_catalog_changelog_available=debug_catalog_changelog_available,
+        debug_catalog_latest_release_candidates=debug_catalog_latest_release_candidates,
         update_state=update_state,
-        update_available=None,
+        update_available=update_available,
         cloud_error=cloud_error,
         candidate_update_fields=candidate_update_fields,
         evidence=evidence,
@@ -1131,6 +1293,7 @@ _UPDATE_CANDIDATE_KEY_TOKENS = (
 _UPDATE_CANDIDATE_EXACT_KEYS = {
     "lateststatus",
     "ota",
+    "otastatus",
     "pluginforceupdate",
     "releaseat",
     "ver",

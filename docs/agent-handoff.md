@@ -352,6 +352,18 @@ Last updated: 2026-04-21
 - `pluginForceUpdate` is not treated as firmware update availability. It is
   conflicting across cloud metadata sources and appears to be app/plugin
   metadata rather than a verified mower OTA signal.
+- The live A2 `checkDeviceVersion` endpoint now confirms an app-approved target
+  of `4.3.6_0447` from current firmware `4.3.6_0320`. The returned
+  `description` field is still not trustworthy because it currently contains an
+  embedded backend error about missing `lang`, not human release notes.
+- The live A2 `manualFirmwareUpdate` approval flow was exercised on
+  2026-04-22. After the approval request, the mower entered `upgrading` and
+  later reported firmware `4.3.6_0447` with `checkDeviceVersion` no longer
+  advertising an available update.
+- The public `ota.tsingting.tech` debug catalog can provide candidate version
+  tracks for a short model such as `g2408`, but as of 2026-04-22 it still does
+  not expose changelog text and is treated as an unverified manual catalog
+  rather than the app-approved OTA target.
 - Realtime key meanings are still being learned. Known useful keys include
   `1.1` as a raw status blob, `1.4` as a runtime status blob, `2.1` as mower
   state, `2.2` as mower error, `2.50` as task status, `2.51` as device time,
@@ -587,8 +599,10 @@ credentials into repo files.
 
 - Keep adding fixtures for real mower transitions such as idle, returning,
   docked-charging, charging, and fault recovery.
-- Do not expose a Home Assistant firmware update entity yet. Keep firmware as
-  diagnostics until a verified latest-version or OTA-available field is found.
+- Validate the live `manualFirmwareUpdate` response path on a supervised mower
+  when it is acceptable to trigger the real approval step. The Home Assistant
+  update entity is now wired to the app-approved check and approval endpoints,
+  but the cloud-side side effects still need one live confirmation.
 - Improve the simple app-map renderer into a polished mower-specific renderer
   once more fixtures are available. The confirmed payload keys are `map`,
   `spot`, `point`, `semantic`, `trajectory`, `total_area`, `name`, and

@@ -164,13 +164,41 @@ def summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
         summary["app_maps"] = _app_maps_summary(app_maps)
 
     if firmware_update:
-        summary["firmware_update"] = {
+        firmware_summary = {
             "current_version": firmware_update.get("current_version"),
             "update_state": firmware_update.get("update_state"),
             "update_available": firmware_update.get("update_available"),
             "warnings": firmware_update.get("warnings", []),
             "reason": firmware_update.get("reason"),
         }
+        latest_version = firmware_update.get("latest_version")
+        if latest_version is not None:
+            firmware_summary["latest_version"] = latest_version
+        for key in (
+            "cloud_check_available",
+            "cloud_check_update_available",
+            "release_summary_available",
+            "debug_catalog_available",
+            "debug_catalog_current_version_present",
+            "debug_catalog_changelog_available",
+        ):
+            value = firmware_update.get(key)
+            if value is not None:
+                firmware_summary[key] = value
+
+        debug_latest_versions = [
+            item.get("latest_release_version")
+            for item in (
+                firmware_update.get("debug_catalog_latest_release_candidates") or []
+            )
+            if isinstance(item, dict) and item.get("latest_release_version")
+        ]
+        if debug_latest_versions:
+            firmware_summary["debug_catalog_latest_release_versions"] = (
+                debug_latest_versions
+            )
+
+        summary["firmware_update"] = firmware_summary
 
     if remote_control_support:
         summary["remote_control_support"] = {

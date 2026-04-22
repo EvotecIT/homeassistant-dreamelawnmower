@@ -48,6 +48,12 @@ from .client import (
     DreameLawnMowerTwoFactorRequiredError,
     render_app_map_payload_png,
 )
+from .debug_ota_catalog import (
+    DEBUG_OTA_LIST_URL,
+    DEBUG_OTA_TRACKS,
+    build_debug_ota_catalog_url,
+    normalize_debug_ota_catalog_payload,
+)
 from .map_probe import (
     MAP_HISTORY_PROPERTY_KEYS,
     MAP_PROBE_PROPERTY_KEYS,
@@ -124,6 +130,8 @@ __all__ = [
     "DISPLAY_NAME_ALIASES",
     "MODEL_NAME_MAP",
     "CAMERA_PROBE_PROPERTY_KEYS",
+    "DEBUG_OTA_LIST_URL",
+    "DEBUG_OTA_TRACKS",
     "MAP_PROBE_PROPERTY_KEYS",
     "MAP_HISTORY_PROPERTY_KEYS",
     "MOWER_BLUETOOTH_PROPERTY_KEY",
@@ -150,6 +158,7 @@ __all__ = [
     "batch_data_text",
     "build_jadx_command",
     "build_camera_probe_payload",
+    "build_debug_ota_catalog_url",
     "build_cloud_key_definition_summary",
     "build_cloud_property_history_summary",
     "build_cloud_property_summary",
@@ -176,6 +185,7 @@ __all__ = [
     "map_diagnostics_from_device",
     "map_summary_from_map_data",
     "map_summary_to_dict",
+    "normalize_debug_ota_catalog_payload",
     "mowing_preference_mode_name",
     "normalize_mowing_preference_mode",
     "remote_control_block_reason",

@@ -14,9 +14,9 @@ from .api import (
     DreameLawnMowerClient,
     DreameLawnMowerConnectionError,
     DreameLawnMowerDescriptor,
+    DreameLawnMowerFirmwareUpdateSupport,
     DreameLawnMowerSnapshot,
 )
-from .dreame_lawn_mower_client.models import DreameLawnMowerStatusBlob
 from .const import (
     CONF_ACCOUNT_TYPE,
     CONF_COUNTRY,
@@ -32,7 +32,10 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_SECONDS,
     DOMAIN,
 )
-from .dreame_lawn_mower_client.models import display_name_for_model
+from .dreame_lawn_mower_client.models import (
+    DreameLawnMowerStatusBlob,
+    display_name_for_model,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +44,7 @@ APP_MAP_REFRESH_INTERVAL = timedelta(minutes=5)
 APP_MAP_OBJECT_REFRESH_INTERVAL = timedelta(minutes=30)
 VECTOR_MAP_REFRESH_INTERVAL = timedelta(minutes=5)
 WEATHER_PROTECTION_REFRESH_INTERVAL = timedelta(minutes=5)
+FIRMWARE_UPDATE_REFRESH_INTERVAL = timedelta(minutes=15)
 
 
 class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot]):
@@ -73,6 +77,8 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         self.app_map_objects_refreshed_at: datetime | None = None
         self.batch_device_data: dict[str, Any] | None = None
         self.batch_device_data_refreshed_at: datetime | None = None
+        self.firmware_update_support: DreameLawnMowerFirmwareUpdateSupport | None = None
+        self.firmware_update_support_refreshed_at: datetime | None = None
         self.vector_map_details: dict[str, Any] | None = None
         self.vector_map_details_refreshed_at: datetime | None = None
         self.weather_protection: dict[str, Any] | None = None
@@ -133,6 +139,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             _LOGGER.debug("Failed to refresh Bluetooth connection state: %s", err)
             self.bluetooth_connected = None
         await self.async_refresh_batch_device_data(force=False)
+        await self.async_refresh_firmware_update_support(force=False)
         await self.async_refresh_app_maps(force=False)
         await self.async_refresh_app_map_objects(force=False)
         await self.async_refresh_vector_map_details(force=False)
@@ -184,6 +191,36 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             self.client.async_get_batch_mowing_preferences(include_raw=False),
             self.client.async_get_batch_ota_info(include_raw=False),
         )
+
+    async def async_refresh_firmware_update_support(
+        self,
+        *,
+        force: bool = False,
+    ) -> DreameLawnMowerFirmwareUpdateSupport | None:
+        """Refresh cached firmware/update support without failing the main poll."""
+        now = datetime.now(UTC)
+        if (
+            not force
+            and self.firmware_update_support is not None
+            and self.firmware_update_support_refreshed_at is not None
+            and now - self.firmware_update_support_refreshed_at
+            < FIRMWARE_UPDATE_REFRESH_INTERVAL
+        ):
+            return self.firmware_update_support
+
+        try:
+            support = await self.client.async_get_firmware_update_support(
+                refresh=False,
+                include_cloud=True,
+                language="en",
+            )
+        except Exception as err:  # noqa: BLE001 - best-effort extra metadata
+            _LOGGER.debug("Failed to refresh firmware update support: %s", err)
+            return self.firmware_update_support
+
+        self.firmware_update_support = support
+        self.firmware_update_support_refreshed_at = now
+        return support
 
     async def async_refresh_app_map_objects(
         self,

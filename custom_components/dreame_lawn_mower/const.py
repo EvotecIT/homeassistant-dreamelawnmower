@@ -39,6 +39,7 @@ PLATFORMS: list[Platform] = [
     Platform.LAWN_MOWER,
     Platform.SELECT,
     Platform.SENSOR,
+    Platform.UPDATE,
 ]
 
 ACTIVITY_MOWING = "mowing"
