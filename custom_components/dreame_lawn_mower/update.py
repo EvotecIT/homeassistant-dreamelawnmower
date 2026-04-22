@@ -67,8 +67,9 @@ class DreameLawnMowerFirmwareUpdateEntity(
     @property
     def in_progress(self) -> bool | int | None:
         """Return whether the mower reports an update in progress."""
-        if live_state := _snapshot_update_state(self.coordinator):
-            return live_state in {"upgrading", "updating"}
+        live_in_progress = _snapshot_update_in_progress(self.coordinator)
+        if live_in_progress is not None:
+            return live_in_progress
         support = self.coordinator.firmware_update_support
         if support is None:
             return None
@@ -160,4 +161,29 @@ def _snapshot_update_state(coordinator: DreameLawnMowerCoordinator) -> str | Non
         normalized = value.strip().lower()
         if normalized in {"upgrading", "updating"}:
             return normalized
+    return None
+
+
+def _snapshot_update_in_progress(
+    coordinator: DreameLawnMowerCoordinator,
+) -> bool | None:
+    """Return a live in-progress signal when the snapshot exposes any state."""
+    snapshot = coordinator.data
+    saw_live_state = False
+    for value in (
+        getattr(snapshot, "state_name", None),
+        getattr(snapshot, "activity", None),
+        getattr(snapshot, "task_status_name", None),
+    ):
+        if not isinstance(value, str):
+            continue
+        normalized = value.strip().lower()
+        if not normalized:
+            continue
+        saw_live_state = True
+        if normalized in {"upgrading", "updating"}:
+            return True
+
+    if saw_live_state:
+        return False
     return None
