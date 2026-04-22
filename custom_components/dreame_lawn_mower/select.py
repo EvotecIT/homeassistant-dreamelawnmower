@@ -73,7 +73,10 @@ class DreameLawnMowerVoiceLanguageSelect(DreameLawnMowerSelectEntity):
     @property
     def available(self) -> bool:
         """Return whether cached voice settings are available."""
-        return self.coordinator.data is not None and self.current_option is not None
+        return (
+            self.coordinator.data is not None
+            and _voice_settings_section(self.coordinator.voice_settings) is not None
+        )
 
     @property
     def options(self) -> list[str]:
