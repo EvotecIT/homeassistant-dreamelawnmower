@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from dreame_lawn_mower_client import DreameLawnMowerClient
+from dreame_lawn_mower_client.client import DreameLawnMowerConnectionError
 from dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
 
 
@@ -155,3 +156,77 @@ def test_get_firmware_update_support_fetches_debug_catalog_when_requested(
         "source": "debug_ota_catalog",
         "available": True,
     }
+
+
+def test_get_firmware_update_support_still_checks_firmware_after_metadata_error(
+    monkeypatch,
+) -> None:
+    client = _client()
+
+    monkeypatch.setattr(client, "_ensure_device", lambda: _firmware_device())
+    monkeypatch.setattr(
+        client,
+        "_sync_get_cloud_device_info",
+        lambda language: (_ for _ in ()).throw(
+            DreameLawnMowerConnectionError("device info unavailable")
+        ),
+    )
+    monkeypatch.setattr(
+        client,
+        "_sync_get_cloud_device_list_page",
+        lambda current, size, language, master, shared_status: None,
+    )
+    monkeypatch.setattr(
+        client,
+        "_sync_get_cloud_firmware_check",
+        lambda language: {
+            "available": True,
+            "update_available": True,
+            "latest_version": "1.1.0",
+        },
+    )
+    monkeypatch.setattr(
+        client,
+        "_sync_get_batch_ota_info",
+        lambda: {
+            "available": True,
+            "update_available": False,
+        },
+    )
+
+    result = client._sync_get_firmware_update_support()
+
+    assert result.cloud_check_available is True
+    assert result.cloud_check_update_available is True
+    assert result.latest_version == "1.1.0"
+    assert result.cloud_error is not None
+    assert "cloud_device_info: device info unavailable" in result.cloud_error
+
+
+def test_cloud_firmware_check_marks_error_response_unavailable(monkeypatch) -> None:
+    client = _client()
+
+    class _Cloud:
+        def check_device_version(self, language=None):
+            return {
+                "code": 500,
+                "success": False,
+                "msg": "backend unavailable",
+            }
+
+    monkeypatch.setattr(client, "_sync_get_cloud_protocol", lambda: _Cloud())
+    monkeypatch.setattr(client, "_ensure_device", lambda: _firmware_device())
+
+    result = client._sync_get_cloud_firmware_check()
+
+    assert result["available"] is False
+    assert result["update_available"] is None
+    assert result["errors"] == [
+        {
+            "stage": "response",
+            "error": "cloud_error",
+            "code": 500,
+            "success": False,
+            "msg": "backend unavailable",
+        }
+    ]

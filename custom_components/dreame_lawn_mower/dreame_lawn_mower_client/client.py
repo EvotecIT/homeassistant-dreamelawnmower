@@ -1177,6 +1177,13 @@ class DreameLawnMowerClient:
         if include_cloud:
             try:
                 cloud_device_info = self._sync_get_cloud_device_info(language)
+            except DreameLawnMowerConnectionError as err:
+                cloud_error = _merge_error_text(
+                    cloud_error,
+                    "cloud_device_info",
+                    str(err),
+                )
+            try:
                 cloud_device_list_page = self._sync_get_cloud_device_list_page(
                     current=1,
                     size=20,
@@ -1184,14 +1191,28 @@ class DreameLawnMowerClient:
                     master=None,
                     shared_status=None,
                 )
+            except DreameLawnMowerConnectionError as err:
+                cloud_error = _merge_error_text(
+                    cloud_error,
+                    "cloud_device_list_page",
+                    str(err),
+                )
+            try:
                 cloud_firmware_check = self._sync_get_cloud_firmware_check(language)
             except DreameLawnMowerConnectionError as err:
-                cloud_error = str(err)
+                cloud_error = _merge_error_text(
+                    cloud_error,
+                    "cloud_firmware_check",
+                    str(err),
+                )
         try:
             batch_ota_info = self._sync_get_batch_ota_info()
         except DreameLawnMowerConnectionError as err:
-            if cloud_error is None:
-                cloud_error = str(err)
+            cloud_error = _merge_error_text(
+                cloud_error,
+                "batch_ota_info",
+                str(err),
+            )
         if include_debug_ota_catalog:
             try:
                 debug_ota_catalog = self._sync_get_debug_ota_catalog(
@@ -3936,6 +3957,22 @@ def _normalize_cloud_firmware_check(
         result["errors"] = [{"stage": "response", "error": "invalid_response"}]
         return result
 
+    code = value.get("code")
+    success = value.get("success")
+    if (isinstance(code, int) and code != 0) or (
+        isinstance(success, bool) and not success
+    ):
+        result["errors"] = [
+            {
+                "stage": "response",
+                "error": "cloud_error",
+                "code": code,
+                "success": success if isinstance(success, bool) else None,
+                "msg": _as_optional_text(value.get("msg")),
+            }
+        ]
+        return result
+
     result["available"] = True
     current_version_value = _as_optional_text(value.get("curVersion"))
     if current_version_value is not None:
@@ -3974,6 +4011,17 @@ def _normalize_cloud_firmware_check(
         result["changelog_error"] = dict(changelog_error)
 
     return result
+
+
+def _merge_error_text(
+    existing: str | None,
+    stage: str,
+    error: str,
+) -> str:
+    entry = f"{stage}: {error}"
+    if existing:
+        return f"{existing}; {entry}"
+    return entry
 
 
 def _optional_bool(value: Any) -> bool | None:
