@@ -209,24 +209,26 @@ SENSORS = [
     DreameSensorDescription(
         key="current_cleaned_area",
         name="Current Cleaned Area",
-        value_fn=lambda snapshot: snapshot.cleaned_area,
-        exists_fn=lambda snapshot: snapshot.cleaned_area is not None,
+        value_fn=lambda snapshot: getattr(snapshot, "cleaned_area", None),
+        exists_fn=lambda snapshot: getattr(snapshot, "cleaned_area", None) is not None,
         icon="mdi:texture-box",
         native_unit_of_measurement="m²",
     ),
     DreameSensorDescription(
         key="current_cleaning_time",
         name="Current Cleaning Time",
-        value_fn=lambda snapshot: snapshot.cleaning_time,
-        exists_fn=lambda snapshot: snapshot.cleaning_time is not None,
+        value_fn=lambda snapshot: getattr(snapshot, "cleaning_time", None),
+        exists_fn=lambda snapshot: getattr(snapshot, "cleaning_time", None) is not None,
         icon="mdi:timer-sand",
         native_unit_of_measurement="min",
     ),
     DreameSensorDescription(
         key="active_segment_count",
         name="Active Segment Count",
-        value_fn=lambda snapshot: snapshot.active_segment_count,
-        exists_fn=lambda snapshot: snapshot.active_segment_count is not None,
+        value_fn=lambda snapshot: getattr(snapshot, "active_segment_count", None),
+        exists_fn=lambda snapshot: (
+            getattr(snapshot, "active_segment_count", None) is not None
+        ),
         icon="mdi:vector-square",
     ),
     DreameSensorDescription(
