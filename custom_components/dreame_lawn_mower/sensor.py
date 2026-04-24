@@ -3076,6 +3076,19 @@ def _batch_ota_status_name(result: dict[str, Any] | None) -> str | None:
     ota = _batch_ota_section(result)
     if ota is None:
         return None
+    state_name = ota.get("ota_state_name")
+    if isinstance(state_name, str) and state_name:
+        return state_name
+    state = ota.get("ota_state")
+    if isinstance(state, int):
+        return {
+            0: "undefined",
+            1: "idle",
+            2: "upgrading",
+            3: "upgrade_success",
+            4: "upgrade_failed",
+            5: "cannot_upgrade",
+        }.get(state, f"state_{state}")
     status = ota.get("ota_status")
     if isinstance(status, str) and status:
         return status
@@ -3578,6 +3591,9 @@ def _batch_ota_probe_summary(value: Any) -> dict[str, Any] | None:
         "auto_upgrade_enabled": value.get("auto_upgrade_enabled"),
         "ota_info": value.get("ota_info"),
         "ota_status": value.get("ota_status"),
+        "ota_state": value.get("ota_state"),
+        "ota_state_name": value.get("ota_state_name"),
+        "ota_progress": value.get("ota_progress"),
     }
     errors = value.get("errors")
     if isinstance(errors, list):

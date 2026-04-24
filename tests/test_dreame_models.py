@@ -884,6 +884,31 @@ def test_firmware_update_support_marks_update_state() -> None:
     assert support.reason == "Mower reports an update-related state."
 
 
+def test_firmware_update_support_marks_batch_ota_upgrading_state() -> None:
+    device = _FakeDevice()
+
+    support = firmware_update_support_from_device(
+        device,
+        batch_ota_info={
+            "source": "batch_device_data_ota_info",
+            "available": True,
+            "update_available": None,
+            "auto_upgrade_enabled": False,
+            "ota_info": [2, 83],
+            "ota_state": 2,
+            "ota_state_name": "upgrading",
+            "ota_progress": 83,
+        },
+    )
+
+    assert support.update_state == "upgrading"
+    assert support.update_available is None
+    assert support.ota_state == 2
+    assert support.ota_state_name == "upgrading"
+    assert support.ota_progress == 83
+    assert support.reason == "Mower reports an update-related state."
+
+
 def test_firmware_update_support_uses_verified_batch_ota_signal() -> None:
     device = _FakeDevice()
 

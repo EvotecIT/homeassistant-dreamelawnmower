@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from homeassistant.exceptions import HomeAssistantError
@@ -124,7 +125,24 @@ def test_firmware_update_entity_install_refreshes_after_success() -> None:
     class _Coordinator:
         def __init__(self):
             self.client = _Client()
-            self.firmware_update_support = SimpleNamespace(latest_version="4.3.6_0447")
+            self.firmware_update_support = SimpleNamespace(
+                current_version="4.3.6_0320",
+                latest_version="4.3.6_0447",
+                update_state=None,
+                release_summary=None,
+                release_summary_available=False,
+                update_available=True,
+                cloud_check_available=True,
+                cloud_check_update_available=True,
+                batch_ota_available=True,
+                auto_upgrade_enabled=False,
+                ota_status=None,
+                ota_state=None,
+                ota_state_name=None,
+                ota_progress=None,
+                reason="Cloud checkDeviceVersion reports that a mower firmware update is available.",
+                warnings=(),
+            )
 
         async def async_refresh_firmware_update_support(self, force=False):
             calls.append(("refresh_support", force))
@@ -146,6 +164,45 @@ def test_firmware_update_entity_install_refreshes_after_success() -> None:
         ("refresh_batch", True, "firmware_update_install"),
         ("request_refresh", None),
     ]
+    assert entity.in_progress is True
+    assert entity.extra_state_attributes["install_assumed_in_progress"] is True
+    assert entity.extra_state_attributes["install_target_version"] == "4.3.6_0447"
+
+
+def test_firmware_update_entity_clears_assumed_install_when_target_installed() -> None:
+    entity = object.__new__(DreameLawnMowerFirmwareUpdateEntity)
+    entity.coordinator = SimpleNamespace(
+        last_update_success=True,
+        data=SimpleNamespace(
+            firmware_version="4.3.6_0550",
+            state_name="idle",
+            activity="idle",
+            task_status_name=None,
+        ),
+        firmware_update_support=SimpleNamespace(
+            current_version="4.3.6_0550",
+            latest_version="4.3.6_0550",
+            update_state=None,
+            release_summary=None,
+            release_summary_available=False,
+            update_available=False,
+            cloud_check_available=True,
+            cloud_check_update_available=False,
+            batch_ota_available=True,
+            auto_upgrade_enabled=False,
+            ota_status=None,
+            ota_state=3,
+            ota_state_name="upgrade_success",
+            ota_progress=0,
+            reason="Batch OTA info reports that no mower firmware update is available.",
+            warnings=(),
+        ),
+    )
+    entity._install_requested_at = datetime.now(UTC)
+    entity._install_target_version = "4.3.6_0550"
+
+    assert entity.in_progress is False
+    assert entity.extra_state_attributes["install_assumed_in_progress"] is False
 
 
 def test_firmware_update_entity_install_rejects_wrong_version() -> None:

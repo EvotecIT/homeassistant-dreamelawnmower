@@ -43,3 +43,11 @@ def test_request_i_map_skips_map_property_without_value() -> None:
     manager._request_map_from_cloud = lambda: False
 
     assert manager._request_i_map() is False
+
+
+def test_request_i_map_ignores_non_mapping_response() -> None:
+    manager = DreameMapMowerMapManager(_DummyProtocol())
+    manager._request_map = lambda payload: []  # noqa: ARG005
+    manager._request_map_from_cloud = lambda: False
+
+    assert manager._request_i_map() is False

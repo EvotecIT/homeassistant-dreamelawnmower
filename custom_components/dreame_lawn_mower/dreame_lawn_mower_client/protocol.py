@@ -570,7 +570,7 @@ class DreameMowerDreameHomeCloudProtocol:
         _LOGGER.debug(
             "DreameMowerDreameHomeCloudProtocol.send api_response: %s", api_response)
         self._id = self._id + 1
-        if api_response and api_response["code"] == 80001:
+        if isinstance(api_response, Mapping) and api_response.get("code") == 80001:
             # Seems to be a valid error message from the server which translates to:
             #   "The device may be offline and the command sending timed out."
             # While the time out was a return value from the server, implying that the
@@ -579,7 +579,25 @@ class DreameMowerDreameHomeCloudProtocol:
                 "DreameMowerDreameHomeCloudProtocol.send 80001, return none: %s", api_response)
             return None
 
-        if api_response is None or "data" not in api_response or "result" not in api_response["data"]:
+        if (
+            isinstance(api_response, Mapping)
+            and api_response.get("code") == 0
+            and api_response.get("success") is True
+            and api_response.get("data") in ("", None)
+        ):
+            _LOGGER.debug(
+                "DreameMowerDreameHomeCloudProtocol.send accepted without result: %s",
+                api_response,
+            )
+            return None
+
+        if (
+            api_response is None
+            or not isinstance(api_response, Mapping)
+            or "data" not in api_response
+            or not isinstance(api_response["data"], Mapping)
+            or "result" not in api_response["data"]
+        ):
             _LOGGER.warning(
                 "DreameMowerDreameHomeCloudProtocol.send failed: %s", api_response)
             return None

@@ -27,7 +27,7 @@ from PIL import (
     PngImagePlugin,
     ImageFilter,
 )
-from typing import Any
+from typing import Any, Mapping
 from time import sleep
 from io import BytesIO
 from typing import Optional, Tuple
@@ -291,6 +291,14 @@ class DreameMapMowerMapManager:
             _LOGGER.warning("DreameMapMowerMapManager._request_map failed: %s", ex)
         return None
 
+    def _map_action_succeeded(self, result: Any) -> bool:
+        """Return whether an app action response contains a successful map payload."""
+        if not isinstance(result, Mapping):
+            if result is not None:
+                _LOGGER.debug("Ignoring non-mapping map response: %s", result)
+            return False
+        return result.get(MAP_PARAMETER_CODE) == 0
+
     def _request_i_map(self, start_time: int = None) -> bool:
         if not self._request_i_map_available and not self._protocol.dreame_cloud:
             return self.request_new_map()
@@ -305,7 +313,7 @@ class DreameMapMowerMapManager:
             parameters[MAP_PARAMETER_TIME] = start_time
 
         result = self._request_map(parameters)
-        if result and result[MAP_PARAMETER_CODE] == 0:
+        if self._map_action_succeeded(result):
             out = result[MAP_PARAMETER_OUT]
             _LOGGER.debug("Response from device %s", out)
             has_map = False
@@ -387,7 +395,7 @@ class DreameMapMowerMapManager:
                 MAP_REQUEST_PARAMETER_FRAME_TYPE: MapFrameType.P.name,
             }
         )
-        return bool(result and result[MAP_PARAMETER_CODE] == 0)
+        return self._map_action_succeeded(result)
 
     def _request_next_p_map(self, map_id: int, frame_id: int) -> bool:
         key = f"{map_id}:{frame_id}"
@@ -404,7 +412,7 @@ class DreameMapMowerMapManager:
                 MAP_REQUEST_PARAMETER_FRAME_TYPE: MapFrameType.P.name,
             }
         )
-        if result and result[MAP_PARAMETER_CODE] == 0:
+        if self._map_action_succeeded(result):
             del self._request_queue[key]
 
             object_name = None
@@ -442,7 +450,7 @@ class DreameMapMowerMapManager:
 
     def _request_t_map(self) -> None:
         result = self._request_map({MAP_REQUEST_PARAMETER_FRAME_TYPE: "T"})
-        if result and result[MAP_PARAMETER_CODE] == 0:
+        if self._map_action_succeeded(result):
             self.request_map_list()
 
     def _request_w_map(self) -> None:
@@ -1366,7 +1374,7 @@ class DreameMapMowerMapManager:
             return self._request_i_map()
         else:
             result = self._request_map()
-            if result and result[MAP_PARAMETER_CODE] == 0 and not self._protocol.dreame_cloud:
+            if self._map_action_succeeded(result) and not self._protocol.dreame_cloud:
                 self._request_map_from_cloud()
 
     def request_next_map(self) -> None:

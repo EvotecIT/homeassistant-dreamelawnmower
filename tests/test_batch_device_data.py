@@ -202,10 +202,12 @@ def test_decode_batch_ota_info_decodes_flags() -> None:
         "source": "batch_device_data_ota_info",
         "available": True,
         "ota_info": [1, 0],
-        "update_available": True,
+        "update_available": None,
         "auto_upgrade_enabled": False,
+        "ota_state": 1,
+        "ota_state_name": "idle",
+        "ota_progress": 0,
         "errors": [],
-        "ota_status": 0,
     }
 
 
@@ -222,6 +224,8 @@ def test_client_batch_helpers_use_batch_device_data_api() -> None:
     assert schedule_result["schedules"][0]["idx"] == 0
     assert [entry["idx"] for entry in preference_result["maps"]] == [1]
     assert preference_result["maps"][0]["preferences"][0]["mowing_height_cm"] == 3.5
-    assert ota_result["update_available"] is True
+    assert ota_result["update_available"] is None
+    assert ota_result["ota_state_name"] == "idle"
+    assert ota_result["ota_progress"] == 0
     assert ota_result["auto_upgrade_enabled"] is False
     assert len(cloud.calls) == 3

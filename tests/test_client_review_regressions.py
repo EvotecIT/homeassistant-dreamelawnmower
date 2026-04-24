@@ -5,6 +5,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from dreame_lawn_mower_client import DreameLawnMowerClient
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import (
+    _normalize_cloud_firmware_check,
+)
 from dreame_lawn_mower_client.client import DreameLawnMowerConnectionError
 from dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
 
@@ -230,3 +233,45 @@ def test_cloud_firmware_check_marks_error_response_unavailable(monkeypatch) -> N
             "msg": "backend unavailable",
         }
     ]
+
+
+def test_cloud_firmware_check_flattens_structured_release_notes() -> None:
+    result = _normalize_cloud_firmware_check(
+        {
+            "curVersion": "4.3.6_0447",
+            "newVersion": "4.3.6_0550",
+            "hasNewFirmware": True,
+            "description": (
+                '{"en":["1. Optimize WiFi connection experience.",'
+                '{"content":"2. Optimize recharge logic.<br>3. Improve stability."},'
+                '{"detail":"4. Fix known issues."}]}'
+            ),
+        }
+    )
+
+    assert result["changelog_available"] is True
+    assert result["changelog"] == (
+        "1. Optimize WiFi connection experience.\n"
+        "2. Optimize recharge logic.\n"
+        "3. Improve stability.\n"
+        "4. Fix known issues."
+    )
+
+
+def test_cloud_firmware_check_keeps_error_description_unavailable() -> None:
+    result = _normalize_cloud_firmware_check(
+        {
+            "curVersion": "4.3.6_0320",
+            "newVersion": "4.3.6_0447",
+            "hasNewFirmware": True,
+            "description": '{"code":10005,"success":false,"msg":"missing lang"}',
+        }
+    )
+
+    assert result["changelog"] is None
+    assert result["changelog_available"] is False
+    assert result["changelog_error"] == {
+        "code": 10005,
+        "success": False,
+        "msg": "missing lang",
+    }

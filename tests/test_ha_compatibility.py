@@ -1194,10 +1194,11 @@ def test_batch_ota_attributes_are_compact() -> None:
         "batch_ota_info": {
             "source": "batch_device_data_ota_info",
             "available": True,
-            "update_available": True,
             "auto_upgrade_enabled": False,
             "ota_info": [1, 0],
-            "ota_status": 0,
+            "ota_state": 1,
+            "ota_state_name": "idle",
+            "ota_progress": 0,
             "errors": [],
         },
     }
@@ -1208,13 +1209,14 @@ def test_batch_ota_attributes_are_compact() -> None:
         "batch_ota_info": {
             "source": "batch_device_data_ota_info",
             "available": True,
-            "update_available": True,
             "auto_upgrade_enabled": False,
             "ota_info": [1, 0],
-            "ota_status": 0,
+            "ota_state": 1,
+            "ota_state_name": "idle",
+            "ota_progress": 0,
             "error_count": 0,
         },
-        "ota_status_name": "update_available",
+        "ota_status_name": "idle",
     }
 
 
