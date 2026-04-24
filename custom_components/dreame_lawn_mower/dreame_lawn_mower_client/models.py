@@ -278,6 +278,9 @@ class DreameLawnMowerFirmwareUpdateSupport:
     batch_ota_available: bool | None = None
     auto_upgrade_enabled: bool | None = None
     ota_status: int | str | None = None
+    ota_state: int | None = None
+    ota_state_name: str | None = None
+    ota_progress: int | None = None
     debug_catalog_available: bool | None = None
     debug_catalog_current_version_present: bool | None = None
     debug_catalog_changelog_available: bool | None = None
@@ -844,6 +847,9 @@ def firmware_update_support_from_device(
                 "update_available",
                 "auto_upgrade_enabled",
                 "ota_status",
+                "ota_state",
+                "ota_state_name",
+                "ota_progress",
             )
             if key in batch_ota_info
         }
@@ -895,6 +901,9 @@ def firmware_update_support_from_device(
     batch_ota_available = None
     auto_upgrade_enabled = None
     ota_status = None
+    ota_state = None
+    ota_state_name = None
+    ota_progress = None
     latest_version = None
     release_summary = None
     release_summary_available = None
@@ -932,6 +941,16 @@ def firmware_update_support_from_device(
             auto_upgrade_enabled = auto_upgrade
 
         ota_status = batch_ota_info.get("ota_status")
+        ota_state_value = batch_ota_info.get("ota_state")
+        if isinstance(ota_state_value, int):
+            ota_state = ota_state_value
+        ota_state_name = _as_optional_str(batch_ota_info.get("ota_state_name"))
+        ota_progress_value = batch_ota_info.get("ota_progress")
+        if isinstance(ota_progress_value, int):
+            ota_progress = ota_progress_value
+        if ota_state == 2 or ota_state_name == "upgrading":
+            update_state = "upgrading"
+
         batch_update_available = batch_ota_info.get("update_available")
         if isinstance(batch_update_available, bool) and update_available is None:
             update_available = batch_update_available
@@ -1011,6 +1030,9 @@ def firmware_update_support_from_device(
         batch_ota_available=batch_ota_available,
         auto_upgrade_enabled=auto_upgrade_enabled,
         ota_status=ota_status,
+        ota_state=ota_state,
+        ota_state_name=ota_state_name,
+        ota_progress=ota_progress,
         debug_catalog_available=debug_catalog_available,
         debug_catalog_current_version_present=debug_catalog_current_version_present,
         debug_catalog_changelog_available=debug_catalog_changelog_available,

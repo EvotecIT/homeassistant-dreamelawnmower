@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import html
 import json
 import math
+import re
 import time
 import urllib.request
 from collections.abc import Mapping, Sequence
@@ -3933,7 +3935,121 @@ def _parse_firmware_description(
                 },
             )
 
+    parsed_text = _firmware_description_text(parsed)
+    if parsed_text is not None:
+        return parsed_text, True, None
+
     return text, True, None
+
+
+_FIRMWARE_DESCRIPTION_PREFERRED_KEYS = (
+    "en",
+    "en_us",
+    "en-us",
+    "default",
+    "content",
+    "contents",
+    "text",
+    "detail",
+    "details",
+    "description",
+    "desc",
+    "release_note",
+    "release_notes",
+    "releasenote",
+    "releasenotes",
+    "changelog",
+    "change_log",
+    "update_content",
+    "updatecontent",
+    "upgrade_content",
+    "upgradecontent",
+    "data",
+)
+_FIRMWARE_DESCRIPTION_METADATA_KEYS = {
+    "code",
+    "success",
+    "status",
+    "curversion",
+    "newversion",
+    "firmwaretype",
+    "hasnewfirmware",
+    "force",
+    "url",
+    "md5",
+    "size",
+}
+
+
+def _firmware_description_text(value: Any) -> str | None:
+    parts = _firmware_description_parts(value)
+    if not parts:
+        return None
+
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        normalized = _normalize_firmware_description_text(part)
+        if normalized is None:
+            continue
+        dedupe_key = normalized.casefold()
+        if dedupe_key in seen:
+            continue
+        cleaned.append(normalized)
+        seen.add(dedupe_key)
+
+    return "\n".join(cleaned) if cleaned else None
+
+
+def _firmware_description_parts(value: Any) -> list[str]:
+    if isinstance(value, str):
+        text = _as_optional_text(value)
+        if text is None:
+            return []
+        try:
+            parsed = json.loads(text)
+        except (TypeError, ValueError):
+            return [text]
+        nested = _firmware_description_parts(parsed)
+        return nested or [text]
+
+    if isinstance(value, Mapping):
+        preferred_parts: list[str] = []
+        fallback_parts: list[str] = []
+        for key, item in value.items():
+            normalized_key = str(key).strip().lower().replace("-", "_")
+            if normalized_key in _FIRMWARE_DESCRIPTION_METADATA_KEYS:
+                continue
+            item_parts = _firmware_description_parts(item)
+            if not item_parts:
+                continue
+            if (
+                normalized_key in _FIRMWARE_DESCRIPTION_PREFERRED_KEYS
+                or normalized_key.isnumeric()
+            ):
+                preferred_parts.extend(item_parts)
+            else:
+                fallback_parts.extend(item_parts)
+        return preferred_parts or fallback_parts
+
+    if isinstance(value, Sequence) and not isinstance(value, bytes | bytearray):
+        parts: list[str] = []
+        for item in value:
+            parts.extend(_firmware_description_parts(item))
+        return parts
+
+    return []
+
+
+def _normalize_firmware_description_text(value: str) -> str | None:
+    text = html.unescape(value)
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?i)</p\s*>", "\n", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = "\n".join(line.strip() for line in text.splitlines())
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text or None
 
 
 def _normalize_cloud_firmware_check(

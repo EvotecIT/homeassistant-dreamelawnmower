@@ -152,6 +152,9 @@ def decode_batch_ota_info(
         "ota_info": None,
         "update_available": None,
         "auto_upgrade_enabled": None,
+        "ota_state": None,
+        "ota_state_name": None,
+        "ota_progress": None,
         "errors": [],
     }
 
@@ -164,11 +167,11 @@ def decode_batch_ota_info(
                 ota_info, (str, bytes, bytearray)
             ):
                 values = list(ota_info)
-                result["update_available"] = (
-                    bool(_to_int(values[0])) if values else None
-                )
+                ota_state = _to_int(values[0]) if values else None
+                result["ota_state"] = ota_state
+                result["ota_state_name"] = _ota_state_name(ota_state)
                 if len(values) > 1:
-                    result["ota_status"] = _to_int(values[1])
+                    result["ota_progress"] = _to_int(values[1])
             result["available"] = True
             if include_raw:
                 result["raw_text"] = payload_text
@@ -181,6 +184,18 @@ def decode_batch_ota_info(
         result["available"] = True
 
     return result
+
+
+def _ota_state_name(value: int | None) -> str | None:
+    """Return the app OTA state label used by the mower plugin."""
+    return {
+        0: "undefined",
+        1: "idle",
+        2: "upgrading",
+        3: "upgrade_success",
+        4: "upgrade_failed",
+        5: "cannot_upgrade",
+    }.get(value)
 
 
 def batch_data_text(
