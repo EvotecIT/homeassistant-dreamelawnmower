@@ -169,7 +169,7 @@ class DreameLawnMowerFirmwareUpdateEntity(
         await self.coordinator.async_request_refresh()
 
     def _assumed_install_in_progress(self) -> bool:
-        """Return whether a recent HA install approval should still be treated as active."""
+        """Return whether a recent HA install approval should still be active."""
         install_requested_at = getattr(self, "_install_requested_at", None)
         if install_requested_at is None:
             return False
@@ -191,6 +191,7 @@ class DreameLawnMowerFirmwareUpdateEntity(
             support is not None
             and getattr(support, "update_available", None) is False
             and getattr(support, "update_state", None) is None
+            and target_version is None
         ):
             self._install_requested_at = None
             self._install_target_version = None

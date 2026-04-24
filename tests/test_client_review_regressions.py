@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from dreame_lawn_mower_client import DreameLawnMowerClient
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import (
     _normalize_cloud_firmware_check,
 )
+from dreame_lawn_mower_client import DreameLawnMowerClient
 from dreame_lawn_mower_client.client import DreameLawnMowerConnectionError
 from dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
 

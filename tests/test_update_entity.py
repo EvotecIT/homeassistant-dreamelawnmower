@@ -140,7 +140,10 @@ def test_firmware_update_entity_install_refreshes_after_success() -> None:
                 ota_state=None,
                 ota_state_name=None,
                 ota_progress=None,
-                reason="Cloud checkDeviceVersion reports that a mower firmware update is available.",
+                reason=(
+                    "Cloud checkDeviceVersion reports that a mower firmware update "
+                    "is available."
+                ),
                 warnings=(),
             )
 
@@ -203,6 +206,45 @@ def test_firmware_update_entity_clears_assumed_install_when_target_installed() -
 
     assert entity.in_progress is False
     assert entity.extra_state_attributes["install_assumed_in_progress"] is False
+
+
+def test_firmware_update_entity_keeps_assumed_install_after_cloud_clear() -> None:
+    entity = object.__new__(DreameLawnMowerFirmwareUpdateEntity)
+    entity.coordinator = SimpleNamespace(
+        last_update_success=True,
+        data=SimpleNamespace(
+            firmware_version="4.3.6_0447",
+            state_name=None,
+            activity=None,
+            task_status_name=None,
+        ),
+        firmware_update_support=SimpleNamespace(
+            current_version="4.3.6_0447",
+            latest_version="4.3.6_0550",
+            update_state=None,
+            release_summary=None,
+            release_summary_available=False,
+            update_available=False,
+            cloud_check_available=True,
+            cloud_check_update_available=False,
+            batch_ota_available=True,
+            auto_upgrade_enabled=False,
+            ota_status=None,
+            ota_state=None,
+            ota_state_name=None,
+            ota_progress=None,
+            reason=(
+                "Cloud checkDeviceVersion reports that no mower firmware update is "
+                "available."
+            ),
+            warnings=(),
+        ),
+    )
+    entity._install_requested_at = datetime.now(UTC)
+    entity._install_target_version = "4.3.6_0550"
+
+    assert entity.in_progress is True
+    assert entity.extra_state_attributes["install_assumed_in_progress"] is True
 
 
 def test_firmware_update_entity_install_rejects_wrong_version() -> None:
