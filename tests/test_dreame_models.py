@@ -173,6 +173,23 @@ def test_display_name_for_model_prefers_known_mapping_over_fallback_name() -> No
     )
 
 
+def test_descriptor_maps_lidax_ultra_1000_model_name() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-5",
+            "model": "mova.mower.g2529c",
+            "customName": "Mowercedes",
+            "deviceInfo": {"displayName": "Lidax Ultra 1000"},
+        },
+        account_type="mova",
+        country="eu",
+    )
+
+    assert descriptor is not None
+    assert descriptor.display_model == "LiDAX Ultra 1000"
+    assert descriptor.title == "Mowercedes (LiDAX Ultra 1000)"
+
+
 def test_snapshot_uses_state_name_before_boolean_helpers() -> None:
     descriptor = descriptor_from_cloud_record(
         {

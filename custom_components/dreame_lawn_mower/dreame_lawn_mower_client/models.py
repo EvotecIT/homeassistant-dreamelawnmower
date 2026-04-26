@@ -16,6 +16,7 @@ MODEL_NAME_MAP = {
     "dreame.mower.p2255": "A1",
     "dreame.mower.g2422": "A1 Pro",
     "dreame.mower.g2408": "A2",
+    "mova.mower.g2529c": "LiDAX Ultra 1000",
 }
 
 DISPLAY_NAME_ALIASES = {
@@ -24,6 +25,7 @@ DISPLAY_NAME_ALIASES = {
     "a2": "A2",
     "awd 1000": "AWD 1000",
     "lidax ultra 800": "LiDAX Ultra 800",
+    "lidax ultra 1000": "LiDAX Ultra 1000",
     "lidax ultra 1200": "LiDAX Ultra 1200",
     "viax 300": "Viax 300",
     "vivax 250": "Vivax 250",

@@ -366,46 +366,48 @@ class DreameMowerDevice:
             if not isinstance(prop, dict):
                 continue
             did = int(prop["did"])
-            property_enum = self._property_enum(did)
-            property_name = self._property_name(did)
+            property_enum = self._property_enum_from_payload(prop, did)
+            data_id = property_enum.value if property_enum is not None else did
+            property_name = self._property_name(data_id)
             if property_enum is None:
                 self._remember_unknown_property(did, prop)
             if prop["code"] == 0 and "value" in prop:
                 value = prop["value"]
-                if did in self._dirty_data:
+                if data_id in self._dirty_data:
                     if (
-                        self._dirty_data[did].value != value
-                        and time.time() - self._dirty_data[did].update_time < self._discard_timeout
+                        self._dirty_data[data_id].value != value
+                        and time.time() - self._dirty_data[data_id].update_time
+                        < self._discard_timeout
                     ):
                         _LOGGER.info(
                             "Property %s Value Discarded: %s <- %s",
                             property_name,
-                            self._dirty_data[did].value,
+                            self._dirty_data[data_id].value,
                             value,
                         )
-                        del self._dirty_data[did]
+                        del self._dirty_data[data_id]
                         continue
-                    del self._dirty_data[did]
+                    del self._dirty_data[data_id]
 
-                current_value = self.data.get(did)
+                current_value = self.data.get(data_id)
 
                 if current_value != value:
                     # Do not call external listener when map and json properties changed
                     if not (
-                        did == DreameMowerProperty.MAP_LIST.value
-                        or did == DreameMowerProperty.RECOVERY_MAP_LIST.value
-                        or did == DreameMowerProperty.MAP_DATA.value
-                        or did == DreameMowerProperty.OBJECT_NAME.value
-                        or did == DreameMowerProperty.AUTO_SWITCH_SETTINGS.value
-                        or did == DreameMowerProperty.AI_DETECTION.value
+                        data_id == DreameMowerProperty.MAP_LIST.value
+                        or data_id == DreameMowerProperty.RECOVERY_MAP_LIST.value
+                        or data_id == DreameMowerProperty.MAP_DATA.value
+                        or data_id == DreameMowerProperty.OBJECT_NAME.value
+                        or data_id == DreameMowerProperty.AUTO_SWITCH_SETTINGS.value
+                        or data_id == DreameMowerProperty.AI_DETECTION.value
                         # or did == DreameMowerProperty.SELF_TEST_STATUS.value
                     ):
                         changed = True
                     custom_property = (
-                        did == DreameMowerProperty.AUTO_SWITCH_SETTINGS.value
-                        or did == DreameMowerProperty.AI_DETECTION.value
-                        or did == DreameMowerProperty.MAP_LIST.value
-                        or did == DreameMowerProperty.SERIAL_NUMBER.value
+                        data_id == DreameMowerProperty.AUTO_SWITCH_SETTINGS.value
+                        or data_id == DreameMowerProperty.AI_DETECTION.value
+                        or data_id == DreameMowerProperty.MAP_LIST.value
+                        or data_id == DreameMowerProperty.SERIAL_NUMBER.value
                     )
                     if not custom_property:
                         if current_value is not None:
@@ -421,14 +423,14 @@ class DreameMowerDevice:
                                 property_name,
                                 value,
                             )
-                    self.data[did] = value
-                    if did in self._property_update_callback:
+                    self.data[data_id] = value
+                    if data_id in self._property_update_callback:
                         _LOGGER.debug(
                             "Property %s Callbacks: %s",
                             property_name,
-                            self._property_update_callback[did],
+                            self._property_update_callback[data_id],
                         )
-                        for callback in self._property_update_callback[did]:
+                        for callback in self._property_update_callback[data_id]:
                             if not self._ready and custom_property:
                                 callback(current_value)
                             else:
@@ -482,6 +484,35 @@ class DreameMowerDevice:
             return DreameMowerProperty(did)
         except ValueError:
             return None
+
+    def _property_enum_from_payload(
+        self,
+        payload: dict[str, Any],
+        did: int,
+    ) -> DreameMowerProperty | None:
+        """Return the known property enum for a payload.
+
+        Some MOVA mower cloud responses use generated negative ``did`` values
+        even for standard properties. In that case the siid/piid pair is still
+        authoritative and lets us update the normal property cache.
+        """
+        property_enum = self._property_enum(did)
+        if property_enum is not None:
+            return property_enum
+
+        siid = payload.get("siid")
+        piid = payload.get("piid")
+        if siid is None or piid is None:
+            return None
+
+        for prop, mapping in self.property_mapping.items():
+            if (
+                "aiid" not in mapping
+                and siid == mapping["siid"]
+                and piid == mapping["piid"]
+            ):
+                return prop
+        return None
 
     def _property_name(self, did: int) -> str:
         """Return a safe log/debug name for a property id."""
