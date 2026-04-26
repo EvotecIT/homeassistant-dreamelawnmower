@@ -28,15 +28,17 @@ MOWER_PROPERTY_HINTS: Final[dict[str, str]] = {
 }
 MOWER_STATE_LABELS: Final[dict[str, dict[str, str]]] = {
     "en": {
-        "1": "Working",
+        "1": "Mowing",
         "2": "Standby",
-        "3": "Working",
-        "4": "Paused",
+        "3": "Paused",
+        "4": "Paused due to errors",
         "5": "Returning Charge",
         "6": "Charging",
         "11": "Mapping",
         "13": "Charging Completed",
         "14": "Upgrading",
+        "15": "Charging paused: battery temperature is too high",
+        "16": "Charging paused: battery temperature is too low",
     },
     "zh": {
         "1": "割草中",
@@ -53,12 +55,15 @@ MOWER_STATE_LABELS: Final[dict[str, dict[str, str]]] = {
 MOWER_STATE_KEYS: Final[dict[str, str]] = {
     "1": "mowing",
     "2": "standby",
+    "3": "paused",
     "4": "paused",
     "5": "returning",
     "6": "charging",
     "11": "mapping",
     "13": "charging_completed",
     "14": "upgrading",
+    "15": "charging_paused_high_temperature",
+    "16": "charging_paused_low_temperature",
 }
 
 

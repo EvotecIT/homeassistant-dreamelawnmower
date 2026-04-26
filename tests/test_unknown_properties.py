@@ -69,6 +69,38 @@ def test_handle_properties_tolerates_unknown_property_ids() -> None:
     }
 
 
+def test_handle_properties_matches_model_specific_did_by_siid_piid() -> None:
+    device, updates = _device_stub()
+    model_specific_did = -115364054
+
+    changed = DreameMowerDevice._handle_properties(
+        device,
+        [
+            {
+                "did": str(model_specific_did),
+                "code": 0,
+                "value": 2,
+                "siid": 3,
+                "piid": 2,
+            },
+            {
+                "did": "-115364055",
+                "code": 0,
+                "value": 5,
+                "siid": 2,
+                "piid": 1,
+            },
+        ],
+    )
+
+    assert changed is True
+    assert updates == ["changed"]
+    assert device.data[DreameMowerProperty.CHARGING_STATUS.value] == 2
+    assert device.data[DreameMowerProperty.STATE.value] == 5
+    assert model_specific_did not in device.data
+    assert device.unknown_properties == {}
+
+
 def test_tracks_unavailable_unknown_properties_for_diagnostics() -> None:
     device, updates = _device_stub()
     unknown_did = -115545820

@@ -219,11 +219,16 @@ def test_public_package_exports_app_protocol_helpers() -> None:
     )
     assert MOWER_STATE_KEYS["5"] == "returning"
     assert mower_state_key("1") == "mowing"
+    assert mower_state_key("3") == "paused"
     assert mower_state_key(5) == "returning"
     assert mower_state_key("13") == "charging_completed"
+    assert mower_state_key("15") == "charging_paused_high_temperature"
     assert mower_state_key(999) is None
     assert mower_state_label(11) == "Mapping"
     assert mower_state_label("13") == "Charging Completed"
+    assert mower_state_label("15") == (
+        "Charging paused: battery temperature is too high"
+    )
     assert mower_state_label(999) is None
     assert mower_error_label(31) == "Left wheel speed"
     assert mower_error_label(-1) == "No error"
