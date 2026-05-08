@@ -109,11 +109,20 @@ The following areas are intentionally cautious:
 
 ### HACS
 
-1. Open HACS.
-2. Add this repository as a custom integration repository.
-3. Install **Dreame Lawn Mower**.
-4. Restart Home Assistant.
-5. Add the integration from **Settings -> Devices & services**.
+1. Add this repository to HACS as a custom integration repository:
+
+   [![Open your Home Assistant instance and open this repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=EvotecIT&repository=homeassistant-dreamelawnmower&category=integration)
+
+   If the button does not open your Home Assistant instance, manually add this
+   repository URL in HACS:
+
+   `https://github.com/EvotecIT/homeassistant-dreamelawnmower`
+
+2. Install **Dreame Lawn Mower** from HACS.
+3. Restart Home Assistant.
+4. Add the integration from **Settings -> Devices & services**:
+
+   [![Open your Home Assistant instance and start setting up Dreame Lawn Mower.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=dreame_lawn_mower)
 
 ### Manual
 
