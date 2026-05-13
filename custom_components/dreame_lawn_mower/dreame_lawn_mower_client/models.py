@@ -120,6 +120,22 @@ def _realtime_error_code_from_device(device: Any) -> int | None:
     return _active_error_code_from_raw(value)
 
 
+def _status_explicitly_reports_no_error(
+    *,
+    status_has_error: bool,
+    error_code: int | None,
+    error_name: str | None,
+    error_text: str | None,
+) -> bool:
+    """Return whether the normal status stream explicitly says no error."""
+    return bool(
+        not status_has_error
+        and error_code in (-1, 0)
+        and _is_no_error_text(error_name)
+        and _is_no_error_text(error_text)
+    )
+
+
 def _friendly_error_display(
     *,
     error_code: int | None,
@@ -584,7 +600,13 @@ def snapshot_from_device(
         or has_only_bare_error_flag
     )
     error_source: str | None = "status" if has_error else None
-    if not has_error and realtime_error_code is not None:
+    status_reports_no_error = _status_explicitly_reports_no_error(
+        status_has_error=status_has_error,
+        error_code=error_code,
+        error_name=error_name,
+        error_text=error_text,
+    )
+    if not has_error and not status_reports_no_error and realtime_error_code is not None:
         error_code = realtime_error_code
         has_error = True
         error_source = f"realtime_property_{REALTIME_ERROR_PROPERTY_KEY}"
