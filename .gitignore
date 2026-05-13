@@ -5,6 +5,7 @@ __pycache__/
 *.pyo
 *.egg-info/
 .tmp_apk/
+tmp/
 field-trip*.json
 firmware-update*.json
 key-definition*.json
