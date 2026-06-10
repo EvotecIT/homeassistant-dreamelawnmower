@@ -190,6 +190,23 @@ def test_descriptor_maps_lidax_ultra_1000_model_name() -> None:
     assert descriptor.title == "Mowercedes (LiDAX Ultra 1000)"
 
 
+def test_descriptor_maps_a3_awd_pro_3500_model_name() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-6",
+            "model": "dreame.mower.g2541e",
+            "customName": "Back Garden",
+            "deviceInfo": {"displayName": "A3 AWD Pro 3500"},
+        },
+        account_type="dreame",
+        country="eu",
+    )
+
+    assert descriptor is not None
+    assert descriptor.display_model == "A3 AWD Pro 3500"
+    assert descriptor.title == "Back Garden (A3 AWD Pro 3500)"
+
+
 def test_snapshot_uses_state_name_before_boolean_helpers() -> None:
     descriptor = descriptor_from_cloud_record(
         {
