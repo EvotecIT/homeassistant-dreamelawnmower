@@ -1663,7 +1663,13 @@ class DreameLawnMowerClient:
             raise DreameLawnMowerConnectionError(
                 "Camera stream handshake probe is blocked while the mower is active."
             )
-        if snapshot.docked:
+        station_states = {
+            "charging",
+            "charging_completed",
+            "smart_charging",
+            "station_reset",
+        }
+        if snapshot.raw_docked or snapshot.state in station_states:
             raise DreameLawnMowerConnectionError(
                 "Camera stream handshake probe is blocked while the mower is "
                 "docked. The Dreame app requires moving the mower out of the "
