@@ -47,11 +47,12 @@ class _FakeCameraDevice:
             obstacles=False,
         )
         self.status = SimpleNamespace(
-            state=DreameMowerState.CHARGING,
-            status=DreameMowerStatus.CHARGING,
+            state=DreameMowerState.PAUSED,
+            status=DreameMowerStatus.IDLE,
             started=False,
             running=False,
             returning=False,
+            docked=False,
             fast_mapping=False,
             stream_session="session-1",
             stream_status=DreameMowerStreamStatus.VIDEO,
@@ -290,6 +291,47 @@ def test_camera_stream_handshake_blocks_active_mower() -> None:
         assert "blocked while the mower is active" in str(err)
     else:
         raise AssertionError("Expected active mower stream probe to be blocked")
+
+
+def test_camera_stream_handshake_blocks_docked_mower() -> None:
+    device = _FakeCameraDevice()
+    device.status.state = DreameMowerState.CHARGING_COMPLETED
+    device.status.status = DreameMowerStatus.CHARGING
+    device.status.docked = True
+    client = _client_with_device(device)
+    client._sync_update_device = lambda: device
+
+    try:
+        client._sync_probe_camera_stream_handshake(
+            timeout=0,
+            interval=0.1,
+            operation="monitor",
+            payload_mode="with_session",
+        )
+    except DreameLawnMowerConnectionError as err:
+        assert "blocked while the mower is docked" in str(err)
+    else:
+        raise AssertionError("Expected docked mower stream probe to be blocked")
+
+
+def test_camera_stream_handshake_allows_idle_undocked_mower() -> None:
+    device = _FakeCameraDevice()
+    device.status.state = DreameMowerState.IDLE
+    device.status.status = DreameMowerStatus.IDLE
+    device.status.docked = False
+    client = _client_with_device(device)
+    client._sync_update_device = lambda: device
+    client._sync_get_cloud_user_features = lambda language=None: ""
+
+    result = client._sync_probe_camera_stream_handshake(
+        timeout=0,
+        interval=0.1,
+        operation="monitor",
+        payload_mode="with_session",
+    )
+
+    assert result["start_result"] == {"code": 0, "result": "started"}
+    assert result["end_result"] == {"code": 0, "result": "ended"}
 
 
 def test_camera_stream_handshake_can_omit_session_key() -> None:
