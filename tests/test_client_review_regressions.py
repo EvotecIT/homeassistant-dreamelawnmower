@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ssl
 from types import SimpleNamespace
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import protocol
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import (
     _normalize_cloud_firmware_check,
 )
@@ -38,6 +40,64 @@ def _firmware_device() -> SimpleNamespace:
         status=SimpleNamespace(),
         data={},
     )
+
+
+def test_cloud_mqtt_client_requires_verified_tls(monkeypatch) -> None:
+    mqtt_clients = []
+
+    class _MqttClient:
+        def __init__(self, *args, **kwargs) -> None:
+            self.tls_set_kwargs = None
+            self.tls_insecure = None
+            self.connected_to = None
+            mqtt_clients.append(self)
+
+        def reconnect_delay_set(self, *args) -> None:
+            pass
+
+        def tls_set(self, **kwargs) -> None:
+            self.tls_set_kwargs = kwargs
+
+        def tls_insecure_set(self, value) -> None:
+            self.tls_insecure = value
+
+        def username_pw_set(self, *args) -> None:
+            pass
+
+        def connect(self, host, port, keepalive) -> None:
+            self.connected_to = (host, port, keepalive)
+
+        def loop_start(self) -> None:
+            pass
+
+    monkeypatch.setattr(protocol.mqtt_client, "Client", _MqttClient)
+
+    cloud = protocol.DreameMowerDreameHomeCloudProtocol(
+        "user@example.invalid",
+        "secret",
+        "eu",
+        "device-1",
+    )
+    cloud._logged_in = True
+    cloud._uid = "uid-1"
+    cloud._did = "device-1"
+    cloud._model = "dreame.mower.g2408"
+    cloud._host = "mqtt.example.invalid:8883"
+    cloud._key = "client-key"
+    cloud._uuid = "uuid-1"
+    cloud._strings = [""] * 57
+    cloud._strings[7] = "topic"
+    cloud._strings[53] = "agent-"
+    cloud._strings[54] = "-"
+    monkeypatch.setattr(cloud, "get_device_info", lambda: {"did": "device-1"})
+
+    result = cloud.connect(message_callback=lambda data: None)
+
+    assert result == {"did": "device-1"}
+    assert len(mqtt_clients) == 1
+    assert mqtt_clients[0].tls_set_kwargs == {"cert_reqs": ssl.CERT_REQUIRED}
+    assert mqtt_clients[0].tls_insecure is False
+    assert mqtt_clients[0].connected_to == ("mqtt.example.invalid", 8883, 50)
 
 
 def test_get_voice_settings_does_not_synthesize_prompt_flags() -> None:
