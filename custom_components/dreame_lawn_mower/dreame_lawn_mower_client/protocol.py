@@ -258,8 +258,8 @@ class DreameMowerDreameHomeCloudProtocol:
                             self._client.on_disconnect = DreameMowerDreameHomeCloudProtocol._on_client_disconnect
                             self._client.on_message = DreameMowerDreameHomeCloudProtocol._on_client_message
                             self._client.reconnect_delay_set(1, 15)
-                            self._client.tls_set(cert_reqs=ssl.CERT_NONE)
-                            self._client.tls_insecure_set(True)
+                            self._client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
+                            self._client.tls_insecure_set(False)
                             self._set_client_key()
                             self._client.connect(host[0], int(host[1]), 50)
                             self._client.loop_start()
