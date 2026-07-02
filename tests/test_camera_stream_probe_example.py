@@ -66,7 +66,7 @@ def test_xp2p_request_summary_redacts_computed_stream_target() -> None:
     assert summary["ready"] is True
     for key in (
         "service_id",
-        "flv_channel_id",
+        "delegate_id",
         "product_id",
         "device_name",
         "p2p_info",

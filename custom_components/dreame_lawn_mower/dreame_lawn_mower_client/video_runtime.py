@@ -126,7 +126,8 @@ class DreameLawnMowerXp2pLiveStreamRequest:
     """Normalized request passed to a native XP2P runtime."""
 
     service_id: str
-    flv_channel_id: str
+    delegate_id: str
+    stream_channel: str
     product_id: str
     device_name: str
     p2p_info: str = field(repr=False)
@@ -152,11 +153,13 @@ class DreameLawnMowerXp2pLiveStreamRequest:
             raise DreameLawnMowerVideoRuntimeError(
                 "Cannot start XP2P stream; missing service id."
             )
-        flv_channel_id = inputs.channel_id or service_id
-        flv_path = _format_flv_path(inputs.flv_path_template, flv_channel_id)
+        delegate_id = inputs.channel_id or service_id
+        stream_channel = str(inputs.stream_channel)
+        flv_path = _format_flv_path(inputs.flv_path_template, stream_channel)
         return cls(
             service_id=service_id,
-            flv_channel_id=flv_channel_id,
+            delegate_id=delegate_id,
+            stream_channel=stream_channel,
             product_id=str(inputs.product_id),
             device_name=str(inputs.device_name),
             p2p_info=str(inputs.p2p_info),
@@ -170,7 +173,9 @@ class DreameLawnMowerXp2pLiveStreamRequest:
         """Return a JSON-safe request payload."""
         payload = {
             "service_id": self.service_id,
-            "flv_channel_id": self.flv_channel_id,
+            "delegate_id": self.delegate_id,
+            "flv_channel_id": self.delegate_id,
+            "stream_channel": self.stream_channel,
             "product_id": self.product_id,
             "device_name": self.device_name,
             "p2p_info": self.p2p_info,
@@ -182,6 +187,7 @@ class DreameLawnMowerXp2pLiveStreamRequest:
         if redact:
             for key in (
                 "service_id",
+                "delegate_id",
                 "flv_channel_id",
                 "product_id",
                 "device_name",
@@ -526,7 +532,7 @@ class DreameLawnMowerNativeXp2pRuntime:
                 _encode(request.flv_path),
                 True,
             )
-            stream_url_raw = self._delegate_http_flv(service_id)
+            stream_url_raw = self._delegate_http_flv(_encode(request.delegate_id))
             stream_url = _decode(stream_url_raw)
             if not stream_url:
                 raise DreameLawnMowerVideoRuntimeError(

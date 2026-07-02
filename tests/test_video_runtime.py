@@ -67,19 +67,21 @@ def test_xp2p_live_stream_request_uses_runtime_contract() -> None:
     )
 
     assert request.service_id == "product-1/mower-camera-1"
-    assert request.flv_channel_id == "channel-1"
+    assert request.delegate_id == "channel-1"
+    assert request.stream_channel == "0"
     assert request.product_id == "product-1"
     assert request.device_name == "mower-camera-1"
     assert request.secret_id == "secret-id-1"
     assert request.secret_key == "secret-key-1"
     assert (
         request.flv_path
-        == "ipc.flv?action=live&channel=channel-1&quality=high&_crypto=on"
+        == "ipc.flv?action=live&channel=0&quality=high&_crypto=on"
     )
     assert request.live_command == "action=live"
     redacted = request.as_dict(redact=True)
     for key in (
         "service_id",
+        "delegate_id",
         "flv_channel_id",
         "product_id",
         "device_name",
@@ -87,6 +89,7 @@ def test_xp2p_live_stream_request_uses_runtime_contract() -> None:
     ):
         assert key not in redacted
         assert redacted[f"{key}_present"] is True
+    assert request.as_dict()["flv_channel_id"] == "channel-1"
     assert "p2p_info" not in redacted
     assert redacted["p2p_info_present"] is True
     assert "secret_id" not in redacted
@@ -107,11 +110,11 @@ def test_xp2p_live_stream_request_encodes_fallback_channel_in_flv_path() -> None
     request = DreameLawnMowerXp2pLiveStreamRequest.from_runtime_inputs(inputs)
 
     assert request.service_id == "product-1/mower-camera-1"
-    assert request.flv_channel_id == "product-1/mower-camera-1"
+    assert request.delegate_id == "product-1/mower-camera-1"
+    assert request.stream_channel == "0"
     assert (
         request.flv_path
-        == "ipc.flv?action=live&channel=product-1%2Fmower-camera-1&"
-        "quality=high&_crypto=on"
+        == "ipc.flv?action=live&channel=0&quality=high&_crypto=on"
     )
 
 
@@ -159,9 +162,9 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
     assert command_call[5] == 123
     assert (
         library.startAvRecvService.calls[0][1]
-        == b"ipc.flv?action=live&channel=channel-1&quality=high&_crypto=on"
+        == b"ipc.flv?action=live&channel=0&quality=high&_crypto=on"
     )
-    assert library.delegateHttpFlv.calls[0][0] == b"product-1/mower-camera-1"
+    assert library.delegateHttpFlv.calls[0][0] == b"channel-1"
 
     runtime.stop_live_stream(session)
 
@@ -314,7 +317,7 @@ def test_external_runner_starts_live_stream_and_stops_session(tmp_path) -> None:
     assert calls[0]["request"]["secret_key"] == "secret-key-1"
     assert (
         calls[0]["request"]["flv_path"]
-        == "ipc.flv?action=live&channel=channel-1&quality=high&_crypto=on"
+        == "ipc.flv?action=live&channel=0&quality=high&_crypto=on"
     )
     assert calls[1] == {
         "operation": "stop",

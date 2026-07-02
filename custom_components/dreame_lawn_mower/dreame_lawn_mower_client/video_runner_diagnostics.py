@@ -8,6 +8,7 @@ from typing import Any
 
 RUNNER_OUTPUT_PREVIEW_LIMIT = 400
 SENSITIVE_RUNNER_PAYLOAD_KEYS = {
+    "delegate_id",
     "device_name",
     "flv_channel_id",
     "flv_path",

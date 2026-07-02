@@ -481,6 +481,7 @@ class DreameLawnMowerCameraStreamRuntimeInputs:
     secret_key: str | None = None
     app_id: str | None = None
     app_secret: str | None = None
+    stream_channel: str | int = 0
     live_command: str = "action=live"
     flv_path_template: str = (
         "ipc.flv?action=live&channel={channel}&quality=high&_crypto=on"
@@ -669,7 +670,11 @@ def snapshot_from_device(
         error_name=error_name,
         error_text=error_text,
     )
-    if not has_error and not status_reports_no_error and realtime_error_code is not None:
+    if (
+        not has_error
+        and not status_reports_no_error
+        and realtime_error_code is not None
+    ):
         error_code = realtime_error_code
         has_error = True
         error_source = f"realtime_property_{REALTIME_ERROR_PROPERTY_KEY}"
