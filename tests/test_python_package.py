@@ -28,8 +28,13 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerMapDiagnostics,
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
+    DreameLawnMowerNativeXp2pRuntime,
     DreameLawnMowerRemoteControlSupport,
     DreameLawnMowerStatusBlob,
+    DreameLawnMowerVideoRuntimeError,
+    DreameLawnMowerXp2pAppConfig,
+    DreameLawnMowerXp2pLiveStreamRequest,
+    DreameLawnMowerXp2pLiveStreamSession,
     analyze_decompiled_sources,
     analyze_dreamehome_apk,
     analyze_dreamehome_assets,
@@ -98,6 +103,15 @@ def test_public_package_exports_map_helpers() -> None:
     assert DreameLawnMowerStatusBlob.__name__.endswith("StatusBlob")
     assert DreameLawnMowerCameraStreamRuntimeInputs.__name__.endswith(
         "CameraStreamRuntimeInputs"
+    )
+    assert DreameLawnMowerNativeXp2pRuntime.__name__.endswith("NativeXp2pRuntime")
+    assert DreameLawnMowerVideoRuntimeError.__name__.endswith("VideoRuntimeError")
+    assert DreameLawnMowerXp2pAppConfig.__name__.endswith("Xp2pAppConfig")
+    assert DreameLawnMowerXp2pLiveStreamRequest.__name__.endswith(
+        "Xp2pLiveStreamRequest"
+    )
+    assert DreameLawnMowerXp2pLiveStreamSession.__name__.endswith(
+        "Xp2pLiveStreamSession"
     )
     assert callable(map_summary_from_map_data)
     assert callable(map_summary_to_dict)

@@ -16,6 +16,8 @@ from typing import Any
 from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
     DreameLawnMowerConnectionError,
+    DreameLawnMowerNativeXp2pRuntime,
+    DreameLawnMowerVideoRuntimeError,
 )
 
 PAYLOAD_MODES = ("app_action", "with_session", "no_session", "empty_session")
@@ -40,6 +42,16 @@ def _parse_args() -> argparse.Namespace:
         "--out",
         type=Path,
         help="Optional JSON output file. Prints to stdout when omitted.",
+    )
+    parser.add_argument(
+        "--xp2p-library",
+        type=Path,
+        help="Optional native XP2P shared library path for live FLV probing.",
+    )
+    parser.add_argument(
+        "--start-native-xp2p",
+        action="store_true",
+        help="Start and stop the native XP2P live stream probe.",
     )
     return parser.parse_args()
 
@@ -81,6 +93,14 @@ def _safe_runtime_inputs_summary(value: Any) -> dict[str, Any]:
         return {"ready": False, "available": False}
     payload["available"] = True
     return payload
+
+
+def _native_xp2p_unavailable(reason: str) -> dict[str, object]:
+    return {
+        "started": False,
+        "available": False,
+        "error": reason,
+    }
 
 
 def _write_output(output: dict[str, object], out: Path | None) -> None:
@@ -133,6 +153,11 @@ async def main() -> None:
             output["camera_stream_runtime_inputs"] = _safe_runtime_inputs_summary(
                 runtime_inputs
             )
+            if args.start_native_xp2p:
+                output["native_xp2p"] = await _async_probe_native_xp2p(
+                    args.xp2p_library,
+                    runtime_inputs,
+                )
         except DreameLawnMowerConnectionError as err:
             output["camera_stream_inputs"] = {
                 "available": False,
@@ -159,6 +184,37 @@ async def main() -> None:
         _write_output(output, args.out)
     finally:
         await client.async_close()
+
+
+async def _async_probe_native_xp2p(
+    library_path: Path | None,
+    runtime_inputs: Any,
+) -> dict[str, object]:
+    if library_path is None:
+        return _native_xp2p_unavailable(
+            "--xp2p-library is required with --start-native-xp2p."
+        )
+    if not getattr(runtime_inputs, "ready", False):
+        missing = getattr(runtime_inputs, "missing_required", ())
+        return _native_xp2p_unavailable(
+            "Runtime inputs are incomplete: " + ", ".join(missing)
+        )
+
+    def _start_and_stop() -> dict[str, object]:
+        runtime = DreameLawnMowerNativeXp2pRuntime(library_path)
+        session = runtime.start_live_stream(runtime_inputs)
+        try:
+            payload = session.as_dict()
+            payload["started"] = True
+            payload["available"] = True
+            return payload
+        finally:
+            runtime.stop_live_stream(session)
+
+    try:
+        return await asyncio.to_thread(_start_and_stop)
+    except DreameLawnMowerVideoRuntimeError as err:
+        return _native_xp2p_unavailable(str(err))
 
 
 if __name__ == "__main__":

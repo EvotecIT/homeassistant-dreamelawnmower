@@ -1,0 +1,340 @@
+"""Native XP2P runtime bindings for Dreame mower live video."""
+
+from __future__ import annotations
+
+from ctypes import (
+    CDLL,
+    POINTER,
+    Structure,
+    byref,
+    c_bool,
+    c_char,
+    c_char_p,
+    c_int,
+    c_size_t,
+    c_ubyte,
+    c_uint64,
+    c_void_p,
+)
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Protocol
+
+from .models import DreameLawnMowerCameraStreamRuntimeInputs
+
+XP2P_PROTOCOL_AUTO = 0
+XP2P_PROTOCOL_UDP = 1
+XP2P_PROTOCOL_TCP = 2
+
+DEFAULT_COMMAND_TIMEOUT_US = 7_500_000
+
+
+class DreameLawnMowerVideoRuntimeError(RuntimeError):
+    """Raised when the native video runtime cannot start a stream."""
+
+
+class _NativeCallable(Protocol):
+    argtypes: Any
+    restype: Any
+
+    def __call__(self, *args: Any) -> Any: ...
+
+
+class _Xp2pAppConfig(Structure):
+    _fields_ = [
+        ("server", c_char * 256),
+        ("ip", c_char * 64),
+        ("port", c_uint64),
+        ("type", c_int),
+        ("cross", c_bool),
+    ]
+
+
+@dataclass(slots=True, frozen=True)
+class DreameLawnMowerXp2pAppConfig:
+    """XP2P native app configuration."""
+
+    server: str = ""
+    ip: str = ""
+    port: int = 0
+    protocol_type: int = XP2P_PROTOCOL_AUTO
+    cross: bool = False
+
+    def to_native(self) -> _Xp2pAppConfig:
+        """Return the ctypes struct expected by Tencent's XP2P C ABI."""
+        config = _Xp2pAppConfig()
+        config.server = _encode_fixed(self.server, 256)
+        config.ip = _encode_fixed(self.ip, 64)
+        config.port = self.port
+        config.type = self.protocol_type
+        config.cross = self.cross
+        return config
+
+
+@dataclass(slots=True, frozen=True)
+class DreameLawnMowerXp2pLiveStreamRequest:
+    """Normalized request passed to a native XP2P runtime."""
+
+    service_id: str
+    product_id: str
+    device_name: str
+    p2p_info: str = field(repr=False)
+    live_command: str = "action=live"
+
+    @classmethod
+    def from_runtime_inputs(
+        cls,
+        inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+    ) -> DreameLawnMowerXp2pLiveStreamRequest:
+        """Build a native stream request from Dreame cloud runtime inputs."""
+        missing = inputs.missing_required
+        if missing:
+            raise DreameLawnMowerVideoRuntimeError(
+                "Cannot start XP2P stream; missing runtime fields: "
+                + ", ".join(missing)
+            )
+        service_id = inputs.channel_id or inputs.xp2p_id or inputs.did
+        if not service_id:
+            raise DreameLawnMowerVideoRuntimeError(
+                "Cannot start XP2P stream; missing service id."
+            )
+        return cls(
+            service_id=service_id,
+            product_id=str(inputs.product_id),
+            device_name=str(inputs.device_name),
+            p2p_info=str(inputs.p2p_info),
+            live_command=inputs.live_command,
+        )
+
+    def as_dict(self, *, redact: bool = False) -> dict[str, Any]:
+        """Return a JSON-safe request payload."""
+        payload = {
+            "service_id": self.service_id,
+            "product_id": self.product_id,
+            "device_name": self.device_name,
+            "p2p_info": self.p2p_info,
+            "live_command": self.live_command,
+        }
+        if redact:
+            payload["p2p_info_present"] = bool(payload.pop("p2p_info", None))
+        return payload
+
+
+@dataclass(slots=True)
+class DreameLawnMowerXp2pLiveStreamSession:
+    """Started native XP2P stream session."""
+
+    service_id: str
+    stream_url: str
+    runtime: str = "native_xp2p"
+    start_result: int = 0
+    command_result: int | None = None
+    command_response: bytes | None = field(default=None, repr=False)
+    av_recv_handle: Any | None = field(default=None, repr=False)
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return safe stream session metadata."""
+        return {
+            "service_id": self.service_id,
+            "stream_url": self.stream_url,
+            "runtime": self.runtime,
+            "start_result": self.start_result,
+            "command_result": self.command_result,
+            "command_response_present": bool(self.command_response),
+            "av_recv_started": self.av_recv_handle is not None,
+        }
+
+
+class DreameLawnMowerNativeXp2pRuntime:
+    """Thin ctypes wrapper around Tencent's native XP2P C ABI."""
+
+    def __init__(self, library_path: str | Path, *, library: Any | None = None) -> None:
+        self.library_path = str(library_path)
+        try:
+            self._library = library if library is not None else CDLL(self.library_path)
+        except OSError as err:
+            raise DreameLawnMowerVideoRuntimeError(
+                f"Could not load XP2P native library {self.library_path!r}: {err}"
+            ) from err
+        self._start_service = self._bind(
+            "startService",
+            [c_char_p, c_char_p, c_char_p, c_char_p, _Xp2pAppConfig],
+            c_int,
+        )
+        self._post_command = self._bind(
+            "postCommandRequestSync",
+            [
+                c_char_p,
+                POINTER(c_ubyte),
+                c_size_t,
+                POINTER(POINTER(c_ubyte)),
+                POINTER(c_size_t),
+                c_uint64,
+            ],
+            c_int,
+        )
+        self._start_av_recv = self._bind(
+            "startAvRecvService",
+            [c_char_p, c_char_p, c_bool],
+            c_void_p,
+        )
+        self._stop_av_recv = self._bind(
+            "stopAvRecvService",
+            [c_char_p, c_void_p],
+            c_int,
+            required=False,
+        )
+        self._delegate_http_flv = self._bind(
+            "delegateHttpFlv",
+            [c_char_p],
+            c_char_p,
+        )
+        self._stop_service = self._bind(
+            "stopService",
+            [c_char_p],
+            None,
+            required=False,
+        )
+
+    def start_live_stream(
+        self,
+        inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+        *,
+        app_config: DreameLawnMowerXp2pAppConfig | None = None,
+        command_timeout_us: int = DEFAULT_COMMAND_TIMEOUT_US,
+    ) -> DreameLawnMowerXp2pLiveStreamSession:
+        """Start native XP2P live video and return its local HTTP-FLV URL."""
+        request = DreameLawnMowerXp2pLiveStreamRequest.from_runtime_inputs(inputs)
+        config = app_config or DreameLawnMowerXp2pAppConfig()
+        service_id = _encode(request.service_id)
+        started = False
+        av_recv_handle: Any | None = None
+        try:
+            start_result = int(
+                self._start_service(
+                    service_id,
+                    _encode(request.product_id),
+                    _encode(request.device_name),
+                    _encode(request.p2p_info),
+                    config.to_native(),
+                )
+            )
+            if start_result != 0:
+                raise DreameLawnMowerVideoRuntimeError(
+                    f"XP2P startService failed with code {start_result}."
+                )
+            started = True
+            command_result, command_response = self._post_live_command(
+                request,
+                command_timeout_us=command_timeout_us,
+            )
+            if command_result != 0:
+                raise DreameLawnMowerVideoRuntimeError(
+                    "XP2P postCommandRequestSync failed with code "
+                    f"{command_result}."
+                )
+            av_recv_handle = self._start_av_recv(
+                service_id,
+                _encode(request.live_command),
+                True,
+            )
+            stream_url_raw = self._delegate_http_flv(service_id)
+            stream_url = _decode(stream_url_raw)
+            if not stream_url:
+                raise DreameLawnMowerVideoRuntimeError(
+                    "XP2P delegateHttpFlv did not return a stream URL."
+                )
+            return DreameLawnMowerXp2pLiveStreamSession(
+                service_id=request.service_id,
+                stream_url=stream_url,
+                start_result=start_result,
+                command_result=command_result,
+                command_response=command_response,
+                av_recv_handle=av_recv_handle,
+            )
+        except Exception:
+            if started:
+                self.stop_live_stream(
+                    DreameLawnMowerXp2pLiveStreamSession(
+                        service_id=request.service_id,
+                        stream_url="",
+                        av_recv_handle=av_recv_handle,
+                    )
+                )
+            raise
+
+    def stop_live_stream(self, session: DreameLawnMowerXp2pLiveStreamSession) -> None:
+        """Stop a native XP2P live stream session."""
+        service_id = _encode(session.service_id)
+        if session.av_recv_handle is not None and self._stop_av_recv is not None:
+            self._stop_av_recv(service_id, session.av_recv_handle)
+        if self._stop_service is not None:
+            self._stop_service(service_id)
+
+    def _post_live_command(
+        self,
+        request: DreameLawnMowerXp2pLiveStreamRequest,
+        *,
+        command_timeout_us: int,
+    ) -> tuple[int, bytes | None]:
+        command = _encode(request.live_command)
+        command_buffer = (c_ubyte * len(command)).from_buffer_copy(command)
+        response_buffer = POINTER(c_ubyte)()
+        response_length = c_size_t()
+        result = int(
+            self._post_command(
+                _encode(request.service_id),
+                command_buffer,
+                len(command),
+                byref(response_buffer),
+                byref(response_length),
+                command_timeout_us,
+            )
+        )
+        response = None
+        if result == 0 and response_buffer and response_length.value:
+            response = bytes(response_buffer[: response_length.value])
+        return result, response
+
+    def _bind(
+        self,
+        name: str,
+        argtypes: list[Any],
+        restype: Any,
+        *,
+        required: bool = True,
+    ) -> _NativeCallable | None:
+        function = getattr(self._library, name, None)
+        if function is None:
+            if required:
+                raise DreameLawnMowerVideoRuntimeError(
+                    f"XP2P native library is missing required symbol: {name}."
+                )
+            return None
+        try:
+            function.argtypes = argtypes
+            function.restype = restype
+        except AttributeError:
+            pass
+        return function
+
+
+def _encode(value: str) -> bytes:
+    return value.encode("utf-8")
+
+
+def _decode(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    return str(value)
+
+
+def _encode_fixed(value: str, size: int) -> bytes:
+    encoded = _encode(value)
+    if len(encoded) >= size:
+        raise DreameLawnMowerVideoRuntimeError(
+            f"XP2P app config value is too long for {size}-byte field."
+        )
+    return encoded
