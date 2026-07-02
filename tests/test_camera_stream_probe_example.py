@@ -43,3 +43,23 @@ def test_runtime_inputs_summary_redacts_stable_identifiers() -> None:
     assert "secret_key" not in summary
     assert summary["secret_key_present"] is True
     assert summary["ready"] is True
+
+
+def test_xp2p_request_summary_redacts_computed_stream_target() -> None:
+    module = _load_probe_module()
+    inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+        source="dreame_third_video_tx",
+        did="device-id-1",
+        channel_id="channel-1",
+        product_id="product-1",
+        device_name="device-name-1",
+        p2p_info="p2p-info-1",
+    )
+
+    summary = module._safe_xp2p_request_summary(inputs)
+
+    assert summary["available"] is True
+    assert summary["ready"] is True
+    for key in ("service_id", "product_id", "device_name", "p2p_info", "flv_path"):
+        assert key not in summary
+        assert summary[f"{key}_present"] is True

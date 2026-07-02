@@ -19,6 +19,7 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerNativeXp2pRuntime,
     DreameLawnMowerVideoRuntimeError,
     DreameLawnMowerXp2pExternalRunner,
+    DreameLawnMowerXp2pLiveStreamRequest,
     diagnose_native_xp2p_runtime,
 )
 
@@ -110,6 +111,28 @@ def _safe_runtime_inputs_summary(value: Any) -> dict[str, Any]:
     return payload
 
 
+def _safe_xp2p_request_summary(value: Any) -> dict[str, Any]:
+    if not getattr(value, "ready", False):
+        missing = getattr(value, "missing_required", ())
+        return {
+            "available": False,
+            "ready": False,
+            "missing_required": list(missing),
+        }
+    try:
+        request = DreameLawnMowerXp2pLiveStreamRequest.from_runtime_inputs(value)
+    except DreameLawnMowerVideoRuntimeError as err:
+        return {
+            "available": False,
+            "ready": False,
+            "error": str(err),
+        }
+    payload = request.as_dict(redact=True)
+    payload["available"] = True
+    payload["ready"] = True
+    return payload
+
+
 def _native_xp2p_unavailable(reason: str) -> dict[str, object]:
     return {
         "started": False,
@@ -168,6 +191,7 @@ async def main() -> None:
             output["camera_stream_runtime_inputs"] = _safe_runtime_inputs_summary(
                 runtime_inputs
             )
+            output["xp2p_request"] = _safe_xp2p_request_summary(runtime_inputs)
             if args.xp2p_library is not None:
                 output["native_xp2p_diagnostics"] = await _async_diagnose_native_xp2p(
                     args.xp2p_library
@@ -235,7 +259,7 @@ async def _async_probe_native_xp2p(
         runtime = DreameLawnMowerNativeXp2pRuntime(library_path)
         session = runtime.start_live_stream(runtime_inputs)
         try:
-            payload = session.as_dict()
+            payload = session.as_dict(redact=True)
             payload["started"] = True
             payload["available"] = True
             return payload
@@ -271,7 +295,7 @@ async def _async_probe_xp2p_runner(
         runner = DreameLawnMowerXp2pExternalRunner((runner_path,))
         session = runner.start_live_stream(runtime_inputs)
         try:
-            payload = session.as_dict()
+            payload = session.as_dict(redact=True)
             payload["started"] = True
             payload["available"] = True
             return payload

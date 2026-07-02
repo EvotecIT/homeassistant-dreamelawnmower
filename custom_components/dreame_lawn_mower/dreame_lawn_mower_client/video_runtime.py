@@ -22,6 +22,7 @@ from ctypes import (
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import quote
 
 from .models import DreameLawnMowerCameraStreamRuntimeInputs
 
@@ -119,6 +120,7 @@ class DreameLawnMowerXp2pLiveStreamRequest:
     product_id: str
     device_name: str
     p2p_info: str = field(repr=False)
+    flv_path: str
     live_command: str = "action=live"
 
     @classmethod
@@ -138,11 +140,13 @@ class DreameLawnMowerXp2pLiveStreamRequest:
             raise DreameLawnMowerVideoRuntimeError(
                 "Cannot start XP2P stream; missing service id."
             )
+        flv_path = _format_flv_path(inputs.flv_path_template, service_id)
         return cls(
             service_id=service_id,
             product_id=str(inputs.product_id),
             device_name=str(inputs.device_name),
             p2p_info=str(inputs.p2p_info),
+            flv_path=flv_path,
             live_command=inputs.live_command,
         )
 
@@ -153,10 +157,18 @@ class DreameLawnMowerXp2pLiveStreamRequest:
             "product_id": self.product_id,
             "device_name": self.device_name,
             "p2p_info": self.p2p_info,
+            "flv_path": self.flv_path,
             "live_command": self.live_command,
         }
         if redact:
-            payload["p2p_info_present"] = bool(payload.pop("p2p_info", None))
+            for key in (
+                "service_id",
+                "product_id",
+                "device_name",
+                "p2p_info",
+                "flv_path",
+            ):
+                payload[f"{key}_present"] = bool(payload.pop(key, None))
         return payload
 
 
@@ -174,9 +186,9 @@ class DreameLawnMowerXp2pLiveStreamSession:
     runner_command: tuple[str, ...] = field(default=(), repr=False)
     runner_session_id: str | None = None
 
-    def as_dict(self) -> dict[str, Any]:
+    def as_dict(self, *, redact: bool = False) -> dict[str, Any]:
         """Return safe stream session metadata."""
-        return {
+        payload = {
             "service_id": self.service_id,
             "stream_url": self.stream_url,
             "runtime": self.runtime,
@@ -187,6 +199,10 @@ class DreameLawnMowerXp2pLiveStreamSession:
             "runner_command": self.runner_command,
             "runner_session_id_present": bool(self.runner_session_id),
         }
+        if redact:
+            for key in ("service_id", "stream_url"):
+                payload[f"{key}_present"] = bool(payload.pop(key, None))
+        return payload
 
 
 class DreameLawnMowerXp2pExternalRunner:
@@ -370,7 +386,7 @@ class DreameLawnMowerNativeXp2pRuntime:
                 )
             av_recv_handle = self._start_av_recv(
                 service_id,
-                _encode(request.live_command),
+                _encode(request.flv_path),
                 True,
             )
             stream_url_raw = self._delegate_http_flv(service_id)
@@ -515,6 +531,16 @@ def _as_text(value: Any) -> str | None:
         return None
     text = str(value)
     return text or None
+
+
+def _format_flv_path(template: str, channel: str) -> str:
+    channel_value = quote(channel, safe="")
+    try:
+        return template.format(channel=channel_value)
+    except (KeyError, IndexError, ValueError) as err:
+        raise DreameLawnMowerVideoRuntimeError(
+            f"Invalid XP2P FLV path template: {template!r}."
+        ) from err
 
 
 def _encode_fixed(value: str, size: int) -> bytes:

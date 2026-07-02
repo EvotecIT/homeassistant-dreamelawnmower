@@ -17,6 +17,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.video_runtime 
     DreameLawnMowerXp2pAppConfig,
     DreameLawnMowerXp2pExternalRunner,
     DreameLawnMowerXp2pLiveStreamRequest,
+    DreameLawnMowerXp2pLiveStreamSession,
     diagnose_native_xp2p_runtime,
 )
 
@@ -64,10 +65,36 @@ def test_xp2p_live_stream_request_uses_runtime_contract() -> None:
     assert request.service_id == "channel-1"
     assert request.product_id == "product-1"
     assert request.device_name == "mower-camera-1"
+    assert (
+        request.flv_path
+        == "ipc.flv?action=live&channel=channel-1&quality=high&_crypto=on"
+    )
     assert request.live_command == "action=live"
     redacted = request.as_dict(redact=True)
+    for key in ("service_id", "product_id", "device_name", "flv_path"):
+        assert key not in redacted
+        assert redacted[f"{key}_present"] is True
     assert "p2p_info" not in redacted
     assert redacted["p2p_info_present"] is True
+
+
+def test_xp2p_live_stream_request_encodes_fallback_channel_in_flv_path() -> None:
+    inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+        source="dreame_third_video_tx",
+        did="device-1",
+        product_id="product-1",
+        device_name="mower-camera-1",
+        p2p_info="p2p-info-1",
+    )
+
+    request = DreameLawnMowerXp2pLiveStreamRequest.from_runtime_inputs(inputs)
+
+    assert request.service_id == "product-1/mower-camera-1"
+    assert (
+        request.flv_path
+        == "ipc.flv?action=live&channel=product-1%2Fmower-camera-1&"
+        "quality=high&_crypto=on"
+    )
 
 
 def test_xp2p_live_stream_request_requires_p2p_runtime_inputs() -> None:
@@ -111,7 +138,10 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
     assert command_call[0] == b"channel-1"
     assert bytes(command_call[1][: command_call[2]]) == b"action=live"
     assert command_call[5] == 123
-    assert library.startAvRecvService.calls[0][1] == b"action=live"
+    assert (
+        library.startAvRecvService.calls[0][1]
+        == b"ipc.flv?action=live&channel=channel-1&quality=high&_crypto=on"
+    )
     assert library.delegateHttpFlv.calls[0][0] == b"channel-1"
 
     runtime.stop_live_stream(session)
@@ -245,6 +275,10 @@ def test_external_runner_starts_live_stream_and_stops_session(tmp_path) -> None:
     assert calls[0]["request"]["product_id"] == "product-1"
     assert calls[0]["request"]["device_name"] == "mower-camera-1"
     assert calls[0]["request"]["p2p_info"] == "p2p-info-1"
+    assert (
+        calls[0]["request"]["flv_path"]
+        == "ipc.flv?action=live&channel=channel-1&quality=high&_crypto=on"
+    )
     assert calls[1] == {
         "operation": "stop",
         "session": {
@@ -281,3 +315,20 @@ def test_external_runner_reports_process_failures_without_secret(tmp_path) -> No
         assert "p2p-info-1" not in message
     else:
         raise AssertionError("Expected failing external runner to fail")
+
+
+def test_stream_session_metadata_can_redact_runtime_identifiers() -> None:
+    session = DreameLawnMowerXp2pLiveStreamSession(
+        service_id="channel-1",
+        stream_url="http://127.0.0.1:5544/ipc.flv",
+        runtime="external_xp2p_runner",
+        runner_session_id="runner-session-1",
+    )
+
+    redacted = session.as_dict(redact=True)
+
+    assert "service_id" not in redacted
+    assert "stream_url" not in redacted
+    assert redacted["service_id_present"] is True
+    assert redacted["stream_url_present"] is True
+    assert redacted["runner_session_id_present"] is True
