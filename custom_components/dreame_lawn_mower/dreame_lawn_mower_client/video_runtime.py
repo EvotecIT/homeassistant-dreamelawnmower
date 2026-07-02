@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import threading
 from collections.abc import Mapping, Sequence
 from ctypes import (
     CDLL,
@@ -185,6 +186,7 @@ class DreameLawnMowerXp2pLiveStreamSession:
     av_recv_handle: Any | None = field(default=None, repr=False)
     runner_command: tuple[str, ...] = field(default=(), repr=False)
     runner_session_id: str | None = None
+    runner_process: Any | None = field(default=None, repr=False)
 
     def as_dict(self, *, redact: bool = False) -> dict[str, Any]:
         """Return safe stream session metadata."""
@@ -198,6 +200,7 @@ class DreameLawnMowerXp2pLiveStreamSession:
             "av_recv_started": self.av_recv_handle is not None,
             "runner_command": self.runner_command,
             "runner_session_id_present": bool(self.runner_session_id),
+            "runner_process_alive": _process_alive(self.runner_process),
         }
         if redact:
             for key in ("service_id", "stream_url"):
@@ -294,6 +297,94 @@ class DreameLawnMowerXp2pExternalRunner:
                 f"XP2P external runner failed: {_as_text(response.get('error'))}"
             )
         return response
+
+
+class DreameLawnMowerXp2pProcessRunner:
+    """Persistent JSON-line adapter for an XP2P runner that owns the FLV server."""
+
+    def __init__(self, command: Sequence[str | Path], *, timeout: float = 15.0) -> None:
+        self.command = tuple(str(part) for part in command)
+        if not self.command:
+            raise DreameLawnMowerVideoRuntimeError(
+                "XP2P process runner command cannot be empty."
+            )
+        self.timeout = timeout
+
+    def start_live_stream(
+        self,
+        inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+        *,
+        command_timeout_us: int = DEFAULT_COMMAND_TIMEOUT_US,
+    ) -> DreameLawnMowerXp2pLiveStreamSession:
+        """Start a persistent XP2P runner and return its local FLV URL."""
+        request = DreameLawnMowerXp2pLiveStreamRequest.from_runtime_inputs(inputs)
+        try:
+            process = subprocess.Popen(
+                self.command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                encoding="utf-8",
+            )
+        except OSError as err:
+            raise DreameLawnMowerVideoRuntimeError(
+                f"Could not start XP2P process runner {self.command!r}: {err}"
+            ) from err
+
+        try:
+            _write_json_line(
+                process,
+                {
+                    "operation": "start",
+                    "request": request.as_dict(redact=False),
+                    "command_timeout_us": command_timeout_us,
+                },
+            )
+            response = _read_json_line(process, timeout=self.timeout)
+            if response.get("error"):
+                raise DreameLawnMowerVideoRuntimeError(
+                    "XP2P process runner failed: "
+                    f"{_as_text(response.get('error'))}"
+                )
+            stream_url = _as_text(response.get("stream_url"))
+            if not stream_url:
+                raise DreameLawnMowerVideoRuntimeError(
+                    "XP2P process runner did not return stream_url."
+                )
+            return DreameLawnMowerXp2pLiveStreamSession(
+                service_id=_as_text(response.get("service_id")) or request.service_id,
+                stream_url=stream_url,
+                runtime="xp2p_process_runner",
+                runner_command=self.command,
+                runner_session_id=_as_text(response.get("runner_session_id")),
+                runner_process=process,
+            )
+        except Exception:
+            _terminate_process(process)
+            raise
+
+    def stop_live_stream(self, session: DreameLawnMowerXp2pLiveStreamSession) -> None:
+        """Stop the persistent XP2P runner that owns the stream session."""
+        process = session.runner_process
+        if process is None:
+            return
+        if process.poll() is not None:
+            return
+        try:
+            _write_json_line(
+                process,
+                {
+                    "operation": "stop",
+                    "session": {
+                        "service_id": session.service_id,
+                        "stream_url": session.stream_url,
+                        "runner_session_id": session.runner_session_id,
+                    },
+                },
+            )
+            process.wait(timeout=self.timeout)
+        except (BrokenPipeError, OSError, subprocess.TimeoutExpired):
+            _terminate_process(process)
 
 
 class DreameLawnMowerNativeXp2pRuntime:
@@ -531,6 +622,66 @@ def _as_text(value: Any) -> str | None:
         return None
     text = str(value)
     return text or None
+
+
+def _write_json_line(process: Any, payload: Mapping[str, Any]) -> None:
+    if process.stdin is None:
+        raise DreameLawnMowerVideoRuntimeError(
+            "XP2P process runner stdin is not available."
+        )
+    process.stdin.write(json.dumps(payload) + "\n")
+    process.stdin.flush()
+
+
+def _read_json_line(process: Any, *, timeout: float) -> dict[str, Any]:
+    if process.stdout is None:
+        raise DreameLawnMowerVideoRuntimeError(
+            "XP2P process runner stdout is not available."
+        )
+
+    result: dict[str, str | None] = {"line": None}
+
+    def _readline() -> None:
+        result["line"] = process.stdout.readline()
+
+    thread = threading.Thread(target=_readline, daemon=True)
+    thread.start()
+    thread.join(timeout=max(timeout, 0.1))
+    if thread.is_alive():
+        raise DreameLawnMowerVideoRuntimeError(
+            f"XP2P process runner timed out after {timeout:g}s."
+        )
+    line = result["line"]
+    if not line:
+        raise DreameLawnMowerVideoRuntimeError(
+            "XP2P process runner exited before returning stream metadata."
+        )
+    try:
+        response = json.loads(line)
+    except json.JSONDecodeError as err:
+        raise DreameLawnMowerVideoRuntimeError(
+            "XP2P process runner returned invalid JSON."
+        ) from err
+    if not isinstance(response, dict):
+        raise DreameLawnMowerVideoRuntimeError(
+            "XP2P process runner response must be a JSON object."
+        )
+    return response
+
+
+def _process_alive(process: Any | None) -> bool:
+    return bool(process is not None and process.poll() is None)
+
+
+def _terminate_process(process: Any) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=2.0)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=2.0)
 
 
 def _format_flv_path(template: str, channel: str) -> str:

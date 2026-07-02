@@ -116,3 +116,15 @@ def test_next_step_message_points_blocked_active_probe_to_supervised_run() -> No
 
     assert "--wait-undocked-timeout" in message
     assert "--dock-after-active" in message
+
+
+def test_next_step_message_keeps_passive_probe_guidance() -> None:
+    module = _load_probe_module()
+
+    message = module._next_step_message(
+        active_requested=False,
+        active_block_reason=None,
+    )
+
+    assert "XP2P runtime flag" in message
+    assert "--wait-undocked-timeout" not in message

@@ -20,10 +20,12 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerVideoRuntimeError,
     DreameLawnMowerXp2pExternalRunner,
     DreameLawnMowerXp2pLiveStreamRequest,
+    DreameLawnMowerXp2pProcessRunner,
     diagnose_native_xp2p_runtime,
 )
 
 PAYLOAD_MODES = ("app_action", "with_session", "no_session", "empty_session")
+XP2P_RUNNER_MODES = ("process", "one-shot")
 STATION_STATES = {
     "charging",
     "charging_completed",
@@ -66,6 +68,15 @@ def _parse_args() -> argparse.Namespace:
         "--xp2p-runner",
         type=Path,
         help="Optional external XP2P runner executable path.",
+    )
+    parser.add_argument(
+        "--xp2p-runner-mode",
+        choices=XP2P_RUNNER_MODES,
+        default="process",
+        help=(
+            "Use a persistent runner process for HA-style stream lifetime, "
+            "or one-shot for legacy runner contracts."
+        ),
     )
     parser.add_argument(
         "--start-xp2p-runner",
@@ -303,7 +314,9 @@ async def main() -> None:
                 runtime_inputs
             )
             output["xp2p_request"] = _safe_xp2p_request_summary(runtime_inputs)
-            active_block_reason = _active_video_block_reason(snapshot)
+            active_block_reason = (
+                _active_video_block_reason(snapshot) if active_requested else None
+            )
             if active_requested and active_block_reason and args.wait_undocked_timeout:
                 snapshot, wait_result = await _async_wait_for_active_video_state(
                     client,
@@ -332,6 +345,7 @@ async def main() -> None:
                 output["xp2p_runner"] = await _async_probe_xp2p_runner(
                     args.xp2p_runner,
                     runtime_inputs,
+                    mode=args.xp2p_runner_mode,
                 )
         except DreameLawnMowerConnectionError as err:
             output["camera_stream_inputs"] = {
@@ -415,6 +429,8 @@ async def _async_diagnose_native_xp2p(library_path: Path) -> dict[str, object]:
 async def _async_probe_xp2p_runner(
     runner_path: Path | None,
     runtime_inputs: Any,
+    *,
+    mode: str = "process",
 ) -> dict[str, object]:
     if runner_path is None:
         return _native_xp2p_unavailable(
@@ -427,12 +443,17 @@ async def _async_probe_xp2p_runner(
         )
 
     def _start_and_stop() -> dict[str, object]:
-        runner = DreameLawnMowerXp2pExternalRunner((runner_path,))
+        runner = (
+            DreameLawnMowerXp2pExternalRunner((runner_path,))
+            if mode == "one-shot"
+            else DreameLawnMowerXp2pProcessRunner((runner_path,))
+        )
         session = runner.start_live_stream(runtime_inputs)
         try:
             payload = session.as_dict(redact=True)
             payload["started"] = True
             payload["available"] = True
+            payload["runner_mode"] = mode
             return payload
         finally:
             runner.stop_live_stream(session)
