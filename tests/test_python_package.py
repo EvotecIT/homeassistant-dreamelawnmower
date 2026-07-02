@@ -35,6 +35,7 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerXp2pAppConfig,
     DreameLawnMowerXp2pLiveStreamRequest,
     DreameLawnMowerXp2pLiveStreamSession,
+    DreameLawnMowerXp2pRuntimeDiagnostics,
     analyze_decompiled_sources,
     analyze_dreamehome_apk,
     analyze_dreamehome_assets,
@@ -56,6 +57,7 @@ from dreame_lawn_mower_client import (
     decode_mower_task_status,
     decode_mowing_preference_payload,
     decode_schedule_payload_text,
+    diagnose_native_xp2p_runtime,
     encode_mowing_preference_payload,
     encode_schedule_payload_text,
     firmware_update_support_from_device,
@@ -113,6 +115,9 @@ def test_public_package_exports_map_helpers() -> None:
     assert DreameLawnMowerXp2pLiveStreamSession.__name__.endswith(
         "Xp2pLiveStreamSession"
     )
+    assert DreameLawnMowerXp2pRuntimeDiagnostics.__name__.endswith(
+        "Xp2pRuntimeDiagnostics"
+    )
     assert callable(map_summary_from_map_data)
     assert callable(map_summary_to_dict)
     assert callable(map_diagnostics_from_device)
@@ -136,6 +141,7 @@ def test_public_package_exports_map_helpers() -> None:
     assert callable(decode_batch_ota_info)
     assert callable(decode_batch_schedule_payload)
     assert callable(decode_mowing_preference_payload)
+    assert callable(diagnose_native_xp2p_runtime)
     assert callable(encode_mowing_preference_payload)
     assert callable(normalize_debug_ota_catalog_payload)
     assert callable(run_jadx_decompile)

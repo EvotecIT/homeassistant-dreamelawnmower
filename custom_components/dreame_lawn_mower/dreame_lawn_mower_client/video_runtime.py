@@ -27,6 +27,16 @@ XP2P_PROTOCOL_UDP = 1
 XP2P_PROTOCOL_TCP = 2
 
 DEFAULT_COMMAND_TIMEOUT_US = 7_500_000
+REQUIRED_XP2P_SYMBOLS = (
+    "startService",
+    "postCommandRequestSync",
+    "startAvRecvService",
+    "delegateHttpFlv",
+)
+OPTIONAL_XP2P_SYMBOLS = (
+    "stopAvRecvService",
+    "stopService",
+)
 
 
 class DreameLawnMowerVideoRuntimeError(RuntimeError):
@@ -69,6 +79,33 @@ class DreameLawnMowerXp2pAppConfig:
         config.type = self.protocol_type
         config.cross = self.cross
         return config
+
+
+@dataclass(slots=True, frozen=True)
+class DreameLawnMowerXp2pRuntimeDiagnostics:
+    """Native XP2P runtime readiness diagnostics."""
+
+    library_path: str
+    loadable: bool
+    ready: bool
+    required_symbols: tuple[str, ...] = REQUIRED_XP2P_SYMBOLS
+    optional_symbols: tuple[str, ...] = OPTIONAL_XP2P_SYMBOLS
+    missing_required_symbols: tuple[str, ...] = ()
+    missing_optional_symbols: tuple[str, ...] = ()
+    error: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a JSON-safe diagnostics payload."""
+        return {
+            "library_path": self.library_path,
+            "loadable": self.loadable,
+            "ready": self.ready,
+            "required_symbols": self.required_symbols,
+            "optional_symbols": self.optional_symbols,
+            "missing_required_symbols": self.missing_required_symbols,
+            "missing_optional_symbols": self.missing_optional_symbols,
+            "error": self.error,
+        }
 
 
 @dataclass(slots=True, frozen=True)
@@ -317,6 +354,50 @@ class DreameLawnMowerNativeXp2pRuntime:
         except AttributeError:
             pass
         return function
+
+
+def diagnose_native_xp2p_runtime(
+    library_path: str | Path,
+    *,
+    library: Any | None = None,
+) -> DreameLawnMowerXp2pRuntimeDiagnostics:
+    """Return load/symbol readiness for a native XP2P runtime library."""
+    path = str(library_path)
+    try:
+        loaded_library = library if library is not None else CDLL(path)
+    except OSError as err:
+        return DreameLawnMowerXp2pRuntimeDiagnostics(
+            library_path=path,
+            loadable=False,
+            ready=False,
+            error=f"Could not load XP2P native library {path!r}: {err}",
+        )
+
+    missing_required = tuple(
+        name
+        for name in REQUIRED_XP2P_SYMBOLS
+        if getattr(loaded_library, name, None) is None
+    )
+    missing_optional = tuple(
+        name
+        for name in OPTIONAL_XP2P_SYMBOLS
+        if getattr(loaded_library, name, None) is None
+    )
+    ready = not missing_required
+    error = None
+    if missing_required:
+        error = (
+            "XP2P native library is missing required symbols: "
+            + ", ".join(missing_required)
+        )
+    return DreameLawnMowerXp2pRuntimeDiagnostics(
+        library_path=path,
+        loadable=True,
+        ready=ready,
+        missing_required_symbols=missing_required,
+        missing_optional_symbols=missing_optional,
+        error=error,
+    )
 
 
 def _encode(value: str) -> bytes:

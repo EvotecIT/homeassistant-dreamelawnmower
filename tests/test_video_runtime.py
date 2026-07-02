@@ -9,11 +9,12 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import 
     DreameLawnMowerCameraStreamRuntimeInputs,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.video_runtime import (
+    XP2P_PROTOCOL_TCP,
     DreameLawnMowerNativeXp2pRuntime,
     DreameLawnMowerVideoRuntimeError,
     DreameLawnMowerXp2pAppConfig,
     DreameLawnMowerXp2pLiveStreamRequest,
-    XP2P_PROTOCOL_TCP,
+    diagnose_native_xp2p_runtime,
 )
 
 
@@ -151,3 +152,49 @@ def test_native_xp2p_runtime_reports_loader_errors() -> None:
         assert "Could not load XP2P native library" in str(err)
     else:
         raise AssertionError("Expected missing native library to fail")
+
+
+def test_native_xp2p_runtime_diagnostics_report_ready_library() -> None:
+    diagnostics = diagnose_native_xp2p_runtime(
+        "fake-xp2p.so",
+        library=_FakeXp2pLibrary(),
+    )
+
+    assert diagnostics.ready is True
+    assert diagnostics.loadable is True
+    assert diagnostics.missing_required_symbols == ()
+    assert diagnostics.missing_optional_symbols == ()
+    assert diagnostics.error is None
+    assert diagnostics.as_dict()["ready"] is True
+
+
+def test_native_xp2p_runtime_diagnostics_report_missing_required_symbols() -> None:
+    library = _FakeXp2pLibrary()
+    del library.startService
+
+    diagnostics = diagnose_native_xp2p_runtime("fake-xp2p.so", library=library)
+
+    assert diagnostics.ready is False
+    assert diagnostics.loadable is True
+    assert diagnostics.missing_required_symbols == ("startService",)
+    assert "startService" in str(diagnostics.error)
+
+
+def test_native_xp2p_runtime_diagnostics_report_missing_optional_symbols() -> None:
+    library = _FakeXp2pLibrary()
+    del library.stopService
+
+    diagnostics = diagnose_native_xp2p_runtime("fake-xp2p.so", library=library)
+
+    assert diagnostics.ready is True
+    assert diagnostics.missing_required_symbols == ()
+    assert diagnostics.missing_optional_symbols == ("stopService",)
+
+
+def test_native_xp2p_runtime_diagnostics_report_loader_errors() -> None:
+    diagnostics = diagnose_native_xp2p_runtime("missing-xp2p-runtime.so")
+
+    assert diagnostics.ready is False
+    assert diagnostics.loadable is False
+    assert diagnostics.missing_required_symbols == ()
+    assert "Could not load XP2P native library" in str(diagnostics.error)

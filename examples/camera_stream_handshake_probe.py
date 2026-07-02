@@ -18,6 +18,7 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerConnectionError,
     DreameLawnMowerNativeXp2pRuntime,
     DreameLawnMowerVideoRuntimeError,
+    diagnose_native_xp2p_runtime,
 )
 
 PAYLOAD_MODES = ("app_action", "with_session", "no_session", "empty_session")
@@ -153,6 +154,10 @@ async def main() -> None:
             output["camera_stream_runtime_inputs"] = _safe_runtime_inputs_summary(
                 runtime_inputs
             )
+            if args.xp2p_library is not None:
+                output["native_xp2p_diagnostics"] = await _async_diagnose_native_xp2p(
+                    args.xp2p_library
+                )
             if args.start_native_xp2p:
                 output["native_xp2p"] = await _async_probe_native_xp2p(
                     args.xp2p_library,
@@ -199,6 +204,13 @@ async def _async_probe_native_xp2p(
         return _native_xp2p_unavailable(
             "Runtime inputs are incomplete: " + ", ".join(missing)
         )
+    diagnostics = await _async_diagnose_native_xp2p(library_path)
+    if not diagnostics.get("ready"):
+        payload = _native_xp2p_unavailable(
+            str(diagnostics.get("error") or "Native XP2P runtime is not ready.")
+        )
+        payload["diagnostics"] = diagnostics
+        return payload
 
     def _start_and_stop() -> dict[str, object]:
         runtime = DreameLawnMowerNativeXp2pRuntime(library_path)
@@ -215,6 +227,11 @@ async def _async_probe_native_xp2p(
         return await asyncio.to_thread(_start_and_stop)
     except DreameLawnMowerVideoRuntimeError as err:
         return _native_xp2p_unavailable(str(err))
+
+
+async def _async_diagnose_native_xp2p(library_path: Path) -> dict[str, object]:
+    diagnostics = await asyncio.to_thread(diagnose_native_xp2p_runtime, library_path)
+    return diagnostics.as_dict()
 
 
 if __name__ == "__main__":

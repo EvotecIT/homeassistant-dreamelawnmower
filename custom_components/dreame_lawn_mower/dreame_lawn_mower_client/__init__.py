@@ -118,6 +118,8 @@ from .video_runtime import (
     DreameLawnMowerXp2pAppConfig,
     DreameLawnMowerXp2pLiveStreamRequest,
     DreameLawnMowerXp2pLiveStreamSession,
+    DreameLawnMowerXp2pRuntimeDiagnostics,
+    diagnose_native_xp2p_runtime,
 )
 
 __all__ = [
@@ -141,6 +143,7 @@ __all__ = [
     "DreameLawnMowerXp2pAppConfig",
     "DreameLawnMowerXp2pLiveStreamRequest",
     "DreameLawnMowerXp2pLiveStreamSession",
+    "DreameLawnMowerXp2pRuntimeDiagnostics",
     "DEFAULT_APK_RESEARCH_TERMS",
     "DEFAULT_DECOMPILED_SOURCE_SUFFIXES",
     "DEFAULT_DREAMEHOME_ASSET_SUFFIXES",
@@ -203,6 +206,7 @@ __all__ = [
     "key_definition_label",
     "find_jadx_executable",
     "display_name_for_model",
+    "diagnose_native_xp2p_runtime",
     "firmware_update_support_from_device",
     "map_diagnostics_from_device",
     "map_summary_from_map_data",
