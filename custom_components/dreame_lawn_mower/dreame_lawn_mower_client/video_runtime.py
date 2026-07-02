@@ -26,6 +26,13 @@ from typing import Any, Protocol
 from urllib.parse import quote
 
 from .models import DreameLawnMowerCameraStreamRuntimeInputs
+from .video_runner_diagnostics import (
+    completed_process_preview,
+    output_preview,
+    payload_sensitive_values,
+    process_stderr_preview,
+    safe_output_preview,
+)
 
 XP2P_PROTOCOL_AUTO = 0
 XP2P_PROTOCOL_UDP = 1
@@ -260,6 +267,7 @@ class DreameLawnMowerXp2pExternalRunner:
         )
 
     def _run_json(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        sensitive_values = payload_sensitive_values(payload)
         try:
             completed = subprocess.run(
                 self.command,
@@ -281,12 +289,14 @@ class DreameLawnMowerXp2pExternalRunner:
             raise DreameLawnMowerVideoRuntimeError(
                 "XP2P external runner failed with exit code "
                 f"{completed.returncode}."
+                + completed_process_preview(completed, sensitive_values)
             )
         try:
             response = json.loads(completed.stdout or "{}")
         except json.JSONDecodeError as err:
             raise DreameLawnMowerVideoRuntimeError(
                 "XP2P external runner returned invalid JSON."
+                + completed_process_preview(completed, sensitive_values)
             ) from err
         if not isinstance(response, dict):
             raise DreameLawnMowerVideoRuntimeError(
@@ -294,7 +304,8 @@ class DreameLawnMowerXp2pExternalRunner:
             )
         if response.get("error"):
             raise DreameLawnMowerVideoRuntimeError(
-                f"XP2P external runner failed: {_as_text(response.get('error'))}"
+                "XP2P external runner failed: "
+                f"{safe_output_preview(response.get('error'), sensitive_values)}"
             )
         return response
 
@@ -340,11 +351,20 @@ class DreameLawnMowerXp2pProcessRunner:
                     "command_timeout_us": command_timeout_us,
                 },
             )
-            response = _read_json_line(process, timeout=self.timeout)
+            sensitive_values = payload_sensitive_values(
+                {
+                    "request": request.as_dict(redact=False),
+                }
+            )
+            response = _read_json_line(
+                process,
+                timeout=self.timeout,
+                sensitive_values=sensitive_values,
+            )
             if response.get("error"):
                 raise DreameLawnMowerVideoRuntimeError(
                     "XP2P process runner failed: "
-                    f"{_as_text(response.get('error'))}"
+                    f"{safe_output_preview(response.get('error'), sensitive_values)}"
                 )
             stream_url = _as_text(response.get("stream_url"))
             if not stream_url:
@@ -633,7 +653,12 @@ def _write_json_line(process: Any, payload: Mapping[str, Any]) -> None:
     process.stdin.flush()
 
 
-def _read_json_line(process: Any, *, timeout: float) -> dict[str, Any]:
+def _read_json_line(
+    process: Any,
+    *,
+    timeout: float,
+    sensitive_values: Sequence[str] = (),
+) -> dict[str, Any]:
     if process.stdout is None:
         raise DreameLawnMowerVideoRuntimeError(
             "XP2P process runner stdout is not available."
@@ -650,17 +675,20 @@ def _read_json_line(process: Any, *, timeout: float) -> dict[str, Any]:
     if thread.is_alive():
         raise DreameLawnMowerVideoRuntimeError(
             f"XP2P process runner timed out after {timeout:g}s."
+            + process_stderr_preview(process, sensitive_values)
         )
     line = result["line"]
     if not line:
         raise DreameLawnMowerVideoRuntimeError(
             "XP2P process runner exited before returning stream metadata."
+            + process_stderr_preview(process, sensitive_values)
         )
     try:
         response = json.loads(line)
     except json.JSONDecodeError as err:
         raise DreameLawnMowerVideoRuntimeError(
             "XP2P process runner returned invalid JSON."
+            + output_preview("stdout", line, sensitive_values)
         ) from err
     if not isinstance(response, dict):
         raise DreameLawnMowerVideoRuntimeError(

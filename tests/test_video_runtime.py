@@ -305,7 +305,16 @@ def test_external_runner_requires_stream_url(tmp_path) -> None:
 
 def test_external_runner_reports_process_failures_without_secret(tmp_path) -> None:
     runner_script = tmp_path / "xp2p_runner.py"
-    runner_script.write_text("raise SystemExit(7)\n", encoding="utf-8")
+    runner_script.write_text(
+        "\n".join(
+            [
+                "import sys",
+                "sys.stderr.write('linker failed for p2p-info-1 channel-1\\n')",
+                "raise SystemExit(7)",
+            ]
+        ),
+        encoding="utf-8",
+    )
     runner = DreameLawnMowerXp2pExternalRunner((sys.executable, runner_script))
 
     try:
@@ -313,7 +322,10 @@ def test_external_runner_reports_process_failures_without_secret(tmp_path) -> No
     except DreameLawnMowerVideoRuntimeError as err:
         message = str(err)
         assert "exit code 7" in message
+        assert "linker failed" in message
+        assert "stderr=" in message
         assert "p2p-info-1" not in message
+        assert "channel-1" not in message
     else:
         raise AssertionError("Expected failing external runner to fail")
 
@@ -396,6 +408,34 @@ def test_process_runner_reports_missing_stream_url_without_secret(tmp_path) -> N
         assert "p2p-info-1" not in message
     else:
         raise AssertionError("Expected missing stream_url to fail")
+
+
+def test_process_runner_reports_startup_stderr_without_secret(tmp_path) -> None:
+    runner_script = tmp_path / "xp2p_process_runner.py"
+    runner_script.write_text(
+        "\n".join(
+            [
+                "import json, sys",
+                "json.loads(sys.stdin.readline())",
+                "sys.stderr.write('xp2p auth failed for p2p-info-1 channel-1\\n')",
+                "raise SystemExit(9)",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    runner = DreameLawnMowerXp2pProcessRunner((sys.executable, runner_script))
+
+    try:
+        runner.start_live_stream(_runtime_inputs())
+    except DreameLawnMowerVideoRuntimeError as err:
+        message = str(err)
+        assert "stream metadata" in message
+        assert "xp2p auth failed" in message
+        assert "stderr=" in message
+        assert "p2p-info-1" not in message
+        assert "channel-1" not in message
+    else:
+        raise AssertionError("Expected process runner startup failure to fail")
 
 
 def test_stream_session_metadata_can_redact_runtime_identifiers() -> None:
