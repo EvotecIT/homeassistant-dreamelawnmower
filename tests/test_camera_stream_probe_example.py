@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -128,3 +131,75 @@ def test_next_step_message_keeps_passive_probe_guidance() -> None:
 
     assert "XP2P runtime flag" in message
     assert "--wait-undocked-timeout" not in message
+
+
+def test_xp2p_runner_probe_checks_returned_stream_url(tmp_path) -> None:
+    module = _load_probe_module()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _FlvHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    stream_url = f"http://127.0.0.1:{server.server_port}/ipc.flv"
+    runner_script = tmp_path / "xp2p_runner.py"
+    runner_script.write_text(
+        "\n".join(
+            [
+                "import json, sys",
+                "payload = json.loads(sys.stdin.read())",
+                "if payload['operation'] == 'start':",
+                "    print(json.dumps({",
+                "        'service_id': payload['request']['service_id'],",
+                "        'runner_session_id': 'runner-session-1',",
+                f"        'stream_url': {stream_url!r}",
+                "    }))",
+                "else:",
+                "    print(json.dumps({'stopped': True}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    runner_cmd = tmp_path / "xp2p_runner.cmd"
+    runner_cmd.write_text(
+        f'@"{sys.executable}" "{runner_script}"\r\n',
+        encoding="utf-8",
+    )
+    inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+        source="dreame_third_video_tx",
+        did="device-id-1",
+        channel_id="channel-1",
+        product_id="product-1",
+        device_name="device-name-1",
+        p2p_info="p2p-info-1",
+    )
+
+    try:
+        result = asyncio.run(
+            module._async_probe_xp2p_runner(
+                runner_cmd,
+                inputs,
+                mode="one-shot",
+                stream_url_timeout=1.0,
+                stream_url_bytes=8,
+            )
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2.0)
+
+    assert result["started"] is True
+    assert result["runner_mode"] == "one-shot"
+    assert result["stream_url_present"] is True
+    assert result["stream_health"]["available"] is True
+    assert result["stream_health"]["flv_header_present"] is True
+    assert result["stream_health"]["bytes_read"] == 8
+
+
+class _FlvHandler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "video/x-flv")
+        self.end_headers()
+        self.wfile.write(b"FLV\x01\x05\x00\x00\x00\x09")
+
+    def log_message(self, format: str, *args) -> None:
+        return

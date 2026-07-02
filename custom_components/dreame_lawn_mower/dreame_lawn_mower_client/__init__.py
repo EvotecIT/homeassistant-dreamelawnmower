@@ -108,6 +108,7 @@ from .schedule import (
     encode_schedule_week_payload,
     schedule_task_summary,
 )
+from .stream_health import DreameLawnMowerStreamUrlProbeResult, probe_stream_url
 from .video_runtime import (
     DEFAULT_COMMAND_TIMEOUT_US,
     XP2P_PROTOCOL_AUTO,
@@ -139,6 +140,7 @@ __all__ = [
     "DreameLawnMowerRemoteControlSupport",
     "DreameLawnMowerSnapshot",
     "DreameLawnMowerStatusBlob",
+    "DreameLawnMowerStreamUrlProbeResult",
     "DreameLawnMowerTwoFactorRequiredError",
     "DreameLawnMowerXp2pExternalRunner",
     "DreameLawnMowerNativeXp2pRuntime",
@@ -220,6 +222,7 @@ __all__ = [
     "normalize_mowing_preference_mode",
     "remote_control_block_reason",
     "remote_control_state_safe",
+    "probe_stream_url",
     "mower_error_label",
     "mower_property_hint",
     "mower_realtime_property_name",

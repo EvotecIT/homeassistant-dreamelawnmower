@@ -22,6 +22,7 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerXp2pLiveStreamRequest,
     DreameLawnMowerXp2pProcessRunner,
     diagnose_native_xp2p_runtime,
+    probe_stream_url,
 )
 
 PAYLOAD_MODES = ("app_action", "with_session", "no_session", "empty_session")
@@ -43,6 +44,18 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--timeout", type=float, default=6.0)
     parser.add_argument("--interval", type=float, default=0.75)
+    parser.add_argument(
+        "--stream-url-timeout",
+        type=float,
+        default=3.0,
+        help="Seconds to wait while checking a returned local stream URL.",
+    )
+    parser.add_argument(
+        "--stream-url-bytes",
+        type=int,
+        default=16,
+        help="Number of initial stream bytes to read for FLV header diagnostics.",
+    )
     parser.add_argument(
         "--payload-mode",
         choices=PAYLOAD_MODES,
@@ -339,6 +352,8 @@ async def main() -> None:
                 output["native_xp2p"] = await _async_probe_native_xp2p(
                     args.xp2p_library,
                     runtime_inputs,
+                    stream_url_timeout=args.stream_url_timeout,
+                    stream_url_bytes=args.stream_url_bytes,
                 )
             if args.start_xp2p_runner and active_block_reason is None:
                 active_attempted = True
@@ -346,6 +361,8 @@ async def main() -> None:
                     args.xp2p_runner,
                     runtime_inputs,
                     mode=args.xp2p_runner_mode,
+                    stream_url_timeout=args.stream_url_timeout,
+                    stream_url_bytes=args.stream_url_bytes,
                 )
         except DreameLawnMowerConnectionError as err:
             output["camera_stream_inputs"] = {
@@ -386,6 +403,9 @@ async def main() -> None:
 async def _async_probe_native_xp2p(
     library_path: Path | None,
     runtime_inputs: Any,
+    *,
+    stream_url_timeout: float = 3.0,
+    stream_url_bytes: int = 16,
 ) -> dict[str, object]:
     if library_path is None:
         return _native_xp2p_unavailable(
@@ -411,6 +431,11 @@ async def _async_probe_native_xp2p(
             payload = session.as_dict(redact=True)
             payload["started"] = True
             payload["available"] = True
+            payload["stream_health"] = probe_stream_url(
+                session.stream_url,
+                timeout=stream_url_timeout,
+                read_bytes=stream_url_bytes,
+            ).as_dict()
             return payload
         finally:
             runtime.stop_live_stream(session)
@@ -431,6 +456,8 @@ async def _async_probe_xp2p_runner(
     runtime_inputs: Any,
     *,
     mode: str = "process",
+    stream_url_timeout: float = 3.0,
+    stream_url_bytes: int = 16,
 ) -> dict[str, object]:
     if runner_path is None:
         return _native_xp2p_unavailable(
@@ -454,6 +481,11 @@ async def _async_probe_xp2p_runner(
             payload["started"] = True
             payload["available"] = True
             payload["runner_mode"] = mode
+            payload["stream_health"] = probe_stream_url(
+                session.stream_url,
+                timeout=stream_url_timeout,
+                read_bytes=stream_url_bytes,
+            ).as_dict()
             return payload
         finally:
             runner.stop_live_stream(session)
