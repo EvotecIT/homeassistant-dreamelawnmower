@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
@@ -63,3 +64,55 @@ def test_xp2p_request_summary_redacts_computed_stream_target() -> None:
     for key in ("service_id", "product_id", "device_name", "p2p_info", "flv_path"):
         assert key not in summary
         assert summary[f"{key}_present"] is True
+
+
+def test_active_video_probe_blocks_docked_or_mapping_states() -> None:
+    module = _load_probe_module()
+
+    docked = SimpleNamespace(state="charging", raw_docked=True, raw_attributes={})
+    mapping = SimpleNamespace(
+        state="mowing",
+        raw_docked=False,
+        raw_attributes={"mapping": True},
+    )
+    ready = SimpleNamespace(state="mowing", raw_docked=False, raw_attributes={})
+
+    assert "docked" in module._active_video_block_reason(docked)
+    assert "mapping" in module._active_video_block_reason(mapping)
+    assert module._active_video_block_reason(ready) is None
+
+
+def test_wait_for_active_video_state_polls_until_undocked() -> None:
+    module = _load_probe_module()
+    docked = SimpleNamespace(state="charging", raw_docked=True, raw_attributes={})
+    ready = SimpleNamespace(state="mowing", raw_docked=False, raw_attributes={})
+
+    class _Client:
+        async def async_refresh(self):
+            return ready
+
+    snapshot, result = asyncio.run(
+        module._async_wait_for_active_video_state(
+            _Client(),
+            initial_snapshot=docked,
+            timeout=1.0,
+            interval=0.01,
+        )
+    )
+
+    assert snapshot is ready
+    assert result["waited"] is True
+    assert result["ready"] is True
+    assert result["block_reason"] is None
+
+
+def test_next_step_message_points_blocked_active_probe_to_supervised_run() -> None:
+    module = _load_probe_module()
+
+    message = module._next_step_message(
+        active_requested=True,
+        active_block_reason="blocked while docked",
+    )
+
+    assert "--wait-undocked-timeout" in message
+    assert "--dock-after-active" in message
