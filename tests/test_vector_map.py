@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from types import SimpleNamespace
+
+from PIL import Image
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.vector_map import (
     parse_batch_vector_map,
@@ -245,6 +248,20 @@ def test_vector_map_summary_and_renderer_return_drawable_output() -> None:
     assert summary.path_point_count == 6
     assert image_png is not None
     assert image_png.startswith(b"\x89PNG")
+
+
+def test_vector_map_renderer_label_scale_changes_label_pixels() -> None:
+    vector_map = parse_batch_vector_map(_batch_payload())
+
+    normal_png = render_vector_map_png(vector_map, label_scale=1.0)
+    larger_png = render_vector_map_png(vector_map, label_scale=3.0)
+
+    assert normal_png is not None
+    assert larger_png is not None
+    assert normal_png != larger_png
+    with Image.open(BytesIO(normal_png)) as normal_image:
+        with Image.open(BytesIO(larger_png)) as larger_image:
+            assert normal_image.size == larger_image.size
 
 
 def test_vector_map_details_report_live_path_counts() -> None:

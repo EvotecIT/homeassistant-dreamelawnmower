@@ -538,9 +538,14 @@ class DreameLawnMowerClient:
         *,
         timeout: float = 8.0,
         interval: float = 0.5,
+        label_scale: float = 1.0,
     ) -> bytes | None:
         """Try to refresh the current mower map and return a rendered PNG."""
-        view = await self.async_refresh_map_view(timeout=timeout, interval=interval)
+        view = await self.async_refresh_map_view(
+            timeout=timeout,
+            interval=interval,
+            label_scale=label_scale,
+        )
         return view.image_png
 
     async def async_refresh_map_view(
@@ -548,17 +553,26 @@ class DreameLawnMowerClient:
         *,
         timeout: float = 8.0,
         interval: float = 0.5,
+        label_scale: float = 1.0,
     ) -> DreameLawnMowerMapView:
         """Try to refresh map data and return metadata plus rendered image bytes."""
         return await asyncio.to_thread(
             self._sync_refresh_map_view,
             timeout,
             interval,
+            label_scale,
         )
 
-    async def async_refresh_vector_map_view(self) -> DreameLawnMowerMapView:
+    async def async_refresh_vector_map_view(
+        self,
+        *,
+        label_scale: float = 1.0,
+    ) -> DreameLawnMowerMapView:
         """Refresh the batch/vector map path used for live mowing overlays."""
-        return await asyncio.to_thread(self._sync_refresh_vector_map_view)
+        return await asyncio.to_thread(
+            self._sync_refresh_vector_map_view,
+            label_scale=label_scale,
+        )
 
     async def async_get_app_schedules(
         self,
@@ -1773,21 +1787,24 @@ class DreameLawnMowerClient:
         self,
         timeout: float,
         interval: float,
+        label_scale: float = 1.0,
     ) -> bytes | None:
-        return self._sync_refresh_map_view(timeout, interval).image_png
+        return self._sync_refresh_map_view(timeout, interval, label_scale).image_png
 
     def _sync_refresh_map_view(
         self,
         timeout: float,
         interval: float,
+        label_scale: float = 1.0,
     ) -> DreameLawnMowerMapView:
         app_view = self._sync_refresh_app_map_view(
             legacy_error=None,
             legacy_reason="app_action_map_primary",
+            label_scale=label_scale,
         )
 
         vector_view = self._with_fallback_app_maps(
-            self._sync_refresh_vector_map_view(),
+            self._sync_refresh_vector_map_view(label_scale=label_scale),
             app_view,
         )
         if _map_view_has_live_path(vector_view):
@@ -1806,7 +1823,11 @@ class DreameLawnMowerClient:
 
         return app_view
 
-    def _sync_refresh_vector_map_view(self) -> DreameLawnMowerMapView:
+    def _sync_refresh_vector_map_view(
+        self,
+        *,
+        label_scale: float = 1.0,
+    ) -> DreameLawnMowerMapView:
         source = "batch_vector_map"
         try:
             batch_data = self._sync_get_vector_map_batch_data()
@@ -1870,6 +1891,7 @@ class DreameLawnMowerClient:
         try:
             image_png = render_vector_map_png(
                 vector_map,
+                label_scale=label_scale,
                 runtime_track_segments=runtime_track_segments,
                 runtime_position=_runtime_blob_position(runtime_blob),
             )
@@ -1974,6 +1996,7 @@ class DreameLawnMowerClient:
         *,
         legacy_error: str | None,
         legacy_reason: str,
+        label_scale: float = 1.0,
     ) -> DreameLawnMowerMapView:
         source = "app_action_map"
         try:
@@ -1996,7 +2019,10 @@ class DreameLawnMowerClient:
                     ),
                 )
             payload = selected.get("payload")
-            image_png, width, height = _render_app_map_payload_png(payload)
+            image_png, width, height = _render_app_map_payload_png(
+                payload,
+                label_scale=label_scale,
+            )
             return DreameLawnMowerMapView(
                 source=source,
                 summary=_app_map_view_summary(selected, payload, width, height),
@@ -4744,17 +4770,27 @@ def _app_map_view_details(
     }
 
 
-def render_app_map_payload_png(payload: Any) -> tuple[bytes, int, int]:
+def render_app_map_payload_png(
+    payload: Any,
+    *,
+    label_scale: float = 1.0,
+) -> tuple[bytes, int, int]:
     """Render a mower-native app map payload to PNG bytes."""
-    return _render_app_map_payload_png(payload)
+    return _render_app_map_payload_png(payload, label_scale=label_scale)
 
 
-def _render_app_map_payload_png(payload: Any) -> tuple[bytes, int, int]:
+def _render_app_map_payload_png(
+    payload: Any,
+    *,
+    label_scale: float = 1.0,
+) -> tuple[bytes, int, int]:
     if not isinstance(payload, Mapping):
         raise ValueError("App map payload is missing.")
 
-    map_polygons = _app_map_coordinate_sets(payload.get("map"))
-    spot_polygons = _app_map_coordinate_sets(payload.get("spot"))
+    map_entries = _app_map_coordinate_entries(payload.get("map"), "Area")
+    spot_entries = _app_map_coordinate_entries(payload.get("spot"), "Spot")
+    map_polygons = [entry["points"] for entry in map_entries]
+    spot_polygons = [entry["points"] for entry in spot_entries]
     trajectories = _app_map_coordinate_sets(payload.get("trajectory"))
     points = _app_map_points(payload.get("point"))
     all_points = [
@@ -4784,7 +4820,7 @@ def _render_app_map_payload_png(payload: Any) -> tuple[bytes, int, int]:
             int(round((max_y - y) * scale + padding)),
         )
 
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageFont
 
     image = Image.new("RGBA", (width, height), (248, 250, 252, 255))
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
@@ -4819,10 +4855,39 @@ def _render_app_map_payload_png(payload: Any) -> tuple[bytes, int, int]:
         x, y = project(point)
         draw.ellipse((x - 6, y - 6, x + 6, y + 6), fill=(15, 23, 42, 255))
 
+    font = _app_map_label_font(ImageFont, label_scale)
+    for entry in [*map_entries, *spot_entries]:
+        label = entry.get("label")
+        polygon = entry.get("points")
+        if not isinstance(label, str) or not polygon:
+            continue
+        center = project(_app_map_polygon_center(polygon))
+        _draw_app_map_label(draw, center, label, font)
+
     image = Image.alpha_composite(image, overlay).convert("RGB")
     buffer = BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue(), width, height
+
+
+def _app_map_coordinate_entries(
+    value: Any,
+    label_prefix: str,
+) -> list[dict[str, Any]]:
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes | bytearray):
+        return []
+    result: list[dict[str, Any]] = []
+    for item in value:
+        data = item.get("data") if isinstance(item, Mapping) else item
+        points = _app_map_points(data)
+        if points:
+            result.append(
+                {
+                    "points": points,
+                    "label": _app_map_entry_label(item, label_prefix),
+                }
+            )
+    return result
 
 
 def _app_map_coordinate_sets(value: Any) -> list[list[tuple[float, float]]]:
@@ -4835,6 +4900,103 @@ def _app_map_coordinate_sets(value: Any) -> list[list[tuple[float, float]]]:
         if points:
             result.append(points)
     return result
+
+
+def _app_map_entry_label(item: Any, label_prefix: str) -> str:
+    if not isinstance(item, Mapping):
+        return label_prefix
+
+    name = item.get("name")
+    if isinstance(name, str) and name.strip():
+        label = name.strip()
+    else:
+        entry_id = item.get("id")
+        label = (
+            f"{label_prefix} #{entry_id}"
+            if entry_id not in (None, "")
+            else label_prefix
+        )
+
+    area = _app_map_area_label(item.get("area"))
+    return f"{label}\n{area}" if area else label
+
+
+def _app_map_area_label(value: Any) -> str | None:
+    if not isinstance(value, int | float) or value <= 0:
+        return None
+    if value >= 100:
+        area = f"{value:.0f}"
+    else:
+        area = f"{value:.1f}".rstrip("0").rstrip(".")
+    return f"{area} m2"
+
+
+def _app_map_polygon_center(
+    points: Sequence[tuple[float, float]],
+) -> tuple[float, float]:
+    if not points:
+        return (0.0, 0.0)
+    return (
+        sum(point[0] for point in points) / len(points),
+        sum(point[1] for point in points) / len(points),
+    )
+
+
+def _app_map_label_font(image_font: Any, label_scale: float) -> Any:
+    size = max(8, int(round(18 * _normalize_app_map_label_scale(label_scale))))
+    for font_name in ("DejaVuSans-Bold.ttf", "Arial.ttf"):
+        try:
+            return image_font.truetype(font_name, size=size)
+        except OSError:
+            continue
+    try:
+        return image_font.load_default(size=size)
+    except TypeError:
+        return image_font.load_default()
+
+
+def _normalize_app_map_label_scale(label_scale: float) -> float:
+    if not isinstance(label_scale, int | float) or math.isnan(float(label_scale)):
+        return 1.0
+    return max(0.5, min(float(label_scale), 4.0))
+
+
+def _draw_app_map_label(
+    draw: Any,
+    center: tuple[int, int],
+    label: str,
+    font: Any,
+) -> None:
+    halo = (248, 250, 252, 235)
+    fill = (15, 23, 42, 255)
+    for offset_x, offset_y in (
+        (-2, 0),
+        (2, 0),
+        (0, -2),
+        (0, 2),
+        (-1, -1),
+        (1, -1),
+        (-1, 1),
+        (1, 1),
+    ):
+        draw.multiline_text(
+            (center[0] + offset_x, center[1] + offset_y),
+            label,
+            fill=halo,
+            font=font,
+            anchor="mm",
+            align="center",
+            spacing=2,
+        )
+    draw.multiline_text(
+        center,
+        label,
+        fill=fill,
+        font=font,
+        anchor="mm",
+        align="center",
+        spacing=2,
+    )
 
 
 def _app_map_points(value: Any) -> list[tuple[float, float]]:

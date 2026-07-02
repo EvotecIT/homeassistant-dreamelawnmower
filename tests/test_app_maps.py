@@ -8,6 +8,7 @@ import json
 from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
     DreameLawnMowerConnectionError,
+    render_app_map_payload_png,
 )
 from dreame_lawn_mower_client.models import (
     DreameLawnMowerDescriptor,
@@ -118,6 +119,40 @@ def _client() -> DreameLawnMowerClient:
             country="eu",
         ),
     )
+
+
+def test_app_map_renderer_labels_areas_and_spots_with_scale() -> None:
+    payload = {
+        "map": [
+            {
+                "id": 7,
+                "name": "Front",
+                "area": 12.5,
+                "data": [[0, 0], [100, 0], [100, 100], [0, 100]],
+            }
+        ],
+        "spot": [
+            {
+                "id": 2,
+                "data": [[30, 30], [70, 30], [70, 70], [30, 70]],
+            }
+        ],
+        "trajectory": [[[0, 0], [100, 100]]],
+    }
+
+    normal_png, normal_width, normal_height = render_app_map_payload_png(
+        payload,
+        label_scale=1.0,
+    )
+    large_png, large_width, large_height = render_app_map_payload_png(
+        payload,
+        label_scale=2.5,
+    )
+
+    assert normal_png
+    assert large_png
+    assert (normal_width, normal_height) == (large_width, large_height)
+    assert normal_png != large_png
 
 
 def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
@@ -352,7 +387,7 @@ def test_map_view_prefers_vector_render_when_live_path_is_available() -> None:
     )
 
     client._sync_refresh_app_map_view = lambda **kwargs: app_view
-    client._sync_refresh_vector_map_view = lambda: vector_view
+    client._sync_refresh_vector_map_view = lambda **kwargs: vector_view
     client._sync_refresh_legacy_map_view = lambda timeout, interval: (
         _ for _ in ()
     ).throw(  # noqa: ARG005
@@ -384,7 +419,7 @@ def test_map_view_keeps_app_render_when_vector_has_no_live_path() -> None:
     )
 
     client._sync_refresh_app_map_view = lambda **kwargs: app_view
-    client._sync_refresh_vector_map_view = lambda: vector_view
+    client._sync_refresh_vector_map_view = lambda **kwargs: vector_view
     client._sync_refresh_legacy_map_view = lambda timeout, interval: (
         _ for _ in ()
     ).throw(  # noqa: ARG005
