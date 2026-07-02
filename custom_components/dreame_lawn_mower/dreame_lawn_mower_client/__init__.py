@@ -67,6 +67,7 @@ from .models import (
     MODEL_NAME_MAP,
     SUPPORTED_ACCOUNT_TYPES,
     DreameLawnMowerCameraFeatureSupport,
+    DreameLawnMowerCameraStreamRuntimeInputs,
     DreameLawnMowerDescriptor,
     DreameLawnMowerFirmwareUpdateSupport,
     DreameLawnMowerMapDiagnostics,
@@ -111,6 +112,7 @@ from .schedule import (
 __all__ = [
     "DreameLawnMowerAuthError",
     "DreameLawnMowerCameraFeatureSupport",
+    "DreameLawnMowerCameraStreamRuntimeInputs",
     "DreameLawnMowerClient",
     "DreameLawnMowerConnectionError",
     "DreameLawnMowerDescriptor",

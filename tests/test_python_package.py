@@ -22,6 +22,7 @@ from dreame_lawn_mower_client import (
     MOWING_PREFERENCE_PROPERTY_KEY,
     MOWING_PREFERENCE_UPDATE_FIELDS,
     DreameLawnMowerCameraFeatureSupport,
+    DreameLawnMowerCameraStreamRuntimeInputs,
     DreameLawnMowerClient,
     DreameLawnMowerFirmwareUpdateSupport,
     DreameLawnMowerMapDiagnostics,
@@ -95,6 +96,9 @@ def test_public_package_exports_map_helpers() -> None:
     )
     assert DreameLawnMowerMapDiagnostics.__name__.endswith("MapDiagnostics")
     assert DreameLawnMowerStatusBlob.__name__.endswith("StatusBlob")
+    assert DreameLawnMowerCameraStreamRuntimeInputs.__name__.endswith(
+        "CameraStreamRuntimeInputs"
+    )
     assert callable(map_summary_from_map_data)
     assert callable(map_summary_to_dict)
     assert callable(map_diagnostics_from_device)
@@ -150,6 +154,7 @@ def test_public_package_client_has_cloud_probe_helpers() -> None:
     assert hasattr(DreameLawnMowerClient, "async_get_status_blob")
     assert hasattr(DreameLawnMowerClient, "async_probe_camera_sources")
     assert hasattr(DreameLawnMowerClient, "async_probe_camera_stream_handshake")
+    assert hasattr(DreameLawnMowerClient, "async_get_camera_stream_runtime_inputs")
     assert hasattr(DreameLawnMowerClient, "async_request_photo_info")
     assert hasattr(DreameLawnMowerClient, "async_capture_operation_snapshot")
     assert hasattr(DreameLawnMowerClient, "async_get_remote_control_support")

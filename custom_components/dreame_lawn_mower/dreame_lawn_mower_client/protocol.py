@@ -449,6 +449,77 @@ class DreameMowerDreameHomeCloudProtocol:
             return response["data"]
         return None
 
+    def get_tx_video_access_token(self, os: int = 1) -> Any:
+        response = self.request(
+            f"{self.get_api_url()}/dreame-third-video/tx/user/accesstoken",
+            json.dumps({"os": os}, separators=(",", ":")),
+        )
+        if response and "data" in response and response["code"] == 0:
+            return response["data"]
+        return response
+
+    def get_tx_video_device_identity(
+        self,
+        access_token: str | None = None,
+        os: int = 1,
+    ) -> Any:
+        if not self._uid:
+            self.get_device_info_v2()
+        params = {"did": self._did, "os": os}
+        if access_token:
+            params["accesstoken"] = access_token
+        if self._uid:
+            params["uid"] = str(self._uid)
+        if self._model:
+            params["model"] = self._model
+
+        response = self.request(
+            f"{self.get_api_url()}/dreame-third-video/tx/mgr/dev/getIdentity",
+            json.dumps(params, separators=(",", ":")),
+        )
+        if response and "data" in response and response["code"] == 0:
+            return response["data"]
+        return response
+
+    def pair_tx_video_device(
+        self,
+        access_token: str | None = None,
+        os: int = 1,
+    ) -> Any:
+        if not self._uid or not self._model:
+            self.get_device_info_v2()
+        params = {"did": self._did, "os": os}
+        if access_token:
+            params["accesstoken"] = access_token
+        if self._uid:
+            params["uid"] = str(self._uid)
+        if self._model:
+            params["model"] = self._model
+
+        response = self.request(
+            f"{self.get_api_url()}/dreame-third-video/tx/dev/pair",
+            json.dumps(params, separators=(",", ":")),
+        )
+        if response and "data" in response and response["code"] == 0:
+            return response["data"]
+        return response
+
+    def get_tx_video_p2p_info(
+        self,
+        access_token: str | None = None,
+        os: int = 1,
+    ) -> Any:
+        params = {"did": self._did, "os": os}
+        if access_token:
+            params["accesstoken"] = access_token
+        response = self.request(
+            f"{self.get_api_url()}/dreame-third-video/tx/dev/getP2PInfo",
+            json.dumps(params, separators=(",", ":")),
+        )
+        if response and "data" in response and response["code"] == 0:
+            return response["data"]
+        return response
+
     def get_app_plugin_version(
         self,
         model: str | None = None,

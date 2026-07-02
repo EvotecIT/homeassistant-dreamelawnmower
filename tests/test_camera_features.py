@@ -208,6 +208,20 @@ def test_photo_info_request_delegates_to_get_photo_info_action() -> None:
     assert device.actions == [(DreameMowerAction.GET_PHOTO_INFO, None)]
 
 
+def test_camera_stream_app_action_uses_dreame_switch_video_payload() -> None:
+    client = _client_with_device(_FakeCameraDevice())
+    calls: list[dict[str, object]] = []
+    client._sync_call_app_action = lambda payload: calls.append(payload) or {"code": 0}
+
+    assert client._sync_call_app_stream_video(True) == {"code": 0}
+    assert client._sync_call_app_stream_video(False) == {"code": 0}
+
+    assert calls == [
+        {"m": "a", "p": 0, "o": 400, "d": {"on": True}},
+        {"m": "a", "p": 0, "o": 400, "d": {"on": False}},
+    ]
+
+
 def test_camera_device_property_probe_handles_empty_protocol_response() -> None:
     device = _FakeCameraDevice()
     device._protocol = SimpleNamespace(get_properties=lambda requested: None)
@@ -274,23 +288,24 @@ def test_camera_stream_handshake_starts_and_ends_monitor_session() -> None:
     )
 
 
-def test_camera_stream_handshake_blocks_active_mower() -> None:
+def test_camera_stream_handshake_allows_active_mower() -> None:
     device = _FakeCameraDevice()
+    device.status.state = DreameMowerState.MOWING
+    device.status.status = DreameMowerStatus.CLEANING
     device.status.running = True
     client = _client_with_device(device)
     client._sync_update_device = lambda: device
+    client._sync_get_cloud_user_features = lambda language=None: ""
 
-    try:
-        client._sync_probe_camera_stream_handshake(
-            timeout=0,
-            interval=0.1,
-            operation="monitor",
-            payload_mode="with_session",
-        )
-    except DreameLawnMowerConnectionError as err:
-        assert "blocked while the mower is active" in str(err)
-    else:
-        raise AssertionError("Expected active mower stream probe to be blocked")
+    result = client._sync_probe_camera_stream_handshake(
+        timeout=0,
+        interval=0.1,
+        operation="monitor",
+        payload_mode="with_session",
+    )
+
+    assert result["start_result"] == {"code": 0, "result": "started"}
+    assert result["end_result"] == {"code": 0, "result": "ended"}
 
 
 def test_camera_stream_handshake_blocks_docked_mower() -> None:

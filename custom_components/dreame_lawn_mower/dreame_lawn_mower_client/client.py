@@ -53,6 +53,7 @@ from .map_probe import (
 from .models import (
     SUPPORTED_ACCOUNT_TYPES,
     DreameLawnMowerCameraFeatureSupport,
+    DreameLawnMowerCameraStreamRuntimeInputs,
     DreameLawnMowerDescriptor,
     DreameLawnMowerFirmwareUpdateSupport,
     DreameLawnMowerMapSummary,
@@ -508,7 +509,7 @@ class DreameLawnMowerClient:
         timeout: float = 6.0,
         interval: float = 0.75,
         operation: str = "monitor",
-        payload_mode: str = "with_session",
+        payload_mode: str = "app_action",
     ) -> dict[str, Any]:
         """Try the camera stream start/end handshake and return debug details.
 
@@ -522,6 +523,20 @@ class DreameLawnMowerClient:
             operation,
             payload_mode,
         )
+
+    async def async_set_camera_stream_enabled(self, enabled: bool) -> Any:
+        """Call the stream toggle used by the Dreame app."""
+        return await asyncio.to_thread(self._sync_set_camera_stream_enabled, enabled)
+
+    async def async_get_camera_stream_inputs(self) -> dict[str, Any]:
+        """Fetch the cloud TX/XP2P inputs needed by Dreame's video runtime."""
+        return await asyncio.to_thread(self._sync_get_camera_stream_inputs)
+
+    async def async_get_camera_stream_runtime_inputs(
+        self,
+    ) -> DreameLawnMowerCameraStreamRuntimeInputs:
+        """Fetch the normalized XP2P runtime contract for live video."""
+        return await asyncio.to_thread(self._sync_get_camera_stream_runtime_inputs)
 
     async def async_refresh_map_summary(
         self,
@@ -1619,6 +1634,24 @@ class DreameLawnMowerClient:
 
         return output
 
+    def _sync_set_camera_stream_enabled(self, enabled: bool) -> Any:
+        """Call the exact stream toggle used by the Dreame mower app."""
+        if enabled:
+            before = self._sync_update_device()
+            self._guard_camera_stream_probe_idle(before)
+        return self._sync_call_app_stream_video(bool(enabled))
+
+    def _sync_call_app_stream_video(self, enabled: bool) -> Any:
+        """Call Control.switchVideo(on) from the mower React Native bundle."""
+        return self._sync_call_app_action(
+            {
+                "m": "a",
+                "p": 0,
+                "o": 400,
+                "d": {"on": bool(enabled)},
+            }
+        )
+
     def _call_stream_video_status(
         self,
         device: Any,
@@ -1628,6 +1661,9 @@ class DreameLawnMowerClient:
         oper_type: str,
         payload_mode: str,
     ) -> Any:
+        if payload_mode == "app_action":
+            return self._sync_call_app_stream_video(oper_type == "start")
+
         if payload_mode == "with_session":
             return device.call_stream_video_action(
                 property_enum.STREAM_STATUS,
@@ -1653,16 +1689,73 @@ class DreameLawnMowerClient:
             ],
         )
 
+    def _sync_get_camera_stream_inputs(self) -> dict[str, Any]:
+        """Fetch and normalize the cloud data used by TXVideoSdk video startup."""
+        cloud = self._sync_get_cloud_protocol()
+        output: dict[str, Any] = {
+            "source": "dreame_third_video_tx",
+            "did": self._descriptor.did,
+            "tx_rtc_info": {},
+            "p2p_info": None,
+            "raw": {},
+        }
+        try:
+            access_token = None
+            if hasattr(cloud, "get_tx_video_access_token"):
+                access = cloud.get_tx_video_access_token(os=1)
+                output["raw"]["access_token"] = _json_safe(access, max_depth=4)
+                access_token = _find_text_by_key(
+                    access,
+                    ("accessToken", "accesstoken", "token"),
+                )
+            if hasattr(cloud, "pair_tx_video_device"):
+                output["raw"]["pair"] = _json_safe(
+                    cloud.pair_tx_video_device(access_token=access_token, os=1),
+                    max_depth=4,
+                )
+            if hasattr(cloud, "get_tx_video_device_identity"):
+                identity = cloud.get_tx_video_device_identity(
+                    access_token=access_token,
+                    os=1,
+                )
+                output["raw"]["identity"] = _json_safe(identity, max_depth=5)
+                output["tx_rtc_info"] = _normalize_tx_rtc_info(
+                    identity,
+                    fallback_did=self._descriptor.did,
+                    fallback_product_id=self._descriptor.model,
+                    fallback_device_name=self._descriptor.name,
+                )
+            else:
+                output["tx_rtc_info"] = _normalize_tx_rtc_info(
+                    {},
+                    fallback_did=self._descriptor.did,
+                    fallback_product_id=self._descriptor.model,
+                    fallback_device_name=self._descriptor.name,
+                )
+            if hasattr(cloud, "get_tx_video_p2p_info"):
+                p2p_info = cloud.get_tx_video_p2p_info(
+                    access_token=access_token,
+                    os=1,
+                )
+                output["raw"]["p2p_info"] = _json_safe(p2p_info, max_depth=5)
+                output["p2p_info"] = _normalize_tx_p2p_info(p2p_info)
+            else:
+                output["p2p_info"] = {"available": False}
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+        return output
+
+    def _sync_get_camera_stream_runtime_inputs(
+        self,
+    ) -> DreameLawnMowerCameraStreamRuntimeInputs:
+        """Return the normalized XP2P input set consumed by a video runner."""
+        return _camera_stream_runtime_inputs_from_cloud_payload(
+            self._sync_get_camera_stream_inputs()
+        )
+
     def _guard_camera_stream_probe_idle(self, device: Any) -> None:
         status = getattr(device, "status", None)
         snapshot = snapshot_from_device(self._descriptor, device)
-        raw_running = bool(
-            snapshot.raw_attributes.get("running") or getattr(status, "running", False)
-        )
-        if snapshot.mowing or snapshot.returning or raw_running:
-            raise DreameLawnMowerConnectionError(
-                "Camera stream handshake probe is blocked while the mower is active."
-            )
         station_states = {
             "charging",
             "charging_completed",
@@ -4974,11 +5067,109 @@ def _validate_stream_payload_mode(payload_mode: str) -> str:
     if not isinstance(payload_mode, str):
         raise ValueError("payload_mode must be a string")
     value = payload_mode.strip()
-    if value not in {"with_session", "no_session", "empty_session"}:
+    if value not in {"app_action", "with_session", "no_session", "empty_session"}:
         raise ValueError(
-            "payload_mode must be one of: with_session, no_session, empty_session"
+            "payload_mode must be one of: app_action, with_session, no_session, "
+            "empty_session"
         )
     return value
+
+
+def _normalize_tx_rtc_info(
+    value: Any,
+    *,
+    fallback_did: str,
+    fallback_product_id: str,
+    fallback_device_name: str,
+) -> dict[str, Any]:
+    """Normalize the app's getTxRtcInfo response for XP2P startup."""
+    output = {
+        "channel_id": (
+            _find_text_by_key(value, ("channelId", "channel_id", "deviceId", "did"))
+            or fallback_did
+        ),
+        "product_id": (
+            _find_text_by_key(value, ("productId", "product_id", "model"))
+            or fallback_product_id
+        ),
+        "device_name": (
+            _find_text_by_key(value, ("deviceName", "device_name", "name"))
+            or fallback_device_name
+        ),
+        "raw": _json_safe(value, max_depth=4),
+    }
+    for output_key, source_keys in (
+        ("secret_id", ("secretId", "secret_id")),
+        ("secret_key", ("secretKey", "secret_key")),
+        ("app_id", ("appId", "app_id")),
+        ("app_secret", ("appSecret", "app_secret")),
+    ):
+        text = _find_text_by_key(value, source_keys)
+        if text:
+            output[output_key] = text
+    return output
+
+
+def _normalize_tx_p2p_info(value: Any) -> dict[str, Any]:
+    """Normalize the app's getP2PInfo response."""
+    p2p_text = _find_text_by_key(
+        value,
+        (
+            "p2pInfo",
+            "p2p_info",
+            "xp2pInfo",
+            "xp2p_info",
+            "initStringApp",
+            "apiLicense",
+        ),
+    )
+    return {
+        "available": value not in (None, "", {}, []),
+        "p2p_info": p2p_text,
+        "raw": _json_safe(value, max_depth=5),
+    }
+
+
+def _camera_stream_runtime_inputs_from_cloud_payload(
+    value: Mapping[str, Any],
+) -> DreameLawnMowerCameraStreamRuntimeInputs:
+    tx_rtc = value.get("tx_rtc_info")
+    tx_rtc = tx_rtc if isinstance(tx_rtc, Mapping) else {}
+    p2p = value.get("p2p_info")
+    p2p = p2p if isinstance(p2p, Mapping) else {}
+    return DreameLawnMowerCameraStreamRuntimeInputs(
+        source=str(value.get("source") or "dreame_third_video_tx"),
+        did=str(value.get("did") or ""),
+        channel_id=_as_optional_text(tx_rtc.get("channel_id")),
+        product_id=_as_optional_text(tx_rtc.get("product_id")),
+        device_name=_as_optional_text(tx_rtc.get("device_name")),
+        p2p_info=_as_optional_text(p2p.get("p2p_info")),
+        secret_id=_as_optional_text(tx_rtc.get("secret_id")),
+        secret_key=_as_optional_text(tx_rtc.get("secret_key")),
+        app_id=_as_optional_text(tx_rtc.get("app_id")),
+        app_secret=_as_optional_text(tx_rtc.get("app_secret")),
+        raw=_json_safe(value, max_depth=5),
+    )
+
+
+def _find_text_by_key(value: Any, keys: Sequence[str]) -> str | None:
+    wanted = {key.casefold() for key in keys}
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if str(key).casefold() in wanted:
+                text = _as_optional_text(item)
+                if text:
+                    return text
+        for item in value.values():
+            text = _find_text_by_key(item, keys)
+            if text:
+                return text
+    elif isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        for item in value:
+            text = _find_text_by_key(item, keys)
+            if text:
+                return text
+    return None
 
 
 def _cloud_user_feature_summary(value: Any) -> Mapping[str, Any]:

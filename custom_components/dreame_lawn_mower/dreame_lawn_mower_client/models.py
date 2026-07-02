@@ -467,6 +467,67 @@ class DreameLawnMowerCameraFeatureSupport:
         return asdict(self)
 
 
+@dataclass(slots=True, frozen=True)
+class DreameLawnMowerCameraStreamRuntimeInputs:
+    """Runtime inputs needed by a native XP2P video runner."""
+
+    source: str
+    did: str
+    channel_id: str | None = None
+    product_id: str | None = None
+    device_name: str | None = None
+    p2p_info: str | None = None
+    secret_id: str | None = None
+    secret_key: str | None = None
+    app_id: str | None = None
+    app_secret: str | None = None
+    live_command: str = "action=live"
+    flv_path_template: str = (
+        "ipc.flv?action=live&channel={channel}&quality=high&_crypto=on"
+    )
+    raw: Mapping[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def xp2p_id(self) -> str | None:
+        """Return the SDK id shape used by Tencent XP2P examples."""
+        if not self.product_id or not self.device_name:
+            return None
+        return f"{self.product_id}/{self.device_name}"
+
+    @property
+    def missing_required(self) -> tuple[str, ...]:
+        """Return runtime fields still missing before XP2P can be started."""
+        missing: list[str] = []
+        for name in ("product_id", "device_name", "p2p_info"):
+            if not getattr(self, name):
+                missing.append(name)
+        return tuple(missing)
+
+    @property
+    def ready(self) -> bool:
+        """Return whether the minimum XP2P runtime input set is present."""
+        return not self.missing_required
+
+    def as_dict(self, *, redact: bool = False) -> dict[str, Any]:
+        """Return a JSON-safe runtime payload."""
+        payload = asdict(self)
+        payload["xp2p_id"] = self.xp2p_id
+        payload["ready"] = self.ready
+        payload["missing_required"] = self.missing_required
+        if redact:
+            for key in (
+                "p2p_info",
+                "secret_id",
+                "secret_key",
+                "app_id",
+                "app_secret",
+            ):
+                payload[f"{key}_present"] = bool(payload.get(key))
+                payload.pop(key, None)
+            payload.pop("raw", None)
+        return payload
+
+
 def remote_control_block_reason(snapshot: Any) -> str | None:
     """Return why manual remote control is blocked for the snapshot state."""
     if snapshot is None:

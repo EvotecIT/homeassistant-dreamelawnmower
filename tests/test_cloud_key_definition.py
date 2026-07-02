@@ -23,6 +23,43 @@ class _FakeCloud:
         self.requested_language = lang
         return {"status": "ok", "map": {"object_name": "MAP.123"}}
 
+    def get_tx_video_access_token(self, os: int = 1) -> dict[str, object]:
+        assert os == 1
+        return {"accessToken": "access-token-1"}
+
+    def pair_tx_video_device(
+        self,
+        access_token: str | None = None,
+        os: int = 1,
+    ) -> dict[str, object]:
+        assert access_token == "access-token-1"
+        assert os == 1
+        return {"paired": True}
+
+    def get_tx_video_device_identity(
+        self,
+        access_token: str | None = None,
+        os: int = 1,
+    ) -> dict[str, object]:
+        assert access_token == "access-token-1"
+        assert os == 1
+        return {
+            "channelId": "channel-1",
+            "productId": "product-1",
+            "deviceName": "Mower Camera",
+            "secretId": "secret-id-1",
+            "secretKey": "secret-key-1",
+        }
+
+    def get_tx_video_p2p_info(
+        self,
+        access_token: str | None = None,
+        os: int = 1,
+    ) -> dict[str, object]:
+        assert access_token == "access-token-1"
+        assert os == 1
+        return {"p2pInfo": "p2p-info-1"}
+
     def get_app_plugin_version(
         self,
         model: str,
@@ -149,3 +186,36 @@ def test_app_plugin_version_uses_app_endpoint_helper() -> None:
         "version": 402,
         "sourceCommonPluginVer": 338,
     }
+
+
+def test_camera_stream_inputs_use_tx_video_endpoints() -> None:
+    client = _client()
+    client._sync_get_cloud_protocol = lambda: _FakeCloud()
+
+    result = client._sync_get_camera_stream_inputs()
+
+    assert result["source"] == "dreame_third_video_tx"
+    assert result["tx_rtc_info"]["channel_id"] == "channel-1"
+    assert result["tx_rtc_info"]["product_id"] == "product-1"
+    assert result["tx_rtc_info"]["device_name"] == "Mower Camera"
+    assert result["tx_rtc_info"]["secret_id"] == "secret-id-1"
+    assert result["tx_rtc_info"]["secret_key"] == "secret-key-1"
+    assert result["p2p_info"]["available"] is True
+    assert result["p2p_info"]["p2p_info"] == "p2p-info-1"
+
+
+def test_camera_stream_runtime_inputs_are_redactable_xp2p_contract() -> None:
+    client = _client()
+    client._sync_get_cloud_protocol = lambda: _FakeCloud()
+
+    result = client._sync_get_camera_stream_runtime_inputs()
+
+    assert result.ready is True
+    assert result.xp2p_id == "product-1/Mower Camera"
+    assert result.live_command == "action=live"
+    assert result.missing_required == ()
+    assert result.as_dict()["p2p_info"] == "p2p-info-1"
+    redacted = result.as_dict(redact=True)
+    assert "p2p_info" not in redacted
+    assert redacted["p2p_info_present"] is True
+    assert redacted["secret_key_present"] is True
