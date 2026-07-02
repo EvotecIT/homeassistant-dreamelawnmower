@@ -18,6 +18,7 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerConnectionError,
     DreameLawnMowerNativeXp2pRuntime,
     DreameLawnMowerVideoRuntimeError,
+    DreameLawnMowerXp2pExternalRunner,
     diagnose_native_xp2p_runtime,
 )
 
@@ -53,6 +54,16 @@ def _parse_args() -> argparse.Namespace:
         "--start-native-xp2p",
         action="store_true",
         help="Start and stop the native XP2P live stream probe.",
+    )
+    parser.add_argument(
+        "--xp2p-runner",
+        type=Path,
+        help="Optional external XP2P runner executable path.",
+    )
+    parser.add_argument(
+        "--start-xp2p-runner",
+        action="store_true",
+        help="Start and stop the external XP2P runner live stream probe.",
     )
     return parser.parse_args()
 
@@ -163,6 +174,11 @@ async def main() -> None:
                     args.xp2p_library,
                     runtime_inputs,
                 )
+            if args.start_xp2p_runner:
+                output["xp2p_runner"] = await _async_probe_xp2p_runner(
+                    args.xp2p_runner,
+                    runtime_inputs,
+                )
         except DreameLawnMowerConnectionError as err:
             output["camera_stream_inputs"] = {
                 "available": False,
@@ -232,6 +248,37 @@ async def _async_probe_native_xp2p(
 async def _async_diagnose_native_xp2p(library_path: Path) -> dict[str, object]:
     diagnostics = await asyncio.to_thread(diagnose_native_xp2p_runtime, library_path)
     return diagnostics.as_dict()
+
+
+async def _async_probe_xp2p_runner(
+    runner_path: Path | None,
+    runtime_inputs: Any,
+) -> dict[str, object]:
+    if runner_path is None:
+        return _native_xp2p_unavailable(
+            "--xp2p-runner is required with --start-xp2p-runner."
+        )
+    if not getattr(runtime_inputs, "ready", False):
+        missing = getattr(runtime_inputs, "missing_required", ())
+        return _native_xp2p_unavailable(
+            "Runtime inputs are incomplete: " + ", ".join(missing)
+        )
+
+    def _start_and_stop() -> dict[str, object]:
+        runner = DreameLawnMowerXp2pExternalRunner((runner_path,))
+        session = runner.start_live_stream(runtime_inputs)
+        try:
+            payload = session.as_dict()
+            payload["started"] = True
+            payload["available"] = True
+            return payload
+        finally:
+            runner.stop_live_stream(session)
+
+    try:
+        return await asyncio.to_thread(_start_and_stop)
+    except DreameLawnMowerVideoRuntimeError as err:
+        return _native_xp2p_unavailable(str(err))
 
 
 if __name__ == "__main__":

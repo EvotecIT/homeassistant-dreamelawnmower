@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import sys
 from ctypes import c_void_p
 from typing import Any
 
@@ -13,6 +15,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.video_runtime 
     DreameLawnMowerNativeXp2pRuntime,
     DreameLawnMowerVideoRuntimeError,
     DreameLawnMowerXp2pAppConfig,
+    DreameLawnMowerXp2pExternalRunner,
     DreameLawnMowerXp2pLiveStreamRequest,
     diagnose_native_xp2p_runtime,
 )
@@ -198,3 +201,83 @@ def test_native_xp2p_runtime_diagnostics_report_loader_errors() -> None:
     assert diagnostics.loadable is False
     assert diagnostics.missing_required_symbols == ()
     assert "Could not load XP2P native library" in str(diagnostics.error)
+
+
+def test_external_runner_starts_live_stream_and_stops_session(tmp_path) -> None:
+    capture = tmp_path / "calls.jsonl"
+    runner_script = tmp_path / "xp2p_runner.py"
+    runner_script.write_text(
+        "\n".join(
+            [
+                "import json, pathlib, sys",
+                "payload = json.loads(sys.stdin.read())",
+                f"path = pathlib.Path({str(capture)!r})",
+                "with path.open('a', encoding='utf-8') as handle:",
+                "    handle.write(json.dumps(payload, sort_keys=True) + '\\n')",
+                "if payload['operation'] == 'start':",
+                "    request = payload['request']",
+                "    print(json.dumps({",
+                "        'service_id': request['service_id'],",
+                "        'runner_session_id': 'runner-session-1',",
+                "        'stream_url': 'http://127.0.0.1:5544/ipc.flv'",
+                "    }))",
+                "else:",
+                "    print(json.dumps({'stopped': True}))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    runner = DreameLawnMowerXp2pExternalRunner((sys.executable, runner_script))
+
+    session = runner.start_live_stream(_runtime_inputs(), command_timeout_us=321)
+    runner.stop_live_stream(session)
+
+    assert session.stream_url == "http://127.0.0.1:5544/ipc.flv"
+    assert session.runtime == "external_xp2p_runner"
+    assert session.service_id == "channel-1"
+    assert session.runner_session_id == "runner-session-1"
+    calls = [
+        json.loads(line)
+        for line in capture.read_text(encoding="utf-8").splitlines()
+    ]
+    assert calls[0]["operation"] == "start"
+    assert calls[0]["command_timeout_us"] == 321
+    assert calls[0]["request"]["product_id"] == "product-1"
+    assert calls[0]["request"]["device_name"] == "mower-camera-1"
+    assert calls[0]["request"]["p2p_info"] == "p2p-info-1"
+    assert calls[1] == {
+        "operation": "stop",
+        "session": {
+            "runner_session_id": "runner-session-1",
+            "service_id": "channel-1",
+            "stream_url": "http://127.0.0.1:5544/ipc.flv",
+        },
+    }
+
+
+def test_external_runner_requires_stream_url(tmp_path) -> None:
+    runner_script = tmp_path / "xp2p_runner.py"
+    runner_script.write_text("print('{}')\n", encoding="utf-8")
+    runner = DreameLawnMowerXp2pExternalRunner((sys.executable, runner_script))
+
+    try:
+        runner.start_live_stream(_runtime_inputs())
+    except DreameLawnMowerVideoRuntimeError as err:
+        assert "stream_url" in str(err)
+    else:
+        raise AssertionError("Expected missing stream_url to fail")
+
+
+def test_external_runner_reports_process_failures_without_secret(tmp_path) -> None:
+    runner_script = tmp_path / "xp2p_runner.py"
+    runner_script.write_text("raise SystemExit(7)\n", encoding="utf-8")
+    runner = DreameLawnMowerXp2pExternalRunner((sys.executable, runner_script))
+
+    try:
+        runner.start_live_stream(_runtime_inputs())
+    except DreameLawnMowerVideoRuntimeError as err:
+        message = str(err)
+        assert "exit code 7" in message
+        assert "p2p-info-1" not in message
+    else:
+        raise AssertionError("Expected failing external runner to fail")

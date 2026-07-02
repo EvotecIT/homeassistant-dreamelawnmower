@@ -33,6 +33,7 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerStatusBlob,
     DreameLawnMowerVideoRuntimeError,
     DreameLawnMowerXp2pAppConfig,
+    DreameLawnMowerXp2pExternalRunner,
     DreameLawnMowerXp2pLiveStreamRequest,
     DreameLawnMowerXp2pLiveStreamSession,
     DreameLawnMowerXp2pRuntimeDiagnostics,
@@ -109,6 +110,7 @@ def test_public_package_exports_map_helpers() -> None:
     assert DreameLawnMowerNativeXp2pRuntime.__name__.endswith("NativeXp2pRuntime")
     assert DreameLawnMowerVideoRuntimeError.__name__.endswith("VideoRuntimeError")
     assert DreameLawnMowerXp2pAppConfig.__name__.endswith("Xp2pAppConfig")
+    assert DreameLawnMowerXp2pExternalRunner.__name__.endswith("Xp2pExternalRunner")
     assert DreameLawnMowerXp2pLiveStreamRequest.__name__.endswith(
         "Xp2pLiveStreamRequest"
     )
