@@ -64,7 +64,14 @@ def test_xp2p_request_summary_redacts_computed_stream_target() -> None:
 
     assert summary["available"] is True
     assert summary["ready"] is True
-    for key in ("service_id", "product_id", "device_name", "p2p_info", "flv_path"):
+    for key in (
+        "service_id",
+        "flv_channel_id",
+        "product_id",
+        "device_name",
+        "p2p_info",
+        "flv_path",
+    ):
         assert key not in summary
         assert summary[f"{key}_present"] is True
 

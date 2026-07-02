@@ -9,6 +9,7 @@ from typing import Any
 RUNNER_OUTPUT_PREVIEW_LIMIT = 400
 SENSITIVE_RUNNER_PAYLOAD_KEYS = {
     "device_name",
+    "flv_channel_id",
     "flv_path",
     "p2p_info",
     "product_id",

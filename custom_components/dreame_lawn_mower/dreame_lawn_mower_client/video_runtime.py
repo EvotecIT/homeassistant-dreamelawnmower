@@ -126,6 +126,7 @@ class DreameLawnMowerXp2pLiveStreamRequest:
     """Normalized request passed to a native XP2P runtime."""
 
     service_id: str
+    flv_channel_id: str
     product_id: str
     device_name: str
     p2p_info: str = field(repr=False)
@@ -146,14 +147,16 @@ class DreameLawnMowerXp2pLiveStreamRequest:
                 "Cannot start XP2P stream; missing runtime fields: "
                 + ", ".join(missing)
             )
-        service_id = inputs.channel_id or inputs.xp2p_id or inputs.did
+        service_id = inputs.xp2p_id or inputs.channel_id or inputs.did
         if not service_id:
             raise DreameLawnMowerVideoRuntimeError(
                 "Cannot start XP2P stream; missing service id."
             )
-        flv_path = _format_flv_path(inputs.flv_path_template, service_id)
+        flv_channel_id = inputs.channel_id or service_id
+        flv_path = _format_flv_path(inputs.flv_path_template, flv_channel_id)
         return cls(
             service_id=service_id,
+            flv_channel_id=flv_channel_id,
             product_id=str(inputs.product_id),
             device_name=str(inputs.device_name),
             p2p_info=str(inputs.p2p_info),
@@ -167,6 +170,7 @@ class DreameLawnMowerXp2pLiveStreamRequest:
         """Return a JSON-safe request payload."""
         payload = {
             "service_id": self.service_id,
+            "flv_channel_id": self.flv_channel_id,
             "product_id": self.product_id,
             "device_name": self.device_name,
             "p2p_info": self.p2p_info,
@@ -178,6 +182,7 @@ class DreameLawnMowerXp2pLiveStreamRequest:
         if redact:
             for key in (
                 "service_id",
+                "flv_channel_id",
                 "product_id",
                 "device_name",
                 "p2p_info",
