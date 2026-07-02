@@ -43,6 +43,7 @@ class _FakeXp2pLibrary:
         self.postCommandRequestSync = _FakeFunction(0)
         self.startAvRecvService = _FakeFunction(c_void_p(1234))
         self.stopAvRecvService = _FakeFunction(0)
+        self.setQcloudApiCred = _FakeFunction(0)
         self.delegateHttpFlv = _FakeFunction(b"http://127.0.0.1:54321/ipc.flv")
         self.stopService = _FakeFunction(None)
 
@@ -55,6 +56,8 @@ def _runtime_inputs() -> DreameLawnMowerCameraStreamRuntimeInputs:
         product_id="product-1",
         device_name="mower-camera-1",
         p2p_info="p2p-info-1",
+        secret_id="secret-id-1",
+        secret_key="secret-key-1",
     )
 
 
@@ -66,6 +69,8 @@ def test_xp2p_live_stream_request_uses_runtime_contract() -> None:
     assert request.service_id == "channel-1"
     assert request.product_id == "product-1"
     assert request.device_name == "mower-camera-1"
+    assert request.secret_id == "secret-id-1"
+    assert request.secret_key == "secret-key-1"
     assert (
         request.flv_path
         == "ipc.flv?action=live&channel=channel-1&quality=high&_crypto=on"
@@ -77,6 +82,10 @@ def test_xp2p_live_stream_request_uses_runtime_contract() -> None:
         assert redacted[f"{key}_present"] is True
     assert "p2p_info" not in redacted
     assert redacted["p2p_info_present"] is True
+    assert "secret_id" not in redacted
+    assert "secret_key" not in redacted
+    assert redacted["secret_id_present"] is True
+    assert redacted["secret_key_present"] is True
 
 
 def test_xp2p_live_stream_request_encodes_fallback_channel_in_flv_path() -> None:
@@ -135,6 +144,7 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
     assert start_call[2] == b"mower-camera-1"
     assert start_call[3] == b"p2p-info-1"
     assert start_call[4].type == XP2P_PROTOCOL_TCP
+    assert library.setQcloudApiCred.calls == [(b"secret-id-1", b"secret-key-1")]
     command_call = library.postCommandRequestSync.calls[0]
     assert command_call[0] == b"channel-1"
     assert bytes(command_call[1][: command_call[2]]) == b"action=live"
@@ -149,6 +159,22 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
 
     assert library.stopAvRecvService.calls
     assert library.stopService.calls == [(b"channel-1",)]
+
+
+def test_native_xp2p_runtime_fails_when_qcloud_credentials_are_rejected() -> None:
+    library = _FakeXp2pLibrary()
+    library.setQcloudApiCred = _FakeFunction(-7)
+    runtime = DreameLawnMowerNativeXp2pRuntime("fake-xp2p.so", library=library)
+
+    try:
+        runtime.start_live_stream(_runtime_inputs())
+    except DreameLawnMowerVideoRuntimeError as err:
+        assert "setQcloudApiCred" in str(err)
+        assert "-7" in str(err)
+    else:
+        raise AssertionError("Expected rejected QCloud credentials to fail")
+
+    assert library.startService.calls == []
 
 
 def test_native_xp2p_runtime_cleans_up_when_flv_url_is_missing() -> None:
@@ -276,6 +302,8 @@ def test_external_runner_starts_live_stream_and_stops_session(tmp_path) -> None:
     assert calls[0]["request"]["product_id"] == "product-1"
     assert calls[0]["request"]["device_name"] == "mower-camera-1"
     assert calls[0]["request"]["p2p_info"] == "p2p-info-1"
+    assert calls[0]["request"]["secret_id"] == "secret-id-1"
+    assert calls[0]["request"]["secret_key"] == "secret-key-1"
     assert (
         calls[0]["request"]["flv_path"]
         == "ipc.flv?action=live&channel=channel-1&quality=high&_crypto=on"
@@ -309,7 +337,9 @@ def test_external_runner_reports_process_failures_without_secret(tmp_path) -> No
         "\n".join(
             [
                 "import sys",
-                "sys.stderr.write('linker failed for p2p-info-1 channel-1\\n')",
+                "sys.stderr.write(",
+                "    'linker failed for p2p-info-1 channel-1 secret-key-1\\n'",
+                ")",
                 "raise SystemExit(7)",
             ]
         ),
@@ -326,6 +356,7 @@ def test_external_runner_reports_process_failures_without_secret(tmp_path) -> No
         assert "stderr=" in message
         assert "p2p-info-1" not in message
         assert "channel-1" not in message
+        assert "secret-key-1" not in message
     else:
         raise AssertionError("Expected failing external runner to fail")
 
@@ -375,6 +406,8 @@ def test_process_runner_keeps_stream_process_alive_until_stop(tmp_path) -> None:
     assert calls[0]["operation"] == "start"
     assert calls[0]["command_timeout_us"] == 321
     assert calls[0]["request"]["flv_path"].startswith("ipc.flv?action=live")
+    assert calls[0]["request"]["secret_id"] == "secret-id-1"
+    assert calls[0]["request"]["secret_key"] == "secret-key-1"
     assert calls[1] == {
         "operation": "stop",
         "session": {
@@ -406,6 +439,7 @@ def test_process_runner_reports_missing_stream_url_without_secret(tmp_path) -> N
         message = str(err)
         assert "stream_url" in message
         assert "p2p-info-1" not in message
+        assert "secret-key-1" not in message
     else:
         raise AssertionError("Expected missing stream_url to fail")
 
@@ -417,7 +451,9 @@ def test_process_runner_reports_startup_stderr_without_secret(tmp_path) -> None:
             [
                 "import json, sys",
                 "json.loads(sys.stdin.readline())",
-                "sys.stderr.write('xp2p auth failed for p2p-info-1 channel-1\\n')",
+                "sys.stderr.write(",
+                "    'xp2p auth failed for p2p-info-1 channel-1 secret-key-1\\n'",
+                ")",
                 "raise SystemExit(9)",
             ]
         ),
@@ -434,6 +470,7 @@ def test_process_runner_reports_startup_stderr_without_secret(tmp_path) -> None:
         assert "stderr=" in message
         assert "p2p-info-1" not in message
         assert "channel-1" not in message
+        assert "secret-key-1" not in message
     else:
         raise AssertionError("Expected process runner startup failure to fail")
 

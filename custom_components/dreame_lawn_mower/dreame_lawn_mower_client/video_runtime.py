@@ -46,6 +46,7 @@ REQUIRED_XP2P_SYMBOLS = (
     "delegateHttpFlv",
 )
 OPTIONAL_XP2P_SYMBOLS = (
+    "setQcloudApiCred",
     "stopAvRecvService",
     "stopService",
 )
@@ -130,6 +131,8 @@ class DreameLawnMowerXp2pLiveStreamRequest:
     p2p_info: str = field(repr=False)
     flv_path: str
     live_command: str = "action=live"
+    secret_id: str | None = field(default=None, repr=False)
+    secret_key: str | None = field(default=None, repr=False)
 
     @classmethod
     def from_runtime_inputs(
@@ -154,6 +157,8 @@ class DreameLawnMowerXp2pLiveStreamRequest:
             product_id=str(inputs.product_id),
             device_name=str(inputs.device_name),
             p2p_info=str(inputs.p2p_info),
+            secret_id=inputs.secret_id,
+            secret_key=inputs.secret_key,
             flv_path=flv_path,
             live_command=inputs.live_command,
         )
@@ -165,6 +170,8 @@ class DreameLawnMowerXp2pLiveStreamRequest:
             "product_id": self.product_id,
             "device_name": self.device_name,
             "p2p_info": self.p2p_info,
+            "secret_id": self.secret_id,
+            "secret_key": self.secret_key,
             "flv_path": self.flv_path,
             "live_command": self.live_command,
         }
@@ -174,6 +181,8 @@ class DreameLawnMowerXp2pLiveStreamRequest:
                 "product_id",
                 "device_name",
                 "p2p_info",
+                "secret_id",
+                "secret_key",
                 "flv_path",
             ):
                 payload[f"{key}_present"] = bool(payload.pop(key, None))
@@ -446,6 +455,12 @@ class DreameLawnMowerNativeXp2pRuntime:
             c_int,
             required=False,
         )
+        self._set_qcloud_api_cred = self._bind(
+            "setQcloudApiCred",
+            [c_char_p, c_char_p],
+            c_int,
+            required=False,
+        )
         self._delegate_http_flv = self._bind(
             "delegateHttpFlv",
             [c_char_p],
@@ -472,6 +487,12 @@ class DreameLawnMowerNativeXp2pRuntime:
         started = False
         av_recv_handle: Any | None = None
         try:
+            qcloud_result = self._set_qcloud_api_cred_for_request(request)
+            if qcloud_result not in (None, 0):
+                raise DreameLawnMowerVideoRuntimeError(
+                    "XP2P setQcloudApiCred failed with code "
+                    f"{qcloud_result}."
+                )
             start_result = int(
                 self._start_service(
                     service_id,
@@ -557,6 +578,21 @@ class DreameLawnMowerNativeXp2pRuntime:
         if result == 0 and response_buffer and response_length.value:
             response = bytes(response_buffer[: response_length.value])
         return result, response
+
+    def _set_qcloud_api_cred_for_request(
+        self,
+        request: DreameLawnMowerXp2pLiveStreamRequest,
+    ) -> int | None:
+        if self._set_qcloud_api_cred is None:
+            return None
+        if not request.secret_id or not request.secret_key:
+            return None
+        return int(
+            self._set_qcloud_api_cred(
+                _encode(request.secret_id),
+                _encode(request.secret_key),
+            )
+        )
 
     def _bind(
         self,

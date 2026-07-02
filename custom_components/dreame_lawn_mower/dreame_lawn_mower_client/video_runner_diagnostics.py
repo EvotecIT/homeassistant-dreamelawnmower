@@ -13,6 +13,8 @@ SENSITIVE_RUNNER_PAYLOAD_KEYS = {
     "p2p_info",
     "product_id",
     "runner_session_id",
+    "secret_id",
+    "secret_key",
     "service_id",
     "stream_url",
 }
