@@ -104,6 +104,9 @@ def _safe_runtime_inputs_summary(value: Any) -> dict[str, Any]:
     else:
         return {"ready": False, "available": False}
     payload["available"] = True
+    for key in ("did", "channel_id", "product_id", "device_name", "xp2p_id"):
+        payload[f"{key}_present"] = bool(payload.get(key))
+        payload.pop(key, None)
     return payload
 
 
