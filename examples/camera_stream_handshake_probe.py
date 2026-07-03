@@ -226,10 +226,17 @@ def _safe_xp2p_request_summary(value: Any) -> dict[str, Any]:
     return payload
 
 
-def _native_xp2p_unavailable(reason: str) -> dict[str, object]:
+def _native_xp2p_unavailable(
+    reason: str,
+    *,
+    error_category: str = "configuration_missing",
+    attempted: bool = False,
+) -> dict[str, object]:
     return {
         "started": False,
+        "attempted": attempted,
         "available": False,
+        "error_category": error_category,
         "error": reason,
     }
 
@@ -302,7 +309,7 @@ def _active_stream_verdict(
 def _stream_probe_verdict(source: str, result: dict[str, object]) -> dict[str, object]:
     if not result.get("started"):
         verdict: dict[str, object] = {
-            "status": "start_failed",
+            "status": str(result.get("error_category") or "start_failed"),
             "source": source,
         }
         if result.get("error"):
@@ -469,7 +476,6 @@ async def main() -> None:
                     args.xp2p_library
                 )
             if args.start_native_xp2p and active_block_reason is None:
-                active_attempted = True
                 output["native_xp2p"] = await _async_probe_native_xp2p(
                     args.xp2p_library,
                     runtime_inputs,
@@ -478,8 +484,10 @@ async def main() -> None:
                     stream_url_attempts=args.stream_url_attempts,
                     stream_url_retry_interval=args.stream_url_retry_interval,
                 )
+                active_attempted = active_attempted or bool(
+                    output["native_xp2p"].get("attempted")
+                )
             if args.start_xp2p_runner and active_block_reason is None:
-                active_attempted = True
                 output["xp2p_runner"] = await _async_probe_xp2p_runner(
                     args.xp2p_runner,
                     runtime_inputs,
@@ -488,6 +496,9 @@ async def main() -> None:
                     stream_url_bytes=args.stream_url_bytes,
                     stream_url_attempts=args.stream_url_attempts,
                     stream_url_retry_interval=args.stream_url_retry_interval,
+                )
+                active_attempted = active_attempted or bool(
+                    output["xp2p_runner"].get("attempted")
                 )
         except DreameLawnMowerConnectionError as err:
             output["camera_stream_inputs"] = {
@@ -564,6 +575,7 @@ async def _async_probe_native_xp2p(
         session = runtime.start_live_stream(runtime_inputs)
         try:
             payload = session.as_dict(redact=True)
+            payload["attempted"] = True
             payload["started"] = True
             payload["available"] = True
             payload["stream_health"] = probe_stream_url(
@@ -580,7 +592,11 @@ async def _async_probe_native_xp2p(
     try:
         return await asyncio.to_thread(_start_and_stop)
     except DreameLawnMowerVideoRuntimeError as err:
-        return _native_xp2p_unavailable(str(err))
+        return _native_xp2p_unavailable(
+            str(err),
+            error_category="runtime_start_failed",
+            attempted=True,
+        )
 
 
 async def _async_diagnose_native_xp2p(library_path: Path) -> dict[str, object]:
@@ -617,6 +633,7 @@ async def _async_probe_xp2p_runner(
         session = runner.start_live_stream(runtime_inputs)
         try:
             payload = session.as_dict(redact=True)
+            payload["attempted"] = True
             payload["started"] = True
             payload["available"] = True
             payload["runner_mode"] = mode
@@ -634,7 +651,11 @@ async def _async_probe_xp2p_runner(
     try:
         return await asyncio.to_thread(_start_and_stop)
     except DreameLawnMowerVideoRuntimeError as err:
-        return _native_xp2p_unavailable(str(err))
+        return _native_xp2p_unavailable(
+            str(err),
+            error_category="runtime_start_failed",
+            attempted=True,
+        )
 
 
 if __name__ == "__main__":

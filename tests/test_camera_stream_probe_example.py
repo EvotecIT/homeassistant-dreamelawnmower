@@ -49,6 +49,10 @@ def test_runtime_inputs_summary_redacts_stable_identifiers() -> None:
     assert summary["p2p_info_present"] is True
     assert "secret_key" not in summary
     assert summary["secret_key_present"] is True
+    assert summary["qcloud_credential_state"] == "partial"
+    assert summary["missing_qcloud_credentials"] == ("secret_id",)
+    assert summary["app_credential_state"] == "absent"
+    assert summary["missing_app_credentials"] == ("app_id", "app_secret")
     assert summary["ready"] is True
 
 
@@ -205,6 +209,30 @@ def test_active_stream_verdict_reports_blocked_probe() -> None:
     }
 
 
+def test_active_stream_verdict_reports_configuration_missing() -> None:
+    module = _load_probe_module()
+
+    verdict = module._active_stream_verdict(
+        {
+            "xp2p_runner": {
+                "started": False,
+                "attempted": False,
+                "available": False,
+                "error_category": "configuration_missing",
+                "error": "--xp2p-runner is required with --start-xp2p-runner.",
+            }
+        },
+        active_requested=True,
+        active_block_reason=None,
+    )
+
+    assert verdict == {
+        "status": "configuration_missing",
+        "source": "xp2p_runner",
+        "error": "--xp2p-runner is required with --start-xp2p-runner.",
+    }
+
+
 def test_active_stream_verdict_reports_confirmed_flv_header() -> None:
     module = _load_probe_module()
 
@@ -325,12 +353,42 @@ def test_xp2p_runner_probe_checks_returned_stream_url(tmp_path) -> None:
         thread.join(timeout=2.0)
 
     assert result["started"] is True
+    assert result["attempted"] is True
     assert result["runner_mode"] == "one-shot"
     assert result["stream_url_present"] is True
     assert result["stream_health"]["available"] is True
     assert result["stream_health"]["flv_header_present"] is True
     assert result["stream_health"]["bytes_read"] == 8
     assert result["stream_health"]["attempts"] == 1
+
+
+def test_xp2p_runner_probe_missing_runner_is_preflight_failure() -> None:
+    module = _load_probe_module()
+    inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+        source="dreame_third_video_tx",
+        did="device-id-1",
+        channel_id="channel-1",
+        product_id="product-1",
+        device_name="device-name-1",
+        p2p_info="p2p-info-1",
+    )
+
+    result = asyncio.run(
+        module._async_probe_xp2p_runner(
+            None,
+            inputs,
+            mode="process",
+            stream_url_timeout=1.0,
+            stream_url_bytes=8,
+            stream_url_attempts=1,
+            stream_url_retry_interval=0.01,
+        )
+    )
+
+    assert result["started"] is False
+    assert result["attempted"] is False
+    assert result["error_category"] == "configuration_missing"
+    assert "--xp2p-runner" in str(result["error"])
 
 
 def test_stream_url_probe_retries_until_flv_header() -> None:

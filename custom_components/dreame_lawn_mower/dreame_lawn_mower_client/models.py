@@ -509,12 +509,42 @@ class DreameLawnMowerCameraStreamRuntimeInputs:
         """Return whether the minimum XP2P runtime input set is present."""
         return not self.missing_required
 
+    @property
+    def qcloud_credential_state(self) -> str:
+        """Return whether Tencent QCloud credentials are complete."""
+        return _credential_pair_state(self.secret_id, self.secret_key)
+
+    @property
+    def missing_qcloud_credentials(self) -> tuple[str, ...]:
+        """Return QCloud credential fields that were not returned by Dreame."""
+        return _missing_credential_pair(
+            ("secret_id", self.secret_id),
+            ("secret_key", self.secret_key),
+        )
+
+    @property
+    def app_credential_state(self) -> str:
+        """Return whether app-level video credentials are complete."""
+        return _credential_pair_state(self.app_id, self.app_secret)
+
+    @property
+    def missing_app_credentials(self) -> tuple[str, ...]:
+        """Return app credential fields that were not returned by Dreame."""
+        return _missing_credential_pair(
+            ("app_id", self.app_id),
+            ("app_secret", self.app_secret),
+        )
+
     def as_dict(self, *, redact: bool = False) -> dict[str, Any]:
         """Return a JSON-safe runtime payload."""
         payload = asdict(self)
         payload["xp2p_id"] = self.xp2p_id
         payload["ready"] = self.ready
         payload["missing_required"] = self.missing_required
+        payload["qcloud_credential_state"] = self.qcloud_credential_state
+        payload["missing_qcloud_credentials"] = self.missing_qcloud_credentials
+        payload["app_credential_state"] = self.app_credential_state
+        payload["missing_app_credentials"] = self.missing_app_credentials
         if redact:
             for key in (
                 "p2p_info",
@@ -527,6 +557,22 @@ class DreameLawnMowerCameraStreamRuntimeInputs:
                 payload.pop(key, None)
             payload.pop("raw", None)
         return payload
+
+
+def _credential_pair_state(left: str | None, right: str | None) -> str:
+    present = (bool(left), bool(right))
+    if all(present):
+        return "complete"
+    if any(present):
+        return "partial"
+    return "absent"
+
+
+def _missing_credential_pair(
+    left: tuple[str, str | None],
+    right: tuple[str, str | None],
+) -> tuple[str, ...]:
+    return tuple(name for name, value in (left, right) if not value)
 
 
 def remote_control_block_reason(snapshot: Any) -> str | None:

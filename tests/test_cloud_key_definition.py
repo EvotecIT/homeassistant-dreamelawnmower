@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dreame_lawn_mower_client import DreameLawnMowerClient
-from dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
+from dreame_lawn_mower_client.models import (
+    DreameLawnMowerCameraStreamRuntimeInputs,
+    DreameLawnMowerDescriptor,
+)
 
 
 class _FakeCloud:
@@ -214,8 +217,42 @@ def test_camera_stream_runtime_inputs_are_redactable_xp2p_contract() -> None:
     assert result.xp2p_id == "product-1/Mower Camera"
     assert result.live_command == "action=live"
     assert result.missing_required == ()
+    assert result.qcloud_credential_state == "complete"
+    assert result.missing_qcloud_credentials == ()
+    assert result.app_credential_state == "absent"
+    assert result.missing_app_credentials == ("app_id", "app_secret")
     assert result.as_dict()["p2p_info"] == "p2p-info-1"
     redacted = result.as_dict(redact=True)
     assert "p2p_info" not in redacted
     assert redacted["p2p_info_present"] is True
     assert redacted["secret_key_present"] is True
+    assert redacted["qcloud_credential_state"] == "complete"
+    assert redacted["missing_qcloud_credentials"] == ()
+    assert redacted["app_credential_state"] == "absent"
+    assert redacted["missing_app_credentials"] == ("app_id", "app_secret")
+
+
+def test_camera_stream_runtime_inputs_report_partial_vendor_credentials() -> None:
+    inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+        source="dreame_third_video_tx",
+        did="device-1",
+        product_id="product-1",
+        device_name="Mower Camera",
+        p2p_info="p2p-info-1",
+        secret_id="secret-id-1",
+        app_secret="app-secret-1",
+    )
+
+    redacted = inputs.as_dict(redact=True)
+
+    assert inputs.ready is True
+    assert inputs.qcloud_credential_state == "partial"
+    assert inputs.missing_qcloud_credentials == ("secret_key",)
+    assert inputs.app_credential_state == "partial"
+    assert inputs.missing_app_credentials == ("app_id",)
+    assert redacted["qcloud_credential_state"] == "partial"
+    assert redacted["missing_qcloud_credentials"] == ("secret_key",)
+    assert redacted["app_credential_state"] == "partial"
+    assert redacted["missing_app_credentials"] == ("app_id",)
+    assert redacted["secret_id_present"] is True
+    assert redacted["secret_key_present"] is False
