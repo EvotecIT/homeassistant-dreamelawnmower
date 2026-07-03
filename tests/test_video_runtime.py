@@ -44,7 +44,7 @@ class _FakeXp2pLibrary:
         self.startAvRecvService = _FakeFunction(c_void_p(1234))
         self.stopAvRecvService = _FakeFunction(0)
         self.setQcloudApiCred = _FakeFunction(0)
-        self.delegateHttpFlv = _FakeFunction(b"http://127.0.0.1:54321/ipc.flv")
+        self.delegateHttpFlv = _FakeFunction(b"http://127.0.0.1:54321/")
         self.stopService = _FakeFunction(None)
 
 
@@ -144,7 +144,11 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
         command_timeout_us=123,
     )
 
-    assert session.stream_url == "http://127.0.0.1:54321/ipc.flv"
+    assert (
+        session.stream_url
+        == "http://127.0.0.1:54321/"
+        "ipc.flv?action=live&channel=0&quality=high&_crypto=on"
+    )
     assert session.service_id == "product-1/mower-camera-1"
     assert session.command_result == 0
     assert session.av_recv_handle is not None

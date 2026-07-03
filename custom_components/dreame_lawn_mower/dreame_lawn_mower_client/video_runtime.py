@@ -532,12 +532,15 @@ class DreameLawnMowerNativeXp2pRuntime:
                 _encode(request.flv_path),
                 True,
             )
-            stream_url_raw = self._delegate_http_flv(_encode(request.delegate_id))
-            stream_url = _decode(stream_url_raw)
-            if not stream_url:
+            stream_url_prefix_raw = self._delegate_http_flv(
+                _encode(request.delegate_id)
+            )
+            stream_url_prefix = _decode(stream_url_prefix_raw)
+            if not stream_url_prefix:
                 raise DreameLawnMowerVideoRuntimeError(
                     "XP2P delegateHttpFlv did not return a stream URL."
                 )
+            stream_url = _append_flv_path(stream_url_prefix, request.flv_path)
             return DreameLawnMowerXp2pLiveStreamSession(
                 service_id=request.service_id,
                 stream_url=stream_url,
@@ -767,6 +770,17 @@ def _format_flv_path(template: str, channel: str) -> str:
         raise DreameLawnMowerVideoRuntimeError(
             f"Invalid XP2P FLV path template: {template!r}."
         ) from err
+
+
+def _append_flv_path(stream_url_prefix: str, flv_path: str) -> str:
+    if "ipc.flv" in stream_url_prefix:
+        return stream_url_prefix
+    separator = (
+        ""
+        if stream_url_prefix.endswith("/") or flv_path.startswith("/")
+        else "/"
+    )
+    return f"{stream_url_prefix}{separator}{flv_path.lstrip('/')}"
 
 
 def _encode_fixed(value: str, size: int) -> bytes:
