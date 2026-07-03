@@ -75,6 +75,9 @@ class DreameLawnMowerVideoCamera(
         self._runtime: _DreameVideoRuntime | None = None
         self._session: DreameLawnMowerXp2pLiveStreamSession | None = None
         self._last_error: str | None = None
+        self._last_runtime_inputs_ready: bool | None = None
+        self._last_runtime_inputs_source: str | None = None
+        self._last_runtime_inputs_missing: tuple[str, ...] = ()
 
     @property
     def available(self) -> bool:
@@ -111,6 +114,9 @@ class DreameLawnMowerVideoCamera(
             "xp2p_runner_configured": bool(self._runner_command),
             "stream_session_active": self._session is not None,
             "last_stream_error": self._last_error,
+            "last_runtime_inputs_ready": self._last_runtime_inputs_ready,
+            "last_runtime_inputs_source": self._last_runtime_inputs_source,
+            "last_runtime_inputs_missing": self._last_runtime_inputs_missing,
             "last_stream_session": self._session.as_dict(redact=True)
             if self._session is not None
             else None,
@@ -128,6 +134,9 @@ class DreameLawnMowerVideoCamera(
             inputs = (
                 await self.coordinator.client.async_get_camera_stream_runtime_inputs()
             )
+            self._last_runtime_inputs_ready = inputs.ready
+            self._last_runtime_inputs_source = inputs.source
+            self._last_runtime_inputs_missing = inputs.missing_required
             if not inputs.ready:
                 self._set_stream_error(
                     "Dreame cloud did not return required XP2P fields: "

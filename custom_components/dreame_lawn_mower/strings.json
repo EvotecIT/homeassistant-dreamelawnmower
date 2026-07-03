@@ -42,9 +42,14 @@
         "title": "Dreame lawn mower options",
         "data": {
           "scan_interval": "Polling interval in seconds",
-          "xp2p_library_path": "XP2P native library path",
-          "xp2p_runner_command": "XP2P runner command",
-          "xp2p_runner_mode": "XP2P runner mode"
+          "xp2p_library_path": "Host XP2P native library path",
+          "xp2p_runner_command": "Host XP2P runner command",
+          "xp2p_runner_mode": "Host XP2P runner mode"
+        },
+        "data_description": {
+          "xp2p_library_path": "Advanced video option. Use a dynamic XP2P library built for this Home Assistant host OS and CPU. Android APK/AAR libraries and iOS frameworks are not host runtimes.",
+          "xp2p_runner_command": "Advanced video option. Use only a local host runner that owns a compatible XP2P runtime and returns a local FLV URL. Android helpers are not the intended Home Assistant runtime.",
+          "xp2p_runner_mode": "Use process mode for a runner that stays alive while Home Assistant streams."
         }
       }
     }
