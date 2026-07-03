@@ -140,6 +140,75 @@ def test_next_step_message_keeps_passive_probe_guidance() -> None:
     assert "--wait-undocked-timeout" not in message
 
 
+def test_active_stream_verdict_reports_blocked_probe() -> None:
+    module = _load_probe_module()
+
+    verdict = module._active_stream_verdict(
+        {},
+        active_requested=True,
+        active_block_reason="blocked while docked",
+    )
+
+    assert verdict == {
+        "status": "blocked",
+        "reason": "blocked while docked",
+    }
+
+
+def test_active_stream_verdict_reports_confirmed_flv_header() -> None:
+    module = _load_probe_module()
+
+    verdict = module._active_stream_verdict(
+        {
+            "xp2p_runner": {
+                "started": True,
+                "stream_health": {
+                    "available": True,
+                    "flv_header_present": True,
+                    "bytes_read": 8,
+                    "status_code": 200,
+                },
+            }
+        },
+        active_requested=True,
+        active_block_reason=None,
+    )
+
+    assert verdict == {
+        "status": "flv_header_confirmed",
+        "source": "xp2p_runner",
+        "available": True,
+        "flv_header_present": True,
+        "bytes_read": 8,
+        "status_code": 200,
+    }
+
+
+def test_active_stream_verdict_reports_open_stream_without_flv_header() -> None:
+    module = _load_probe_module()
+
+    verdict = module._active_stream_verdict(
+        {
+            "native_xp2p": {
+                "started": True,
+                "stream_health": {
+                    "available": True,
+                    "flv_header_present": False,
+                    "bytes_read": 8,
+                },
+            }
+        },
+        active_requested=True,
+        active_block_reason=None,
+    )
+
+    assert verdict["status"] == "stream_opened_without_flv_header"
+    assert verdict["source"] == "native_xp2p"
+    assert verdict["available"] is True
+    assert verdict["flv_header_present"] is False
+    assert verdict["bytes_read"] == 8
+
+
 def test_xp2p_runner_probe_checks_returned_stream_url(tmp_path) -> None:
     module = _load_probe_module()
     server = ThreadingHTTPServer(("127.0.0.1", 0), _FlvHandler)

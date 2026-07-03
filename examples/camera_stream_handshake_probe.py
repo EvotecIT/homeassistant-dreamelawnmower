@@ -225,6 +225,71 @@ def _next_step_message(
     return None
 
 
+def _active_stream_verdict(
+    output: dict[str, object],
+    *,
+    active_requested: bool,
+    active_block_reason: str | None,
+) -> dict[str, object]:
+    if not active_requested:
+        return {"status": "not_requested"}
+    if active_block_reason:
+        return {
+            "status": "blocked",
+            "reason": active_block_reason,
+        }
+    for key in ("native_xp2p", "xp2p_runner"):
+        result = output.get(key)
+        if isinstance(result, dict):
+            return _stream_probe_verdict(key, result)
+    if "handshake" in output:
+        return {"status": "handshake_attempted", "source": "app_handshake"}
+    if output.get("handshake_error"):
+        return {
+            "status": "handshake_failed",
+            "source": "app_handshake",
+            "error": str(output["handshake_error"]),
+        }
+    return {"status": "not_attempted"}
+
+
+def _stream_probe_verdict(source: str, result: dict[str, object]) -> dict[str, object]:
+    if not result.get("started"):
+        verdict: dict[str, object] = {
+            "status": "start_failed",
+            "source": source,
+        }
+        if result.get("error"):
+            verdict["error"] = str(result["error"])
+        return verdict
+    health = result.get("stream_health")
+    if not isinstance(health, dict):
+        return {
+            "status": "stream_health_missing",
+            "source": source,
+        }
+    verdict = {
+        "status": _stream_health_status(health),
+        "source": source,
+        "available": bool(health.get("available")),
+        "flv_header_present": bool(health.get("flv_header_present")),
+        "bytes_read": int(health.get("bytes_read") or 0),
+    }
+    if health.get("status_code") is not None:
+        verdict["status_code"] = health["status_code"]
+    if health.get("error"):
+        verdict["error"] = str(health["error"])
+    return verdict
+
+
+def _stream_health_status(health: dict[str, object]) -> str:
+    if bool(health.get("flv_header_present")):
+        return "flv_header_confirmed"
+    if bool(health.get("available")):
+        return "stream_opened_without_flv_header"
+    return "stream_unavailable"
+
+
 async def _async_wait_for_active_video_state(
     client: DreameLawnMowerClient,
     *,
@@ -385,6 +450,14 @@ async def main() -> None:
                 )
             except DreameLawnMowerConnectionError as err:
                 output["handshake_error"] = str(err)
+        output["field_test"]["active_attempted"] = active_attempted
+        output["field_test"]["active_stream_verdict"] = _active_stream_verdict(
+            output,
+            active_requested=active_requested,
+            active_block_reason=(
+                str(active_block_reason) if active_block_reason is not None else None
+            ),
+        )
         next_step = _next_step_message(
             active_requested=active_requested,
             active_block_reason=(
