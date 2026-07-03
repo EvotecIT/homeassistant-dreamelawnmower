@@ -13,6 +13,9 @@ from types import ModuleType, SimpleNamespace
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.stream_health import (
+    probe_stream_url,
+)
 
 
 def _load_probe_module() -> ModuleType:
@@ -255,6 +258,8 @@ def test_xp2p_runner_probe_checks_returned_stream_url(tmp_path) -> None:
                 mode="one-shot",
                 stream_url_timeout=1.0,
                 stream_url_bytes=8,
+                stream_url_attempts=2,
+                stream_url_retry_interval=0.01,
             )
         )
     finally:
@@ -268,6 +273,34 @@ def test_xp2p_runner_probe_checks_returned_stream_url(tmp_path) -> None:
     assert result["stream_health"]["available"] is True
     assert result["stream_health"]["flv_header_present"] is True
     assert result["stream_health"]["bytes_read"] == 8
+    assert result["stream_health"]["attempts"] == 1
+
+
+def test_stream_url_probe_retries_until_flv_header() -> None:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _DelayedFlvHandler)
+    _DelayedFlvHandler.request_count = 0
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    stream_url = f"http://127.0.0.1:{server.server_port}/ipc.flv"
+
+    try:
+        result = probe_stream_url(
+            stream_url,
+            timeout=1.0,
+            read_bytes=8,
+            attempts=3,
+            retry_interval=0.01,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2.0)
+
+    assert result.available is True
+    assert result.flv_header_present is True
+    assert result.bytes_read == 8
+    assert result.attempts == 2
+    assert result.elapsed_seconds >= 0
 
 
 class _FlvHandler(BaseHTTPRequestHandler):
@@ -276,6 +309,23 @@ class _FlvHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "video/x-flv")
         self.end_headers()
         self.wfile.write(b"FLV\x01\x05\x00\x00\x00\x09")
+
+    def log_message(self, format: str, *args) -> None:
+        return
+
+
+class _DelayedFlvHandler(BaseHTTPRequestHandler):
+    request_count = 0
+
+    def do_GET(self) -> None:
+        type(self).request_count += 1
+        self.send_response(200)
+        self.send_header("Content-Type", "video/x-flv")
+        self.end_headers()
+        if type(self).request_count == 1:
+            self.wfile.write(b"WAITING!")
+        else:
+            self.wfile.write(b"FLV\x01\x05\x00\x00\x00\x09")
 
     def log_message(self, format: str, *args) -> None:
         return
