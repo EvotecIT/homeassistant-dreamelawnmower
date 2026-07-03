@@ -39,6 +39,11 @@ XP2P_PROTOCOL_UDP = 1
 XP2P_PROTOCOL_TCP = 2
 
 DEFAULT_COMMAND_TIMEOUT_US = 7_500_000
+ANDROID_XP2P_JNI_SYMBOL_MARKERS = (
+    b"Java_com_tencent_xnet_XP2P",
+    b"setDeviceXp2pInfo",
+    b"startServiceNative",
+)
 REQUIRED_XP2P_SYMBOLS = (
     "startService",
     "postCommandRequestSync",
@@ -105,6 +110,10 @@ class DreameLawnMowerXp2pRuntimeDiagnostics:
     optional_symbols: tuple[str, ...] = OPTIONAL_XP2P_SYMBOLS
     missing_required_symbols: tuple[str, ...] = ()
     missing_optional_symbols: tuple[str, ...] = ()
+    file_format: str | None = None
+    machine: str | None = None
+    android_jni_symbols_present: bool = False
+    platform_hint: str | None = None
     error: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -117,6 +126,10 @@ class DreameLawnMowerXp2pRuntimeDiagnostics:
             "optional_symbols": self.optional_symbols,
             "missing_required_symbols": self.missing_required_symbols,
             "missing_optional_symbols": self.missing_optional_symbols,
+            "file_format": self.file_format,
+            "machine": self.machine,
+            "android_jni_symbols_present": self.android_jni_symbols_present,
+            "platform_hint": self.platform_hint,
             "error": self.error,
         }
 
@@ -530,15 +543,6 @@ class DreameLawnMowerNativeXp2pRuntime:
                     f"XP2P startService failed with code {start_result}."
                 )
             started = True
-            command_result, command_response = self._post_live_command(
-                request,
-                command_timeout_us=command_timeout_us,
-            )
-            if command_result != 0:
-                raise DreameLawnMowerVideoRuntimeError(
-                    "XP2P postCommandRequestSync failed with code "
-                    f"{command_result}."
-                )
             device_status_result, device_status_response = (
                 self._post_device_status_command(
                     request,
@@ -574,8 +578,6 @@ class DreameLawnMowerNativeXp2pRuntime:
                 service_id=request.service_id,
                 stream_url=stream_url,
                 start_result=start_result,
-                command_result=command_result,
-                command_response=command_response,
                 device_status_result=device_status_result,
                 device_status_code=device_status_code,
                 device_status_response=device_status_response,
@@ -696,14 +698,23 @@ def diagnose_native_xp2p_runtime(
 ) -> DreameLawnMowerXp2pRuntimeDiagnostics:
     """Return load/symbol readiness for a native XP2P runtime library."""
     path = str(library_path)
+    inspection = _inspect_native_library_file(Path(path)) if library is None else {}
     try:
         loaded_library = library if library is not None else CDLL(path)
     except OSError as err:
+        error = f"Could not load XP2P native library {path!r}: {err}"
+        if inspection.get("platform_hint") == "android_jni":
+            error += (
+                " The file looks like Dreamehome's Android JNI XP2P library; "
+                "use an Android/JVM-hosted external runner instead of direct "
+                "ctypes loading in Home Assistant."
+            )
         return DreameLawnMowerXp2pRuntimeDiagnostics(
             library_path=path,
             loadable=False,
             ready=False,
-            error=f"Could not load XP2P native library {path!r}: {err}",
+            error=error,
+            **inspection,
         )
 
     missing_required = tuple(
@@ -729,8 +740,49 @@ def diagnose_native_xp2p_runtime(
         ready=ready,
         missing_required_symbols=missing_required,
         missing_optional_symbols=missing_optional,
+        **inspection,
         error=error,
     )
+
+
+def _inspect_native_library_file(path: Path) -> dict[str, Any]:
+    inspection: dict[str, Any] = {}
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return inspection
+
+    if data.startswith(b"\x7fELF"):
+        inspection["file_format"] = "elf"
+        inspection["machine"] = _elf_machine_name(data)
+    elif data.startswith(b"MZ"):
+        inspection["file_format"] = "pe"
+    elif data.startswith(b"\xcf\xfa\xed\xfe") or data.startswith(b"\xfe\xed\xfa\xcf"):
+        inspection["file_format"] = "macho"
+
+    android_jni = any(marker in data for marker in ANDROID_XP2P_JNI_SYMBOL_MARKERS)
+    inspection["android_jni_symbols_present"] = android_jni
+    if android_jni:
+        inspection["platform_hint"] = "android_jni"
+    return inspection
+
+
+def _elf_machine_name(data: bytes) -> str | None:
+    if len(data) < 20:
+        return None
+    endian = data[5]
+    if endian == 1:
+        machine = int.from_bytes(data[18:20], "little")
+    elif endian == 2:
+        machine = int.from_bytes(data[18:20], "big")
+    else:
+        return None
+    return {
+        3: "x86",
+        40: "arm",
+        62: "x86_64",
+        183: "aarch64",
+    }.get(machine, f"elf_machine_{machine}")
 
 
 def _encode(value: str) -> bytes:

@@ -155,7 +155,7 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
         "ipc.flv?action=live&channel=0&quality=high&_crypto=on"
     )
     assert session.service_id == "product-1/mower-camera-1"
-    assert session.command_result == 0
+    assert session.command_result is None
     assert session.device_status_result == 0
     assert session.device_status_code is None
     assert session.av_recv_handle is not None
@@ -167,11 +167,8 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
     assert start_call[3] == b"p2p-info-1"
     assert start_call[4].type == XP2P_PROTOCOL_TCP
     assert library.setQcloudApiCred.calls == [(b"secret-id-1", b"secret-key-1")]
-    command_call = library.postCommandRequestSync.calls[0]
-    assert command_call[0] == b"product-1/mower-camera-1"
-    assert bytes(command_call[1][: command_call[2]]) == b"action=live"
-    assert command_call[5] == 123
-    status_call = library.postCommandRequestSync.calls[1]
+    assert len(library.postCommandRequestSync.calls) == 1
+    status_call = library.postCommandRequestSync.calls[0]
     assert status_call[0] == b"product-1/mower-camera-1"
     assert bytes(status_call[1][: status_call[2]]) == (
         b"action=inner_define&channel=0&cmd=get_device_st&type=live&quality=standard"
@@ -192,10 +189,7 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
 def test_native_xp2p_runtime_fails_when_device_status_command_fails() -> None:
     library = _FakeXp2pLibrary()
 
-    def _post_result(*_args: Any) -> int:
-        return 0 if len(library.postCommandRequestSync.calls) == 1 else -9
-
-    library.postCommandRequestSync = _FakeFunction(_post_result)
+    library.postCommandRequestSync = _FakeFunction(-9)
     runtime = DreameLawnMowerNativeXp2pRuntime("fake-xp2p.so", library=library)
 
     try:
@@ -315,6 +309,35 @@ def test_native_xp2p_runtime_diagnostics_report_loader_errors() -> None:
     assert diagnostics.loadable is False
     assert diagnostics.missing_required_symbols == ()
     assert "Could not load XP2P native library" in str(diagnostics.error)
+
+
+def test_native_xp2p_runtime_diagnostics_identify_android_jni_library(
+    tmp_path,
+) -> None:
+    library_path = tmp_path / "libxnet-android.so"
+    elf_header = bytearray(64)
+    elf_header[0:4] = b"\x7fELF"
+    elf_header[4] = 2
+    elf_header[5] = 1
+    elf_header[18:20] = (183).to_bytes(2, "little")
+    library_path.write_bytes(
+        bytes(elf_header)
+        + b"Java_com_tencent_xnet_XP2P"
+        + b"setDeviceXp2pInfo"
+        + b"startServiceNative"
+    )
+
+    diagnostics = diagnose_native_xp2p_runtime(library_path)
+
+    assert diagnostics.ready is False
+    assert diagnostics.loadable is False
+    assert diagnostics.file_format == "elf"
+    assert diagnostics.machine == "aarch64"
+    assert diagnostics.android_jni_symbols_present is True
+    assert diagnostics.platform_hint == "android_jni"
+    assert "Android JNI XP2P library" in str(diagnostics.error)
+    payload = diagnostics.as_dict()
+    assert payload["platform_hint"] == "android_jni"
 
 
 def test_external_runner_starts_live_stream_and_stops_session(tmp_path) -> None:
