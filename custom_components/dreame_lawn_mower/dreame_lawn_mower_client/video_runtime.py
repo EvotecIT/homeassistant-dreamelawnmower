@@ -133,6 +133,9 @@ class DreameLawnMowerXp2pLiveStreamRequest:
     p2p_info: str = field(repr=False)
     flv_path: str
     live_command: str = "action=live"
+    device_status_command: str = (
+        "action=inner_define&channel=0&cmd=get_device_st&type=live&quality=high"
+    )
     secret_id: str | None = field(default=None, repr=False)
     secret_key: str | None = field(default=None, repr=False)
 
@@ -156,6 +159,7 @@ class DreameLawnMowerXp2pLiveStreamRequest:
         delegate_id = inputs.channel_id or service_id
         stream_channel = str(inputs.stream_channel)
         flv_path = _format_flv_path(inputs.flv_path_template, stream_channel)
+        device_status_command = _format_device_status_command(stream_channel)
         return cls(
             service_id=service_id,
             delegate_id=delegate_id,
@@ -167,6 +171,7 @@ class DreameLawnMowerXp2pLiveStreamRequest:
             secret_key=inputs.secret_key,
             flv_path=flv_path,
             live_command=inputs.live_command,
+            device_status_command=device_status_command,
         )
 
     def as_dict(self, *, redact: bool = False) -> dict[str, Any]:
@@ -183,6 +188,7 @@ class DreameLawnMowerXp2pLiveStreamRequest:
             "secret_key": self.secret_key,
             "flv_path": self.flv_path,
             "live_command": self.live_command,
+            "device_status_command": self.device_status_command,
         }
         if redact:
             for key in (
@@ -210,6 +216,9 @@ class DreameLawnMowerXp2pLiveStreamSession:
     start_result: int = 0
     command_result: int | None = None
     command_response: bytes | None = field(default=None, repr=False)
+    device_status_result: int | None = None
+    device_status_code: int | None = None
+    device_status_response: bytes | None = field(default=None, repr=False)
     av_recv_handle: Any | None = field(default=None, repr=False)
     runner_command: tuple[str, ...] = field(default=(), repr=False)
     runner_session_id: str | None = None
@@ -224,6 +233,9 @@ class DreameLawnMowerXp2pLiveStreamSession:
             "start_result": self.start_result,
             "command_result": self.command_result,
             "command_response_present": bool(self.command_response),
+            "device_status_result": self.device_status_result,
+            "device_status_code": self.device_status_code,
+            "device_status_response_present": bool(self.device_status_response),
             "av_recv_started": self.av_recv_handle is not None,
             "runner_command": self.runner_command,
             "runner_session_id_present": bool(self.runner_session_id),
@@ -527,6 +539,23 @@ class DreameLawnMowerNativeXp2pRuntime:
                     "XP2P postCommandRequestSync failed with code "
                     f"{command_result}."
                 )
+            device_status_result, device_status_response = (
+                self._post_device_status_command(
+                    request,
+                    command_timeout_us=command_timeout_us,
+                )
+            )
+            if device_status_result != 0:
+                raise DreameLawnMowerVideoRuntimeError(
+                    "XP2P device status command failed with code "
+                    f"{device_status_result}."
+                )
+            device_status_code = _decode_device_status_code(device_status_response)
+            if device_status_code not in (None, 0):
+                raise DreameLawnMowerVideoRuntimeError(
+                    "XP2P device status rejected live video with code "
+                    f"{device_status_code}."
+                )
             av_recv_handle = self._start_av_recv(
                 service_id,
                 _encode(request.flv_path),
@@ -547,6 +576,9 @@ class DreameLawnMowerNativeXp2pRuntime:
                 start_result=start_result,
                 command_result=command_result,
                 command_response=command_response,
+                device_status_result=device_status_result,
+                device_status_code=device_status_code,
+                device_status_response=device_status_response,
                 av_recv_handle=av_recv_handle,
             )
         except Exception:
@@ -575,12 +607,38 @@ class DreameLawnMowerNativeXp2pRuntime:
         command_timeout_us: int,
     ) -> tuple[int, bytes | None]:
         command = _encode(request.live_command)
+        return self._post_command_bytes(
+            request.service_id,
+            command,
+            command_timeout_us=command_timeout_us,
+        )
+
+    def _post_device_status_command(
+        self,
+        request: DreameLawnMowerXp2pLiveStreamRequest,
+        *,
+        command_timeout_us: int,
+    ) -> tuple[int, bytes | None]:
+        command = _encode(request.device_status_command)
+        return self._post_command_bytes(
+            request.service_id,
+            command,
+            command_timeout_us=command_timeout_us,
+        )
+
+    def _post_command_bytes(
+        self,
+        service_id: str,
+        command: bytes,
+        *,
+        command_timeout_us: int,
+    ) -> tuple[int, bytes | None]:
         command_buffer = (c_ubyte * len(command)).from_buffer_copy(command)
         response_buffer = POINTER(c_ubyte)()
         response_length = c_size_t()
         result = int(
             self._post_command(
-                _encode(request.service_id),
+                _encode(service_id),
                 command_buffer,
                 len(command),
                 byref(response_buffer),
@@ -770,6 +828,36 @@ def _format_flv_path(template: str, channel: str) -> str:
         raise DreameLawnMowerVideoRuntimeError(
             f"Invalid XP2P FLV path template: {template!r}."
         ) from err
+
+
+def _format_device_status_command(channel: str) -> str:
+    channel_value = quote(channel, safe="")
+    return (
+        "action=inner_define&channel="
+        f"{channel_value}&cmd=get_device_st&type=live&quality=high"
+    )
+
+
+def _decode_device_status_code(response: bytes | None) -> int | None:
+    if not response:
+        return None
+    try:
+        payload = json.loads(response.decode("utf-8", "replace"))
+    except json.JSONDecodeError:
+        return None
+    if isinstance(payload, Sequence) and payload:
+        first = payload[0]
+    else:
+        first = payload
+    if not isinstance(first, Mapping):
+        return None
+    status = first.get("status")
+    if isinstance(status, bool):
+        return None
+    try:
+        return int(status)
+    except (TypeError, ValueError):
+        return None
 
 
 def _append_flv_path(stream_url_prefix: str, flv_path: str) -> str:

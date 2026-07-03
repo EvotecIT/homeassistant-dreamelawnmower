@@ -19,6 +19,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.video_runtime 
     DreameLawnMowerXp2pLiveStreamRequest,
     DreameLawnMowerXp2pLiveStreamSession,
     DreameLawnMowerXp2pProcessRunner,
+    _decode_device_status_code,
     diagnose_native_xp2p_runtime,
 )
 
@@ -78,6 +79,10 @@ def test_xp2p_live_stream_request_uses_runtime_contract() -> None:
         == "ipc.flv?action=live&channel=0&quality=high&_crypto=on"
     )
     assert request.live_command == "action=live"
+    assert (
+        request.device_status_command
+        == "action=inner_define&channel=0&cmd=get_device_st&type=live&quality=high"
+    )
     redacted = request.as_dict(redact=True)
     for key in (
         "service_id",
@@ -151,6 +156,8 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
     )
     assert session.service_id == "product-1/mower-camera-1"
     assert session.command_result == 0
+    assert session.device_status_result == 0
+    assert session.device_status_code is None
     assert session.av_recv_handle is not None
     assert library.startService.calls
     start_call = library.startService.calls[0]
@@ -164,6 +171,12 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
     assert command_call[0] == b"product-1/mower-camera-1"
     assert bytes(command_call[1][: command_call[2]]) == b"action=live"
     assert command_call[5] == 123
+    status_call = library.postCommandRequestSync.calls[1]
+    assert status_call[0] == b"product-1/mower-camera-1"
+    assert bytes(status_call[1][: status_call[2]]) == (
+        b"action=inner_define&channel=0&cmd=get_device_st&type=live&quality=high"
+    )
+    assert status_call[5] == 123
     assert (
         library.startAvRecvService.calls[0][1]
         == b"ipc.flv?action=live&channel=0&quality=high&_crypto=on"
@@ -174,6 +187,35 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
 
     assert library.stopAvRecvService.calls
     assert library.stopService.calls == [(b"product-1/mower-camera-1",)]
+
+
+def test_native_xp2p_runtime_fails_when_device_status_command_fails() -> None:
+    library = _FakeXp2pLibrary()
+
+    def _post_result(*_args: Any) -> int:
+        return 0 if len(library.postCommandRequestSync.calls) == 1 else -9
+
+    library.postCommandRequestSync = _FakeFunction(_post_result)
+    runtime = DreameLawnMowerNativeXp2pRuntime("fake-xp2p.so", library=library)
+
+    try:
+        runtime.start_live_stream(_runtime_inputs())
+    except DreameLawnMowerVideoRuntimeError as err:
+        assert "device status command" in str(err)
+        assert "-9" in str(err)
+    else:
+        raise AssertionError("Expected failed device status command to fail")
+
+    assert library.startAvRecvService.calls == []
+    assert library.delegateHttpFlv.calls == []
+    assert library.stopService.calls == [(b"product-1/mower-camera-1",)]
+
+
+def test_device_status_decoder_reads_app_status_payload() -> None:
+    assert _decode_device_status_code(b'[{"status":0}]') == 0
+    assert _decode_device_status_code(b'[{"status":405}]') == 405
+    assert _decode_device_status_code(b"not-json") is None
+    assert _decode_device_status_code(None) is None
 
 
 def test_native_xp2p_runtime_fails_when_qcloud_credentials_are_rejected() -> None:
