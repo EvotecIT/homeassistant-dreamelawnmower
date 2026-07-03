@@ -374,6 +374,31 @@ Home Assistant mirrors this as a disabled-by-default `All Maps` diagnostic
 camera that renders the read-only app-map payloads into one contact sheet. This
 surfaces secondary maps without changing the mower-selected map.
 
+## Confirmed TX video playback sequence
+
+The local Dreamehome `2.5.3.0` decompile exposes the Tencent XP2P video path in:
+
+- `com.tencent.xnet.XP2P`
+- `com.dreame.plugin.video.tx.dreame_flutter_plugin_tx_video.rn.TXAVVideoPlayer`
+- `com.dreame.plugin.video.tx.dreame_flutter_plugin_tx_video.rn.video.Command`
+
+For live playback, `TXAVVideoPlayer.startPlay(p2pInfo)` calls:
+
+- `XP2P.startService(context, channelId, productId, deviceName)`
+- `XP2P.setParamsForXp2pInfo(channelId, null, null, p2pInfo)`
+
+After the XP2P callback reports event `1004`, the app checks device state with
+`action=inner_define&channel={channel}&cmd=get_device_st&type=live&quality=standard`.
+Only when that status is `0` does it call `XP2P.delegateHttpFlv(channelId)`,
+store the returned URL prefix, and reset the player. The player then starts
+`urlPrefix + ipc.flv?action=live&channel={channel}&quality=high&_crypto=on`
+for the high-quality live stream.
+
+This matters for probes: the status/readiness command uses `quality=standard`
+even when the final FLV URL requests `quality=high`. Treat a returned local URL
+as only an intermediate step; the proof point remains readable FLV bytes or
+frame data.
+
 Use `python examples/apk_research.py <apk> --max-string-length 220` when
 testing a new Dreamehome APK.
 It creates a compact string index of dex/assets/resources for protocol endpoints,

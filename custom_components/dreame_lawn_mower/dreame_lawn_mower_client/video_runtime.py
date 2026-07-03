@@ -134,7 +134,7 @@ class DreameLawnMowerXp2pLiveStreamRequest:
     flv_path: str
     live_command: str = "action=live"
     device_status_command: str = (
-        "action=inner_define&channel=0&cmd=get_device_st&type=live&quality=high"
+        "action=inner_define&channel=0&cmd=get_device_st&type=live&quality=standard"
     )
     secret_id: str | None = field(default=None, repr=False)
     secret_key: str | None = field(default=None, repr=False)
@@ -834,7 +834,7 @@ def _format_device_status_command(channel: str) -> str:
     channel_value = quote(channel, safe="")
     return (
         "action=inner_define&channel="
-        f"{channel_value}&cmd=get_device_st&type=live&quality=high"
+        f"{channel_value}&cmd=get_device_st&type=live&quality=standard"
     )
 
 

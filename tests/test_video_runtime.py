@@ -81,7 +81,7 @@ def test_xp2p_live_stream_request_uses_runtime_contract() -> None:
     assert request.live_command == "action=live"
     assert (
         request.device_status_command
-        == "action=inner_define&channel=0&cmd=get_device_st&type=live&quality=high"
+        == "action=inner_define&channel=0&cmd=get_device_st&type=live&quality=standard"
     )
     redacted = request.as_dict(redact=True)
     for key in (
@@ -174,7 +174,7 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
     status_call = library.postCommandRequestSync.calls[1]
     assert status_call[0] == b"product-1/mower-camera-1"
     assert bytes(status_call[1][: status_call[2]]) == (
-        b"action=inner_define&channel=0&cmd=get_device_st&type=live&quality=high"
+        b"action=inner_define&channel=0&cmd=get_device_st&type=live&quality=standard"
     )
     assert status_call[5] == 123
     assert (
