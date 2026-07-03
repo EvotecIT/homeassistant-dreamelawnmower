@@ -28,12 +28,17 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_TOKEN,
     CONF_USERNAME,
+    CONF_XP2P_LIBRARY_PATH,
+    CONF_XP2P_RUNNER_COMMAND,
+    CONF_XP2P_RUNNER_MODE,
     COUNTRY_OPTIONS,
     DEFAULT_COUNTRY,
     DEFAULT_SCAN_INTERVAL_SECONDS,
     DOMAIN,
     MAX_SCAN_INTERVAL_SECONDS,
     MIN_SCAN_INTERVAL_SECONDS,
+    XP2P_RUNNER_MODE_OPTIONS,
+    XP2P_RUNNER_MODE_PROCESS,
 )
 
 
@@ -269,7 +274,28 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                             min=MIN_SCAN_INTERVAL_SECONDS,
                             max=MAX_SCAN_INTERVAL_SECONDS,
                         ),
-                    )
+                    ),
+                    vol.Optional(
+                        CONF_XP2P_LIBRARY_PATH,
+                        default=self.config_entry.options.get(
+                            CONF_XP2P_LIBRARY_PATH,
+                            "",
+                        ),
+                    ): str,
+                    vol.Optional(
+                        CONF_XP2P_RUNNER_COMMAND,
+                        default=self.config_entry.options.get(
+                            CONF_XP2P_RUNNER_COMMAND,
+                            "",
+                        ),
+                    ): str,
+                    vol.Optional(
+                        CONF_XP2P_RUNNER_MODE,
+                        default=self.config_entry.options.get(
+                            CONF_XP2P_RUNNER_MODE,
+                            XP2P_RUNNER_MODE_PROCESS,
+                        ),
+                    ): vol.In(XP2P_RUNNER_MODE_OPTIONS),
                 }
             ),
         )

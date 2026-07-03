@@ -17,6 +17,9 @@ CONF_PASSWORD = "password"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_TOKEN = "token"
 CONF_USERNAME = "username"
+CONF_XP2P_LIBRARY_PATH = "xp2p_library_path"
+CONF_XP2P_RUNNER_COMMAND = "xp2p_runner_command"
+CONF_XP2P_RUNNER_MODE = "xp2p_runner_mode"
 
 DEFAULT_COUNTRY = "eu"
 DEFAULT_SCAN_INTERVAL_SECONDS = 60
@@ -30,6 +33,13 @@ ACCOUNT_TYPE_OPTIONS = {
     ACCOUNT_TYPE_MOVA: "MOVAhome",
 }
 COUNTRY_OPTIONS = ["cn", "eu", "us", "ru", "sg"]
+
+XP2P_RUNNER_MODE_PROCESS = "process"
+XP2P_RUNNER_MODE_ONE_SHOT = "one-shot"
+XP2P_RUNNER_MODE_OPTIONS = {
+    XP2P_RUNNER_MODE_PROCESS: "Persistent process",
+    XP2P_RUNNER_MODE_ONE_SHOT: "One-shot command",
+}
 
 PLATFORMS: list[Platform] = [
     Platform.CAMERA,
