@@ -143,6 +143,53 @@ def test_next_step_message_keeps_passive_probe_guidance() -> None:
     assert "--wait-undocked-timeout" not in message
 
 
+def test_field_test_profile_expands_xp2p_runner_defaults() -> None:
+    module = _load_probe_module()
+    args = SimpleNamespace(
+        field_test_profile="xp2p-runner",
+        start_xp2p_runner=False,
+        start_native_xp2p=False,
+        wait_undocked_timeout=0.0,
+        dock_after_active=False,
+        stream_url_attempts=module.DEFAULT_STREAM_URL_ATTEMPTS,
+        stream_url_retry_interval=module.DEFAULT_STREAM_URL_RETRY_INTERVAL,
+    )
+
+    result = module._apply_field_test_profile(args)
+
+    assert result.start_xp2p_runner is True
+    assert result.start_native_xp2p is False
+    assert result.wait_undocked_timeout == module.PROFILE_WAIT_UNDOCKED_TIMEOUT
+    assert result.dock_after_active is True
+    assert result.stream_url_attempts == module.PROFILE_STREAM_URL_ATTEMPTS
+    assert (
+        result.stream_url_retry_interval
+        == module.PROFILE_STREAM_URL_RETRY_INTERVAL
+    )
+
+
+def test_field_test_profile_preserves_explicit_probe_timing() -> None:
+    module = _load_probe_module()
+    args = SimpleNamespace(
+        field_test_profile="native-xp2p",
+        start_xp2p_runner=False,
+        start_native_xp2p=False,
+        wait_undocked_timeout=30.0,
+        dock_after_active=False,
+        stream_url_attempts=3,
+        stream_url_retry_interval=0.5,
+    )
+
+    result = module._apply_field_test_profile(args)
+
+    assert result.start_native_xp2p is True
+    assert result.start_xp2p_runner is False
+    assert result.wait_undocked_timeout == 30.0
+    assert result.dock_after_active is True
+    assert result.stream_url_attempts == 3
+    assert result.stream_url_retry_interval == 0.5
+
+
 def test_active_stream_verdict_reports_blocked_probe() -> None:
     module = _load_probe_module()
 

@@ -27,6 +27,12 @@ from dreame_lawn_mower_client import (
 
 PAYLOAD_MODES = ("app_action", "with_session", "no_session", "empty_session")
 XP2P_RUNNER_MODES = ("process", "one-shot")
+FIELD_TEST_PROFILES = ("none", "xp2p-runner", "native-xp2p")
+DEFAULT_STREAM_URL_ATTEMPTS = 1
+DEFAULT_STREAM_URL_RETRY_INTERVAL = 0.25
+PROFILE_WAIT_UNDOCKED_TIMEOUT = 180.0
+PROFILE_STREAM_URL_ATTEMPTS = 10
+PROFILE_STREAM_URL_RETRY_INTERVAL = 1.0
 STATION_STATES = {
     "charging",
     "charging_completed",
@@ -59,13 +65,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--stream-url-attempts",
         type=int,
-        default=1,
+        default=DEFAULT_STREAM_URL_ATTEMPTS,
         help="Number of local stream URL open/read attempts before declaring failure.",
     )
     parser.add_argument(
         "--stream-url-retry-interval",
         type=float,
-        default=0.25,
+        default=DEFAULT_STREAM_URL_RETRY_INTERVAL,
         help="Seconds to wait between local stream URL attempts.",
     )
     parser.add_argument(
@@ -109,6 +115,15 @@ def _parse_args() -> argparse.Namespace:
         help="Start and stop the external XP2P runner live stream probe.",
     )
     parser.add_argument(
+        "--field-test-profile",
+        choices=FIELD_TEST_PROFILES,
+        default="none",
+        help=(
+            "Apply repeatable supervised field-test defaults for the selected "
+            "active stream path."
+        ),
+    )
+    parser.add_argument(
         "--wait-undocked-timeout",
         type=float,
         default=0.0,
@@ -125,7 +140,26 @@ def _parse_args() -> argparse.Namespace:
             "dock in a finally step."
         ),
     )
-    return parser.parse_args()
+    return _apply_field_test_profile(parser.parse_args())
+
+
+def _apply_field_test_profile(args: argparse.Namespace) -> argparse.Namespace:
+    profile = str(getattr(args, "field_test_profile", "none") or "none")
+    if profile == "none":
+        return args
+    if profile == "xp2p-runner":
+        args.start_xp2p_runner = True
+    elif profile == "native-xp2p":
+        args.start_native_xp2p = True
+
+    if not args.wait_undocked_timeout:
+        args.wait_undocked_timeout = PROFILE_WAIT_UNDOCKED_TIMEOUT
+    args.dock_after_active = True
+    if args.stream_url_attempts == DEFAULT_STREAM_URL_ATTEMPTS:
+        args.stream_url_attempts = PROFILE_STREAM_URL_ATTEMPTS
+    if args.stream_url_retry_interval == DEFAULT_STREAM_URL_RETRY_INTERVAL:
+        args.stream_url_retry_interval = PROFILE_STREAM_URL_RETRY_INTERVAL
+    return args
 
 
 def _safe_stream_inputs_summary(value: dict[str, Any] | None) -> dict[str, Any]:
@@ -390,9 +424,12 @@ async def main() -> None:
             "payload_mode": args.payload_mode,
             "camera_support": support.as_dict(),
             "field_test": {
+                "profile": args.field_test_profile,
                 "active_requested": active_requested,
                 "wait_undocked_timeout": args.wait_undocked_timeout,
                 "dock_after_active_requested": args.dock_after_active,
+                "stream_url_attempts": args.stream_url_attempts,
+                "stream_url_retry_interval": args.stream_url_retry_interval,
             },
         }
         active_attempted = False
