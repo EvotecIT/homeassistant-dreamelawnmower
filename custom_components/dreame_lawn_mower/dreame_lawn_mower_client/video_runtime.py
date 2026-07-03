@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import subprocess
+import tempfile
 import threading
+import time
 from collections.abc import Mapping, Sequence
 from ctypes import (
     CDLL,
@@ -53,6 +55,7 @@ REQUIRED_XP2P_SYMBOLS = (
 )
 OPTIONAL_XP2P_SYMBOLS = (
     "setQcloudApiCred",
+    "setStunServerToXp2p",
     "stopAvRecvService",
     "stopService",
 )
@@ -88,6 +91,8 @@ class DreameLawnMowerXp2pAppConfig:
     port: int = 0
     protocol_type: int = XP2P_PROTOCOL_AUTO
     cross: bool = False
+    stun_servers: tuple[str, ...] = ("43.158.113.38:20002",)
+    stun_port: int = 20002
 
     def to_native(self) -> _Xp2pAppConfig:
         """Return the ctypes struct expected by Tencent's XP2P C ABI."""
@@ -234,6 +239,7 @@ class DreameLawnMowerXp2pLiveStreamSession:
     device_status_code: int | None = None
     device_status_response: bytes | None = field(default=None, repr=False)
     av_recv_handle: Any | None = field(default=None, repr=False)
+    stun_file_path: str | None = field(default=None, repr=False)
     runner_command: tuple[str, ...] = field(default=(), repr=False)
     runner_session_id: str | None = None
     runner_process: Any | None = field(default=None, repr=False)
@@ -251,6 +257,7 @@ class DreameLawnMowerXp2pLiveStreamSession:
             "device_status_code": self.device_status_code,
             "device_status_response_present": bool(self.device_status_response),
             "av_recv_started": self.av_recv_handle is not None,
+            "stun_configured": bool(self.stun_file_path),
             "runner_command": self.runner_command,
             "runner_session_id_present": bool(self.runner_session_id),
             "runner_process_alive": _process_alive(self.runner_process),
@@ -503,6 +510,12 @@ class DreameLawnMowerNativeXp2pRuntime:
             c_int,
             required=False,
         )
+        self._set_stun_server = self._bind(
+            "setStunServerToXp2p",
+            [c_char_p, c_int],
+            c_int,
+            required=False,
+        )
         self._delegate_http_flv = self._bind(
             "delegateHttpFlv",
             [c_char_p],
@@ -521,6 +534,8 @@ class DreameLawnMowerNativeXp2pRuntime:
         *,
         app_config: DreameLawnMowerXp2pAppConfig | None = None,
         command_timeout_us: int = DEFAULT_COMMAND_TIMEOUT_US,
+        delegate_attempts: int = 60,
+        delegate_retry_interval: float = 0.5,
     ) -> DreameLawnMowerXp2pLiveStreamSession:
         """Start native XP2P live video and return its local HTTP-FLV URL."""
         request = DreameLawnMowerXp2pLiveStreamRequest.from_runtime_inputs(inputs)
@@ -528,7 +543,9 @@ class DreameLawnMowerNativeXp2pRuntime:
         service_id = _encode(request.service_id)
         started = False
         av_recv_handle: Any | None = None
+        stun_file_path: Path | None = None
         try:
+            stun_file_path = self._set_stun_server_for_config(config)
             qcloud_result = self._set_qcloud_api_cred_for_request(request)
             if qcloud_result not in (None, 0):
                 raise DreameLawnMowerVideoRuntimeError(
@@ -578,10 +595,11 @@ class DreameLawnMowerNativeXp2pRuntime:
                 _encode(request.flv_path),
                 True,
             )
-            stream_url_prefix_raw = self._delegate_http_flv(
-                _encode(request.delegate_id)
+            stream_url_prefix = self._wait_for_flv_url_prefix(
+                request,
+                delegate_attempts=delegate_attempts,
+                delegate_retry_interval=delegate_retry_interval,
             )
-            stream_url_prefix = _decode(stream_url_prefix_raw)
             if not stream_url_prefix:
                 raise DreameLawnMowerVideoRuntimeError(
                     "XP2P delegateHttpFlv did not return a stream URL."
@@ -595,6 +613,7 @@ class DreameLawnMowerNativeXp2pRuntime:
                 device_status_code=device_status_code,
                 device_status_response=device_status_response,
                 av_recv_handle=av_recv_handle,
+                stun_file_path=str(stun_file_path) if stun_file_path else None,
             )
         except Exception:
             if started:
@@ -603,8 +622,13 @@ class DreameLawnMowerNativeXp2pRuntime:
                         service_id=request.service_id,
                         stream_url="",
                         av_recv_handle=av_recv_handle,
+                        stun_file_path=(
+                            str(stun_file_path) if stun_file_path else None
+                        ),
                     )
                 )
+            else:
+                _remove_stun_file(stun_file_path)
             raise
 
     def stop_live_stream(self, session: DreameLawnMowerXp2pLiveStreamSession) -> None:
@@ -614,6 +638,7 @@ class DreameLawnMowerNativeXp2pRuntime:
             self._stop_av_recv(service_id, session.av_recv_handle)
         if self._stop_service is not None:
             self._stop_service(service_id)
+        _remove_stun_file(session.stun_file_path)
 
     def _post_live_command(
         self,
@@ -666,6 +691,23 @@ class DreameLawnMowerNativeXp2pRuntime:
             response = bytes(response_buffer[: response_length.value])
         return result, response
 
+    def _wait_for_flv_url_prefix(
+        self,
+        request: DreameLawnMowerXp2pLiveStreamRequest,
+        *,
+        delegate_attempts: int,
+        delegate_retry_interval: float,
+    ) -> str | None:
+        attempts = max(int(delegate_attempts), 1)
+        delegate_id = _encode(request.delegate_id)
+        for attempt in range(1, attempts + 1):
+            stream_url_prefix = _decode(self._delegate_http_flv(delegate_id))
+            if stream_url_prefix:
+                return stream_url_prefix
+            if attempt < attempts:
+                time.sleep(max(delegate_retry_interval, 0.0))
+        return None
+
     def _set_qcloud_api_cred_for_request(
         self,
         request: DreameLawnMowerXp2pLiveStreamRequest,
@@ -680,6 +722,30 @@ class DreameLawnMowerNativeXp2pRuntime:
                 _encode(request.secret_key),
             )
         )
+
+    def _set_stun_server_for_config(
+        self,
+        config: DreameLawnMowerXp2pAppConfig,
+    ) -> Path | None:
+        if self._set_stun_server is None or not config.stun_servers:
+            return None
+        stun_file = _write_stun_file(config.stun_servers)
+        try:
+            result = int(
+                self._set_stun_server(
+                    _encode(str(stun_file)),
+                    int(config.stun_port),
+                )
+            )
+        except Exception:
+            _remove_stun_file(stun_file)
+            raise
+        if result != 0:
+            _remove_stun_file(stun_file)
+            raise DreameLawnMowerVideoRuntimeError(
+                f"XP2P setStunServerToXp2p failed with code {result}."
+            )
+        return stun_file
 
     def _bind(
         self,
@@ -906,6 +972,34 @@ def _terminate_process(process: Any) -> None:
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=2.0)
+
+
+def _write_stun_file(stun_servers: Sequence[str]) -> Path:
+    handle = tempfile.NamedTemporaryFile(
+        "w",
+        delete=False,
+        encoding="utf-8",
+        prefix="dreame-xp2p-stun-",
+        suffix=".txt",
+    )
+    try:
+        with handle:
+            for server in stun_servers:
+                if server:
+                    handle.write(str(server).strip() + "\n")
+    except Exception:
+        Path(handle.name).unlink(missing_ok=True)
+        raise
+    return Path(handle.name)
+
+
+def _remove_stun_file(stun_file_path: str | Path | None) -> None:
+    if not stun_file_path:
+        return
+    try:
+        Path(stun_file_path).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _format_flv_path(template: str, channel: str) -> str:

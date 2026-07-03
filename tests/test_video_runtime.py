@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from ctypes import c_void_p
+from pathlib import Path
 from typing import Any
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
@@ -46,6 +47,7 @@ class _FakeXp2pLibrary:
         self.startAvRecvService = _FakeFunction(c_void_p(1234))
         self.stopAvRecvService = _FakeFunction(0)
         self.setQcloudApiCred = _FakeFunction(0)
+        self.setStunServerToXp2p = _FakeFunction(0)
         self.delegateHttpFlv = _FakeFunction(b"http://127.0.0.1:54321/")
         self.stopService = _FakeFunction(None)
 
@@ -160,6 +162,9 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
     assert session.device_status_result == 0
     assert session.device_status_code is None
     assert session.av_recv_handle is not None
+    assert session.stun_file_path is not None
+    stun_file_path = Path(session.stun_file_path)
+    assert stun_file_path.exists()
     assert library.startService.calls
     start_call = library.startService.calls[0]
     assert start_call[0] == b"product-1/mower-camera-1"
@@ -170,6 +175,11 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
         (b"product-1/mower-camera-1", b"p2p-info-1")
     ]
     assert library.setQcloudApiCred.calls == [(b"secret-id-1", b"secret-key-1")]
+    assert library.setStunServerToXp2p.calls
+    stun_call = library.setStunServerToXp2p.calls[0]
+    assert Path(stun_call[0].decode()) == stun_file_path
+    assert stun_call[1] == 20002
+    assert "43.158.113.38:20002" in stun_file_path.read_text(encoding="utf-8")
     assert len(library.postCommandRequestSync.calls) == 1
     status_call = library.postCommandRequestSync.calls[0]
     assert status_call[0] == b"product-1/mower-camera-1"
@@ -185,8 +195,57 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
 
     runtime.stop_live_stream(session)
 
+    assert not stun_file_path.exists()
     assert library.stopAvRecvService.calls
     assert library.stopService.calls == [(b"product-1/mower-camera-1",)]
+
+
+def test_native_xp2p_runtime_uses_configured_stun_servers() -> None:
+    library = _FakeXp2pLibrary()
+    runtime = DreameLawnMowerNativeXp2pRuntime("fake-xp2p.so", library=library)
+
+    session = runtime.start_live_stream(
+        _runtime_inputs(),
+        app_config=DreameLawnMowerXp2pAppConfig(
+            stun_servers=("10.1.1.1:20002", "10.1.1.2:20002"),
+            stun_port=20003,
+        ),
+    )
+    stun_file_path = Path(session.stun_file_path or "")
+
+    try:
+        stun_call = library.setStunServerToXp2p.calls[0]
+        assert Path(stun_call[0].decode()) == stun_file_path
+        assert stun_call[1] == 20003
+        assert stun_file_path.read_text(encoding="utf-8") == (
+            "10.1.1.1:20002\n10.1.1.2:20002\n"
+        )
+    finally:
+        runtime.stop_live_stream(session)
+
+
+def test_native_xp2p_runtime_polls_until_flv_delegate_is_ready() -> None:
+    library = _FakeXp2pLibrary()
+    library.delegateHttpFlv = _FakeFunction(
+        lambda *_: (
+            b"http://127.0.0.1:54321/"
+            if len(library.delegateHttpFlv.calls) >= 2
+            else None
+        )
+    )
+    runtime = DreameLawnMowerNativeXp2pRuntime("fake-xp2p.so", library=library)
+
+    session = runtime.start_live_stream(
+        _runtime_inputs(),
+        delegate_attempts=3,
+        delegate_retry_interval=0,
+    )
+
+    try:
+        assert session.stream_url.startswith("http://127.0.0.1:54321/")
+        assert len(library.delegateHttpFlv.calls) == 2
+    finally:
+        runtime.stop_live_stream(session)
 
 
 def test_native_xp2p_runtime_fails_when_device_status_command_fails() -> None:
