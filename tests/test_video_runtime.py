@@ -343,6 +343,38 @@ def test_native_xp2p_runtime_diagnostics_identify_android_jni_library(
     assert payload["platform_hint"] == "android_jni"
 
 
+def test_native_xp2p_runtime_diagnostics_identify_static_archive(tmp_path) -> None:
+    library_path = tmp_path / "libxp2p-ios.a"
+    library_path.write_bytes(b"!<arch>\n")
+
+    diagnostics = diagnose_native_xp2p_runtime(library_path)
+
+    assert diagnostics.ready is False
+    assert diagnostics.loadable is False
+    assert diagnostics.file_format == "static_archive"
+    assert diagnostics.platform_hint == "static_archive"
+    assert "static library archive" in str(diagnostics.error)
+
+
+def test_native_xp2p_runtime_diagnostics_identify_apple_macho(tmp_path) -> None:
+    library_path = tmp_path / "TencentENET"
+    library_path.write_bytes(
+        b"\xcf\xfa\xed\xfe"
+        + b"\0" * 60
+        + b"Java_com_tencent_xnet_XP2P"
+        + b"setDeviceXp2pInfo"
+    )
+
+    diagnostics = diagnose_native_xp2p_runtime(library_path)
+
+    assert diagnostics.ready is False
+    assert diagnostics.loadable is False
+    assert diagnostics.file_format == "macho"
+    assert diagnostics.platform_hint == "apple_macho"
+    assert diagnostics.android_jni_symbols_present is False
+    assert "Mach-O Apple-platform library" in str(diagnostics.error)
+
+
 def test_external_runner_starts_live_stream_and_stops_session(tmp_path) -> None:
     capture = tmp_path / "calls.jsonl"
     runner_script = tmp_path / "xp2p_runner.py"

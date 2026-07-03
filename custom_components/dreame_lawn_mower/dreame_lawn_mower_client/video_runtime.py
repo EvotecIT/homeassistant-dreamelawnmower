@@ -723,6 +723,21 @@ def diagnose_native_xp2p_runtime(
                 "library or runner built for the Home Assistant operating "
                 "system and CPU architecture."
             )
+        elif inspection.get("file_format") == "static_archive":
+            error += (
+                " The file is a static library archive, not a loadable Home "
+                "Assistant runtime. Provide a dynamic XP2P library or runner "
+                "built for the Home Assistant operating system and CPU "
+                "architecture."
+            )
+        elif inspection.get("file_format") == "macho":
+            error += (
+                " The file is a Mach-O Apple-platform library. It cannot be "
+                "loaded on a non-Apple Home Assistant host, and iOS builds "
+                "are not Home Assistant host runtimes. Provide a dynamic XP2P "
+                "library or runner built for the Home Assistant operating "
+                "system and CPU architecture."
+            )
         return DreameLawnMowerXp2pRuntimeDiagnostics(
             library_path=path,
             loadable=False,
@@ -771,10 +786,17 @@ def _inspect_native_library_file(path: Path) -> dict[str, Any]:
         inspection["machine"] = _elf_machine_name(data)
     elif data.startswith(b"MZ"):
         inspection["file_format"] = "pe"
+    elif data.startswith(b"!<arch>\n"):
+        inspection["file_format"] = "static_archive"
+        inspection["platform_hint"] = "static_archive"
     elif data.startswith(b"\xcf\xfa\xed\xfe") or data.startswith(b"\xfe\xed\xfa\xcf"):
         inspection["file_format"] = "macho"
+        inspection["platform_hint"] = "apple_macho"
 
-    android_jni = any(marker in data for marker in ANDROID_XP2P_JNI_SYMBOL_MARKERS)
+    android_jni = (
+        inspection.get("file_format") == "elf"
+        and any(marker in data for marker in ANDROID_XP2P_JNI_SYMBOL_MARKERS)
+    )
     inspection["android_jni_symbols_present"] = android_jni
     if android_jni:
         inspection["platform_hint"] = "android_jni"
