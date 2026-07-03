@@ -243,8 +243,13 @@ def test_active_stream_verdict_reports_open_stream_without_flv_header() -> None:
                 "started": True,
                 "stream_health": {
                     "available": True,
+                    "content_type": "application/json",
+                    "error_category": "open_without_flv_header",
                     "flv_header_present": False,
                     "bytes_read": 8,
+                    "attempts": 3,
+                    "elapsed_seconds": 2.0,
+                    "first_bytes_hex": "7b226572726f7222",
                 },
             }
         },
@@ -257,6 +262,11 @@ def test_active_stream_verdict_reports_open_stream_without_flv_header() -> None:
     assert verdict["available"] is True
     assert verdict["flv_header_present"] is False
     assert verdict["bytes_read"] == 8
+    assert verdict["content_type"] == "application/json"
+    assert verdict["error_category"] == "open_without_flv_header"
+    assert verdict["attempts"] == 3
+    assert verdict["elapsed_seconds"] == 2.0
+    assert verdict["first_bytes_hex"] == "7b226572726f7222"
 
 
 def test_xp2p_runner_probe_checks_returned_stream_url(tmp_path) -> None:
@@ -350,6 +360,32 @@ def test_stream_url_probe_retries_until_flv_header() -> None:
     assert result.elapsed_seconds >= 0
 
 
+def test_stream_url_probe_reports_open_non_flv_response() -> None:
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _JsonHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    stream_url = f"http://127.0.0.1:{server.server_port}/ipc.flv"
+
+    try:
+        result = probe_stream_url(
+            stream_url,
+            timeout=1.0,
+            read_bytes=8,
+            attempts=1,
+            retry_interval=0.01,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2.0)
+
+    assert result.available is True
+    assert result.flv_header_present is False
+    assert result.error_category == "open_without_flv_header"
+    assert result.content_type == "application/json"
+    assert result.first_bytes_hex == b'{"error"'.hex()
+
+
 class _FlvHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         self.send_response(200)
@@ -373,6 +409,17 @@ class _DelayedFlvHandler(BaseHTTPRequestHandler):
             self.wfile.write(b"WAITING!")
         else:
             self.wfile.write(b"FLV\x01\x05\x00\x00\x00\x09")
+
+    def log_message(self, format: str, *args) -> None:
+        return
+
+
+class _JsonHandler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(b'{"error":"not_ready"}')
 
     def log_message(self, format: str, *args) -> None:
         return

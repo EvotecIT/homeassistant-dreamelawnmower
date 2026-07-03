@@ -321,10 +321,17 @@ def _stream_probe_verdict(source: str, result: dict[str, object]) -> dict[str, o
         "flv_header_present": bool(health.get("flv_header_present")),
         "bytes_read": int(health.get("bytes_read") or 0),
     }
-    if health.get("status_code") is not None:
-        verdict["status_code"] = health["status_code"]
-    if health.get("error"):
-        verdict["error"] = str(health["error"])
+    for key in (
+        "error_category",
+        "status_code",
+        "content_type",
+        "attempts",
+        "elapsed_seconds",
+        "first_bytes_hex",
+        "error",
+    ):
+        if health.get(key) is not None:
+            verdict[key] = health[key]
     return verdict
 
 

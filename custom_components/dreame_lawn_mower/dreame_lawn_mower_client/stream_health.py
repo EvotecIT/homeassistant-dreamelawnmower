@@ -15,10 +15,12 @@ class DreameLawnMowerStreamUrlProbeResult:
     """Redacted health result for a local stream URL."""
 
     available: bool
+    error_category: str | None = None
     status_code: int | None = None
     content_type: str | None = None
     bytes_read: int = 0
     flv_header_present: bool = False
+    first_bytes_hex: str | None = None
     attempts: int = 1
     elapsed_seconds: float = 0.0
     error: str | None = None
@@ -40,6 +42,7 @@ def probe_stream_url(
     if not stream_url:
         return DreameLawnMowerStreamUrlProbeResult(
             available=False,
+            error_category="missing_url",
             error="stream_url_missing",
         )
 
@@ -61,6 +64,7 @@ def probe_stream_url(
     if last_result is None:
         return DreameLawnMowerStreamUrlProbeResult(
             available=False,
+            error_category="not_attempted",
             error="stream_probe_not_attempted",
         )
     return _with_elapsed(last_result, started)
@@ -86,6 +90,7 @@ def _probe_stream_url_once(
     except HTTPError as err:
         return DreameLawnMowerStreamUrlProbeResult(
             available=False,
+            error_category="http_error",
             status_code=err.code,
             content_type=err.headers.get("Content-Type"),
             attempts=attempts,
@@ -95,6 +100,7 @@ def _probe_stream_url_once(
     except URLError as err:
         return DreameLawnMowerStreamUrlProbeResult(
             available=False,
+            error_category="url_error",
             attempts=attempts,
             elapsed_seconds=elapsed_seconds,
             error=f"url_error_{type(err.reason).__name__}",
@@ -102,6 +108,7 @@ def _probe_stream_url_once(
     except TimeoutError:
         return DreameLawnMowerStreamUrlProbeResult(
             available=False,
+            error_category="timeout",
             attempts=attempts,
             elapsed_seconds=elapsed_seconds,
             error="timeout",
@@ -109,6 +116,7 @@ def _probe_stream_url_once(
     except OSError as err:
         return DreameLawnMowerStreamUrlProbeResult(
             available=False,
+            error_category="os_error",
             attempts=attempts,
             elapsed_seconds=elapsed_seconds,
             error=type(err).__name__,
@@ -125,12 +133,15 @@ def _probe_response(
     status_code = getattr(response, "status", None) or response.getcode()
     content_type = response.headers.get("Content-Type")
     chunk = response.read(read_bytes) if read_bytes else b""
+    flv_header_present = chunk.startswith(b"FLV")
     return DreameLawnMowerStreamUrlProbeResult(
         available=200 <= int(status_code) < 300,
+        error_category=None if flv_header_present else "open_without_flv_header",
         status_code=int(status_code),
         content_type=content_type,
         bytes_read=len(chunk),
-        flv_header_present=chunk.startswith(b"FLV"),
+        flv_header_present=flv_header_present,
+        first_bytes_hex=chunk[:16].hex() if chunk else None,
         attempts=attempts,
         elapsed_seconds=elapsed_seconds,
     )
@@ -142,10 +153,12 @@ def _with_elapsed(
 ) -> DreameLawnMowerStreamUrlProbeResult:
     return DreameLawnMowerStreamUrlProbeResult(
         available=result.available,
+        error_category=result.error_category,
         status_code=result.status_code,
         content_type=result.content_type,
         bytes_read=result.bytes_read,
         flv_header_present=result.flv_header_present,
+        first_bytes_hex=result.first_bytes_hex,
         attempts=result.attempts,
         elapsed_seconds=round(time.monotonic() - started, 3),
         error=result.error,
