@@ -23,6 +23,10 @@ from .coordinator import DreameLawnMowerCoordinator
 from .dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
 )
+from .dreame_lawn_mower_client.stream_health import (
+    DreameLawnMowerStreamUrlProbeResult,
+    probe_stream_url,
+)
 from .dreame_lawn_mower_client.video_runtime import (
     DreameLawnMowerNativeXp2pRuntime,
     DreameLawnMowerVideoRuntimeError,
@@ -32,6 +36,10 @@ from .dreame_lawn_mower_client.video_runtime import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+_STREAM_HEALTH_ATTEMPTS = 3
+_STREAM_HEALTH_RETRY_INTERVAL = 0.5
+_STREAM_HEALTH_TIMEOUT = 3.0
+_STREAM_HEALTH_BYTES = 16
 
 
 class _DreameVideoRuntime(Protocol):
@@ -78,6 +86,7 @@ class DreameLawnMowerVideoCamera(
         self._last_runtime_inputs_ready: bool | None = None
         self._last_runtime_inputs_source: str | None = None
         self._last_runtime_inputs_missing: tuple[str, ...] = ()
+        self._last_stream_health: dict[str, Any] | None = None
 
     @property
     def available(self) -> bool:
@@ -117,6 +126,7 @@ class DreameLawnMowerVideoCamera(
             "last_runtime_inputs_ready": self._last_runtime_inputs_ready,
             "last_runtime_inputs_source": self._last_runtime_inputs_source,
             "last_runtime_inputs_missing": self._last_runtime_inputs_missing,
+            "last_stream_health": self._last_stream_health,
             "last_stream_session": self._session.as_dict(redact=True)
             if self._session is not None
             else None,
@@ -124,6 +134,7 @@ class DreameLawnMowerVideoCamera(
 
     async def stream_source(self) -> str | None:
         """Start live video and return the local FLV source URL for HA stream."""
+        self._last_stream_health = None
         if not self._runtime_configured:
             self._set_stream_error(
                 "Configure a native XP2P library path or XP2P runner command."
@@ -150,12 +161,22 @@ class DreameLawnMowerVideoCamera(
                 runtime.start_live_stream,
                 inputs,
             )
+            stream_health = await self.hass.async_add_executor_job(
+                _probe_stream_health,
+                session.stream_url,
+            )
         except DreameLawnMowerVideoRuntimeError as err:
             self._set_stream_error(str(err))
             return None
         except Exception as err:  # noqa: BLE001 - HA should receive a clean miss.
             _LOGGER.warning("Failed to start Dreame mower live video: %s", err)
             self._set_stream_error(str(err))
+            return None
+
+        self._last_stream_health = stream_health.as_dict()
+        if not stream_health.flv_header_present:
+            await self._async_stop_session(runtime, session)
+            self._set_stream_error(_stream_health_error(stream_health))
             return None
 
         self._runtime = runtime
@@ -182,12 +203,19 @@ class DreameLawnMowerVideoCamera(
         self._attr_is_streaming = False
         if runtime is None or session is None:
             return
+        await self._async_stop_session(runtime, session)
+        self.async_write_ha_state()
+
+    async def _async_stop_session(
+        self,
+        runtime: _DreameVideoRuntime,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+    ) -> None:
+        """Stop a runtime session without changing entity state bookkeeping."""
         try:
             await self.hass.async_add_executor_job(runtime.stop_live_stream, session)
         except Exception as err:  # noqa: BLE001 - cleanup should not break unload.
             _LOGGER.debug("Failed to stop Dreame mower live video: %s", err)
-        finally:
-            self.async_write_ha_state()
 
     def _create_runtime(self) -> _DreameVideoRuntime:
         """Create the configured runtime adapter."""
@@ -251,3 +279,29 @@ def _split_runner_command(command: str) -> tuple[str, ...]:
             "XP2P runner command cannot be empty."
         )
     return parts
+
+
+def _probe_stream_health(stream_url: str) -> DreameLawnMowerStreamUrlProbeResult:
+    """Check the local stream before Home Assistant advertises it."""
+    return probe_stream_url(
+        stream_url,
+        timeout=_STREAM_HEALTH_TIMEOUT,
+        read_bytes=_STREAM_HEALTH_BYTES,
+        attempts=_STREAM_HEALTH_ATTEMPTS,
+        retry_interval=_STREAM_HEALTH_RETRY_INTERVAL,
+    )
+
+
+def _stream_health_error(health: DreameLawnMowerStreamUrlProbeResult) -> str:
+    """Render a redacted reason for a local stream URL that did not serve FLV."""
+    details = [f"error_category={health.error_category or 'unknown'}"]
+    if health.status_code is not None:
+        details.append(f"status_code={health.status_code}")
+    if health.bytes_read:
+        details.append(f"bytes_read={health.bytes_read}")
+    if health.error:
+        details.append(f"error={health.error}")
+    return (
+        "XP2P runtime returned a local stream URL, but it did not emit an FLV "
+        f"header ({', '.join(details)})."
+    )

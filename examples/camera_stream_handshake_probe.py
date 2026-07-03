@@ -245,6 +245,35 @@ def _active_probe_requested(args: argparse.Namespace) -> bool:
     return bool(args.execute or args.start_native_xp2p or args.start_xp2p_runner)
 
 
+def _live_stream_probe_requested(args: argparse.Namespace) -> bool:
+    return bool(args.start_native_xp2p or args.start_xp2p_runner)
+
+
+def _host_runtime_preflight(args: argparse.Namespace) -> dict[str, object]:
+    failures: dict[str, str] = {}
+    runnable_sources: list[str] = []
+    if args.start_native_xp2p:
+        if args.xp2p_library is None:
+            failures["native_xp2p"] = (
+                "--xp2p-library is required with --start-native-xp2p."
+            )
+        else:
+            runnable_sources.append("native_xp2p")
+    if args.start_xp2p_runner:
+        if args.xp2p_runner is None:
+            failures["xp2p_runner"] = (
+                "--xp2p-runner is required with --start-xp2p-runner."
+            )
+        else:
+            runnable_sources.append("xp2p_runner")
+    return {
+        "live_stream_requested": _live_stream_probe_requested(args),
+        "runnable": bool(runnable_sources),
+        "runnable_sources": runnable_sources,
+        "failures": failures,
+    }
+
+
 def _active_video_block_reason(snapshot: Any) -> str | None:
     state = str(getattr(snapshot, "state", "") or "").casefold()
     raw_docked = bool(getattr(snapshot, "raw_docked", False))
@@ -263,6 +292,7 @@ def _next_step_message(
     *,
     active_requested: bool,
     active_block_reason: str | None,
+    active_stream_verdict: dict[str, object] | None = None,
 ) -> str | None:
     if active_block_reason:
         return (
@@ -270,10 +300,24 @@ def _next_step_message(
             "a supervised test. Add --dock-after-active to return it to base "
             "after an active stream attempt."
         )
+    if active_stream_verdict:
+        verdict_status = str(active_stream_verdict.get("status") or "")
+        verdict_source = str(active_stream_verdict.get("source") or "host XP2P")
+        if verdict_status == "configuration_missing":
+            return (
+                "Configure the selected host XP2P runtime before a supervised "
+                f"field run. Missing source: {verdict_source}."
+            )
+        if verdict_status == "stream_opened_without_flv_header":
+            return (
+                "The host XP2P runtime returned a local stream URL, but the URL "
+                "did not emit an FLV header. Continue from the runtime playback "
+                "startup sequence; do not treat URL creation as working video."
+            )
     if not active_requested:
         return (
             "Re-run with --execute for the app stream handshake, or with an "
-            "XP2P runtime flag to try a short live FLV stream."
+            "host XP2P runtime flag to try a short live FLV stream."
         )
     return None
 
@@ -291,10 +335,23 @@ def _active_stream_verdict(
             "status": "blocked",
             "reason": active_block_reason,
         }
+    verdicts = []
     for key in ("native_xp2p", "xp2p_runner"):
         result = output.get(key)
         if isinstance(result, dict):
-            return _stream_probe_verdict(key, result)
+            verdicts.append(_stream_probe_verdict(key, result))
+    if verdicts:
+        for status in (
+            "flv_header_confirmed",
+            "stream_opened_without_flv_header",
+            "stream_unavailable",
+            "runtime_start_failed",
+            "configuration_missing",
+        ):
+            for verdict in verdicts:
+                if verdict.get("status") == status:
+                    return verdict
+        return verdicts[0]
     if "handshake" in output:
         return {"status": "handshake_attempted", "source": "app_handshake"}
     if output.get("handshake_error"):
@@ -430,6 +487,7 @@ async def main() -> None:
         snapshot = await client.async_refresh()
         support = await client.async_get_camera_feature_support()
         active_requested = _active_probe_requested(args)
+        host_runtime_preflight = _host_runtime_preflight(args)
         output: dict[str, object] = {
             "device": snapshot.descriptor.title,
             "state": snapshot.state,
@@ -444,8 +502,11 @@ async def main() -> None:
                 "dock_after_active_requested": args.dock_after_active,
                 "stream_url_attempts": args.stream_url_attempts,
                 "stream_url_retry_interval": args.stream_url_retry_interval,
+                "host_runtime_preflight": host_runtime_preflight,
             },
         }
+        for source, error in host_runtime_preflight["failures"].items():
+            output[source] = _native_xp2p_unavailable(error)
         active_attempted = False
         try:
             stream_inputs = await client.async_get_camera_stream_inputs()
@@ -456,7 +517,14 @@ async def main() -> None:
             )
             output["xp2p_request"] = _safe_xp2p_request_summary(runtime_inputs)
             active_block_reason = (
-                _active_video_block_reason(snapshot) if active_requested else None
+                _active_video_block_reason(snapshot)
+                if active_requested
+                and (
+                    args.execute
+                    or not host_runtime_preflight["live_stream_requested"]
+                    or host_runtime_preflight["runnable"]
+                )
+                else None
             )
             if active_requested and active_block_reason and args.wait_undocked_timeout:
                 snapshot, wait_result = await _async_wait_for_active_video_state(
@@ -475,7 +543,11 @@ async def main() -> None:
                 output["native_xp2p_diagnostics"] = await _async_diagnose_native_xp2p(
                     args.xp2p_library
                 )
-            if args.start_native_xp2p and active_block_reason is None:
+            if (
+                args.start_native_xp2p
+                and active_block_reason is None
+                and "native_xp2p" not in output
+            ):
                 output["native_xp2p"] = await _async_probe_native_xp2p(
                     args.xp2p_library,
                     runtime_inputs,
@@ -487,7 +559,11 @@ async def main() -> None:
                 active_attempted = active_attempted or bool(
                     output["native_xp2p"].get("attempted")
                 )
-            if args.start_xp2p_runner and active_block_reason is None:
+            if (
+                args.start_xp2p_runner
+                and active_block_reason is None
+                and "xp2p_runner" not in output
+            ):
                 output["xp2p_runner"] = await _async_probe_xp2p_runner(
                     args.xp2p_runner,
                     runtime_inputs,
@@ -522,18 +598,20 @@ async def main() -> None:
             except DreameLawnMowerConnectionError as err:
                 output["handshake_error"] = str(err)
         output["field_test"]["active_attempted"] = active_attempted
-        output["field_test"]["active_stream_verdict"] = _active_stream_verdict(
+        active_stream_verdict = _active_stream_verdict(
             output,
             active_requested=active_requested,
             active_block_reason=(
                 str(active_block_reason) if active_block_reason is not None else None
             ),
         )
+        output["field_test"]["active_stream_verdict"] = active_stream_verdict
         next_step = _next_step_message(
             active_requested=active_requested,
             active_block_reason=(
                 str(active_block_reason) if active_block_reason is not None else None
             ),
+            active_stream_verdict=active_stream_verdict,
         )
         if next_step:
             output["next_step"] = next_step

@@ -147,6 +147,23 @@ def test_next_step_message_keeps_passive_probe_guidance() -> None:
     assert "--wait-undocked-timeout" not in message
 
 
+def test_next_step_message_reports_missing_host_runtime() -> None:
+    module = _load_probe_module()
+
+    message = module._next_step_message(
+        active_requested=True,
+        active_block_reason=None,
+        active_stream_verdict={
+            "status": "configuration_missing",
+            "source": "xp2p_runner",
+        },
+    )
+
+    assert "host XP2P runtime" in message
+    assert "xp2p_runner" in message
+    assert "--wait-undocked-timeout" not in message
+
+
 def test_field_test_profile_expands_xp2p_runner_defaults() -> None:
     module = _load_probe_module()
     args = SimpleNamespace(
@@ -194,6 +211,25 @@ def test_field_test_profile_preserves_explicit_probe_timing() -> None:
     assert result.stream_url_retry_interval == 0.5
 
 
+def test_host_runtime_preflight_blocks_missing_field_runner_before_wait() -> None:
+    module = _load_probe_module()
+    args = SimpleNamespace(
+        start_xp2p_runner=True,
+        start_native_xp2p=False,
+        xp2p_runner=None,
+        xp2p_library=None,
+    )
+
+    result = module._host_runtime_preflight(args)
+
+    assert result["live_stream_requested"] is True
+    assert result["runnable"] is False
+    assert result["runnable_sources"] == []
+    assert result["failures"] == {
+        "xp2p_runner": "--xp2p-runner is required with --start-xp2p-runner.",
+    }
+
+
 def test_active_stream_verdict_reports_blocked_probe() -> None:
     module = _load_probe_module()
 
@@ -231,6 +267,36 @@ def test_active_stream_verdict_reports_configuration_missing() -> None:
         "source": "xp2p_runner",
         "error": "--xp2p-runner is required with --start-xp2p-runner.",
     }
+
+
+def test_active_stream_verdict_prefers_confirmed_flv_over_missing_other_path() -> None:
+    module = _load_probe_module()
+
+    verdict = module._active_stream_verdict(
+        {
+            "native_xp2p": {
+                "started": False,
+                "attempted": False,
+                "available": False,
+                "error_category": "configuration_missing",
+                "error": "--xp2p-library is required with --start-native-xp2p.",
+            },
+            "xp2p_runner": {
+                "started": True,
+                "stream_health": {
+                    "available": True,
+                    "flv_header_present": True,
+                    "bytes_read": 8,
+                    "status_code": 200,
+                },
+            },
+        },
+        active_requested=True,
+        active_block_reason=None,
+    )
+
+    assert verdict["status"] == "flv_header_confirmed"
+    assert verdict["source"] == "xp2p_runner"
 
 
 def test_active_stream_verdict_reports_confirmed_flv_header() -> None:
