@@ -41,6 +41,7 @@ class _FakeFunction:
 class _FakeXp2pLibrary:
     def __init__(self) -> None:
         self.startService = _FakeFunction(0)
+        self.setDeviceXp2pInfo = _FakeFunction(0)
         self.postCommandRequestSync = _FakeFunction(0)
         self.startAvRecvService = _FakeFunction(c_void_p(1234))
         self.stopAvRecvService = _FakeFunction(0)
@@ -164,8 +165,10 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
     assert start_call[0] == b"product-1/mower-camera-1"
     assert start_call[1] == b"product-1"
     assert start_call[2] == b"mower-camera-1"
-    assert start_call[3] == b"p2p-info-1"
-    assert start_call[4].type == XP2P_PROTOCOL_TCP
+    assert start_call[3].type == XP2P_PROTOCOL_TCP
+    assert library.setDeviceXp2pInfo.calls == [
+        (b"product-1/mower-camera-1", b"p2p-info-1")
+    ]
     assert library.setQcloudApiCred.calls == [(b"secret-id-1", b"secret-key-1")]
     assert len(library.postCommandRequestSync.calls) == 1
     status_call = library.postCommandRequestSync.calls[0]

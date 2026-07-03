@@ -46,6 +46,7 @@ ANDROID_XP2P_JNI_SYMBOL_MARKERS = (
 )
 REQUIRED_XP2P_SYMBOLS = (
     "startService",
+    "setDeviceXp2pInfo",
     "postCommandRequestSync",
     "startAvRecvService",
     "delegateHttpFlv",
@@ -465,7 +466,12 @@ class DreameLawnMowerNativeXp2pRuntime:
             ) from err
         self._start_service = self._bind(
             "startService",
-            [c_char_p, c_char_p, c_char_p, c_char_p, _Xp2pAppConfig],
+            [c_char_p, c_char_p, c_char_p, _Xp2pAppConfig],
+            c_int,
+        )
+        self._set_device_xp2p_info = self._bind(
+            "setDeviceXp2pInfo",
+            [c_char_p, c_char_p],
             c_int,
         )
         self._post_command = self._bind(
@@ -534,7 +540,6 @@ class DreameLawnMowerNativeXp2pRuntime:
                     service_id,
                     _encode(request.product_id),
                     _encode(request.device_name),
-                    _encode(request.p2p_info),
                     config.to_native(),
                 )
             )
@@ -543,6 +548,14 @@ class DreameLawnMowerNativeXp2pRuntime:
                     f"XP2P startService failed with code {start_result}."
                 )
             started = True
+            xp2p_info_result = int(
+                self._set_device_xp2p_info(service_id, _encode(request.p2p_info))
+            )
+            if xp2p_info_result != 0:
+                raise DreameLawnMowerVideoRuntimeError(
+                    "XP2P setDeviceXp2pInfo failed with code "
+                    f"{xp2p_info_result}."
+                )
             device_status_result, device_status_response = (
                 self._post_device_status_command(
                     request,
@@ -706,8 +719,9 @@ def diagnose_native_xp2p_runtime(
         if inspection.get("platform_hint") == "android_jni":
             error += (
                 " The file looks like Dreamehome's Android JNI XP2P library; "
-                "use an Android/JVM-hosted external runner instead of direct "
-                "ctypes loading in Home Assistant."
+                "it is not a Home Assistant host runtime. Provide a XP2P "
+                "library or runner built for the Home Assistant operating "
+                "system and CPU architecture."
             )
         return DreameLawnMowerXp2pRuntimeDiagnostics(
             library_path=path,
