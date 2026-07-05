@@ -33,6 +33,9 @@ _SPOT_COLOR = (110, 170, 225, 120)
 _SPOT_OUTLINE_COLOR = (70, 130, 190, 220)
 _POINT_COLOR = (55, 55, 55, 255)
 _LABEL_COLOR = (60, 60, 60, 255)
+_LABEL_FONT_SIZE = 18
+_MIN_LABEL_SCALE = 0.5
+_MAX_LABEL_SCALE = 4.0
 _ZONE_COLORS = (
     ((164, 210, 145, 200), (134, 190, 115, 255)),
     ((160, 200, 220, 200), (130, 170, 200, 255)),
@@ -132,10 +135,12 @@ class DreameLawnMowerVectorMap:
     map_id: int = 1
     map_index: int = 0
     current_map_id: int | None = None
-    available_maps: tuple[DreameLawnMowerAvailableMap, ...] = field(default_factory=tuple)
+    available_maps: tuple[DreameLawnMowerAvailableMap, ...] = field(
+        default_factory=tuple
+    )
     last_updated: float | None = None
     mow_paths: tuple[DreameLawnMowerVectorMowPath, ...] = field(default_factory=tuple)
-    maps: Mapping[int, "DreameLawnMowerVectorMap"] = field(
+    maps: Mapping[int, DreameLawnMowerVectorMap] = field(
         default_factory=dict,
         repr=False,
     )
@@ -204,6 +209,7 @@ def parse_batch_vector_map(
 def render_vector_map_png(
     vector_map: DreameLawnMowerVectorMap | None,
     *,
+    label_scale: float = 1.0,
     runtime_track_segments: Sequence[Sequence[tuple[int, int]]] | None = None,
     runtime_position: tuple[int, int] | None = None,
 ) -> bytes | None:
@@ -224,7 +230,8 @@ def render_vector_map_png(
     image_height = int(map_height * scale) + (2 * _PADDING)
     image = Image.new("RGBA", (image_width, image_height), _BACKGROUND_COLOR)
     draw = ImageDraw.Draw(image)
-    font = ImageFont.load_default()
+    font = _label_font(label_scale)
+    label_halo_width = max(1, int(round(_normalize_label_scale(label_scale) * 2)))
 
     def to_pixel(x: int, y: int) -> tuple[int, int]:
         px = image_width - (int((x - boundary.x1) * scale) + _PADDING)
@@ -302,19 +309,45 @@ def render_vector_map_png(
         center_x = sum(point[0] for point in zone.points) // len(zone.points)
         center_y = sum(point[1] for point in zone.points) // len(zone.points)
         px, py = to_pixel(center_x, center_y)
-        for dx, dy in ((-1, -1), (-1, 1), (1, -1), (1, 1)):
-            draw.text(
-                (px + dx, py + dy),
-                zone.name,
-                fill=(255, 255, 255, 150),
-                font=font,
-                anchor="mm",
-            )
+        for dx in range(-label_halo_width, label_halo_width + 1):
+            for dy in range(-label_halo_width, label_halo_width + 1):
+                if dx == 0 and dy == 0:
+                    continue
+                draw.text(
+                    (px + dx, py + dy),
+                    zone.name,
+                    fill=(255, 255, 255, 170),
+                    font=font,
+                    anchor="mm",
+                )
         draw.text((px, py), zone.name, fill=_LABEL_COLOR, font=font, anchor="mm")
 
     buffer = BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def _label_font(label_scale: float) -> ImageFont.ImageFont:
+    size = max(8, int(round(_LABEL_FONT_SIZE * _normalize_label_scale(label_scale))))
+    for font_name in ("DejaVuSans-Bold.ttf", "Arial.ttf"):
+        try:
+            return ImageFont.truetype(font_name, size=size)
+        except OSError:
+            continue
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
+
+
+def _normalize_label_scale(label_scale: float) -> float:
+    try:
+        value = float(label_scale)
+    except (TypeError, ValueError):
+        value = 1.0
+    if math.isnan(value) or math.isinf(value):
+        value = 1.0
+    return min(max(value, _MIN_LABEL_SCALE), _MAX_LABEL_SCALE)
 
 
 def vector_map_to_summary(
@@ -405,7 +438,9 @@ def vector_map_to_details(
             "zone_ids": [zone.zone_id for zone in parsed_map.zones],
             "zone_names": [zone.name for zone in parsed_map.zones if zone.name],
             "spot_ids": [spot.zone_id for spot in parsed_map.spot_areas],
-            "contour_ids": [list(contour.contour_id) for contour in parsed_map.contours],
+            "contour_ids": [
+                list(contour.contour_id) for contour in parsed_map.contours
+            ],
             "contour_count": len(parsed_map.contours),
             "clean_point_count": len(parsed_map.clean_points),
             "cruise_point_count": len(parsed_map.cruise_points),
@@ -426,7 +461,9 @@ def vector_map_to_details(
                 ),
                 2,
             ),
-            "has_live_path": any(mow_path.segments for mow_path in parsed_map.mow_paths),
+            "has_live_path": any(
+                mow_path.segments for mow_path in parsed_map.mow_paths
+            ),
         }
         for parsed_map in sorted(parsed_maps, key=lambda item: item.map_index)
     ]

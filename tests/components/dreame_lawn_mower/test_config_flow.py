@@ -2,18 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
+
 import pytest
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
 
+from custom_components.dreame_lawn_mower.config_flow import DreameLawnMowerOptionsFlow
 from custom_components.dreame_lawn_mower.const import (
     ACCOUNT_TYPE_DREAME,
     CONF_ACCOUNT_TYPE,
     CONF_COUNTRY,
     CONF_DID,
+    CONF_MAP_LABEL_SCALE,
     CONF_MODEL,
     CONF_NAME,
     CONF_PASSWORD,
+    CONF_SCAN_INTERVAL,
     CONF_USERNAME,
     DOMAIN,
 )
@@ -66,3 +72,27 @@ async def test_user_flow_creates_entry(hass, monkeypatch) -> None:
     assert result["data"][CONF_DID] == "device-1"
     assert result["data"][CONF_MODEL] == "dreame.mower.g3255"
     assert result["data"][CONF_NAME] == "Garage Mower"
+
+
+def test_options_flow_accepts_map_label_scale() -> None:
+    flow = DreameLawnMowerOptionsFlow(SimpleNamespace(options={}))
+
+    result = asyncio.run(flow.async_step_init())
+
+    assert result["type"] is FlowResultType.FORM
+    validated = result["data_schema"](
+        {
+            CONF_SCAN_INTERVAL: "45",
+            CONF_MAP_LABEL_SCALE: "2.5",
+        }
+    )
+    assert validated[CONF_SCAN_INTERVAL] == 45
+    assert validated[CONF_MAP_LABEL_SCALE] == 2.5
+
+    result = asyncio.run(flow.async_step_init(validated))
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"] == {
+        CONF_SCAN_INTERVAL: 45,
+        CONF_MAP_LABEL_SCALE: 2.5,
+    }

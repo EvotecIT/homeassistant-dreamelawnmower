@@ -41,7 +41,8 @@
       "init": {
         "title": "Dreame lawn mower options",
         "data": {
-          "scan_interval": "Polling interval in seconds"
+          "scan_interval": "Polling interval in seconds",
+          "map_label_scale": "Map label scale"
         }
       }
     }
