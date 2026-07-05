@@ -148,6 +148,8 @@ class DreameLawnMowerVectorMap:
 
 def parse_batch_vector_map(
     batch_data: Mapping[str, Any] | None,
+    *,
+    current_map_index: int | None = None,
 ) -> DreameLawnMowerVectorMap | None:
     """Parse cloud batch-map response data into a normalized vector map."""
     if not isinstance(batch_data, Mapping) or not batch_data:
@@ -177,10 +179,7 @@ def parse_batch_vector_map(
     if not parsed_maps:
         return None
 
-    primary = next(
-        (vector_map for vector_map in parsed_maps if vector_map.map_index == 0),
-        parsed_maps[0],
-    )
+    primary = _select_primary_vector_map(parsed_maps, current_map_index)
 
     available_maps = tuple(
         DreameLawnMowerAvailableMap(
@@ -199,11 +198,34 @@ def parse_batch_vector_map(
     for vector_map in parsed_maps_by_id.values():
         vector_map.available_maps = available_maps
         vector_map.mow_paths = mow_paths
+        vector_map.maps = parsed_maps_by_id
 
     primary.available_maps = available_maps
     primary.mow_paths = mow_paths
     primary.maps = parsed_maps_by_id
     return primary
+
+
+def _select_primary_vector_map(
+    parsed_maps: Sequence[DreameLawnMowerVectorMap],
+    current_map_index: int | None,
+) -> DreameLawnMowerVectorMap:
+    if current_map_index is not None:
+        selected = next(
+            (
+                vector_map
+                for vector_map in parsed_maps
+                if vector_map.map_index == current_map_index
+            ),
+            None,
+        )
+        if selected is not None:
+            return selected
+
+    return next(
+        (vector_map for vector_map in parsed_maps if vector_map.map_index == 0),
+        parsed_maps[0],
+    )
 
 
 def render_vector_map_png(

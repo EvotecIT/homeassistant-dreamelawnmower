@@ -1486,7 +1486,10 @@ class DreameLawnMowerClient:
                 "error": str(err),
             }
 
-        vector_map = parse_batch_vector_map(batch_data)
+        vector_map = parse_batch_vector_map(
+            batch_data,
+            current_map_index=self._sync_get_current_app_map_index(),
+        )
         if vector_map is None:
             return {
                 "available": False,
@@ -1842,7 +1845,10 @@ class DreameLawnMowerClient:
                 ),
             )
 
-        vector_map = parse_batch_vector_map(batch_data)
+        vector_map = parse_batch_vector_map(
+            batch_data,
+            current_map_index=self._sync_get_current_app_map_index(),
+        )
         if vector_map is None:
             return DreameLawnMowerMapView(
                 source=source,
