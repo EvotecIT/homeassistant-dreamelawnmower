@@ -455,3 +455,19 @@ def test_vector_map_view_renders_current_app_map_index() -> None:
     assert view.details["map_index"] == 1
     assert view.details["zone_names"] == ["Back Yard"]
     assert app_action_calls == [{"m": "g", "t": "MAPL"}]
+
+
+def test_vector_map_view_falls_back_when_map_list_errors() -> None:
+    client = _client()
+    client._sync_call_app_action = lambda payload, **kwargs: {"r": 1}  # noqa: ARG005
+    client._sync_get_vector_map_batch_data = lambda: _batch_payload()
+    client._safe_map_diagnostics = lambda **kwargs: None
+
+    view = client._sync_refresh_vector_map_view()
+
+    assert view.source == "batch_vector_map"
+    assert view.available is True
+    assert view.summary is not None
+    assert view.summary.map_id == 0
+    assert view.details is not None
+    assert view.details["map_index"] == 0

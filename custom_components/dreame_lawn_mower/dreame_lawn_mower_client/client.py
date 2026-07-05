@@ -2709,11 +2709,11 @@ class DreameLawnMowerClient:
     def _sync_get_current_app_map_index(self) -> int | None:
         try:
             map_list_result = self._sync_call_app_action({"m": "g", "t": "MAPL"})
+            for entry in _normalize_app_map_entries(map_list_result):
+                if entry.get("current"):
+                    return _positive_int(entry.get("idx"))
         except Exception:  # noqa: BLE001 - best-effort hint only
             return None
-        for entry in _normalize_app_map_entries(map_list_result):
-            if entry.get("current"):
-                return _positive_int(entry.get("idx"))
         return None
 
     def _sync_get_mowing_preferences(
