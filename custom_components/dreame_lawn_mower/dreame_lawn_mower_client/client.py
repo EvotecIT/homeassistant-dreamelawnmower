@@ -567,11 +567,13 @@ class DreameLawnMowerClient:
         self,
         *,
         label_scale: float = 1.0,
+        current_map_index: int | None = None,
     ) -> DreameLawnMowerMapView:
         """Refresh the batch/vector map path used for live mowing overlays."""
         return await asyncio.to_thread(
             self._sync_refresh_vector_map_view,
             label_scale=label_scale,
+            current_map_index=current_map_index,
         )
 
     async def async_get_app_schedules(
@@ -1486,7 +1488,10 @@ class DreameLawnMowerClient:
                 "error": str(err),
             }
 
-        vector_map = parse_batch_vector_map(batch_data)
+        vector_map = parse_batch_vector_map(
+            batch_data,
+            current_map_index=self._sync_get_current_app_map_index(),
+        )
         if vector_map is None:
             return {
                 "available": False,
@@ -1804,7 +1809,10 @@ class DreameLawnMowerClient:
         )
 
         vector_view = self._with_fallback_app_maps(
-            self._sync_refresh_vector_map_view(label_scale=label_scale),
+            self._sync_refresh_vector_map_view(
+                label_scale=label_scale,
+                current_map_index=_map_view_current_app_map_index(app_view),
+            ),
             app_view,
         )
         if _map_view_has_live_path(vector_view):
@@ -1827,6 +1835,7 @@ class DreameLawnMowerClient:
         self,
         *,
         label_scale: float = 1.0,
+        current_map_index: int | None = None,
     ) -> DreameLawnMowerMapView:
         source = "batch_vector_map"
         try:
@@ -1842,7 +1851,14 @@ class DreameLawnMowerClient:
                 ),
             )
 
-        vector_map = parse_batch_vector_map(batch_data)
+        vector_map = parse_batch_vector_map(
+            batch_data,
+            current_map_index=(
+                current_map_index
+                if current_map_index is not None
+                else self._sync_get_current_app_map_index()
+            ),
+        )
         if vector_map is None:
             return DreameLawnMowerMapView(
                 source=source,
@@ -2692,15 +2708,13 @@ class DreameLawnMowerClient:
 
     def _sync_get_current_app_map_index(self) -> int | None:
         try:
-            app_maps = self._sync_get_app_maps(
-                chunk_size=400,
-                include_payload=False,
-                include_objects=False,
-                include_object_urls=False,
-            )
+            map_list_result = self._sync_call_app_action({"m": "g", "t": "MAPL"})
+            for entry in _normalize_app_map_entries(map_list_result):
+                if entry.get("current"):
+                    return _positive_int(entry.get("idx"))
         except Exception:  # noqa: BLE001 - best-effort hint only
             return None
-        return _positive_int(app_maps.get("current_map_index"))
+        return None
 
     def _sync_get_mowing_preferences(
         self,
@@ -4536,6 +4550,13 @@ def _select_app_map_payload(app_maps: Mapping[str, Any]) -> Mapping[str, Any] | 
         if item.get("idx") == current_idx:
             return item
     return available_maps[0] if available_maps else None
+
+
+def _map_view_current_app_map_index(view: DreameLawnMowerMapView) -> int | None:
+    app_maps = view.app_maps
+    if not isinstance(app_maps, Mapping):
+        return None
+    return _positive_int(app_maps.get("current_map_index"))
 
 
 def _vector_map_batch_keys() -> list[str]:
