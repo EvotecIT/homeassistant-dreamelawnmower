@@ -430,11 +430,15 @@ def test_vector_map_view_includes_cached_runtime_track_overlay() -> None:
 
 def test_vector_map_view_renders_current_app_map_index() -> None:
     client = _client()
-    client._sync_get_app_maps = lambda **kwargs: {  # noqa: ARG005
-        "source": "app_action_map",
-        "current_map_index": 1,
-        "maps": [],
-    }
+    app_action_calls: list[dict[str, object]] = []
+
+    def call_app_action(payload: dict[str, object], **kwargs) -> dict:  # noqa: ARG001
+        app_action_calls.append(payload)
+        if payload.get("t") == "MAPL":
+            return {"r": 0, "d": [[0, 0, 1, 1, 0], [1, 1, 1, 1, 0]]}
+        raise AssertionError(f"unexpected app action call: {payload}")
+
+    client._sync_call_app_action = call_app_action
     client._sync_get_vector_map_batch_data = lambda: _batch_payload()
     client._safe_map_diagnostics = lambda **kwargs: None
 
@@ -450,3 +454,4 @@ def test_vector_map_view_renders_current_app_map_index() -> None:
     assert view.details is not None
     assert view.details["map_index"] == 1
     assert view.details["zone_names"] == ["Back Yard"]
+    assert app_action_calls == [{"m": "g", "t": "MAPL"}]
