@@ -13,6 +13,7 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
     DreameLawnMowerBluetoothConnectedBinarySensor,
     DreameLawnMowerFirmwareUpdateAvailableBinarySensor,
     DreameLawnMowerMaintenanceDueBinarySensor,
+    DreameLawnMowerMaintenanceWarningBinarySensor,
     DreameLawnMowerRainDelayActiveBinarySensor,
     DreameLawnMowerRainProtectionEnabledBinarySensor,
 )
@@ -247,6 +248,15 @@ def test_rain_delay_active_binary_sensor_is_diagnostic() -> None:
 def test_maintenance_due_binary_sensor_is_diagnostic() -> None:
     assert (
         DreameLawnMowerMaintenanceDueBinarySensor.__dict__["__attr_entity_category"]
+        == "diagnostic"
+    )
+
+
+def test_maintenance_warning_binary_sensor_is_diagnostic() -> None:
+    assert (
+        DreameLawnMowerMaintenanceWarningBinarySensor.__dict__[
+            "__attr_entity_category"
+        ]
         == "diagnostic"
     )
 

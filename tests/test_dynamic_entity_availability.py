@@ -12,6 +12,7 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
     DreameLawnMowerBluetoothConnectedBinarySensor,
     DreameLawnMowerCurrentAppMapLivePathBinarySensor,
     DreameLawnMowerMaintenanceDueBinarySensor,
+    DreameLawnMowerMaintenanceWarningBinarySensor,
     DreameLawnMowerRainDelayActiveBinarySensor,
     DreameLawnMowerRainProtectionEnabledBinarySensor,
 )
@@ -375,6 +376,8 @@ def test_maintenance_remaining_sensor_uses_cached_cms_status() -> None:
     assert entity.native_value == 18.4
     assert entity.extra_state_attributes["item"] == "blade"
     assert entity.extra_state_attributes["remaining_hours"] == 18.4
+    assert entity.extra_state_attributes["status"] == "replace_soon"
+    assert entity.extra_state_attributes["warning"] is True
 
 
 def test_maintenance_remaining_sensor_unavailable_without_cms_status() -> None:
@@ -402,6 +405,36 @@ def test_maintenance_due_binary_sensor_uses_cached_status() -> None:
     assert entity.available is True
     assert entity.is_on is True
     assert entity.extra_state_attributes["due_items"] == ["robot"]
+
+
+def test_maintenance_warning_binary_sensor_uses_cached_status() -> None:
+    entity = object.__new__(DreameLawnMowerMaintenanceWarningBinarySensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(raw_attributes={}),
+        maintenance_status=maintenance_status_from_cms(
+            [4896, 16752, 6849, -1],
+            source="test",
+        ),
+    )
+
+    assert entity.available is True
+    assert entity.is_on is True
+    assert entity.extra_state_attributes["warning_items"] == ["blade", "robot"]
+
+
+def test_maintenance_warning_binary_sensor_clears_for_fresh_counters() -> None:
+    entity = object.__new__(DreameLawnMowerMaintenanceWarningBinarySensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(raw_attributes={}),
+        maintenance_status=maintenance_status_from_cms(
+            [0, 0, 0, -1],
+            source="test",
+        ),
+    )
+
+    assert entity.available is True
+    assert entity.is_on is False
+    assert entity.extra_state_attributes["warning_items"] == []
 
 
 def test_last_maintenance_reset_sensor_summarizes_result() -> None:
