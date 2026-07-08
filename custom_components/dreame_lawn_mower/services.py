@@ -18,6 +18,7 @@ from .dreame_lawn_mower_client.client import (
     REMOTE_CONTROL_MAX_ROTATION,
     REMOTE_CONTROL_MAX_VELOCITY,
 )
+from .dreame_lawn_mower_client.maintenance import normalize_maintenance_item
 from .dreame_lawn_mower_client.mowing_preferences import (
     MOWING_PREFERENCE_MODE_FIELD,
     normalize_mowing_preference_mode,
@@ -32,6 +33,7 @@ from .manual_control import remote_control_block_reason
 ATTR_ENTRY_ID = "entry_id"
 ATTR_CHUNK_SIZE = "chunk_size"
 ATTR_CONFIRM_PREFERENCE_WRITE = "confirm_preference_write"
+ATTR_CONFIRM_MAINTENANCE_RESET = "confirm_maintenance_reset"
 ATTR_CONFIRM_SCHEDULE_WRITE = "confirm_schedule_write"
 ATTR_CUTTER_POSITION = "cutter_position"
 ATTR_EDGE_MOWING_AUTO = "edge_mowing_auto"
@@ -44,6 +46,7 @@ ATTR_EFFICIENT_MODE = "efficient_mode"
 ATTR_EXECUTE = "execute"
 ATTR_AREA_ID = "area_id"
 ATTR_MAP_INDEX = "map_index"
+ATTR_MAINTENANCE_ITEM = "item"
 ATTR_MOWING_DIRECTION_DEGREES = "mowing_direction_degrees"
 ATTR_MOWING_DIRECTION_MODE = "mowing_direction_mode"
 ATTR_MOWING_HEIGHT_CM = "mowing_height_cm"
@@ -60,6 +63,7 @@ ATTR_VELOCITY = "velocity"
 ATTR_ZONE_ID = "zone_id"
 
 SERVICE_PLAN_MOWING_PREFERENCE_UPDATE = "plan_mowing_preference_update"
+SERVICE_PLAN_MAINTENANCE_RESET = "plan_maintenance_reset"
 SERVICE_PLAN_SCHEDULE_UPLOAD = "plan_schedule_upload"
 SERVICE_REMOTE_CONTROL_STEP = "remote_control_step"
 SERVICE_REMOTE_CONTROL_STOP = "remote_control_stop"
@@ -106,6 +110,14 @@ def _preference_mode_validator(value: Any) -> int:
     """Validate a map preference mode label or integer."""
     try:
         return normalize_mowing_preference_mode(value)
+    except ValueError as err:
+        raise vol.Invalid(str(err)) from err
+
+
+def _maintenance_item_validator(value: Any) -> str:
+    """Validate a maintenance item label or alias."""
+    try:
+        return normalize_maintenance_item(str(value)).key
     except ValueError as err:
         raise vol.Invalid(str(err)) from err
 
@@ -163,6 +175,15 @@ PLAN_SCHEDULE_UPLOAD_SCHEMA = vol.Schema(
         ),
         vol.Optional(ATTR_EXECUTE, default=False): cv.boolean,
         vol.Optional(ATTR_CONFIRM_SCHEDULE_WRITE, default=False): cv.boolean,
+    }
+)
+
+PLAN_MAINTENANCE_RESET_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Required(ATTR_MAINTENANCE_ITEM): _maintenance_item_validator,
+        vol.Optional(ATTR_EXECUTE, default=False): cv.boolean,
+        vol.Optional(ATTR_CONFIRM_MAINTENANCE_RESET, default=False): cv.boolean,
     }
 )
 
@@ -295,6 +316,24 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             await coordinator.async_request_refresh()
         _notify_mowing_preference_update(coordinator, result)
 
+    async def async_handle_plan_maintenance_reset(call: ServiceCall) -> None:
+        coordinator = _coordinator_from_call(hass, call)
+        _guard_maintenance_reset_request(call)
+        result = await coordinator.client.async_plan_maintenance_reset(
+            item=call.data[ATTR_MAINTENANCE_ITEM],
+            execute=call.data[ATTR_EXECUTE],
+            confirm_write=call.data[ATTR_CONFIRM_MAINTENANCE_RESET],
+        )
+        coordinator.last_maintenance_reset_result = result
+        coordinator.async_update_listeners()
+        if call.data[ATTR_EXECUTE]:
+            await coordinator.async_refresh_maintenance_status(
+                force=True,
+                source="maintenance_reset_refresh",
+            )
+            await coordinator.async_request_refresh()
+        _notify_maintenance_reset(coordinator, result)
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_REMOTE_CONTROL_STEP,
@@ -325,6 +364,12 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         async_handle_plan_mowing_preference_update,
         schema=PLAN_MOWING_PREFERENCE_UPDATE_SCHEMA,
     )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_PLAN_MAINTENANCE_RESET,
+        async_handle_plan_maintenance_reset,
+        schema=PLAN_MAINTENANCE_RESET_SCHEMA,
+    )
     domain_data[_SERVICES_REGISTERED] = True
 
 
@@ -339,6 +384,7 @@ async def async_unload_services(hass: HomeAssistant) -> None:
     hass.services.async_remove(DOMAIN, SERVICE_SET_SCHEDULE_PLAN_ENABLED)
     hass.services.async_remove(DOMAIN, SERVICE_PLAN_SCHEDULE_UPLOAD)
     hass.services.async_remove(DOMAIN, SERVICE_PLAN_MOWING_PREFERENCE_UPDATE)
+    hass.services.async_remove(DOMAIN, SERVICE_PLAN_MAINTENANCE_RESET)
     domain_data.pop(_SERVICES_REGISTERED, None)
 
 
@@ -394,6 +440,14 @@ def _guard_preference_write_request(call: ServiceCall) -> None:
     if call.data[ATTR_EXECUTE] and not call.data[ATTR_CONFIRM_PREFERENCE_WRITE]:
         raise HomeAssistantError(
             "Preference writes require confirm_preference_write when execute is true."
+        )
+
+
+def _guard_maintenance_reset_request(call: ServiceCall) -> None:
+    """Block maintenance resets unless the HA service confirmation gate is set."""
+    if call.data[ATTR_EXECUTE] and not call.data[ATTR_CONFIRM_MAINTENANCE_RESET]:
+        raise HomeAssistantError(
+            "Maintenance resets require confirm_maintenance_reset when execute is true."
         )
 
 
@@ -461,6 +515,22 @@ def _notify_mowing_preference_update(
     )
 
 
+def _notify_maintenance_reset(
+    coordinator: DreameLawnMowerCoordinator,
+    result: dict[str, Any],
+) -> None:
+    """Create a user-visible notification for a maintenance reset plan or write."""
+    title, message = _maintenance_reset_notification(result)
+    persistent_notification.async_create(
+        coordinator.hass,
+        message,
+        title=title,
+        notification_id=(
+            f"{DOMAIN}_{coordinator.entry.entry_id}_plan_maintenance_reset"
+        ),
+    )
+
+
 def _schedule_write_notification(result: dict[str, Any]) -> tuple[str, str]:
     """Return title and message for a schedule write result notification."""
     request = json.dumps(result.get("request"), sort_keys=True)
@@ -511,6 +581,36 @@ def _schedule_write_notification(result: dict[str, Any]) -> tuple[str, str]:
             f"target={result.get('enabled')} ({change_text}), "
             f"version={result.get('version')}. Request: `{request}`"
         )
+    if result.get("executed") and result.get("response_data") is not None:
+        response = json.dumps(result.get("response_data"), sort_keys=True)
+        message = f"{message} Response: `{response}`"
+    return title, message
+
+
+def _maintenance_reset_notification(result: dict[str, Any]) -> tuple[str, str]:
+    """Return title and message for a maintenance reset dry run or write."""
+    request = json.dumps(result.get("request"), sort_keys=True)
+    previous = result.get("previous_item")
+    updated = result.get("updated_item")
+    previous_counter = (
+        previous.get("used_minutes") if isinstance(previous, dict) else None
+    )
+    updated_counter = updated.get("used_minutes") if isinstance(updated, dict) else None
+    item_name = result.get("item_name") or result.get("item") or "maintenance item"
+    if result.get("executed"):
+        title = "Dreame Lawn Mower Maintenance Reset"
+        action = "Sent"
+        change_text = "changed" if result.get("changed") else "was already reset"
+    else:
+        title = "Dreame Lawn Mower Maintenance Reset Dry Run"
+        action = "Built dry-run"
+        change_text = "will change" if result.get("changed") else "already reset"
+
+    message = (
+        f"{action} maintenance reset for {item_name}: "
+        f"counter {previous_counter} -> {updated_counter} ({change_text}). "
+        f"Request: `{request}`"
+    )
     if result.get("executed") and result.get("response_data") is not None:
         response = json.dumps(result.get("response_data"), sort_keys=True)
         message = f"{message} Response: `{response}`"

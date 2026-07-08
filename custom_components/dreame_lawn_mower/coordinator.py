@@ -44,6 +44,7 @@ APP_MAP_REFRESH_INTERVAL = timedelta(minutes=5)
 APP_MAP_OBJECT_REFRESH_INTERVAL = timedelta(minutes=30)
 VECTOR_MAP_REFRESH_INTERVAL = timedelta(minutes=5)
 WEATHER_PROTECTION_REFRESH_INTERVAL = timedelta(minutes=5)
+MAINTENANCE_REFRESH_INTERVAL = timedelta(minutes=5)
 VOICE_SETTINGS_REFRESH_INTERVAL = timedelta(minutes=5)
 FIRMWARE_UPDATE_REFRESH_INTERVAL = timedelta(minutes=15)
 
@@ -84,6 +85,8 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         self.vector_map_details_refreshed_at: datetime | None = None
         self.weather_protection: dict[str, Any] | None = None
         self.weather_protection_refreshed_at: datetime | None = None
+        self.maintenance_status: dict[str, Any] | None = None
+        self.maintenance_status_refreshed_at: datetime | None = None
         self.voice_settings: dict[str, Any] | None = None
         self.voice_settings_refreshed_at: datetime | None = None
         self.selected_mowing_action = "all_area"
@@ -100,6 +103,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         self.last_schedule_write_result: dict[str, Any] | None = None
         self.last_task_status_probe_result: dict[str, Any] | None = None
         self.last_weather_probe_result: dict[str, Any] | None = None
+        self.last_maintenance_reset_result: dict[str, Any] | None = None
 
         super().__init__(
             hass,
@@ -147,6 +151,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         await self.async_refresh_app_map_objects(force=False)
         await self.async_refresh_vector_map_details(force=False)
         await self.async_refresh_weather_protection(force=False)
+        await self.async_refresh_maintenance_status(force=False)
         await self.async_refresh_voice_settings(force=False)
         return snapshot
 
@@ -354,6 +359,38 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         payload["source"] = source
         self.weather_protection = payload
         self.weather_protection_refreshed_at = now
+        return payload
+
+    async def async_refresh_maintenance_status(
+        self,
+        *,
+        force: bool = False,
+        source: str = "maintenance_auto",
+    ) -> dict[str, Any] | None:
+        """Refresh cached read-only maintenance counter state."""
+        now = datetime.now(UTC)
+        if (
+            not force
+            and self.maintenance_status is not None
+            and self.maintenance_status_refreshed_at is not None
+            and now - self.maintenance_status_refreshed_at
+            < MAINTENANCE_REFRESH_INTERVAL
+        ):
+            return self.maintenance_status
+
+        try:
+            maintenance_status = await self.client.async_get_maintenance_status(
+                include_raw=False,
+            )
+        except Exception as err:  # noqa: BLE001 - best-effort extra metadata
+            _LOGGER.debug("Failed to refresh maintenance status: %s", err)
+            return self.maintenance_status
+
+        payload = dict(maintenance_status)
+        payload.setdefault("captured_at", now.isoformat())
+        payload["source"] = source
+        self.maintenance_status = payload
+        self.maintenance_status_refreshed_at = now
         return payload
 
     async def async_refresh_voice_settings(

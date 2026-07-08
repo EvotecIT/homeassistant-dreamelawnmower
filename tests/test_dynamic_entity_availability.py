@@ -9,8 +9,13 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
     DreameLawnMowerBinarySensor,
     DreameLawnMowerBluetoothConnectedBinarySensor,
     DreameLawnMowerCurrentAppMapLivePathBinarySensor,
+    DreameLawnMowerMaintenanceDueBinarySensor,
     DreameLawnMowerRainDelayActiveBinarySensor,
     DreameLawnMowerRainProtectionEnabledBinarySensor,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.maintenance import (
+    MAINTENANCE_ITEM_BY_KEY,
+    maintenance_status_from_cms,
 )
 from custom_components.dreame_lawn_mower.sensor import (
     SENSORS,
@@ -28,11 +33,13 @@ from custom_components.dreame_lawn_mower.sensor import (
     DreameLawnMowerCurrentAppMapZoneCountSensor,
     DreameLawnMowerCurrentVectorMapIdSensor,
     DreameLawnMowerCurrentVectorMapNameSensor,
+    DreameLawnMowerLastMaintenanceResetSensor,
     DreameLawnMowerLastPreferenceProbeSensor,
     DreameLawnMowerLastScheduleProbeSensor,
     DreameLawnMowerLastScheduleWriteSensor,
     DreameLawnMowerLastTaskStatusProbeSensor,
     DreameLawnMowerLastWeatherProbeSensor,
+    DreameLawnMowerMaintenanceRemainingSensor,
     DreameLawnMowerMowingProgressSensor,
     DreameLawnMowerRainDelayEndTimeSensor,
     DreameLawnMowerRainProtectionDurationSensor,
@@ -346,6 +353,65 @@ def test_raw_started_binary_sensor_preserves_vendor_flag() -> None:
 
     assert entity.available is True
     assert entity.is_on is True
+
+
+def test_maintenance_remaining_sensor_uses_cached_cms_status() -> None:
+    entity = object.__new__(DreameLawnMowerMaintenanceRemainingSensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(raw_attributes={}),
+        maintenance_status=maintenance_status_from_cms(
+            [4896, 16752, 6849, -1],
+            source="test",
+        ),
+    )
+    entity._item = MAINTENANCE_ITEM_BY_KEY["blade"]
+
+    assert entity.available is True
+    assert entity.native_value == 18.4
+    assert entity.extra_state_attributes["item"] == "blade"
+    assert entity.extra_state_attributes["remaining_hours"] == 18.4
+
+
+def test_maintenance_remaining_sensor_unavailable_without_cms_status() -> None:
+    entity = object.__new__(DreameLawnMowerMaintenanceRemainingSensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(raw_attributes={}),
+        maintenance_status=None,
+    )
+    entity._item = MAINTENANCE_ITEM_BY_KEY["blade"]
+
+    assert entity.available is False
+    assert entity.native_value is None
+
+
+def test_maintenance_due_binary_sensor_uses_cached_status() -> None:
+    entity = object.__new__(DreameLawnMowerMaintenanceDueBinarySensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(raw_attributes={}),
+        maintenance_status=maintenance_status_from_cms(
+            [4896, 16752, 6849, -1],
+            source="test",
+        ),
+    )
+
+    assert entity.available is True
+    assert entity.is_on is True
+    assert entity.extra_state_attributes["due_items"] == ["robot"]
+
+
+def test_last_maintenance_reset_sensor_summarizes_result() -> None:
+    entity = object.__new__(DreameLawnMowerLastMaintenanceResetSensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(raw_attributes={}),
+        last_maintenance_reset_result={
+            "executed": False,
+            "item": "blade",
+            "request": {"m": "s", "t": "CMS"},
+        },
+    )
+
+    assert entity.native_value == "dry_run"
+    assert entity.extra_state_attributes["item"] == "blade"
 
 
 def test_raw_returning_binary_sensor_preserves_vendor_flag() -> None:
