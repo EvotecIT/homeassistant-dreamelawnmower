@@ -63,7 +63,7 @@ ACTIVITY_MAP = {
     ACTIVITY_IDLE: LawnMowerActivity.DOCKED,
     ACTIVITY_MOWING: LawnMowerActivity.MOWING,
     ACTIVITY_PAUSED: LawnMowerActivity.PAUSED,
-    ACTIVITY_RETURNING: LawnMowerActivity.MOWING,
+    ACTIVITY_RETURNING: LawnMowerActivity.RETURNING,
 }
 
 
