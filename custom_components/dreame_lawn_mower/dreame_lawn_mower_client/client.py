@@ -50,6 +50,13 @@ from .map_probe import (
     build_cloud_property_summary,
     build_map_probe_payload,
 )
+from .maintenance import (
+    CMS_GET_REQUEST,
+    build_cms_set_request,
+    maintenance_item_status,
+    maintenance_status_from_app_data,
+    reset_cms_counter,
+)
 from .models import (
     SUPPORTED_ACCOUNT_TYPES,
     DreameLawnMowerCameraFeatureSupport,
@@ -670,6 +677,32 @@ class DreameLawnMowerClient:
         return await asyncio.to_thread(
             self._sync_get_weather_protection,
             include_raw,
+        )
+
+    async def async_get_maintenance_status(
+        self,
+        *,
+        include_raw: bool = False,
+    ) -> dict[str, Any]:
+        """Return read-only CMS maintenance counter state from app actions."""
+        return await asyncio.to_thread(
+            self._sync_get_maintenance_status,
+            include_raw,
+        )
+
+    async def async_plan_maintenance_reset(
+        self,
+        *,
+        item: str,
+        execute: bool = False,
+        confirm_write: bool = False,
+    ) -> dict[str, Any]:
+        """Build or execute a guarded CMS maintenance counter reset."""
+        return await asyncio.to_thread(
+            self._sync_plan_maintenance_reset,
+            item,
+            execute,
+            confirm_write,
         )
 
     async def async_get_voice_settings(
@@ -2894,6 +2927,112 @@ class DreameLawnMowerClient:
             include_raw=include_raw,
         )
         result["url"] = url
+        return result
+
+    def _sync_get_maintenance_status(
+        self,
+        include_raw: bool = False,
+    ) -> dict[str, Any]:
+        """Fetch read-only CMS maintenance counter state."""
+        result: dict[str, Any] = {
+            "source": "app_action_maintenance_cms",
+            "available": False,
+            "items": [],
+            "raw_cms": None,
+            "errors": [],
+        }
+
+        try:
+            cms_result = self._sync_call_app_action(CMS_GET_REQUEST)
+            if include_raw:
+                result["raw_cms_response"] = _json_safe(cms_result, max_depth=4)
+            cms_data = _app_action_data(cms_result)
+            result.update(
+                maintenance_status_from_app_data(
+                    cms_data,
+                    source="app_action_maintenance_cms",
+                )
+            )
+            if result.get("available"):
+                return result
+        except Exception as err:  # noqa: BLE001 - fallback to CFG may still work
+            result["errors"].append({"stage": "cms", "error": str(err)})
+
+        try:
+            config_result = self._sync_call_app_action({"m": "g", "t": "CFG"})
+            if include_raw:
+                result["raw_config_response"] = _json_safe(config_result, max_depth=4)
+            config = _app_action_data(config_result)
+            result.update(
+                maintenance_status_from_app_data(
+                    config,
+                    source="app_action_config_cms",
+                )
+            )
+        except Exception as err:  # noqa: BLE001 - diagnostic probe returns evidence
+            result["errors"].append({"stage": "config", "error": str(err)})
+        return result
+
+    def _sync_plan_maintenance_reset(
+        self,
+        item: str,
+        execute: bool = False,
+        confirm_write: bool = False,
+    ) -> dict[str, Any]:
+        """Build or execute a guarded CMS maintenance counter reset request."""
+        if execute and not confirm_write:
+            raise ValueError(
+                "Maintenance resets require confirm_write=True when execute=True."
+            )
+
+        status = self._sync_get_maintenance_status(include_raw=False)
+        values = status.get("raw_cms")
+        if not isinstance(values, Sequence) or isinstance(
+            values,
+            str | bytes | bytearray,
+        ):
+            raise DreameLawnMowerConnectionError(
+                "Could not read CMS maintenance counters before planning reset."
+            )
+
+        updated_values = reset_cms_counter(values, item)
+        request = build_cms_set_request(updated_values)
+        before = maintenance_item_status(status, item)
+        planned_status = maintenance_status_from_app_data(
+            {"value": updated_values},
+            source="planned_maintenance_reset",
+        )
+        after = maintenance_item_status(planned_status, item)
+        result: dict[str, Any] = {
+            "source": "app_action_maintenance_cms",
+            "action": "reset_maintenance_counter",
+            "item": after.get("key") if isinstance(after, Mapping) else item,
+            "item_name": after.get("name") if isinstance(after, Mapping) else item,
+            "dry_run": not execute,
+            "executed": False,
+            "changed": list(values) != updated_values,
+            "previous_cms": list(values),
+            "updated_cms": updated_values,
+            "previous_item": before,
+            "updated_item": after,
+            "request": request,
+        }
+
+        if not execute:
+            return result
+
+        response = self._sync_call_app_action(request)
+        response_data = _app_action_data(response)
+        result["dry_run"] = False
+        result["executed"] = True
+        result["response"] = _json_safe(response, max_depth=4)
+        result["response_data"] = _json_safe(response_data, max_depth=4)
+        try:
+            refreshed = self._sync_get_maintenance_status(include_raw=False)
+            result["refreshed_cms"] = refreshed.get("raw_cms")
+            result["refreshed_item"] = maintenance_item_status(refreshed, item)
+        except Exception as err:  # noqa: BLE001 - write result is still useful
+            result["refresh_error"] = str(err)
         return result
 
     def _sync_get_weather_protection(
