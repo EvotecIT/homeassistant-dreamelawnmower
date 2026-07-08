@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 CMS_GET_REQUEST: dict[str, str] = {"m": "g", "t": "CMS"}
+MAINTENANCE_WARNING_PERCENT = 20.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +20,7 @@ class MaintenanceItem:
     total_minutes: int
     icon: str
     aliases: tuple[str, ...] = ()
+    warning_percent: float = MAINTENANCE_WARNING_PERCENT
 
     @property
     def total_hours(self) -> float:
@@ -70,7 +72,9 @@ def normalize_maintenance_item(value: str | MaintenanceItem) -> MaintenanceItem:
         return _MAINTENANCE_ITEM_ALIASES[key]
     except KeyError as err:
         allowed = ", ".join(item.key for item in MAINTENANCE_ITEMS)
-        raise ValueError(f"Unknown maintenance item {value!r}; expected {allowed}.") from err
+        raise ValueError(
+            f"Unknown maintenance item {value!r}; expected {allowed}."
+        ) from err
 
 
 def build_cms_set_request(values: Sequence[Any]) -> dict[str, Any]:
@@ -138,6 +142,7 @@ def maintenance_status_from_cms(
         if item.index < len(counters)
     ]
     due_items = [item["key"] for item in items if item.get("due")]
+    warning_items = [item["key"] for item in items if item.get("warning")]
     return {
         "source": source,
         "available": bool(items),
@@ -146,6 +151,8 @@ def maintenance_status_from_cms(
         "extra_values": counters[len(MAINTENANCE_ITEMS) :],
         "due": bool(due_items),
         "due_items": due_items,
+        "warning": bool(warning_items),
+        "warning_items": warning_items,
     }
 
 
@@ -177,6 +184,8 @@ def maintenance_status_attributes(status: Mapping[str, Any] | None) -> dict[str,
         "extra_values": status.get("extra_values"),
         "due": status.get("due"),
         "due_items": status.get("due_items"),
+        "warning": status.get("warning"),
+        "warning_items": status.get("warning_items"),
     }
     return {key: value for key, value in attributes.items() if value is not None}
 
@@ -191,6 +200,9 @@ def _maintenance_item_status(
         0.0,
         round((remaining_minutes / item.total_minutes) * 100, 1),
     )
+    due = used_minutes >= item.total_minutes
+    warning = due or remaining_percent <= item.warning_percent
+    status = "due" if due else "replace_soon" if warning else "normal"
     return {
         "key": item.key,
         "name": item.name,
@@ -202,7 +214,10 @@ def _maintenance_item_status(
         "total_minutes": item.total_minutes,
         "total_hours": item.total_hours,
         "remaining_percent": remaining_percent,
-        "due": used_minutes >= item.total_minutes,
+        "warning_percent": item.warning_percent,
+        "status": status,
+        "warning": warning,
+        "due": due,
     }
 
 

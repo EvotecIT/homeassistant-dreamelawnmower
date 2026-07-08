@@ -412,6 +412,9 @@ class DreameLawnMowerMaintenanceRemainingSensor(
                     "remaining_hours": item.get("remaining_hours"),
                     "total_minutes": item.get("total_minutes"),
                     "total_hours": item.get("total_hours"),
+                    "status": item.get("status"),
+                    "warning": item.get("warning"),
+                    "warning_percent": item.get("warning_percent"),
                     "due": item.get("due"),
                 }
             )

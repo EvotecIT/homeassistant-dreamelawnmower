@@ -268,6 +268,7 @@ async def async_setup_entry(
         + [DreameLawnMowerAutomaticFirmwareUpdatesBinarySensor(coordinator)]
         + [DreameLawnMowerRainProtectionEnabledBinarySensor(coordinator)]
         + [DreameLawnMowerRainDelayActiveBinarySensor(coordinator)]
+        + [DreameLawnMowerMaintenanceWarningBinarySensor(coordinator)]
         + [DreameLawnMowerMaintenanceDueBinarySensor(coordinator)]
     )
 
@@ -540,6 +541,40 @@ class DreameLawnMowerMaintenanceDueBinarySensor(
         if not isinstance(status, dict):
             return None
         value = status.get("due")
+        return value if isinstance(value, bool) else None
+
+    @property
+    def available(self) -> bool:
+        """Return whether cached maintenance data exists."""
+        return self.coordinator.data is not None and self.is_on is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe cached maintenance attributes."""
+        return maintenance_status_attributes(self.coordinator.maintenance_status)
+
+
+class DreameLawnMowerMaintenanceWarningBinarySensor(
+    DreameLawnMowerEntity,
+    BinarySensorEntity,
+):
+    """Expose whether any CMS maintenance counter is nearing replacement."""
+
+    _attr_name = "Maintenance Warning"
+    _attr_icon = "mdi:wrench-alert"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_maintenance_warning"
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return whether any known maintenance item is nearing replacement."""
+        status = self.coordinator.maintenance_status
+        if not isinstance(status, dict):
+            return None
+        value = status.get("warning")
         return value if isinstance(value, bool) else None
 
     @property

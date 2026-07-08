@@ -44,18 +44,18 @@ from .debug_ota_catalog import (
     normalize_debug_ota_catalog_payload,
 )
 from .exceptions import DeviceException, InvalidActionException
-from .map_probe import (
-    MAP_HISTORY_PROPERTY_KEYS,
-    MAP_PROBE_PROPERTY_KEYS,
-    build_cloud_property_summary,
-    build_map_probe_payload,
-)
 from .maintenance import (
     CMS_GET_REQUEST,
     build_cms_set_request,
     maintenance_item_status,
     maintenance_status_from_app_data,
     reset_cms_counter,
+)
+from .map_probe import (
+    MAP_HISTORY_PROPERTY_KEYS,
+    MAP_PROBE_PROPERTY_KEYS,
+    build_cloud_property_summary,
+    build_map_probe_payload,
 )
 from .models import (
     SUPPORTED_ACCOUNT_TYPES,
@@ -4758,18 +4758,27 @@ def _weather_protection_summary(config: Mapping[str, Any]) -> dict[str, Any]:
 
 def _weather_protection_active_summary(result: Mapping[str, Any]) -> dict[str, Any]:
     summary: dict[str, Any] = {}
-    end_time = result.get("rain_protect_end_time")
+    end_time = _rain_protect_end_time_timestamp(result.get("rain_protect_end_time"))
     end_time_present = bool(result.get("rain_protect_end_time_present"))
 
-    if end_time_present:
+    if end_time is not None:
         summary["rain_protection_active"] = True
         end_time_iso = _epoch_to_iso(end_time)
         if end_time_iso is not None:
             summary["rain_protect_end_time_iso"] = end_time_iso
-    elif result.get("available"):
+    elif end_time_present or result.get("available"):
         summary["rain_protection_active"] = False
 
     return summary
+
+
+def _rain_protect_end_time_timestamp(value: Any) -> int | None:
+    """Return a future rain-protection end timestamp, ignoring empty sentinels."""
+    parsed = _positive_int(value)
+    if parsed is None or parsed <= 0:
+        return None
+    timestamp = parsed / 1000 if parsed > 10_000_000_000 else parsed
+    return parsed if timestamp > datetime.now(UTC).timestamp() else None
 
 
 def _voice_settings_summary(config: Mapping[str, Any]) -> dict[str, Any]:

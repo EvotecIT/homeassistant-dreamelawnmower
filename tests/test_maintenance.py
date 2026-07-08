@@ -82,11 +82,36 @@ def test_maintenance_status_decodes_known_cms_counters() -> None:
     assert status["raw_cms"] == [4896, 16752, 6849, -1]
     assert status["extra_values"] == [-1]
     assert status["due_items"] == ["robot"]
+    assert status["warning_items"] == ["blade", "robot"]
+    assert status["warning"] is True
     assert blade["remaining_percent"] == 18.4
     assert blade["used_hours"] == 81.6
+    assert blade["status"] == "replace_soon"
+    assert blade["warning"] is True
     assert brush["remaining_hours"] == 220.8
+    assert brush["status"] == "normal"
+    assert brush["warning"] is False
     assert robot["due"] is True
+    assert robot["status"] == "due"
+    assert robot["warning"] is True
     assert robot["remaining_percent"] == 0.0
+
+
+def test_maintenance_status_marks_fresh_counters_good() -> None:
+    status = maintenance_status_from_cms(
+        [0, 0, 0, -1],
+        source="test",
+    )
+
+    assert status["due"] is False
+    assert status["due_items"] == []
+    assert status["warning"] is False
+    assert status["warning_items"] == []
+    assert [item["status"] for item in status["items"]] == [
+        "normal",
+        "normal",
+        "normal",
+    ]
 
 
 def test_maintenance_status_accepts_direct_cms_and_cfg_payloads() -> None:

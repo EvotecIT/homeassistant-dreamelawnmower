@@ -9,9 +9,15 @@ from dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
 class _FakeWeatherCloud:
     logged_in = True
 
-    def __init__(self, *, rpet_error: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        rpet_error: bool = False,
+        rain_protect_end_time: int = 4102444800,
+    ) -> None:
         self.calls: list[dict[str, object]] = []
         self.rpet_error = rpet_error
+        self.rain_protect_end_time = rain_protect_end_time
 
     def call_app_action(
         self,
@@ -33,7 +39,7 @@ class _FakeWeatherCloud:
                         "d": {
                             "WRF": True,
                             "WRP": [1, 8],
-                            "rainProtectEndTime": 1776600000,
+                            "rainProtectEndTime": self.rain_protect_end_time,
                         },
                     }
                 ]
@@ -41,7 +47,15 @@ class _FakeWeatherCloud:
         if command == "RPET":
             if self.rpet_error:
                 raise RuntimeError("not protecting")
-            return {"out": [{"m": "r", "r": 0, "d": {"endTime": 1776600300}}]}
+            return {
+                "out": [
+                    {
+                        "m": "r",
+                        "r": 0,
+                        "d": {"endTime": self.rain_protect_end_time},
+                    }
+                ]
+            }
         raise AssertionError(f"Unexpected app command: {payload}")
 
 
@@ -78,8 +92,8 @@ def test_get_weather_protection_uses_read_only_app_actions() -> None:
     assert result["rain_protection_duration_hours"] == 8
     assert result["rain_sensor_sensitivity"] == 0
     assert result["rain_protection_raw"] == [1, 8, 0]
-    assert result["rain_protect_end_time"] == 1776600300
-    assert result["rain_protect_end_time_iso"] == "2026-04-19T12:05:00+00:00"
+    assert result["rain_protect_end_time"] == 4102444800
+    assert result["rain_protect_end_time_iso"] == "2100-01-01T00:00:00+00:00"
     assert result["rain_protection_active"] is True
     assert result["errors"] == []
     assert result["warnings"] == []
@@ -101,3 +115,20 @@ def test_get_weather_protection_keeps_config_when_rpet_is_unavailable() -> None:
     assert result["warnings"] == [
         {"stage": "rain_end_time", "warning": "not protecting"}
     ]
+
+
+def test_get_weather_protection_treats_zero_rain_end_time_as_inactive() -> None:
+    client = _client()
+    cloud = _FakeWeatherCloud(rain_protect_end_time=0)
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_get_weather_protection()
+
+    assert result["available"] is True
+    assert result["rain_protection_enabled"] is True
+    assert result["rain_protect_end_time"] == 0
+    assert result["rain_protect_end_time_present"] is True
+    assert "rain_protect_end_time_iso" not in result
+    assert result["rain_protection_active"] is False
+    assert result["errors"] == []
+    assert result["warnings"] == []
