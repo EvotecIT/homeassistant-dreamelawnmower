@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
+from custom_components.dreame_lawn_mower import button as button_module
 from custom_components.dreame_lawn_mower.binary_sensor import (
     BINARY_SENSORS,
     DreameLawnMowerBinarySensor,
@@ -12,6 +14,9 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
     DreameLawnMowerMaintenanceDueBinarySensor,
     DreameLawnMowerRainDelayActiveBinarySensor,
     DreameLawnMowerRainProtectionEnabledBinarySensor,
+)
+from custom_components.dreame_lawn_mower.button import (
+    DreameLawnMowerResetMaintenanceButton,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.maintenance import (
     MAINTENANCE_ITEM_BY_KEY,
@@ -412,6 +417,83 @@ def test_last_maintenance_reset_sensor_summarizes_result() -> None:
 
     assert entity.native_value == "dry_run"
     assert entity.extra_state_attributes["item"] == "blade"
+
+
+def test_reset_maintenance_button_executes_confirmed_reset(monkeypatch) -> None:
+    notifications = []
+
+    def _capture_notification(hass, message, *, title, notification_id):
+        notifications.append(
+            {
+                "hass": hass,
+                "message": message,
+                "title": title,
+                "notification_id": notification_id,
+            }
+        )
+
+    class _FakeClient:
+        async def async_plan_maintenance_reset(
+            self,
+            *,
+            item,
+            execute,
+            confirm_write,
+        ):
+            self.call = {
+                "item": item,
+                "execute": execute,
+                "confirm_write": confirm_write,
+            }
+            return {
+                "item": item,
+                "item_name": "Blade",
+                "executed": True,
+                "previous_item": {"used_minutes": 4909},
+                "updated_item": {"used_minutes": 0},
+            }
+
+    class _FakeCoordinator:
+        def __init__(self) -> None:
+            self.client = _FakeClient()
+            self.entry = SimpleNamespace(entry_id="entry-1")
+            self.hass = object()
+            self.last_maintenance_reset_result = None
+            self.refresh_call = None
+            self.updated = False
+
+        async def async_refresh_maintenance_status(self, *, force, source):
+            self.refresh_call = {"force": force, "source": source}
+            return {"available": True}
+
+        def async_update_listeners(self):
+            self.updated = True
+
+    monkeypatch.setattr(
+        button_module.persistent_notification,
+        "async_create",
+        _capture_notification,
+    )
+    coordinator = _FakeCoordinator()
+    entity = object.__new__(DreameLawnMowerResetMaintenanceButton)
+    entity.coordinator = coordinator
+    entity._item = MAINTENANCE_ITEM_BY_KEY["blade"]
+
+    asyncio.run(entity.async_press())
+
+    assert coordinator.client.call == {
+        "item": "blade",
+        "execute": True,
+        "confirm_write": True,
+    }
+    assert coordinator.refresh_call == {
+        "force": True,
+        "source": "maintenance_reset_button",
+    }
+    assert coordinator.updated is True
+    assert coordinator.last_maintenance_reset_result["executed"] is True
+    assert notifications[0]["title"] == "Dreame Lawn Mower Maintenance Reset"
+    assert notifications[0]["notification_id"].endswith("_reset_maintenance_blade")
 
 
 def test_raw_returning_binary_sensor_preserves_vendor_flag() -> None:

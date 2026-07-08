@@ -22,6 +22,8 @@ from custom_components.dreame_lawn_mower.button import (
     DreameLawnMowerCaptureScheduleProbeButton,
     DreameLawnMowerCaptureTaskStatusProbeButton,
     DreameLawnMowerCaptureWeatherProbeButton,
+    DreameLawnMowerResetMaintenanceButton,
+    _maintenance_reset_button_notification,
     schedule_probe_payload,
 )
 from custom_components.dreame_lawn_mower.const import PLATFORMS
@@ -262,6 +264,19 @@ def test_last_maintenance_reset_sensor_is_diagnostic_disabled_by_default() -> No
     )
 
 
+def test_reset_maintenance_button_is_diagnostic_disabled_by_default() -> None:
+    assert (
+        DreameLawnMowerResetMaintenanceButton.__dict__["__attr_entity_category"]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerResetMaintenanceButton.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
+    )
+
+
 def test_maintenance_reset_result_attributes_are_compact() -> None:
     attributes = maintenance_reset_result_attributes(
         {
@@ -283,6 +298,20 @@ def test_maintenance_reset_result_attributes_are_compact() -> None:
     assert attributes["item"] == "blade"
     assert attributes["changed"] is True
     assert attributes["request"] == {"m": "s", "t": "CMS"}
+
+
+def test_maintenance_reset_button_notification_is_compact() -> None:
+    title, message = _maintenance_reset_button_notification(
+        {
+            "item_name": "Blade",
+            "previous_item": {"used_minutes": 4909},
+            "updated_item": {"used_minutes": 0},
+        }
+    )
+
+    assert title == "Dreame Lawn Mower Maintenance Reset"
+    assert "Reset Blade: counter 4909 -> 0" in message
+    assert "Last Maintenance Reset" in message
 
 
 def test_task_status_probe_button_is_diagnostic_disabled_by_default() -> None:
