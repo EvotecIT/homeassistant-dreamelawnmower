@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 from custom_components.dreame_lawn_mower import button as button_module
@@ -18,6 +19,10 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
 )
 from custom_components.dreame_lawn_mower.button import (
     DreameLawnMowerResetMaintenanceButton,
+)
+from custom_components.dreame_lawn_mower.coordinator import _app_map_index_hints
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    decode_batch_mowing_preferences,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.maintenance import (
     MAINTENANCE_ITEM_BY_KEY,
@@ -2039,6 +2044,89 @@ def test_selected_zone_preference_sensors_expose_read_only_zone_settings() -> No
         "obstacle_avoidance_distance_cm": 15.0,
         "obstacle_avoidance_ai_classes": ["people", "animals", "objects"],
     }
+
+
+def test_selected_zone_preferences_follow_hinted_app_map_cards() -> None:
+    settings_text = json.dumps(
+        [
+            {
+                "mode": 0,
+                "settings": {
+                    "3": {
+                        "id": 3,
+                        "version": 17,
+                        "efficientMode": 1,
+                        "mowingHeight": 4.0,
+                    },
+                },
+            },
+            {
+                "mode": 0,
+                "settings": {
+                    "3": {
+                        "id": 3,
+                        "version": 18,
+                        "efficientMode": 0,
+                        "mowingHeight": 6.0,
+                    },
+                },
+            },
+        ],
+        separators=(",", ":"),
+    )
+    app_maps = {
+        "current_map_index": 1,
+        "maps": [
+            {"idx": 0, "created": False, "current": False},
+            {
+                "idx": 1,
+                "created": True,
+                "current": True,
+                "summary": {"name": "Front"},
+            },
+            {
+                "idx": 2,
+                "created": True,
+                "current": False,
+                "summary": {"name": "Back"},
+            },
+        ],
+    }
+    batch_preferences = decode_batch_mowing_preferences(
+        {
+            "SETTINGS.0": settings_text,
+            "SETTINGS.info": str(len(settings_text)),
+        },
+        map_index_hints=_app_map_index_hints(app_maps),
+    )
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(activity="paused"),
+        selected_map_index=1,
+        selected_zone_id=3,
+        app_maps=app_maps,
+        batch_device_data={"batch_mowing_preferences": batch_preferences},
+    )
+
+    height_entity = object.__new__(DreameLawnMowerSelectedZoneMowingHeightSensor)
+    height_entity.coordinator = coordinator
+    efficiency_entity = object.__new__(DreameLawnMowerSelectedZoneEfficiencyModeSensor)
+    efficiency_entity.coordinator = coordinator
+
+    assert height_entity.available is True
+    assert height_entity.native_value == 4.0
+    assert efficiency_entity.available is True
+    assert efficiency_entity.native_value == "efficient"
+    assert height_entity.extra_state_attributes["selected_map_index"] == 1
+    assert height_entity.extra_state_attributes["reported_version"] == 17
+
+    coordinator.selected_map_index = 2
+
+    assert height_entity.available is True
+    assert height_entity.native_value == 6.0
+    assert efficiency_entity.available is True
+    assert efficiency_entity.native_value == "standard"
+    assert height_entity.extra_state_attributes["selected_map_index"] == 2
+    assert height_entity.extra_state_attributes["reported_version"] == 18
 
 
 def test_selected_zone_preference_sensors_hide_unavailable_zone_settings() -> None:
