@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -145,9 +146,9 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh Bluetooth connection state: %s", err)
             self.bluetooth_connected = None
+        await self.async_refresh_app_maps(force=False)
         await self.async_refresh_batch_device_data(force=False)
         await self.async_refresh_firmware_update_support(force=False)
-        await self.async_refresh_app_maps(force=False)
         await self.async_refresh_app_map_objects(force=False)
         await self.async_refresh_vector_map_details(force=False)
         await self.async_refresh_weather_protection(force=False)
@@ -199,7 +200,10 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         """Fetch batch schedule, settings, and OTA payloads in parallel."""
         return await asyncio.gather(
             self.client.async_get_batch_schedules(include_raw=False),
-            self.client.async_get_batch_mowing_preferences(include_raw=False),
+            self.client.async_get_batch_mowing_preferences(
+                include_raw=False,
+                map_index_hints=_app_map_index_hints(self.app_maps),
+            ),
             self.client.async_get_batch_ota_info(include_raw=False),
         )
 
@@ -429,3 +433,22 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
     async def async_shutdown(self) -> None:
         """Disconnect client resources."""
         await self.client.async_close()
+
+
+def _app_map_index_hints(app_maps: Mapping[str, Any] | None) -> list[int]:
+    """Return known app map ids in display order for batch settings alignment."""
+    maps = app_maps.get("maps") if isinstance(app_maps, Mapping) else None
+    if not isinstance(maps, Sequence) or isinstance(maps, str | bytes | bytearray):
+        return []
+
+    indices: list[int] = []
+    for entry in maps:
+        if not isinstance(entry, Mapping):
+            continue
+        if entry.get("created") is False:
+            continue
+        index = entry.get("idx")
+        if not isinstance(index, int) or index < 0 or index in indices:
+            continue
+        indices.append(index)
+    return indices
