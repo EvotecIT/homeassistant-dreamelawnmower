@@ -70,18 +70,6 @@ def test_video_camera_unavailable_without_video_metadata() -> None:
     assert entity.available is False
 
 
-def test_video_camera_unavailable_while_mower_is_docked() -> None:
-    snapshot = SimpleNamespace(
-        capabilities=("video",),
-        raw_info={"deviceInfo": {"feature": "video_tx"}},
-        docked=True,
-        raw_docked=True,
-    )
-    entity = _uninitialized_entity(snapshot=snapshot)
-
-    assert entity.available is False
-
-
 def test_video_camera_serializes_concurrent_stream_starts() -> None:
     async def _run() -> tuple[list[str | None], int, int]:
         entity = _uninitialized_entity()

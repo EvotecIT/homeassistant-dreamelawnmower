@@ -139,11 +139,6 @@ class DreameLawnMowerVideoCamera(
         snapshot = self.coordinator.data
         if snapshot is None:
             return False
-        if bool(
-            getattr(snapshot, "docked", False)
-            or getattr(snapshot, "raw_docked", False)
-        ):
-            return False
         return snapshot_advertises_video(snapshot)
 
     @property

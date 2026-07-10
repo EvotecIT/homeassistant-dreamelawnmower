@@ -415,11 +415,21 @@ frame data.
 A supervised Dreame A2 run on July 10, 2026 first confirmed the host protocol:
 XP2P reported ready event `1004`, the device-status and local delegate calls
 succeeded, and the first 16 stream bytes began with `46 4c 56` (`FLV`). A second
-run loaded the real Home Assistant camera entity on Linux x86_64, started the
-managed Python-owned runtime, and passed the stream through Home Assistant's HLS
-pipeline. The HA endpoint returned HTTP 200 with an HLS playlist and produced a
-1,298-byte MP4 initialization section plus 497,189 bytes of media. The mower was
-verified back at the charging station afterward.
+run copied the integration into a normal Home Assistant `custom_components`
+installation on Linux x86_64, loaded the real mower and camera entities, started
+the managed Python-owned runtime, and passed the stream through Home Assistant's
+HLS pipeline. The HA endpoint returned HTTP 200 with an HLS playlist and
+produced a complete fragmented-MP4 segment.
+
+The final retained segment was 503,650 bytes and independently reopened as H.264
+MP4 at 640 x 360. PyAV decoded 100 frames covering 6.598 seconds. A 31,313-byte
+JPEG selected from those frames was then visually inspected and showed the real
+outdoor mower view rather than a blank or synthetic image. Its SHA-256 was
+`59fe7d56a733f38e511c703d26712750409388d4f51c25d5cc15a8337afea1f0`; the MP4
+SHA-256 was
+`56f9e2639fa04bef2752c524b7d8c4f9e457c5fc1f9154f69915194dfe5c9d6d`.
+Home Assistant turned the camera off, no worker remained, and the mower reported
+both `docked=true` and `raw_docked=true` afterward.
 
 This host path does not use an Android phone, emulator, or framework. Python
 owns runtime installation, credential delivery over stdin, process lifetime,

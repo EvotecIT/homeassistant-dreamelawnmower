@@ -1,9 +1,11 @@
 """Supervised end-to-end Home Assistant playback proof for Dreame video.
 
-This probe creates a temporary real Home Assistant instance, loads the custom
-integration through its config flow, asks the live-video camera entity for its
-stream, and verifies that Home Assistant's stream integration produces HLS
-media. It never uses an Android device or Android framework.
+This probe creates a temporary real Home Assistant instance, copies and loads
+the custom integration through its config flow, asks the deployed live-video
+camera entity for its stream, and verifies that Home Assistant's stream
+integration produces decodable HLS media. Optional outputs retain the complete
+MP4 segment and a decoded JPEG frame. It never uses an Android device or Android
+framework.
 
 The mower is never moved or its camera enabled unless ``--execute`` is passed.
 Use ``--start-before-active`` only for a supervised docked-mower proof; that
@@ -14,8 +16,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
+import io
 import json
 import os
+import shutil
 import socket
 import sys
 import tempfile
@@ -31,6 +36,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from homeassistant import bootstrap, loader  # noqa: E402
 from homeassistant.components import camera as camera_component  # noqa: E402
+from homeassistant.components import lawn_mower as lawn_mower_component  # noqa: E402
 from homeassistant.core import HomeAssistant  # noqa: E402
 
 DOMAIN = "dreame_lawn_mower"
@@ -75,6 +81,16 @@ def _parse_args() -> argparse.Namespace:
         type=float,
         default=240.0,
         help="Seconds to wait for dock-after cleanup.",
+    )
+    parser.add_argument(
+        "--frame-out",
+        type=Path,
+        help="Optional JPEG path for the most detailed decoded HA video frame.",
+    )
+    parser.add_argument(
+        "--video-out",
+        type=Path,
+        help="Optional MP4 path for the complete HA HLS media segment.",
     )
     parser.add_argument("--out", type=Path, help="Optional redacted JSON output.")
     args = parser.parse_args()
@@ -141,9 +157,10 @@ def _pick_loopback_port() -> int:
 async def _setup_home_assistant(config_dir: Path, port: int) -> HomeAssistant:
     custom_components = config_dir / "custom_components"
     custom_components.mkdir(parents=True)
-    (custom_components / DOMAIN).symlink_to(
+    shutil.copytree(
         _REPO_ROOT / "custom_components" / DOMAIN,
-        target_is_directory=True,
+        custom_components / DOMAIN,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
 
     hass = HomeAssistant(str(config_dir))
@@ -202,11 +219,28 @@ def _find_video_camera(hass: HomeAssistant) -> Any:
     return entities[0]
 
 
+def _find_mower_entity(hass: HomeAssistant) -> Any:
+    component = hass.data[lawn_mower_component.DATA_COMPONENT]
+    entities = [
+        entity
+        for entity in component.entities
+        if entity.__class__.__module__.endswith(".lawn_mower")
+    ]
+    if len(entities) != 1:
+        raise RuntimeError("Expected one deployed Dreame lawn-mower entity.")
+    return entities[0]
+
+
 async def _wait_for_hls_media(output: Any, *, timeout: float) -> Any:
     deadline = asyncio.get_running_loop().time() + max(timeout, 0.1)
     while True:
         segment = output.last_segment
-        if segment is not None and segment.init and segment.data_size > 0:
+        if (
+            segment is not None
+            and segment.complete
+            and segment.init
+            and segment.data_size > 0
+        ):
             return segment
         remaining = deadline - asyncio.get_running_loop().time()
         if remaining <= 0:
@@ -215,6 +249,57 @@ async def _wait_for_hls_media(output: Any, *, timeout: float) -> Any:
             await asyncio.wait_for(output.recv(), timeout=remaining)
         else:
             await output.part_recv(timeout=min(remaining, 5.0))
+
+
+def _decode_best_video_frame(
+    segment: Any,
+    frame_out: Path | None,
+    video_out: Path | None,
+) -> dict[str, Any]:
+    """Decode real HA fMP4 media and retain its video and best frame."""
+    import av
+    from PIL import ImageStat
+
+    media = segment.init + segment.get_data()
+    if video_out is not None:
+        video_out.parent.mkdir(parents=True, exist_ok=True)
+        video_out.write_bytes(media)
+    best_image = None
+    best_score = -1.0
+    decoded_frames = 0
+    with av.open(io.BytesIO(media), format="mp4") as container:
+        for frame in container.decode(video=0):
+            image = frame.to_image().convert("RGB")
+            variance = float(ImageStat.Stat(image.convert("L")).var[0])
+            decoded_frames += 1
+            if variance > best_score:
+                best_image = image.copy()
+                best_score = variance
+    if best_image is None:
+        raise RuntimeError("Home Assistant media contained no decodable video frame.")
+
+    encoded = io.BytesIO()
+    best_image.save(encoded, format="JPEG", quality=92)
+    jpeg = encoded.getvalue()
+    if frame_out is not None:
+        frame_out.parent.mkdir(parents=True, exist_ok=True)
+        frame_out.write_bytes(jpeg)
+    luma = ImageStat.Stat(best_image.convert("L"))
+    return {
+        "decoded_frame_count": decoded_frames,
+        "width": best_image.width,
+        "height": best_image.height,
+        "jpeg_bytes": len(jpeg),
+        "jpeg_sha256": hashlib.sha256(jpeg).hexdigest(),
+        "luma_mean": round(float(luma.mean[0]), 3),
+        "luma_variance": round(float(luma.var[0]), 3),
+        "saved": frame_out is not None,
+        "path": str(frame_out) if frame_out is not None else None,
+        "video_bytes": len(media),
+        "video_sha256": hashlib.sha256(media).hexdigest(),
+        "video_saved": video_out is not None,
+        "video_path": str(video_out) if video_out is not None else None,
+    }
 
 
 async def _fetch_hls_playlist(port: int, endpoint: str) -> tuple[int, str]:
@@ -229,12 +314,16 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     output: dict[str, Any] = {
         "executed": args.execute,
         "host_runtime": "python_linux_managed",
+        "integration_install_mode": "copied_custom_component",
         "android_required": False,
         "home_assistant_hls_verified": False,
+        "playable_video_verified": False,
+        "visual_frame_verified": False,
     }
     hass: HomeAssistant | None = None
     entry = None
     camera = None
+    mower = None
     ha_stream = None
     client = None
     start_sent = False
@@ -246,6 +335,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             coordinator = hass.data[DOMAIN][entry.entry_id]
             client = coordinator.client
             camera = _find_video_camera(hass)
+            mower = _find_mower_entity(hass)
             snapshot = await client.async_refresh()
             output["before"] = _snapshot_summary(snapshot)
             output["camera_entity"] = {
@@ -258,6 +348,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                     "video_runtime_preparation_error"
                 ],
             }
+            output["mower_entity"] = {"entity_id": mower.entity_id}
             if not args.execute:
                 return output
 
@@ -267,14 +358,24 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                         "Mower is docked; rerun under supervision with "
                         "--start-before-active."
                     )
-                await client.async_start_mowing()
+                await mower.async_start_mowing()
                 start_sent = True
                 snapshot = await _wait_for_state(
                     client,
                     lambda value: not _at_station(value),
                     timeout=args.active_timeout,
                 )
+                await coordinator.async_request_refresh()
                 output["after_start"] = _snapshot_summary(snapshot)
+                output["camera_entity"]["available_after_start"] = camera.available
+                camera_state = hass.states.get(camera.entity_id)
+                output["camera_entity"]["ha_state_after_start"] = (
+                    camera_state.state if camera_state is not None else None
+                )
+                if not camera.available:
+                    raise RuntimeError(
+                        "The deployed HA camera did not become available after start."
+                    )
 
             ha_stream = await camera.async_create_stream()
             if ha_stream is None:
@@ -289,6 +390,12 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                 hls_output,
                 timeout=args.stream_timeout,
             )
+            frame = await hass.async_add_executor_job(
+                _decode_best_video_frame,
+                segment,
+                args.frame_out,
+                args.video_out,
+            )
             status, playlist = await _fetch_hls_playlist(port, endpoint)
             output["playback"] = {
                 "camera_stream_created": True,
@@ -299,12 +406,24 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                 "hls_media_bytes": segment.data_size,
                 "hls_init_is_mp4": segment.init[4:8] == b"ftyp",
                 "sequence": segment.sequence,
+                "decoded_frame": frame,
             }
+            output["visual_frame_verified"] = bool(
+                frame["decoded_frame_count"] > 0
+                and frame["width"] > 0
+                and frame["height"] > 0
+                and frame["jpeg_bytes"] > 0
+            )
+            output["playable_video_verified"] = bool(
+                frame["decoded_frame_count"] > 1 and frame["video_bytes"] > 0
+            )
             output["home_assistant_hls_verified"] = bool(
                 status == 200
                 and "#EXTM3U" in playlist
                 and segment.init[4:8] == b"ftyp"
                 and segment.data_size > 0
+                and output["visual_frame_verified"]
+                and output["playable_video_verified"]
             )
             if not output["home_assistant_hls_verified"]:
                 raise RuntimeError("Home Assistant HLS verification was incomplete.")
@@ -323,7 +442,10 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             if client is not None and (args.execute or start_sent):
                 dock_request_error = None
                 try:
-                    await client.async_dock()
+                    if mower is not None:
+                        await asyncio.wait_for(mower.async_dock(), timeout=30.0)
+                    else:
+                        await client.async_dock()
                 except Exception as err:  # noqa: BLE001 - still verify station state.
                     dock_request_error = f"{type(err).__name__}: {err}"
                 try:
