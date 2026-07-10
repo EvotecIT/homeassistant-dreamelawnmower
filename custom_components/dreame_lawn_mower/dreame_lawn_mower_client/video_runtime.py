@@ -53,7 +53,6 @@ REQUIRED_XP2P_SYMBOLS = (
     "startService",
     "setDeviceXp2pInfo",
     "postCommandRequestSync",
-    "startAvRecvService",
     "delegateHttpFlv",
 )
 OPTIONAL_XP2P_SYMBOLS = (
@@ -525,11 +524,6 @@ class DreameLawnMowerNativeXp2pRuntime:
             ],
             c_int,
         )
-        self._start_av_recv = self._bind(
-            "startAvRecvService",
-            [c_char_p, c_char_p, c_bool],
-            c_void_p,
-        )
         self._stop_av_recv = self._bind(
             "stopAvRecvService",
             [c_char_p, c_void_p],
@@ -632,15 +626,6 @@ class DreameLawnMowerNativeXp2pRuntime:
                     "XP2P device status did not report ready; code "
                     f"{device_status_code}."
                 )
-            av_recv_handle = self._start_av_recv(
-                _encode(request.delegate_id),
-                _encode(request.flv_path),
-                True,
-            )
-            if not av_recv_handle:
-                raise DreameLawnMowerVideoRuntimeError(
-                    "XP2P startAvRecvService returned a null handle."
-                )
             stream_url_prefix = self._wait_for_flv_url_prefix(
                 request,
                 delegate_attempts=delegate_attempts,
@@ -681,11 +666,11 @@ class DreameLawnMowerNativeXp2pRuntime:
 
     def stop_live_stream(self, session: DreameLawnMowerXp2pLiveStreamSession) -> None:
         """Stop a native XP2P live stream session."""
-        runtime_id = _encode(session.delegate_id or session.service_id)
+        delegate_id = _encode(session.delegate_id or session.service_id)
         if session.av_recv_handle is not None and self._stop_av_recv is not None:
-            self._stop_av_recv(runtime_id, session.av_recv_handle)
+            self._stop_av_recv(delegate_id, session.av_recv_handle)
         if self._stop_service is not None:
-            self._stop_service(runtime_id)
+            self._stop_service(_encode(session.service_id))
         _remove_stun_file(session.stun_file_path)
 
     def _post_live_command(

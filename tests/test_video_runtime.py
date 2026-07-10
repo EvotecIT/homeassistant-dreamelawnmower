@@ -174,7 +174,7 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
     assert session.command_result is None
     assert session.device_status_result == 0
     assert session.device_status_code == 0
-    assert session.av_recv_handle is not None
+    assert session.av_recv_handle is None
     assert session.stun_file_path is not None
     stun_file_path = Path(session.stun_file_path)
     assert stun_file_path.exists()
@@ -202,19 +202,14 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
         b"action=inner_define&channel=0&cmd=get_device_st&type=live&quality=standard"
     )
     assert status_call[5] == 123
-    assert (
-        library.startAvRecvService.calls[0][1]
-        == b"ipc.flv?action=live&channel=0&quality=high&_crypto=on"
-    )
-    assert library.startAvRecvService.calls[0][0] == b"channel-1"
+    assert library.startAvRecvService.calls == []
     assert library.delegateHttpFlv.calls[0][0] == b"channel-1"
 
     runtime.stop_live_stream(session)
 
     assert not stun_file_path.exists()
-    assert library.stopAvRecvService.calls
-    assert library.stopAvRecvService.calls[0][0] == b"channel-1"
-    assert library.stopService.calls == [(b"channel-1",)]
+    assert library.stopAvRecvService.calls == []
+    assert library.stopService.calls == [(b"product-1/mower-camera-1",)]
 
 
 def test_native_xp2p_runtime_uses_configured_stun_servers() -> None:
@@ -281,7 +276,7 @@ def test_native_xp2p_runtime_fails_when_device_status_command_fails() -> None:
 
     assert library.startAvRecvService.calls == []
     assert library.delegateHttpFlv.calls == []
-    assert library.stopService.calls == [(b"channel-1",)]
+    assert library.stopService.calls == [(b"product-1/mower-camera-1",)]
 
 
 def test_native_xp2p_runtime_requires_parseable_ready_status() -> None:
@@ -295,28 +290,24 @@ def test_native_xp2p_runtime_requires_parseable_ready_status() -> None:
         assert "did not report ready" in str(err)
         assert "None" in str(err)
     else:
-        raise AssertionError("Expected an unknown device status to block AV receive")
+        raise AssertionError("Expected an unknown device status to block FLV delegate")
 
     assert library.startAvRecvService.calls == []
     assert library.delegateHttpFlv.calls == []
-    assert library.stopService.calls == [(b"channel-1",)]
+    assert library.stopService.calls == [(b"product-1/mower-camera-1",)]
 
 
-def test_native_xp2p_runtime_rejects_null_av_receive_handle() -> None:
+def test_native_xp2p_runtime_delegates_without_av_receive_handle() -> None:
     library = _FakeXp2pLibrary()
-    library.startAvRecvService = _FakeFunction(None)
+    del library.startAvRecvService
     runtime = DreameLawnMowerNativeXp2pRuntime("fake-xp2p.so", library=library)
 
-    try:
-        runtime.start_live_stream(_runtime_inputs())
-    except DreameLawnMowerVideoRuntimeError as err:
-        assert "startAvRecvService returned a null handle" in str(err)
-    else:
-        raise AssertionError("Expected a null AV receive handle to fail")
+    session = runtime.start_live_stream(_runtime_inputs())
 
-    assert library.delegateHttpFlv.calls == []
-    assert library.stopAvRecvService.calls == []
-    assert library.stopService.calls == [(b"channel-1",)]
+    assert session.stream_url.startswith("http://127.0.0.1:54321/")
+    assert library.delegateHttpFlv.calls == [(b"channel-1",)]
+    runtime.stop_live_stream(session)
+    assert library.stopService.calls == [(b"product-1/mower-camera-1",)]
 
 
 def test_device_status_decoder_reads_app_status_payload() -> None:
@@ -354,8 +345,8 @@ def test_native_xp2p_runtime_cleans_up_when_flv_url_is_missing() -> None:
     else:
         raise AssertionError("Expected missing FLV URL to fail")
 
-    assert library.stopAvRecvService.calls
-    assert library.stopService.calls == [(b"channel-1",)]
+    assert library.stopAvRecvService.calls == []
+    assert library.stopService.calls == [(b"product-1/mower-camera-1",)]
 
 
 def test_native_xp2p_runtime_reports_missing_required_symbols() -> None:

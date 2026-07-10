@@ -228,10 +228,15 @@ class DreameLawnMowerVideoCamera(
         """Return a real JPEG frame decoded from the managed local FLV source."""
         if not getattr(self, "_attr_is_on", True):
             return None
+        existing_session = self._session
+        snapshot_session: DreameLawnMowerXp2pLiveStreamSession | None = None
         source = await self.stream_source()
         if source is None:
             return self._last_image
         try:
+            current_session = self._session
+            if current_session is not None and current_session is not existing_session:
+                snapshot_session = current_session
             image = await self.hass.async_add_executor_job(
                 _decode_flv_jpeg,
                 source,
@@ -241,9 +246,28 @@ class DreameLawnMowerVideoCamera(
         except Exception as err:  # noqa: BLE001 - snapshots may be transient.
             _LOGGER.debug("Failed to decode Dreame mower still image: %s", err)
             return self._last_image
+        finally:
+            if snapshot_session is not None:
+                await self._async_stop_snapshot_session(snapshot_session)
         if image is not None:
             self._last_image = image
         return image or self._last_image
+
+    async def _async_stop_snapshot_session(
+        self,
+        snapshot_session: DreameLawnMowerXp2pLiveStreamSession,
+    ) -> None:
+        """Stop a session created only for a still unless HLS adopted it."""
+        while True:
+            async with self._stream_lock:
+                if self._session is not snapshot_session or self.stream is not None:
+                    return
+                create_stream_lock = self._create_stream_lock
+                if create_stream_lock is None or not create_stream_lock.locked():
+                    await self._async_stop_active_session()
+                    return
+            async with create_stream_lock:
+                pass
 
     async def _async_start_stream(self) -> str | None:
         """Start one serialized XP2P stream session."""

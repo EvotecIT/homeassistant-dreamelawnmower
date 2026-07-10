@@ -594,7 +594,7 @@ finish:
         stop_av_recv(request.fields[FIELD_DELEGATE_ID], av_handle);
     }
     if (service_started && stop_service != NULL) {
-        stop_service(request.fields[FIELD_DELEGATE_ID]);
+        stop_service(request.fields[FIELD_SERVICE_ID]);
     }
     free(stream_url);
     free_request(&request);
