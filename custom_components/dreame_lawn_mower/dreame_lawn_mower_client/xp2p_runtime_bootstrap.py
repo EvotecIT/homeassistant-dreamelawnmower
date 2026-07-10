@@ -167,10 +167,10 @@ def ensure_xp2p_host_runtime(
                     "Installed XP2P host runtime failed integrity validation."
                 )
             if runtime_path.exists():
-                _remove_runtime_directory(runtime_path, root_path)
+                _remove_runtime_path(runtime_path, root_path)
             staging.replace(runtime_path)
         except Exception:
-            _remove_runtime_directory(staging, root_path)
+            _remove_runtime_path(staging, root_path)
             raise
         assets = _validated_assets(runtime_path, architecture)
         if assets is None:
@@ -426,14 +426,20 @@ def _normalize_machine(value: str) -> str:
     return machine
 
 
-def _remove_runtime_directory(path: Path, root: Path) -> None:
-    resolved_path = path.resolve()
+def _remove_runtime_path(path: Path, root: Path) -> None:
     resolved_root = root.resolve()
-    if resolved_path == resolved_root or resolved_root not in resolved_path.parents:
+    resolved_parent = path.parent.resolve()
+    if (
+        resolved_parent != resolved_root
+        and resolved_root not in resolved_parent.parents
+    ):
         raise DreameLawnMowerVideoRuntimeError(
             "Refusing to remove XP2P runtime outside its configured root."
         )
-    shutil.rmtree(resolved_path, ignore_errors=True)
+    if path.is_symlink() or not path.is_dir():
+        path.unlink(missing_ok=True)
+        return
+    shutil.rmtree(path, ignore_errors=True)
 
 
 class _ExtFilesystem:

@@ -106,6 +106,7 @@ class DreameLawnMowerVideoCamera(
         self._prepared_runtime: _DreameVideoRuntime | None = None
         self._session: DreameLawnMowerXp2pLiveStreamSession | None = None
         self._stream_lock = asyncio.Lock()
+        self._snapshot_lock = asyncio.Lock()
         self._last_error: str | None = None
         self._last_runtime_inputs_ready: bool | None = None
         self._last_runtime_inputs_source: str | None = None
@@ -228,6 +229,15 @@ class DreameLawnMowerVideoCamera(
         """Return a real JPEG frame decoded from the managed local FLV source."""
         if not getattr(self, "_attr_is_on", True):
             return None
+        async with self._snapshot_lock:
+            return await self._async_camera_image_locked(width, height)
+
+    async def _async_camera_image_locked(
+        self,
+        width: int | None,
+        height: int | None,
+    ) -> bytes | None:
+        """Decode one JPEG while serializing snapshot-only session ownership."""
         existing_session = self._session
         snapshot_session: DreameLawnMowerXp2pLiveStreamSession | None = None
         source = await self.stream_source()

@@ -85,8 +85,8 @@ class DreameLawnMowerXp2pHostAssets:
         return os.pathsep.join(str(path) for path in self.library_search_paths)
 
     def environment(self) -> dict[str, str]:
-        """Return the process environment without any mower credentials."""
-        environment = dict(os.environ)
+        """Return only the process environment required by the worker."""
+        environment: dict[str, str] = {}
         if self.qemu_path is None:
             environment["LD_LIBRARY_PATH"] = self.library_search_path
         return environment

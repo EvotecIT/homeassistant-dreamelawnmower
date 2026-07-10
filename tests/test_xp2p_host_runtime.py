@@ -12,6 +12,7 @@ import requests
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     xp2p_host_runtime,
     xp2p_host_worker_blob,
+    xp2p_runtime_bootstrap,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
@@ -179,3 +180,69 @@ def test_host_command_keeps_mower_secrets_out_of_argv(tmp_path) -> None:
     assert struct.unpack("!I", payload[4:8])[0] == 17
     assert b"p2p-info-1" in payload
     assert b"secret-key-1" in payload
+
+
+def test_host_runtime_does_not_inherit_home_assistant_environment(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("HOME_ASSISTANT_SECRET", "must-not-reach-worker")
+    emulated = DreameLawnMowerXp2pHostAssets(
+        worker_path=tmp_path / "worker",
+        linker_path=tmp_path / "linker64",
+        library_path=tmp_path / "libiot_video_demo.so",
+        library_search_paths=(tmp_path / "lib",),
+        qemu_path=tmp_path / "qemu-aarch64-static",
+    )
+    native = DreameLawnMowerXp2pHostAssets(
+        worker_path=tmp_path / "worker",
+        linker_path=tmp_path / "linker64",
+        library_path=tmp_path / "libiot_video_demo.so",
+        library_search_paths=(tmp_path / "lib", tmp_path / "lib" / "bionic"),
+    )
+
+    assert emulated.environment() == {}
+    assert native.environment() == {
+        "LD_LIBRARY_PATH": native.library_search_path,
+    }
+
+
+def test_runtime_bootstrap_repairs_file_shaped_cache(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    root = tmp_path / "xp2p"
+    root.mkdir()
+    runtime_path = root / (
+        f"runtime-v{xp2p_runtime_bootstrap.RUNTIME_LAYOUT_VERSION}-x86_64"
+    )
+    runtime_path.write_text("interrupted install", encoding="utf-8")
+
+    def _assets(path):
+        return DreameLawnMowerXp2pHostAssets(
+            worker_path=path / "bin" / "dreame-xp2p-host-runner",
+            linker_path=path / "bin" / "linker64",
+            library_path=path / "lib" / "libiot_video_demo.so",
+            library_search_paths=(path / "lib",),
+            qemu_path=path / "bin" / "qemu-aarch64-static",
+        )
+
+    def _validated(path, _architecture):
+        if path == runtime_path and path.is_file():
+            return None
+        return _assets(path)
+
+    monkeypatch.setattr(xp2p_runtime_bootstrap, "_validated_assets", _validated)
+    monkeypatch.setattr(
+        xp2p_runtime_bootstrap,
+        "_install_runtime",
+        lambda *_args, **_kwargs: None,
+    )
+
+    assets = xp2p_runtime_bootstrap.ensure_xp2p_host_runtime(
+        root,
+        machine="x86_64",
+    )
+
+    assert runtime_path.is_dir()
+    assert assets.worker_path == runtime_path / "bin" / "dreame-xp2p-host-runner"

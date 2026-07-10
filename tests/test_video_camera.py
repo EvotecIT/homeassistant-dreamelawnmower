@@ -42,6 +42,7 @@ def _uninitialized_entity(*, snapshot: object | None = None):
     entity._session = None
     entity._runtime = None
     entity._attr_is_on = True
+    entity._snapshot_lock = asyncio.Lock()
     return entity
 
 
@@ -313,6 +314,58 @@ def test_video_camera_snapshot_stops_after_failed_hls_adoption() -> None:
         return stops
 
     assert asyncio.run(_run()) == 1
+
+
+def test_video_camera_serializes_concurrent_snapshot_sessions() -> None:
+    async def _run() -> tuple[int, int, int]:
+        entity = _uninitialized_entity()
+        entity._last_image = None
+        entity.stream = None
+        entity._stream_lock = asyncio.Lock()
+        entity._create_stream_lock = None
+        first_decode_started = asyncio.Event()
+        release_first_decode = asyncio.Event()
+        source_calls = 0
+        decode_calls = 0
+        stops = 0
+
+        async def _source() -> str:
+            nonlocal source_calls
+            source_calls += 1
+            session = SimpleNamespace(
+                stream_url=f"http://127.0.0.1/live-{source_calls}.flv"
+            )
+            entity._session = session
+            return session.stream_url
+
+        async def _decode_job(_function, *_args) -> bytes:
+            nonlocal decode_calls
+            decode_calls += 1
+            if decode_calls == 1:
+                first_decode_started.set()
+                await release_first_decode.wait()
+            return b"\xff\xd8real-jpeg\xff\xd9"
+
+        async def _stop() -> None:
+            nonlocal stops
+            stops += 1
+            entity._session = None
+
+        entity.stream_source = _source
+        entity._async_stop_active_session = _stop
+        entity.hass = SimpleNamespace(async_add_executor_job=_decode_job)
+
+        first = asyncio.create_task(entity.async_camera_image())
+        await first_decode_started.wait()
+        second = asyncio.create_task(entity.async_camera_image())
+        await asyncio.sleep(0)
+        assert decode_calls == 1
+        assert stops == 0
+        release_first_decode.set()
+        await asyncio.gather(first, second)
+        return source_calls, decode_calls, stops
+
+    assert asyncio.run(_run()) == (2, 2, 2)
 
 
 def test_video_camera_stop_discards_cached_home_assistant_stream() -> None:
