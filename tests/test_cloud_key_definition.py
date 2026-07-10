@@ -249,6 +249,33 @@ def test_camera_stream_runtime_inputs_are_redactable_xp2p_contract() -> None:
     assert redacted["missing_app_credentials"] == ()
 
 
+def test_camera_stream_runtime_inputs_accept_device_id_alias() -> None:
+    class _DeviceIdCloud(_FakeCloud):
+        def get_tx_video_device_identity(
+            self,
+            access_token: str | None = None,
+            os: int = 1,
+        ) -> dict[str, object]:
+            assert access_token == "access-token-1"
+            assert os == 1
+            return {
+                "deviceId": "product-1/Mower Camera",
+                "productId": "product-1",
+                "deviceName": "Mower Camera",
+                "secretId": ENCRYPTED_APP_ID,
+                "secretKey": ENCRYPTED_APP_SECRET,
+            }
+
+    client = _client()
+    client._sync_get_cloud_protocol = lambda: _DeviceIdCloud()
+
+    result = client._sync_get_camera_stream_runtime_inputs()
+
+    assert result.ready is True
+    assert result.channel_id == "product-1/Mower Camera"
+    assert result.xp2p_id == "product-1/Mower Camera"
+
+
 def test_camera_stream_runtime_inputs_require_tx_identity_fields() -> None:
     class _MissingIdentityCloud(_FakeCloud):
         def get_tx_video_device_identity(
@@ -273,7 +300,6 @@ def test_camera_stream_runtime_inputs_require_tx_identity_fields() -> None:
     assert result.channel_id is None
     assert result.product_id is None
     assert result.device_name is None
-    assert "channel_id" in result.missing_required
     assert "product_id" in result.missing_required
     assert "device_name" in result.missing_required
     assert result.p2p_info == "p2p-info-1"

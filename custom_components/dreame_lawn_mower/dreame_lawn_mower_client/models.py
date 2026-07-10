@@ -530,7 +530,7 @@ class DreameLawnMowerCameraStreamRuntimeInputs:
     def missing_required(self) -> tuple[str, ...]:
         """Return runtime fields still missing before XP2P can be started."""
         missing: list[str] = []
-        for name in ("channel_id", "product_id", "device_name", "p2p_info"):
+        for name in ("product_id", "device_name", "p2p_info"):
             if not getattr(self, name):
                 missing.append(name)
         return tuple(missing)

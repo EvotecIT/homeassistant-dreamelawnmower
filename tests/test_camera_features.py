@@ -211,10 +211,10 @@ def test_photo_info_request_delegates_to_get_photo_info_action() -> None:
 def test_camera_stream_app_action_uses_dreame_switch_video_payload() -> None:
     client = _client_with_device(_FakeCameraDevice())
     calls: list[dict[str, object]] = []
-    client._sync_call_app_action = lambda payload: calls.append(payload) or {"code": 0}
+    client._sync_call_app_action = lambda payload: calls.append(payload) or {"r": 0}
 
-    assert client._sync_call_app_stream_video(True) == {"code": 0}
-    assert client._sync_call_app_stream_video(False) == {"code": 0}
+    assert client._sync_call_app_stream_video(True) == {"r": 0}
+    assert client._sync_call_app_stream_video(False) == {"r": 0}
 
     assert calls == [
         {"m": "a", "p": 0, "o": 400, "d": {"on": True}},
@@ -232,10 +232,21 @@ def test_camera_stream_app_action_rejects_logical_failure() -> None:
     try:
         client._sync_call_app_stream_video(True)
     except DreameLawnMowerConnectionError as err:
-        assert "App action failed" in str(err)
-        assert "405" in str(err)
+        assert str(err) == "Dreame app video toggle returned an invalid response."
     else:
         raise AssertionError("Expected a failed switchVideo app action to fail")
+
+
+def test_camera_stream_app_action_rejects_missing_response() -> None:
+    client = _client_with_device(_FakeCameraDevice())
+    client._sync_call_app_action = lambda payload: None
+
+    try:
+        client._sync_call_app_stream_video(True)
+    except DreameLawnMowerConnectionError as err:
+        assert str(err) == "Dreame app video toggle returned an invalid response."
+    else:
+        raise AssertionError("Expected a missing switchVideo app action to fail")
 
 
 def test_camera_device_property_probe_handles_empty_protocol_response() -> None:

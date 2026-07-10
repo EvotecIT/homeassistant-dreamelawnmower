@@ -1706,7 +1706,10 @@ class DreameLawnMowerClient:
                 "d": {"on": bool(enabled)},
             }
         )
-        _app_action_data(response)
+        if not isinstance(response, Mapping) or response.get("r") != 0:
+            raise DreameLawnMowerConnectionError(
+                "Dreame app video toggle returned an invalid response."
+            )
         return response
 
     def _call_stream_video_status(
@@ -5405,7 +5408,10 @@ def _normalize_tx_rtc_info(
 ) -> dict[str, Any]:
     """Normalize the app's getTxRtcInfo response for XP2P startup."""
     output = {
-        "channel_id": _find_text_by_key(value, ("channelId", "channel_id")),
+        "channel_id": _find_text_by_key(
+            value,
+            ("channelId", "channel_id", "deviceId", "device_id"),
+        ),
         "product_id": _find_text_by_key(value, ("productId", "product_id")),
         "device_name": _find_text_by_key(value, ("deviceName", "device_name")),
         "raw": _json_safe(value, max_depth=4),

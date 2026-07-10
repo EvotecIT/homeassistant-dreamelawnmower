@@ -360,7 +360,7 @@ class DreameLawnMowerXp2pExternalRunner:
             )
         except OSError as err:
             raise DreameLawnMowerVideoRuntimeError(
-                f"Could not start XP2P external runner {self.command!r}: {err}"
+                f"Could not start XP2P external runner: {err}"
             ) from err
         except subprocess.TimeoutExpired as err:
             raise DreameLawnMowerVideoRuntimeError(
@@ -421,7 +421,7 @@ class DreameLawnMowerXp2pProcessRunner:
             )
         except OSError as err:
             raise DreameLawnMowerVideoRuntimeError(
-                f"Could not start XP2P process runner {self.command!r}: {err}"
+                f"Could not start XP2P process runner: {err}"
             ) from err
 
         stderr_tail: list[str] = []

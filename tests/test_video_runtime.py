@@ -124,7 +124,7 @@ def test_xp2p_live_stream_request_uses_runtime_contract() -> None:
     assert redacted["secret_key_present"] is True
 
 
-def test_xp2p_live_stream_request_requires_cloud_channel_identity() -> None:
+def test_xp2p_live_stream_request_derives_cloud_channel_identity() -> None:
     inputs = DreameLawnMowerCameraStreamRuntimeInputs(
         source="dreame_third_video_tx",
         did="device-1",
@@ -133,12 +133,10 @@ def test_xp2p_live_stream_request_requires_cloud_channel_identity() -> None:
         p2p_info="p2p-info-1",
     )
 
-    try:
-        DreameLawnMowerXp2pLiveStreamRequest.from_runtime_inputs(inputs)
-    except DreameLawnMowerVideoRuntimeError as err:
-        assert "channel_id" in str(err)
-    else:
-        raise AssertionError("Expected missing channel_id to block native stream start")
+    request = DreameLawnMowerXp2pLiveStreamRequest.from_runtime_inputs(inputs)
+
+    assert request.service_id == "product-1/mower-camera-1"
+    assert request.delegate_id == request.service_id
 
 
 def test_xp2p_live_stream_request_requires_p2p_runtime_inputs() -> None:

@@ -72,7 +72,7 @@ region/account details are especially helpful for moving a device from
 - guarded mowing-preference update service with dry-run mode by default
 - read-only map camera using the app-map payload when available
 - disabled-by-default all-maps and map-diagnostics cameras
-- disabled-by-default live video camera for a configured compatible XP2P runtime
+- live video camera with a managed XP2P runtime on Linux x86_64 and aarch64 hosts
 - runtime telemetry sensors for mission progress, mission area, mower pose, and live-track length
 - selected-run sensors for mowing action, chosen map, and scoped zone/spot/edge target
 - selected-zone preference sensors for read-only mowing height, efficiency, direction, and obstacle-avoidance details
@@ -103,10 +103,12 @@ The following areas are intentionally cautious:
 - mowing-preference writes are guarded, validated on a supervised A2 no-op write, and still need broader model and firmware validation
 - map rendering is read-only; no-go editing, virtual-wall editing, and other map
   editing flows are not exposed yet
-- Dreame A2 XP2P playback and FLV output are validated, but live video still
-  requires either a host-native XP2P library or a local runner compatible with
-  the Home Assistant operating system and CPU; Android APK libraries cannot be
-  loaded directly by a normal Home Assistant host
+- live video has been validated end to end on a Dreame A2, including Home
+  Assistant HLS playback; other Tencent-video mower models and firmware still
+  need field validation
+- the managed video runtime currently supports Linux x86_64 and aarch64 Home
+  Assistant hosts, and the mower must be active and away from its station before
+  the vendor permits live video
 - 3D map object downloads are metadata-first and not treated as stable
 - manual driving must stay supervised and uses strict state and battery guards
 
@@ -147,12 +149,26 @@ The config flow asks for:
 The integration stores Home Assistant config-entry data only. Do not put
 credentials into repository files, fixtures, or issue attachments.
 
-The disabled `Live Video` camera is an advanced option. Configure either a
-host-native XP2P dynamic library or a local persistent XP2P runner in the
-integration options, then enable the camera in the entity registry. The runner
-must keep the local FLV endpoint alive for the duration of the Home Assistant
-stream. Android/Bionic libraries extracted from Dreamehome are not host-native
-libraries.
+### Live video
+
+On Linux x86_64 and aarch64 Home Assistant hosts, the `Live Video` camera uses
+the managed runtime by default. No Android phone, emulator, library path, or
+external runner is required. The integration prepares the runtime during entity
+setup, starts it when Home Assistant requests the camera, verifies the local FLV
+source, and stops it when the camera is turned off or unloaded.
+
+The first setup needs internet access. The integration downloads fixed versions
+of Tencent XP2P, the required AOSP Bionic libraries, and qemu-user-static on
+x86_64 hosts. Every file is pinned and SHA-256 verified before use, then cached
+under Home Assistant's `.storage` directory. The Home Assistant/Python client
+owns the lifecycle; Tencent's proprietary P2P transport still runs in the small
+native compatibility worker. It does not require an Android device or Android
+framework.
+
+The mower vendor only allows video while the mower is active and away from its
+station. Requesting the camera does not start or move the mower. The existing
+native-library and persistent-runner options remain available as advanced
+overrides for development or unsupported host platforms.
 
 ## Help Expand Support
 
@@ -211,13 +227,13 @@ Common user-facing helpers include:
 - `binary_sensor.<device>_rain_delay_active`
 - `binary_sensor.<device>_returning`
 - `calendar.<device>_schedule`
+- `camera.<device>_live_video` on supported Linux hosts
 
 Many reverse-engineering and validation helpers are disabled by default. Enable
 them from the entity registry only when troubleshooting:
 
 - map and all-map cameras
 - map diagnostics camera
-- live video camera (requires a compatible host XP2P runtime)
 - runtime pose / heading / segment-count sensors
 - all-schedules calendar
 - rain delay end time sensor

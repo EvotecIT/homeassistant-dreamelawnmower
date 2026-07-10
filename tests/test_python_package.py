@@ -35,6 +35,8 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerVideoRuntimeError,
     DreameLawnMowerXp2pAppConfig,
     DreameLawnMowerXp2pExternalRunner,
+    DreameLawnMowerXp2pHostAssets,
+    DreameLawnMowerXp2pHostRuntime,
     DreameLawnMowerXp2pLiveStreamRequest,
     DreameLawnMowerXp2pLiveStreamSession,
     DreameLawnMowerXp2pRuntimeDiagnostics,
@@ -63,6 +65,7 @@ from dreame_lawn_mower_client import (
     diagnose_native_xp2p_runtime,
     encode_mowing_preference_payload,
     encode_schedule_payload_text,
+    ensure_xp2p_host_runtime,
     firmware_update_support_from_device,
     key_definition_label,
     maintenance_status_from_cms,
@@ -116,6 +119,8 @@ def test_public_package_exports_map_helpers() -> None:
     assert DreameLawnMowerVideoRuntimeError.__name__.endswith("VideoRuntimeError")
     assert DreameLawnMowerXp2pAppConfig.__name__.endswith("Xp2pAppConfig")
     assert DreameLawnMowerXp2pExternalRunner.__name__.endswith("Xp2pExternalRunner")
+    assert DreameLawnMowerXp2pHostAssets.__name__.endswith("Xp2pHostAssets")
+    assert DreameLawnMowerXp2pHostRuntime.__name__.endswith("Xp2pHostRuntime")
     assert DreameLawnMowerXp2pLiveStreamRequest.__name__.endswith(
         "Xp2pLiveStreamRequest"
     )
@@ -150,6 +155,7 @@ def test_public_package_exports_map_helpers() -> None:
     assert callable(decode_batch_schedule_payload)
     assert callable(decode_mowing_preference_payload)
     assert callable(diagnose_native_xp2p_runtime)
+    assert callable(ensure_xp2p_host_runtime)
     assert callable(encode_mowing_preference_payload)
     assert callable(maintenance_status_from_cms)
     assert callable(normalize_debug_ota_catalog_payload)

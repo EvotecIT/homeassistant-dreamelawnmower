@@ -13,6 +13,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
+import pytest_socket
+
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
 )
@@ -519,6 +521,7 @@ def test_active_stream_verdict_reports_open_stream_without_flv_header() -> None:
 
 
 def test_xp2p_runner_probe_checks_returned_stream_url(tmp_path) -> None:
+    pytest_socket.enable_socket()
     module = _load_probe_module()
     server = ThreadingHTTPServer(("127.0.0.1", 0), _FlvHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -627,6 +630,7 @@ def test_xp2p_runner_probe_missing_runner_is_preflight_failure() -> None:
 
 
 def test_stream_url_probe_retries_until_flv_header() -> None:
+    pytest_socket.enable_socket()
     server = ThreadingHTTPServer(("127.0.0.1", 0), _DelayedFlvHandler)
     _DelayedFlvHandler.request_count = 0
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -654,6 +658,7 @@ def test_stream_url_probe_retries_until_flv_header() -> None:
 
 
 def test_stream_url_probe_reports_open_non_flv_response() -> None:
+    pytest_socket.enable_socket()
     server = ThreadingHTTPServer(("127.0.0.1", 0), _JsonHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

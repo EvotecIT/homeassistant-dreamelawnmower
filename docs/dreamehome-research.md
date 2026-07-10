@@ -383,12 +383,15 @@ plugin expose the Tencent XP2P video path in:
 - `com.dreame.plugin.video.tx.dreame_flutter_plugin_tx_video.rn.TXAVVideoPlayer`
 - `com.dreame.plugin.video.tx.dreame_flutter_plugin_tx_video.rn.video.Command`
 
-For live playback, the plugin supplies `channelId`, `productId`, `deviceName`,
-and `p2pInfo`. The Java XP2P wrapper then uses two distinct identifiers:
+For live playback, the plugin supplies the device identity, `productId`,
+`deviceName`, and `p2pInfo`. Captures have returned both `channelId` and
+`deviceId` for the identity field. The runtime therefore accepts either name
+and falls back to `productId/deviceName` when no separate channel identifier is
+present. The Java XP2P wrapper uses:
 
 - `productId/deviceName` for native `startService` and `setDeviceXp2pInfo`
-- `channelId` for the device-status command, AV receive, FLV delegation, and
-  shutdown
+- the returned channel/device identity, or the service identifier fallback, for
+  FLV delegation and shutdown
 
 The app initializes the XP2P config with `autoConfigFromDevice=false`. It uses
 the SDK default STUN/config path during playback rather than making
@@ -409,13 +412,21 @@ even when the final FLV URL requests `quality=high`. Treat a returned local URL
 as only an intermediate step; the proof point remains readable FLV bytes or
 frame data.
 
-A supervised Dreame A2 run on July 10, 2026 confirmed this split-ID contract:
+A supervised Dreame A2 run on July 10, 2026 first confirmed the host protocol:
 XP2P reported ready event `1004`, the device-status and local delegate calls
-succeeded, and the first 16 stream bytes began with `46 4c 56` (`FLV`). The
-mower was returned to charging afterward. This proves the playback protocol;
-Home Assistant still needs a compatible host-native XP2P library or local
-runner because Dreamehome's Android/Bionic libraries cannot be loaded directly
-on a standard Home Assistant host.
+succeeded, and the first 16 stream bytes began with `46 4c 56` (`FLV`). A second
+run loaded the real Home Assistant camera entity on Linux x86_64, started the
+managed Python-owned runtime, and passed the stream through Home Assistant's HLS
+pipeline. The HA endpoint returned HTTP 200 with an HLS playlist and produced a
+1,298-byte MP4 initialization section plus 497,189 bytes of media. The mower was
+verified back at the charging station afterward.
+
+This host path does not use an Android phone, emulator, or framework. Python
+owns runtime installation, credential delivery over stdin, process lifetime,
+FLV health checks, and Home Assistant cleanup. A small AArch64/Bionic worker is
+still required to call Tencent's proprietary native XP2P ABI; on x86_64 Linux
+it runs through a pinned qemu-user-static binary. All downloaded runtime files
+are SHA-256 verified before use.
 
 Use `python examples/apk_research.py <apk> --max-string-length 220` when
 testing a new Dreamehome APK.

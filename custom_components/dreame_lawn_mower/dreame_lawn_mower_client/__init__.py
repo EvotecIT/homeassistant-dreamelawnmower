@@ -136,6 +136,17 @@ from .video_runtime import (
     DreameLawnMowerXp2pRuntimeDiagnostics,
     diagnose_native_xp2p_runtime,
 )
+from .xp2p_config import (
+    DreameLawnMowerXp2pConfigError,
+    DreameLawnMowerXp2pDeviceConfig,
+    fetch_xp2p_device_config,
+    resolve_xp2p_device_config,
+)
+from .xp2p_host_runtime import (
+    DreameLawnMowerXp2pHostAssets,
+    DreameLawnMowerXp2pHostRuntime,
+)
+from .xp2p_runtime_bootstrap import ensure_xp2p_host_runtime
 
 __all__ = [
     "DreameLawnMowerAuthError",
@@ -155,6 +166,10 @@ __all__ = [
     "DreameLawnMowerStreamUrlProbeResult",
     "DreameLawnMowerTwoFactorRequiredError",
     "DreameLawnMowerXp2pExternalRunner",
+    "DreameLawnMowerXp2pConfigError",
+    "DreameLawnMowerXp2pDeviceConfig",
+    "DreameLawnMowerXp2pHostAssets",
+    "DreameLawnMowerXp2pHostRuntime",
     "DreameLawnMowerNativeXp2pRuntime",
     "DreameLawnMowerXp2pProcessRunner",
     "DreameLawnMowerVideoRuntimeError",
@@ -229,6 +244,8 @@ __all__ = [
     "find_jadx_executable",
     "display_name_for_model",
     "diagnose_native_xp2p_runtime",
+    "ensure_xp2p_host_runtime",
+    "fetch_xp2p_device_config",
     "firmware_update_support_from_device",
     "map_diagnostics_from_device",
     "map_summary_from_map_data",
@@ -250,6 +267,7 @@ __all__ = [
     "mower_state_key",
     "mower_state_label",
     "render_app_map_payload_png",
+    "resolve_xp2p_device_config",
     "reset_cms_counter",
     "run_jadx_decompile",
     "schedule_task_summary",
