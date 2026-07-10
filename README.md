@@ -178,6 +178,20 @@ station. Requesting the camera does not start or move the mower. The existing
 native-library and persistent-runner options remain available as advanced
 overrides for development or unsupported host platforms.
 
+This proof is intentionally narrower than every camera feature in the vendor
+apps:
+
+- Dreame/Tencent cloud calls still provide authentication and XP2P
+  configuration. The native SDK does not expose whether a session selected a
+  same-LAN peer route or a relay, so direct-LAN or cloud-independent video is
+  not claimed yet.
+- Home Assistant can display and save the current JPEG frame, but the vendor's
+  stored photo gallery is not exposed.
+- Live video is field-validated on the A2 only. A3 AWD Pro and MOVA camera
+  variants still need their own runtime-input and playback proof.
+- Patrol movement, arbitrary voice-prompt playback, and two-way live talk are
+  separate control/audio features and are not implemented by this camera.
+
 ## Help Expand Support
 
 Support across Dreame, MOVA, and rebadged mower variants will improve fastest
