@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import platform
 import shlex
@@ -56,6 +57,8 @@ _STREAM_HEALTH_RETRY_INTERVAL = 0.5
 _STREAM_HEALTH_TIMEOUT = 3.0
 _STREAM_HEALTH_BYTES = 16
 _HA_STREAM_START_TIMEOUT = 75.0
+_STILL_CONNECT_TIMEOUT = 3.0
+_STILL_READ_TIMEOUT = 7.0
 
 
 class _DreameVideoRuntime(Protocol):
@@ -98,7 +101,7 @@ class DreameLawnMowerVideoCamera(
         self._attr_brand = "Dreametech"
         self._attr_model = self._descriptor.display_model
         self._attr_is_on = True
-        self.content_type = "video/x-flv"
+        self.content_type = "image/jpeg"
         self._runtime: _DreameVideoRuntime | None = None
         self._prepared_runtime: _DreameVideoRuntime | None = None
         self._session: DreameLawnMowerXp2pLiveStreamSession | None = None
@@ -112,6 +115,7 @@ class DreameLawnMowerVideoCamera(
         self._last_stream_disable_error: str | None = None
         self._last_native_runtime_diagnostics: dict[str, Any] | None = None
         self._runtime_preparation_error: str | None = None
+        self._last_image: bytes | None = None
 
     async def async_added_to_hass(self) -> None:
         """Prepare the managed runtime before HA applies its stream timeout."""
@@ -215,6 +219,31 @@ class DreameLawnMowerVideoCamera(
             )
             self.stream.set_update_callback(self.async_write_ha_state)
             return self.stream
+
+    async def async_camera_image(
+        self,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> bytes | None:
+        """Return a real JPEG frame decoded from the managed local FLV source."""
+        if not getattr(self, "_attr_is_on", True):
+            return None
+        source = await self.stream_source()
+        if source is None:
+            return self._last_image
+        try:
+            image = await self.hass.async_add_executor_job(
+                _decode_flv_jpeg,
+                source,
+                width,
+                height,
+            )
+        except Exception as err:  # noqa: BLE001 - snapshots may be transient.
+            _LOGGER.debug("Failed to decode Dreame mower still image: %s", err)
+            return self._last_image
+        if image is not None:
+            self._last_image = image
+        return image or self._last_image
 
     async def _async_start_stream(self) -> str | None:
         """Start one serialized XP2P stream session."""
@@ -335,11 +364,18 @@ class DreameLawnMowerVideoCamera(
 
     async def _async_stop_active_session(self) -> None:
         """Stop the current runtime session if one is active."""
+        ha_stream = getattr(self, "stream", None)
+        self.stream = None
         runtime = self._runtime
         session = self._session
         self._runtime = None
         self._session = None
         self._attr_is_streaming = False
+        if ha_stream is not None:
+            try:
+                await ha_stream.stop()
+            except Exception as err:  # noqa: BLE001 - continue XP2P cleanup.
+                _LOGGER.debug("Failed to stop Home Assistant camera stream: %s", err)
         if runtime is None or session is None:
             return
         await self._async_stop_session(runtime, session)
@@ -472,6 +508,34 @@ def _safe_state_attribute(value: Any, *, max_depth: int = 4) -> Any:
     if isinstance(value, (list, tuple)):
         return [_safe_state_attribute(item, max_depth=max_depth - 1) for item in value]
     return repr(value)
+
+
+def _decode_flv_jpeg(
+    stream_url: str,
+    width: int | None,
+    height: int | None,
+) -> bytes | None:
+    """Decode the first FLV video frame to JPEG without optional TurboJPEG."""
+    import av
+    from PIL import Image
+
+    with av.open(
+        stream_url,
+        timeout=(_STILL_CONNECT_TIMEOUT, _STILL_READ_TIMEOUT),
+    ) as container:
+        for frame in container.decode(video=0):
+            image = frame.to_image().convert("RGB")
+            if width or height:
+                target_width = max(int(width or image.width), 1)
+                target_height = max(int(height or image.height), 1)
+                image.thumbnail(
+                    (target_width, target_height),
+                    Image.Resampling.LANCZOS,
+                )
+            encoded = io.BytesIO()
+            image.save(encoded, format="JPEG", quality=90)
+            return encoded.getvalue()
+    return None
 
 
 def _split_runner_command(command: str) -> tuple[str, ...]:

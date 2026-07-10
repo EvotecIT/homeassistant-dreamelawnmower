@@ -167,9 +167,11 @@ framework.
 
 The Dreame A2 proof uses a normal copied `custom_components` installation, the
 real Home Assistant mower and camera entities, and Home Assistant's HLS output.
-The retained H.264 MP4 reopened independently as a 640 x 360, 100-frame,
-6.598-second video, and a decoded JPEG frame was visually inspected. This is a
-pixel-level playback proof, not only an FLV header or byte-count check.
+The retained H.264 MP4 reopened independently as 640 x 360 video and decoded
+100 frames spanning 6.599 seconds. The HA camera entity also returned a real
+JPEG through the integration's PyAV/Pillow still-image path, even without the
+optional TurboJPEG system library, and that frame was visually inspected. This
+is a pixel-level playback proof, not only an FLV header or byte-count check.
 
 The mower vendor only allows video while the mower is active and away from its
 station. Requesting the camera does not start or move the mower. The existing

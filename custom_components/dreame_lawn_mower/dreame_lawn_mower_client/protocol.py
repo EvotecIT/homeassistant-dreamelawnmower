@@ -22,6 +22,15 @@ from .exceptions import DeviceException
 from .const import DREAME_STRINGS, MOVA_STRINGS
 
 _LOGGER = logging.getLogger(__name__)
+_TX_VIDEO_API_PATH = "/dreame-third-video/tx/"
+_REDACTED_TX_VIDEO_PAYLOAD = "<redacted TX video payload>"
+
+
+def _cloud_request_log_value(url: str, value: Any) -> Any:
+    """Hide TX video credentials and P2P material from cloud request logs."""
+    if _TX_VIDEO_API_PATH in url and value is not None:
+        return _REDACTED_TX_VIDEO_PAYLOAD
+    return value
 
 
 class DreameMowerDeviceProtocol(MiIOProtocol):
@@ -801,7 +810,10 @@ class DreameMowerDreameHomeCloudProtocol:
 
     def request(self, url: str, data, retry_count=2) -> Any:
         _LOGGER.debug(
-            "DreameMowerDreameHomeCloudProtocol.request %s %s", url, data)
+            "DreameMowerDreameHomeCloudProtocol.request %s %s",
+            url,
+            _cloud_request_log_value(url, data),
+        )
 
         retries = 0
         if not retry_count or retry_count < 0:
@@ -841,7 +853,7 @@ class DreameMowerDreameHomeCloudProtocol:
                     _LOGGER.warning(
                         "DreameMowerDreameHomeCloudProtocol.request: Read timed out. (read timeout=%s): %s",
                         timeout,
-                        data,
+                        _cloud_request_log_value(url, data),
                     )
             except Exception as ex:
                 retries = retries + 1
@@ -857,14 +869,18 @@ class DreameMowerDreameHomeCloudProtocol:
                 self._fail_count = 0
                 self._connected = True
                 _LOGGER.debug(
-                    "DreameMowerDreameHomeCloudProtocol.request response.text: %s", response.text)
+                    "DreameMowerDreameHomeCloudProtocol.request response.text: %s",
+                    _cloud_request_log_value(url, response.text),
+                )
                 return json.loads(response.text)
             elif response.status_code == 401 and self._secondary_key:
                 _LOGGER.debug("Execute api call failed: Token Expired")
                 self.login()
             else:
                 _LOGGER.warn(
-                    "Execute api call failed with response: %s", response.text)
+                    "Execute api call failed with response: %s",
+                    _cloud_request_log_value(url, response.text),
+                )
 
         if self._fail_count == 5:
             self._connected = False

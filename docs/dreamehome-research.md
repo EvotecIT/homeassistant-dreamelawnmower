@@ -421,15 +421,18 @@ the managed Python-owned runtime, and passed the stream through Home Assistant's
 HLS pipeline. The HA endpoint returned HTTP 200 with an HLS playlist and
 produced a complete fragmented-MP4 segment.
 
-The final retained segment was 503,650 bytes and independently reopened as H.264
-MP4 at 640 x 360. PyAV decoded 100 frames covering 6.598 seconds. A 31,313-byte
-JPEG selected from those frames was then visually inspected and showed the real
-outdoor mower view rather than a blank or synthetic image. Its SHA-256 was
-`59fe7d56a733f38e511c703d26712750409388d4f51c25d5cc15a8337afea1f0`; the MP4
+The final retained segment was 507,615 bytes and independently reopened as H.264
+MP4 at 640 x 360. PyAV decoded 100 frames whose timestamps span 6.599 seconds.
+The real HA camera entity also returned a 29,815-byte JPEG through the
+integration-owned PyAV/Pillow still-image path; this worked in an environment
+without the optional TurboJPEG system library. Visual inspection showed the
+real outdoor mower view rather than a blank or synthetic image. Its SHA-256 was
+`ed54c246ae87183c9a0f549783dbc8adddf68ce129e6f5875b36817e891ef02f`; the MP4
 SHA-256 was
-`56f9e2639fa04bef2752c524b7d8c4f9e457c5fc1f9154f69915194dfe5c9d6d`.
+`c38aeae1e44efc79cf5588f661d2c7cb0eb6e3ab722452729d297f790a8dc934`.
 Home Assistant turned the camera off, no worker remained, and the mower reported
-both `docked=true` and `raw_docked=true` afterward.
+both `docked=true` and `raw_docked=true` during cleanup. A later read-only HA
+snapshot reported `charging_completed`, `docked=true`, and battery 100%.
 
 This host path does not use an Android phone, emulator, or framework. Python
 owns runtime installation, credential delivery over stdin, process lifetime,

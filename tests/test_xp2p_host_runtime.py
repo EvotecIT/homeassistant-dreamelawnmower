@@ -28,6 +28,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.xp2p_config im
 
 DreameLawnMowerXp2pHostAssets = xp2p_host_runtime.DreameLawnMowerXp2pHostAssets
 _encode_request = xp2p_host_runtime._encode_request
+_stun_servers = xp2p_host_runtime._stun_servers
 WORKER_GZIP_BASE64 = xp2p_host_worker_blob.WORKER_GZIP_BASE64
 WORKER_GZIP_SHA256 = xp2p_host_worker_blob.WORKER_GZIP_SHA256
 WORKER_SHA256 = xp2p_host_worker_blob.WORKER_SHA256
@@ -116,6 +117,28 @@ def test_tencent_device_config_falls_back_like_the_sdk_when_unreachable() -> Non
     assert config.port == 20002
     assert config.protocol_type == XP2P_PROTOCOL_TCP
     assert config.cross is False
+
+
+def test_host_runtime_uses_fetched_regional_stun_endpoints() -> None:
+    config = DreameLawnMowerXp2pDeviceConfig(
+        server="stun.example.test",
+        ip="192.0.2.1",
+        port=20003,
+    )
+
+    assert _stun_servers(config) == (
+        "stun.example.test:20003",
+        "192.0.2.1:20003",
+    )
+
+
+def test_host_runtime_keeps_known_stun_fallback_without_fetched_endpoint() -> None:
+    assert _stun_servers(DreameLawnMowerXp2pDeviceConfig()) == (
+        "43.158.113.38:20002",
+    )
+    assert _stun_servers(
+        DreameLawnMowerXp2pDeviceConfig(server="stun.example.test", port=0)
+    ) == ("stun.example.test:20002",)
 
 
 def test_embedded_worker_matches_reproducible_hashes() -> None:

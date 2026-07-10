@@ -26,6 +26,7 @@ from .video_runtime import (
     DreameLawnMowerXp2pLiveStreamSession,
 )
 from .xp2p_config import (
+    DEFAULT_XP2P_STUN_PORT,
     DreameLawnMowerXp2pDeviceConfig,
     resolve_xp2p_device_config,
 )
@@ -36,6 +37,7 @@ _REQUEST_FIELDS = 17
 _MAX_RESPONSE_LENGTH = 64 * 1024
 _DEFAULT_STATUS_ATTEMPTS = 60
 _DEFAULT_RETRY_INTERVAL = 0.5
+_DEFAULT_STUN_SERVER = "43.158.113.38:20002"
 _WORKER_ERRORS = {
     1: "Invalid XP2P worker request.",
     2: "Could not load the XP2P runtime.",
@@ -152,7 +154,7 @@ class DreameLawnMowerXp2pHostRuntime:
         self.assets.validate()
         request = DreameLawnMowerXp2pLiveStreamRequest.from_runtime_inputs(inputs)
         device_config = self.config_fetcher(inputs)
-        stun_file = _write_stun_file(("43.158.113.38:20002",))
+        stun_file = _write_stun_file(_stun_servers(device_config))
         command = self.assets.command()
         try:
             process = subprocess.Popen(
@@ -375,6 +377,21 @@ def _write_stun_file(stun_servers: Sequence[str]) -> Path:
         for server in stun_servers:
             handle.write(server + "\n")
     return Path(handle.name)
+
+
+def _stun_servers(config: DreameLawnMowerXp2pDeviceConfig) -> tuple[str, ...]:
+    """Return fetched regional STUN endpoints with the known SDK fallback."""
+    port = int(config.port)
+    if not 0 < port <= 65535:
+        port = DEFAULT_XP2P_STUN_PORT
+    endpoints = tuple(
+        dict.fromkeys(
+            f"{host.strip()}:{port}"
+            for host in (config.server, config.ip)
+            if host and host.strip()
+        )
+    )
+    return endpoints or (_DEFAULT_STUN_SERVER,)
 
 
 def _start_binary_drain_thread(

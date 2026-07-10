@@ -11,6 +11,7 @@ from dreame_lawn_mower_client.models import (
 
 client_module = load_internal_module("client")
 credentials_module = load_internal_module("video_credentials")
+protocol_module = load_internal_module("protocol")
 
 ENCRYPTED_APP_ID = (
     "83f131752c9685534334475314dd5ab813ffe385cd526adc8bb2ab7ef3e53427"
@@ -220,6 +221,23 @@ def test_camera_stream_inputs_use_tx_video_endpoints() -> None:
     )
     assert result["p2p_info"]["available"] is True
     assert result["p2p_info"]["p2p_info"] == "p2p-info-1"
+
+
+def test_tx_video_cloud_logs_redact_request_and_response_material() -> None:
+    url = "https://example.invalid/dreame-third-video/tx/dev/getP2PInfo"
+
+    assert protocol_module._cloud_request_log_value(
+        url,
+        '{"accessToken":"secret-token"}',
+    ) == "<redacted TX video payload>"
+    assert protocol_module._cloud_request_log_value(
+        url,
+        '{"p2pInfo":"secret-p2p-material"}',
+    ) == "<redacted TX video payload>"
+    assert protocol_module._cloud_request_log_value(
+        "https://example.invalid/ordinary-endpoint",
+        '{"status":"ok"}',
+    ) == '{"status":"ok"}'
 
 
 def test_camera_stream_runtime_inputs_are_redactable_xp2p_contract() -> None:

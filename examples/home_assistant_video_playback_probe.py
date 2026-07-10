@@ -85,7 +85,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--frame-out",
         type=Path,
-        help="Optional JPEG path for the most detailed decoded HA video frame.",
+        help="Optional JPEG path for the deployed HA camera's still image.",
     )
     parser.add_argument(
         "--video-out",
@@ -302,6 +302,29 @@ def _decode_best_video_frame(
     }
 
 
+def _inspect_camera_jpeg(jpeg: bytes, frame_out: Path | None) -> dict[str, Any]:
+    """Validate and optionally retain the JPEG returned by the HA camera entity."""
+    from PIL import Image, ImageStat
+
+    with Image.open(io.BytesIO(jpeg)) as image:
+        image.load()
+        rgb = image.convert("RGB")
+    if frame_out is not None:
+        frame_out.parent.mkdir(parents=True, exist_ok=True)
+        frame_out.write_bytes(jpeg)
+    luma = ImageStat.Stat(rgb.convert("L"))
+    return {
+        "width": rgb.width,
+        "height": rgb.height,
+        "jpeg_bytes": len(jpeg),
+        "jpeg_sha256": hashlib.sha256(jpeg).hexdigest(),
+        "luma_mean": round(float(luma.mean[0]), 3),
+        "luma_variance": round(float(luma.var[0]), 3),
+        "saved": frame_out is not None,
+        "path": str(frame_out) if frame_out is not None else None,
+    }
+
+
 async def _fetch_hls_playlist(port: int, endpoint: str) -> tuple[int, str]:
     url = urljoin(f"http://127.0.0.1:{port}/", endpoint)
     async with aiohttp.ClientSession() as session:
@@ -390,10 +413,20 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                 hls_output,
                 timeout=args.stream_timeout,
             )
+            camera_jpeg = await camera.async_camera_image()
+            if not camera_jpeg:
+                raise RuntimeError(
+                    "The deployed HA camera returned no still-image bytes."
+                )
+            camera_image = await hass.async_add_executor_job(
+                _inspect_camera_jpeg,
+                camera_jpeg,
+                args.frame_out,
+            )
             frame = await hass.async_add_executor_job(
                 _decode_best_video_frame,
                 segment,
-                args.frame_out,
+                None,
                 args.video_out,
             )
             status, playlist = await _fetch_hls_playlist(port, endpoint)
@@ -406,6 +439,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                 "hls_media_bytes": segment.data_size,
                 "hls_init_is_mp4": segment.init[4:8] == b"ftyp",
                 "sequence": segment.sequence,
+                "camera_image": camera_image,
                 "decoded_frame": frame,
             }
             output["visual_frame_verified"] = bool(
@@ -413,6 +447,9 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                 and frame["width"] > 0
                 and frame["height"] > 0
                 and frame["jpeg_bytes"] > 0
+                and camera_image["width"] > 0
+                and camera_image["height"] > 0
+                and camera_image["jpeg_bytes"] > 0
             )
             output["playable_video_verified"] = bool(
                 frame["decoded_frame_count"] > 1 and frame["video_bytes"] > 0
@@ -435,6 +472,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                 try:
                     await camera.async_turn_off()
                     output["camera_turned_off"] = True
+                    output["camera_stream_cleared"] = camera.stream is None
                 except Exception as err:  # noqa: BLE001 - preserve cleanup evidence.
                     output["camera_turn_off_error"] = str(err)
             if ha_stream is not None:

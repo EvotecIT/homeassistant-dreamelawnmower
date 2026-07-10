@@ -38,6 +38,7 @@ def _uninitialized_entity(*, snapshot: object | None = None):
     )
     entity.coordinator = SimpleNamespace(data=snapshot)
     entity._session = None
+    entity._runtime = None
     entity._attr_is_on = True
     return entity
 
@@ -198,6 +199,92 @@ def test_video_camera_creates_home_assistant_stream_from_live_source() -> None:
     assert result is not None
     assert call.args[1] == "http://127.0.0.1/live.flv"
     assert call.kwargs["stream_label"] == "camera.dreame_live_video"
+
+
+def test_video_camera_returns_jpeg_from_managed_flv_source() -> None:
+    async def _run() -> tuple[bytes | None, tuple[object, object, object]]:
+        entity = _uninitialized_entity()
+        calls: list[tuple[object, object, object]] = []
+        entity._last_image = None
+        entity.stream_source = lambda: asyncio.sleep(
+            0,
+            result="http://127.0.0.1/live.flv",
+        )
+        entity.hass = SimpleNamespace(
+            async_add_executor_job=lambda function, *args: asyncio.sleep(
+                0,
+                result=function(*args),
+            )
+        )
+
+        def _decode(source: str, width: int | None, height: int | None) -> bytes:
+            calls.append((source, width, height))
+            return b"\xff\xd8real-jpeg\xff\xd9"
+
+        with patch.object(video_camera_module, "_decode_flv_jpeg", _decode):
+            image = await entity.async_camera_image(width=640, height=360)
+        return image, calls[0]
+
+    image, call = asyncio.run(_run())
+
+    assert image == b"\xff\xd8real-jpeg\xff\xd9"
+    assert call == ("http://127.0.0.1/live.flv", 640, 360)
+
+
+def test_video_camera_stop_discards_cached_home_assistant_stream() -> None:
+    async def _run() -> tuple[object | None, int]:
+        entity = _uninitialized_entity()
+        entity._attr_is_streaming = True
+        stopped = 0
+
+        class _Stream:
+            async def stop(self) -> None:
+                nonlocal stopped
+                stopped += 1
+
+        entity.stream = _Stream()
+        await entity._async_stop_active_session()
+        return entity.stream, stopped
+
+    stream, stopped = asyncio.run(_run())
+
+    assert stream is None
+    assert stopped == 1
+
+
+def test_video_camera_stop_continues_after_cached_stream_failure() -> None:
+    async def _run() -> tuple[int, int]:
+        entity = _uninitialized_entity()
+        runtime = object()
+        session = object()
+        entity._runtime = runtime
+        entity._session = session
+        entity._attr_is_streaming = True
+        runtime_stops = 0
+        video_disables = 0
+
+        class _Stream:
+            async def stop(self) -> None:
+                raise RuntimeError("HA stream stop failed")
+
+        async def _stop_session(actual_runtime: object, actual_session: object) -> None:
+            nonlocal runtime_stops
+            assert actual_runtime is runtime
+            assert actual_session is session
+            runtime_stops += 1
+
+        async def _disable() -> None:
+            nonlocal video_disables
+            video_disables += 1
+
+        entity.stream = _Stream()
+        entity._async_stop_session = _stop_session
+        entity._async_disable_camera_stream = _disable
+        entity.async_write_ha_state = lambda: None
+        await entity._async_stop_active_session()
+        return runtime_stops, video_disables
+
+    assert asyncio.run(_run()) == (1, 1)
 
 
 def test_video_camera_cancellation_stops_completed_native_startup() -> None:
