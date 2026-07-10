@@ -288,11 +288,12 @@ def test_video_camera_stop_continues_after_cached_stream_failure() -> None:
 
 
 def test_video_camera_cancellation_stops_completed_native_startup() -> None:
-    async def _run() -> int:
+    async def _run() -> tuple[int, bool]:
         entity = _uninitialized_entity()
         start_job = asyncio.get_running_loop().create_future()
         entity.hass = SimpleNamespace(
             async_add_executor_job=lambda *args: start_job,
+            async_create_task=lambda coroutine: asyncio.create_task(coroutine),
         )
         stopped = 0
 
@@ -310,9 +311,51 @@ def test_video_camera_cancellation_stops_completed_native_startup() -> None:
         await asyncio.sleep(0)
         task.cancel()
         await asyncio.sleep(0)
-        start_job.set_result(object())
         with suppress(asyncio.CancelledError):
             await task
-        return stopped
+        returned_before_native_start = not start_job.done()
+        start_job.set_result(object())
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        return stopped, returned_before_native_start
 
-    assert asyncio.run(_run()) == 1
+    assert asyncio.run(_run()) == (1, True)
+
+
+def test_video_camera_disables_video_when_enable_attempt_raises() -> None:
+    async def _run() -> tuple[str | None, list[bool]]:
+        entity = _uninitialized_entity()
+        calls: list[bool] = []
+
+        class _Client:
+            async def async_get_camera_stream_runtime_inputs(self) -> object:
+                return SimpleNamespace(
+                    ready=True,
+                    source="dreame_third_video_tx",
+                    missing_required=(),
+                )
+
+            async def async_set_camera_stream_enabled(self, enabled: bool) -> None:
+                calls.append(enabled)
+                if enabled:
+                    raise RuntimeError("enable response was lost")
+
+        entity.coordinator = SimpleNamespace(client=_Client(), data=object())
+        entity.stream = None
+        entity._attr_is_streaming = False
+        entity._runtime_preparation_error = None
+        entity._last_stream_disable_error = None
+        entity._async_stop_active_session = lambda: asyncio.sleep(0)
+        entity._create_runtime = lambda: object()
+        entity._set_stream_error = lambda _error: None
+        entity.hass = SimpleNamespace(
+            async_add_executor_job=lambda function, *args: asyncio.sleep(
+                0,
+                result=function(*args),
+            )
+        )
+
+        result = await entity._async_start_stream()
+        return result, calls
+
+    assert asyncio.run(_run()) == (None, [True, False])

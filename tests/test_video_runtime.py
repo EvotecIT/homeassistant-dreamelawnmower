@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
-from ctypes import POINTER, c_size_t, c_ubyte, c_void_p, cast
+from ctypes import POINTER, c_int, c_size_t, c_ubyte, c_void_p, cast
 from pathlib import Path
 from typing import Any
 
@@ -161,7 +161,6 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
 
     session = runtime.start_live_stream(
         _runtime_inputs(),
-        app_config=DreameLawnMowerXp2pAppConfig(protocol_type=XP2P_PROTOCOL_TCP),
         command_timeout_us=123,
     )
 
@@ -184,9 +183,8 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
     assert start_call[0] == b"product-1/mower-camera-1"
     assert start_call[1] == b"product-1"
     assert start_call[2] == b"mower-camera-1"
-    assert start_call[3].server == b""
-    assert start_call[3].ip == b""
-    assert start_call[3].type == XP2P_PROTOCOL_TCP
+    assert start_call[3] == XP2P_PROTOCOL_TCP
+    assert library.startService.argtypes[3] is c_int
     assert library.setDeviceXp2pInfo.calls == [
         (b"product-1/mower-camera-1", b"p2p-info-1")
     ]

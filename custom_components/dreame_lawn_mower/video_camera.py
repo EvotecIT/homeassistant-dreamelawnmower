@@ -248,7 +248,7 @@ class DreameLawnMowerVideoCamera(
     async def _async_start_stream(self) -> str | None:
         """Start one serialized XP2P stream session."""
         self._last_stream_health = None
-        stream_enabled = False
+        stream_enable_attempted = False
         runtime: _DreameVideoRuntime | None = None
         session: DreameLawnMowerXp2pLiveStreamSession | None = None
         if not self._runtime_configured:
@@ -274,12 +274,12 @@ class DreameLawnMowerVideoCamera(
             await self._async_stop_active_session()
             runtime = await self.hass.async_add_executor_job(self._create_runtime)
             self._runtime_preparation_error = None
+            stream_enable_attempted = True
             self._last_stream_enable_result = (
                 _safe_state_attribute(
                     await self.coordinator.client.async_set_camera_stream_enabled(True)
                 )
             )
-            stream_enabled = True
             self._last_stream_disable_error = None
             session = await self._async_start_runtime_session(runtime, inputs)
             stream_health = await self.hass.async_add_executor_job(
@@ -289,20 +289,20 @@ class DreameLawnMowerVideoCamera(
         except asyncio.CancelledError:
             if runtime is not None and session is not None:
                 await self._async_stop_session(runtime, session)
-            if stream_enabled:
+            if stream_enable_attempted:
                 await self._async_disable_camera_stream()
             raise
         except DreameLawnMowerVideoRuntimeError as err:
             if runtime is not None and session is not None:
                 await self._async_stop_session(runtime, session)
-            if stream_enabled:
+            if stream_enable_attempted:
                 await self._async_disable_camera_stream()
             self._set_stream_error(str(err))
             return None
         except Exception as err:  # noqa: BLE001 - HA should receive a clean miss.
             if runtime is not None and session is not None:
                 await self._async_stop_session(runtime, session)
-            if stream_enabled:
+            if stream_enable_attempted:
                 await self._async_disable_camera_stream()
             _LOGGER.warning("Failed to start Dreame mower live video: %s", err)
             self._set_stream_error(str(err))
@@ -336,13 +336,28 @@ class DreameLawnMowerVideoCamera(
         try:
             return await asyncio.shield(start_job)
         except asyncio.CancelledError:
-            try:
-                orphaned_session = await start_job
-            except Exception:  # noqa: BLE001 - startup already failed cleanly.
-                pass
-            else:
-                await self._async_stop_session(runtime, orphaned_session)
+            self._schedule_late_start_cleanup(runtime, start_job)
             raise
+
+    def _schedule_late_start_cleanup(
+        self,
+        runtime: _DreameVideoRuntime,
+        start_job: asyncio.Future[DreameLawnMowerXp2pLiveStreamSession],
+    ) -> None:
+        """Clean up an uncancellable executor result without delaying HA timeout."""
+
+        def _completed(
+            future: asyncio.Future[DreameLawnMowerXp2pLiveStreamSession],
+        ) -> None:
+            if future.cancelled():
+                return
+            try:
+                session = future.result()
+            except Exception:  # noqa: BLE001 - native startup already failed.
+                return
+            self.hass.async_create_task(self._async_stop_session(runtime, session))
+
+        start_job.add_done_callback(_completed)
 
     async def async_turn_off(self) -> None:
         """Stop the current live video session."""

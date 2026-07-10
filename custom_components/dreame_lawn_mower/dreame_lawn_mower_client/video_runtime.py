@@ -11,7 +11,6 @@ from collections.abc import Mapping, Sequence
 from ctypes import (
     CDLL,
     POINTER,
-    Structure,
     byref,
     c_bool,
     c_char_p,
@@ -77,16 +76,6 @@ class _NativeCallable(Protocol):
     def __call__(self, *args: Any) -> Any: ...
 
 
-class _Xp2pAppConfig(Structure):
-    _fields_ = [
-        ("server", c_char_p),
-        ("ip", c_char_p),
-        ("port", c_uint64),
-        ("type", c_int),
-        ("cross", c_bool),
-    ]
-
-
 @dataclass(slots=True, frozen=True)
 class DreameLawnMowerXp2pAppConfig:
     """XP2P native app configuration."""
@@ -94,21 +83,10 @@ class DreameLawnMowerXp2pAppConfig:
     server: str = ""
     ip: str = ""
     port: int = 0
-    protocol_type: int = XP2P_PROTOCOL_AUTO
+    protocol_type: int = XP2P_PROTOCOL_TCP
     cross: bool = False
     stun_servers: tuple[str, ...] = ("43.158.113.38:20002",)
     stun_port: int = 20002
-
-    def to_native(self) -> _Xp2pAppConfig:
-        """Return the ctypes struct expected by Tencent's XP2P C ABI."""
-        config = _Xp2pAppConfig()
-        config.server = _encode(self.server)
-        config.ip = _encode(self.ip)
-        config.port = self.port
-        config.type = self.protocol_type
-        config.cross = self.cross
-        return config
-
 
 @dataclass(slots=True, frozen=True)
 class DreameLawnMowerXp2pRuntimeDiagnostics:
@@ -527,7 +505,7 @@ class DreameLawnMowerNativeXp2pRuntime:
             ) from err
         self._start_service = self._bind(
             "startService",
-            [c_char_p, c_char_p, c_char_p, _Xp2pAppConfig],
+            [c_char_p, c_char_p, c_char_p, c_int],
             c_int,
         )
         self._set_device_xp2p_info = self._bind(
@@ -620,7 +598,7 @@ class DreameLawnMowerNativeXp2pRuntime:
                     service_id,
                     _encode(request.product_id),
                     _encode(request.device_name),
-                    config.to_native(),
+                    int(config.protocol_type),
                 )
             )
             if start_result != 0:

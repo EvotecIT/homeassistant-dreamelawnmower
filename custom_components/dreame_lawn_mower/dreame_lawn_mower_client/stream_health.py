@@ -132,7 +132,10 @@ def _probe_response(
 ) -> DreameLawnMowerStreamUrlProbeResult:
     status_code = getattr(response, "status", None) or response.getcode()
     content_type = response.headers.get("Content-Type")
-    chunk = response.read(read_bytes) if read_bytes else b""
+    # A live HTTP response may flush the FLV signature immediately while the
+    # first media tag is still pending. Reading the full diagnostic budget here
+    # would block for bytes that are not needed to establish stream health.
+    chunk = response.read(min(read_bytes, len(b"FLV"))) if read_bytes else b""
     flv_header_present = chunk.startswith(b"FLV")
     return DreameLawnMowerStreamUrlProbeResult(
         available=200 <= int(status_code) < 300,

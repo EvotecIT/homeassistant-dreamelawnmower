@@ -19,6 +19,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import 
     DreameLawnMowerCameraStreamRuntimeInputs,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.stream_health import (
+    _probe_response,
     probe_stream_url,
 )
 
@@ -593,7 +594,7 @@ def test_xp2p_runner_probe_checks_returned_stream_url(tmp_path) -> None:
     assert result["stream_url_present"] is True
     assert result["stream_health"]["available"] is True
     assert result["stream_health"]["flv_header_present"] is True
-    assert result["stream_health"]["bytes_read"] == 8
+    assert result["stream_health"]["bytes_read"] == 3
     assert result["stream_health"]["attempts"] == 1
     assert result["app_video_enable"]["ok"] is True
     assert result["app_video_disable"]["ok"] is True
@@ -652,9 +653,37 @@ def test_stream_url_probe_retries_until_flv_header() -> None:
 
     assert result.available is True
     assert result.flv_header_present is True
-    assert result.bytes_read == 8
+    assert result.bytes_read == 3
     assert result.attempts == 2
     assert result.elapsed_seconds >= 0
+
+
+def test_stream_health_accepts_flushed_signature_without_waiting_for_media() -> None:
+    reads: list[int] = []
+
+    class _HeaderOnlyResponse:
+        status = 200
+        headers = {"Content-Type": "video/x-flv"}
+
+        def getcode(self) -> int:
+            return self.status
+
+        def read(self, size: int) -> bytes:
+            reads.append(size)
+            if size > 3:
+                raise TimeoutError("media tag not flushed yet")
+            return b"FLV"[:size]
+
+    result = _probe_response(
+        _HeaderOnlyResponse(),
+        read_bytes=16,
+        attempts=1,
+        elapsed_seconds=0.0,
+    )
+
+    assert reads == [3]
+    assert result.flv_header_present is True
+    assert result.bytes_read == 3
 
 
 def test_stream_url_probe_reports_open_non_flv_response() -> None:
@@ -681,7 +710,7 @@ def test_stream_url_probe_reports_open_non_flv_response() -> None:
     assert result.flv_header_present is False
     assert result.error_category == "open_without_flv_header"
     assert result.content_type == "application/json"
-    assert result.first_bytes_hex == b'{"error"'.hex()
+    assert result.first_bytes_hex == b'{"e'.hex()
 
 
 class _FlvHandler(BaseHTTPRequestHandler):
