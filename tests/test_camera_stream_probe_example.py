@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import os
+import shlex
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -499,11 +501,21 @@ def test_xp2p_runner_probe_checks_returned_stream_url(tmp_path) -> None:
         ),
         encoding="utf-8",
     )
-    runner_cmd = tmp_path / "xp2p_runner.cmd"
-    runner_cmd.write_text(
-        f'@"{sys.executable}" "{runner_script}"\r\n',
-        encoding="utf-8",
-    )
+    if os.name == "nt":
+        runner_cmd = tmp_path / "xp2p_runner.cmd"
+        runner_cmd.write_text(
+            f'@"{sys.executable}" "{runner_script}"\r\n',
+            encoding="utf-8",
+        )
+    else:
+        runner_cmd = tmp_path / "xp2p_runner"
+        runner_cmd.write_text(
+            "#!/bin/sh\n"
+            f"exec {shlex.quote(sys.executable)} "
+            f"{shlex.quote(str(runner_script))}\n",
+            encoding="utf-8",
+        )
+        runner_cmd.chmod(0o755)
     inputs = DreameLawnMowerCameraStreamRuntimeInputs(
         source="dreame_third_video_tx",
         did="device-id-1",
