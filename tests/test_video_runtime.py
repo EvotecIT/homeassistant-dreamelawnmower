@@ -13,6 +13,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import 
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.video_runtime import (
     XP2P_PROTOCOL_TCP,
+    XP2P_PROTOCOL_UDP,
     DreameLawnMowerNativeXp2pRuntime,
     DreameLawnMowerVideoRuntimeError,
     DreameLawnMowerXp2pAppConfig,
@@ -22,6 +23,9 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.video_runtime 
     DreameLawnMowerXp2pProcessRunner,
     _decode_device_status_code,
     diagnose_native_xp2p_runtime,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.xp2p_config import (
+    DreameLawnMowerXp2pDeviceConfig,
 )
 
 
@@ -231,6 +235,41 @@ def test_native_xp2p_runtime_uses_configured_stun_servers() -> None:
         assert stun_call[1] == 20003
         assert stun_file_path.read_text(encoding="utf-8") == (
             "10.1.1.1:20002\n10.1.1.2:20002\n"
+        )
+    finally:
+        runtime.stop_live_stream(session)
+
+
+def test_native_xp2p_runtime_fetches_regional_device_config() -> None:
+    library = _FakeXp2pLibrary()
+    fetched_inputs = []
+
+    def _fetch(inputs):
+        fetched_inputs.append(inputs)
+        return DreameLawnMowerXp2pDeviceConfig(
+            server="regional-stun.example.test",
+            ip="192.0.2.24",
+            port=20003,
+            protocol_type=XP2P_PROTOCOL_UDP,
+            cross=True,
+        )
+
+    runtime = DreameLawnMowerNativeXp2pRuntime(
+        "fake-xp2p.so",
+        library=library,
+        config_fetcher=_fetch,
+    )
+    inputs = _runtime_inputs()
+    session = runtime.start_live_stream(inputs)
+    stun_file_path = Path(session.stun_file_path or "")
+
+    try:
+        assert fetched_inputs == [inputs]
+        assert library.startService.calls[0][3] == XP2P_PROTOCOL_UDP
+        assert library.setCrossStunTurn.calls == [(True,)]
+        assert library.setStunServerToXp2p.calls[0][1] == 20003
+        assert stun_file_path.read_text(encoding="utf-8") == (
+            "regional-stun.example.test:20003\n192.0.2.24:20003\n"
         )
     finally:
         runtime.stop_live_stream(session)

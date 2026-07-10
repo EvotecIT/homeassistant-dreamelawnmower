@@ -38,6 +38,7 @@ _MAX_RESPONSE_LENGTH = 64 * 1024
 _DEFAULT_STATUS_ATTEMPTS = 60
 _DEFAULT_RETRY_INTERVAL = 0.5
 _DEFAULT_STUN_SERVER = "43.158.113.38:20002"
+_STARTUP_TIMEOUT_MARGIN = 5.0
 _WORKER_ERRORS = {
     1: "Invalid XP2P worker request.",
     2: "Could not load the XP2P runtime.",
@@ -51,6 +52,36 @@ _WORKER_ERRORS = {
     16: "XP2P did not expose a local FLV URL.",
     17: "XP2P did not reach its native ready event.",
 }
+
+
+def _startup_response_timeout(
+    *,
+    command_timeout_us: int = DEFAULT_COMMAND_TIMEOUT_US,
+    device_status_attempts: int = _DEFAULT_STATUS_ATTEMPTS,
+    device_status_retry_interval: float = _DEFAULT_RETRY_INTERVAL,
+    delegate_attempts: int = _DEFAULT_STATUS_ATTEMPTS,
+    delegate_retry_interval: float = _DEFAULT_RETRY_INTERVAL,
+    minimum: float = 45.0,
+) -> float:
+    """Return a parent timeout that covers every configured worker retry."""
+    status_attempts = max(int(device_status_attempts), 1)
+    status_interval = max(float(device_status_retry_interval), 0.0)
+    delegate_count = max(int(delegate_attempts), 1)
+    delegate_interval = max(float(delegate_retry_interval), 0.0)
+    command_timeout = max(int(command_timeout_us), 1) / 1_000_000
+    ready_event_budget = status_attempts * status_interval
+    device_status_budget = status_attempts * (command_timeout + status_interval)
+    delegate_budget = delegate_count * delegate_interval
+    return max(
+        float(minimum),
+        ready_event_budget
+        + device_status_budget
+        + delegate_budget
+        + _STARTUP_TIMEOUT_MARGIN,
+    )
+
+
+DEFAULT_XP2P_HOST_STARTUP_TIMEOUT = _startup_response_timeout()
 
 
 @dataclass(slots=True, frozen=True)
@@ -199,7 +230,14 @@ class DreameLawnMowerXp2pHostRuntime:
             process.stdin.flush()
             status, response = _read_response(
                 process.stdout,
-                timeout=self.startup_timeout,
+                timeout=_startup_response_timeout(
+                    command_timeout_us=command_timeout_us,
+                    device_status_attempts=device_status_attempts,
+                    device_status_retry_interval=device_status_retry_interval,
+                    delegate_attempts=delegate_attempts,
+                    delegate_retry_interval=delegate_retry_interval,
+                    minimum=self.startup_timeout,
+                ),
             )
             response_text = response.decode("utf-8", "replace")
             if status != 0:

@@ -25,7 +25,10 @@ except ModuleNotFoundError:
 from homeassistant.components.camera import CameraEntityFeature
 
 import custom_components.dreame_lawn_mower.video_camera as video_camera_module
-from custom_components.dreame_lawn_mower.const import CONF_XP2P_RUNNER_COMMAND
+from custom_components.dreame_lawn_mower.const import (
+    CONF_XP2P_LIBRARY_PATH,
+    CONF_XP2P_RUNNER_COMMAND,
+)
 from custom_components.dreame_lawn_mower.video_camera import (
     DreameLawnMowerVideoCamera,
     _split_runner_command,
@@ -43,6 +46,7 @@ def _uninitialized_entity(*, snapshot: object | None = None):
     entity._session = None
     entity._runtime = None
     entity._attr_is_on = True
+    entity._stream_lock = asyncio.Lock()
     entity._snapshot_lock = asyncio.Lock()
     return entity
 
@@ -115,6 +119,37 @@ def test_runner_command_uses_windows_backslash_and_quote_semantics() -> None:
         "C:\\Program Files\\Dreame\\xp2p-runner.exe",
         "--mode",
         "process",
+    )
+
+
+def test_native_library_runtime_receives_device_config_fetcher() -> None:
+    entity = _uninitialized_entity()
+    entity._entry = SimpleNamespace(
+        options={CONF_XP2P_LIBRARY_PATH: "/tmp/fake-xp2p.so"}
+    )
+    entity._prepared_runtime = None
+    entity._last_native_runtime_diagnostics = None
+    diagnostics = SimpleNamespace(ready=True, error=None, as_dict=lambda: {})
+    runtime = object()
+
+    with (
+        patch.object(
+            video_camera_module,
+            "diagnose_native_xp2p_runtime",
+            return_value=diagnostics,
+        ),
+        patch.object(
+            video_camera_module,
+            "DreameLawnMowerNativeXp2pRuntime",
+            return_value=runtime,
+        ) as runtime_type,
+    ):
+        result = entity._create_runtime()
+
+    assert result is runtime
+    assert (
+        runtime_type.call_args.kwargs["config_fetcher"]
+        is video_camera_module.resolve_xp2p_device_config
     )
 
 
@@ -217,10 +252,13 @@ def test_video_camera_creates_home_assistant_stream_from_live_source() -> None:
         entity.stream_options = {"use_wallclock_as_timestamps": True}
         entity.entity_id = "camera.dreame_live_video"
         entity.async_write_ha_state = lambda: None
-        entity.stream_source = lambda: asyncio.sleep(
-            0,
-            result="http://127.0.0.1/live.flv",
-        )
+        session = SimpleNamespace(stream_url="http://127.0.0.1/live.flv")
+
+        async def _source() -> str:
+            entity._session = session
+            return session.stream_url
+
+        entity.stream_source = _source
 
         dynamic_settings = object()
 
@@ -246,6 +284,156 @@ def test_video_camera_creates_home_assistant_stream_from_live_source() -> None:
     assert result is not None
     assert call.args[1] == "http://127.0.0.1/live.flv"
     assert call.kwargs["stream_label"] == "camera.dreame_live_video"
+
+
+def test_video_camera_replaces_cached_stream_after_worker_exit() -> None:
+    async def _run() -> tuple[object, int]:
+        entity = _uninitialized_entity()
+        entity._create_stream_lock = None
+        entity._stream_lock = asyncio.Lock()
+        entity.stream_options = {}
+        entity.entity_id = "camera.dreame_live_video"
+        entity.async_write_ha_state = lambda: None
+        entity.stream = object()
+        entity._session = SimpleNamespace(
+            stream_url="http://127.0.0.1/stale.flv",
+            runner_process=SimpleNamespace(poll=lambda: 7),
+        )
+        stops = 0
+
+        async def _stop() -> None:
+            nonlocal stops
+            stops += 1
+            entity.stream = None
+            entity._session = None
+
+        fresh_session = SimpleNamespace(
+            stream_url="http://127.0.0.1/fresh.flv",
+            runner_process=SimpleNamespace(poll=lambda: None),
+        )
+
+        async def _source() -> str:
+            entity._session = fresh_session
+            return fresh_session.stream_url
+
+        class _Preferences:
+            async def get_dynamic_stream_settings(self, _entity_id: str) -> object:
+                return object()
+
+        fresh_stream = SimpleNamespace(set_update_callback=lambda _callback: None)
+        entity._async_stop_active_session = _stop
+        entity.stream_source = _source
+        entity.hass = SimpleNamespace(
+            data={video_camera_module.DATA_CAMERA_PREFS: _Preferences()}
+        )
+        with patch.object(
+            video_camera_module,
+            "create_stream",
+            return_value=fresh_stream,
+        ):
+            result = await entity.async_create_stream()
+        return result, stops
+
+    result, stops = asyncio.run(_run())
+
+    assert result is not None
+    assert stops == 1
+
+
+def test_video_camera_does_not_cache_stream_after_turn_off_race() -> None:
+    async def _run() -> tuple[object | None, int]:
+        entity = _uninitialized_entity()
+        entity._create_stream_lock = None
+        entity._stream_lock = asyncio.Lock()
+        entity.stream_options = {}
+        entity.entity_id = "camera.dreame_live_video"
+        entity.async_write_ha_state = lambda: None
+        entity.stream = None
+        session = SimpleNamespace(stream_url="http://127.0.0.1/live.flv")
+        preferences_started = asyncio.Event()
+        release_preferences = asyncio.Event()
+        stops = 0
+
+        async def _source() -> str:
+            entity._session = session
+            return session.stream_url
+
+        async def _stop() -> None:
+            nonlocal stops
+            stops += 1
+            entity.stream = None
+            entity._session = None
+
+        class _Preferences:
+            async def get_dynamic_stream_settings(self, _entity_id: str) -> object:
+                preferences_started.set()
+                await release_preferences.wait()
+                return object()
+
+        entity.stream_source = _source
+        entity._async_stop_active_session = _stop
+        entity.hass = SimpleNamespace(
+            data={video_camera_module.DATA_CAMERA_PREFS: _Preferences()}
+        )
+        create_task = asyncio.create_task(entity.async_create_stream())
+        await preferences_started.wait()
+        await entity.async_turn_off()
+        release_preferences.set()
+        result = await create_task
+        return result, stops
+
+    with patch.object(video_camera_module, "create_stream") as create_stream:
+        result, stops = asyncio.run(_run())
+
+    assert result is None
+    assert stops == 1
+    create_stream.assert_not_called()
+
+
+def test_video_camera_cancellation_cleans_unadopted_session() -> None:
+    async def _run() -> tuple[int, object | None]:
+        entity = _uninitialized_entity()
+        entity._create_stream_lock = None
+        entity._stream_lock = asyncio.Lock()
+        entity.stream_options = {}
+        entity.entity_id = "camera.dreame_live_video"
+        entity.async_write_ha_state = lambda: None
+        entity.stream = None
+        session = SimpleNamespace(stream_url="http://127.0.0.1/live.flv")
+        preferences_started = asyncio.Event()
+        stops = 0
+
+        async def _source() -> str:
+            entity._session = session
+            return session.stream_url
+
+        async def _stop() -> None:
+            nonlocal stops
+            stops += 1
+            entity.stream = None
+            entity._session = None
+
+        class _Preferences:
+            async def get_dynamic_stream_settings(self, _entity_id: str) -> object:
+                preferences_started.set()
+                await asyncio.Future()
+
+        entity.stream_source = _source
+        entity._async_stop_active_session = _stop
+        entity.hass = SimpleNamespace(
+            data={video_camera_module.DATA_CAMERA_PREFS: _Preferences()}
+        )
+        task = asyncio.create_task(entity.async_create_stream())
+        await preferences_started.wait()
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        return stops, entity._session
+
+    stops, session = asyncio.run(_run())
+
+    assert stops == 1
+    assert session is None
 
 
 def test_video_camera_returns_jpeg_from_managed_flv_source() -> None:

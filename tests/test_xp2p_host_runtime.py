@@ -31,6 +31,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.xp2p_config im
 
 DreameLawnMowerXp2pHostAssets = xp2p_host_runtime.DreameLawnMowerXp2pHostAssets
 _encode_request = xp2p_host_runtime._encode_request
+_startup_response_timeout = xp2p_host_runtime._startup_response_timeout
 _stun_servers = xp2p_host_runtime._stun_servers
 WORKER_GZIP_BASE64 = xp2p_host_worker_blob.WORKER_GZIP_BASE64
 WORKER_GZIP_SHA256 = xp2p_host_worker_blob.WORKER_GZIP_SHA256
@@ -154,6 +155,19 @@ def test_host_runtime_keeps_known_stun_fallback_without_fetched_endpoint() -> No
     assert _stun_servers(
         DreameLawnMowerXp2pDeviceConfig(server="stun.example.test", port=0)
     ) == ("stun.example.test:20002",)
+
+
+def test_host_runtime_timeout_covers_worker_retry_budgets() -> None:
+    assert _startup_response_timeout() == 545.0
+    assert xp2p_host_runtime.DEFAULT_XP2P_HOST_STARTUP_TIMEOUT == 545.0
+    assert _startup_response_timeout(
+        command_timeout_us=1_000_000,
+        device_status_attempts=2,
+        device_status_retry_interval=0.5,
+        delegate_attempts=3,
+        delegate_retry_interval=0.25,
+        minimum=0,
+    ) == 9.75
 
 
 def test_embedded_worker_matches_reproducible_hashes() -> None:

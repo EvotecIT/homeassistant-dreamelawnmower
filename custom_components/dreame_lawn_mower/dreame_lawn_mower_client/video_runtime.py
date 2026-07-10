@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from ctypes import (
     CDLL,
     POINTER,
@@ -35,6 +35,7 @@ from .video_runner_diagnostics import (
     safe_output_preview,
     timeout_expired_preview,
 )
+from .xp2p_config import DreameLawnMowerXp2pDeviceConfig
 
 XP2P_PROTOCOL_AUTO = 0
 XP2P_PROTOCOL_UDP = 1
@@ -494,8 +495,19 @@ class DreameLawnMowerXp2pProcessRunner:
 class DreameLawnMowerNativeXp2pRuntime:
     """Thin ctypes wrapper around Tencent's native XP2P C ABI."""
 
-    def __init__(self, library_path: str | Path, *, library: Any | None = None) -> None:
+    def __init__(
+        self,
+        library_path: str | Path,
+        *,
+        library: Any | None = None,
+        config_fetcher: Callable[
+            [DreameLawnMowerCameraStreamRuntimeInputs],
+            DreameLawnMowerXp2pDeviceConfig,
+        ]
+        | None = None,
+    ) -> None:
         self.library_path = str(library_path)
+        self.config_fetcher = config_fetcher
         try:
             self._library = library if library is not None else CDLL(self.library_path)
         except OSError as err:
@@ -572,7 +584,11 @@ class DreameLawnMowerNativeXp2pRuntime:
     ) -> DreameLawnMowerXp2pLiveStreamSession:
         """Start native XP2P live video and return its local HTTP-FLV URL."""
         request = DreameLawnMowerXp2pLiveStreamRequest.from_runtime_inputs(inputs)
-        config = app_config or DreameLawnMowerXp2pAppConfig()
+        config = app_config
+        if config is None and self.config_fetcher is not None:
+            config = _app_config_from_device_config(self.config_fetcher(inputs))
+        if config is None:
+            config = DreameLawnMowerXp2pAppConfig()
         service_id = _encode(request.service_id)
         started = False
         av_recv_handle: Any | None = None
@@ -823,6 +839,27 @@ class DreameLawnMowerNativeXp2pRuntime:
         except AttributeError:
             pass
         return function
+
+
+def _app_config_from_device_config(
+    config: DreameLawnMowerXp2pDeviceConfig,
+) -> DreameLawnMowerXp2pAppConfig:
+    """Convert the fetched Tencent device config for the native adapter."""
+    port = int(config.port or 20002)
+    stun_servers = tuple(
+        f"{value}:{port}" for value in (config.server, config.ip) if value
+    )
+    if not stun_servers:
+        stun_servers = ("43.158.113.38:20002",)
+    return DreameLawnMowerXp2pAppConfig(
+        server=config.server,
+        ip=config.ip,
+        port=port,
+        protocol_type=config.protocol_type,
+        cross=config.cross,
+        stun_servers=stun_servers,
+        stun_port=port,
+    )
 
 
 def diagnose_native_xp2p_runtime(
