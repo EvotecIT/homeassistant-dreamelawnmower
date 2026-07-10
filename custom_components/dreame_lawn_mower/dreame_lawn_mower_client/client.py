@@ -68,6 +68,7 @@ from .models import (
     DreameLawnMowerRemoteControlSupport,
     DreameLawnMowerSnapshot,
     DreameLawnMowerStatusBlob,
+    camera_metadata_advertises_video,
     descriptor_from_cloud_record,
     display_name_for_model,
     firmware_update_support_from_device,
@@ -5366,19 +5367,15 @@ def _camera_feature_advertised(
     live_key_define: Any,
     video_status: Any,
 ) -> bool:
-    permit_tokens = {
-        item.strip().casefold() for item in (permit or "").split(",") if item.strip()
-    }
-    return bool(
-        camera_streaming
-        or camera_light is not None
-        or ai_detection
-        or obstacles
-        or "video" in permit_tokens
-        or "aiobs" in permit_tokens
-        or "video" in (feature or "").casefold()
-        or (isinstance(live_key_define, Mapping) and bool(live_key_define))
-        or video_status is not None
+    return camera_metadata_advertises_video(
+        camera_streaming=camera_streaming,
+        camera_light=camera_light,
+        ai_detection=ai_detection,
+        obstacles=obstacles,
+        permit=permit,
+        feature=feature,
+        live_key_define=live_key_define,
+        video_status=video_status,
     )
 
 

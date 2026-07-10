@@ -54,13 +54,13 @@ REQUIRED_XP2P_SYMBOLS = (
     "setDeviceXp2pInfo",
     "postCommandRequestSync",
     "delegateHttpFlv",
+    "stopService",
 )
 OPTIONAL_XP2P_SYMBOLS = (
     "setQcloudApiCred",
     "setStunServerToXp2p",
     "setCrossStunTurn",
     "stopAvRecvService",
-    "stopService",
 )
 
 
@@ -557,7 +557,6 @@ class DreameLawnMowerNativeXp2pRuntime:
             "stopService",
             [c_char_p],
             None,
-            required=False,
         )
 
     def start_live_stream(
@@ -669,8 +668,7 @@ class DreameLawnMowerNativeXp2pRuntime:
         delegate_id = _encode(session.delegate_id or session.service_id)
         if session.av_recv_handle is not None and self._stop_av_recv is not None:
             self._stop_av_recv(delegate_id, session.av_recv_handle)
-        if self._stop_service is not None:
-            self._stop_service(_encode(session.service_id))
+        self._stop_service(_encode(session.service_id))
         _remove_stun_file(session.stun_file_path)
 
     def _post_live_command(

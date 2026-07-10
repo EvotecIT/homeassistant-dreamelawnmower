@@ -239,6 +239,36 @@ class DreameLawnMowerSnapshot:
     raw_info: Mapping[str, Any] = field(default_factory=dict, repr=False)
 
 
+def camera_metadata_advertises_video(
+    *,
+    camera_streaming: bool = False,
+    camera_light: bool | None = None,
+    ai_detection: bool = False,
+    obstacles: bool = False,
+    permit: Any = None,
+    feature: Any = None,
+    live_key_define: Any = None,
+    video_status: Any = None,
+) -> bool:
+    """Return whether normalized device metadata advertises camera/video support."""
+    permit_tokens = {
+        item.strip().casefold()
+        for item in str(permit or "").split(",")
+        if item.strip()
+    }
+    return bool(
+        camera_streaming
+        or camera_light is not None
+        or ai_detection
+        or obstacles
+        or "video" in permit_tokens
+        or "aiobs" in permit_tokens
+        or "video" in str(feature or "").casefold()
+        or (isinstance(live_key_define, Mapping) and bool(live_key_define))
+        or video_status is not None
+    )
+
+
 def snapshot_advertises_video(snapshot: Any) -> bool:
     """Return whether normalized mower metadata advertises live video."""
     capabilities = getattr(snapshot, "capabilities", ()) or ()
@@ -252,22 +282,17 @@ def snapshot_advertises_video(snapshot: Any) -> bool:
     if not isinstance(device_info, Mapping):
         device_info = {}
 
-    permit = device_info.get("permit") or raw_info.get("permit")
-    permit_tokens = {
-        item.strip().casefold()
-        for item in str(permit or "").split(",")
-        if item.strip()
-    }
-    if "video" in permit_tokens:
-        return True
-
-    feature = device_info.get("feature") or raw_info.get("feature")
-    feature_tokens = {
-        item.strip().casefold()
-        for item in str(feature or "").split(",")
-        if item.strip()
-    }
-    return any(item == "video" or item.startswith("video_") for item in feature_tokens)
+    video_status = device_info.get("videoStatus")
+    if "videoStatus" not in device_info:
+        video_status = raw_info.get("videoStatus")
+    return camera_metadata_advertises_video(
+        permit=device_info.get("permit") or raw_info.get("permit"),
+        feature=device_info.get("feature") or raw_info.get("feature"),
+        live_key_define=(
+            device_info.get("liveKeyDefine") or raw_info.get("liveKeyDefine")
+        ),
+        video_status=video_status,
+    )
 
 
 @dataclass(slots=True, frozen=True)

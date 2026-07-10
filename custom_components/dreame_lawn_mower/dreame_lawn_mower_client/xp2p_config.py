@@ -184,9 +184,10 @@ def normalize_xp2p_device_config(
     port = _as_int(value.get("StunPort")) or DEFAULT_XP2P_STUN_PORT
     protocol = str(value.get("Protocol") or "").upper()
     protocol_type = {
+        "AUTO": XP2P_PROTOCOL_AUTO,
         "TCP": XP2P_PROTOCOL_TCP,
         "UDP": XP2P_PROTOCOL_UDP,
-    }.get(protocol, XP2P_PROTOCOL_AUTO)
+    }.get(protocol, XP2P_PROTOCOL_TCP)
     return DreameLawnMowerXp2pDeviceConfig(
         server=_as_text(value.get("StunHost")),
         ip=_as_text(value.get("StunIP")),

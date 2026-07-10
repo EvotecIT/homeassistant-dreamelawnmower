@@ -21,9 +21,11 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.video_runtime 
     DreameLawnMowerXp2pLiveStreamRequest,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.xp2p_config import (
+    XP2P_PROTOCOL_AUTO,
     XP2P_PROTOCOL_TCP,
     DreameLawnMowerXp2pDeviceConfig,
     fetch_xp2p_device_config,
+    normalize_xp2p_device_config,
     resolve_xp2p_device_config,
 )
 
@@ -118,6 +120,18 @@ def test_tencent_device_config_falls_back_like_the_sdk_when_unreachable() -> Non
     assert config.port == 20002
     assert config.protocol_type == XP2P_PROTOCOL_TCP
     assert config.cross is False
+
+
+def test_tencent_device_config_defaults_missing_protocol_to_proven_tcp() -> None:
+    config = normalize_xp2p_device_config({"StunHost": "stun.example.test"})
+
+    assert config.protocol_type == XP2P_PROTOCOL_TCP
+
+
+def test_tencent_device_config_preserves_explicit_auto_protocol() -> None:
+    config = normalize_xp2p_device_config({"Protocol": "AUTO"})
+
+    assert config.protocol_type == XP2P_PROTOCOL_AUTO
 
 
 def test_host_runtime_uses_fetched_regional_stun_endpoints() -> None:

@@ -28,6 +28,7 @@ import custom_components.dreame_lawn_mower.video_camera as video_camera_module
 from custom_components.dreame_lawn_mower.const import CONF_XP2P_RUNNER_COMMAND
 from custom_components.dreame_lawn_mower.video_camera import (
     DreameLawnMowerVideoCamera,
+    _split_runner_command,
 )
 
 from .fixture_data import load_json_fixture
@@ -82,6 +83,39 @@ def test_video_camera_unavailable_without_video_metadata() -> None:
     entity = _uninitialized_entity(snapshot=snapshot)
 
     assert entity.available is False
+
+
+def test_video_camera_available_from_live_key_definition() -> None:
+    snapshot = SimpleNamespace(
+        capabilities=(),
+        raw_info={"deviceInfo": {"liveKeyDefine": {"monitor": "available"}}},
+    )
+    entity = _uninitialized_entity(snapshot=snapshot)
+
+    assert entity.available is True
+
+
+def test_video_camera_available_from_top_level_video_status() -> None:
+    snapshot = SimpleNamespace(
+        capabilities=(),
+        raw_info={"deviceInfo": {}, "videoStatus": 0},
+    )
+    entity = _uninitialized_entity(snapshot=snapshot)
+
+    assert entity.available is True
+
+
+def test_runner_command_uses_windows_backslash_and_quote_semantics() -> None:
+    with patch.object(video_camera_module.platform, "system", return_value="Windows"):
+        command = _split_runner_command(
+            '"C:\\Program Files\\Dreame\\xp2p-runner.exe" --mode process'
+        )
+
+    assert command == (
+        "C:\\Program Files\\Dreame\\xp2p-runner.exe",
+        "--mode",
+        "process",
+    )
 
 
 def test_video_camera_serializes_concurrent_stream_starts() -> None:

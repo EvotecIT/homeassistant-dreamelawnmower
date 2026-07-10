@@ -590,7 +590,16 @@ def _decode_flv_jpeg(
 def _split_runner_command(command: str) -> tuple[str, ...]:
     """Split a configured runner command into executable and arguments."""
     try:
-        parts = tuple(shlex.split(command))
+        windows = platform.system().casefold() == "windows"
+        parsed = shlex.split(command, posix=not windows)
+        if windows:
+            parsed = [
+                part[1:-1]
+                if len(part) >= 2 and part[0] == part[-1] and part[0] in "\"'"
+                else part
+                for part in parsed
+            ]
+        parts = tuple(parsed)
     except ValueError as err:
         raise DreameLawnMowerVideoRuntimeError(
             f"Invalid XP2P runner command: {err}"

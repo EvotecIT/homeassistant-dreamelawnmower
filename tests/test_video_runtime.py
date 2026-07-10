@@ -361,6 +361,18 @@ def test_native_xp2p_runtime_reports_missing_required_symbols() -> None:
         raise AssertionError("Expected missing native symbol to fail")
 
 
+def test_native_xp2p_runtime_requires_stop_service() -> None:
+    library = _FakeXp2pLibrary()
+    del library.stopService
+
+    try:
+        DreameLawnMowerNativeXp2pRuntime("fake-xp2p.so", library=library)
+    except DreameLawnMowerVideoRuntimeError as err:
+        assert "stopService" in str(err)
+    else:
+        raise AssertionError("Expected missing stopService to fail")
+
+
 def test_native_xp2p_runtime_reports_loader_errors() -> None:
     try:
         DreameLawnMowerNativeXp2pRuntime("missing-xp2p-runtime.so")
@@ -396,15 +408,28 @@ def test_native_xp2p_runtime_diagnostics_report_missing_required_symbols() -> No
     assert "startService" in str(diagnostics.error)
 
 
-def test_native_xp2p_runtime_diagnostics_report_missing_optional_symbols() -> None:
+def test_native_xp2p_runtime_diagnostics_require_stop_service() -> None:
     library = _FakeXp2pLibrary()
     del library.stopService
 
     diagnostics = diagnose_native_xp2p_runtime("fake-xp2p.so", library=library)
 
+    assert diagnostics.ready is False
+    assert diagnostics.missing_required_symbols == ("stopService",)
+    assert diagnostics.missing_optional_symbols == ()
+    assert "stopService" in str(diagnostics.error)
+
+
+def test_native_xp2p_runtime_diagnostics_allow_optional_av_stop() -> None:
+    library = _FakeXp2pLibrary()
+    del library.stopAvRecvService
+
+    diagnostics = diagnose_native_xp2p_runtime("fake-xp2p.so", library=library)
+
     assert diagnostics.ready is True
     assert diagnostics.missing_required_symbols == ()
-    assert diagnostics.missing_optional_symbols == ("stopService",)
+    assert diagnostics.missing_optional_symbols == ("stopAvRecvService",)
+    assert diagnostics.error is None
 
 
 def test_native_xp2p_runtime_diagnostics_report_loader_errors() -> None:
