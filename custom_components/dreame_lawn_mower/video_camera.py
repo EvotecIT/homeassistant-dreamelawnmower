@@ -148,6 +148,8 @@ class DreameLawnMowerVideoCamera(
     async def stream_source(self) -> str | None:
         """Start live video and return the local FLV source URL for HA stream."""
         async with self._stream_lock:
+            if self._session is not None:
+                return self._session.stream_url
             return await self._async_start_stream()
 
     async def _async_start_stream(self) -> str | None:

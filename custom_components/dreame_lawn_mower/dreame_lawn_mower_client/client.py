@@ -1773,17 +1773,9 @@ class DreameLawnMowerClient:
                 output["raw"]["identity"] = _json_safe(identity, max_depth=5)
                 output["tx_rtc_info"] = _normalize_tx_rtc_info(
                     identity,
-                    fallback_did=self._descriptor.did,
-                    fallback_product_id=self._descriptor.model,
-                    fallback_device_name=self._descriptor.name,
                 )
             else:
-                output["tx_rtc_info"] = _normalize_tx_rtc_info(
-                    {},
-                    fallback_did=self._descriptor.did,
-                    fallback_product_id=self._descriptor.model,
-                    fallback_device_name=self._descriptor.name,
-                )
+                output["tx_rtc_info"] = _normalize_tx_rtc_info({})
             if hasattr(cloud, "get_tx_video_p2p_info"):
                 p2p_info = cloud.get_tx_video_p2p_info(
                     access_token=access_token,
@@ -5410,25 +5402,12 @@ def _validate_stream_payload_mode(payload_mode: str) -> str:
 
 def _normalize_tx_rtc_info(
     value: Any,
-    *,
-    fallback_did: str,
-    fallback_product_id: str,
-    fallback_device_name: str,
 ) -> dict[str, Any]:
     """Normalize the app's getTxRtcInfo response for XP2P startup."""
     output = {
-        "channel_id": (
-            _find_text_by_key(value, ("channelId", "channel_id", "deviceId", "did"))
-            or fallback_did
-        ),
-        "product_id": (
-            _find_text_by_key(value, ("productId", "product_id", "model"))
-            or fallback_product_id
-        ),
-        "device_name": (
-            _find_text_by_key(value, ("deviceName", "device_name", "name"))
-            or fallback_device_name
-        ),
+        "channel_id": _find_text_by_key(value, ("channelId", "channel_id")),
+        "product_id": _find_text_by_key(value, ("productId", "product_id")),
+        "device_name": _find_text_by_key(value, ("deviceName", "device_name")),
         "raw": _json_safe(value, max_depth=4),
     }
     for output_key, source_keys in (

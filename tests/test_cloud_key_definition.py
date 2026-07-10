@@ -249,6 +249,36 @@ def test_camera_stream_runtime_inputs_are_redactable_xp2p_contract() -> None:
     assert redacted["missing_app_credentials"] == ()
 
 
+def test_camera_stream_runtime_inputs_require_tx_identity_fields() -> None:
+    class _MissingIdentityCloud(_FakeCloud):
+        def get_tx_video_device_identity(
+            self,
+            access_token: str | None = None,
+            os: int = 1,
+        ) -> dict[str, object]:
+            assert access_token == "access-token-1"
+            assert os == 1
+            return {
+                "error": "identity unavailable",
+                "model": "dreame.mower.g2408",
+                "name": "Garage Mower",
+            }
+
+    client = _client()
+    client._sync_get_cloud_protocol = lambda: _MissingIdentityCloud()
+
+    result = client._sync_get_camera_stream_runtime_inputs()
+
+    assert result.ready is False
+    assert result.channel_id is None
+    assert result.product_id is None
+    assert result.device_name is None
+    assert "channel_id" in result.missing_required
+    assert "product_id" in result.missing_required
+    assert "device_name" in result.missing_required
+    assert result.p2p_info == "p2p-info-1"
+
+
 def test_tx_video_identity_decryption_matches_dreamehome_contract() -> None:
     assert credentials_module.derive_tx_video_app_credentials(
         ENCRYPTED_APP_ID,
@@ -267,6 +297,7 @@ def test_camera_stream_runtime_inputs_report_partial_vendor_credentials() -> Non
     inputs = DreameLawnMowerCameraStreamRuntimeInputs(
         source="dreame_third_video_tx",
         did="device-1",
+        channel_id="channel-1",
         product_id="product-1",
         device_name="Mower Camera",
         p2p_info="p2p-info-1",

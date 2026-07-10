@@ -29,10 +29,10 @@ from urllib.parse import quote
 
 from .models import DreameLawnMowerCameraStreamRuntimeInputs
 from .video_runner_diagnostics import (
+    RUNNER_OUTPUT_PREVIEW_LIMIT,
     completed_process_preview,
     output_preview,
     payload_sensitive_values,
-    process_stderr_preview,
     safe_output_preview,
     timeout_expired_preview,
 )
@@ -424,7 +424,14 @@ class DreameLawnMowerXp2pProcessRunner:
                 f"Could not start XP2P process runner {self.command!r}: {err}"
             ) from err
 
+        stderr_tail: list[str] = []
+        stderr_thread: threading.Thread | None = None
         try:
+            stderr_thread = _start_stream_drain_thread(
+                process.stderr,
+                name="dreame-xp2p-stderr",
+                tail=stderr_tail,
+            )
             _write_json_line(
                 process,
                 {
@@ -442,6 +449,8 @@ class DreameLawnMowerXp2pProcessRunner:
                 process,
                 timeout=self.timeout,
                 sensitive_values=sensitive_values,
+                stderr_thread=stderr_thread,
+                stderr_tail=stderr_tail,
             )
             if response.get("error"):
                 raise DreameLawnMowerVideoRuntimeError(
@@ -456,10 +465,6 @@ class DreameLawnMowerXp2pProcessRunner:
             stdout_thread = _start_stream_drain_thread(
                 process.stdout,
                 name="dreame-xp2p-stdout",
-            )
-            stderr_thread = _start_stream_drain_thread(
-                process.stderr,
-                name="dreame-xp2p-stderr",
             )
             return DreameLawnMowerXp2pLiveStreamSession(
                 service_id=_as_text(response.get("service_id")) or request.service_id,
@@ -476,6 +481,7 @@ class DreameLawnMowerXp2pProcessRunner:
             )
         except Exception:
             _terminate_process(process)
+            _join_stream_drain_thread(stderr_thread)
             raise
 
     def stop_live_stream(self, session: DreameLawnMowerXp2pLiveStreamSession) -> None:
@@ -1023,6 +1029,8 @@ def _read_json_line(
     *,
     timeout: float,
     sensitive_values: Sequence[str] = (),
+    stderr_thread: threading.Thread | None = None,
+    stderr_tail: Sequence[str] = (),
 ) -> dict[str, Any]:
     if process.stdout is None:
         raise DreameLawnMowerVideoRuntimeError(
@@ -1040,16 +1048,18 @@ def _read_json_line(
     if thread.is_alive():
         _terminate_process(process)
         thread.join(timeout=0.5)
+        _join_stream_drain_thread(stderr_thread)
         raise DreameLawnMowerVideoRuntimeError(
             f"XP2P process runner timed out after {timeout:g}s."
             + output_preview("stdout", result["line"], sensitive_values)
-            + process_stderr_preview(process, sensitive_values)
+            + output_preview("stderr", _stream_tail_text(stderr_tail), sensitive_values)
         )
     line = result["line"]
     if not line:
+        _join_stream_drain_thread(stderr_thread)
         raise DreameLawnMowerVideoRuntimeError(
             "XP2P process runner exited before returning stream metadata."
-            + process_stderr_preview(process, sensitive_values)
+            + output_preview("stderr", _stream_tail_text(stderr_tail), sensitive_values)
         )
     try:
         response = json.loads(line)
@@ -1073,6 +1083,7 @@ def _start_stream_drain_thread(
     stream: Any | None,
     *,
     name: str,
+    tail: list[str] | None = None,
 ) -> threading.Thread | None:
     """Drain a runner output stream so persistent output cannot block it."""
     if stream is None:
@@ -1080,8 +1091,10 @@ def _start_stream_drain_thread(
 
     def _drain() -> None:
         try:
-            while stream.read(8192):
-                pass
+            while chunk := stream.read(8192):
+                if tail is not None:
+                    previous = tail[0] if tail else ""
+                    tail[:] = [(previous + chunk)[-RUNNER_OUTPUT_PREVIEW_LIMIT:]]
         except (OSError, ValueError):
             return
 
@@ -1092,6 +1105,11 @@ def _start_stream_drain_thread(
     )
     thread.start()
     return thread
+
+
+def _stream_tail_text(tail: Sequence[str]) -> str:
+    """Return the bounded tail collected by a process output drain."""
+    return tail[0] if tail else ""
 
 
 def _join_stream_drain_thread(thread: threading.Thread | None) -> None:

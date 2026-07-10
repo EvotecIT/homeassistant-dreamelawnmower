@@ -124,7 +124,7 @@ def test_xp2p_live_stream_request_uses_runtime_contract() -> None:
     assert redacted["secret_key_present"] is True
 
 
-def test_xp2p_live_stream_request_encodes_fallback_channel_in_flv_path() -> None:
+def test_xp2p_live_stream_request_requires_cloud_channel_identity() -> None:
     inputs = DreameLawnMowerCameraStreamRuntimeInputs(
         source="dreame_third_video_tx",
         did="device-1",
@@ -133,15 +133,12 @@ def test_xp2p_live_stream_request_encodes_fallback_channel_in_flv_path() -> None
         p2p_info="p2p-info-1",
     )
 
-    request = DreameLawnMowerXp2pLiveStreamRequest.from_runtime_inputs(inputs)
-
-    assert request.service_id == "product-1/mower-camera-1"
-    assert request.delegate_id == "product-1/mower-camera-1"
-    assert request.stream_channel == "0"
-    assert (
-        request.flv_path
-        == "ipc.flv?action=live&channel=0&quality=high&_crypto=on"
-    )
+    try:
+        DreameLawnMowerXp2pLiveStreamRequest.from_runtime_inputs(inputs)
+    except DreameLawnMowerVideoRuntimeError as err:
+        assert "channel_id" in str(err)
+    else:
+        raise AssertionError("Expected missing channel_id to block native stream start")
 
 
 def test_xp2p_live_stream_request_requires_p2p_runtime_inputs() -> None:
@@ -704,6 +701,41 @@ def test_process_runner_drains_persistent_output_until_stop(tmp_path) -> None:
                 "sys.stdout.flush()",
                 "sys.stderr.write('x' * 262144)",
                 "sys.stderr.flush()",
+                "marker.write_text('drained', encoding='utf-8')",
+                "json.loads(sys.stdin.readline())",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    runner = DreameLawnMowerXp2pProcessRunner(
+        (sys.executable, runner_script),
+        timeout=2,
+    )
+
+    session = runner.start_live_stream(_runtime_inputs())
+    runner.stop_live_stream(session)
+
+    assert session.runner_process is not None
+    assert session.runner_process.returncode == 0
+    assert completed_marker.read_text(encoding="utf-8") == "drained"
+
+
+def test_process_runner_drains_stderr_before_startup_metadata(tmp_path) -> None:
+    completed_marker = tmp_path / "startup-stderr-drained.txt"
+    runner_script = tmp_path / "xp2p_noisy_startup_runner.py"
+    runner_script.write_text(
+        "\n".join(
+            [
+                "import json, pathlib, sys",
+                f"marker = pathlib.Path({str(completed_marker)!r})",
+                "start = json.loads(sys.stdin.readline())",
+                "request = start['request']",
+                "sys.stderr.write('x' * 262144)",
+                "sys.stderr.flush()",
+                "print(json.dumps({",
+                "    'service_id': request['service_id'],",
+                "    'stream_url': 'http://127.0.0.1:5544/ipc.flv'",
+                "}), flush=True)",
                 "marker.write_text('drained', encoding='utf-8')",
                 "json.loads(sys.stdin.readline())",
             ]

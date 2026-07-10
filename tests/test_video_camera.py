@@ -34,6 +34,7 @@ def _uninitialized_entity(*, snapshot: object | None = None):
         options={CONF_XP2P_RUNNER_COMMAND: "xp2p-runner"}
     )
     entity.coordinator = SimpleNamespace(data=snapshot)
+    entity._session = None
     return entity
 
 
@@ -66,31 +67,37 @@ def test_video_camera_unavailable_without_video_metadata() -> None:
 
 
 def test_video_camera_serializes_concurrent_stream_starts() -> None:
-    async def _run() -> tuple[list[str | None], int]:
+    async def _run() -> tuple[list[str | None], int, int]:
         entity = _uninitialized_entity()
         entity._stream_lock = asyncio.Lock()
         active = 0
         maximum_active = 0
+        start_count = 0
 
         async def _start() -> str:
-            nonlocal active, maximum_active
+            nonlocal active, maximum_active, start_count
+            start_count += 1
             active += 1
             maximum_active = max(maximum_active, active)
             await asyncio.sleep(0)
             active -= 1
-            return "http://127.0.0.1/live.flv"
+            entity._session = SimpleNamespace(
+                stream_url="http://127.0.0.1/live.flv"
+            )
+            return entity._session.stream_url
 
         entity._async_start_stream = _start
         results = await asyncio.gather(
             entity.stream_source(),
             entity.stream_source(),
         )
-        return results, maximum_active
+        return results, maximum_active, start_count
 
-    results, maximum_active = asyncio.run(_run())
+    results, maximum_active, start_count = asyncio.run(_run())
 
     assert results == [
         "http://127.0.0.1/live.flv",
         "http://127.0.0.1/live.flv",
     ]
     assert maximum_active == 1
+    assert start_count == 1
