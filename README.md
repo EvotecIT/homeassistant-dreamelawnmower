@@ -182,9 +182,11 @@ This proof is intentionally narrower than every camera feature in the vendor
 apps:
 
 - Dreame/Tencent cloud calls still provide authentication and XP2P
-  configuration. The native SDK does not expose whether a session selected a
-  same-LAN peer route or a relay, so direct-LAN or cloud-independent video is
-  not claimed yet.
+  configuration for the current `startService` path. Tencent also exposes a
+  separate WLAN-discovery and `startLanService` path, but this integration does
+  not use it yet. Explicit same-LAN video is therefore not implemented or
+  proven. The current proof also does not attribute normal XP2P traffic to its
+  internal direct or relay route.
 - Home Assistant can display and save the current JPEG frame, but the vendor's
   stored photo gallery is not exposed.
 - Live video is field-validated on the A2 only. A3 AWD Pro and MOVA camera

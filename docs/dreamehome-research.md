@@ -441,6 +441,30 @@ still required to call Tencent's proprietary native XP2P ABI; on x86_64 Linux
 it runs through a pinned qemu-user-static binary. All downloaded runtime files
 are SHA-256 verified before use.
 
+### Separate Tencent LAN, talk, and movement paths
+
+Tencent's public Android SDK
+[WLAN preview demo](https://github.com/tencentyun/iot-link-android/blob/73252a0c23572143818de635867a7874000eea47/sdkdemo/src/main/java/com/tencent/iot/explorer/link/demo/video/preview/WlanVideoPreviewActivity.kt)
+confirms that explicit LAN playback is a different path from the XP2P
+`startService` flow used above. Its WLAN preview:
+
+- discovers a device address and port, then calls
+  `startLanService(id, productId, deviceName, address, port)`
+- builds the FLV endpoint with `getLanUrl(id)` and disables stream encryption
+  for that local proxy request
+- opens the microphone send path with `runSendService` and a `voice` URL
+- sends directional PTZ commands over a separate `command` URL
+
+The managed Home Assistant runtime currently implements downstream video over
+`startService`; it does not perform WLAN discovery, call `startLanService`, send
+microphone audio, or expose movement/patrol controls. The native SDK also
+contains direct and TURN/relay transports, but the retained A2 proof did not
+capture enough route telemetry to say which transport normal XP2P selected.
+
+Consequently, explicit same-LAN playback, A3/MOVA compatibility, two-way talk,
+and patrol are separate follow-up capabilities. Each needs its own device-safe
+proof rather than being inferred from the working A2 camera stream.
+
 Use `python examples/apk_research.py <apk> --max-string-length 220` when
 testing a new Dreamehome APK.
 It creates a compact string index of dex/assets/resources for protocol endpoints,
