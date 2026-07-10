@@ -261,6 +261,7 @@ class DreameLawnMowerXp2pLiveStreamSession:
     runner_command: tuple[str, ...] = field(default=(), repr=False)
     runner_session_id: str | None = None
     runner_process: Any | None = field(default=None, repr=False)
+    runner_stderr_thread: threading.Thread | None = field(default=None, repr=False)
 
     def as_dict(self, *, redact: bool = False) -> dict[str, Any]:
         """Return safe stream session metadata."""
@@ -448,6 +449,7 @@ class DreameLawnMowerXp2pProcessRunner:
                 raise DreameLawnMowerVideoRuntimeError(
                     "XP2P process runner did not return stream_url."
                 )
+            stderr_thread = _start_stream_drain_thread(process.stderr)
             return DreameLawnMowerXp2pLiveStreamSession(
                 service_id=_as_text(response.get("service_id")) or request.service_id,
                 stream_url=stream_url,
@@ -458,6 +460,7 @@ class DreameLawnMowerXp2pProcessRunner:
                 runner_command=self.command,
                 runner_session_id=_as_text(response.get("runner_session_id")),
                 runner_process=process,
+                runner_stderr_thread=stderr_thread,
             )
         except Exception:
             _terminate_process(process)
@@ -469,6 +472,7 @@ class DreameLawnMowerXp2pProcessRunner:
         if process is None:
             return
         if process.poll() is not None:
+            _join_stream_drain_thread(session.runner_stderr_thread)
             return
         try:
             _write_json_line(
@@ -486,6 +490,8 @@ class DreameLawnMowerXp2pProcessRunner:
             process.wait(timeout=self.timeout)
         except (BrokenPipeError, OSError, subprocess.TimeoutExpired):
             _terminate_process(process)
+        finally:
+            _join_stream_drain_thread(session.runner_stderr_thread)
 
 
 class DreameLawnMowerNativeXp2pRuntime:
@@ -623,9 +629,9 @@ class DreameLawnMowerNativeXp2pRuntime:
                     "XP2P device status command failed with code "
                     f"{device_status_result}."
                 )
-            if device_status_code not in (None, 0):
+            if device_status_code != 0:
                 raise DreameLawnMowerVideoRuntimeError(
-                    "XP2P device status rejected live video with code "
+                    "XP2P device status did not report ready; code "
                     f"{device_status_code}."
                 )
             av_recv_handle = self._start_av_recv(
@@ -724,7 +730,7 @@ class DreameLawnMowerNativeXp2pRuntime:
                 command_timeout_us=command_timeout_us,
             )
             last_code = _decode_device_status_code(last_response)
-            if last_result == 0 and last_code in (None, 0):
+            if last_result == 0 and last_code == 0:
                 return last_result, last_response, last_code
             if attempt < max_attempts:
                 time.sleep(max(retry_interval, 0.0))
@@ -1043,6 +1049,33 @@ def _read_json_line(
 
 def _process_alive(process: Any | None) -> bool:
     return bool(process is not None and process.poll() is None)
+
+
+def _start_stream_drain_thread(stream: Any | None) -> threading.Thread | None:
+    """Drain runner stderr after startup so persistent logs cannot block it."""
+    if stream is None:
+        return None
+
+    def _drain() -> None:
+        try:
+            while stream.read(8192):
+                pass
+        except (OSError, ValueError):
+            return
+
+    thread = threading.Thread(
+        target=_drain,
+        name="dreame-xp2p-stderr",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
+def _join_stream_drain_thread(thread: threading.Thread | None) -> None:
+    """Allow a completed runner stderr drain to settle without blocking cleanup."""
+    if thread is not None:
+        thread.join(timeout=0.5)
 
 
 def _terminate_process(process: Any) -> None:

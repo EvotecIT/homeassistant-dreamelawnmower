@@ -222,6 +222,22 @@ def test_camera_stream_app_action_uses_dreame_switch_video_payload() -> None:
     ]
 
 
+def test_camera_stream_app_action_rejects_logical_failure() -> None:
+    client = _client_with_device(_FakeCameraDevice())
+    client._sync_call_app_action = lambda payload: {
+        "r": 405,
+        "d": {"on": payload["d"]["on"]},
+    }
+
+    try:
+        client._sync_call_app_stream_video(True)
+    except DreameLawnMowerConnectionError as err:
+        assert "App action failed" in str(err)
+        assert "405" in str(err)
+    else:
+        raise AssertionError("Expected a failed switchVideo app action to fail")
+
+
 def test_camera_device_property_probe_handles_empty_protocol_response() -> None:
     device = _FakeCameraDevice()
     device._protocol = SimpleNamespace(get_properties=lambda requested: None)

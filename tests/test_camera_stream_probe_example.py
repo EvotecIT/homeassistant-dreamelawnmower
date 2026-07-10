@@ -6,6 +6,7 @@ import asyncio
 import importlib.util
 import os
 import shlex
+import subprocess
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,6 +29,46 @@ def _load_probe_module() -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_probe_help_uses_standalone_client_package(tmp_path) -> None:
+    (tmp_path / "sitecustomize.py").write_text(
+        "\n".join(
+            [
+                "import sys",
+                "class _BlockHomeAssistant:",
+                "    def find_spec(self, fullname, path=None, target=None):",
+                (
+                    "        if fullname == 'homeassistant' or "
+                    "fullname.startswith('homeassistant.'):"
+                ),
+                (
+                    "            raise RuntimeError("
+                    "'standalone probe imported Home Assistant')"
+                ),
+                "        return None",
+                "sys.meta_path.insert(0, _BlockHomeAssistant())",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        item
+        for item in (str(tmp_path), env.get("PYTHONPATH"))
+        if item
+    )
+    completed = subprocess.run(
+        [sys.executable, "examples/camera_stream_handshake_probe.py", "--help"],
+        check=False,
+        capture_output=True,
+        env=env,
+        text=True,
+        timeout=15,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "--execute" in completed.stdout
 
 
 class _FakeVideoClient:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import shlex
 from pathlib import Path
@@ -22,6 +23,7 @@ from .const import (
 from .coordinator import DreameLawnMowerCoordinator
 from .dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
+    snapshot_advertises_video,
 )
 from .dreame_lawn_mower_client.stream_health import (
     DreameLawnMowerStreamUrlProbeResult,
@@ -66,7 +68,9 @@ class DreameLawnMowerVideoCamera(
     _attr_name = "Live Video"
     _attr_icon = "mdi:video-wireless-outline"
     _attr_entity_registry_enabled_default = False
-    _attr_supported_features = CameraEntityFeature.STREAM
+    _attr_supported_features = (
+        CameraEntityFeature.STREAM | CameraEntityFeature.ON_OFF
+    )
 
     def __init__(
         self,
@@ -80,9 +84,11 @@ class DreameLawnMowerVideoCamera(
         self._attr_unique_id = f"{self._descriptor.unique_id}_live_video"
         self._attr_brand = "Dreametech"
         self._attr_model = self._descriptor.display_model
+        self._attr_is_on = True
         self.content_type = "video/x-flv"
         self._runtime: _DreameVideoRuntime | None = None
         self._session: DreameLawnMowerXp2pLiveStreamSession | None = None
+        self._stream_lock = asyncio.Lock()
         self._last_error: str | None = None
         self._last_runtime_inputs_ready: bool | None = None
         self._last_runtime_inputs_source: str | None = None
@@ -100,7 +106,7 @@ class DreameLawnMowerVideoCamera(
         snapshot = self.coordinator.data
         if snapshot is None:
             return False
-        return "video" in snapshot.capabilities
+        return snapshot_advertises_video(snapshot)
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -141,6 +147,11 @@ class DreameLawnMowerVideoCamera(
 
     async def stream_source(self) -> str | None:
         """Start live video and return the local FLV source URL for HA stream."""
+        async with self._stream_lock:
+            return await self._async_start_stream()
+
+    async def _async_start_stream(self) -> str | None:
+        """Start one serialized XP2P stream session."""
         self._last_stream_health = None
         stream_enabled = False
         runtime: _DreameVideoRuntime | None = None
@@ -208,17 +219,28 @@ class DreameLawnMowerVideoCamera(
         self._runtime = runtime
         self._session = session
         self._last_error = None
+        self._attr_is_on = True
         self._attr_is_streaming = True
         self.async_write_ha_state()
         return session.stream_url
 
     async def async_turn_off(self) -> None:
         """Stop the current live video session."""
-        await self._async_stop_active_session()
+        async with self._stream_lock:
+            await self._async_stop_active_session()
+            self._attr_is_on = False
+            self.async_write_ha_state()
+
+    async def async_turn_on(self) -> None:
+        """Allow Home Assistant to request a new live video session."""
+        async with self._stream_lock:
+            self._attr_is_on = True
+            self.async_write_ha_state()
 
     async def async_will_remove_from_hass(self) -> None:
         """Stop XP2P video when Home Assistant unloads the camera."""
-        await self._async_stop_active_session()
+        async with self._stream_lock:
+            await self._async_stop_active_session()
 
     async def _async_stop_active_session(self) -> None:
         """Stop the current runtime session if one is active."""

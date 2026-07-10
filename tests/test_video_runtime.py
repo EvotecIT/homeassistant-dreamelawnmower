@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
-from ctypes import c_void_p
+from ctypes import POINTER, c_size_t, c_ubyte, c_void_p, cast
 from pathlib import Path
 from typing import Any
 
@@ -39,11 +39,28 @@ class _FakeFunction:
         return self.result
 
 
+class _FakeStatusFunction(_FakeFunction):
+    def __init__(self, payload: bytes = b'[{"status":0}]') -> None:
+        super().__init__(0)
+        self.payload = payload
+        self._buffers: list[Any] = []
+
+    def __call__(self, *args: Any) -> int:
+        self.calls.append(args)
+        buffer = (c_ubyte * len(self.payload)).from_buffer_copy(self.payload)
+        self._buffers.append(buffer)
+        response_pointer = cast(args[3], POINTER(POINTER(c_ubyte)))
+        response_pointer[0] = cast(buffer, POINTER(c_ubyte))
+        response_length = cast(args[4], POINTER(c_size_t))
+        response_length[0] = len(self.payload)
+        return 0
+
+
 class _FakeXp2pLibrary:
     def __init__(self) -> None:
         self.startService = _FakeFunction(0)
         self.setDeviceXp2pInfo = _FakeFunction(0)
-        self.postCommandRequestSync = _FakeFunction(0)
+        self.postCommandRequestSync = _FakeStatusFunction()
         self.startAvRecvService = _FakeFunction(c_void_p(1234))
         self.stopAvRecvService = _FakeFunction(0)
         self.setQcloudApiCred = _FakeFunction(0)
@@ -162,7 +179,7 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
     assert session.delegate_id == "channel-1"
     assert session.command_result is None
     assert session.device_status_result == 0
-    assert session.device_status_code is None
+    assert session.device_status_code == 0
     assert session.av_recv_handle is not None
     assert session.stun_file_path is not None
     stun_file_path = Path(session.stun_file_path)
@@ -268,6 +285,24 @@ def test_native_xp2p_runtime_fails_when_device_status_command_fails() -> None:
         assert "-9" in str(err)
     else:
         raise AssertionError("Expected failed device status command to fail")
+
+    assert library.startAvRecvService.calls == []
+    assert library.delegateHttpFlv.calls == []
+    assert library.stopService.calls == [(b"channel-1",)]
+
+
+def test_native_xp2p_runtime_requires_parseable_ready_status() -> None:
+    library = _FakeXp2pLibrary()
+    library.postCommandRequestSync = _FakeFunction(0)
+    runtime = DreameLawnMowerNativeXp2pRuntime("fake-xp2p.so", library=library)
+
+    try:
+        runtime.start_live_stream(_runtime_inputs(), device_status_attempts=1)
+    except DreameLawnMowerVideoRuntimeError as err:
+        assert "did not report ready" in str(err)
+        assert "None" in str(err)
+    else:
+        raise AssertionError("Expected an unknown device status to block AV receive")
 
     assert library.startAvRecvService.calls == []
     assert library.delegateHttpFlv.calls == []
@@ -632,6 +667,41 @@ def test_process_runner_keeps_stream_process_alive_until_stop(tmp_path) -> None:
             "stream_url": "http://127.0.0.1:5544/ipc.flv",
         },
     }
+
+
+def test_process_runner_drains_persistent_stderr_until_stop(tmp_path) -> None:
+    completed_marker = tmp_path / "stderr-drained.txt"
+    runner_script = tmp_path / "xp2p_noisy_process_runner.py"
+    runner_script.write_text(
+        "\n".join(
+            [
+                "import json, pathlib, sys",
+                f"marker = pathlib.Path({str(completed_marker)!r})",
+                "start = json.loads(sys.stdin.readline())",
+                "request = start['request']",
+                "print(json.dumps({",
+                "    'service_id': request['service_id'],",
+                "    'stream_url': 'http://127.0.0.1:5544/ipc.flv'",
+                "}), flush=True)",
+                "sys.stderr.write('x' * 262144)",
+                "sys.stderr.flush()",
+                "marker.write_text('drained', encoding='utf-8')",
+                "json.loads(sys.stdin.readline())",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    runner = DreameLawnMowerXp2pProcessRunner(
+        (sys.executable, runner_script),
+        timeout=2,
+    )
+
+    session = runner.start_live_stream(_runtime_inputs())
+    runner.stop_live_stream(session)
+
+    assert session.runner_process is not None
+    assert session.runner_process.returncode == 0
+    assert completed_marker.read_text(encoding="utf-8") == "drained"
 
 
 def test_process_runner_reports_missing_stream_url_without_secret(tmp_path) -> None:

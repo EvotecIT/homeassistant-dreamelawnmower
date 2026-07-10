@@ -16,11 +16,10 @@ from pathlib import Path
 from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_CUSTOM_COMPONENTS = _REPO_ROOT / "custom_components"
-if str(_CUSTOM_COMPONENTS) not in sys.path:
-    sys.path.insert(0, str(_CUSTOM_COMPONENTS))
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-from dreame_lawn_mower.dreame_lawn_mower_client import (  # noqa: E402
+from dreame_lawn_mower_client import (  # noqa: E402
     DreameLawnMowerClient,
     DreameLawnMowerConnectionError,
     DreameLawnMowerNativeXp2pRuntime,
@@ -31,7 +30,7 @@ from dreame_lawn_mower.dreame_lawn_mower_client import (  # noqa: E402
     diagnose_native_xp2p_runtime,
     probe_stream_url,
 )
-from dreame_lawn_mower.dreame_lawn_mower_client.models import (  # noqa: E402
+from dreame_lawn_mower_client.models import (  # noqa: E402
     MIN_REMOTE_CONTROL_BATTERY_LEVEL as MIN_ACTIVE_VIDEO_START_BATTERY_LEVEL,
 )
 

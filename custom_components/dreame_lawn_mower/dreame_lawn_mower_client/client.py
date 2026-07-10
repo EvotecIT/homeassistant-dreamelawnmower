@@ -1698,7 +1698,7 @@ class DreameLawnMowerClient:
 
     def _sync_call_app_stream_video(self, enabled: bool) -> Any:
         """Call Control.switchVideo(on) from the mower React Native bundle."""
-        return self._sync_call_app_action(
+        response = self._sync_call_app_action(
             {
                 "m": "a",
                 "p": 0,
@@ -1706,6 +1706,8 @@ class DreameLawnMowerClient:
                 "d": {"on": bool(enabled)},
             }
         )
+        _app_action_data(response)
+        return response
 
     def _call_stream_video_status(
         self,

@@ -239,6 +239,37 @@ class DreameLawnMowerSnapshot:
     raw_info: Mapping[str, Any] = field(default_factory=dict, repr=False)
 
 
+def snapshot_advertises_video(snapshot: Any) -> bool:
+    """Return whether normalized mower metadata advertises live video."""
+    capabilities = getattr(snapshot, "capabilities", ()) or ()
+    if any(str(item).strip().casefold() == "video" for item in capabilities):
+        return True
+
+    raw_info = getattr(snapshot, "raw_info", {}) or {}
+    if not isinstance(raw_info, Mapping):
+        return False
+    device_info = raw_info.get("deviceInfo") or {}
+    if not isinstance(device_info, Mapping):
+        device_info = {}
+
+    permit = device_info.get("permit") or raw_info.get("permit")
+    permit_tokens = {
+        item.strip().casefold()
+        for item in str(permit or "").split(",")
+        if item.strip()
+    }
+    if "video" in permit_tokens:
+        return True
+
+    feature = device_info.get("feature") or raw_info.get("feature")
+    feature_tokens = {
+        item.strip().casefold()
+        for item in str(feature or "").split(",")
+        if item.strip()
+    }
+    return any(item == "video" or item.startswith("video_") for item in feature_tokens)
+
+
 @dataclass(slots=True, frozen=True)
 class DreameLawnMowerStatusBlob:
     """Structured, conservative view of the app realtime `1.1` status blob."""
