@@ -3,7 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
+
+try:
+    import turbojpeg  # noqa: F401
+except ModuleNotFoundError:
+    turbojpeg_stub = ModuleType("turbojpeg")
+
+    class _UnavailableTurboJPEG:
+        def __init__(self) -> None:
+            raise RuntimeError("TurboJPEG is unavailable in the lightweight test job")
+
+    turbojpeg_stub.TurboJPEG = _UnavailableTurboJPEG
+    sys.modules["turbojpeg"] = turbojpeg_stub
 
 from homeassistant.components.camera import CameraEntityFeature
 
@@ -52,23 +65,29 @@ def test_video_camera_unavailable_without_video_metadata() -> None:
     assert entity.available is False
 
 
-async def test_video_camera_serializes_concurrent_stream_starts() -> None:
-    entity = _uninitialized_entity()
-    entity._stream_lock = asyncio.Lock()
-    active = 0
-    maximum_active = 0
+def test_video_camera_serializes_concurrent_stream_starts() -> None:
+    async def _run() -> tuple[list[str | None], int]:
+        entity = _uninitialized_entity()
+        entity._stream_lock = asyncio.Lock()
+        active = 0
+        maximum_active = 0
 
-    async def _start() -> str:
-        nonlocal active, maximum_active
-        active += 1
-        maximum_active = max(maximum_active, active)
-        await asyncio.sleep(0)
-        active -= 1
-        return "http://127.0.0.1/live.flv"
+        async def _start() -> str:
+            nonlocal active, maximum_active
+            active += 1
+            maximum_active = max(maximum_active, active)
+            await asyncio.sleep(0)
+            active -= 1
+            return "http://127.0.0.1/live.flv"
 
-    entity._async_start_stream = _start
+        entity._async_start_stream = _start
+        results = await asyncio.gather(
+            entity.stream_source(),
+            entity.stream_source(),
+        )
+        return results, maximum_active
 
-    results = await asyncio.gather(entity.stream_source(), entity.stream_source())
+    results, maximum_active = asyncio.run(_run())
 
     assert results == [
         "http://127.0.0.1/live.flv",
