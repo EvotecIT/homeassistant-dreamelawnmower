@@ -2,15 +2,31 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 from types import SimpleNamespace
 
+from custom_components.dreame_lawn_mower import button as button_module
 from custom_components.dreame_lawn_mower.binary_sensor import (
     BINARY_SENSORS,
     DreameLawnMowerBinarySensor,
     DreameLawnMowerBluetoothConnectedBinarySensor,
     DreameLawnMowerCurrentAppMapLivePathBinarySensor,
+    DreameLawnMowerMaintenanceDueBinarySensor,
+    DreameLawnMowerMaintenanceWarningBinarySensor,
     DreameLawnMowerRainDelayActiveBinarySensor,
     DreameLawnMowerRainProtectionEnabledBinarySensor,
+)
+from custom_components.dreame_lawn_mower.button import (
+    DreameLawnMowerResetMaintenanceButton,
+)
+from custom_components.dreame_lawn_mower.coordinator import _app_map_index_hints
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    decode_batch_mowing_preferences,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.maintenance import (
+    MAINTENANCE_ITEM_BY_KEY,
+    maintenance_status_from_cms,
 )
 from custom_components.dreame_lawn_mower.sensor import (
     SENSORS,
@@ -28,11 +44,13 @@ from custom_components.dreame_lawn_mower.sensor import (
     DreameLawnMowerCurrentAppMapZoneCountSensor,
     DreameLawnMowerCurrentVectorMapIdSensor,
     DreameLawnMowerCurrentVectorMapNameSensor,
+    DreameLawnMowerLastMaintenanceResetSensor,
     DreameLawnMowerLastPreferenceProbeSensor,
     DreameLawnMowerLastScheduleProbeSensor,
     DreameLawnMowerLastScheduleWriteSensor,
     DreameLawnMowerLastTaskStatusProbeSensor,
     DreameLawnMowerLastWeatherProbeSensor,
+    DreameLawnMowerMaintenanceRemainingSensor,
     DreameLawnMowerMowingProgressSensor,
     DreameLawnMowerRainDelayEndTimeSensor,
     DreameLawnMowerRainProtectionDurationSensor,
@@ -346,6 +364,174 @@ def test_raw_started_binary_sensor_preserves_vendor_flag() -> None:
 
     assert entity.available is True
     assert entity.is_on is True
+
+
+def test_maintenance_remaining_sensor_uses_cached_cms_status() -> None:
+    entity = object.__new__(DreameLawnMowerMaintenanceRemainingSensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(raw_attributes={}),
+        maintenance_status=maintenance_status_from_cms(
+            [4896, 16752, 6849, -1],
+            source="test",
+        ),
+    )
+    entity._item = MAINTENANCE_ITEM_BY_KEY["blade"]
+
+    assert entity.available is True
+    assert entity.native_value == 18.4
+    assert entity.extra_state_attributes["item"] == "blade"
+    assert entity.extra_state_attributes["remaining_hours"] == 18.4
+    assert entity.extra_state_attributes["status"] == "replace_soon"
+    assert entity.extra_state_attributes["warning"] is True
+
+
+def test_maintenance_remaining_sensor_unavailable_without_cms_status() -> None:
+    entity = object.__new__(DreameLawnMowerMaintenanceRemainingSensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(raw_attributes={}),
+        maintenance_status=None,
+    )
+    entity._item = MAINTENANCE_ITEM_BY_KEY["blade"]
+
+    assert entity.available is False
+    assert entity.native_value is None
+
+
+def test_maintenance_due_binary_sensor_uses_cached_status() -> None:
+    entity = object.__new__(DreameLawnMowerMaintenanceDueBinarySensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(raw_attributes={}),
+        maintenance_status=maintenance_status_from_cms(
+            [4896, 16752, 6849, -1],
+            source="test",
+        ),
+    )
+
+    assert entity.available is True
+    assert entity.is_on is True
+    assert entity.extra_state_attributes["due_items"] == ["robot"]
+
+
+def test_maintenance_warning_binary_sensor_uses_cached_status() -> None:
+    entity = object.__new__(DreameLawnMowerMaintenanceWarningBinarySensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(raw_attributes={}),
+        maintenance_status=maintenance_status_from_cms(
+            [4896, 16752, 6849, -1],
+            source="test",
+        ),
+    )
+
+    assert entity.available is True
+    assert entity.is_on is True
+    assert entity.extra_state_attributes["warning_items"] == ["blade", "robot"]
+
+
+def test_maintenance_warning_binary_sensor_clears_for_fresh_counters() -> None:
+    entity = object.__new__(DreameLawnMowerMaintenanceWarningBinarySensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(raw_attributes={}),
+        maintenance_status=maintenance_status_from_cms(
+            [0, 0, 0, -1],
+            source="test",
+        ),
+    )
+
+    assert entity.available is True
+    assert entity.is_on is False
+    assert entity.extra_state_attributes["warning_items"] == []
+
+
+def test_last_maintenance_reset_sensor_summarizes_result() -> None:
+    entity = object.__new__(DreameLawnMowerLastMaintenanceResetSensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(raw_attributes={}),
+        last_maintenance_reset_result={
+            "executed": False,
+            "item": "blade",
+            "request": {"m": "s", "t": "CMS"},
+        },
+    )
+
+    assert entity.native_value == "dry_run"
+    assert entity.extra_state_attributes["item"] == "blade"
+
+
+def test_reset_maintenance_button_executes_confirmed_reset(monkeypatch) -> None:
+    notifications = []
+
+    def _capture_notification(hass, message, *, title, notification_id):
+        notifications.append(
+            {
+                "hass": hass,
+                "message": message,
+                "title": title,
+                "notification_id": notification_id,
+            }
+        )
+
+    class _FakeClient:
+        async def async_plan_maintenance_reset(
+            self,
+            *,
+            item,
+            execute,
+            confirm_write,
+        ):
+            self.call = {
+                "item": item,
+                "execute": execute,
+                "confirm_write": confirm_write,
+            }
+            return {
+                "item": item,
+                "item_name": "Blade",
+                "executed": True,
+                "previous_item": {"used_minutes": 4909},
+                "updated_item": {"used_minutes": 0},
+            }
+
+    class _FakeCoordinator:
+        def __init__(self) -> None:
+            self.client = _FakeClient()
+            self.entry = SimpleNamespace(entry_id="entry-1")
+            self.hass = object()
+            self.last_maintenance_reset_result = None
+            self.refresh_call = None
+            self.updated = False
+
+        async def async_refresh_maintenance_status(self, *, force, source):
+            self.refresh_call = {"force": force, "source": source}
+            return {"available": True}
+
+        def async_update_listeners(self):
+            self.updated = True
+
+    monkeypatch.setattr(
+        button_module.persistent_notification,
+        "async_create",
+        _capture_notification,
+    )
+    coordinator = _FakeCoordinator()
+    entity = object.__new__(DreameLawnMowerResetMaintenanceButton)
+    entity.coordinator = coordinator
+    entity._item = MAINTENANCE_ITEM_BY_KEY["blade"]
+
+    asyncio.run(entity.async_press())
+
+    assert coordinator.client.call == {
+        "item": "blade",
+        "execute": True,
+        "confirm_write": True,
+    }
+    assert coordinator.refresh_call == {
+        "force": True,
+        "source": "maintenance_reset_button",
+    }
+    assert coordinator.updated is True
+    assert coordinator.last_maintenance_reset_result["executed"] is True
+    assert notifications[0]["title"] == "Dreame Lawn Mower Maintenance Reset"
+    assert notifications[0]["notification_id"].endswith("_reset_maintenance_blade")
 
 
 def test_raw_returning_binary_sensor_preserves_vendor_flag() -> None:
@@ -1858,6 +2044,89 @@ def test_selected_zone_preference_sensors_expose_read_only_zone_settings() -> No
         "obstacle_avoidance_distance_cm": 15.0,
         "obstacle_avoidance_ai_classes": ["people", "animals", "objects"],
     }
+
+
+def test_selected_zone_preferences_follow_hinted_app_map_cards() -> None:
+    settings_text = json.dumps(
+        [
+            {
+                "mode": 0,
+                "settings": {
+                    "3": {
+                        "id": 3,
+                        "version": 17,
+                        "efficientMode": 1,
+                        "mowingHeight": 4.0,
+                    },
+                },
+            },
+            {
+                "mode": 0,
+                "settings": {
+                    "3": {
+                        "id": 3,
+                        "version": 18,
+                        "efficientMode": 0,
+                        "mowingHeight": 6.0,
+                    },
+                },
+            },
+        ],
+        separators=(",", ":"),
+    )
+    app_maps = {
+        "current_map_index": 1,
+        "maps": [
+            {"idx": 0, "created": False, "current": False},
+            {
+                "idx": 1,
+                "created": True,
+                "current": True,
+                "summary": {"name": "Front"},
+            },
+            {
+                "idx": 2,
+                "created": True,
+                "current": False,
+                "summary": {"name": "Back"},
+            },
+        ],
+    }
+    batch_preferences = decode_batch_mowing_preferences(
+        {
+            "SETTINGS.0": settings_text,
+            "SETTINGS.info": str(len(settings_text)),
+        },
+        map_index_hints=_app_map_index_hints(app_maps),
+    )
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(activity="paused"),
+        selected_map_index=1,
+        selected_zone_id=3,
+        app_maps=app_maps,
+        batch_device_data={"batch_mowing_preferences": batch_preferences},
+    )
+
+    height_entity = object.__new__(DreameLawnMowerSelectedZoneMowingHeightSensor)
+    height_entity.coordinator = coordinator
+    efficiency_entity = object.__new__(DreameLawnMowerSelectedZoneEfficiencyModeSensor)
+    efficiency_entity.coordinator = coordinator
+
+    assert height_entity.available is True
+    assert height_entity.native_value == 4.0
+    assert efficiency_entity.available is True
+    assert efficiency_entity.native_value == "efficient"
+    assert height_entity.extra_state_attributes["selected_map_index"] == 1
+    assert height_entity.extra_state_attributes["reported_version"] == 17
+
+    coordinator.selected_map_index = 2
+
+    assert height_entity.available is True
+    assert height_entity.native_value == 6.0
+    assert efficiency_entity.available is True
+    assert efficiency_entity.native_value == "standard"
+    assert height_entity.extra_state_attributes["selected_map_index"] == 2
+    assert height_entity.extra_state_attributes["reported_version"] == 18
 
 
 def test_selected_zone_preference_sensors_hide_unavailable_zone_settings() -> None:

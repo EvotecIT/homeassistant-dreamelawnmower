@@ -22,6 +22,7 @@ from .const import (
     CONF_DID,
     CONF_HOST,
     CONF_MAC,
+    CONF_MAP_LABEL_SCALE,
     CONF_MODEL,
     CONF_NAME,
     CONF_PASSWORD,
@@ -33,9 +34,12 @@ from .const import (
     CONF_XP2P_RUNNER_MODE,
     COUNTRY_OPTIONS,
     DEFAULT_COUNTRY,
+    DEFAULT_MAP_LABEL_SCALE,
     DEFAULT_SCAN_INTERVAL_SECONDS,
     DOMAIN,
+    MAX_MAP_LABEL_SCALE,
     MAX_SCAN_INTERVAL_SECONDS,
+    MIN_MAP_LABEL_SCALE,
     MIN_SCAN_INTERVAL_SECONDS,
     XP2P_RUNNER_MODE_OPTIONS,
     XP2P_RUNNER_MODE_PROCESS,
@@ -249,7 +253,7 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
     """Handle integration options."""
 
     def __init__(self, config_entry) -> None:
-        self.config_entry = config_entry
+        self._entry_options = dict(config_entry.options)
 
     async def async_step_init(
         self,
@@ -264,7 +268,7 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                 {
                     vol.Optional(
                         CONF_SCAN_INTERVAL,
-                        default=self.config_entry.options.get(
+                        default=self._entry_options.get(
                             CONF_SCAN_INTERVAL,
                             DEFAULT_SCAN_INTERVAL_SECONDS,
                         ),
@@ -276,22 +280,35 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                         ),
                     ),
                     vol.Optional(
+                        CONF_MAP_LABEL_SCALE,
+                        default=self._entry_options.get(
+                            CONF_MAP_LABEL_SCALE,
+                            DEFAULT_MAP_LABEL_SCALE,
+                        ),
+                    ): vol.All(
+                        vol.Coerce(float),
+                        vol.Range(
+                            min=MIN_MAP_LABEL_SCALE,
+                            max=MAX_MAP_LABEL_SCALE,
+                        ),
+                    ),
+                    vol.Optional(
                         CONF_XP2P_LIBRARY_PATH,
-                        default=self.config_entry.options.get(
+                        default=self._entry_options.get(
                             CONF_XP2P_LIBRARY_PATH,
                             "",
                         ),
                     ): str,
                     vol.Optional(
                         CONF_XP2P_RUNNER_COMMAND,
-                        default=self.config_entry.options.get(
+                        default=self._entry_options.get(
                             CONF_XP2P_RUNNER_COMMAND,
                             "",
                         ),
                     ): str,
                     vol.Optional(
                         CONF_XP2P_RUNNER_MODE,
-                        default=self.config_entry.options.get(
+                        default=self._entry_options.get(
                             CONF_XP2P_RUNNER_MODE,
                             XP2P_RUNNER_MODE_PROCESS,
                         ),

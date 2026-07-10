@@ -7,6 +7,7 @@ from dreame_lawn_mower_client import (
     DEFAULT_APK_RESEARCH_TERMS,
     DEFAULT_DECOMPILED_SOURCE_SUFFIXES,
     DEFAULT_DREAMEHOME_ASSET_TERMS,
+    MAINTENANCE_ITEMS,
     MAP_HISTORY_PROPERTY_KEYS,
     MAP_PROBE_PROPERTY_KEYS,
     MOWER_BATTERY_PROPERTY_KEY,
@@ -46,6 +47,7 @@ from dreame_lawn_mower_client import (
     build_cloud_key_definition_summary,
     build_cloud_property_history_summary,
     build_cloud_property_summary,
+    build_cms_set_request,
     build_debug_ota_catalog_url,
     build_jadx_command,
     build_map_probe_payload,
@@ -63,6 +65,7 @@ from dreame_lawn_mower_client import (
     encode_schedule_payload_text,
     firmware_update_support_from_device,
     key_definition_label,
+    maintenance_status_from_cms,
     map_diagnostics_from_device,
     map_summary_from_map_data,
     map_summary_to_dict,
@@ -72,8 +75,10 @@ from dreame_lawn_mower_client import (
     mower_state_key,
     mower_state_label,
     normalize_debug_ota_catalog_payload,
+    normalize_maintenance_item,
     remote_control_block_reason,
     remote_control_state_safe,
+    reset_cms_counter,
     run_jadx_decompile,
     summarize_mowing_preference_info,
 )
@@ -136,6 +141,7 @@ def test_public_package_exports_map_helpers() -> None:
     assert callable(build_cloud_property_history_summary)
     assert callable(build_cloud_property_summary)
     assert callable(build_jadx_command)
+    assert callable(build_cms_set_request)
     assert callable(build_map_probe_payload)
     assert callable(batch_data_text)
     assert callable(apply_mowing_preference_changes)
@@ -145,7 +151,10 @@ def test_public_package_exports_map_helpers() -> None:
     assert callable(decode_mowing_preference_payload)
     assert callable(diagnose_native_xp2p_runtime)
     assert callable(encode_mowing_preference_payload)
+    assert callable(maintenance_status_from_cms)
     assert callable(normalize_debug_ota_catalog_payload)
+    assert callable(normalize_maintenance_item)
+    assert callable(reset_cms_counter)
     assert callable(run_jadx_decompile)
     assert callable(summarize_mowing_preference_info)
     assert "10001.1" in CAMERA_PROBE_PROPERTY_KEYS
@@ -156,6 +165,7 @@ def test_public_package_exports_map_helpers() -> None:
     assert "object_name" in DEFAULT_DREAMEHOME_ASSET_TERMS
     assert "2.1" in MAP_PROBE_PROPERTY_KEYS
     assert "6.1" in MAP_HISTORY_PROPERTY_KEYS
+    assert [item.key for item in MAINTENANCE_ITEMS] == ["blade", "brush", "robot"]
     assert MOWING_PREFERENCE_PROPERTY_KEY == "2.52"
     assert "mowing_height_cm" in MOWING_PREFERENCE_UPDATE_FIELDS
 
@@ -191,6 +201,8 @@ def test_public_package_client_has_cloud_probe_helpers() -> None:
     assert hasattr(DreameLawnMowerClient, "async_get_batch_ota_info")
     assert hasattr(DreameLawnMowerClient, "async_get_debug_ota_catalog")
     assert hasattr(DreameLawnMowerClient, "async_get_weather_protection")
+    assert hasattr(DreameLawnMowerClient, "async_get_maintenance_status")
+    assert hasattr(DreameLawnMowerClient, "async_plan_maintenance_reset")
     assert hasattr(DreameLawnMowerClient, "async_set_app_schedule_plan_enabled")
 
 

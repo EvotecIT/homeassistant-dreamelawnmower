@@ -42,6 +42,7 @@
         "title": "Dreame lawn mower options",
         "data": {
           "scan_interval": "Polling interval in seconds",
+          "map_label_scale": "Map label scale",
           "xp2p_library_path": "Host XP2P native library path",
           "xp2p_runner_command": "Host XP2P runner command",
           "xp2p_runner_mode": "Host XP2P runner mode"

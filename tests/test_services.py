@@ -10,13 +10,16 @@ from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.dreame_lawn_mower.services import (
     ATTR_PREFERENCE_MODE,
+    PLAN_MAINTENANCE_RESET_SCHEMA,
     PLAN_MOWING_PREFERENCE_UPDATE_SCHEMA,
     PLAN_SCHEDULE_UPLOAD_SCHEMA,
     REMOTE_CONTROL_STEP_SCHEMA,
     SET_SCHEDULE_PLAN_ENABLED_SCHEMA,
+    _guard_maintenance_reset_request,
     _guard_preference_write_request,
     _guard_remote_control_step,
     _guard_schedule_write_request,
+    _maintenance_reset_notification,
     _mowing_preference_notification,
     _preference_change_request,
     _schedule_write_notification,
@@ -133,6 +136,20 @@ def test_plan_mowing_preference_update_schema_accepts_mode_only_request() -> Non
         "preference_mode": 1,
         "execute": False,
         "confirm_preference_write": False,
+    }
+
+
+def test_plan_maintenance_reset_schema_normalizes_aliases() -> None:
+    parsed = PLAN_MAINTENANCE_RESET_SCHEMA(
+        {
+            "item": "cleaning brush",
+        }
+    )
+
+    assert parsed == {
+        "item": "brush",
+        "execute": False,
+        "confirm_maintenance_reset": False,
     }
 
 
@@ -255,6 +272,29 @@ def test_preference_write_guard_allows_dry_run_without_confirmation() -> None:
     _guard_preference_write_request(call)
 
 
+def test_maintenance_reset_guard_blocks_execute_without_confirmation() -> None:
+    call = SimpleNamespace(
+        data={
+            "execute": True,
+            "confirm_maintenance_reset": False,
+        }
+    )
+
+    with pytest.raises(HomeAssistantError, match="confirm_maintenance_reset"):
+        _guard_maintenance_reset_request(call)
+
+
+def test_maintenance_reset_guard_allows_dry_run_without_confirmation() -> None:
+    call = SimpleNamespace(
+        data={
+            "execute": False,
+            "confirm_maintenance_reset": False,
+        }
+    )
+
+    _guard_maintenance_reset_request(call)
+
+
 def test_preference_change_request_requires_at_least_one_field() -> None:
     call = SimpleNamespace(data={"map_index": 0, "area_id": 11})
 
@@ -370,6 +410,53 @@ def test_mowing_preference_notification_summarizes_candidate_request() -> None:
     assert "changed_fields=mowing_height_cm, edge_mowing_auto" in message
     assert "height 4.0 -> 5.0" in message
     assert '"t": "PRE"' in message
+
+
+def test_maintenance_reset_notification_summarizes_candidate_request() -> None:
+    title, message = _maintenance_reset_notification(
+        {
+            "executed": False,
+            "changed": True,
+            "item": "blade",
+            "item_name": "Blade",
+            "previous_item": {"used_minutes": 4896},
+            "updated_item": {"used_minutes": 0},
+            "request": {
+                "m": "s",
+                "t": "CMS",
+                "d": {"value": [0, 16752, 6849, -1]},
+            },
+        }
+    )
+
+    assert title == "Dreame Lawn Mower Maintenance Reset Dry Run"
+    assert "Built dry-run maintenance reset for Blade" in message
+    assert "counter 4896 -> 0 (will change)" in message
+    assert '"t": "CMS"' in message
+
+
+def test_maintenance_reset_notification_summarizes_executed_request() -> None:
+    title, message = _maintenance_reset_notification(
+        {
+            "executed": True,
+            "changed": False,
+            "item": "robot",
+            "item_name": "Robot Maintenance",
+            "previous_item": {"used_minutes": 0},
+            "updated_item": {"used_minutes": 0},
+            "request": {
+                "m": "s",
+                "t": "CMS",
+                "d": {"value": [4896, 16752, 0, -1]},
+            },
+            "response_data": {"ok": True},
+        }
+    )
+
+    assert title == "Dreame Lawn Mower Maintenance Reset"
+    assert "Sent maintenance reset for Robot Maintenance" in message
+    assert "counter 0 -> 0 (was already reset)" in message
+    assert 'Response: `{"ok": true}`' in message
 
 
 def test_mowing_preference_notification_summarizes_mode_only_request() -> None:

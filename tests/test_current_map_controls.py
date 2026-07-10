@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from homeassistant.components.lawn_mower import LawnMowerActivity
 from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.dreame_lawn_mower.control_options import (
@@ -230,6 +231,13 @@ def _snapshot(**overrides: object) -> SimpleNamespace:
     }
     values.update(overrides)
     return SimpleNamespace(**values)
+
+
+def test_lawn_mower_activity_reports_returning_to_dock() -> None:
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = SimpleNamespace(data=_snapshot(activity="returning"))
+
+    assert entity.activity is LawnMowerActivity.RETURNING
 
 
 def test_current_zone_entries_filter_global_and_edge_area_ids() -> None:

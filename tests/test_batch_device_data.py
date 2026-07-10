@@ -189,6 +189,40 @@ def test_decode_batch_mowing_preferences_decodes_map_settings() -> None:
     assert result["maps"][1]["preferences"][0]["mowing_height_cm"] == 3.5
 
 
+def test_decode_batch_mowing_preferences_aligns_with_app_map_index_hints() -> None:
+    settings_text = _settings_text()
+
+    result = decode_batch_mowing_preferences(
+        {
+            "SETTINGS.0": settings_text[:150],
+            "SETTINGS.1": settings_text[150:300],
+            "SETTINGS.2": settings_text[300:],
+            "SETTINGS.info": str(len(settings_text)),
+        },
+        map_index_hints=[1, 2],
+    )
+
+    assert [entry["idx"] for entry in result["maps"]] == [1, 2]
+    assert result["maps"][0]["preferences"][0]["map_index"] == 1
+    assert result["maps"][0]["preferences"][0]["mowing_height_cm"] == 4.0
+    assert result["maps"][1]["preferences"][0]["map_index"] == 2
+    assert result["maps"][1]["preferences"][0]["mowing_height_cm"] == 3.5
+
+    filtered = decode_batch_mowing_preferences(
+        {
+            "SETTINGS.0": settings_text[:150],
+            "SETTINGS.1": settings_text[150:300],
+            "SETTINGS.2": settings_text[300:],
+            "SETTINGS.info": str(len(settings_text)),
+        },
+        map_indices=[1],
+        map_index_hints=[1, 2],
+    )
+
+    assert [entry["idx"] for entry in filtered["maps"]] == [1]
+    assert filtered["maps"][0]["preferences"][0]["mowing_height_cm"] == 4.0
+
+
 def test_decode_batch_ota_info_decodes_flags() -> None:
     result = decode_batch_ota_info(
         {

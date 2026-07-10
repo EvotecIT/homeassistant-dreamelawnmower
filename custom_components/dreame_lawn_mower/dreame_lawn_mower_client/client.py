@@ -44,6 +44,13 @@ from .debug_ota_catalog import (
     normalize_debug_ota_catalog_payload,
 )
 from .exceptions import DeviceException, InvalidActionException
+from .maintenance import (
+    CMS_GET_REQUEST,
+    build_cms_set_request,
+    maintenance_item_status,
+    maintenance_status_from_app_data,
+    reset_cms_counter,
+)
 from .map_probe import (
     MAP_HISTORY_PROPERTY_KEYS,
     MAP_PROBE_PROPERTY_KEYS,
@@ -554,9 +561,14 @@ class DreameLawnMowerClient:
         *,
         timeout: float = 8.0,
         interval: float = 0.5,
+        label_scale: float = 1.0,
     ) -> bytes | None:
         """Try to refresh the current mower map and return a rendered PNG."""
-        view = await self.async_refresh_map_view(timeout=timeout, interval=interval)
+        view = await self.async_refresh_map_view(
+            timeout=timeout,
+            interval=interval,
+            label_scale=label_scale,
+        )
         return view.image_png
 
     async def async_refresh_map_view(
@@ -564,17 +576,28 @@ class DreameLawnMowerClient:
         *,
         timeout: float = 8.0,
         interval: float = 0.5,
+        label_scale: float = 1.0,
     ) -> DreameLawnMowerMapView:
         """Try to refresh map data and return metadata plus rendered image bytes."""
         return await asyncio.to_thread(
             self._sync_refresh_map_view,
             timeout,
             interval,
+            label_scale,
         )
 
-    async def async_refresh_vector_map_view(self) -> DreameLawnMowerMapView:
+    async def async_refresh_vector_map_view(
+        self,
+        *,
+        label_scale: float = 1.0,
+        current_map_index: int | None = None,
+    ) -> DreameLawnMowerMapView:
         """Refresh the batch/vector map path used for live mowing overlays."""
-        return await asyncio.to_thread(self._sync_refresh_vector_map_view)
+        return await asyncio.to_thread(
+            self._sync_refresh_vector_map_view,
+            label_scale=label_scale,
+            current_map_index=current_map_index,
+        )
 
     async def async_get_app_schedules(
         self,
@@ -670,6 +693,32 @@ class DreameLawnMowerClient:
         return await asyncio.to_thread(
             self._sync_get_weather_protection,
             include_raw,
+        )
+
+    async def async_get_maintenance_status(
+        self,
+        *,
+        include_raw: bool = False,
+    ) -> dict[str, Any]:
+        """Return read-only CMS maintenance counter state from app actions."""
+        return await asyncio.to_thread(
+            self._sync_get_maintenance_status,
+            include_raw,
+        )
+
+    async def async_plan_maintenance_reset(
+        self,
+        *,
+        item: str,
+        execute: bool = False,
+        confirm_write: bool = False,
+    ) -> dict[str, Any]:
+        """Build or execute a guarded CMS maintenance counter reset."""
+        return await asyncio.to_thread(
+            self._sync_plan_maintenance_reset,
+            item,
+            execute,
+            confirm_write,
         )
 
     async def async_get_voice_settings(
@@ -801,12 +850,14 @@ class DreameLawnMowerClient:
         *,
         include_raw: bool = False,
         map_indices: Sequence[int] | None = None,
+        map_index_hints: Sequence[int] | None = None,
     ) -> dict[str, Any]:
         """Fetch and decode mower preferences from batch device data."""
         return await asyncio.to_thread(
             self._sync_get_batch_mowing_preferences,
             include_raw,
             map_indices,
+            map_index_hints,
         )
 
     async def async_get_batch_ota_info(
@@ -1488,7 +1539,10 @@ class DreameLawnMowerClient:
                 "error": str(err),
             }
 
-        vector_map = parse_batch_vector_map(batch_data)
+        vector_map = parse_batch_vector_map(
+            batch_data,
+            current_map_index=self._sync_get_current_app_map_index(),
+        )
         if vector_map is None:
             return {
                 "available": False,
@@ -1862,21 +1916,27 @@ class DreameLawnMowerClient:
         self,
         timeout: float,
         interval: float,
+        label_scale: float = 1.0,
     ) -> bytes | None:
-        return self._sync_refresh_map_view(timeout, interval).image_png
+        return self._sync_refresh_map_view(timeout, interval, label_scale).image_png
 
     def _sync_refresh_map_view(
         self,
         timeout: float,
         interval: float,
+        label_scale: float = 1.0,
     ) -> DreameLawnMowerMapView:
         app_view = self._sync_refresh_app_map_view(
             legacy_error=None,
             legacy_reason="app_action_map_primary",
+            label_scale=label_scale,
         )
 
         vector_view = self._with_fallback_app_maps(
-            self._sync_refresh_vector_map_view(),
+            self._sync_refresh_vector_map_view(
+                label_scale=label_scale,
+                current_map_index=_map_view_current_app_map_index(app_view),
+            ),
             app_view,
         )
         if _map_view_has_live_path(vector_view):
@@ -1895,7 +1955,12 @@ class DreameLawnMowerClient:
 
         return app_view
 
-    def _sync_refresh_vector_map_view(self) -> DreameLawnMowerMapView:
+    def _sync_refresh_vector_map_view(
+        self,
+        *,
+        label_scale: float = 1.0,
+        current_map_index: int | None = None,
+    ) -> DreameLawnMowerMapView:
         source = "batch_vector_map"
         try:
             batch_data = self._sync_get_vector_map_batch_data()
@@ -1910,7 +1975,14 @@ class DreameLawnMowerClient:
                 ),
             )
 
-        vector_map = parse_batch_vector_map(batch_data)
+        vector_map = parse_batch_vector_map(
+            batch_data,
+            current_map_index=(
+                current_map_index
+                if current_map_index is not None
+                else self._sync_get_current_app_map_index()
+            ),
+        )
         if vector_map is None:
             return DreameLawnMowerMapView(
                 source=source,
@@ -1959,6 +2031,7 @@ class DreameLawnMowerClient:
         try:
             image_png = render_vector_map_png(
                 vector_map,
+                label_scale=label_scale,
                 runtime_track_segments=runtime_track_segments,
                 runtime_position=_runtime_blob_position(runtime_blob),
             )
@@ -2063,6 +2136,7 @@ class DreameLawnMowerClient:
         *,
         legacy_error: str | None,
         legacy_reason: str,
+        label_scale: float = 1.0,
     ) -> DreameLawnMowerMapView:
         source = "app_action_map"
         try:
@@ -2085,7 +2159,10 @@ class DreameLawnMowerClient:
                     ),
                 )
             payload = selected.get("payload")
-            image_png, width, height = _render_app_map_payload_png(payload)
+            image_png, width, height = _render_app_map_payload_png(
+                payload,
+                label_scale=label_scale,
+            )
             return DreameLawnMowerMapView(
                 source=source,
                 summary=_app_map_view_summary(selected, payload, width, height),
@@ -2755,15 +2832,13 @@ class DreameLawnMowerClient:
 
     def _sync_get_current_app_map_index(self) -> int | None:
         try:
-            app_maps = self._sync_get_app_maps(
-                chunk_size=400,
-                include_payload=False,
-                include_objects=False,
-                include_object_urls=False,
-            )
+            map_list_result = self._sync_call_app_action({"m": "g", "t": "MAPL"})
+            for entry in _normalize_app_map_entries(map_list_result):
+                if entry.get("current"):
+                    return _positive_int(entry.get("idx"))
         except Exception:  # noqa: BLE001 - best-effort hint only
             return None
-        return _positive_int(app_maps.get("current_map_index"))
+        return None
 
     def _sync_get_mowing_preferences(
         self,
@@ -2859,6 +2934,7 @@ class DreameLawnMowerClient:
         self,
         include_raw: bool = False,
         map_indices: Sequence[int] | None = None,
+        map_index_hints: Sequence[int] | None = None,
     ) -> dict[str, Any]:
         """Fetch and decode mower preferences from batch device data."""
         batch_data = self._sync_get_batch_device_data(_batch_settings_keys())
@@ -2879,6 +2955,7 @@ class DreameLawnMowerClient:
             batch_data,
             include_raw=include_raw,
             map_indices=map_indices,
+            map_index_hints=map_index_hints,
         )
 
     def _sync_get_batch_ota_info(
@@ -2943,6 +3020,112 @@ class DreameLawnMowerClient:
             include_raw=include_raw,
         )
         result["url"] = url
+        return result
+
+    def _sync_get_maintenance_status(
+        self,
+        include_raw: bool = False,
+    ) -> dict[str, Any]:
+        """Fetch read-only CMS maintenance counter state."""
+        result: dict[str, Any] = {
+            "source": "app_action_maintenance_cms",
+            "available": False,
+            "items": [],
+            "raw_cms": None,
+            "errors": [],
+        }
+
+        try:
+            cms_result = self._sync_call_app_action(CMS_GET_REQUEST)
+            if include_raw:
+                result["raw_cms_response"] = _json_safe(cms_result, max_depth=4)
+            cms_data = _app_action_data(cms_result)
+            result.update(
+                maintenance_status_from_app_data(
+                    cms_data,
+                    source="app_action_maintenance_cms",
+                )
+            )
+            if result.get("available"):
+                return result
+        except Exception as err:  # noqa: BLE001 - fallback to CFG may still work
+            result["errors"].append({"stage": "cms", "error": str(err)})
+
+        try:
+            config_result = self._sync_call_app_action({"m": "g", "t": "CFG"})
+            if include_raw:
+                result["raw_config_response"] = _json_safe(config_result, max_depth=4)
+            config = _app_action_data(config_result)
+            result.update(
+                maintenance_status_from_app_data(
+                    config,
+                    source="app_action_config_cms",
+                )
+            )
+        except Exception as err:  # noqa: BLE001 - diagnostic probe returns evidence
+            result["errors"].append({"stage": "config", "error": str(err)})
+        return result
+
+    def _sync_plan_maintenance_reset(
+        self,
+        item: str,
+        execute: bool = False,
+        confirm_write: bool = False,
+    ) -> dict[str, Any]:
+        """Build or execute a guarded CMS maintenance counter reset request."""
+        if execute and not confirm_write:
+            raise ValueError(
+                "Maintenance resets require confirm_write=True when execute=True."
+            )
+
+        status = self._sync_get_maintenance_status(include_raw=False)
+        values = status.get("raw_cms")
+        if not isinstance(values, Sequence) or isinstance(
+            values,
+            str | bytes | bytearray,
+        ):
+            raise DreameLawnMowerConnectionError(
+                "Could not read CMS maintenance counters before planning reset."
+            )
+
+        updated_values = reset_cms_counter(values, item)
+        request = build_cms_set_request(updated_values)
+        before = maintenance_item_status(status, item)
+        planned_status = maintenance_status_from_app_data(
+            {"value": updated_values},
+            source="planned_maintenance_reset",
+        )
+        after = maintenance_item_status(planned_status, item)
+        result: dict[str, Any] = {
+            "source": "app_action_maintenance_cms",
+            "action": "reset_maintenance_counter",
+            "item": after.get("key") if isinstance(after, Mapping) else item,
+            "item_name": after.get("name") if isinstance(after, Mapping) else item,
+            "dry_run": not execute,
+            "executed": False,
+            "changed": list(values) != updated_values,
+            "previous_cms": list(values),
+            "updated_cms": updated_values,
+            "previous_item": before,
+            "updated_item": after,
+            "request": request,
+        }
+
+        if not execute:
+            return result
+
+        response = self._sync_call_app_action(request)
+        response_data = _app_action_data(response)
+        result["dry_run"] = False
+        result["executed"] = True
+        result["response"] = _json_safe(response, max_depth=4)
+        result["response_data"] = _json_safe(response_data, max_depth=4)
+        try:
+            refreshed = self._sync_get_maintenance_status(include_raw=False)
+            result["refreshed_cms"] = refreshed.get("raw_cms")
+            result["refreshed_item"] = maintenance_item_status(refreshed, item)
+        except Exception as err:  # noqa: BLE001 - write result is still useful
+            result["refresh_error"] = str(err)
         return result
 
     def _sync_get_weather_protection(
@@ -4601,6 +4784,13 @@ def _select_app_map_payload(app_maps: Mapping[str, Any]) -> Mapping[str, Any] | 
     return available_maps[0] if available_maps else None
 
 
+def _map_view_current_app_map_index(view: DreameLawnMowerMapView) -> int | None:
+    app_maps = view.app_maps
+    if not isinstance(app_maps, Mapping):
+        return None
+    return _positive_int(app_maps.get("current_map_index"))
+
+
 def _vector_map_batch_keys() -> list[str]:
     keys = [*(f"MAP.{index}" for index in range(40)), "MAP.info"]
     keys.extend(f"M_PATH.{index}" for index in range(10))
@@ -4661,18 +4851,27 @@ def _weather_protection_summary(config: Mapping[str, Any]) -> dict[str, Any]:
 
 def _weather_protection_active_summary(result: Mapping[str, Any]) -> dict[str, Any]:
     summary: dict[str, Any] = {}
-    end_time = result.get("rain_protect_end_time")
+    end_time = _rain_protect_end_time_timestamp(result.get("rain_protect_end_time"))
     end_time_present = bool(result.get("rain_protect_end_time_present"))
 
-    if end_time_present:
+    if end_time is not None:
         summary["rain_protection_active"] = True
         end_time_iso = _epoch_to_iso(end_time)
         if end_time_iso is not None:
             summary["rain_protect_end_time_iso"] = end_time_iso
-    elif result.get("available"):
+    elif end_time_present or result.get("available"):
         summary["rain_protection_active"] = False
 
     return summary
+
+
+def _rain_protect_end_time_timestamp(value: Any) -> int | None:
+    """Return a future rain-protection end timestamp, ignoring empty sentinels."""
+    parsed = _positive_int(value)
+    if parsed is None or parsed <= 0:
+        return None
+    timestamp = parsed / 1000 if parsed > 10_000_000_000 else parsed
+    return parsed if timestamp > datetime.now(UTC).timestamp() else None
 
 
 def _voice_settings_summary(config: Mapping[str, Any]) -> dict[str, Any]:
@@ -4833,17 +5032,27 @@ def _app_map_view_details(
     }
 
 
-def render_app_map_payload_png(payload: Any) -> tuple[bytes, int, int]:
+def render_app_map_payload_png(
+    payload: Any,
+    *,
+    label_scale: float = 1.0,
+) -> tuple[bytes, int, int]:
     """Render a mower-native app map payload to PNG bytes."""
-    return _render_app_map_payload_png(payload)
+    return _render_app_map_payload_png(payload, label_scale=label_scale)
 
 
-def _render_app_map_payload_png(payload: Any) -> tuple[bytes, int, int]:
+def _render_app_map_payload_png(
+    payload: Any,
+    *,
+    label_scale: float = 1.0,
+) -> tuple[bytes, int, int]:
     if not isinstance(payload, Mapping):
         raise ValueError("App map payload is missing.")
 
-    map_polygons = _app_map_coordinate_sets(payload.get("map"))
-    spot_polygons = _app_map_coordinate_sets(payload.get("spot"))
+    map_entries = _app_map_coordinate_entries(payload.get("map"), "Area")
+    spot_entries = _app_map_coordinate_entries(payload.get("spot"), "Spot")
+    map_polygons = [entry["points"] for entry in map_entries]
+    spot_polygons = [entry["points"] for entry in spot_entries]
     trajectories = _app_map_coordinate_sets(payload.get("trajectory"))
     points = _app_map_points(payload.get("point"))
     all_points = [
@@ -4873,7 +5082,7 @@ def _render_app_map_payload_png(payload: Any) -> tuple[bytes, int, int]:
             int(round((max_y - y) * scale + padding)),
         )
 
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageFont
 
     image = Image.new("RGBA", (width, height), (248, 250, 252, 255))
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
@@ -4908,10 +5117,39 @@ def _render_app_map_payload_png(payload: Any) -> tuple[bytes, int, int]:
         x, y = project(point)
         draw.ellipse((x - 6, y - 6, x + 6, y + 6), fill=(15, 23, 42, 255))
 
+    font = _app_map_label_font(ImageFont, label_scale)
+    for entry in [*map_entries, *spot_entries]:
+        label = entry.get("label")
+        polygon = entry.get("points")
+        if not isinstance(label, str) or not polygon:
+            continue
+        center = project(_app_map_polygon_center(polygon))
+        _draw_app_map_label(draw, center, label, font)
+
     image = Image.alpha_composite(image, overlay).convert("RGB")
     buffer = BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue(), width, height
+
+
+def _app_map_coordinate_entries(
+    value: Any,
+    label_prefix: str,
+) -> list[dict[str, Any]]:
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes | bytearray):
+        return []
+    result: list[dict[str, Any]] = []
+    for item in value:
+        data = item.get("data") if isinstance(item, Mapping) else item
+        points = _app_map_points(data)
+        if points:
+            result.append(
+                {
+                    "points": points,
+                    "label": _app_map_entry_label(item, label_prefix),
+                }
+            )
+    return result
 
 
 def _app_map_coordinate_sets(value: Any) -> list[list[tuple[float, float]]]:
@@ -4924,6 +5162,103 @@ def _app_map_coordinate_sets(value: Any) -> list[list[tuple[float, float]]]:
         if points:
             result.append(points)
     return result
+
+
+def _app_map_entry_label(item: Any, label_prefix: str) -> str:
+    if not isinstance(item, Mapping):
+        return label_prefix
+
+    name = item.get("name")
+    if isinstance(name, str) and name.strip():
+        label = name.strip()
+    else:
+        entry_id = item.get("id")
+        label = (
+            f"{label_prefix} #{entry_id}"
+            if entry_id not in (None, "")
+            else label_prefix
+        )
+
+    area = _app_map_area_label(item.get("area"))
+    return f"{label}\n{area}" if area else label
+
+
+def _app_map_area_label(value: Any) -> str | None:
+    if not isinstance(value, int | float) or value <= 0:
+        return None
+    if value >= 100:
+        area = f"{value:.0f}"
+    else:
+        area = f"{value:.1f}".rstrip("0").rstrip(".")
+    return f"{area} m2"
+
+
+def _app_map_polygon_center(
+    points: Sequence[tuple[float, float]],
+) -> tuple[float, float]:
+    if not points:
+        return (0.0, 0.0)
+    return (
+        sum(point[0] for point in points) / len(points),
+        sum(point[1] for point in points) / len(points),
+    )
+
+
+def _app_map_label_font(image_font: Any, label_scale: float) -> Any:
+    size = max(8, int(round(18 * _normalize_app_map_label_scale(label_scale))))
+    for font_name in ("DejaVuSans-Bold.ttf", "Arial.ttf"):
+        try:
+            return image_font.truetype(font_name, size=size)
+        except OSError:
+            continue
+    try:
+        return image_font.load_default(size=size)
+    except TypeError:
+        return image_font.load_default()
+
+
+def _normalize_app_map_label_scale(label_scale: float) -> float:
+    if not isinstance(label_scale, int | float) or math.isnan(float(label_scale)):
+        return 1.0
+    return max(0.5, min(float(label_scale), 4.0))
+
+
+def _draw_app_map_label(
+    draw: Any,
+    center: tuple[int, int],
+    label: str,
+    font: Any,
+) -> None:
+    halo = (248, 250, 252, 235)
+    fill = (15, 23, 42, 255)
+    for offset_x, offset_y in (
+        (-2, 0),
+        (2, 0),
+        (0, -2),
+        (0, 2),
+        (-1, -1),
+        (1, -1),
+        (-1, 1),
+        (1, 1),
+    ):
+        draw.multiline_text(
+            (center[0] + offset_x, center[1] + offset_y),
+            label,
+            fill=halo,
+            font=font,
+            anchor="mm",
+            align="center",
+            spacing=2,
+        )
+    draw.multiline_text(
+        center,
+        label,
+        fill=fill,
+        font=font,
+        anchor="mm",
+        align="center",
+        spacing=2,
+    )
 
 
 def _app_map_points(value: Any) -> list[tuple[float, float]]:

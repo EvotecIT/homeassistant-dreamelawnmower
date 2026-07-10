@@ -17,6 +17,7 @@ from .calendar import schedule_calendar_selection
 from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .debug import build_debug_payload, sanitize_debug_data
+from .dreame_lawn_mower_client.maintenance import MAINTENANCE_ITEMS, MaintenanceItem
 from .entity import DreameLawnMowerEntity
 from .task_status_probe import TASK_STATUS_PROBE_KEYS, task_status_probe_payload
 
@@ -40,6 +41,10 @@ async def async_setup_entry(
             DreameLawnMowerCaptureScheduleProbeButton(coordinator),
             DreameLawnMowerCapturePreferenceProbeButton(coordinator),
             DreameLawnMowerCaptureWeatherProbeButton(coordinator),
+        ]
+        + [
+            DreameLawnMowerResetMaintenanceButton(coordinator, item)
+            for item in MAINTENANCE_ITEMS
         ]
     )
 
@@ -401,6 +406,79 @@ class DreameLawnMowerCaptureWeatherProbeButton(
                 f"{DOMAIN}_{self.coordinator.entry.entry_id}_weather_probe"
             ),
         )
+
+
+class DreameLawnMowerResetMaintenanceButton(
+    DreameLawnMowerEntity,
+    ButtonEntity,
+):
+    """Reset a live CMS maintenance counter."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(
+        self,
+        coordinator: DreameLawnMowerCoordinator,
+        item: MaintenanceItem,
+    ) -> None:
+        super().__init__(coordinator)
+        self._item = item
+        self._attr_name = f"Reset {item.name} Maintenance"
+        self._attr_icon = item.icon
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_reset_maintenance_{item.key}"
+        )
+
+    async def async_press(self) -> None:
+        """Reset the selected maintenance counter and refresh cached status."""
+        result = await self.coordinator.client.async_plan_maintenance_reset(
+            item=self._item.key,
+            execute=True,
+            confirm_write=True,
+        )
+        self.coordinator.last_maintenance_reset_result = result
+        await self.coordinator.async_refresh_maintenance_status(
+            force=True,
+            source="maintenance_reset_button",
+        )
+        self.coordinator.async_update_listeners()
+        _LOGGER.info(
+            "Reset Dreame lawn mower maintenance counter for %s: %s",
+            self._item.name,
+            json.dumps(result, sort_keys=True),
+        )
+        title, message = _maintenance_reset_button_notification(result)
+        persistent_notification.async_create(
+            self.coordinator.hass,
+            message,
+            title=title,
+            notification_id=(
+                f"{DOMAIN}_{self.coordinator.entry.entry_id}_reset_maintenance_"
+                f"{self._item.key}"
+            ),
+        )
+
+
+def _maintenance_reset_button_notification(
+    result: dict[str, object],
+) -> tuple[str, str]:
+    """Return title and message for a maintenance reset button press."""
+    item_name = result.get("item_name") or result.get("item") or "maintenance item"
+    previous = result.get("previous_item")
+    updated = result.get("updated_item")
+    previous_counter = (
+        previous.get("used_minutes") if isinstance(previous, dict) else None
+    )
+    updated_counter = updated.get("used_minutes") if isinstance(updated, dict) else None
+    return (
+        "Dreame Lawn Mower Maintenance Reset",
+        (
+            f"Reset {item_name}: counter {previous_counter} -> "
+            f"{updated_counter}. Enable the Last Maintenance Reset diagnostic "
+            "sensor for full CMS request and response details."
+        ),
+    )
 
 
 def schedule_probe_payload(payload: dict[str, object]) -> dict[str, object]:

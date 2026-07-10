@@ -89,6 +89,7 @@ def decode_batch_mowing_preferences(
     *,
     include_raw: bool = False,
     map_indices: Sequence[int] | None = None,
+    map_index_hints: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     """Decode `SETTINGS.*` batch device data into readable preference summaries."""
     result: dict[str, Any] = {
@@ -125,7 +126,13 @@ def decode_batch_mowing_preferences(
         if map_indices is not None
         else None
     )
-    for map_index, map_entry in enumerate(payload):
+    index_hints = _map_index_hints(map_index_hints)
+    for payload_index, map_entry in enumerate(payload):
+        map_index = _batch_preference_map_index(
+            map_entry,
+            payload_index=payload_index,
+            map_index_hints=index_hints,
+        )
         if selected_indices is not None and map_index not in selected_indices:
             continue
         entry = _decode_batch_preference_map_entry(
@@ -138,6 +145,35 @@ def decode_batch_mowing_preferences(
         result["maps"].append(entry)
 
     return result
+
+
+def _map_index_hints(values: Sequence[int] | None) -> list[int]:
+    if values is None:
+        return []
+    hints: list[int] = []
+    for value in values:
+        index = _to_int(value)
+        if index is None or index < 0 or index in hints:
+            continue
+        hints.append(index)
+    return hints
+
+
+def _batch_preference_map_index(
+    value: Any,
+    *,
+    payload_index: int,
+    map_index_hints: Sequence[int],
+) -> int:
+    if isinstance(value, Mapping):
+        for key in ("idx", "index", "map_index", "mapIndex", "map_id", "mapId", "id"):
+            index = _to_int(value.get(key))
+            if index is not None and index >= 0:
+                return index
+
+    if payload_index < len(map_index_hints):
+        return int(map_index_hints[payload_index])
+    return payload_index
 
 
 def decode_batch_ota_info(

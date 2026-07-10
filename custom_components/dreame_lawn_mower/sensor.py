@@ -36,6 +36,12 @@ from .control_options import (
     current_map_index as selected_current_map_index,
 )
 from .coordinator import DreameLawnMowerCoordinator
+from .dreame_lawn_mower_client.maintenance import (
+    MAINTENANCE_ITEMS,
+    MaintenanceItem,
+    maintenance_item_status,
+    maintenance_status_attributes,
+)
 from .entity import DreameLawnMowerEntity
 from .manual_control import remote_control_block_reason
 from .task_status_probe import (
@@ -302,6 +308,11 @@ async def async_setup_entry(
         + [DreameLawnMowerWeatherProtectionStatusSensor(coordinator)]
         + [DreameLawnMowerRainProtectionDurationSensor(coordinator)]
         + [DreameLawnMowerRainDelayEndTimeSensor(coordinator)]
+        + [
+            DreameLawnMowerMaintenanceRemainingSensor(coordinator, item)
+            for item in MAINTENANCE_ITEMS
+        ]
+        + [DreameLawnMowerLastMaintenanceResetSensor(coordinator)]
         + [DreameLawnMowerLastPreferenceWriteSensor(coordinator)]
         + [DreameLawnMowerLastScheduleWriteSensor(coordinator)]
         + [DreameLawnMowerLastBatchDeviceDataProbeSensor(coordinator)]
@@ -341,6 +352,135 @@ class DreameLawnMowerSensor(DreameLawnMowerEntity, SensorEntity):
         """Return whether the sensor currently has meaningful mower data."""
         snapshot = self.coordinator.data
         return snapshot is not None and self.entity_description.exists_fn(snapshot)
+
+
+class DreameLawnMowerMaintenanceRemainingSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose remaining maintenance life for a CMS counter."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 1
+
+    def __init__(
+        self,
+        coordinator: DreameLawnMowerCoordinator,
+        item: MaintenanceItem,
+    ) -> None:
+        super().__init__(coordinator)
+        self._item = item
+        self._attr_name = f"{item.name} Remaining"
+        self._attr_icon = item.icon
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_maintenance_{item.key}_remaining"
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return remaining maintenance life percentage."""
+        item = maintenance_item_status(
+            self.coordinator.maintenance_status,
+            self._item,
+        )
+        if not isinstance(item, dict):
+            return None
+        value = item.get("remaining_percent")
+        return value if isinstance(value, int | float) else None
+
+    @property
+    def available(self) -> bool:
+        """Return whether maintenance data is cached."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe maintenance counter details."""
+        status = self.coordinator.maintenance_status
+        attributes = maintenance_status_attributes(status)
+        item = maintenance_item_status(status, self._item)
+        if isinstance(item, dict):
+            attributes.update(
+                {
+                    "item": item.get("key"),
+                    "item_name": item.get("name"),
+                    "used_minutes": item.get("used_minutes"),
+                    "used_hours": item.get("used_hours"),
+                    "remaining_minutes": item.get("remaining_minutes"),
+                    "remaining_hours": item.get("remaining_hours"),
+                    "total_minutes": item.get("total_minutes"),
+                    "total_hours": item.get("total_hours"),
+                    "status": item.get("status"),
+                    "warning": item.get("warning"),
+                    "warning_percent": item.get("warning_percent"),
+                    "due": item.get("due"),
+                }
+            )
+        return {key: value for key, value in attributes.items() if value is not None}
+
+
+class DreameLawnMowerLastMaintenanceResetSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the last guarded maintenance reset or dry-run result."""
+
+    _attr_name = "Last Maintenance Reset"
+    _attr_icon = "mdi:wrench-clock"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_last_maintenance_reset"
+
+    @property
+    def native_value(self) -> str:
+        """Return a compact state for the last maintenance reset result."""
+        return _maintenance_reset_state(self.coordinator.last_maintenance_reset_result)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return safe details for the last maintenance reset result."""
+        return maintenance_reset_result_attributes(
+            self.coordinator.last_maintenance_reset_result
+        )
+
+
+def _maintenance_reset_state(result: dict[str, Any] | None) -> str:
+    if not result:
+        return "none"
+    return "executed" if result.get("executed") else "dry_run"
+
+
+def maintenance_reset_result_attributes(
+    result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return compact, non-secret attributes for a maintenance reset result."""
+    if not result:
+        return {}
+
+    attributes: dict[str, Any] = {
+        "source": result.get("source"),
+        "action": result.get("action"),
+        "dry_run": result.get("dry_run"),
+        "executed": result.get("executed"),
+        "changed": result.get("changed"),
+        "item": result.get("item"),
+        "item_name": result.get("item_name"),
+        "previous_cms": result.get("previous_cms"),
+        "updated_cms": result.get("updated_cms"),
+        "previous_item": result.get("previous_item"),
+        "updated_item": result.get("updated_item"),
+        "request": result.get("request"),
+        "response_data": result.get("response_data"),
+        "refreshed_cms": result.get("refreshed_cms"),
+        "refreshed_item": result.get("refreshed_item"),
+        "refresh_error": result.get("refresh_error"),
+    }
+    return {key: value for key, value in attributes.items() if value is not None}
 
 
 class DreameLawnMowerLastScheduleWriteSensor(

@@ -8,6 +8,7 @@ import json
 from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
     DreameLawnMowerConnectionError,
+    render_app_map_payload_png,
 )
 from dreame_lawn_mower_client.models import (
     DreameLawnMowerDescriptor,
@@ -118,6 +119,40 @@ def _client() -> DreameLawnMowerClient:
             country="eu",
         ),
     )
+
+
+def test_app_map_renderer_labels_areas_and_spots_with_scale() -> None:
+    payload = {
+        "map": [
+            {
+                "id": 7,
+                "name": "Front",
+                "area": 12.5,
+                "data": [[0, 0], [100, 0], [100, 100], [0, 100]],
+            }
+        ],
+        "spot": [
+            {
+                "id": 2,
+                "data": [[30, 30], [70, 30], [70, 70], [30, 70]],
+            }
+        ],
+        "trajectory": [[[0, 0], [100, 100]]],
+    }
+
+    normal_png, normal_width, normal_height = render_app_map_payload_png(
+        payload,
+        label_scale=1.0,
+    )
+    large_png, large_width, large_height = render_app_map_payload_png(
+        payload,
+        label_scale=2.5,
+    )
+
+    assert normal_png
+    assert large_png
+    assert (normal_width, normal_height) == (large_width, large_height)
+    assert normal_png != large_png
 
 
 def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
@@ -337,11 +372,16 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
 
 def test_map_view_prefers_vector_render_when_live_path_is_available() -> None:
     client = _client()
+    vector_refresh_kwargs: dict[str, object] = {}
     app_view = DreameLawnMowerMapView(
         source="app_action_map",
         summary=DreameLawnMowerMapSummary(available=True, map_id=0),
         image_png=b"app",
-        app_maps={"source": "app_action_map", "map_count": 2},
+        app_maps={
+            "source": "app_action_map",
+            "map_count": 2,
+            "current_map_index": 1,
+        },
         details={"has_live_path": False},
     )
     vector_view = DreameLawnMowerMapView(
@@ -352,7 +392,9 @@ def test_map_view_prefers_vector_render_when_live_path_is_available() -> None:
     )
 
     client._sync_refresh_app_map_view = lambda **kwargs: app_view
-    client._sync_refresh_vector_map_view = lambda: vector_view
+    client._sync_refresh_vector_map_view = lambda **kwargs: (
+        vector_refresh_kwargs.update(kwargs) or vector_view
+    )
     client._sync_refresh_legacy_map_view = lambda timeout, interval: (
         _ for _ in ()
     ).throw(  # noqa: ARG005
@@ -364,7 +406,12 @@ def test_map_view_prefers_vector_render_when_live_path_is_available() -> None:
     assert view.source == "batch_vector_map"
     assert view.image_png == b"vector"
     assert view.details == {"has_live_path": True, "mow_path_point_count": 42}
-    assert view.app_maps == {"source": "app_action_map", "map_count": 2}
+    assert view.app_maps == {
+        "source": "app_action_map",
+        "map_count": 2,
+        "current_map_index": 1,
+    }
+    assert vector_refresh_kwargs["current_map_index"] == 1
 
 
 def test_map_view_keeps_app_render_when_vector_has_no_live_path() -> None:
@@ -384,7 +431,7 @@ def test_map_view_keeps_app_render_when_vector_has_no_live_path() -> None:
     )
 
     client._sync_refresh_app_map_view = lambda **kwargs: app_view
-    client._sync_refresh_vector_map_view = lambda: vector_view
+    client._sync_refresh_vector_map_view = lambda **kwargs: vector_view
     client._sync_refresh_legacy_map_view = lambda timeout, interval: (
         _ for _ in ()
     ).throw(  # noqa: ARG005

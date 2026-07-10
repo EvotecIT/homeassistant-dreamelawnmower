@@ -12,6 +12,8 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
     DreameLawnMowerAutomaticFirmwareUpdatesBinarySensor,
     DreameLawnMowerBluetoothConnectedBinarySensor,
     DreameLawnMowerFirmwareUpdateAvailableBinarySensor,
+    DreameLawnMowerMaintenanceDueBinarySensor,
+    DreameLawnMowerMaintenanceWarningBinarySensor,
     DreameLawnMowerRainDelayActiveBinarySensor,
     DreameLawnMowerRainProtectionEnabledBinarySensor,
 )
@@ -21,6 +23,8 @@ from custom_components.dreame_lawn_mower.button import (
     DreameLawnMowerCaptureScheduleProbeButton,
     DreameLawnMowerCaptureTaskStatusProbeButton,
     DreameLawnMowerCaptureWeatherProbeButton,
+    DreameLawnMowerResetMaintenanceButton,
+    _maintenance_reset_button_notification,
     schedule_probe_payload,
 )
 from custom_components.dreame_lawn_mower.const import PLATFORMS
@@ -38,6 +42,7 @@ from custom_components.dreame_lawn_mower.sensor import (
     DreameLawnMowerConfiguredScheduleCountSensor,
     DreameLawnMowerFirmwareUpdateStatusSensor,
     DreameLawnMowerLastBatchDeviceDataProbeSensor,
+    DreameLawnMowerLastMaintenanceResetSensor,
     DreameLawnMowerLastPreferenceProbeSensor,
     DreameLawnMowerLastPreferenceWriteSensor,
     DreameLawnMowerLastScheduleProbeSensor,
@@ -57,6 +62,7 @@ from custom_components.dreame_lawn_mower.sensor import (
     batch_ota_attributes,
     batch_preference_attributes,
     batch_schedule_attributes,
+    maintenance_reset_result_attributes,
     preference_probe_result_attributes,
     preference_write_result_attributes,
     schedule_probe_result_attributes,
@@ -237,6 +243,85 @@ def test_rain_delay_active_binary_sensor_is_diagnostic() -> None:
         DreameLawnMowerRainDelayActiveBinarySensor.__dict__["__attr_entity_category"]
         == "diagnostic"
     )
+
+
+def test_maintenance_due_binary_sensor_is_diagnostic() -> None:
+    assert (
+        DreameLawnMowerMaintenanceDueBinarySensor.__dict__["__attr_entity_category"]
+        == "diagnostic"
+    )
+
+
+def test_maintenance_warning_binary_sensor_is_diagnostic() -> None:
+    assert (
+        DreameLawnMowerMaintenanceWarningBinarySensor.__dict__[
+            "__attr_entity_category"
+        ]
+        == "diagnostic"
+    )
+
+
+def test_last_maintenance_reset_sensor_is_diagnostic_disabled_by_default() -> None:
+    assert (
+        DreameLawnMowerLastMaintenanceResetSensor.__dict__["__attr_entity_category"]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerLastMaintenanceResetSensor.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
+    )
+
+
+def test_reset_maintenance_button_is_diagnostic_disabled_by_default() -> None:
+    assert (
+        DreameLawnMowerResetMaintenanceButton.__dict__["__attr_entity_category"]
+        == "diagnostic"
+    )
+    assert (
+        DreameLawnMowerResetMaintenanceButton.__dict__[
+            "__attr_entity_registry_enabled_default"
+        ]
+        is False
+    )
+
+
+def test_maintenance_reset_result_attributes_are_compact() -> None:
+    attributes = maintenance_reset_result_attributes(
+        {
+            "source": "test",
+            "action": "reset_maintenance_counter",
+            "dry_run": True,
+            "executed": False,
+            "changed": True,
+            "item": "blade",
+            "item_name": "Blade",
+            "previous_cms": [4896, 16752, 6849, -1],
+            "updated_cms": [0, 16752, 6849, -1],
+            "previous_item": {"used_minutes": 4896},
+            "updated_item": {"used_minutes": 0},
+            "request": {"m": "s", "t": "CMS"},
+        }
+    )
+
+    assert attributes["item"] == "blade"
+    assert attributes["changed"] is True
+    assert attributes["request"] == {"m": "s", "t": "CMS"}
+
+
+def test_maintenance_reset_button_notification_is_compact() -> None:
+    title, message = _maintenance_reset_button_notification(
+        {
+            "item_name": "Blade",
+            "previous_item": {"used_minutes": 4909},
+            "updated_item": {"used_minutes": 0},
+        }
+    )
+
+    assert title == "Dreame Lawn Mower Maintenance Reset"
+    assert "Reset Blade: counter 4909 -> 0" in message
+    assert "Last Maintenance Reset" in message
 
 
 def test_task_status_probe_button_is_diagnostic_disabled_by_default() -> None:

@@ -425,6 +425,45 @@ plan_schedule_upload:
       selector:
         boolean: {}
 
+plan_maintenance_reset:
+  name: Plan maintenance reset
+  description: >-
+    Build or send a guarded CMS maintenance counter reset. By default this is
+    a dry run that only shows the candidate CMS request in a notification and
+    the diagnostic sensor. Sending the request requires execute and
+    confirm_maintenance_reset to both be true.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Required only when multiple Dreame lawn mower entries are loaded.
+      selector:
+        text: {}
+    item:
+      name: Maintenance item
+      description: CMS maintenance counter to reset.
+      required: true
+      selector:
+        select:
+          options:
+            - label: Blade
+              value: blade
+            - label: Cleaning Brush
+              value: brush
+            - label: Robot Maintenance
+              value: robot
+    execute:
+      name: Execute
+      description: Send the reset request instead of only building a dry-run preview.
+      default: false
+      selector:
+        boolean: {}
+    confirm_maintenance_reset:
+      name: Confirm maintenance reset
+      description: Required together with execute before the reset is sent.
+      default: false
+      selector:
+        boolean: {}
+
 plan_mowing_preference_update:
   name: Plan mowing preference update
   description: >-

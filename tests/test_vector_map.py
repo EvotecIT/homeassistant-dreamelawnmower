@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from types import SimpleNamespace
+
+from PIL import Image
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.vector_map import (
     parse_batch_vector_map,
@@ -226,6 +229,20 @@ def test_parse_batch_vector_map_handles_map_info_split_and_mow_paths() -> None:
     )
 
 
+def test_parse_batch_vector_map_can_select_current_map_index() -> None:
+    vector_map = parse_batch_vector_map(_batch_payload(), current_map_index=1)
+
+    assert vector_map is not None
+    assert vector_map.map_index == 1
+    assert vector_map.map_id == 2
+    assert vector_map.zones[0].name == "Back Yard"
+    assert vector_map.boundary is not None
+    assert vector_map.boundary.width == 50
+    assert sorted(vector_map.maps) == [1, 2]
+    assert vector_map.maps[1].zones[0].name == "Front Yard"
+    assert len(vector_map.mow_paths) == 1
+
+
 def test_vector_map_summary_and_renderer_return_drawable_output() -> None:
     vector_map = parse_batch_vector_map(_batch_payload())
 
@@ -245,6 +262,20 @@ def test_vector_map_summary_and_renderer_return_drawable_output() -> None:
     assert summary.path_point_count == 6
     assert image_png is not None
     assert image_png.startswith(b"\x89PNG")
+
+
+def test_vector_map_renderer_label_scale_changes_label_pixels() -> None:
+    vector_map = parse_batch_vector_map(_batch_payload())
+
+    normal_png = render_vector_map_png(vector_map, label_scale=1.0)
+    larger_png = render_vector_map_png(vector_map, label_scale=3.0)
+
+    assert normal_png is not None
+    assert larger_png is not None
+    assert normal_png != larger_png
+    with Image.open(BytesIO(normal_png)) as normal_image:
+        with Image.open(BytesIO(larger_png)) as larger_image:
+            assert normal_image.size == larger_image.size
 
 
 def test_vector_map_details_report_live_path_counts() -> None:
@@ -395,3 +426,48 @@ def test_vector_map_view_includes_cached_runtime_track_overlay() -> None:
     assert view.details["runtime_pose_y"] == 40
     assert view.details["runtime_heading_deg"] == 90.0
     assert view.details["has_live_path"] is True
+
+
+def test_vector_map_view_renders_current_app_map_index() -> None:
+    client = _client()
+    app_action_calls: list[dict[str, object]] = []
+
+    def call_app_action(payload: dict[str, object], **kwargs) -> dict:  # noqa: ARG001
+        app_action_calls.append(payload)
+        if payload.get("t") == "MAPL":
+            return {"r": 0, "d": [[0, 0, 1, 1, 0], [1, 1, 1, 1, 0]]}
+        raise AssertionError(f"unexpected app action call: {payload}")
+
+    client._sync_call_app_action = call_app_action
+    client._sync_get_vector_map_batch_data = lambda: _batch_payload()
+    client._safe_map_diagnostics = lambda **kwargs: None
+
+    view = client._sync_refresh_vector_map_view()
+
+    assert view.source == "batch_vector_map"
+    assert view.available is True
+    assert view.image_png is not None
+    assert view.image_png.startswith(b"\x89PNG")
+    assert view.summary is not None
+    assert view.summary.map_id == 1
+    assert view.summary.width == 50
+    assert view.details is not None
+    assert view.details["map_index"] == 1
+    assert view.details["zone_names"] == ["Back Yard"]
+    assert app_action_calls == [{"m": "g", "t": "MAPL"}]
+
+
+def test_vector_map_view_falls_back_when_map_list_errors() -> None:
+    client = _client()
+    client._sync_call_app_action = lambda payload, **kwargs: {"r": 1}  # noqa: ARG005
+    client._sync_get_vector_map_batch_data = lambda: _batch_payload()
+    client._safe_map_diagnostics = lambda **kwargs: None
+
+    view = client._sync_refresh_vector_map_view()
+
+    assert view.source == "batch_vector_map"
+    assert view.available is True
+    assert view.summary is not None
+    assert view.summary.map_id == 0
+    assert view.details is not None
+    assert view.details["map_index"] == 0

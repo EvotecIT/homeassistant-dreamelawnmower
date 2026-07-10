@@ -14,7 +14,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import CONF_MAP_LABEL_SCALE, DEFAULT_MAP_LABEL_SCALE, DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .dreame_lawn_mower_client.client import render_app_map_payload_png
 from .dreame_lawn_mower_client.models import DreameLawnMowerMapView
@@ -163,6 +163,7 @@ class DreameLawnMowerMapCamera(
                 lambda: self.coordinator.client.async_refresh_map_view(
                     timeout=_MAP_TIMEOUT_SECONDS,
                     interval=_MAP_POLL_INTERVAL_SECONDS,
+                    label_scale=self._map_label_scale,
                 )
             )
             self.async_write_ha_state()
@@ -172,6 +173,16 @@ class DreameLawnMowerMapCamera(
             view = self._map_cache.store_error(str(err))
             self.async_write_ha_state()
             return view
+
+    @property
+    def _map_label_scale(self) -> float:
+        """Return configured label scaling for locally rendered map text."""
+        return float(
+            self.coordinator.entry.options.get(
+                CONF_MAP_LABEL_SCALE,
+                DEFAULT_MAP_LABEL_SCALE,
+            )
+        )
 
 
 class DreameLawnMowerLivePathMapCamera(DreameLawnMowerMapCamera):
@@ -192,7 +203,9 @@ class DreameLawnMowerLivePathMapCamera(DreameLawnMowerMapCamera):
         """Return a cached live/vector map view or refresh it on demand."""
         try:
             view = await self._map_cache.async_get_view(
-                self.coordinator.client.async_refresh_vector_map_view
+                lambda: self.coordinator.client.async_refresh_vector_map_view(
+                    label_scale=self._map_label_scale,
+                )
             )
             self.async_write_ha_state()
             return view
@@ -319,7 +332,11 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
                 include_objects=False,
             )
             return await self.hass.async_add_executor_job(
-                partial(_all_maps_contact_sheet_from_payload, app_maps)
+                partial(
+                    _all_maps_contact_sheet_from_payload,
+                    app_maps,
+                    label_scale=self._map_label_scale,
+                )
             )
         except Exception as err:
             _LOGGER.warning("Failed to refresh Dreame mower all-map image: %s", err)
@@ -332,7 +349,11 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
             )
 
 
-def _all_maps_contact_sheet_from_payload(app_maps: dict[str, Any]) -> bytes:
+def _all_maps_contact_sheet_from_payload(
+    app_maps: dict[str, Any],
+    *,
+    label_scale: float = 1.0,
+) -> bytes:
     """Render all drawable app map payloads into one contact sheet."""
     rendered: list[dict[str, object]] = []
     maps = app_maps.get("maps")
@@ -347,7 +368,10 @@ def _all_maps_contact_sheet_from_payload(app_maps: dict[str, Any]) -> bytes:
             }
             payload = item.get("payload")
             try:
-                image_png, width, height = render_app_map_payload_png(payload)
+                image_png, width, height = render_app_map_payload_png(
+                    payload,
+                    label_scale=label_scale,
+                )
                 entry.update(
                     {
                         "image_png": image_png,
