@@ -454,7 +454,7 @@ class DreameMowerDreameHomeCloudProtocol:
             f"{self.get_api_url()}/dreame-third-video/tx/user/accesstoken",
             json.dumps({"os": os}, separators=(",", ":")),
         )
-        if response and "data" in response and response["code"] == 0:
+        if response and "data" in response and response.get("code", 0) == 0:
             return response["data"]
         return response
 
@@ -468,6 +468,7 @@ class DreameMowerDreameHomeCloudProtocol:
         params = {"did": self._did, "os": os}
         if access_token:
             params["accesstoken"] = access_token
+            params["accessToken"] = access_token
         if self._uid:
             params["uid"] = str(self._uid)
         if self._model:
@@ -477,7 +478,7 @@ class DreameMowerDreameHomeCloudProtocol:
             f"{self.get_api_url()}/dreame-third-video/tx/mgr/dev/getIdentity",
             json.dumps(params, separators=(",", ":")),
         )
-        if response and "data" in response and response["code"] == 0:
+        if response and "data" in response and response.get("code", 0) == 0:
             return response["data"]
         return response
 
@@ -512,11 +513,12 @@ class DreameMowerDreameHomeCloudProtocol:
         params = {"did": self._did, "os": os}
         if access_token:
             params["accesstoken"] = access_token
+            params["accessToken"] = access_token
         response = self.request(
             f"{self.get_api_url()}/dreame-third-video/tx/dev/getP2PInfo",
             json.dumps(params, separators=(",", ":")),
         )
-        if response and "data" in response and response["code"] == 0:
+        if response and "data" in response and response.get("code", 0) == 0:
             return response["data"]
         return response
 

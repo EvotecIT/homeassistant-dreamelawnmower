@@ -376,16 +376,26 @@ surfaces secondary maps without changing the mower-selected map.
 
 ## Confirmed TX video playback sequence
 
-The local Dreamehome `2.5.3.0` decompile exposes the Tencent XP2P video path in:
+The local Dreamehome `2.5.8.1` decompile and the downloaded A2 React Native
+plugin expose the Tencent XP2P video path in:
 
 - `com.tencent.xnet.XP2P`
 - `com.dreame.plugin.video.tx.dreame_flutter_plugin_tx_video.rn.TXAVVideoPlayer`
 - `com.dreame.plugin.video.tx.dreame_flutter_plugin_tx_video.rn.video.Command`
 
-For live playback, `TXAVVideoPlayer.startPlay(p2pInfo)` calls:
+For live playback, the plugin supplies `channelId`, `productId`, `deviceName`,
+and `p2pInfo`. The Java XP2P wrapper then uses two distinct identifiers:
 
-- `XP2P.startService(context, channelId, productId, deviceName)`
-- `XP2P.setParamsForXp2pInfo(channelId, null, null, p2pInfo)`
+- `productId/deviceName` for native `startService` and `setDeviceXp2pInfo`
+- `channelId` for the device-status command, AV receive, FLV delegation, and
+  shutdown
+
+The app initializes the XP2P config with `autoConfigFromDevice=false`. It uses
+the SDK default STUN/config path during playback rather than making
+`AppDescribeConfigureDeviceP2P` a startup dependency. The identity response
+also contains the encrypted values used for QCloud and for deriving the XP2P
+application credentials, but those application credentials are not a gate for
+the app's default playback path.
 
 After the XP2P callback reports event `1004`, the app checks device state with
 `action=inner_define&channel={channel}&cmd=get_device_st&type=live&quality=standard`.
@@ -398,6 +408,14 @@ This matters for probes: the status/readiness command uses `quality=standard`
 even when the final FLV URL requests `quality=high`. Treat a returned local URL
 as only an intermediate step; the proof point remains readable FLV bytes or
 frame data.
+
+A supervised Dreame A2 run on July 10, 2026 confirmed this split-ID contract:
+XP2P reported ready event `1004`, the device-status and local delegate calls
+succeeded, and the first 16 stream bytes began with `46 4c 56` (`FLV`). The
+mower was returned to charging afterward. This proves the playback protocol;
+Home Assistant still needs a compatible host-native XP2P library or local
+runner because Dreamehome's Android/Bionic libraries cannot be loaded directly
+on a standard Home Assistant host.
 
 Use `python examples/apk_research.py <apk> --max-string-length 220` when
 testing a new Dreamehome APK.

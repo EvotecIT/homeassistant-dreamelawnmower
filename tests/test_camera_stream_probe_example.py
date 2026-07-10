@@ -28,6 +28,37 @@ def _load_probe_module() -> ModuleType:
     return module
 
 
+class _FakeVideoClient:
+    def __init__(self) -> None:
+        self.video_enabled: list[bool] = []
+
+    async def async_set_camera_stream_enabled(self, enabled: bool):
+        self.video_enabled.append(enabled)
+        return {"ok": True, "enabled": enabled}
+
+
+class _FakeDockClient:
+    def __init__(self, *snapshots) -> None:
+        self.snapshots = list(snapshots)
+        self.dock_called = False
+
+    async def async_dock(self) -> None:
+        self.dock_called = True
+
+    async def async_refresh(self):
+        if len(self.snapshots) > 1:
+            return self.snapshots.pop(0)
+        return self.snapshots[0]
+
+
+class _FakeStartClient:
+    async def async_start_mowing(self) -> None:
+        return None
+
+    async def async_refresh(self):
+        raise RuntimeError("refresh unavailable")
+
+
 def test_runtime_inputs_summary_redacts_stable_identifiers() -> None:
     module = _load_probe_module()
     inputs = DreameLawnMowerCameraStreamRuntimeInputs(
@@ -209,6 +240,87 @@ def test_field_test_profile_preserves_explicit_probe_timing() -> None:
     assert result.dock_after_active is True
     assert result.stream_url_attempts == 3
     assert result.stream_url_retry_interval == 0.5
+
+
+def test_start_before_active_enables_dock_cleanup() -> None:
+    module = _load_probe_module()
+    args = SimpleNamespace(
+        field_test_profile="none",
+        start_before_active=True,
+        dock_after_active=False,
+    )
+
+    result = module._apply_field_test_profile(args)
+
+    assert result.dock_after_active is True
+
+
+def test_start_before_active_preserves_cleanup_after_wait_failure() -> None:
+    module = _load_probe_module()
+    docked = SimpleNamespace(
+        state="charging",
+        activity="docked",
+        battery_level=90,
+        docked=True,
+        raw_docked=True,
+        mowing=False,
+        paused=False,
+        returning=False,
+    )
+
+    snapshot, result = asyncio.run(
+        module._async_start_before_active(
+            _FakeStartClient(),
+            initial_snapshot=docked,
+            timeout=1.0,
+            interval=0.01,
+        )
+    )
+
+    assert snapshot is docked
+    assert result["sent"] is True
+    assert result["wait_error_type"] == "RuntimeError"
+
+
+def test_dock_after_active_waits_for_station_state() -> None:
+    module = _load_probe_module()
+    returning = SimpleNamespace(
+        state="returning",
+        activity="returning",
+        battery_level=90,
+        docked=False,
+        raw_docked=False,
+        mowing=False,
+        paused=False,
+        returning=True,
+    )
+    docked = SimpleNamespace(
+        state="charging",
+        activity="docked",
+        battery_level=90,
+        docked=True,
+        raw_docked=True,
+        mowing=False,
+        paused=False,
+        returning=False,
+    )
+    client = _FakeDockClient(returning, docked)
+    output: dict[str, object] = {}
+
+    asyncio.run(
+        module._async_dock_after_active(
+            client,
+            output,
+            timeout=1.0,
+            interval=0.01,
+        )
+    )
+
+    result = output["dock_after_active"]
+    assert client.dock_called is True
+    assert result["sent"] is True
+    assert result["wait"]["ready"] is True
+    assert result["after"]["state"] == "charging"
 
 
 def test_host_runtime_preflight_blocks_missing_field_runner_before_wait() -> None:
@@ -404,6 +516,7 @@ def test_xp2p_runner_probe_checks_returned_stream_url(tmp_path) -> None:
     try:
         result = asyncio.run(
             module._async_probe_xp2p_runner(
+                _FakeVideoClient(),
                 runner_cmd,
                 inputs,
                 mode="one-shot",
@@ -426,6 +539,8 @@ def test_xp2p_runner_probe_checks_returned_stream_url(tmp_path) -> None:
     assert result["stream_health"]["flv_header_present"] is True
     assert result["stream_health"]["bytes_read"] == 8
     assert result["stream_health"]["attempts"] == 1
+    assert result["app_video_enable"]["ok"] is True
+    assert result["app_video_disable"]["ok"] is True
 
 
 def test_xp2p_runner_probe_missing_runner_is_preflight_failure() -> None:
@@ -441,6 +556,7 @@ def test_xp2p_runner_probe_missing_runner_is_preflight_failure() -> None:
 
     result = asyncio.run(
         module._async_probe_xp2p_runner(
+            _FakeVideoClient(),
             None,
             inputs,
             mode="process",

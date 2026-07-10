@@ -95,6 +95,7 @@ from .vector_map import (
     vector_map_to_details,
     vector_map_to_summary,
 )
+from .video_credentials import derive_tx_video_app_credentials
 
 REMOTE_CONTROL_MAX_ROTATION = 1000
 REMOTE_CONTROL_MAX_VELOCITY = 1000
@@ -1707,11 +1708,6 @@ class DreameLawnMowerClient:
                 access_token = _find_text_by_key(
                     access,
                     ("accessToken", "accesstoken", "token"),
-                )
-            if hasattr(cloud, "pair_tx_video_device"):
-                output["raw"]["pair"] = _json_safe(
-                    cloud.pair_tx_video_device(access_token=access_token, os=1),
-                    max_depth=4,
                 )
             if hasattr(cloud, "get_tx_video_device_identity"):
                 identity = cloud.get_tx_video_device_identity(
@@ -5101,12 +5097,39 @@ def _normalize_tx_rtc_info(
     for output_key, source_keys in (
         ("secret_id", ("secretId", "secret_id")),
         ("secret_key", ("secretKey", "secret_key")),
-        ("app_id", ("appId", "app_id")),
-        ("app_secret", ("appSecret", "app_secret")),
+        (
+            "app_id",
+            ("appId", "app_id", "appid", "appKey", "app_key", "appkey"),
+        ),
+        (
+            "app_secret",
+            (
+                "appSecret",
+                "app_secret",
+                "appsecret",
+                "xp2pSecretKey",
+                "xp2p_secretKey",
+                "xp2p_secret_key",
+            ),
+        ),
     ):
         text = _find_text_by_key(value, source_keys)
         if text:
             output[output_key] = text
+
+    derived_app_id, derived_app_secret = derive_tx_video_app_credentials(
+        output.get("secret_id"),
+        output.get("secret_key"),
+    )
+    derived = False
+    if not output.get("app_id") and derived_app_id:
+        output["app_id"] = derived_app_id
+        derived = True
+    if not output.get("app_secret") and derived_app_secret:
+        output["app_secret"] = derived_app_secret
+        derived = True
+    if derived:
+        output["app_credentials_source"] = "dreame_identity_decrypted"
     return output
 
 
@@ -5123,11 +5146,43 @@ def _normalize_tx_p2p_info(value: Any) -> dict[str, Any]:
             "apiLicense",
         ),
     )
-    return {
+    output = {
         "available": value not in (None, "", {}, []),
         "p2p_info": p2p_text,
         "raw": _json_safe(value, max_depth=5),
     }
+    for output_key, source_keys in (
+        (
+            "app_id",
+            (
+                "appId",
+                "app_id",
+                "appid",
+                "appKey",
+                "app_key",
+                "appkey",
+                "xp2pKey",
+                "xp2p_key",
+            ),
+        ),
+        (
+            "app_secret",
+            (
+                "appSecret",
+                "app_secret",
+                "appsecret",
+                "xp2pSecretKey",
+                "xp2p_secretKey",
+                "xp2p_secret_key",
+            ),
+        ),
+        ("secret_id", ("secretId", "secret_id")),
+        ("secret_key", ("secretKey", "secret_key")),
+    ):
+        text = _find_text_by_key(value, source_keys)
+        if text:
+            output[output_key] = text
+    return output
 
 
 def _camera_stream_runtime_inputs_from_cloud_payload(
@@ -5144,10 +5199,14 @@ def _camera_stream_runtime_inputs_from_cloud_payload(
         product_id=_as_optional_text(tx_rtc.get("product_id")),
         device_name=_as_optional_text(tx_rtc.get("device_name")),
         p2p_info=_as_optional_text(p2p.get("p2p_info")),
-        secret_id=_as_optional_text(tx_rtc.get("secret_id")),
-        secret_key=_as_optional_text(tx_rtc.get("secret_key")),
-        app_id=_as_optional_text(tx_rtc.get("app_id")),
-        app_secret=_as_optional_text(tx_rtc.get("app_secret")),
+        secret_id=_as_optional_text(tx_rtc.get("secret_id"))
+        or _as_optional_text(p2p.get("secret_id")),
+        secret_key=_as_optional_text(tx_rtc.get("secret_key"))
+        or _as_optional_text(p2p.get("secret_key")),
+        app_id=_as_optional_text(tx_rtc.get("app_id"))
+        or _as_optional_text(p2p.get("app_id")),
+        app_secret=_as_optional_text(tx_rtc.get("app_secret"))
+        or _as_optional_text(p2p.get("app_secret")),
         raw=_json_safe(value, max_depth=5),
     )
 

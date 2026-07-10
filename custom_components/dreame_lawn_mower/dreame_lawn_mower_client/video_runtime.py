@@ -14,11 +14,11 @@ from ctypes import (
     Structure,
     byref,
     c_bool,
-    c_char,
     c_char_p,
     c_int,
     c_size_t,
     c_ubyte,
+    c_uint16,
     c_uint64,
     c_void_p,
 )
@@ -34,6 +34,7 @@ from .video_runner_diagnostics import (
     payload_sensitive_values,
     process_stderr_preview,
     safe_output_preview,
+    timeout_expired_preview,
 )
 
 XP2P_PROTOCOL_AUTO = 0
@@ -43,8 +44,11 @@ XP2P_PROTOCOL_TCP = 2
 DEFAULT_COMMAND_TIMEOUT_US = 7_500_000
 ANDROID_XP2P_JNI_SYMBOL_MARKERS = (
     b"Java_com_tencent_xnet_XP2P",
-    b"setDeviceXp2pInfo",
     b"startServiceNative",
+)
+ANDROID_BIONIC_LIBRARY_MARKERS = (
+    b"liblog.so",
+    b"libandroid.so",
 )
 REQUIRED_XP2P_SYMBOLS = (
     "startService",
@@ -56,6 +60,7 @@ REQUIRED_XP2P_SYMBOLS = (
 OPTIONAL_XP2P_SYMBOLS = (
     "setQcloudApiCred",
     "setStunServerToXp2p",
+    "setCrossStunTurn",
     "stopAvRecvService",
     "stopService",
 )
@@ -74,8 +79,8 @@ class _NativeCallable(Protocol):
 
 class _Xp2pAppConfig(Structure):
     _fields_ = [
-        ("server", c_char * 256),
-        ("ip", c_char * 64),
+        ("server", c_char_p),
+        ("ip", c_char_p),
         ("port", c_uint64),
         ("type", c_int),
         ("cross", c_bool),
@@ -97,8 +102,8 @@ class DreameLawnMowerXp2pAppConfig:
     def to_native(self) -> _Xp2pAppConfig:
         """Return the ctypes struct expected by Tencent's XP2P C ABI."""
         config = _Xp2pAppConfig()
-        config.server = _encode_fixed(self.server, 256)
-        config.ip = _encode_fixed(self.ip, 64)
+        config.server = _encode(self.server)
+        config.ip = _encode(self.ip)
         config.port = self.port
         config.type = self.protocol_type
         config.cross = self.cross
@@ -119,6 +124,7 @@ class DreameLawnMowerXp2pRuntimeDiagnostics:
     file_format: str | None = None
     machine: str | None = None
     android_jni_symbols_present: bool = False
+    android_bionic_dependencies_present: bool = False
     platform_hint: str | None = None
     error: str | None = None
 
@@ -135,6 +141,9 @@ class DreameLawnMowerXp2pRuntimeDiagnostics:
             "file_format": self.file_format,
             "machine": self.machine,
             "android_jni_symbols_present": self.android_jni_symbols_present,
+            "android_bionic_dependencies_present": (
+                self.android_bionic_dependencies_present
+            ),
             "platform_hint": self.platform_hint,
             "error": self.error,
         }
@@ -157,6 +166,8 @@ class DreameLawnMowerXp2pLiveStreamRequest:
     )
     secret_id: str | None = field(default=None, repr=False)
     secret_key: str | None = field(default=None, repr=False)
+    app_id: str | None = field(default=None, repr=False)
+    app_secret: str | None = field(default=None, repr=False)
 
     @classmethod
     def from_runtime_inputs(
@@ -188,6 +199,8 @@ class DreameLawnMowerXp2pLiveStreamRequest:
             p2p_info=str(inputs.p2p_info),
             secret_id=inputs.secret_id,
             secret_key=inputs.secret_key,
+            app_id=inputs.app_id,
+            app_secret=inputs.app_secret,
             flv_path=flv_path,
             live_command=inputs.live_command,
             device_status_command=device_status_command,
@@ -205,6 +218,8 @@ class DreameLawnMowerXp2pLiveStreamRequest:
             "p2p_info": self.p2p_info,
             "secret_id": self.secret_id,
             "secret_key": self.secret_key,
+            "app_id": self.app_id,
+            "app_secret": self.app_secret,
             "flv_path": self.flv_path,
             "live_command": self.live_command,
             "device_status_command": self.device_status_command,
@@ -219,6 +234,8 @@ class DreameLawnMowerXp2pLiveStreamRequest:
                 "p2p_info",
                 "secret_id",
                 "secret_key",
+                "app_id",
+                "app_secret",
                 "flv_path",
             ):
                 payload[f"{key}_present"] = bool(payload.pop(key, None))
@@ -231,6 +248,7 @@ class DreameLawnMowerXp2pLiveStreamSession:
 
     service_id: str
     stream_url: str
+    delegate_id: str | None = None
     runtime: str = "native_xp2p"
     start_result: int = 0
     command_result: int | None = None
@@ -248,6 +266,7 @@ class DreameLawnMowerXp2pLiveStreamSession:
         """Return safe stream session metadata."""
         payload = {
             "service_id": self.service_id,
+            "delegate_id": self.delegate_id,
             "stream_url": self.stream_url,
             "runtime": self.runtime,
             "start_result": self.start_result,
@@ -263,7 +282,7 @@ class DreameLawnMowerXp2pLiveStreamSession:
             "runner_process_alive": _process_alive(self.runner_process),
         }
         if redact:
-            for key in ("service_id", "stream_url"):
+            for key in ("service_id", "delegate_id", "stream_url"):
                 payload[f"{key}_present"] = bool(payload.pop(key, None))
         return payload
 
@@ -301,6 +320,9 @@ class DreameLawnMowerXp2pExternalRunner:
         return DreameLawnMowerXp2pLiveStreamSession(
             service_id=_as_text(response.get("service_id")) or request.service_id,
             stream_url=stream_url,
+            delegate_id=(
+                _as_text(response.get("delegate_id")) or request.delegate_id
+            ),
             runtime="external_xp2p_runner",
             runner_command=self.command,
             runner_session_id=_as_text(response.get("runner_session_id")),
@@ -313,6 +335,7 @@ class DreameLawnMowerXp2pExternalRunner:
                 "operation": "stop",
                 "session": {
                     "service_id": session.service_id,
+                    "delegate_id": session.delegate_id,
                     "stream_url": session.stream_url,
                     "runner_session_id": session.runner_session_id,
                 },
@@ -337,6 +360,7 @@ class DreameLawnMowerXp2pExternalRunner:
         except subprocess.TimeoutExpired as err:
             raise DreameLawnMowerVideoRuntimeError(
                 f"XP2P external runner timed out after {self.timeout:g}s."
+                + timeout_expired_preview(err, sensitive_values)
             ) from err
         if completed.returncode != 0:
             raise DreameLawnMowerVideoRuntimeError(
@@ -427,6 +451,9 @@ class DreameLawnMowerXp2pProcessRunner:
             return DreameLawnMowerXp2pLiveStreamSession(
                 service_id=_as_text(response.get("service_id")) or request.service_id,
                 stream_url=stream_url,
+                delegate_id=(
+                    _as_text(response.get("delegate_id")) or request.delegate_id
+                ),
                 runtime="xp2p_process_runner",
                 runner_command=self.command,
                 runner_session_id=_as_text(response.get("runner_session_id")),
@@ -450,6 +477,7 @@ class DreameLawnMowerXp2pProcessRunner:
                     "operation": "stop",
                     "session": {
                         "service_id": session.service_id,
+                        "delegate_id": session.delegate_id,
                         "stream_url": session.stream_url,
                         "runner_session_id": session.runner_session_id,
                     },
@@ -512,8 +540,14 @@ class DreameLawnMowerNativeXp2pRuntime:
         )
         self._set_stun_server = self._bind(
             "setStunServerToXp2p",
-            [c_char_p, c_int],
-            c_int,
+            [c_char_p, c_uint16],
+            None,
+            required=False,
+        )
+        self._set_cross_stun_turn = self._bind(
+            "setCrossStunTurn",
+            [c_bool],
+            None,
             required=False,
         )
         self._delegate_http_flv = self._bind(
@@ -534,6 +568,8 @@ class DreameLawnMowerNativeXp2pRuntime:
         *,
         app_config: DreameLawnMowerXp2pAppConfig | None = None,
         command_timeout_us: int = DEFAULT_COMMAND_TIMEOUT_US,
+        device_status_attempts: int = 60,
+        device_status_retry_interval: float = 0.5,
         delegate_attempts: int = 60,
         delegate_retry_interval: float = 0.5,
     ) -> DreameLawnMowerXp2pLiveStreamSession:
@@ -546,6 +582,7 @@ class DreameLawnMowerNativeXp2pRuntime:
         stun_file_path: Path | None = None
         try:
             stun_file_path = self._set_stun_server_for_config(config)
+            self._set_cross_stun_turn_for_config(config)
             qcloud_result = self._set_qcloud_api_cred_for_request(request)
             if qcloud_result not in (None, 0):
                 raise DreameLawnMowerVideoRuntimeError(
@@ -573,10 +610,12 @@ class DreameLawnMowerNativeXp2pRuntime:
                     "XP2P setDeviceXp2pInfo failed with code "
                     f"{xp2p_info_result}."
                 )
-            device_status_result, device_status_response = (
-                self._post_device_status_command(
+            device_status_result, device_status_response, device_status_code = (
+                self._wait_for_ready_device_status(
                     request,
                     command_timeout_us=command_timeout_us,
+                    attempts=device_status_attempts,
+                    retry_interval=device_status_retry_interval,
                 )
             )
             if device_status_result != 0:
@@ -584,14 +623,13 @@ class DreameLawnMowerNativeXp2pRuntime:
                     "XP2P device status command failed with code "
                     f"{device_status_result}."
                 )
-            device_status_code = _decode_device_status_code(device_status_response)
             if device_status_code not in (None, 0):
                 raise DreameLawnMowerVideoRuntimeError(
                     "XP2P device status rejected live video with code "
                     f"{device_status_code}."
                 )
             av_recv_handle = self._start_av_recv(
-                service_id,
+                _encode(request.delegate_id),
                 _encode(request.flv_path),
                 True,
             )
@@ -608,6 +646,7 @@ class DreameLawnMowerNativeXp2pRuntime:
             return DreameLawnMowerXp2pLiveStreamSession(
                 service_id=request.service_id,
                 stream_url=stream_url,
+                delegate_id=request.delegate_id,
                 start_result=start_result,
                 device_status_result=device_status_result,
                 device_status_code=device_status_code,
@@ -621,6 +660,7 @@ class DreameLawnMowerNativeXp2pRuntime:
                     DreameLawnMowerXp2pLiveStreamSession(
                         service_id=request.service_id,
                         stream_url="",
+                        delegate_id=request.delegate_id,
                         av_recv_handle=av_recv_handle,
                         stun_file_path=(
                             str(stun_file_path) if stun_file_path else None
@@ -633,11 +673,11 @@ class DreameLawnMowerNativeXp2pRuntime:
 
     def stop_live_stream(self, session: DreameLawnMowerXp2pLiveStreamSession) -> None:
         """Stop a native XP2P live stream session."""
-        service_id = _encode(session.service_id)
+        runtime_id = _encode(session.delegate_id or session.service_id)
         if session.av_recv_handle is not None and self._stop_av_recv is not None:
-            self._stop_av_recv(service_id, session.av_recv_handle)
+            self._stop_av_recv(runtime_id, session.av_recv_handle)
         if self._stop_service is not None:
-            self._stop_service(service_id)
+            self._stop_service(runtime_id)
         _remove_stun_file(session.stun_file_path)
 
     def _post_live_command(
@@ -661,10 +701,34 @@ class DreameLawnMowerNativeXp2pRuntime:
     ) -> tuple[int, bytes | None]:
         command = _encode(request.device_status_command)
         return self._post_command_bytes(
-            request.service_id,
+            request.delegate_id,
             command,
             command_timeout_us=command_timeout_us,
         )
+
+    def _wait_for_ready_device_status(
+        self,
+        request: DreameLawnMowerXp2pLiveStreamRequest,
+        *,
+        command_timeout_us: int,
+        attempts: int,
+        retry_interval: float,
+    ) -> tuple[int, bytes | None, int | None]:
+        last_result = 0
+        last_response = None
+        last_code = None
+        max_attempts = max(int(attempts), 1)
+        for attempt in range(1, max_attempts + 1):
+            last_result, last_response = self._post_device_status_command(
+                request,
+                command_timeout_us=command_timeout_us,
+            )
+            last_code = _decode_device_status_code(last_response)
+            if last_result == 0 and last_code in (None, 0):
+                return last_result, last_response, last_code
+            if attempt < max_attempts:
+                time.sleep(max(retry_interval, 0.0))
+        return last_result, last_response, last_code
 
     def _post_command_bytes(
         self,
@@ -723,6 +787,13 @@ class DreameLawnMowerNativeXp2pRuntime:
             )
         )
 
+    def _set_cross_stun_turn_for_config(
+        self,
+        config: DreameLawnMowerXp2pAppConfig,
+    ) -> None:
+        if self._set_cross_stun_turn is not None:
+            self._set_cross_stun_turn(bool(config.cross))
+
     def _set_stun_server_for_config(
         self,
         config: DreameLawnMowerXp2pAppConfig,
@@ -731,20 +802,13 @@ class DreameLawnMowerNativeXp2pRuntime:
             return None
         stun_file = _write_stun_file(config.stun_servers)
         try:
-            result = int(
-                self._set_stun_server(
-                    _encode(str(stun_file)),
-                    int(config.stun_port),
-                )
+            self._set_stun_server(
+                _encode(str(stun_file)),
+                int(config.stun_port),
             )
         except Exception:
             _remove_stun_file(stun_file)
             raise
-        if result != 0:
-            _remove_stun_file(stun_file)
-            raise DreameLawnMowerVideoRuntimeError(
-                f"XP2P setStunServerToXp2p failed with code {result}."
-            )
         return stun_file
 
     def _bind(
@@ -788,6 +852,14 @@ def diagnose_native_xp2p_runtime(
                 "it is not a Home Assistant host runtime. Provide a XP2P "
                 "library or runner built for the Home Assistant operating "
                 "system and CPU architecture."
+            )
+        elif inspection.get("platform_hint") == "android_bionic":
+            error += (
+                " The file looks like Tencent's Android XP2P runtime. It may "
+                "export the expected C symbols, but Android/Bionic shared "
+                "libraries cannot be loaded as a Home Assistant host runtime. "
+                "Provide a XP2P library or runner built for the Home Assistant "
+                "operating system and CPU architecture."
             )
         elif inspection.get("file_format") == "static_archive":
             error += (
@@ -863,9 +935,16 @@ def _inspect_native_library_file(path: Path) -> dict[str, Any]:
         inspection.get("file_format") == "elf"
         and any(marker in data for marker in ANDROID_XP2P_JNI_SYMBOL_MARKERS)
     )
+    android_bionic = (
+        inspection.get("file_format") == "elf"
+        and any(marker in data for marker in ANDROID_BIONIC_LIBRARY_MARKERS)
+    )
     inspection["android_jni_symbols_present"] = android_jni
+    inspection["android_bionic_dependencies_present"] = android_bionic
     if android_jni:
         inspection["platform_hint"] = "android_jni"
+    elif android_bionic:
+        inspection["platform_hint"] = "android_bionic"
     return inspection
 
 
@@ -935,8 +1014,11 @@ def _read_json_line(
     thread.start()
     thread.join(timeout=max(timeout, 0.1))
     if thread.is_alive():
+        _terminate_process(process)
+        thread.join(timeout=0.5)
         raise DreameLawnMowerVideoRuntimeError(
             f"XP2P process runner timed out after {timeout:g}s."
+            + output_preview("stdout", result["line"], sensitive_values)
             + process_stderr_preview(process, sensitive_values)
         )
     line = result["line"]
@@ -1051,12 +1133,3 @@ def _append_flv_path(stream_url_prefix: str, flv_path: str) -> str:
         else "/"
     )
     return f"{stream_url_prefix}{separator}{flv_path.lstrip('/')}"
-
-
-def _encode_fixed(value: str, size: int) -> bytes:
-    encoded = _encode(value)
-    if len(encoded) >= size:
-        raise DreameLawnMowerVideoRuntimeError(
-            f"XP2P app config value is too long for {size}-byte field."
-        )
-    return encoded

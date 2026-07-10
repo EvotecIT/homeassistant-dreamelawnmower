@@ -48,6 +48,7 @@ class _FakeXp2pLibrary:
         self.stopAvRecvService = _FakeFunction(0)
         self.setQcloudApiCred = _FakeFunction(0)
         self.setStunServerToXp2p = _FakeFunction(0)
+        self.setCrossStunTurn = _FakeFunction(None)
         self.delegateHttpFlv = _FakeFunction(b"http://127.0.0.1:54321/")
         self.stopService = _FakeFunction(None)
 
@@ -158,6 +159,7 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
         "ipc.flv?action=live&channel=0&quality=high&_crypto=on"
     )
     assert session.service_id == "product-1/mower-camera-1"
+    assert session.delegate_id == "channel-1"
     assert session.command_result is None
     assert session.device_status_result == 0
     assert session.device_status_code is None
@@ -170,19 +172,22 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
     assert start_call[0] == b"product-1/mower-camera-1"
     assert start_call[1] == b"product-1"
     assert start_call[2] == b"mower-camera-1"
+    assert start_call[3].server == b""
+    assert start_call[3].ip == b""
     assert start_call[3].type == XP2P_PROTOCOL_TCP
     assert library.setDeviceXp2pInfo.calls == [
         (b"product-1/mower-camera-1", b"p2p-info-1")
     ]
     assert library.setQcloudApiCred.calls == [(b"secret-id-1", b"secret-key-1")]
     assert library.setStunServerToXp2p.calls
+    assert library.setCrossStunTurn.calls == [(False,)]
     stun_call = library.setStunServerToXp2p.calls[0]
     assert Path(stun_call[0].decode()) == stun_file_path
     assert stun_call[1] == 20002
     assert "43.158.113.38:20002" in stun_file_path.read_text(encoding="utf-8")
     assert len(library.postCommandRequestSync.calls) == 1
     status_call = library.postCommandRequestSync.calls[0]
-    assert status_call[0] == b"product-1/mower-camera-1"
+    assert status_call[0] == b"channel-1"
     assert bytes(status_call[1][: status_call[2]]) == (
         b"action=inner_define&channel=0&cmd=get_device_st&type=live&quality=standard"
     )
@@ -191,13 +196,15 @@ def test_native_xp2p_runtime_starts_live_stream_and_returns_flv_url() -> None:
         library.startAvRecvService.calls[0][1]
         == b"ipc.flv?action=live&channel=0&quality=high&_crypto=on"
     )
+    assert library.startAvRecvService.calls[0][0] == b"channel-1"
     assert library.delegateHttpFlv.calls[0][0] == b"channel-1"
 
     runtime.stop_live_stream(session)
 
     assert not stun_file_path.exists()
     assert library.stopAvRecvService.calls
-    assert library.stopService.calls == [(b"product-1/mower-camera-1",)]
+    assert library.stopAvRecvService.calls[0][0] == b"channel-1"
+    assert library.stopService.calls == [(b"channel-1",)]
 
 
 def test_native_xp2p_runtime_uses_configured_stun_servers() -> None:
@@ -255,7 +262,7 @@ def test_native_xp2p_runtime_fails_when_device_status_command_fails() -> None:
     runtime = DreameLawnMowerNativeXp2pRuntime("fake-xp2p.so", library=library)
 
     try:
-        runtime.start_live_stream(_runtime_inputs())
+        runtime.start_live_stream(_runtime_inputs(), device_status_attempts=1)
     except DreameLawnMowerVideoRuntimeError as err:
         assert "device status command" in str(err)
         assert "-9" in str(err)
@@ -264,7 +271,7 @@ def test_native_xp2p_runtime_fails_when_device_status_command_fails() -> None:
 
     assert library.startAvRecvService.calls == []
     assert library.delegateHttpFlv.calls == []
-    assert library.stopService.calls == [(b"product-1/mower-camera-1",)]
+    assert library.stopService.calls == [(b"channel-1",)]
 
 
 def test_device_status_decoder_reads_app_status_payload() -> None:
@@ -303,7 +310,7 @@ def test_native_xp2p_runtime_cleans_up_when_flv_url_is_missing() -> None:
         raise AssertionError("Expected missing FLV URL to fail")
 
     assert library.stopAvRecvService.calls
-    assert library.stopService.calls == [(b"product-1/mower-camera-1",)]
+    assert library.stopService.calls == [(b"channel-1",)]
 
 
 def test_native_xp2p_runtime_reports_missing_required_symbols() -> None:
@@ -402,6 +409,36 @@ def test_native_xp2p_runtime_diagnostics_identify_android_jni_library(
     assert payload["platform_hint"] == "android_jni"
 
 
+def test_native_xp2p_runtime_diagnostics_identify_android_bionic_library(
+    tmp_path,
+) -> None:
+    library_path = tmp_path / "libiot_video_demo.so"
+    elf_header = bytearray(64)
+    elf_header[0:4] = b"\x7fELF"
+    elf_header[4] = 2
+    elf_header[5] = 1
+    elf_header[18:20] = (183).to_bytes(2, "little")
+    library_path.write_bytes(
+        bytes(elf_header)
+        + b"startService"
+        + b"setDeviceXp2pInfo"
+        + b"delegateHttpFlv"
+        + b"liblog.so"
+    )
+
+    diagnostics = diagnose_native_xp2p_runtime(library_path)
+
+    assert diagnostics.ready is False
+    assert diagnostics.loadable is False
+    assert diagnostics.file_format == "elf"
+    assert diagnostics.machine == "aarch64"
+    assert diagnostics.android_jni_symbols_present is False
+    assert diagnostics.android_bionic_dependencies_present is True
+    assert diagnostics.platform_hint == "android_bionic"
+    assert "Android XP2P runtime" in str(diagnostics.error)
+    assert diagnostics.as_dict()["platform_hint"] == "android_bionic"
+
+
 def test_native_xp2p_runtime_diagnostics_identify_static_archive(tmp_path) -> None:
     library_path = tmp_path / "libxp2p-ios.a"
     library_path.write_bytes(b"!<arch>\n")
@@ -466,6 +503,7 @@ def test_external_runner_starts_live_stream_and_stops_session(tmp_path) -> None:
     assert session.stream_url == "http://127.0.0.1:5544/ipc.flv"
     assert session.runtime == "external_xp2p_runner"
     assert session.service_id == "product-1/mower-camera-1"
+    assert session.delegate_id == "channel-1"
     assert session.runner_session_id == "runner-session-1"
     calls = [
         json.loads(line)
@@ -485,6 +523,7 @@ def test_external_runner_starts_live_stream_and_stops_session(tmp_path) -> None:
     assert calls[1] == {
         "operation": "stop",
         "session": {
+            "delegate_id": "channel-1",
             "runner_session_id": "runner-session-1",
             "service_id": "product-1/mower-camera-1",
             "stream_url": "http://127.0.0.1:5544/ipc.flv",
@@ -567,6 +606,7 @@ def test_process_runner_keeps_stream_process_alive_until_stop(tmp_path) -> None:
     assert session.runtime == "xp2p_process_runner"
     assert session.runner_session_id == "process-session-1"
     assert session.service_id == "product-1/mower-camera-1"
+    assert session.delegate_id == "channel-1"
     assert session.runner_process is not None
     assert session.runner_process.poll() is None
     assert session.as_dict()["runner_process_alive"] is True
@@ -586,6 +626,7 @@ def test_process_runner_keeps_stream_process_alive_until_stop(tmp_path) -> None:
     assert calls[1] == {
         "operation": "stop",
         "session": {
+            "delegate_id": "channel-1",
             "runner_session_id": "process-session-1",
             "service_id": "product-1/mower-camera-1",
             "stream_url": "http://127.0.0.1:5544/ipc.flv",
@@ -654,6 +695,7 @@ def test_stream_session_metadata_can_redact_runtime_identifiers() -> None:
     session = DreameLawnMowerXp2pLiveStreamSession(
         service_id="channel-1",
         stream_url="http://127.0.0.1:5544/ipc.flv",
+        delegate_id="channel-1",
         runtime="external_xp2p_runner",
         runner_session_id="runner-session-1",
     )
@@ -661,7 +703,9 @@ def test_stream_session_metadata_can_redact_runtime_identifiers() -> None:
     redacted = session.as_dict(redact=True)
 
     assert "service_id" not in redacted
+    assert "delegate_id" not in redacted
     assert "stream_url" not in redacted
     assert redacted["service_id_present"] is True
+    assert redacted["delegate_id_present"] is True
     assert redacted["stream_url_present"] is True
     assert redacted["runner_session_id_present"] is True

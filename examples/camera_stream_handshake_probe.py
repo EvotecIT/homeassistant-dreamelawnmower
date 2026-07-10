@@ -1,7 +1,8 @@
 """Safety-gated probe for the Dreame mower camera stream handshake.
 
 Default mode is read-only. Add --execute or an XP2P start flag to try a short
-supervised video attempt. This does not start mowing, audio, or remote control.
+supervised video attempt. Add --start-before-active only when you intentionally
+want a supervised start/undock step before the video attempt.
 """
 
 from __future__ import annotations
@@ -10,10 +11,16 @@ import argparse
 import asyncio
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
-from dreame_lawn_mower_client import (
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_CUSTOM_COMPONENTS = _REPO_ROOT / "custom_components"
+if str(_CUSTOM_COMPONENTS) not in sys.path:
+    sys.path.insert(0, str(_CUSTOM_COMPONENTS))
+
+from dreame_lawn_mower.dreame_lawn_mower_client import (  # noqa: E402
     DreameLawnMowerClient,
     DreameLawnMowerConnectionError,
     DreameLawnMowerNativeXp2pRuntime,
@@ -23,6 +30,9 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerXp2pProcessRunner,
     diagnose_native_xp2p_runtime,
     probe_stream_url,
+)
+from dreame_lawn_mower.dreame_lawn_mower_client.models import (  # noqa: E402
+    MIN_REMOTE_CONTROL_BATTERY_LEVEL as MIN_ACTIVE_VIDEO_START_BATTERY_LEVEL,
 )
 
 PAYLOAD_MODES = ("app_action", "with_session", "no_session", "empty_session")
@@ -133,6 +143,20 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--start-before-active",
+        action="store_true",
+        help=(
+            "For supervised field tests, send start mowing before the active "
+            "video attempt when the mower is docked or otherwise blocked."
+        ),
+    )
+    parser.add_argument(
+        "--start-before-active-timeout",
+        type=float,
+        default=180.0,
+        help="Seconds to wait for the mower to become video-ready after start.",
+    )
+    parser.add_argument(
         "--dock-after-active",
         action="store_true",
         help=(
@@ -140,11 +164,19 @@ def _parse_args() -> argparse.Namespace:
             "dock in a finally step."
         ),
     )
+    parser.add_argument(
+        "--dock-after-active-timeout",
+        type=float,
+        default=240.0,
+        help="Seconds to wait for the mower to report a dock/station state.",
+    )
     return _apply_field_test_profile(parser.parse_args())
 
 
 def _apply_field_test_profile(args: argparse.Namespace) -> argparse.Namespace:
     profile = str(getattr(args, "field_test_profile", "none") or "none")
+    if getattr(args, "start_before_active", False):
+        args.dock_after_active = True
     if profile == "none":
         return args
     if profile == "xp2p-runner":
@@ -288,6 +320,24 @@ def _active_video_block_reason(snapshot: Any) -> str | None:
     return None
 
 
+def _start_before_active_block_reason(snapshot: Any) -> str | None:
+    battery_level = getattr(snapshot, "battery_level", None)
+    if (
+        isinstance(battery_level, int | float)
+        and battery_level < MIN_ACTIVE_VIDEO_START_BATTERY_LEVEL
+    ):
+        return (
+            "Start-before-active is blocked while battery is "
+            f"{battery_level:g}% (< {MIN_ACTIVE_VIDEO_START_BATTERY_LEVEL}%). "
+            "Wait for the mower to charge before a supervised video run."
+        )
+    return None
+
+
+def _low_battery_block(reason: str | None) -> bool:
+    return bool(reason and "battery" in reason.casefold())
+
+
 def _next_step_message(
     *,
     active_requested: bool,
@@ -295,6 +345,12 @@ def _next_step_message(
     active_stream_verdict: dict[str, object] | None = None,
 ) -> str | None:
     if active_block_reason:
+        if _low_battery_block(active_block_reason):
+            return (
+                "Wait for the mower to charge, then rerun the supervised video "
+                "probe. The proof target is still an FLV header after the mower "
+                "can leave the station."
+            )
         return (
             "Undock the mower, or rerun with --wait-undocked-timeout during "
             "a supervised test. Add --dock-after-active to return it to base "
@@ -407,6 +463,49 @@ def _stream_health_status(health: dict[str, object]) -> str:
     return "stream_unavailable"
 
 
+async def _async_start_before_active(
+    client: DreameLawnMowerClient,
+    *,
+    initial_snapshot: Any,
+    timeout: float,
+    interval: float,
+) -> tuple[Any, dict[str, object]]:
+    output: dict[str, object] = {
+        "requested": True,
+        "sent": False,
+        "before": _snapshot_video_state(initial_snapshot),
+        "wait": None,
+    }
+    start_block_reason = _start_before_active_block_reason(initial_snapshot)
+    if start_block_reason:
+        output["blocked"] = True
+        output["block_reason"] = start_block_reason
+        return initial_snapshot, output
+    try:
+        result = await client.async_start_mowing()
+    except Exception as err:  # noqa: BLE001 - field probe should report blockers.
+        output["error"] = str(err)
+        output["error_type"] = type(err).__name__
+        return initial_snapshot, output
+
+    output["sent"] = True
+    output["result"] = _safe_json_value(result)
+    try:
+        snapshot, wait_result = await _async_wait_for_active_video_state(
+            client,
+            initial_snapshot=initial_snapshot,
+            timeout=timeout,
+            interval=interval,
+        )
+    except Exception as err:  # noqa: BLE001 - preserve mandatory dock cleanup.
+        output["wait_error"] = str(err)
+        output["wait_error_type"] = type(err).__name__
+        return initial_snapshot, output
+    output["wait"] = wait_result
+    output["after"] = _snapshot_video_state(snapshot)
+    return snapshot, output
+
+
 async def _async_wait_for_active_video_state(
     client: DreameLawnMowerClient,
     *,
@@ -432,9 +531,25 @@ async def _async_wait_for_active_video_state(
     }
 
 
+def _snapshot_video_state(snapshot: Any) -> dict[str, object]:
+    return {
+        "state": getattr(snapshot, "state", None),
+        "activity": getattr(snapshot, "activity", None),
+        "battery_level": getattr(snapshot, "battery_level", None),
+        "docked": bool(getattr(snapshot, "docked", False)),
+        "raw_docked": bool(getattr(snapshot, "raw_docked", False)),
+        "mowing": bool(getattr(snapshot, "mowing", False)),
+        "paused": bool(getattr(snapshot, "paused", False)),
+        "returning": bool(getattr(snapshot, "returning", False)),
+    }
+
+
 async def _async_dock_after_active(
     client: DreameLawnMowerClient,
     output: dict[str, object],
+    *,
+    timeout: float,
+    interval: float,
 ) -> None:
     try:
         await client.async_dock()
@@ -445,10 +560,59 @@ async def _async_dock_after_active(
             "error": str(err),
         }
         return
+    try:
+        snapshot, wait_result = await _async_wait_for_station_state(
+            client,
+            timeout=timeout,
+            interval=interval,
+        )
+    except Exception as err:  # noqa: BLE001 - docking was already requested.
+        output["dock_after_active"] = {
+            "requested": True,
+            "sent": True,
+            "wait_error": str(err),
+            "wait_error_type": type(err).__name__,
+        }
+        return
     output["dock_after_active"] = {
         "requested": True,
         "sent": True,
+        "wait": wait_result,
+        "after": _snapshot_video_state(snapshot),
     }
+
+
+async def _async_wait_for_station_state(
+    client: DreameLawnMowerClient,
+    *,
+    timeout: float,
+    interval: float,
+) -> tuple[Any, dict[str, object]]:
+    deadline = asyncio.get_running_loop().time() + max(timeout, 0.0)
+    attempts = 0
+    snapshot = await client.async_refresh()
+    while (
+        not _station_state_reached(snapshot)
+        and asyncio.get_running_loop().time() < deadline
+    ):
+        attempts += 1
+        await asyncio.sleep(max(interval, 0.1))
+        snapshot = await client.async_refresh()
+    return snapshot, {
+        "waited": attempts > 0,
+        "attempts": attempts,
+        "ready": _station_state_reached(snapshot),
+        "timeout": timeout,
+    }
+
+
+def _station_state_reached(snapshot: Any) -> bool:
+    state = str(getattr(snapshot, "state", "") or "").casefold()
+    return (
+        bool(getattr(snapshot, "docked", False))
+        or bool(getattr(snapshot, "raw_docked", False))
+        or state in STATION_STATES
+    )
 
 
 def _write_output(output: dict[str, object], out: Path | None) -> None:
@@ -500,6 +664,9 @@ async def main() -> None:
                 "active_requested": active_requested,
                 "wait_undocked_timeout": args.wait_undocked_timeout,
                 "dock_after_active_requested": args.dock_after_active,
+                "dock_after_active_timeout": args.dock_after_active_timeout,
+                "start_before_active_requested": args.start_before_active,
+                "start_before_active_timeout": args.start_before_active_timeout,
                 "stream_url_attempts": args.stream_url_attempts,
                 "stream_url_retry_interval": args.stream_url_retry_interval,
                 "host_runtime_preflight": host_runtime_preflight,
@@ -508,6 +675,7 @@ async def main() -> None:
         for source, error in host_runtime_preflight["failures"].items():
             output[source] = _native_xp2p_unavailable(error)
         active_attempted = False
+        dock_after_active_needed = False
         try:
             stream_inputs = await client.async_get_camera_stream_inputs()
             output["camera_stream_inputs"] = _safe_stream_inputs_summary(stream_inputs)
@@ -526,7 +694,28 @@ async def main() -> None:
                 )
                 else None
             )
-            if active_requested and active_block_reason and args.wait_undocked_timeout:
+            if active_requested and active_block_reason and args.start_before_active:
+                snapshot, start_result = await _async_start_before_active(
+                    client,
+                    initial_snapshot=snapshot,
+                    timeout=args.start_before_active_timeout,
+                    interval=args.interval,
+                )
+                output["field_test"]["start_before_active"] = start_result
+                output["state"] = snapshot.state
+                output["activity"] = snapshot.activity
+                dock_after_active_needed = bool(start_result.get("sent"))
+                active_block_reason = (
+                    str(start_result["block_reason"])
+                    if start_result.get("block_reason")
+                    else _active_video_block_reason(snapshot)
+                )
+            if (
+                active_requested
+                and active_block_reason
+                and args.wait_undocked_timeout
+                and not _low_battery_block(active_block_reason)
+            ):
                 snapshot, wait_result = await _async_wait_for_active_video_state(
                     client,
                     initial_snapshot=snapshot,
@@ -549,6 +738,7 @@ async def main() -> None:
                 and "native_xp2p" not in output
             ):
                 output["native_xp2p"] = await _async_probe_native_xp2p(
+                    client,
                     args.xp2p_library,
                     runtime_inputs,
                     stream_url_timeout=args.stream_url_timeout,
@@ -565,6 +755,7 @@ async def main() -> None:
                 and "xp2p_runner" not in output
             ):
                 output["xp2p_runner"] = await _async_probe_xp2p_runner(
+                    client,
                     args.xp2p_runner,
                     runtime_inputs,
                     mode=args.xp2p_runner_mode,
@@ -615,14 +806,33 @@ async def main() -> None:
         )
         if next_step:
             output["next_step"] = next_step
-        if args.dock_after_active and active_attempted:
-            await _async_dock_after_active(client, output)
+        if args.dock_after_active and (active_attempted or dock_after_active_needed):
+            await _async_dock_after_active(
+                client,
+                output,
+                timeout=args.dock_after_active_timeout,
+                interval=args.interval,
+            )
         _write_output(output, args.out)
     finally:
+        if (
+            "output" in locals()
+            and args.dock_after_active
+            and (active_attempted or dock_after_active_needed)
+            and "dock_after_active" not in output
+        ):
+            await _async_dock_after_active(
+                client,
+                output,
+                timeout=args.dock_after_active_timeout,
+                interval=args.interval,
+            )
+            _write_output(output, args.out)
         await client.async_close()
 
 
 async def _async_probe_native_xp2p(
+    client: DreameLawnMowerClient,
     library_path: Path | None,
     runtime_inputs: Any,
     *,
@@ -668,7 +878,7 @@ async def _async_probe_native_xp2p(
             runtime.stop_live_stream(session)
 
     try:
-        return await asyncio.to_thread(_start_and_stop)
+        return await _async_probe_with_app_video_enabled(client, _start_and_stop)
     except DreameLawnMowerVideoRuntimeError as err:
         return _native_xp2p_unavailable(
             str(err),
@@ -683,6 +893,7 @@ async def _async_diagnose_native_xp2p(library_path: Path) -> dict[str, object]:
 
 
 async def _async_probe_xp2p_runner(
+    client: DreameLawnMowerClient,
     runner_path: Path | None,
     runtime_inputs: Any,
     *,
@@ -727,13 +938,79 @@ async def _async_probe_xp2p_runner(
             runner.stop_live_stream(session)
 
     try:
-        return await asyncio.to_thread(_start_and_stop)
+        return await _async_probe_with_app_video_enabled(client, _start_and_stop)
     except DreameLawnMowerVideoRuntimeError as err:
         return _native_xp2p_unavailable(
             str(err),
             error_category="runtime_start_failed",
             attempted=True,
         )
+
+
+async def _async_probe_with_app_video_enabled(
+    client: DreameLawnMowerClient,
+    start_and_stop: Any,
+) -> dict[str, object]:
+    app_video_enable = await _async_set_app_video(client, True)
+    if not app_video_enable.get("ok"):
+        payload = _native_xp2p_unavailable(
+            str(app_video_enable.get("error") or "App-side video enable failed."),
+            error_category="app_video_enable_failed",
+            attempted=True,
+        )
+        payload["app_video_enable"] = app_video_enable
+        return payload
+
+    try:
+        try:
+            payload = await asyncio.to_thread(start_and_stop)
+        except DreameLawnMowerVideoRuntimeError as err:
+            payload = _native_xp2p_unavailable(
+                str(err),
+                error_category="runtime_start_failed",
+                attempted=True,
+            )
+    finally:
+        app_video_disable = await _async_set_app_video(client, False)
+
+    payload["app_video_enable"] = app_video_enable
+    payload["app_video_disable"] = app_video_disable
+    return payload
+
+
+async def _async_set_app_video(
+    client: DreameLawnMowerClient,
+    enabled: bool,
+) -> dict[str, object]:
+    try:
+        result = await client.async_set_camera_stream_enabled(enabled)
+    except Exception as err:  # noqa: BLE001 - field probe should report blockers.
+        return {
+            "ok": False,
+            "requested": enabled,
+            "error": str(err),
+            "error_type": type(err).__name__,
+        }
+    return {
+        "ok": True,
+        "requested": enabled,
+        "result": _safe_json_value(result),
+    }
+
+
+def _safe_json_value(value: Any, *, max_depth: int = 4) -> Any:
+    if max_depth < 0:
+        return repr(value)
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, dict):
+        return {
+            str(key): _safe_json_value(item, max_depth=max_depth - 1)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_safe_json_value(item, max_depth=max_depth - 1) for item in value]
+    return repr(value)
 
 
 if __name__ == "__main__":

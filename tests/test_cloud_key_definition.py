@@ -3,9 +3,20 @@
 from __future__ import annotations
 
 from dreame_lawn_mower_client import DreameLawnMowerClient
+from dreame_lawn_mower_client._loader import load_internal_module
 from dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
     DreameLawnMowerDescriptor,
+)
+
+client_module = load_internal_module("client")
+credentials_module = load_internal_module("video_credentials")
+
+ENCRYPTED_APP_ID = (
+    "83f131752c9685534334475314dd5ab813ffe385cd526adc8bb2ab7ef3e53427"
+)
+ENCRYPTED_APP_SECRET = (
+    "cbc3bfd0d0dbafe0795c7f040b2e2748a4702bd6263f4d74bb975bbb120537c8"
 )
 
 
@@ -35,9 +46,7 @@ class _FakeCloud:
         access_token: str | None = None,
         os: int = 1,
     ) -> dict[str, object]:
-        assert access_token == "access-token-1"
-        assert os == 1
-        return {"paired": True}
+        raise AssertionError("read-only stream input discovery must not pair")
 
     def get_tx_video_device_identity(
         self,
@@ -50,8 +59,8 @@ class _FakeCloud:
             "channelId": "channel-1",
             "productId": "product-1",
             "deviceName": "Mower Camera",
-            "secretId": "secret-id-1",
-            "secretKey": "secret-key-1",
+            "secretId": ENCRYPTED_APP_ID,
+            "secretKey": ENCRYPTED_APP_SECRET,
         }
 
     def get_tx_video_p2p_info(
@@ -201,8 +210,14 @@ def test_camera_stream_inputs_use_tx_video_endpoints() -> None:
     assert result["tx_rtc_info"]["channel_id"] == "channel-1"
     assert result["tx_rtc_info"]["product_id"] == "product-1"
     assert result["tx_rtc_info"]["device_name"] == "Mower Camera"
-    assert result["tx_rtc_info"]["secret_id"] == "secret-id-1"
-    assert result["tx_rtc_info"]["secret_key"] == "secret-key-1"
+    assert result["tx_rtc_info"]["secret_id"] == ENCRYPTED_APP_ID
+    assert result["tx_rtc_info"]["secret_key"] == ENCRYPTED_APP_SECRET
+    assert result["tx_rtc_info"]["app_id"] == "xp2p-app-id-test"
+    assert result["tx_rtc_info"]["app_secret"] == "xp2p-app-secret-test"
+    assert (
+        result["tx_rtc_info"]["app_credentials_source"]
+        == "dreame_identity_decrypted"
+    )
     assert result["p2p_info"]["available"] is True
     assert result["p2p_info"]["p2p_info"] == "p2p-info-1"
 
@@ -219,8 +234,8 @@ def test_camera_stream_runtime_inputs_are_redactable_xp2p_contract() -> None:
     assert result.missing_required == ()
     assert result.qcloud_credential_state == "complete"
     assert result.missing_qcloud_credentials == ()
-    assert result.app_credential_state == "absent"
-    assert result.missing_app_credentials == ("app_id", "app_secret")
+    assert result.app_credential_state == "complete"
+    assert result.missing_app_credentials == ()
     assert result.as_dict()["p2p_info"] == "p2p-info-1"
     redacted = result.as_dict(redact=True)
     assert "p2p_info" not in redacted
@@ -228,8 +243,24 @@ def test_camera_stream_runtime_inputs_are_redactable_xp2p_contract() -> None:
     assert redacted["secret_key_present"] is True
     assert redacted["qcloud_credential_state"] == "complete"
     assert redacted["missing_qcloud_credentials"] == ()
-    assert redacted["app_credential_state"] == "absent"
-    assert redacted["missing_app_credentials"] == ("app_id", "app_secret")
+    assert redacted["app_id_present"] is True
+    assert redacted["app_secret_present"] is True
+    assert redacted["app_credential_state"] == "complete"
+    assert redacted["missing_app_credentials"] == ()
+
+
+def test_tx_video_identity_decryption_matches_dreamehome_contract() -> None:
+    assert credentials_module.derive_tx_video_app_credentials(
+        ENCRYPTED_APP_ID,
+        ENCRYPTED_APP_SECRET,
+    ) == ("xp2p-app-id-test", "xp2p-app-secret-test")
+
+
+def test_tx_video_identity_decryption_rejects_invalid_values() -> None:
+    assert credentials_module.derive_tx_video_app_credentials(
+        "not-hex",
+        "abcd",
+    ) == (None, None)
 
 
 def test_camera_stream_runtime_inputs_report_partial_vendor_credentials() -> None:
@@ -256,3 +287,36 @@ def test_camera_stream_runtime_inputs_report_partial_vendor_credentials() -> Non
     assert redacted["missing_app_credentials"] == ("app_id",)
     assert redacted["secret_id_present"] is True
     assert redacted["secret_key_present"] is False
+
+
+def test_camera_stream_inputs_accept_app_key_aliases_from_tx_payloads() -> None:
+    p2p_info = client_module._normalize_tx_p2p_info(
+        {
+            "data": {
+                "p2pInfo": "p2p-info-1",
+                "appKey": "xp2p-app-key-1",
+                "xp2p_secretKey": "xp2p-app-secret-1",
+            }
+        }
+    )
+    payload = {
+        "source": "dreame_third_video_tx",
+        "did": "device-1",
+        "tx_rtc_info": {
+            "channel_id": "channel-1",
+            "product_id": "product-1",
+            "device_name": "Mower Camera",
+            "secret_id": "secret-id-1",
+            "secret_key": "secret-key-1",
+        },
+        "p2p_info": p2p_info,
+    }
+
+    result = client_module._camera_stream_runtime_inputs_from_cloud_payload(payload)
+
+    assert p2p_info["app_id"] == "xp2p-app-key-1"
+    assert p2p_info["app_secret"] == "xp2p-app-secret-1"
+    assert result.app_id == "xp2p-app-key-1"
+    assert result.app_secret == "xp2p-app-secret-1"
+    assert result.app_credential_state == "complete"
+    assert result.missing_app_credentials == ()

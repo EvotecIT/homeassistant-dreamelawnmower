@@ -33,6 +33,7 @@ from .dreame_lawn_mower_client.video_runtime import (
     DreameLawnMowerXp2pExternalRunner,
     DreameLawnMowerXp2pLiveStreamSession,
     DreameLawnMowerXp2pProcessRunner,
+    diagnose_native_xp2p_runtime,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -87,6 +88,9 @@ class DreameLawnMowerVideoCamera(
         self._last_runtime_inputs_source: str | None = None
         self._last_runtime_inputs_missing: tuple[str, ...] = ()
         self._last_stream_health: dict[str, Any] | None = None
+        self._last_stream_enable_result: Any | None = None
+        self._last_stream_disable_error: str | None = None
+        self._last_native_runtime_diagnostics: dict[str, Any] | None = None
 
     @property
     def available(self) -> bool:
@@ -126,6 +130,9 @@ class DreameLawnMowerVideoCamera(
             "last_runtime_inputs_ready": self._last_runtime_inputs_ready,
             "last_runtime_inputs_source": self._last_runtime_inputs_source,
             "last_runtime_inputs_missing": self._last_runtime_inputs_missing,
+            "last_stream_enable_result": self._last_stream_enable_result,
+            "last_stream_disable_error": self._last_stream_disable_error,
+            "last_native_runtime_diagnostics": self._last_native_runtime_diagnostics,
             "last_stream_health": self._last_stream_health,
             "last_stream_session": self._session.as_dict(redact=True)
             if self._session is not None
@@ -135,6 +142,9 @@ class DreameLawnMowerVideoCamera(
     async def stream_source(self) -> str | None:
         """Start live video and return the local FLV source URL for HA stream."""
         self._last_stream_health = None
+        stream_enabled = False
+        runtime: _DreameVideoRuntime | None = None
+        session: DreameLawnMowerXp2pLiveStreamSession | None = None
         if not self._runtime_configured:
             self._set_stream_error(
                 "Configure a native XP2P library path or XP2P runner command."
@@ -157,6 +167,13 @@ class DreameLawnMowerVideoCamera(
 
             await self._async_stop_active_session()
             runtime = self._create_runtime()
+            self._last_stream_enable_result = (
+                _safe_state_attribute(
+                    await self.coordinator.client.async_set_camera_stream_enabled(True)
+                )
+            )
+            stream_enabled = True
+            self._last_stream_disable_error = None
             session = await self.hass.async_add_executor_job(
                 runtime.start_live_stream,
                 inputs,
@@ -166,9 +183,17 @@ class DreameLawnMowerVideoCamera(
                 session.stream_url,
             )
         except DreameLawnMowerVideoRuntimeError as err:
+            if runtime is not None and session is not None:
+                await self._async_stop_session(runtime, session)
+            if stream_enabled:
+                await self._async_disable_camera_stream()
             self._set_stream_error(str(err))
             return None
         except Exception as err:  # noqa: BLE001 - HA should receive a clean miss.
+            if runtime is not None and session is not None:
+                await self._async_stop_session(runtime, session)
+            if stream_enabled:
+                await self._async_disable_camera_stream()
             _LOGGER.warning("Failed to start Dreame mower live video: %s", err)
             self._set_stream_error(str(err))
             return None
@@ -176,6 +201,7 @@ class DreameLawnMowerVideoCamera(
         self._last_stream_health = stream_health.as_dict()
         if not stream_health.flv_header_present:
             await self._async_stop_session(runtime, session)
+            await self._async_disable_camera_stream()
             self._set_stream_error(_stream_health_error(stream_health))
             return None
 
@@ -204,6 +230,7 @@ class DreameLawnMowerVideoCamera(
         if runtime is None or session is None:
             return
         await self._async_stop_session(runtime, session)
+        await self._async_disable_camera_stream()
         self.async_write_ha_state()
 
     async def _async_stop_session(
@@ -217,16 +244,36 @@ class DreameLawnMowerVideoCamera(
         except Exception as err:  # noqa: BLE001 - cleanup should not break unload.
             _LOGGER.debug("Failed to stop Dreame mower live video: %s", err)
 
+    async def _async_disable_camera_stream(self) -> None:
+        """Best-effort app-side video cleanup."""
+        try:
+            await self.coordinator.client.async_set_camera_stream_enabled(False)
+            self._last_stream_disable_error = None
+        except Exception as err:  # noqa: BLE001 - cleanup should not break unload.
+            self._last_stream_disable_error = str(err)
+            _LOGGER.debug("Failed to disable Dreame mower app video mode: %s", err)
+
     def _create_runtime(self) -> _DreameVideoRuntime:
         """Create the configured runtime adapter."""
         if runner_command := self._runner_command:
+            self._last_native_runtime_diagnostics = None
             command = _split_runner_command(runner_command)
             if self._runtime_mode == XP2P_RUNNER_MODE_ONE_SHOT:
                 return DreameLawnMowerXp2pExternalRunner(command)
             return DreameLawnMowerXp2pProcessRunner(command)
 
         if library_path := self._native_library_path:
-            return DreameLawnMowerNativeXp2pRuntime(Path(library_path))
+            path = Path(library_path)
+            diagnostics = diagnose_native_xp2p_runtime(path)
+            self._last_native_runtime_diagnostics = _safe_state_attribute(
+                diagnostics.as_dict()
+            )
+            if not diagnostics.ready:
+                raise DreameLawnMowerVideoRuntimeError(
+                    diagnostics.error
+                    or "Configured XP2P native library is not ready."
+                )
+            return DreameLawnMowerNativeXp2pRuntime(path)
 
         raise DreameLawnMowerVideoRuntimeError(
             "Configure a native XP2P library path or XP2P runner command."
@@ -264,6 +311,22 @@ def _option_text(entry: ConfigEntry, key: str) -> str | None:
         return None
     value = value.strip()
     return value or None
+
+
+def _safe_state_attribute(value: Any, *, max_depth: int = 4) -> Any:
+    """Return a bounded JSON-safe value for Home Assistant attributes."""
+    if max_depth < 0:
+        return repr(value)
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, dict):
+        return {
+            str(key): _safe_state_attribute(item, max_depth=max_depth - 1)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_safe_state_attribute(item, max_depth=max_depth - 1) for item in value]
+    return repr(value)
 
 
 def _split_runner_command(command: str) -> tuple[str, ...]:

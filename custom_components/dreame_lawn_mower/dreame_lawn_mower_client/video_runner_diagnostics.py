@@ -14,6 +14,8 @@ SENSITIVE_RUNNER_PAYLOAD_KEYS = {
     "flv_path",
     "p2p_info",
     "product_id",
+    "app_id",
+    "app_secret",
     "runner_session_id",
     "secret_id",
     "secret_key",
@@ -37,6 +39,17 @@ def completed_process_preview(
     return (
         output_preview("stdout", completed.stdout, sensitive_values)
         + output_preview("stderr", completed.stderr, sensitive_values)
+    )
+
+
+def timeout_expired_preview(
+    error: subprocess.TimeoutExpired,
+    sensitive_values: Sequence[str],
+) -> str:
+    """Return sanitized stdout/stderr previews from a timed-out runner."""
+    return (
+        output_preview("stdout", error.stdout, sensitive_values)
+        + output_preview("stderr", error.stderr, sensitive_values)
     )
 
 
@@ -100,5 +113,7 @@ def _collect_sensitive_values(value: Any, values: list[str], key: str = "") -> N
 def _as_text(value: Any) -> str | None:
     if value is None:
         return None
+    if isinstance(value, bytes | bytearray):
+        return bytes(value).decode("utf-8", "replace")
     text = str(value)
     return text or None

@@ -72,6 +72,7 @@ region/account details are especially helpful for moving a device from
 - guarded mowing-preference update service with dry-run mode by default
 - read-only map camera using the app-map payload when available
 - disabled-by-default all-maps and map-diagnostics cameras
+- disabled-by-default live video camera for a configured compatible XP2P runtime
 - runtime telemetry sensors for mission progress, mission area, mower pose, and live-track length
 - selected-run sensors for mowing action, chosen map, and scoped zone/spot/edge target
 - selected-zone preference sensors for read-only mowing height, efficiency, direction, and obstacle-avoidance details
@@ -102,7 +103,10 @@ The following areas are intentionally cautious:
 - mowing-preference writes are guarded, validated on a supervised A2 no-op write, and still need broader model and firmware validation
 - map rendering is read-only; no-go editing, virtual-wall editing, and other map
   editing flows are not exposed yet
-- camera/photo/video paths are probe-only until runtime safety is clearer
+- Dreame A2 XP2P playback and FLV output are validated, but live video still
+  requires either a host-native XP2P library or a local runner compatible with
+  the Home Assistant operating system and CPU; Android APK libraries cannot be
+  loaded directly by a normal Home Assistant host
 - 3D map object downloads are metadata-first and not treated as stable
 - manual driving must stay supervised and uses strict state and battery guards
 
@@ -142,6 +146,13 @@ The config flow asks for:
 
 The integration stores Home Assistant config-entry data only. Do not put
 credentials into repository files, fixtures, or issue attachments.
+
+The disabled `Live Video` camera is an advanced option. Configure either a
+host-native XP2P dynamic library or a local persistent XP2P runner in the
+integration options, then enable the camera in the entity registry. The runner
+must keep the local FLV endpoint alive for the duration of the Home Assistant
+stream. Android/Bionic libraries extracted from Dreamehome are not host-native
+libraries.
 
 ## Help Expand Support
 
@@ -206,6 +217,7 @@ them from the entity registry only when troubleshooting:
 
 - map and all-map cameras
 - map diagnostics camera
+- live video camera (requires a compatible host XP2P runtime)
 - runtime pose / heading / segment-count sensors
 - all-schedules calendar
 - rain delay end time sensor
