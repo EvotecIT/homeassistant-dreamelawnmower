@@ -309,6 +309,23 @@ def test_native_xp2p_runtime_requires_parseable_ready_status() -> None:
     assert library.stopService.calls == [(b"channel-1",)]
 
 
+def test_native_xp2p_runtime_rejects_null_av_receive_handle() -> None:
+    library = _FakeXp2pLibrary()
+    library.startAvRecvService = _FakeFunction(None)
+    runtime = DreameLawnMowerNativeXp2pRuntime("fake-xp2p.so", library=library)
+
+    try:
+        runtime.start_live_stream(_runtime_inputs())
+    except DreameLawnMowerVideoRuntimeError as err:
+        assert "startAvRecvService returned a null handle" in str(err)
+    else:
+        raise AssertionError("Expected a null AV receive handle to fail")
+
+    assert library.delegateHttpFlv.calls == []
+    assert library.stopAvRecvService.calls == []
+    assert library.stopService.calls == [(b"channel-1",)]
+
+
 def test_device_status_decoder_reads_app_status_payload() -> None:
     assert _decode_device_status_code(b'[{"status":0}]') == 0
     assert _decode_device_status_code(b'[{"status":405}]') == 405
@@ -669,8 +686,8 @@ def test_process_runner_keeps_stream_process_alive_until_stop(tmp_path) -> None:
     }
 
 
-def test_process_runner_drains_persistent_stderr_until_stop(tmp_path) -> None:
-    completed_marker = tmp_path / "stderr-drained.txt"
+def test_process_runner_drains_persistent_output_until_stop(tmp_path) -> None:
+    completed_marker = tmp_path / "output-drained.txt"
     runner_script = tmp_path / "xp2p_noisy_process_runner.py"
     runner_script.write_text(
         "\n".join(
@@ -683,6 +700,8 @@ def test_process_runner_drains_persistent_stderr_until_stop(tmp_path) -> None:
                 "    'service_id': request['service_id'],",
                 "    'stream_url': 'http://127.0.0.1:5544/ipc.flv'",
                 "}), flush=True)",
+                "sys.stdout.write('y' * 262144)",
+                "sys.stdout.flush()",
                 "sys.stderr.write('x' * 262144)",
                 "sys.stderr.flush()",
                 "marker.write_text('drained', encoding='utf-8')",
@@ -767,6 +786,7 @@ def test_stream_session_metadata_can_redact_runtime_identifiers() -> None:
         stream_url="http://127.0.0.1:5544/ipc.flv",
         delegate_id="channel-1",
         runtime="external_xp2p_runner",
+        runner_command=("xp2p-runner", "--token", "runner-secret"),
         runner_session_id="runner-session-1",
     )
 
@@ -775,7 +795,10 @@ def test_stream_session_metadata_can_redact_runtime_identifiers() -> None:
     assert "service_id" not in redacted
     assert "delegate_id" not in redacted
     assert "stream_url" not in redacted
+    assert "runner_command" not in redacted
+    assert "runner-secret" not in repr(redacted)
     assert redacted["service_id_present"] is True
     assert redacted["delegate_id_present"] is True
     assert redacted["stream_url_present"] is True
+    assert redacted["runner_command_present"] is True
     assert redacted["runner_session_id_present"] is True

@@ -261,6 +261,7 @@ class DreameLawnMowerXp2pLiveStreamSession:
     runner_command: tuple[str, ...] = field(default=(), repr=False)
     runner_session_id: str | None = None
     runner_process: Any | None = field(default=None, repr=False)
+    runner_stdout_thread: threading.Thread | None = field(default=None, repr=False)
     runner_stderr_thread: threading.Thread | None = field(default=None, repr=False)
 
     def as_dict(self, *, redact: bool = False) -> dict[str, Any]:
@@ -285,6 +286,9 @@ class DreameLawnMowerXp2pLiveStreamSession:
         if redact:
             for key in ("service_id", "delegate_id", "stream_url"):
                 payload[f"{key}_present"] = bool(payload.pop(key, None))
+            payload["runner_command_present"] = bool(
+                payload.pop("runner_command", ())
+            )
         return payload
 
 
@@ -449,7 +453,14 @@ class DreameLawnMowerXp2pProcessRunner:
                 raise DreameLawnMowerVideoRuntimeError(
                     "XP2P process runner did not return stream_url."
                 )
-            stderr_thread = _start_stream_drain_thread(process.stderr)
+            stdout_thread = _start_stream_drain_thread(
+                process.stdout,
+                name="dreame-xp2p-stdout",
+            )
+            stderr_thread = _start_stream_drain_thread(
+                process.stderr,
+                name="dreame-xp2p-stderr",
+            )
             return DreameLawnMowerXp2pLiveStreamSession(
                 service_id=_as_text(response.get("service_id")) or request.service_id,
                 stream_url=stream_url,
@@ -460,6 +471,7 @@ class DreameLawnMowerXp2pProcessRunner:
                 runner_command=self.command,
                 runner_session_id=_as_text(response.get("runner_session_id")),
                 runner_process=process,
+                runner_stdout_thread=stdout_thread,
                 runner_stderr_thread=stderr_thread,
             )
         except Exception:
@@ -472,6 +484,7 @@ class DreameLawnMowerXp2pProcessRunner:
         if process is None:
             return
         if process.poll() is not None:
+            _join_stream_drain_thread(session.runner_stdout_thread)
             _join_stream_drain_thread(session.runner_stderr_thread)
             return
         try:
@@ -491,6 +504,7 @@ class DreameLawnMowerXp2pProcessRunner:
         except (BrokenPipeError, OSError, subprocess.TimeoutExpired):
             _terminate_process(process)
         finally:
+            _join_stream_drain_thread(session.runner_stdout_thread)
             _join_stream_drain_thread(session.runner_stderr_thread)
 
 
@@ -639,6 +653,10 @@ class DreameLawnMowerNativeXp2pRuntime:
                 _encode(request.flv_path),
                 True,
             )
+            if not av_recv_handle:
+                raise DreameLawnMowerVideoRuntimeError(
+                    "XP2P startAvRecvService returned a null handle."
+                )
             stream_url_prefix = self._wait_for_flv_url_prefix(
                 request,
                 delegate_attempts=delegate_attempts,
@@ -1051,8 +1069,12 @@ def _process_alive(process: Any | None) -> bool:
     return bool(process is not None and process.poll() is None)
 
 
-def _start_stream_drain_thread(stream: Any | None) -> threading.Thread | None:
-    """Drain runner stderr after startup so persistent logs cannot block it."""
+def _start_stream_drain_thread(
+    stream: Any | None,
+    *,
+    name: str,
+) -> threading.Thread | None:
+    """Drain a runner output stream so persistent output cannot block it."""
     if stream is None:
         return None
 
@@ -1065,7 +1087,7 @@ def _start_stream_drain_thread(stream: Any | None) -> threading.Thread | None:
 
     thread = threading.Thread(
         target=_drain,
-        name="dreame-xp2p-stderr",
+        name=name,
         daemon=True,
     )
     thread.start()
@@ -1073,7 +1095,7 @@ def _start_stream_drain_thread(stream: Any | None) -> threading.Thread | None:
 
 
 def _join_stream_drain_thread(thread: threading.Thread | None) -> None:
-    """Allow a completed runner stderr drain to settle without blocking cleanup."""
+    """Allow a completed runner output drain to settle without blocking cleanup."""
     if thread is not None:
         thread.join(timeout=0.5)
 
