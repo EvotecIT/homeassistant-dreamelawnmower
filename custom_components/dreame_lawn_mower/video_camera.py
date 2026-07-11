@@ -207,14 +207,22 @@ class DreameLawnMowerVideoCamera(
         snapshot = self.coordinator.data
         if camera_stream_block_reason(snapshot) is not None:
             return False
-        if (
-            self._video_transport != VIDEO_TRANSPORT_CLOUD
-            and (
-                self._lan_cache.inputs is not None
-                or self._provisioning_cache.inputs is not None
-            )
+        cached_lan_ready = (
+            self._lan_cache.inputs is not None
+            and self._lan_cache.endpoint is not None
+        )
+        cached_xp2p_ready = (
+            self._provisioning_cache.inputs is not None
+            and self._provisioning_cache.device_config is not None
+        )
+        if self._video_transport == VIDEO_TRANSPORT_LAN and cached_lan_ready:
+            return True
+        if self._video_transport == VIDEO_TRANSPORT_AUTO and (
+            cached_lan_ready or cached_xp2p_ready
         ):
             return True
+        if not super().available:
+            return False
         if snapshot is None:
             return False
         return snapshot_advertises_video(snapshot)

@@ -105,7 +105,7 @@ def _uninitialized_entity(*, snapshot: object | None = None):
             CONF_VIDEO_TRANSPORT: VIDEO_TRANSPORT_CLOUD,
         }
     )
-    entity.coordinator = SimpleNamespace(data=snapshot)
+    entity.coordinator = SimpleNamespace(data=snapshot, last_update_success=True)
     entity._session = None
     entity._runtime = None
     entity._prepared_runtime = None
@@ -192,6 +192,25 @@ def test_video_camera_unavailable_without_video_metadata() -> None:
     entity = _uninitialized_entity(snapshot=snapshot)
 
     assert entity.available is False
+
+
+def test_cloud_video_camera_unavailable_when_coordinator_polling_fails() -> None:
+    payload = load_json_fixture("a2_paused_diagnostics.json")
+    snapshot = SimpleNamespace(**payload["data"]["snapshot"])
+    entity = _uninitialized_entity(snapshot=snapshot)
+    entity.coordinator.last_update_success = False
+
+    assert entity.available is False
+
+
+def test_cached_auto_video_remains_available_when_coordinator_polling_fails() -> None:
+    entity = _uninitialized_entity(snapshot=None)
+    entity._entry.options[CONF_VIDEO_TRANSPORT] = VIDEO_TRANSPORT_AUTO
+    entity._lan_cache.inputs = object()
+    entity._lan_cache.endpoint = object()
+    entity.coordinator.last_update_success = False
+
+    assert entity.available is True
 
 
 def test_video_camera_available_from_live_key_definition() -> None:

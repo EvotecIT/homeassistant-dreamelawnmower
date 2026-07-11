@@ -82,8 +82,11 @@ def _cached_video_only_available(
         return lan_cache.inputs is not None and lan_cache.endpoint is not None
     if transport == VIDEO_TRANSPORT_AUTO:
         return (
-            provisioning_cache.inputs is not None
-            and provisioning_cache.device_config is not None
+            (lan_cache.inputs is not None and lan_cache.endpoint is not None)
+            or (
+                provisioning_cache.inputs is not None
+                and provisioning_cache.device_config is not None
+            )
         )
     return False
 
