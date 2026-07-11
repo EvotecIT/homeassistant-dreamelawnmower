@@ -195,13 +195,13 @@ def test_embedded_worker_matches_reproducible_hashes() -> None:
 
 
 def test_host_worker_success_payload_reports_direct_or_relay_route() -> None:
-    assert _decode_success_payload("62\nhttp://127.0.0.1/direct.flv") == (
+    assert _decode_success_payload("62\nhttp://127.0.0.1/stream-62.flv") == (
         62,
-        "http://127.0.0.1/direct.flv",
+        "http://127.0.0.1/stream-62.flv",
     )
-    assert _decode_success_payload("63\nhttp://127.0.0.1/relay.flv") == (
+    assert _decode_success_payload("63\nhttp://127.0.0.1/stream-63.flv") == (
         63,
-        "http://127.0.0.1/relay.flv",
+        "http://127.0.0.1/stream-63.flv",
     )
     assert _decode_success_payload("0\nhttp://127.0.0.1/unknown.flv") == (
         None,
@@ -244,7 +244,8 @@ def test_host_runtime_refreshes_authoritative_relay_mode(tmp_path) -> None:
 
     assert runtime.refresh_stream_link_mode(session) == 63
     assert session.stream_link_mode == 63
-    assert session.as_dict()["stream_route"] == "relay"
+    assert session.as_dict()["sdk_stream_network_type"] == 63
+    assert session.as_dict()["stream_route"] == "unknown"
     assert process.stdin.getvalue() == b"Q"
 
 

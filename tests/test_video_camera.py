@@ -24,8 +24,12 @@ except ModuleNotFoundError:
 
 from homeassistant.components.camera import CameraEntityFeature
 
+import custom_components.dreame_lawn_mower.video_cached_xp2p as cached_xp2p_module
 import custom_components.dreame_lawn_mower.video_camera as video_camera_module
 import custom_components.dreame_lawn_mower.video_stream_helpers as video_helpers_module
+from custom_components.dreame_lawn_mower import (
+    video_provisioning_cache as provisioning_cache_module,
+)
 from custom_components.dreame_lawn_mower.const import (
     CONF_VIDEO_TRANSPORT,
     CONF_XP2P_LIBRARY_PATH,
@@ -47,16 +51,53 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.xp2p_config im
 )
 from custom_components.dreame_lawn_mower.video_camera import (
     DreameLawnMowerVideoCamera,
-    _split_runner_command,
 )
 from custom_components.dreame_lawn_mower.video_session_lifecycle import (
     DreameLawnMowerHaStreamIdleMonitor,
+)
+from custom_components.dreame_lawn_mower.video_stream_helpers import (
+    split_runner_command,
 )
 
 from .fixture_data import load_json_fixture
 
 
 def _uninitialized_entity(*, snapshot: object | None = None):
+    class _ProvisioningCache:
+        loaded = True
+        inputs = None
+        device_config = None
+
+        @staticmethod
+        def resolve_fresh_device_config(
+            inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+        ) -> DreameLawnMowerXp2pDeviceConfig:
+            return provisioning_cache_module.resolve_xp2p_device_config(inputs)
+
+        @staticmethod
+        async def async_save(
+            _inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+            _config: DreameLawnMowerXp2pDeviceConfig,
+        ) -> None:
+            return None
+
+        @staticmethod
+        def resolve_for_transport(
+            inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+            *,
+            auto: bool,
+        ) -> DreameLawnMowerXp2pDeviceConfig:
+            config = provisioning_cache_module.resolve_xp2p_device_config(inputs)
+            if not auto:
+                return config
+            return DreameLawnMowerXp2pDeviceConfig(
+                server=config.server,
+                ip=config.ip,
+                port=config.port,
+                protocol_type=XP2P_PROTOCOL_AUTO,
+                cross=False,
+            )
+
     entity = object.__new__(DreameLawnMowerVideoCamera)
     entity._entry = SimpleNamespace(
         options={
@@ -77,6 +118,10 @@ def _uninitialized_entity(*, snapshot: object | None = None):
     entity._stream_lock = asyncio.Lock()
     entity._snapshot_lock = asyncio.Lock()
     entity._lan_cache = SimpleNamespace(inputs=None, endpoint=None)
+    entity._provisioning_cache = _ProvisioningCache()
+    entity._provisioning_cache_error = None
+    entity._last_cached_xp2p_error = None
+    entity._runtime_input_config = None
     entity._last_lan_error = None
     entity._last_video_transport = None
     return entity
@@ -107,7 +152,7 @@ def test_video_camera_auto_policy_prefers_direct_capable_sdk_negotiation() -> No
     )
 
     with patch.object(
-        video_camera_module,
+        provisioning_cache_module,
         "resolve_xp2p_device_config",
         return_value=fetched,
     ):
@@ -171,7 +216,7 @@ def test_video_camera_available_from_top_level_video_status() -> None:
 
 def test_runner_command_uses_windows_backslash_and_quote_semantics() -> None:
     with patch.object(video_helpers_module.platform, "system", return_value="Windows"):
-        command = _split_runner_command(
+        command = split_runner_command(
             '"C:\\Program Files\\Dreame\\xp2p-runner.exe" --mode process'
         )
 
@@ -530,7 +575,11 @@ def test_video_camera_returns_jpeg_from_managed_flv_source() -> None:
             calls.append((source, width, height))
             return b"\xff\xd8real-jpeg\xff\xd9"
 
-        with patch.object(video_camera_module, "_decode_flv_jpeg", _decode):
+        with patch.object(
+            video_camera_module.video_helpers,
+            "decode_flv_jpeg",
+            _decode,
+        ):
             image = await entity.async_camera_image(width=640, height=360)
         return image, calls[0], stops
 
@@ -1004,11 +1053,12 @@ def test_video_camera_disables_video_when_enable_attempt_raises() -> None:
 
         class _Client:
             async def async_get_camera_stream_runtime_inputs(self) -> object:
-                return SimpleNamespace(
-                    ready=True,
-                    lan_identity_ready=False,
+                return DreameLawnMowerCameraStreamRuntimeInputs(
                     source="dreame_third_video_tx",
-                    missing_required=(),
+                    did="did-1",
+                    product_id="product-1",
+                    device_name="device-1",
+                    p2p_info="p2p-info-1",
                 )
 
             async def async_set_camera_stream_enabled(self, enabled: bool) -> None:
@@ -1114,8 +1164,8 @@ def test_video_camera_lan_only_starts_and_stops_without_cloud_video_calls() -> N
 
         entity.hass = SimpleNamespace(async_add_executor_job=_executor)
         with patch.object(
-            video_camera_module,
-            "_probe_stream_health",
+                video_camera_module.video_helpers,
+                "probe_stream_health_and_route",
             return_value=_Health(),
         ):
             source = await entity._async_start_stream()
@@ -1127,6 +1177,92 @@ def test_video_camera_lan_only_starts_and_stops_without_cloud_video_calls() -> N
         1,
         1,
         None,
+    )
+
+
+def test_video_camera_auto_uses_cached_xp2p_without_video_cloud_calls() -> None:
+    async def _run() -> tuple[str | None, int, str | None, bool]:
+        entity = _uninitialized_entity()
+        entity._entry.options[CONF_VIDEO_TRANSPORT] = VIDEO_TRANSPORT_AUTO
+        inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+            source="video_provisioning_cache",
+            did="did-1",
+            product_id="product-1",
+            device_name="device-1",
+            p2p_info="p2p-info-1",
+        )
+        config = DreameLawnMowerXp2pDeviceConfig(protocol_type=XP2P_PROTOCOL_TCP)
+        entity._provisioning_cache = SimpleNamespace(
+            inputs=inputs,
+            device_config=config,
+        )
+
+        class _Client:
+            async def async_get_camera_stream_runtime_inputs(self) -> object:
+                raise AssertionError("Cached XP2P must not fetch video-cloud inputs")
+
+            async def async_set_camera_stream_enabled(self, _enabled: bool) -> None:
+                raise AssertionError("Cached XP2P must not toggle cloud video")
+
+        class _Runtime:
+            def __init__(self) -> None:
+                self.starts = 0
+
+            def start_live_stream(
+                self,
+                actual_inputs: object,
+            ) -> DreameLawnMowerXp2pLiveStreamSession:
+                assert actual_inputs is inputs
+                self.starts += 1
+                return DreameLawnMowerXp2pLiveStreamSession(
+                    service_id="product-1/device-1",
+                    stream_url="http://127.0.0.1/cached.flv",
+                )
+
+            def stop_live_stream(self, _session: object) -> None:
+                return None
+
+        class _Health:
+            flv_header_present = True
+
+            @staticmethod
+            def as_dict() -> dict[str, object]:
+                return {"flv_header_present": True}
+
+        runtime = _Runtime()
+        entity.coordinator = SimpleNamespace(client=_Client(), data=None)
+        entity._prepared_runtime = runtime
+        entity._runtime_preparation_error = None
+        entity._last_stream_health = None
+        entity._last_error = None
+        entity._attr_is_streaming = False
+        entity._last_stream_disable_error = None
+        entity.async_write_ha_state = lambda: None
+
+        async def _executor(function, *args):
+            return function(*args)
+
+        entity.hass = SimpleNamespace(async_add_executor_job=_executor)
+        with patch.object(
+                cached_xp2p_module,
+                "probe_stream_health_and_route",
+            return_value=_Health(),
+        ):
+            source = await entity._async_start_stream()
+        session = entity._session
+        await entity._async_stop_active_session()
+        return (
+            source,
+            runtime.starts,
+            entity._last_video_transport,
+            bool(session and session.camera_toggle_managed),
+        )
+
+    assert asyncio.run(_run()) == (
+        "http://127.0.0.1/cached.flv",
+        1,
+        "cached_xp2p",
+        False,
     )
 
 

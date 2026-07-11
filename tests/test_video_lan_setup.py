@@ -37,6 +37,14 @@ def test_proven_cached_lan_only_mode_can_set_up_while_cloud_is_unavailable() -> 
                 self.inputs = object()
                 self.endpoint = object()
 
+        class _ProvisioningCache:
+            def __init__(self, *_args: object, **_kwargs: object) -> None:
+                self.inputs = None
+                self.device_config = None
+
+            async def async_load(self) -> None:
+                return None
+
         forwarded_platforms: tuple[Platform, ...] = ()
         unloaded_platforms: tuple[Platform, ...] = ()
 
@@ -85,6 +93,11 @@ def test_proven_cached_lan_only_mode_can_set_up_while_cloud_is_unavailable() -> 
                 _Coordinator,
             ),
             patch.object(integration_module, "DreameLawnMowerVideoLanCache", _Cache),
+            patch.object(
+                integration_module,
+                "DreameLawnMowerVideoProvisioningCache",
+                _ProvisioningCache,
+            ),
             patch.object(
                 integration_module,
                 "async_setup_services",

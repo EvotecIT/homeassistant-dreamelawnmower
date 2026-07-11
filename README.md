@@ -180,24 +180,38 @@ overrides for development or unsupported host platforms.
 
 The integration's options expose three video transport policies. The default
 keeps the proven XP2P-compatible path. `Auto` first tries Tencent's separate
-same-LAN service and then uses normal XP2P with direct-capable AUTO negotiation;
-if the SDK falls back to a relay, video remains available. `Same-LAN only`
-never falls back, but it requires firmware that advertises a LAN endpoint. The
-camera's `last_stream_session` attribute reports `stream_route` as `direct`,
-`relay`, or `unknown`; Tencent's native values are `62` for direct and `63` for
-relay.
+same-LAN service and then uses normal XP2P with direct-capable AUTO negotiation.
+`Same-LAN only` never falls back, but it requires firmware that advertises a LAN
+endpoint. The camera's `last_stream_session` attribute reports `stream_route`
+as `direct` only when the separate LAN service was selected; otherwise it stays
+`unknown`. Tencent's misleadingly named `getStreamLinkMode` API returns a
+network/NAT-type bitmask, exposed as `sdk_stream_network_type`, rather than a
+direct-versus-relay result.
+
+After a successful cloud-provisioned stream, `Auto` privately caches the minimum
+XP2P identity, P2P material, QCloud/app credentials, and resolved device
+configuration under Home Assistant's `.storage`. The cache uses Home Assistant's
+private-store permissions and deliberately excludes the Dreame access token,
+LAN discovery token, and raw cloud responses. On a later restart, `Auto` tries
+that cache before any Dreame video-input or camera-toggle call and refreshes it
+through the normal path if the cached material has expired.
 
 This proof is intentionally narrower than every camera feature in the vendor
 apps:
 
-- Dreame/Tencent cloud calls still provide authentication, camera enablement,
-  and XP2P configuration for the working A2 path. The integration implements
-  Tencent's WLAN discovery and `startLanService`, but the tested A2 firmware did
-  not listen on the discovery port or advertise a LAN endpoint. Normal XP2P in
-  AUTO mode returned valid FLV while the SDK reported route `63` (`relay`), not
-  `62` (`direct`). Direct same-LAN and cloud-independent cold start can therefore
-  work only when mower firmware exposes the required local service; they are not
-  proven on the current A2 firmware.
+- The tested A2 sent normal-XP2P AUTO media directly between the Home Assistant
+  host and the mower's same-LAN IP. A retained socket trace includes the direct
+  peer address, FLV request, HTTP 200 response, and media bytes, so this does not
+  depend on an SDK label. Tencent's separate WLAN discovery and
+  `startLanService` path was also implemented, but this A2 firmware did not
+  answer that discovery request. Dreame/Tencent cloud calls still provide the
+  initial provisioning. A second copied-HA proof deliberately failed the entire
+  Dreame client during config-entry reload: the integration entered cached
+  camera-only mode, produced another HLS HTTP 200 response, and independently
+  decoded 100 more frames without fetching runtime inputs or toggling video in
+  Dreame cloud. Tencent XP2P can still use its internet rendezvous/STUN control
+  plane to establish the direct peer route, so this is not a claim that video
+  starts with all internet connectivity removed.
 - Home Assistant can display and save the current JPEG frame, but the vendor's
   stored photo gallery is not exposed.
 - Live video is field-validated on the A2 only. A3 AWD Pro and MOVA camera

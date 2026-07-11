@@ -272,6 +272,8 @@ class DreameLawnMowerXp2pLiveStreamSession:
     lan_endpoint_address: str | None = None
     lan_endpoint_port: int | None = None
     stream_link_mode: int | None = None
+    provisioning_source: str | None = None
+    camera_toggle_managed: bool = True
     start_result: int = 0
     command_result: int | None = None
     command_response: bytes | None = field(default=None, repr=False)
@@ -296,8 +298,13 @@ class DreameLawnMowerXp2pLiveStreamSession:
             "transport": self.transport,
             "lan_endpoint_address": self.lan_endpoint_address,
             "lan_endpoint_port": self.lan_endpoint_port,
-            "stream_link_mode": self.stream_link_mode,
+            # Tencent names this value `getStreamLinkMode`, but the native
+            # implementation returns its network/NAT type bitmask.  It does
+            # not distinguish a direct peer path from a relay.
+            "sdk_stream_network_type": self.stream_link_mode,
             "stream_route": _stream_route(self.stream_link_mode, self.transport),
+            "provisioning_source": self.provisioning_source,
+            "camera_toggle_managed": self.camera_toggle_managed,
             "start_result": self.start_result,
             "command_result": self.command_result,
             "command_response_present": bool(self.command_response),
@@ -325,11 +332,10 @@ class DreameLawnMowerXp2pLiveStreamSession:
 
 
 def _stream_route(link_mode: int | None, transport: str) -> str:
-    """Return the SDK's authoritative route classification."""
-    if transport == "lan" or link_mode == 62:
+    """Return a route only when the selected transport proves it."""
+    del link_mode
+    if transport == "lan":
         return "direct"
-    if link_mode == 63:
-        return "relay"
     return "unknown"
 
 

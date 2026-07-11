@@ -10,12 +10,20 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 
+from .const import (
+    CONF_VIDEO_TRANSPORT,
+    DEFAULT_VIDEO_TRANSPORT,
+    VIDEO_TRANSPORT_AUTO,
+    VIDEO_TRANSPORT_CLOUD,
+    VIDEO_TRANSPORT_LAN,
+)
 from .dreame_lawn_mower_client.stream_health import (
     DreameLawnMowerStreamUrlProbeResult,
     probe_stream_url,
 )
 from .dreame_lawn_mower_client.video_runtime import (
     DreameLawnMowerVideoRuntimeError,
+    DreameLawnMowerXp2pLiveStreamSession,
 )
 
 _STREAM_HEALTH_ATTEMPTS = 3
@@ -33,6 +41,18 @@ def option_text(entry: ConfigEntry, key: str) -> str | None:
         return None
     value = value.strip()
     return value or None
+
+
+def video_transport(entry: ConfigEntry) -> str:
+    """Return one validated camera transport option."""
+    value = entry.options.get(CONF_VIDEO_TRANSPORT)
+    if value in {
+        VIDEO_TRANSPORT_AUTO,
+        VIDEO_TRANSPORT_LAN,
+        VIDEO_TRANSPORT_CLOUD,
+    }:
+        return str(value)
+    return DEFAULT_VIDEO_TRANSPORT
 
 
 def safe_state_attribute(value: Any, *, max_depth: int = 4) -> Any:
@@ -138,3 +158,29 @@ def stream_health_error(health: DreameLawnMowerStreamUrlProbeResult) -> str:
         "XP2P runtime returned a local stream URL, but it did not emit an FLV "
         f"header ({', '.join(details)})."
     )
+
+
+def probe_stream_health_and_route(
+    runtime: Any,
+    session: DreameLawnMowerXp2pLiveStreamSession,
+) -> DreameLawnMowerStreamUrlProbeResult:
+    """Probe FLV while querying Tencent's opaque network-type metadata."""
+    refresh = getattr(runtime, "refresh_stream_link_mode", None)
+    callback = (lambda: refresh(session)) if callable(refresh) else None
+    return probe_stream_health(session.stream_url, on_stream_open=callback)
+
+
+def format_video_start_failures(
+    cloud_error: str,
+    *,
+    lan_error: str | None,
+    cached_xp2p_error: str | None,
+) -> str:
+    """Preserve Auto-mode failures without leaking runtime inputs."""
+    failures: list[str] = []
+    if lan_error:
+        failures.append(f"Same-LAN service failed: {lan_error}")
+    if cached_xp2p_error:
+        failures.append(f"Cached XP2P failed: {cached_xp2p_error}")
+    failures.append(f"Cloud fallback failed: {cloud_error}")
+    return " ".join(failures) if len(failures) > 1 else cloud_error

@@ -39,17 +39,24 @@ from homeassistant.components import camera as camera_component  # noqa: E402
 from homeassistant.components import lawn_mower as lawn_mower_component  # noqa: E402
 from homeassistant.core import HomeAssistant  # noqa: E402
 
+from custom_components.dreame_lawn_mower.api import (  # noqa: E402
+    DreameLawnMowerConnectionError,
+)
+
 DOMAIN = "dreame_lawn_mower"
 CONF_ACCOUNT_TYPE = "account_type"
 CONF_COUNTRY = "country"
 CONF_PASSWORD = "password"
 CONF_USERNAME = "username"
+CONF_VIDEO_TRANSPORT = "video_transport"
+VIDEO_TRANSPORT_OPTIONS = ("cloud", "auto", "lan")
 _STATION_STATES = {
     "charging",
     "charging_completed",
     "smart_charging",
     "station_reset",
 }
+_CAMERA_AVAILABILITY_TIMEOUT = 30.0
 
 
 def _parse_args() -> argparse.Namespace:
@@ -58,6 +65,20 @@ def _parse_args() -> argparse.Namespace:
         "--execute",
         action="store_true",
         help="Enable the mower camera and verify an HA HLS media segment.",
+    )
+    parser.add_argument(
+        "--video-transport",
+        choices=VIDEO_TRANSPORT_OPTIONS,
+        default="cloud",
+        help="Select the deployed camera transport policy for this proof.",
+    )
+    parser.add_argument(
+        "--verify-cached-xp2p",
+        action="store_true",
+        help=(
+            "After the normal proof, reload the integration and prove a second "
+            "stream while Dreame video input/toggle calls are blocked."
+        ),
     )
     parser.add_argument(
         "--start-before-active",
@@ -96,6 +117,8 @@ def _parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.start_before_active and not args.execute:
         parser.error("--start-before-active requires --execute")
+    if args.verify_cached_xp2p and args.video_transport != "auto":
+        parser.error("--verify-cached-xp2p requires --video-transport auto")
     return args
 
 
@@ -123,6 +146,16 @@ def _at_station(snapshot: Any) -> bool:
     )
 
 
+async def _wait_for_camera_available(camera: Any, *, timeout: float) -> bool:
+    """Wait for HA's debounced coordinator refresh to expose active video."""
+    deadline = asyncio.get_running_loop().time() + max(timeout, 0.1)
+    while not camera.available:
+        if asyncio.get_running_loop().time() >= deadline:
+            return False
+        await asyncio.sleep(0.5)
+    return True
+
+
 async def _wait_for_state(
     client: Any,
     predicate: Any,
@@ -132,19 +165,23 @@ async def _wait_for_state(
     deadline = asyncio.get_running_loop().time() + max(timeout, 0.1)
     last_error: Exception | None = None
     while True:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            message = "Timed out waiting for the mower state transition."
+            if last_error is not None:
+                message += f" Last refresh: {type(last_error).__name__}."
+            raise TimeoutError(message)
         try:
-            snapshot = await client.async_refresh()
+            snapshot = await asyncio.wait_for(
+                client.async_refresh(),
+                timeout=min(remaining, 10.0),
+            )
         except Exception as err:  # noqa: BLE001 - cloud refreshes can be transient.
             last_error = err
         else:
             last_error = None
             if predicate(snapshot):
                 return snapshot
-        if asyncio.get_running_loop().time() >= deadline:
-            message = "Timed out waiting for the mower state transition."
-            if last_error is not None:
-                message += f" Last refresh: {type(last_error).__name__}."
-            raise TimeoutError(message)
         await asyncio.sleep(1.0)
 
 
@@ -180,7 +217,11 @@ async def _setup_home_assistant(config_dir: Path, port: int) -> HomeAssistant:
     return hass
 
 
-async def _configure_integration(hass: HomeAssistant) -> Any:
+async def _configure_integration(
+    hass: HomeAssistant,
+    *,
+    video_transport: str,
+) -> Any:
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": "user"},
@@ -203,6 +244,20 @@ async def _configure_integration(hass: HomeAssistant) -> Any:
     entry = entries[0]
     if entry.state.name.casefold() != "loaded":
         raise RuntimeError(f"Dreame config entry is {entry.state.name}, not loaded.")
+    if video_transport != "cloud":
+        hass.config_entries.async_update_entry(
+            entry,
+            options={
+                **entry.options,
+                CONF_VIDEO_TRANSPORT: video_transport,
+            },
+        )
+        await hass.async_block_till_done()
+        if entry.state.name.casefold() != "loaded":
+            raise RuntimeError(
+                "Dreame config entry did not reload with the requested video "
+                f"transport: {entry.state.name}."
+            )
     return entry
 
 
@@ -332,6 +387,93 @@ async def _fetch_hls_playlist(port: int, endpoint: str) -> tuple[int, str]:
             return response.status, await response.text()
 
 
+async def _verify_cached_xp2p_after_reload(
+    hass: HomeAssistant,
+    entry: Any,
+    *,
+    port: int,
+    timeout: float,
+) -> tuple[Any, Any, Any, dict[str, Any]]:
+    """Prove persisted XP2P restart while the whole Dreame client is offline."""
+    blocked_calls: list[str] = []
+
+    async def _blocked_refresh(_self: Any) -> Any:
+        blocked_calls.append("refresh")
+        raise DreameLawnMowerConnectionError(
+            "Dreame client access was blocked by the cache proof."
+        )
+
+    async def _blocked_inputs(_self: Any) -> Any:
+        blocked_calls.append("runtime_inputs")
+        raise DreameLawnMowerConnectionError(
+            "Dreame video input fetch was blocked by the cache proof."
+        )
+
+    async def _blocked_toggle(_self: Any, _enabled: bool) -> Any:
+        blocked_calls.append("camera_toggle")
+        raise DreameLawnMowerConnectionError(
+            "Dreame camera toggle was blocked by the cache proof."
+        )
+
+    client_type = type(hass.data[DOMAIN][entry.entry_id].client)
+    original_refresh = client_type.async_refresh
+    original_inputs = client_type.async_get_camera_stream_runtime_inputs
+    original_toggle = client_type.async_set_camera_stream_enabled
+    try:
+        client_type.async_refresh = _blocked_refresh
+        client_type.async_get_camera_stream_runtime_inputs = _blocked_inputs
+        client_type.async_set_camera_stream_enabled = _blocked_toggle
+        if not await hass.config_entries.async_reload(entry.entry_id):
+            raise RuntimeError("Dreame config entry did not reload for cache proof.")
+        await hass.async_block_till_done()
+        coordinator = hass.data[DOMAIN][entry.entry_id]
+        client = coordinator.client
+        camera = _find_video_camera(hass)
+        ha_stream = await camera.async_create_stream()
+        if ha_stream is None:
+            raise RuntimeError(
+                camera.extra_state_attributes.get("last_stream_error")
+                or "Cached XP2P restart returned no stream."
+            )
+        hls_output = ha_stream.add_provider("hls")
+        endpoint = ha_stream.endpoint_url("hls")
+        await ha_stream.start()
+        segment = await _wait_for_hls_media(hls_output, timeout=timeout)
+        frame = await hass.async_add_executor_job(
+            _decode_best_video_frame,
+            segment,
+            None,
+            None,
+        )
+        status, playlist = await _fetch_hls_playlist(port, endpoint)
+        attributes = camera.extra_state_attributes
+    finally:
+        client_type.async_refresh = original_refresh
+        client_type.async_get_camera_stream_runtime_inputs = original_inputs
+        client_type.async_set_camera_stream_enabled = original_toggle
+
+    result = {
+        "blocked_dreame_client_calls": blocked_calls,
+        "stream_session": attributes["last_stream_session"],
+        "last_video_transport": attributes["last_video_transport"],
+        "hls_endpoint_status": status,
+        "hls_playlist_present": "#EXTM3U" in playlist,
+        "decoded_frame_count": frame["decoded_frame_count"],
+        "width": frame["width"],
+        "height": frame["height"],
+        "verified": bool(
+            blocked_calls == ["refresh"]
+            and attributes["last_video_transport"] == "cached_xp2p"
+            and status == 200
+            and "#EXTM3U" in playlist
+            and frame["decoded_frame_count"] > 1
+        ),
+    }
+    if not result["verified"]:
+        raise RuntimeError("Cached XP2P restart verification was incomplete.")
+    return camera, ha_stream, client, result
+
+
 async def _run(args: argparse.Namespace) -> dict[str, Any]:
     port = _pick_loopback_port()
     output: dict[str, Any] = {
@@ -339,6 +481,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         "host_runtime": "python_linux_managed",
         "integration_install_mode": "copied_custom_component",
         "android_required": False,
+        "video_transport": args.video_transport,
         "home_assistant_hls_verified": False,
         "playable_video_verified": False,
         "visual_frame_verified": False,
@@ -354,7 +497,10 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="dreame-ha-video-proof-") as temp_dir:
         try:
             hass = await _setup_home_assistant(Path(temp_dir), port)
-            entry = await _configure_integration(hass)
+            entry = await _configure_integration(
+                hass,
+                video_transport=args.video_transport,
+            )
             coordinator = hass.data[DOMAIN][entry.entry_id]
             client = coordinator.client
             camera = _find_video_camera(hass)
@@ -366,6 +512,19 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                 "available": camera.available,
                 "runtime_mode": camera.extra_state_attributes[
                     "video_runtime_mode"
+                ],
+                "transport_policy": camera.extra_state_attributes[
+                    "video_transport_policy"
+                ],
+                "block_reason": camera.extra_state_attributes["video_block_reason"],
+                "lan_identity_cached": camera.extra_state_attributes[
+                    "lan_video_identity_cached"
+                ],
+                "lan_endpoint_cached": camera.extra_state_attributes[
+                    "lan_video_endpoint_cached"
+                ],
+                "xp2p_provisioning_cached": camera.extra_state_attributes[
+                    "xp2p_provisioning_cached"
                 ],
                 "runtime_preparation_error": camera.extra_state_attributes[
                     "video_runtime_preparation_error"
@@ -390,12 +549,30 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                 )
                 await coordinator.async_request_refresh()
                 output["after_start"] = _snapshot_summary(snapshot)
-                output["camera_entity"]["available_after_start"] = camera.available
+                camera_available = await _wait_for_camera_available(
+                    camera,
+                    timeout=_CAMERA_AVAILABILITY_TIMEOUT,
+                )
+                output["coordinator_after_start"] = _snapshot_summary(coordinator.data)
+                camera_attributes = camera.extra_state_attributes
+                output["camera_entity"].update(
+                    available_after_start=camera_available,
+                    block_reason_after_start=camera_attributes["video_block_reason"],
+                    lan_identity_cached_after_start=camera_attributes[
+                        "lan_video_identity_cached"
+                    ],
+                    lan_endpoint_cached_after_start=camera_attributes[
+                        "lan_video_endpoint_cached"
+                    ],
+                    xp2p_provisioning_cached_after_start=camera_attributes[
+                        "xp2p_provisioning_cached"
+                    ],
+                )
                 camera_state = hass.states.get(camera.entity_id)
                 output["camera_entity"]["ha_state_after_start"] = (
                     camera_state.state if camera_state is not None else None
                 )
-                if not camera.available:
+                if not camera_available:
                     raise RuntimeError(
                         "The deployed HA camera did not become available after start."
                     )
@@ -442,6 +619,11 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                 "camera_image": camera_image,
                 "decoded_frame": frame,
             }
+            camera_attributes = camera.extra_state_attributes
+            output["stream_session"] = camera_attributes["last_stream_session"]
+            output["last_video_transport"] = camera_attributes[
+                "last_video_transport"
+            ]
             output["visual_frame_verified"] = bool(
                 frame["decoded_frame_count"] > 0
                 and frame["width"] > 0
@@ -464,6 +646,20 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             )
             if not output["home_assistant_hls_verified"]:
                 raise RuntimeError("Home Assistant HLS verification was incomplete.")
+            if args.verify_cached_xp2p:
+                await camera.async_turn_off()
+                await ha_stream.stop()
+                ha_stream = None
+                camera, ha_stream, client, cached_restart = (
+                    await _verify_cached_xp2p_after_reload(
+                        hass,
+                        entry,
+                        port=port,
+                        timeout=args.stream_timeout,
+                    )
+                )
+                mower = None
+                output["cached_xp2p_restart"] = cached_restart
         except Exception as err:  # noqa: BLE001 - retain cleanup evidence.
             detail = str(err).strip()
             output["error"] = type(err).__name__ + (f": {detail}" if detail else "")
