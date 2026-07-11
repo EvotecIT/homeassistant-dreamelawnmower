@@ -8,6 +8,10 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import DreameLawnMowerCoordinator
 
+_OFFLINE_REPORTING_ENTITY_KEYS = frozenset(
+    {"online", "device_connected", "cloud_connected"}
+)
+
 
 class DreameLawnMowerEntity(CoordinatorEntity[DreameLawnMowerCoordinator]):
     """Shared base entity for Dreame lawn mower entities."""
@@ -24,7 +28,18 @@ class DreameLawnMowerEntity(CoordinatorEntity[DreameLawnMowerCoordinator]):
             else:
                 snapshot = getattr(coordinator, "data", None)
                 if snapshot is not None and not getattr(snapshot, "available", True):
-                    return False
+                    try:
+                        description = object.__getattribute__(
+                            self,
+                            "entity_description",
+                        )
+                    except AttributeError:
+                        return False
+                    if (
+                        getattr(description, "key", None)
+                        not in _OFFLINE_REPORTING_ENTITY_KEYS
+                    ):
+                        return False
         return super().__getattribute__(name)
 
     def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:

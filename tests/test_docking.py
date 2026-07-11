@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import (
     DreameLawnMowerClient,
+    DreameLawnMowerConnectionError,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.docking import (
     async_stop_then_dock,
@@ -222,3 +223,16 @@ def test_normal_dock_uses_heartbeat_session_state_at_base() -> None:
     refresh_state = orchestrator.await_args.kwargs["refresh_state"]
     assert asyncio.run(refresh_state()) == "paused"
     assert client.async_refresh.await_count == 2
+
+
+def test_normal_dock_falls_back_when_preflight_refresh_fails() -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    client.async_refresh = AsyncMock(
+        side_effect=DreameLawnMowerConnectionError("status unavailable")
+    )
+    client._async_call_device_method = AsyncMock()
+
+    asyncio.run(client.async_dock())
+
+    client.async_refresh.assert_awaited_once()
+    client._async_call_device_method.assert_awaited_once_with("dock")

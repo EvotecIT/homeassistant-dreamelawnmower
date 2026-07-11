@@ -396,6 +396,25 @@ def test_cloud_offline_snapshot_overrides_specialized_entity_availability() -> N
     assert entity.is_on is None
 
 
+def test_connectivity_binary_sensors_report_off_while_mower_is_offline() -> None:
+    for key, field in (
+        ("online", "online"),
+        ("device_connected", "device_connected"),
+        ("cloud_connected", "cloud_connected"),
+    ):
+        entity = object.__new__(DreameLawnMowerBinarySensor)
+        snapshot_values = {
+            "available": False,
+            "raw_attributes": {},
+            field: False,
+        }
+        entity.coordinator = SimpleNamespace(data=SimpleNamespace(**snapshot_values))
+        entity.entity_description = _binary_sensor_description(key)
+
+        assert entity.available is True
+        assert entity.is_on is False
+
+
 def test_raw_started_binary_sensor_preserves_vendor_flag() -> None:
     entity = object.__new__(DreameLawnMowerBinarySensor)
     entity.coordinator = SimpleNamespace(

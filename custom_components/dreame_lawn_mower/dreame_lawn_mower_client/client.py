@@ -346,7 +346,11 @@ class DreameLawnMowerClient:
 
     async def async_dock(self) -> None:
         """End an active mowing session and return the mower to base."""
-        snapshot = await self.async_refresh()
+        try:
+            snapshot = await self.async_refresh()
+        except DreameLawnMowerConnectionError:
+            await self._async_call_device_method("dock")
+            return
         initial_state = snapshot_session_control_state(snapshot)
 
         async def async_refresh_state() -> str | None:
