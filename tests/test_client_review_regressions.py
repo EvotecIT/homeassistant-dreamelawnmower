@@ -104,6 +104,63 @@ def test_session_control_state_falls_back_without_heartbeat_evidence() -> None:
     assert snapshot_session_control_state(snapshot) == "returning"
 
 
+def test_cloud_presence_throttles_empty_refresh_after_cached_success(
+    monkeypatch,
+) -> None:
+    client = _client()
+    calls = 0
+
+    def empty_refresh(language: str | None = None):
+        nonlocal calls
+        calls += 1
+        return None
+
+    client._latest_cloud_device_info = {"online": True}
+    client._cloud_device_info_refreshed_at = 0.0
+    client._sync_get_cloud_device_info = empty_refresh
+    monkeypatch.setattr(
+        "custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client."
+        "time.monotonic",
+        lambda: 100.0,
+    )
+
+    first = client._sync_get_cached_cloud_device_info()
+    second = client._sync_get_cached_cloud_device_info()
+
+    assert first == {"online": True}
+    assert second == {"online": True}
+    assert calls == 1
+    assert client._cloud_device_info_refreshed_at == 100.0
+
+
+def test_cloud_presence_throttles_failed_refresh_attempt(monkeypatch) -> None:
+    client = _client()
+    calls = 0
+
+    def failed_refresh(language: str | None = None):
+        nonlocal calls
+        calls += 1
+        raise DreameLawnMowerConnectionError("presence unavailable")
+
+    client._sync_get_cloud_device_info = failed_refresh
+    monkeypatch.setattr(
+        "custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client."
+        "time.monotonic",
+        lambda: 100.0,
+    )
+
+    try:
+        client._sync_get_cached_cloud_device_info()
+    except DreameLawnMowerConnectionError:
+        pass
+    else:
+        raise AssertionError("Expected the first presence refresh to fail")
+
+    assert client._sync_get_cached_cloud_device_info() is None
+    assert calls == 1
+    assert client._cloud_device_info_refreshed_at == 100.0
+
+
 def test_cloud_mqtt_client_requires_verified_tls(monkeypatch) -> None:
     mqtt_clients = []
 

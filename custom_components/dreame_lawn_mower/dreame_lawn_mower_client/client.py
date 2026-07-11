@@ -2184,16 +2184,16 @@ class DreameLawnMowerClient:
         """Refresh cloud presence at a bounded rate and retain last-known state."""
         now = time.monotonic()
         if (
-            self._latest_cloud_device_info is not None
+            self._cloud_device_info_refreshed_at > 0
             and now - self._cloud_device_info_refreshed_at
             < _CLOUD_PRESENCE_REFRESH_INTERVAL
         ):
             return self._latest_cloud_device_info
 
+        self._cloud_device_info_refreshed_at = now
         info = self._sync_get_cloud_device_info("en")
         if isinstance(info, Mapping):
             self._latest_cloud_device_info = dict(info)
-            self._cloud_device_info_refreshed_at = now
         return self._latest_cloud_device_info
 
     def _sync_resume_mowing(self) -> Any:
