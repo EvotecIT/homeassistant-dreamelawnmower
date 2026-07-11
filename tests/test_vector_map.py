@@ -73,7 +73,32 @@ def _batch_payload() -> dict[str, str]:
                             {"x": 20, "y": 30},
                         ],
                     },
-                ]
+                ],
+                [
+                    9,
+                    {
+                        "type": 2,
+                        "shapeType": 3,
+                        "path": [
+                            {"x": 40, "y": 40},
+                            {"x": 60, "y": 60},
+                        ],
+                    },
+                ],
+                [
+                    10,
+                    {
+                        "type": 2,
+                        "shapeType": 2,
+                        "angle": 45,
+                        "path": [
+                            {"x": 40, "y": 40},
+                            {"x": 50, "y": 40},
+                            {"x": 50, "y": 50},
+                            {"x": 40, "y": 50},
+                        ],
+                    },
+                ],
             ],
         },
         "spotAreas": {
@@ -207,7 +232,16 @@ def test_parse_batch_vector_map_handles_map_info_split_and_mow_paths() -> None:
     assert vector_map.boundary.width == 130
     assert len(vector_map.zones) == 1
     assert vector_map.zones[0].name == "Front Yard"
-    assert len(vector_map.forbidden_areas) == 1
+    assert len(vector_map.forbidden_areas) == 3
+    circle = vector_map.forbidden_areas[1]
+    assert circle.shape_type == 3
+    assert len(circle.points) == 36
+    assert circle.points[0] == (60, 50)
+    assert circle.points[9] == (50, 60)
+    rotated_rectangle = vector_map.forbidden_areas[2]
+    assert rotated_rectangle.shape_type == 2
+    assert rotated_rectangle.angle == 45
+    assert rotated_rectangle.points == ((38, 45), (45, 38), (52, 45), (45, 52))
     assert len(vector_map.spot_areas) == 1
     assert len(vector_map.paths) == 1
     assert len(vector_map.contours) == 1
@@ -255,7 +289,7 @@ def test_vector_map_summary_and_renderer_return_drawable_output() -> None:
     assert summary.width == 130
     assert summary.height == 120
     assert summary.segment_count == 1
-    assert summary.no_go_area_count == 1
+    assert summary.no_go_area_count == 3
     assert summary.spot_area_count == 1
     assert summary.active_point_count == 1
     assert summary.pathway_count == 1
@@ -384,7 +418,7 @@ def test_map_view_uses_batch_vector_map_when_app_map_fails() -> None:
     assert view.image_png.startswith(b"\x89PNG")
     assert view.summary is not None
     assert view.summary.segment_count == 1
-    assert view.summary.no_go_area_count == 1
+    assert view.summary.no_go_area_count == 3
     assert view.summary.spot_area_count == 1
     assert view.details is not None
     assert view.details["mow_path_point_count"] == 4

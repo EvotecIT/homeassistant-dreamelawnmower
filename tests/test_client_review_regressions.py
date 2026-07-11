@@ -3,15 +3,23 @@
 from __future__ import annotations
 
 import ssl
+from dataclasses import replace
 from types import SimpleNamespace
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import protocol
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import (
     _normalize_cloud_firmware_check,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.runtime_state import (
+    snapshot_session_control_state,
+    snapshot_with_cloud_presence,
+)
 from dreame_lawn_mower_client import DreameLawnMowerClient
 from dreame_lawn_mower_client.client import DreameLawnMowerConnectionError
-from dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
+from dreame_lawn_mower_client.models import (
+    DreameLawnMowerDescriptor,
+    DreameLawnMowerSnapshot,
+)
 
 
 def _client() -> DreameLawnMowerClient:
@@ -40,6 +48,117 @@ def _firmware_device() -> SimpleNamespace:
         status=SimpleNamespace(),
         data={},
     )
+
+
+def _snapshot(*, available: bool = True) -> DreameLawnMowerSnapshot:
+    return DreameLawnMowerSnapshot(
+        descriptor=_client().descriptor,
+        available=available,
+        state="charging_completed",
+        state_name="Charging complete",
+        activity="docked",
+    )
+
+
+def test_cloud_offline_presence_marks_cached_snapshot_unavailable() -> None:
+    snapshot = snapshot_with_cloud_presence(_snapshot(), {"online": False})
+
+    assert snapshot.online is False
+    assert snapshot.available is False
+
+
+def test_cloud_online_presence_keeps_successful_snapshot_available() -> None:
+    snapshot = snapshot_with_cloud_presence(_snapshot(), {"online": True})
+
+    assert snapshot.online is True
+    assert snapshot.available is True
+
+
+def test_session_control_state_uses_active_heartbeat_at_dock() -> None:
+    snapshot = replace(
+        _snapshot(),
+        task_status="paused",
+        mowing_session_active=True,
+    )
+
+    assert snapshot_session_control_state(snapshot) == "paused"
+
+
+def test_session_control_state_respects_explicit_inactive_heartbeat() -> None:
+    snapshot = replace(
+        _snapshot(),
+        state="paused",
+        mowing_session_active=False,
+    )
+
+    assert snapshot_session_control_state(snapshot) == "idle"
+
+
+def test_session_control_state_falls_back_without_heartbeat_evidence() -> None:
+    snapshot = replace(
+        _snapshot(),
+        state="returning",
+        mowing_session_active=None,
+    )
+
+    assert snapshot_session_control_state(snapshot) == "returning"
+
+
+def test_cloud_presence_throttles_empty_refresh_after_cached_success(
+    monkeypatch,
+) -> None:
+    client = _client()
+    calls = 0
+
+    def empty_refresh(language: str | None = None):
+        nonlocal calls
+        calls += 1
+        return None
+
+    client._latest_cloud_device_info = {"online": True}
+    client._cloud_device_info_refreshed_at = 0.0
+    client._sync_get_cloud_device_info = empty_refresh
+    monkeypatch.setattr(
+        "custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client."
+        "time.monotonic",
+        lambda: 100.0,
+    )
+
+    first = client._sync_get_cached_cloud_device_info()
+    second = client._sync_get_cached_cloud_device_info()
+
+    assert first == {"online": True}
+    assert second == {"online": True}
+    assert calls == 1
+    assert client._cloud_device_info_refreshed_at == 100.0
+
+
+def test_cloud_presence_throttles_failed_refresh_attempt(monkeypatch) -> None:
+    client = _client()
+    calls = 0
+
+    def failed_refresh(language: str | None = None):
+        nonlocal calls
+        calls += 1
+        raise DreameLawnMowerConnectionError("presence unavailable")
+
+    client._sync_get_cloud_device_info = failed_refresh
+    monkeypatch.setattr(
+        "custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client."
+        "time.monotonic",
+        lambda: 100.0,
+    )
+
+    try:
+        client._sync_get_cached_cloud_device_info()
+    except DreameLawnMowerConnectionError:
+        pass
+    else:
+        raise AssertionError("Expected the first presence refresh to fail")
+
+    assert client._sync_get_cached_cloud_device_info() is None
+    assert calls == 1
+    assert client._cloud_device_info_refreshed_at == 100.0
 
 
 def test_cloud_mqtt_client_requires_verified_tls(monkeypatch) -> None:

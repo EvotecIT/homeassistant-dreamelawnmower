@@ -207,8 +207,8 @@ def decode_mower_status_blob(
     """Return a conservative structure for app realtime/status byte blobs.
 
     The Dreamehome app exposes this as a framed byte array. We preserve indexed
-    bytes for cross-device comparison, but intentionally avoid assigning
-    semantics until we can prove them from multiple mower states/models.
+    bytes for cross-device comparison and decode only the battery, charging,
+    and task-state fields confirmed by fixtures and supervised transitions.
     """
     raw = _normalize_byte_array(value)
     if raw is None:
@@ -225,8 +225,16 @@ def decode_mower_status_blob(
         notes.append("invalid_frame_markers")
 
     candidate_battery_level = None
-    if frame_valid and len(raw) > 11 and raw[11] <= 100:
-        candidate_battery_level = raw[11]
+    heartbeat_charging = None
+    if frame_valid and len(raw) > 11:
+        raw_battery = raw[11]
+        heartbeat_charging = raw_battery >= 128
+        normalized_battery = raw_battery - 128 if heartbeat_charging else raw_battery
+        if normalized_battery <= 100:
+            candidate_battery_level = normalized_battery
+
+    task_state = _decode_heartbeat_task_state(raw, frame_valid=frame_valid)
+    notes.extend(task_state.pop("notes", ()))
 
     runtime_telemetry = _decode_runtime_blob_candidates(raw, frame_valid=frame_valid)
     notes.extend(runtime_telemetry.pop("notes", ()))
@@ -243,6 +251,12 @@ def decode_mower_status_blob(
         payload=raw[1:-1] if len(raw) >= 2 else (),
         bytes_by_index={str(index): item for index, item in enumerate(raw)},
         candidate_battery_level=candidate_battery_level,
+        heartbeat_charging=heartbeat_charging,
+        main_state=task_state.get("main_state"),
+        sub_state=task_state.get("sub_state"),
+        task_status=task_state.get("task_status"),
+        mowing_session_active=task_state.get("mowing_session_active"),
+        task_resumable=task_state.get("task_resumable"),
         candidate_runtime_region_id=runtime_telemetry.get("region_id"),
         candidate_runtime_task_id=runtime_telemetry.get("task_id"),
         candidate_runtime_progress_percent=runtime_telemetry.get("progress_percent"),
@@ -259,6 +273,57 @@ def decode_mower_status_blob(
         candidate_runtime_track_segments=runtime_telemetry.get("track_segments", ()),
         notes=tuple(notes),
     )
+
+
+_HEARTBEAT_MOWING_MAIN_STATE = 4
+_HEARTBEAT_TASK_SUBSTATE_BASE = 33
+_HEARTBEAT_TASK_STATUSES = {
+    0: "idle",
+    1: "starting",
+    2: "mowing",
+    3: "paused",
+    4: "finished",
+    5: "failed",
+    6: "exit",
+    7: "returning_to_dock",
+}
+_INACTIVE_HEARTBEAT_TASK_STATUSES = frozenset(
+    {"idle", "finished", "failed", "exit"}
+)
+
+
+def _decode_heartbeat_task_state(
+    raw: Sequence[int],
+    *,
+    frame_valid: bool,
+) -> dict[str, object]:
+    """Decode the active mowing session state from a 20-byte heartbeat."""
+    if not frame_valid or len(raw) != 20:
+        return {}
+
+    main_state = (raw[12] & 0x0F) - 1
+    sub_state = raw[13]
+    if main_state != _HEARTBEAT_MOWING_MAIN_STATE:
+        task_status = "idle"
+    else:
+        task_status = _HEARTBEAT_TASK_STATUSES.get(
+            sub_state - _HEARTBEAT_TASK_SUBSTATE_BASE
+        )
+
+    result: dict[str, object] = {
+        "main_state": main_state,
+        "sub_state": sub_state,
+        "task_status": task_status,
+        "mowing_session_active": (
+            task_status not in _INACTIVE_HEARTBEAT_TASK_STATUSES
+            if task_status is not None
+            else None
+        ),
+        "task_resumable": task_status == "paused" if task_status is not None else None,
+    }
+    if task_status is None:
+        result["notes"] = ("unknown_heartbeat_task_substate",)
+    return result
 
 
 def _decode_runtime_blob_candidates(

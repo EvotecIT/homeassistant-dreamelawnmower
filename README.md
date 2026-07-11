@@ -61,10 +61,13 @@ region/account details are especially helpful for moving a device from
 - UI config flow with Dreamehome or MOVAhome account login
 - automatic mower discovery from the cloud account
 - `lawn_mower` entity for start, pause, and dock
+- button to dock without ending the current mowing session
+- heartbeat-backed task status and automatic resume of a paused mowing session
 - battery, activity, state, task, firmware, and error sensors
 - current-map selector entities for map, mowing action, edge, zone, and spot scope
 - current-map services for switching maps and starting explicit zone, spot, or edge runs
 - binary sensors for docked, charging, mowing, paused, returning, and error state
+- binary sensors for active and resumable mowing sessions
 - binary sensor for Bluetooth-connected runtime state
 - read-only schedule calendar using the mower-native app schedule protocol
 - disabled-by-default all-schedules calendar for default and per-map schedule diagnosis
@@ -81,6 +84,8 @@ region/account details are especially helpful for moving a device from
 - read-only mowing-preference diagnostics
 - supervised remote-control service for short validation pulses
 - sanitized diagnostics and debug snapshot helpers
+- cloud presence checks that make entities unavailable instead of showing stale
+  mower values while the device is offline
 
 ## Not Yet Public-Ready Features
 
@@ -273,6 +278,8 @@ Common user-facing helpers include:
 - `binary_sensor.<device>_charging`
 - `binary_sensor.<device>_bluetooth_connected`
 - `binary_sensor.<device>_mowing`
+- `binary_sensor.<device>_task_active`
+- `binary_sensor.<device>_task_resumable`
 - `binary_sensor.<device>_rain_delay_active`
 - `binary_sensor.<device>_returning`
 - `calendar.<device>_schedule`
@@ -313,6 +320,10 @@ disabled-by-default `Last Preference Write` diagnostic sensor. It sends a live
 preference write only when both `execute: true` and
 `confirm_preference_write: true` are provided.
 
+The guarded preference fields include per-zone safe edge mowing through
+`edge_mowing_safe`. Use the dry-run result to inspect the candidate payload
+before confirming a live write.
+
 ## Maps
 
 The map camera uses the confirmed app-map JSON path first. The renderer is
@@ -331,6 +342,8 @@ Current map support now includes:
 - services for switching the active mower map and starting explicit zone, spot,
   or edge jobs
 - runtime live-track telemetry surfaced through sensors and map-camera attributes
+- circular and rotated rectangular forbidden areas rendered from their compact
+  mower map representation
 
 Interactive map editing is still intentionally out of scope for now:
 

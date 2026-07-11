@@ -62,6 +62,8 @@ async def main() -> None:
         print(snapshot.descriptor.title)
         print(snapshot.state_name)
         print(snapshot.battery_level)
+        print(snapshot.task_status_name)
+        print(snapshot.task_resumable)
     finally:
         await client.async_close()
 
@@ -75,7 +77,9 @@ The same flow is available as `examples/python_client.py`.
 
 - account discovery for Dreamehome and MOVAhome accounts
 - normalized mower snapshots with state, activity, battery, errors, firmware,
-  and capability data
+  capability, cloud presence, and heartbeat-backed task data
+- automatic resume of a heartbeat-confirmed paused session while ordinary
+  starts continue to create a fresh mower task
 - read-only schedule retrieval and calendar-friendly task summaries
 - dry-run schedule enable/disable planning, with explicit gates required before
   live writes
@@ -127,4 +131,5 @@ service, config-flow, and registry behavior in `custom_components`.
 - `examples/weather_probe.py`
 - `examples/preference_probe.py`
 - `examples/task_status_probe.py`
+- `examples/status_blob_probe.py`
 - `examples/remote_control_probe.py`

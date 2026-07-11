@@ -170,8 +170,20 @@ BINARY_SENSORS = [
     DreameBinarySensorDescription(
         key="task_active",
         name="Task Active",
-        value_fn=lambda snapshot: snapshot.started,
+        value_fn=lambda snapshot: (
+            getattr(snapshot, "mowing_session_active", None)
+            if getattr(snapshot, "mowing_session_active", None) is not None
+            else snapshot.started
+        ),
         icon="mdi:play-circle-outline",
+    ),
+    DreameBinarySensorDescription(
+        key="task_resumable",
+        name="Task Resumable",
+        value_fn=lambda snapshot: getattr(snapshot, "task_resumable", None),
+        exists_fn=lambda snapshot: getattr(snapshot, "task_resumable", None)
+        is not None,
+        icon="mdi:play-pause",
     ),
     DreameBinarySensorDescription(
         key="raw_started",

@@ -50,6 +50,14 @@ VOICE_SETTINGS_REFRESH_INTERVAL = timedelta(minutes=5)
 FIRMWARE_UPDATE_REFRESH_INTERVAL = timedelta(minutes=15)
 
 
+def _runtime_tracking_active(snapshot: DreameLawnMowerSnapshot) -> bool:
+    """Prefer explicit heartbeat session state over legacy activity state."""
+    session_active = getattr(snapshot, "mowing_session_active", None)
+    if session_active is not None:
+        return bool(session_active)
+    return getattr(snapshot, "activity", None) in {"mowing", "paused", "returning"}
+
+
 class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot]):
     """Manage mower state updates for a single config entry."""
 
@@ -124,6 +132,10 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             snapshot = await self.client.async_refresh()
         except DreameLawnMowerConnectionError as err:
             raise UpdateFailed(str(err)) from err
+        if not snapshot.available:
+            self.runtime_status_blob = None
+            self.client.update_runtime_live_tracking(None, active=False)
+            return snapshot
         try:
             self.runtime_status_blob = await self.client.async_get_runtime_status_blob(
                 refresh=False,
@@ -131,8 +143,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             )
             self.client.update_runtime_live_tracking(
                 self.runtime_status_blob,
-                active=getattr(snapshot, "activity", None)
-                in {"mowing", "paused", "returning"},
+                active=_runtime_tracking_active(snapshot),
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh runtime status blob: %s", err)

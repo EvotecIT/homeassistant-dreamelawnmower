@@ -16,6 +16,9 @@ from PIL import Image, ImageDraw, ImageFont
 from .models import DreameLawnMowerMapSummary
 
 _PATH_SENTINEL = (32767, -32768)
+_SHAPE_RECTANGLE = 2
+_SHAPE_CIRCLE = 3
+_CIRCLE_SEGMENTS = 36
 _MAX_IMAGE_SIDE = 2048
 _MIN_IMAGE_SIDE = 400
 _PADDING = 40
@@ -73,6 +76,7 @@ class DreameLawnMowerVectorZone:
     name: str = ""
     zone_type: int = 0
     shape_type: int = 0
+    angle: float = 0
     area: float = 0
     time_minutes: int = 0
     estimated_minutes: int = 0
@@ -598,19 +602,75 @@ def _parse_zone_collection(value: Any) -> tuple[DreameLawnMowerVectorZone, ...]:
     for zone_id, zone_data in _parse_map_entries(value):
         if not isinstance(zone_data, Mapping):
             continue
+        shape_type = int(zone_data.get("shapeType") or 0)
+        angle = float(zone_data.get("angle") or 0)
         result.append(
             DreameLawnMowerVectorZone(
                 zone_id=zone_id,
-                points=_extract_path_coords(zone_data.get("path")),
+                points=_resolve_zone_points(
+                    _extract_path_coords(zone_data.get("path")),
+                    shape_type=shape_type,
+                    angle=angle,
+                ),
                 name=str(zone_data.get("name") or ""),
                 zone_type=int(zone_data.get("type") or 0),
-                shape_type=int(zone_data.get("shapeType") or 0),
+                shape_type=shape_type,
+                angle=angle,
                 area=float(zone_data.get("area") or 0),
                 time_minutes=int(zone_data.get("time") or 0),
                 estimated_minutes=int(zone_data.get("etime") or 0),
             )
         )
     return tuple(result)
+
+
+def _resolve_zone_points(
+    points: tuple[tuple[int, int], ...],
+    *,
+    shape_type: int,
+    angle: float,
+) -> tuple[tuple[int, int], ...]:
+    """Expand compact circle and rotated-rectangle mower map shapes."""
+    if shape_type == _SHAPE_CIRCLE and len(points) >= 2:
+        (x1, y1), (x2, y2) = points[:2]
+        center_x = (x1 + x2) / 2
+        center_y = (y1 + y2) / 2
+        radius_x = abs(x2 - x1) / 2
+        radius_y = abs(y2 - y1) / 2
+        return tuple(
+            (
+                round(center_x + radius_x * math.cos(theta)),
+                round(center_y + radius_y * math.sin(theta)),
+            )
+            for theta in (
+                2 * math.pi * index / _CIRCLE_SEGMENTS
+                for index in range(_CIRCLE_SEGMENTS)
+            )
+        )
+
+    if shape_type == _SHAPE_RECTANGLE and angle and points:
+        center_x = sum(point[0] for point in points) / len(points)
+        center_y = sum(point[1] for point in points) / len(points)
+        theta = math.radians(-angle)
+        cosine = math.cos(theta)
+        sine = math.sin(theta)
+        return tuple(
+            (
+                round(
+                    center_x
+                    + (x - center_x) * cosine
+                    - (y - center_y) * sine
+                ),
+                round(
+                    center_y
+                    + (x - center_x) * sine
+                    + (y - center_y) * cosine
+                ),
+            )
+            for x, y in points
+        )
+
+    return points
 
 
 def _parse_path_collection(value: Any) -> tuple[DreameLawnMowerVectorPath, ...]:
