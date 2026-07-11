@@ -729,13 +729,16 @@ def camera_stream_block_reason(snapshot: Any) -> str | None:
     activity = str(getattr(snapshot, "activity", None) or "").casefold()
     raw_attributes = getattr(snapshot, "raw_attributes", None) or {}
     station_states = {
+        "docked",
         "charging",
         "charging_completed",
         "smart_charging",
         "station_reset",
     }
     if (
-        bool(getattr(snapshot, "raw_docked", False))
+        bool(getattr(snapshot, "docked", False))
+        or activity in station_states
+        or bool(getattr(snapshot, "raw_docked", False))
         or state in station_states
     ):
         return (

@@ -131,6 +131,18 @@ def test_camera_stream_allows_known_mowing_state_required_by_a2() -> None:
     assert camera_stream_block_reason(snapshot) is None
 
 
+def test_camera_stream_blocks_normalized_docked_state_without_raw_flag() -> None:
+    snapshot = SimpleNamespace(
+        state="docked",
+        activity="docked",
+        docked=True,
+        raw_docked=False,
+        raw_attributes={},
+    )
+
+    assert "blocked while the mower is docked" in camera_stream_block_reason(snapshot)
+
+
 def test_camera_stream_blocks_returning_and_ambiguous_active_states() -> None:
     returning = SimpleNamespace(
         state="returning",
@@ -393,9 +405,9 @@ def test_camera_stream_handshake_blocks_docked_mower() -> None:
         raise AssertionError("Expected docked mower stream probe to be blocked")
 
 
-def test_camera_stream_handshake_allows_idle_undocked_mower() -> None:
+def test_camera_stream_handshake_allows_paused_undocked_mower() -> None:
     device = _FakeCameraDevice()
-    device.status.state = DreameMowerState.IDLE
+    device.status.state = DreameMowerState.PAUSED
     device.status.status = DreameMowerStatus.IDLE
     device.status.docked = False
     client = _client_with_device(device)
