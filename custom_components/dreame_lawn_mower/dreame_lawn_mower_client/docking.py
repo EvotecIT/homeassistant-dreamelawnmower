@@ -8,9 +8,11 @@ from collections.abc import Awaitable, Callable
 
 _LOGGER = logging.getLogger(__name__)
 
-ACTIVE_DOCKING_STATES = frozenset(
+SESSION_STATES_TO_END = frozenset(
     {
         "mowing",
+        "paused",
+        "returning",
         "remote_control",
         "clean_summon",
         "second_cleaning",
@@ -18,6 +20,7 @@ ACTIVE_DOCKING_STATES = frozenset(
         "spot_cleaning",
         "shortcut",
         "monitoring",
+        "monitoring_paused",
     }
 )
 
@@ -42,7 +45,7 @@ async def async_stop_then_dock(
     """
 
     state = _normalize_state(initial_state)
-    if state not in ACTIVE_DOCKING_STATES:
+    if state not in SESSION_STATES_TO_END:
         await dock()
         return True
 
@@ -53,8 +56,16 @@ async def async_stop_then_dock(
             if initial_delay > 0:
                 await asyncio.sleep(initial_delay)
             while True:
-                state = _normalize_state(await refresh_state())
-                if state not in ACTIVE_DOCKING_STATES:
+                try:
+                    state = _normalize_state(await refresh_state())
+                except Exception as err:  # noqa: BLE001 - dock despite refresh failure
+                    _LOGGER.warning(
+                        "Failed to refresh mower state after stopping: %s; "
+                        "docking anyway.",
+                        err,
+                    )
+                    break
+                if state not in SESSION_STATES_TO_END:
                     stopped = True
                     break
                 await asyncio.sleep(max(poll_interval, 0))

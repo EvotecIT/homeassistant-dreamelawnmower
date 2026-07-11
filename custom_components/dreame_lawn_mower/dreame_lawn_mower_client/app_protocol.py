@@ -287,7 +287,9 @@ _HEARTBEAT_TASK_STATUSES = {
     6: "exit",
     7: "returning_to_dock",
 }
-_INACTIVE_HEARTBEAT_TASK_STATUSES = frozenset({"idle", "exit"})
+_INACTIVE_HEARTBEAT_TASK_STATUSES = frozenset(
+    {"idle", "finished", "failed", "exit"}
+)
 
 
 def _decode_heartbeat_task_state(

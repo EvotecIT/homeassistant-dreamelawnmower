@@ -263,6 +263,39 @@ def test_status_blob_decoder_reports_idle_outside_mowing_main_state() -> None:
     assert decoded.task_resumable is False
 
 
+def test_status_blob_decoder_marks_terminal_task_states_inactive() -> None:
+    for sub_state, expected_status in ((37, "finished"), (38, "failed")):
+        decoded = decode_mower_status_blob(
+            [
+                206,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                128,
+                0,
+                128,
+                100,
+                21,
+                sub_state,
+                0,
+                0,
+                128,
+                211,
+                196,
+                206,
+            ]
+        )
+
+        assert decoded is not None
+        assert decoded.task_status == expected_status
+        assert decoded.mowing_session_active is False
+        assert decoded.task_resumable is False
+
+
 def test_property_annotations_mark_runtime_status_blob_frame() -> None:
     entry = DreameLawnMowerClient._annotate_cloud_property_entry(
         {

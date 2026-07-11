@@ -65,6 +65,29 @@ def test_idle_mower_docks_without_stop_or_polling() -> None:
     dock.assert_awaited_once()
 
 
+def test_interrupted_session_stops_before_normal_docking() -> None:
+    for initial_state in ("paused", "monitoring_paused", "returning"):
+        stop = AsyncMock()
+        refresh_state = AsyncMock(return_value="idle")
+        dock = AsyncMock()
+
+        stopped = asyncio.run(
+            async_stop_then_dock(
+                initial_state=initial_state,
+                stop=stop,
+                dock=dock,
+                refresh_state=refresh_state,
+                initial_delay=0,
+                poll_interval=0,
+            )
+        )
+
+        assert stopped is True
+        stop.assert_awaited_once()
+        refresh_state.assert_awaited_once()
+        dock.assert_awaited_once()
+
+
 def test_docking_continues_when_stop_state_times_out() -> None:
     stop = AsyncMock()
     refresh_state = AsyncMock(return_value="mowing")
@@ -84,6 +107,28 @@ def test_docking_continues_when_stop_state_times_out() -> None:
 
     assert stopped is False
     stop.assert_awaited_once()
+    dock.assert_awaited_once()
+
+
+def test_docking_continues_when_stop_state_refresh_fails() -> None:
+    stop = AsyncMock()
+    refresh_state = AsyncMock(side_effect=OSError("cloud unavailable"))
+    dock = AsyncMock()
+
+    stopped = asyncio.run(
+        async_stop_then_dock(
+            initial_state="mowing",
+            stop=stop,
+            dock=dock,
+            refresh_state=refresh_state,
+            initial_delay=0,
+            poll_interval=0,
+        )
+    )
+
+    assert stopped is False
+    stop.assert_awaited_once()
+    refresh_state.assert_awaited_once()
     dock.assert_awaited_once()
 
 
