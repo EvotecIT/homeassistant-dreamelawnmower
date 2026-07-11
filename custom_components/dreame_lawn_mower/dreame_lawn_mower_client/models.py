@@ -94,19 +94,44 @@ def _is_no_error_text(value: str | None) -> bool:
     return text.replace("_", " ").casefold() in {"no error", "none"}
 
 
+def _inherited_error_name_from_code(value: int | None) -> str | None:
+    """Return the vacuum-inherited vendor error name for a numeric code."""
+    try:
+        from .const import ERROR_CODE_TO_ERROR_NAME
+        from .types import DreameMowerErrorCode
+
+        return ERROR_CODE_TO_ERROR_NAME.get(DreameMowerErrorCode(value))
+    except (ImportError, TypeError, ValueError):
+        return None
+
+
 def _error_name_from_code(value: int | None) -> str | None:
     """Return the bundled vendor error name for a numeric code, if known."""
     if value in (None, -1, 0):
         return None
     if value in MOWER_ERROR_CODE_NAMES:
         return MOWER_ERROR_CODE_NAMES[value]
-    try:
-        from .const import ERROR_CODE_TO_ERROR_NAME
-        from .types import DreameMowerErrorCode
-
-        return ERROR_CODE_TO_ERROR_NAME.get(DreameMowerErrorCode(value))
-    except (ImportError, ValueError):
+    inherited = _inherited_error_name_from_code(value)
+    if inherited is None or inherited == "no_error":
         return None
+    # Remaining table entries carry vacuum firmware meanings that have not
+    # been confirmed on mower hardware; mark them so users don't act on them.
+    return f"unverified_{inherited}"
+
+
+def _qualify_inherited_error_name(
+    error_code: int | None,
+    error_name: str | None,
+) -> str | None:
+    """Prefer confirmed mower error names over inherited vacuum-table ones."""
+    if error_code in MOWER_ERROR_CODE_NAMES:
+        return MOWER_ERROR_CODE_NAMES[error_code]
+    text = _as_optional_str(error_name)
+    if text is None or _is_no_error_text(text):
+        return error_name
+    if text == _inherited_error_name_from_code(error_code):
+        return f"unverified_{text}"
+    return error_name
 
 
 def _error_code_from_raw(value: Any) -> int | None:
@@ -629,6 +654,7 @@ def snapshot_from_device(
         error_text = None
         error_code = None
         status_has_error = False
+    error_name = _qualify_inherited_error_name(error_code, error_name)
     error_code_active = _active_error_code_from_raw(error_code) is not None
     error_name_active = not _is_no_error_text(error_name)
     error_text_active = not _is_no_error_text(error_text)

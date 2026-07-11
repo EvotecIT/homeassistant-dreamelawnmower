@@ -120,13 +120,24 @@ def mower_error_label(value: object) -> str | None:
         return "No error"
 
     try:
+        from .models import MOWER_ERROR_CODE_NAMES
+    except ImportError:
+        MOWER_ERROR_CODE_NAMES = {}
+    if code in MOWER_ERROR_CODE_NAMES:
+        return _clean_label(MOWER_ERROR_CODE_NAMES[code])
+
+    try:
         from .const import ERROR_CODE_TO_ERROR_NAME
         from .types import DreameMowerErrorCode
 
         enum_value = DreameMowerErrorCode(code)
-        return _clean_label(ERROR_CODE_TO_ERROR_NAME.get(enum_value))
+        name = ERROR_CODE_TO_ERROR_NAME.get(enum_value)
     except (ImportError, ValueError):
         return None
+    if name is None:
+        return None
+    # Vacuum-table meaning that has not been confirmed on mower firmware.
+    return _clean_label(f"unverified_{name}")
 
 
 def decode_mower_task_status(value: object) -> dict[str, object] | None:
