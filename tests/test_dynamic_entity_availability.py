@@ -381,6 +381,21 @@ def test_task_resumable_binary_sensor_uses_heartbeat_state() -> None:
     assert entity.is_on is True
 
 
+def test_cloud_offline_snapshot_overrides_specialized_entity_availability() -> None:
+    entity = object.__new__(DreameLawnMowerBinarySensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            available=False,
+            task_resumable=True,
+            raw_attributes={},
+        )
+    )
+    entity.entity_description = _binary_sensor_description("task_resumable")
+
+    assert entity.available is False
+    assert entity.is_on is None
+
+
 def test_raw_started_binary_sensor_preserves_vendor_flag() -> None:
     entity = object.__new__(DreameLawnMowerBinarySensor)
     entity.coordinator = SimpleNamespace(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ssl
+from dataclasses import replace
 from types import SimpleNamespace
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import protocol
@@ -10,6 +11,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import 
     _normalize_cloud_firmware_check,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.runtime_state import (
+    snapshot_session_control_state,
     snapshot_with_cloud_presence,
 )
 from dreame_lawn_mower_client import DreameLawnMowerClient
@@ -70,6 +72,36 @@ def test_cloud_online_presence_keeps_successful_snapshot_available() -> None:
 
     assert snapshot.online is True
     assert snapshot.available is True
+
+
+def test_session_control_state_uses_active_heartbeat_at_dock() -> None:
+    snapshot = replace(
+        _snapshot(),
+        task_status="paused",
+        mowing_session_active=True,
+    )
+
+    assert snapshot_session_control_state(snapshot) == "paused"
+
+
+def test_session_control_state_respects_explicit_inactive_heartbeat() -> None:
+    snapshot = replace(
+        _snapshot(),
+        state="paused",
+        mowing_session_active=False,
+    )
+
+    assert snapshot_session_control_state(snapshot) == "idle"
+
+
+def test_session_control_state_falls_back_without_heartbeat_evidence() -> None:
+    snapshot = replace(
+        _snapshot(),
+        state="returning",
+        mowing_session_active=None,
+    )
+
+    assert snapshot_session_control_state(snapshot) == "returning"
 
 
 def test_cloud_mqtt_client_requires_verified_tls(monkeypatch) -> None:

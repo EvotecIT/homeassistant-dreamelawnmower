@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import (
     DreameLawnMowerClient,
@@ -151,6 +151,10 @@ def test_start_resumes_heartbeat_confirmed_paused_session() -> None:
 
     asyncio.run(client.async_start_mowing())
 
+    client.async_get_status_blob.assert_awaited_once_with(
+        refresh=True,
+        include_cloud=True,
+    )
     client._sync_resume_mowing.assert_called_once_with()
     client._async_call_device_method.assert_not_awaited()
 
@@ -165,5 +169,34 @@ def test_start_uses_fresh_action_without_resumable_session() -> None:
 
     asyncio.run(client.async_start_mowing())
 
+    client.async_get_status_blob.assert_awaited_once_with(
+        refresh=True,
+        include_cloud=True,
+    )
     client._sync_resume_mowing.assert_not_called()
     client._async_call_device_method.assert_awaited_once_with("start_mowing")
+
+
+def test_normal_dock_uses_heartbeat_session_state_at_base() -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    client.async_refresh = AsyncMock(
+        return_value=SimpleNamespace(
+            state="charging_completed",
+            task_status="paused",
+            mowing_session_active=True,
+        )
+    )
+    client._async_call_device_method = AsyncMock()
+    orchestrator = AsyncMock()
+
+    with patch(
+        "custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client."
+        "async_stop_then_dock",
+        orchestrator,
+    ):
+        asyncio.run(client.async_dock())
+
+    assert orchestrator.await_args.kwargs["initial_state"] == "paused"
+    refresh_state = orchestrator.await_args.kwargs["refresh_state"]
+    assert asyncio.run(refresh_state()) == "paused"
+    assert client.async_refresh.await_count == 2

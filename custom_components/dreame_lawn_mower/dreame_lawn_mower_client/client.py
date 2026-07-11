@@ -98,6 +98,7 @@ from .schedule import (
 )
 from .runtime_state import (
     RESUME_MOWING_REQUEST,
+    snapshot_session_control_state,
     snapshot_with_cloud_presence,
     snapshot_with_heartbeat_task_state,
 )
@@ -329,7 +330,7 @@ class DreameLawnMowerClient:
         """Start a new task or resume the heartbeat-confirmed paused task."""
         try:
             status_blob = await self.async_get_status_blob(
-                refresh=False,
+                refresh=True,
                 include_cloud=True,
             )
         except DreameLawnMowerConnectionError:
@@ -345,11 +346,11 @@ class DreameLawnMowerClient:
 
     async def async_dock(self) -> None:
         """End an active mowing session and return the mower to base."""
-        device = await asyncio.to_thread(self._ensure_device)
-        initial_state = _lower_enum_name(getattr(device.status, "state", None))
+        snapshot = await self.async_refresh()
+        initial_state = snapshot_session_control_state(snapshot)
 
         async def async_refresh_state() -> str | None:
-            return (await self.async_refresh()).state
+            return snapshot_session_control_state(await self.async_refresh())
 
         await async_stop_then_dock(
             initial_state=initial_state,

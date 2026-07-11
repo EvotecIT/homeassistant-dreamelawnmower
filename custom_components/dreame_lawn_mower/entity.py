@@ -14,6 +14,19 @@ class DreameLawnMowerEntity(CoordinatorEntity[DreameLawnMowerCoordinator]):
 
     _attr_has_entity_name = True
 
+    def __getattribute__(self, name: str) -> Any:
+        """Enforce cloud-offline availability across specialized entities."""
+        if name == "available":
+            try:
+                coordinator = object.__getattribute__(self, "coordinator")
+            except AttributeError:
+                pass
+            else:
+                snapshot = getattr(coordinator, "data", None)
+                if snapshot is not None and not getattr(snapshot, "available", True):
+                    return False
+        return super().__getattribute__(name)
+
     def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
         super().__init__(coordinator)
         self._descriptor = coordinator.client.descriptor

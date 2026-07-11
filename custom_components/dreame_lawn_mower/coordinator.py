@@ -133,8 +133,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         except DreameLawnMowerConnectionError as err:
             raise UpdateFailed(str(err)) from err
         if not snapshot.available:
-            self.data = None
-            raise UpdateFailed("Mower is offline; cached state was discarded.")
+            return snapshot
         try:
             self.runtime_status_blob = await self.client.async_get_runtime_status_blob(
                 refresh=False,

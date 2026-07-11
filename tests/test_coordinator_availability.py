@@ -5,30 +5,27 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-import pytest
-from homeassistant.helpers.update_coordinator import UpdateFailed
-
 from custom_components.dreame_lawn_mower.coordinator import (
     DreameLawnMowerCoordinator,
     _runtime_tracking_active,
 )
 
 
-def test_offline_snapshot_discards_stale_coordinator_data() -> None:
+def test_offline_snapshot_returns_normally_so_entities_remain_loaded() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator.data = SimpleNamespace(state="stale")
+    offline_snapshot = SimpleNamespace(available=False)
     coordinator.client = SimpleNamespace(
-        async_refresh=lambda: _offline_snapshot(),
+        async_refresh=lambda: _offline_snapshot(offline_snapshot),
     )
 
-    with pytest.raises(UpdateFailed, match="Mower is offline"):
-        asyncio.run(coordinator._async_update_data())
+    result = asyncio.run(coordinator._async_update_data())
 
-    assert coordinator.data is None
+    assert result is offline_snapshot
 
 
-async def _offline_snapshot() -> SimpleNamespace:
-    return SimpleNamespace(available=False)
+async def _offline_snapshot(snapshot: SimpleNamespace) -> SimpleNamespace:
+    return snapshot
 
 
 def test_runtime_tracking_respects_explicit_inactive_heartbeat() -> None:

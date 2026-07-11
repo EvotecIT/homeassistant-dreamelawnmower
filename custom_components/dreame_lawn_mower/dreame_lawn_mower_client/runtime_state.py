@@ -10,6 +10,13 @@ from .models import DreameLawnMowerSnapshot, DreameLawnMowerStatusBlob
 
 RESUME_MOWING_REQUEST = {"m": "a", "p": 0, "o": 5}
 
+_ACTIVE_TASK_CONTROL_STATES = {
+    "starting": "mowing",
+    "mowing": "mowing",
+    "paused": "paused",
+    "returning_to_dock": "returning",
+}
+
 
 def snapshot_with_heartbeat_task_state(
     snapshot: DreameLawnMowerSnapshot,
@@ -42,6 +49,16 @@ def snapshot_with_cloud_presence(
         online=online,
         available=snapshot.available and online,
     )
+
+
+def snapshot_session_control_state(snapshot: DreameLawnMowerSnapshot) -> str:
+    """Return the authoritative state used for session-ending commands."""
+    session_active = snapshot.mowing_session_active
+    if session_active is False:
+        return "idle"
+    if session_active is True:
+        return _ACTIVE_TASK_CONTROL_STATES.get(snapshot.task_status or "", "mowing")
+    return snapshot.state
 
 
 def _optional_bool(value: Any) -> bool | None:
