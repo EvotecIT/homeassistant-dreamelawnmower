@@ -8,11 +8,17 @@ import struct
 import subprocess
 import tempfile
 import threading
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from .lan_video import (
+    DEFAULT_LAN_DISCOVERY_TIMEOUT,
+    DreameLawnMowerLanVideoEndpoint,
+    discover_lan_video_endpoint,
+)
 from .models import DreameLawnMowerCameraStreamRuntimeInputs
 from .video_runner_diagnostics import (
     RUNNER_OUTPUT_PREVIEW_LIMIT,
@@ -33,7 +39,7 @@ from .xp2p_config import (
 
 _REQUEST_MAGIC = b"DXP1"
 _RESPONSE_MAGIC = b"DXR1"
-_REQUEST_FIELDS = 17
+_REQUEST_FIELDS = 20
 _MAX_RESPONSE_LENGTH = 64 * 1024
 _DEFAULT_STATUS_ATTEMPTS = 60
 _DEFAULT_RETRY_INTERVAL = 0.5
@@ -62,6 +68,7 @@ def _startup_response_timeout(
     delegate_attempts: int = _DEFAULT_STATUS_ATTEMPTS,
     delegate_retry_interval: float = _DEFAULT_RETRY_INTERVAL,
     minimum: float = 45.0,
+    include_device_status: bool = True,
 ) -> float:
     """Return a parent timeout that covers every configured worker retry."""
     status_attempts = max(int(device_status_attempts), 1)
@@ -70,7 +77,11 @@ def _startup_response_timeout(
     delegate_interval = max(float(delegate_retry_interval), 0.0)
     command_timeout = max(int(command_timeout_us), 1) / 1_000_000
     ready_event_budget = status_attempts * status_interval
-    device_status_budget = status_attempts * (command_timeout + status_interval)
+    device_status_budget = (
+        status_attempts * (command_timeout + status_interval)
+        if include_device_status
+        else 0.0
+    )
     delegate_budget = delegate_count * delegate_interval
     return max(
         float(minimum),
@@ -166,10 +177,14 @@ class DreameLawnMowerXp2pHostRuntime:
             [DreameLawnMowerCameraStreamRuntimeInputs],
             DreameLawnMowerXp2pDeviceConfig,
         ] = resolve_xp2p_device_config,
+        lan_discoverer: Callable[..., DreameLawnMowerLanVideoEndpoint] = (
+            discover_lan_video_endpoint
+        ),
     ) -> None:
         self.assets = assets
         self.startup_timeout = startup_timeout
         self.config_fetcher = config_fetcher
+        self.lan_discoverer = lan_discoverer
 
     def start_live_stream(
         self,
@@ -186,6 +201,77 @@ class DreameLawnMowerXp2pHostRuntime:
         request = DreameLawnMowerXp2pLiveStreamRequest.from_runtime_inputs(inputs)
         device_config = self.config_fetcher(inputs)
         stun_file = _write_stun_file(_stun_servers(device_config))
+        return self._start_worker(
+            request,
+            transport="cloud",
+            endpoint=None,
+            stun_file=stun_file,
+            device_config=device_config,
+            command_timeout_us=command_timeout_us,
+            device_status_attempts=device_status_attempts,
+            device_status_retry_interval=device_status_retry_interval,
+            delegate_attempts=delegate_attempts,
+            delegate_retry_interval=delegate_retry_interval,
+        )
+
+    def start_lan_stream(
+        self,
+        inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+        *,
+        endpoint: DreameLawnMowerLanVideoEndpoint | None = None,
+        preferred_address: str | None = None,
+        discovery_timeout: float = DEFAULT_LAN_DISCOVERY_TIMEOUT,
+        device_status_attempts: int = _DEFAULT_STATUS_ATTEMPTS,
+        device_status_retry_interval: float = _DEFAULT_RETRY_INTERVAL,
+        delegate_attempts: int = _DEFAULT_STATUS_ATTEMPTS,
+        delegate_retry_interval: float = _DEFAULT_RETRY_INTERVAL,
+    ) -> DreameLawnMowerXp2pLiveStreamSession:
+        """Start direct same-LAN HTTP-FLV without cloud config or credentials."""
+        self.assets.validate()
+        request = DreameLawnMowerXp2pLiveStreamRequest.from_lan_runtime_inputs(inputs)
+        if endpoint is None:
+            endpoint = self.lan_discoverer(
+                request.product_id,
+                device_name=request.device_name,
+                client_token=inputs.lan_client_token,
+                preferred_address=preferred_address,
+                timeout=discovery_timeout,
+            )
+        if (
+            endpoint.product_id != request.product_id
+            or endpoint.device_name != request.device_name
+        ):
+            raise DreameLawnMowerVideoRuntimeError(
+                "The discovered LAN endpoint does not match the mower video identity."
+            )
+        return self._start_worker(
+            request,
+            transport="lan",
+            endpoint=endpoint,
+            stun_file=None,
+            device_config=None,
+            command_timeout_us=DEFAULT_COMMAND_TIMEOUT_US,
+            device_status_attempts=device_status_attempts,
+            device_status_retry_interval=device_status_retry_interval,
+            delegate_attempts=delegate_attempts,
+            delegate_retry_interval=delegate_retry_interval,
+        )
+
+    def _start_worker(
+        self,
+        request: DreameLawnMowerXp2pLiveStreamRequest,
+        *,
+        transport: str,
+        endpoint: DreameLawnMowerLanVideoEndpoint | None,
+        stun_file: Path | None,
+        device_config: DreameLawnMowerXp2pDeviceConfig | None,
+        command_timeout_us: int,
+        device_status_attempts: int,
+        device_status_retry_interval: float,
+        delegate_attempts: int,
+        delegate_retry_interval: float,
+    ) -> DreameLawnMowerXp2pLiveStreamSession:
+        """Launch the isolated Bionic worker for cloud or direct-LAN transport."""
         command = self.assets.command()
         try:
             process = subprocess.Popen(
@@ -196,7 +282,8 @@ class DreameLawnMowerXp2pHostRuntime:
                 env=self.assets.environment(),
             )
         except OSError as err:
-            stun_file.unlink(missing_ok=True)
+            if stun_file is not None:
+                stun_file.unlink(missing_ok=True)
             raise DreameLawnMowerVideoRuntimeError(
                 f"Could not start the XP2P host worker: {err}"
             ) from err
@@ -216,6 +303,8 @@ class DreameLawnMowerXp2pHostRuntime:
                 stun_file,
                 request,
                 device_config,
+                transport=transport,
+                endpoint=endpoint,
                 command_timeout_us=command_timeout_us,
                 device_status_attempts=device_status_attempts,
                 device_status_retry_interval=device_status_retry_interval,
@@ -237,6 +326,7 @@ class DreameLawnMowerXp2pHostRuntime:
                     delegate_attempts=delegate_attempts,
                     delegate_retry_interval=delegate_retry_interval,
                     minimum=self.startup_timeout,
+                    include_device_status=transport != "lan",
                 ),
             )
             response_text = response.decode("utf-8", "replace")
@@ -252,7 +342,8 @@ class DreameLawnMowerXp2pHostRuntime:
                 if native_tail:
                     message = f"{message} Native diagnostics: {native_tail}"
                 raise DreameLawnMowerVideoRuntimeError(message)
-            if not response_text.startswith(("http://", "https://")):
+            stream_link_mode, stream_url = _decode_success_payload(response_text)
+            if not stream_url.startswith(("http://", "https://")):
                 raise DreameLawnMowerVideoRuntimeError(
                     "XP2P host worker returned an invalid stream URL."
                 )
@@ -262,10 +353,14 @@ class DreameLawnMowerXp2pHostRuntime:
                 )
             return DreameLawnMowerXp2pLiveStreamSession(
                 service_id=request.service_id,
-                stream_url=response_text,
+                stream_url=stream_url,
                 delegate_id=request.delegate_id,
                 runtime="xp2p_python_host_runtime",
-                stun_file_path=str(stun_file),
+                transport=transport,
+                lan_endpoint_address=(endpoint.address if endpoint else None),
+                lan_endpoint_port=(endpoint.port if endpoint else None),
+                stream_link_mode=stream_link_mode,
+                stun_file_path=str(stun_file) if stun_file is not None else None,
                 runner_command=command,
                 runner_process=process,
                 runner_stderr_thread=stderr_thread,
@@ -273,7 +368,8 @@ class DreameLawnMowerXp2pHostRuntime:
         except Exception as err:
             _terminate_process(process)
             _join_thread(stderr_thread)
-            stun_file.unlink(missing_ok=True)
+            if stun_file is not None:
+                stun_file.unlink(missing_ok=True)
             if isinstance(err, DreameLawnMowerVideoRuntimeError):
                 raise
             stderr = _tail_text(stderr_tail)
@@ -299,22 +395,67 @@ class DreameLawnMowerXp2pHostRuntime:
             if session.stun_file_path:
                 Path(session.stun_file_path).unlink(missing_ok=True)
 
+    def refresh_stream_link_mode(
+        self,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+        *,
+        attempts: int = 5,
+        retry_interval: float = 0.2,
+        timeout: float = 2.0,
+    ) -> int | None:
+        """Ask the live worker whether media is direct (62) or relayed (63)."""
+        process = session.runner_process
+        if (
+            process is None
+            or process.poll() is not None
+            or process.stdin is None
+            or process.stdout is None
+        ):
+            return session.stream_link_mode
+        for attempt in range(max(int(attempts), 1)):
+            try:
+                process.stdin.write(b"Q")
+                process.stdin.flush()
+                status, response = _read_response(process.stdout, timeout=timeout)
+            except (BrokenPipeError, OSError, DreameLawnMowerVideoRuntimeError):
+                return session.stream_link_mode
+            if status == 0:
+                value = response.decode("ascii", "replace").strip()
+                if value in {"62", "63"}:
+                    session.stream_link_mode = int(value)
+                    return session.stream_link_mode
+            if attempt + 1 < attempts:
+                time.sleep(max(float(retry_interval), 0.0))
+        return session.stream_link_mode
+
+
+def _decode_success_payload(value: str) -> tuple[int | None, str]:
+    """Decode the worker's route mode while accepting legacy URL-only workers."""
+    first, separator, remainder = value.partition("\n")
+    if separator and first in {"0", "62", "63"}:
+        mode = int(first)
+        return (mode or None), remainder
+    return None, value
+
 
 def _encode_request(
     assets: DreameLawnMowerXp2pHostAssets,
-    stun_file: Path,
+    stun_file: Path | None,
     request: DreameLawnMowerXp2pLiveStreamRequest,
-    device_config: DreameLawnMowerXp2pDeviceConfig,
+    device_config: DreameLawnMowerXp2pDeviceConfig | None,
     *,
+    transport: str = "cloud",
+    endpoint: DreameLawnMowerLanVideoEndpoint | None = None,
     command_timeout_us: int,
     device_status_attempts: int,
     device_status_retry_interval: float,
     delegate_attempts: int,
     delegate_retry_interval: float,
 ) -> bytes:
+    config = device_config or DreameLawnMowerXp2pDeviceConfig()
     fields = (
         str(assets.library_path),
-        str(stun_file),
+        str(stun_file) if stun_file is not None else "",
         request.service_id,
         request.delegate_id,
         request.product_id,
@@ -325,11 +466,14 @@ def _encode_request(
         request.flv_path,
         request.device_status_command,
         request.live_command,
-        device_config.server,
-        device_config.ip,
-        str(device_config.port),
-        str(device_config.protocol_type),
-        "1" if device_config.cross else "0",
+        config.server,
+        config.ip,
+        str(config.port),
+        str(config.protocol_type),
+        "1" if config.cross else "0",
+        transport,
+        endpoint.address if endpoint is not None else "",
+        str(endpoint.port) if endpoint is not None else "",
     )
     encoded = [value.encode("utf-8") for value in fields]
     payload = bytearray(_REQUEST_MAGIC)

@@ -25,7 +25,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define FIELD_COUNT 17U
+#define FIELD_COUNT 20U
 #define MAX_FIELD_LENGTH (1024U * 1024U)
 #define RESPONSE_OK 0U
 #define RESPONSE_BAD_REQUEST 1U
@@ -63,7 +63,10 @@ enum request_field {
     FIELD_CONFIG_IP,
     FIELD_CONFIG_PORT,
     FIELD_CONFIG_PROTOCOL,
-    FIELD_CONFIG_CROSS
+    FIELD_CONFIG_CROSS,
+    FIELD_TRANSPORT,
+    FIELD_LAN_ADDRESS,
+    FIELD_LAN_PORT
 };
 
 struct xp2p_app_config {
@@ -77,12 +80,17 @@ struct xp2p_app_config {
 /* Tencent 2.4.50, used by Dreame's working A2 path, exposes the fourth
  * startService argument as the integer XP2P protocol mode. */
 typedef int (*start_service_fn)(const char *, const char *, const char *, int);
+typedef int (*start_lan_service_fn)(const char *, const char *, const char *,
+                                    const char *, const char *);
 typedef int (*set_device_info_fn)(const char *, const char *);
 typedef int (*post_command_fn)(const char *, const unsigned char *, size_t,
                                unsigned char **, size_t *, uint64_t);
 typedef void *(*start_av_recv_fn)(const char *, const char *, bool);
 typedef int (*stop_av_recv_fn)(const char *, void *);
 typedef const char *(*delegate_http_flv_fn)(const char *);
+typedef const char *(*get_lan_url_fn)(const char *);
+typedef int (*get_lan_proxy_port_fn)(const char *);
+typedef int (*get_stream_link_mode_fn)(const char *);
 typedef void (*stop_service_fn)(const char *);
 typedef int (*set_qcloud_cred_fn)(const char *, const char *);
 typedef void (*set_stun_server_fn)(const char *, uint16_t);
@@ -296,9 +304,21 @@ static int read_request(struct request *request) {
         request->fields[FIELD_DELEGATE_ID][0] == 0 ||
         request->fields[FIELD_PRODUCT_ID][0] == 0 ||
         request->fields[FIELD_DEVICE_NAME][0] == 0 ||
-        request->fields[FIELD_P2P_INFO][0] == 0 ||
         request->fields[FIELD_FLV_PATH][0] == 0 ||
-        request->fields[FIELD_DEVICE_STATUS_COMMAND][0] == 0) {
+        request->fields[FIELD_TRANSPORT][0] == 0) {
+        return -1;
+    }
+    if (strcmp(request->fields[FIELD_TRANSPORT], "lan") == 0) {
+        if (request->fields[FIELD_LAN_ADDRESS][0] == 0 ||
+            request->fields[FIELD_LAN_PORT][0] == 0) {
+            return -1;
+        }
+    } else if (strcmp(request->fields[FIELD_TRANSPORT], "cloud") == 0) {
+        if (request->fields[FIELD_P2P_INFO][0] == 0 ||
+            request->fields[FIELD_DEVICE_STATUS_COMMAND][0] == 0) {
+            return -1;
+        }
+    } else {
         return -1;
     }
     if (request->status_attempts == 0) {
@@ -383,6 +403,45 @@ static char *append_flv_path(const char *prefix, const char *path) {
     return result;
 }
 
+static char *append_lan_proxy_port(const char *prefix, const char *path,
+                                   int proxy_port) {
+    static const char suffix[] = "&_port=";
+    char digits[6];
+    size_t digit_count = 0;
+    size_t base_length;
+    uint32_t value;
+    char *base;
+    char *result;
+    size_t index;
+    if (proxy_port <= 0 || proxy_port > 65535) {
+        return NULL;
+    }
+    base = append_flv_path(prefix, path);
+    if (base == NULL) {
+        return NULL;
+    }
+    value = (uint32_t)proxy_port;
+    do {
+        digits[digit_count++] = (char)('0' + value % 10U);
+        value /= 10U;
+    } while (value > 0U && digit_count < sizeof(digits));
+    base_length = strlen(base);
+    result = (char *)malloc(base_length + sizeof(suffix) - 1U + digit_count + 1U);
+    if (result == NULL) {
+        free(base);
+        return NULL;
+    }
+    memcpy(result, base, base_length);
+    memcpy(result + base_length, suffix, sizeof(suffix) - 1U);
+    for (index = 0; index < digit_count; index++) {
+        result[base_length + sizeof(suffix) - 1U + index] =
+            digits[digit_count - index - 1U];
+    }
+    result[base_length + sizeof(suffix) - 1U + digit_count] = 0;
+    free(base);
+    return result;
+}
+
 static void sleep_ms(uint32_t milliseconds) {
     if (milliseconds > 0) {
         usleep((useconds_t)milliseconds * 1000U);
@@ -412,6 +471,12 @@ static int run(void) {
     uint32_t attempt;
     int last_command_result = 0;
     int last_device_status = -1;
+    bool lan_transport;
+    start_lan_service_fn start_lan_service;
+    get_lan_url_fn get_lan_url;
+    get_lan_proxy_port_fn get_lan_proxy_port;
+    get_stream_link_mode_fn get_stream_link_mode;
+    char *success_payload = NULL;
 
     if (read_request(&request) != 0) {
         send_response(RESPONSE_BAD_REQUEST, "Invalid XP2P worker request.");
@@ -437,6 +502,8 @@ static int run(void) {
                                           XP2P_PROTOCOL_AUTO);
     app_config.cross =
         parse_unsigned(request.fields[FIELD_CONFIG_CROSS], 0U) == 1U;
+    lan_transport = strcmp(request.fields[FIELD_TRANSPORT], "lan") == 0;
+    last_xp2p_event = 0;
 
     trace("xp2p-worker: request accepted");
     library = dlopen(request.fields[FIELD_LIBRARY_PATH], RTLD_NOW | RTLD_GLOBAL);
@@ -448,13 +515,24 @@ static int run(void) {
     trace("xp2p-worker: runtime loaded");
 
     start_service = (start_service_fn)dlsym(library, "startService");
+    start_lan_service =
+        (start_lan_service_fn)dlsym(library, "startLanService");
     set_device_info = (set_device_info_fn)dlsym(library, "setDeviceXp2pInfo");
     post_command = (post_command_fn)dlsym(library, "postCommandRequestSync");
     start_av_recv = (start_av_recv_fn)dlsym(library, "startAvRecvService");
     delegate_http_flv =
         (delegate_http_flv_fn)dlsym(library, "delegateHttpFlv");
-    if (start_service == NULL || set_device_info == NULL ||
-        post_command == NULL || delegate_http_flv == NULL) {
+    get_lan_url = (get_lan_url_fn)dlsym(library, "getLanUrl");
+    get_lan_proxy_port =
+        (get_lan_proxy_port_fn)dlsym(library, "getLanProxyPort");
+    get_stream_link_mode =
+        (get_stream_link_mode_fn)dlsym(library, "getStreamLinkMode");
+    if ((!lan_transport &&
+         (start_service == NULL || set_device_info == NULL ||
+          post_command == NULL || delegate_http_flv == NULL)) ||
+        (lan_transport &&
+         (start_lan_service == NULL || get_lan_url == NULL ||
+          get_lan_proxy_port == NULL))) {
         response_status = RESPONSE_SYMBOL_MISSING;
         response_payload = "The XP2P runtime is missing required symbols.";
         goto finish;
@@ -476,15 +554,16 @@ static int run(void) {
     }
     set_user_callback(receive_callback, message_callback, device_data_callback);
 
-    if (set_stun_server != NULL &&
+    if (!lan_transport && set_stun_server != NULL &&
         request.fields[FIELD_STUN_FILE_PATH][0] != 0) {
         set_stun_server(request.fields[FIELD_STUN_FILE_PATH],
                         (uint16_t)app_config.port);
     }
-    if (set_cross_stun_turn != NULL) {
+    if (!lan_transport && set_cross_stun_turn != NULL) {
         set_cross_stun_turn(app_config.cross);
     }
-    if (set_qcloud_cred != NULL && request.fields[FIELD_SECRET_ID][0] != 0 &&
+    if (!lan_transport && set_qcloud_cred != NULL &&
+        request.fields[FIELD_SECRET_ID][0] != 0 &&
         request.fields[FIELD_SECRET_KEY][0] != 0 &&
         set_qcloud_cred(request.fields[FIELD_SECRET_ID],
                         request.fields[FIELD_SECRET_KEY]) != 0) {
@@ -494,24 +573,34 @@ static int run(void) {
     }
     trace("xp2p-worker: optional configuration applied");
 
-    last_command_result = start_service(
-        request.fields[FIELD_SERVICE_ID], request.fields[FIELD_PRODUCT_ID],
-        request.fields[FIELD_DEVICE_NAME], app_config.type);
+    if (lan_transport) {
+        last_command_result = start_lan_service(
+            request.fields[FIELD_SERVICE_ID], request.fields[FIELD_PRODUCT_ID],
+            request.fields[FIELD_DEVICE_NAME],
+            request.fields[FIELD_LAN_ADDRESS], request.fields[FIELD_LAN_PORT]);
+    } else {
+        last_command_result = start_service(
+            request.fields[FIELD_SERVICE_ID], request.fields[FIELD_PRODUCT_ID],
+            request.fields[FIELD_DEVICE_NAME], app_config.type);
+    }
     if (last_command_result != 0) {
         response_status = RESPONSE_START_FAILED;
         response_payload = "XP2P service startup failed.";
         goto finish;
     }
     service_started = true;
-    trace("xp2p-worker: service started");
-    last_command_result = set_device_info(request.fields[FIELD_SERVICE_ID],
-                                          request.fields[FIELD_P2P_INFO]);
-    if (last_command_result != 0) {
-        response_status = RESPONSE_P2P_INFO_FAILED;
-        response_payload = "XP2P device configuration failed.";
-        goto finish;
+    trace(lan_transport ? "xp2p-worker: LAN service started"
+                        : "xp2p-worker: service started");
+    if (!lan_transport) {
+        last_command_result = set_device_info(request.fields[FIELD_SERVICE_ID],
+                                              request.fields[FIELD_P2P_INFO]);
+        if (last_command_result != 0) {
+            response_status = RESPONSE_P2P_INFO_FAILED;
+            response_payload = "XP2P device configuration failed.";
+            goto finish;
+        }
+        trace("xp2p-worker: device configuration applied");
     }
-    trace("xp2p-worker: device configuration applied");
 
     for (attempt = 0; attempt < request.status_attempts; attempt++) {
         if (last_xp2p_event == 1004 || last_xp2p_event == 1005) {
@@ -527,36 +616,39 @@ static int run(void) {
         goto finish;
     }
 
-    for (attempt = 0; attempt < request.status_attempts; attempt++) {
-        unsigned char *command_response = NULL;
-        size_t response_length = 0;
-        const char *command = request.fields[FIELD_DEVICE_STATUS_COMMAND];
-        last_command_result = post_command(
-            request.fields[FIELD_DELEGATE_ID], (const unsigned char *)command,
-            strlen(command), &command_response, &response_length,
-            request.command_timeout_us);
-        last_device_status = -1;
-        if (last_command_result == 0 &&
-            response_status_code(command_response, response_length,
-                                 &last_device_status) == 0 &&
-            last_device_status == 0) {
-            break;
+    if (!lan_transport) {
+        for (attempt = 0; attempt < request.status_attempts; attempt++) {
+            unsigned char *command_response = NULL;
+            size_t response_length = 0;
+            const char *command = request.fields[FIELD_DEVICE_STATUS_COMMAND];
+            last_command_result = post_command(
+                request.fields[FIELD_DELEGATE_ID],
+                (const unsigned char *)command, strlen(command),
+                &command_response, &response_length,
+                request.command_timeout_us);
+            last_device_status = -1;
+            if (last_command_result == 0 &&
+                response_status_code(command_response, response_length,
+                                     &last_device_status) == 0 &&
+                last_device_status == 0) {
+                break;
+            }
+            if (attempt + 1U < request.status_attempts) {
+                sleep_ms(request.status_retry_ms);
+            }
         }
-        if (attempt + 1U < request.status_attempts) {
-            sleep_ms(request.status_retry_ms);
+        if (last_command_result != 0) {
+            response_status = RESPONSE_STATUS_COMMAND_FAILED;
+            response_payload = "XP2P device status command failed.";
+            goto finish;
         }
+        if (last_device_status != 0) {
+            response_status = RESPONSE_DEVICE_NOT_READY;
+            response_payload = "The mower XP2P channel did not become ready.";
+            goto finish;
+        }
+        trace("xp2p-worker: device ready");
     }
-    if (last_command_result != 0) {
-        response_status = RESPONSE_STATUS_COMMAND_FAILED;
-        response_payload = "XP2P device status command failed.";
-        goto finish;
-    }
-    if (last_device_status != 0) {
-        response_status = RESPONSE_DEVICE_NOT_READY;
-        response_payload = "The mower XP2P channel did not become ready.";
-        goto finish;
-    }
-    trace("xp2p-worker: device ready");
 
     /* The A2's proven Tencent 2.4.50 flow delegates HTTP-FLV directly after
      * readiness. Its startAvRecvService export returns no usable handle and is
@@ -565,9 +657,15 @@ static int run(void) {
 
     for (attempt = 0; attempt < request.delegate_attempts; attempt++) {
         const char *prefix =
-            delegate_http_flv(request.fields[FIELD_DELEGATE_ID]);
+            lan_transport ? get_lan_url(request.fields[FIELD_SERVICE_ID])
+                          : delegate_http_flv(request.fields[FIELD_DELEGATE_ID]);
         if (prefix != NULL && prefix[0] != 0) {
-            stream_url = append_flv_path(prefix, request.fields[FIELD_FLV_PATH]);
+            stream_url =
+                lan_transport
+                    ? append_lan_proxy_port(
+                          prefix, request.fields[FIELD_FLV_PATH],
+                          get_lan_proxy_port(request.fields[FIELD_SERVICE_ID]))
+                    : append_flv_path(prefix, request.fields[FIELD_FLV_PATH]);
             if (stream_url != NULL) {
                 break;
             }
@@ -581,14 +679,68 @@ static int run(void) {
         response_payload = "XP2P did not expose a local FLV URL.";
         goto finish;
     }
-    response_payload = stream_url;
-    trace("xp2p-worker: FLV delegate ready");
+    {
+        const char *link_mode_text = "0\n";
+        size_t link_mode_length = 2U;
+        size_t stream_url_length = strlen(stream_url);
+        int link_mode = lan_transport ? 62 : 0;
+
+        if (!lan_transport && get_stream_link_mode != NULL) {
+            link_mode =
+                get_stream_link_mode(request.fields[FIELD_SERVICE_ID]);
+            if (link_mode == 0 &&
+                strcmp(request.fields[FIELD_DELEGATE_ID],
+                       request.fields[FIELD_SERVICE_ID]) != 0) {
+                link_mode =
+                    get_stream_link_mode(request.fields[FIELD_DELEGATE_ID]);
+            }
+        }
+        if (link_mode == 62) {
+            link_mode_text = "62\n";
+            link_mode_length = 3U;
+        } else if (link_mode == 63) {
+            link_mode_text = "63\n";
+            link_mode_length = 3U;
+        }
+        success_payload = malloc(link_mode_length + stream_url_length + 1U);
+        if (success_payload == NULL) {
+            response_status = RESPONSE_DELEGATE_FAILED;
+            response_payload = "XP2P could not describe the FLV route.";
+            goto finish;
+        }
+        memcpy(success_payload, link_mode_text, link_mode_length);
+        memcpy(success_payload + link_mode_length, stream_url,
+               stream_url_length + 1U);
+        response_payload = success_payload;
+    }
+    trace(lan_transport ? "xp2p-worker: LAN FLV proxy ready"
+                        : "xp2p-worker: FLV delegate ready");
 
 finish:
     send_response(response_status, response_payload);
     if (response_status == RESPONSE_OK) {
-        unsigned char stop_byte;
-        (void)read(STDIN_FILENO, &stop_byte, 1U);
+        unsigned char control_byte;
+        while (read(STDIN_FILENO, &control_byte, 1U) == 1) {
+            if (control_byte == 'Q') {
+                int link_mode = lan_transport ? 62 : 0;
+                if (!lan_transport && get_stream_link_mode != NULL) {
+                    link_mode = get_stream_link_mode(
+                        request.fields[FIELD_SERVICE_ID]);
+                    if (link_mode == 0 &&
+                        strcmp(request.fields[FIELD_DELEGATE_ID],
+                               request.fields[FIELD_SERVICE_ID]) != 0) {
+                        link_mode = get_stream_link_mode(
+                            request.fields[FIELD_DELEGATE_ID]);
+                    }
+                }
+                send_response(RESPONSE_OK,
+                              link_mode == 62 ? "62"
+                              : link_mode == 63 ? "63"
+                                                : "0");
+                continue;
+            }
+            break;
+        }
     }
     if (av_handle != NULL && stop_av_recv != NULL) {
         stop_av_recv(request.fields[FIELD_DELEGATE_ID], av_handle);
@@ -597,6 +749,7 @@ finish:
         stop_service(request.fields[FIELD_SERVICE_ID]);
     }
     free(stream_url);
+    free(success_payload);
     free_request(&request);
     return response_status == RESPONSE_OK ? 0 : (int)response_status;
 }

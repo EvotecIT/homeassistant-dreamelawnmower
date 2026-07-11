@@ -5511,6 +5511,8 @@ def _camera_stream_runtime_inputs_from_cloud_payload(
     tx_rtc = tx_rtc if isinstance(tx_rtc, Mapping) else {}
     p2p = value.get("p2p_info")
     p2p = p2p if isinstance(p2p, Mapping) else {}
+    raw = value.get("raw")
+    raw = raw if isinstance(raw, Mapping) else {}
     return DreameLawnMowerCameraStreamRuntimeInputs(
         source=str(value.get("source") or "dreame_third_video_tx"),
         did=str(value.get("did") or ""),
@@ -5526,6 +5528,10 @@ def _camera_stream_runtime_inputs_from_cloud_payload(
         or _as_optional_text(p2p.get("app_id")),
         app_secret=_as_optional_text(tx_rtc.get("app_secret"))
         or _as_optional_text(p2p.get("app_secret")),
+        lan_client_token=_find_text_by_key(
+            raw.get("access_token"),
+            ("accessToken", "accesstoken", "token"),
+        ),
         raw=_json_safe(value, max_depth=5),
     )
 

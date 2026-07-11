@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
-import platform
-import shlex
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -20,10 +17,15 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    CONF_VIDEO_TRANSPORT,
     CONF_XP2P_LIBRARY_PATH,
     CONF_XP2P_RUNNER_COMMAND,
     CONF_XP2P_RUNNER_MODE,
+    DEFAULT_VIDEO_TRANSPORT,
     DOMAIN,
+    VIDEO_TRANSPORT_AUTO,
+    VIDEO_TRANSPORT_CLOUD,
+    VIDEO_TRANSPORT_LAN,
     XP2P_RUNNER_MODE_ONE_SHOT,
     XP2P_RUNNER_MODE_PROCESS,
 )
@@ -32,10 +34,7 @@ from .dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
     snapshot_advertises_video,
 )
-from .dreame_lawn_mower_client.stream_health import (
-    DreameLawnMowerStreamUrlProbeResult,
-    probe_stream_url,
-)
+from .dreame_lawn_mower_client.stream_health import DreameLawnMowerStreamUrlProbeResult
 from .dreame_lawn_mower_client.video_runtime import (
     DreameLawnMowerNativeXp2pRuntime,
     DreameLawnMowerVideoRuntimeError,
@@ -44,7 +43,11 @@ from .dreame_lawn_mower_client.video_runtime import (
     DreameLawnMowerXp2pProcessRunner,
     diagnose_native_xp2p_runtime,
 )
-from .dreame_lawn_mower_client.xp2p_config import resolve_xp2p_device_config
+from .dreame_lawn_mower_client.xp2p_config import (
+    XP2P_PROTOCOL_AUTO,
+    DreameLawnMowerXp2pDeviceConfig,
+    resolve_xp2p_device_config,
+)
 from .dreame_lawn_mower_client.xp2p_host_runtime import (
     DEFAULT_XP2P_HOST_STARTUP_TIMEOUT,
     DreameLawnMowerXp2pHostRuntime,
@@ -52,15 +55,31 @@ from .dreame_lawn_mower_client.xp2p_host_runtime import (
 from .dreame_lawn_mower_client.xp2p_runtime_bootstrap import (
     ensure_xp2p_host_runtime,
 )
+from .video_lan_cache import DreameLawnMowerVideoLanCache
+from .video_stream_helpers import (
+    decode_flv_jpeg as _decode_flv_jpeg,
+)
+from .video_stream_helpers import (
+    managed_runtime_supported as _managed_runtime_supported,
+)
+from .video_stream_helpers import (
+    option_text as _option_text,
+)
+from .video_stream_helpers import (
+    probe_stream_health as _probe_stream_health,
+)
+from .video_stream_helpers import (
+    safe_state_attribute as _safe_state_attribute,
+)
+from .video_stream_helpers import (
+    split_runner_command as _split_runner_command,
+)
+from .video_stream_helpers import (
+    stream_health_error as _stream_health_error,
+)
 
 _LOGGER = logging.getLogger(__name__)
-_STREAM_HEALTH_ATTEMPTS = 3
-_STREAM_HEALTH_RETRY_INTERVAL = 0.5
-_STREAM_HEALTH_TIMEOUT = 3.0
-_STREAM_HEALTH_BYTES = 16
 _HA_STREAM_START_TIMEOUT = DEFAULT_XP2P_HOST_STARTUP_TIMEOUT + 30.0
-_STILL_CONNECT_TIMEOUT = 3.0
-_STILL_READ_TIMEOUT = 7.0
 
 
 class _DreameVideoRuntime(Protocol):
@@ -119,15 +138,30 @@ class DreameLawnMowerVideoCamera(
         self._last_native_runtime_diagnostics: dict[str, Any] | None = None
         self._runtime_preparation_error: str | None = None
         self._last_image: bytes | None = None
+        self._lan_cache = getattr(coordinator, "video_lan_cache", None)
+        if self._lan_cache is None:
+            self._lan_cache = DreameLawnMowerVideoLanCache(
+                coordinator.hass,
+                entry_id=entry.entry_id,
+                did=self._descriptor.did,
+            )
+        self._lan_cache_error: str | None = None
+        self._last_lan_error: str | None = None
+        self._last_video_transport: str | None = None
 
     async def async_added_to_hass(self) -> None:
         """Prepare the managed runtime before HA applies its stream timeout."""
         await super().async_added_to_hass()
+        if not self._lan_cache.loaded:
+            try:
+                await self._lan_cache.async_load()
+            except Exception as err:  # noqa: BLE001 - Auto/cloud remain available.
+                self._lan_cache_error = str(err)
+                _LOGGER.warning("Failed to load Dreame LAN video cache: %s", err)
         snapshot = self.coordinator.data
-        if (
-            not self._runtime_configured
-            or snapshot is None
-            or not snapshot_advertises_video(snapshot)
+        if not self._runtime_configured or (
+            self._lan_cache.inputs is None
+            and (snapshot is None or not snapshot_advertises_video(snapshot))
         ):
             return
         try:
@@ -143,6 +177,11 @@ class DreameLawnMowerVideoCamera(
         """Return whether live video can be requested from Home Assistant."""
         if not self._runtime_configured:
             return False
+        if (
+            self._video_transport != VIDEO_TRANSPORT_CLOUD
+            and self._lan_cache.inputs is not None
+        ):
+            return True
         snapshot = self.coordinator.data
         if snapshot is None:
             return False
@@ -169,6 +208,12 @@ class DreameLawnMowerVideoCamera(
         return {
             "video_runtime_configured": self._runtime_configured,
             "video_runtime_mode": self._runtime_mode,
+            "video_transport_policy": self._video_transport,
+            "last_video_transport": self._last_video_transport,
+            "lan_video_identity_cached": self._lan_cache.inputs is not None,
+            "lan_video_endpoint_cached": self._lan_cache.endpoint is not None,
+            "lan_video_cache_error": self._lan_cache_error,
+            "last_lan_video_error": self._last_lan_error,
             "xp2p_library_configured": bool(self._native_library_path),
             "xp2p_runner_configured": bool(self._runner_command),
             "managed_xp2p_runtime_supported": _managed_runtime_supported(),
@@ -330,43 +375,75 @@ class DreameLawnMowerVideoCamera(
     async def _async_start_stream(self) -> str | None:
         """Start one serialized XP2P stream session."""
         self._last_stream_health = None
-        stream_enable_attempted = False
-        runtime: _DreameVideoRuntime | None = None
-        session: DreameLawnMowerXp2pLiveStreamSession | None = None
+        self._last_lan_error = None
         if not self._runtime_configured:
             self._set_stream_error(
                 "Configure a native XP2P library path or XP2P runner command."
             )
             return None
 
+        await self._async_stop_active_session()
         try:
-            inputs = (
-                await self.coordinator.client.async_get_camera_stream_runtime_inputs()
-            )
-            self._last_runtime_inputs_ready = inputs.ready
-            self._last_runtime_inputs_source = inputs.source
-            self._last_runtime_inputs_missing = inputs.missing_required
-            if not inputs.ready:
-                self._set_stream_error(
-                    "Dreame cloud did not return required XP2P fields: "
-                    + ", ".join(inputs.missing_required)
-                )
-                return None
-
-            await self._async_stop_active_session()
             runtime = await self.hass.async_add_executor_job(self._create_runtime)
             self._runtime_preparation_error = None
-            stream_enable_attempted = True
-            self._last_stream_enable_result = (
-                _safe_state_attribute(
-                    await self.coordinator.client.async_set_camera_stream_enabled(True)
+        except Exception as err:  # noqa: BLE001 - HA should receive a clean miss.
+            self._set_stream_error(str(err))
+            return None
+
+        cloud_inputs: DreameLawnMowerCameraStreamRuntimeInputs | None = None
+        cloud_inputs_error: Exception | None = None
+        if self._video_transport != VIDEO_TRANSPORT_CLOUD:
+            lan_inputs = self._lan_cache.inputs
+            if self._video_transport == VIDEO_TRANSPORT_AUTO and (
+                lan_inputs is None or self._lan_cache.endpoint is None
+            ):
+                try:
+                    cloud_inputs = await self._async_get_runtime_inputs()
+                except Exception as err:  # noqa: BLE001 - LAN cache may be absent.
+                    cloud_inputs_error = err
+                if cloud_inputs is not None and cloud_inputs.lan_identity_ready:
+                    # Tencent's LAN probe may require the short-lived access token.
+                    # It is used only for discovery and is never persisted.
+                    lan_inputs = cloud_inputs
+                else:
+                    lan_inputs = self._lan_cache.inputs
+
+            if lan_inputs is not None:
+                lan_source = await self._async_try_lan_stream(runtime, lan_inputs)
+                if lan_source is not None:
+                    return lan_source
+            else:
+                self._last_lan_error = (
+                    "No cached LAN video identity is available. Use Auto or Cloud "
+                    "once while the video cloud is reachable to provision it."
                 )
+
+            if self._video_transport == VIDEO_TRANSPORT_LAN:
+                self._set_stream_error(self._last_lan_error or "Same-LAN video failed.")
+                return None
+
+        stream_enable_attempted = False
+        session: DreameLawnMowerXp2pLiveStreamSession | None = None
+        try:
+            if cloud_inputs is None:
+                if cloud_inputs_error is not None:
+                    raise cloud_inputs_error
+                cloud_inputs = await self._async_get_runtime_inputs()
+            if not cloud_inputs.ready:
+                raise DreameLawnMowerVideoRuntimeError(
+                    "Dreame cloud did not return required XP2P fields: "
+                    + ", ".join(cloud_inputs.missing_required)
+                )
+            stream_enable_attempted = True
+            self._last_stream_enable_result = _safe_state_attribute(
+                await self.coordinator.client.async_set_camera_stream_enabled(True)
             )
             self._last_stream_disable_error = None
-            session = await self._async_start_runtime_session(runtime, inputs)
+            session = await self._async_start_runtime_session(runtime, cloud_inputs)
             stream_health = await self.hass.async_add_executor_job(
-                _probe_stream_health,
-                session.stream_url,
+                _probe_stream_health_and_route,
+                runtime,
+                session,
             )
         except asyncio.CancelledError:
             if runtime is not None and session is not None:
@@ -379,7 +456,7 @@ class DreameLawnMowerVideoCamera(
                 await self._async_stop_session(runtime, session)
             if stream_enable_attempted:
                 await self._async_disable_camera_stream()
-            self._set_stream_error(str(err))
+            self._set_stream_error(self._with_lan_failure(str(err)))
             return None
         except Exception as err:  # noqa: BLE001 - HA should receive a clean miss.
             if runtime is not None and session is not None:
@@ -387,23 +464,140 @@ class DreameLawnMowerVideoCamera(
             if stream_enable_attempted:
                 await self._async_disable_camera_stream()
             _LOGGER.warning("Failed to start Dreame mower live video: %s", err)
-            self._set_stream_error(str(err))
+            self._set_stream_error(self._with_lan_failure(str(err)))
             return None
 
         self._last_stream_health = stream_health.as_dict()
         if not stream_health.flv_header_present:
             await self._async_stop_session(runtime, session)
             await self._async_disable_camera_stream()
-            self._set_stream_error(_stream_health_error(stream_health))
+            self._set_stream_error(
+                self._with_lan_failure(_stream_health_error(stream_health))
+            )
             return None
 
+        return self._adopt_stream_session(
+            runtime,
+            session,
+            stream_health,
+            transport=VIDEO_TRANSPORT_CLOUD,
+        )
+
+    async def _async_try_lan_stream(
+        self,
+        runtime: _DreameVideoRuntime,
+        inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+    ) -> str | None:
+        """Try direct-LAN startup without invoking a cloud video action."""
+        session: DreameLawnMowerXp2pLiveStreamSession | None = None
+        try:
+            session = await self._async_start_lan_runtime_session(runtime, inputs)
+            stream_health = await self.hass.async_add_executor_job(
+                _probe_stream_health_and_route,
+                runtime,
+                session,
+            )
+        except asyncio.CancelledError:
+            if session is not None:
+                await self._async_stop_session(runtime, session)
+            raise
+        except Exception as err:  # noqa: BLE001 - Auto may fall back to cloud.
+            if session is not None:
+                await self._async_stop_session(runtime, session)
+            self._last_lan_error = str(err)
+            return None
+        if not stream_health.flv_header_present:
+            await self._async_stop_session(runtime, session)
+            self._last_lan_error = _stream_health_error(stream_health)
+            return None
+        try:
+            await self._lan_cache.async_save_session(session)
+            self._lan_cache_error = None
+        except Exception as err:  # noqa: BLE001 - a live stream remains usable.
+            self._lan_cache_error = str(err)
+            _LOGGER.warning("Failed to save Dreame LAN video endpoint: %s", err)
+        return self._adopt_stream_session(
+            runtime,
+            session,
+            stream_health,
+            transport=VIDEO_TRANSPORT_LAN,
+        )
+
+    async def _async_get_runtime_inputs(
+        self,
+    ) -> DreameLawnMowerCameraStreamRuntimeInputs:
+        """Fetch cloud inputs and retain only non-secret LAN identity."""
+        inputs = await self.coordinator.client.async_get_camera_stream_runtime_inputs()
+        self._last_runtime_inputs_ready = inputs.ready
+        self._last_runtime_inputs_source = inputs.source
+        self._last_runtime_inputs_missing = inputs.missing_required
+        if inputs.lan_identity_ready:
+            try:
+                await self._lan_cache.async_save_identity(inputs)
+                self._lan_cache_error = None
+            except Exception as err:  # noqa: BLE001 - cloud transport still works.
+                self._lan_cache_error = str(err)
+                _LOGGER.warning("Failed to save Dreame LAN video identity: %s", err)
+        return inputs
+
+    async def _async_start_lan_runtime_session(
+        self,
+        runtime: _DreameVideoRuntime,
+        inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+    ) -> DreameLawnMowerXp2pLiveStreamSession:
+        """Start LAN mode and clean up a late native result after cancellation."""
+        start_lan = getattr(runtime, "start_lan_stream", None)
+        if not callable(start_lan):
+            raise DreameLawnMowerVideoRuntimeError(
+                "The configured advanced XP2P runtime does not support same-LAN video."
+            )
+        cached_endpoint = self._lan_cache.endpoint
+
+        def _start() -> DreameLawnMowerXp2pLiveStreamSession:
+            if cached_endpoint is None:
+                return start_lan(inputs)
+            try:
+                return start_lan(inputs, endpoint=cached_endpoint)
+            except DreameLawnMowerVideoRuntimeError:
+                return start_lan(
+                    inputs,
+                    preferred_address=cached_endpoint.address,
+                )
+
+        start_job = self.hass.async_add_executor_job(_start)
+        try:
+            return await asyncio.shield(start_job)
+        except asyncio.CancelledError:
+            self._schedule_late_start_cleanup(runtime, start_job)
+            raise
+
+    def _adopt_stream_session(
+        self,
+        runtime: _DreameVideoRuntime,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+        stream_health: DreameLawnMowerStreamUrlProbeResult,
+        *,
+        transport: str,
+    ) -> str:
+        """Adopt one health-checked session as the active HA camera source."""
         self._runtime = runtime
         self._session = session
+        self._last_stream_health = stream_health.as_dict()
         self._last_error = None
+        self._last_video_transport = transport
         self._attr_is_on = True
         self._attr_is_streaming = True
         self.async_write_ha_state()
         return session.stream_url
+
+    def _with_lan_failure(self, cloud_error: str) -> str:
+        """Preserve both Auto-mode failures without leaking runtime inputs."""
+        if not self._last_lan_error:
+            return cloud_error
+        return (
+            f"Same-LAN video failed: {self._last_lan_error} "
+            f"Cloud fallback failed: {cloud_error}"
+        )
 
     async def _async_start_runtime_session(
         self,
@@ -476,7 +670,8 @@ class DreameLawnMowerVideoCamera(
         if runtime is None or session is None:
             return
         await self._async_stop_session(runtime, session)
-        await self._async_disable_camera_stream()
+        if getattr(session, "transport", VIDEO_TRANSPORT_CLOUD) != VIDEO_TRANSPORT_LAN:
+            await self._async_disable_camera_stream()
         self.async_write_ha_state()
 
     async def _async_stop_session(
@@ -528,7 +723,7 @@ class DreameLawnMowerVideoCamera(
                 )
             runtime = DreameLawnMowerNativeXp2pRuntime(
                 path,
-                config_fetcher=resolve_xp2p_device_config,
+                config_fetcher=self._resolve_xp2p_config,
             )
             self._prepared_runtime = runtime
             return runtime
@@ -542,7 +737,8 @@ class DreameLawnMowerVideoCamera(
                 )
             )
             runtime = DreameLawnMowerXp2pHostRuntime(
-                ensure_xp2p_host_runtime(runtime_root)
+                ensure_xp2p_host_runtime(runtime_root),
+                config_fetcher=self._resolve_xp2p_config,
             )
             self._prepared_runtime = runtime
             self._last_native_runtime_diagnostics = None
@@ -552,6 +748,22 @@ class DreameLawnMowerVideoCamera(
             "Managed XP2P video requires a Linux aarch64 or x86_64 host. "
             "Configure an advanced native XP2P library or runner override on "
             "this platform."
+        )
+
+    def _resolve_xp2p_config(
+        self,
+        inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+    ) -> DreameLawnMowerXp2pDeviceConfig:
+        """Prefer SDK AUTO negotiation when the HA policy permits LAN routing."""
+        config = resolve_xp2p_device_config(inputs)
+        if self._video_transport != VIDEO_TRANSPORT_AUTO:
+            return config
+        return DreameLawnMowerXp2pDeviceConfig(
+            server=config.server,
+            ip=config.ip,
+            port=config.port,
+            protocol_type=XP2P_PROTOCOL_AUTO,
+            cross=False,
         )
 
     @property
@@ -572,6 +784,17 @@ class DreameLawnMowerVideoCamera(
         return XP2P_RUNNER_MODE_PROCESS
 
     @property
+    def _video_transport(self) -> str:
+        value = self._entry.options.get(CONF_VIDEO_TRANSPORT)
+        if value in {
+            VIDEO_TRANSPORT_AUTO,
+            VIDEO_TRANSPORT_LAN,
+            VIDEO_TRANSPORT_CLOUD,
+        }:
+            return str(value)
+        return DEFAULT_VIDEO_TRANSPORT
+
+    @property
     def _native_library_path(self) -> str | None:
         return _option_text(self._entry, CONF_XP2P_LIBRARY_PATH)
 
@@ -585,112 +808,11 @@ class DreameLawnMowerVideoCamera(
         self.async_write_ha_state()
 
 
-def _option_text(entry: ConfigEntry, key: str) -> str | None:
-    """Return a trimmed non-empty string option."""
-    value = entry.options.get(key)
-    if not isinstance(value, str):
-        return None
-    value = value.strip()
-    return value or None
-
-
-def _safe_state_attribute(value: Any, *, max_depth: int = 4) -> Any:
-    """Return a bounded JSON-safe value for Home Assistant attributes."""
-    if max_depth < 0:
-        return repr(value)
-    if value is None or isinstance(value, str | int | float | bool):
-        return value
-    if isinstance(value, dict):
-        return {
-            str(key): _safe_state_attribute(item, max_depth=max_depth - 1)
-            for key, item in value.items()
-        }
-    if isinstance(value, (list, tuple)):
-        return [_safe_state_attribute(item, max_depth=max_depth - 1) for item in value]
-    return repr(value)
-
-
-def _decode_flv_jpeg(
-    stream_url: str,
-    width: int | None,
-    height: int | None,
-) -> bytes | None:
-    """Decode the first FLV video frame to JPEG without optional TurboJPEG."""
-    import av
-    from PIL import Image
-
-    with av.open(
-        stream_url,
-        timeout=(_STILL_CONNECT_TIMEOUT, _STILL_READ_TIMEOUT),
-    ) as container:
-        for frame in container.decode(video=0):
-            image = frame.to_image().convert("RGB")
-            if width or height:
-                target_width = max(int(width or image.width), 1)
-                target_height = max(int(height or image.height), 1)
-                image.thumbnail(
-                    (target_width, target_height),
-                    Image.Resampling.LANCZOS,
-                )
-            encoded = io.BytesIO()
-            image.save(encoded, format="JPEG", quality=90)
-            return encoded.getvalue()
-    return None
-
-
-def _split_runner_command(command: str) -> tuple[str, ...]:
-    """Split a configured runner command into executable and arguments."""
-    try:
-        windows = platform.system().casefold() == "windows"
-        parsed = shlex.split(command, posix=not windows)
-        if windows:
-            parsed = [
-                part[1:-1]
-                if len(part) >= 2 and part[0] == part[-1] and part[0] in "\"'"
-                else part
-                for part in parsed
-            ]
-        parts = tuple(parsed)
-    except ValueError as err:
-        raise DreameLawnMowerVideoRuntimeError(
-            f"Invalid XP2P runner command: {err}"
-        ) from err
-    if not parts:
-        raise DreameLawnMowerVideoRuntimeError(
-            "XP2P runner command cannot be empty."
-        )
-    return parts
-
-
-def _managed_runtime_supported() -> bool:
-    """Return whether the self-managed runtime supports this HA host."""
-    if platform.system().casefold() != "linux":
-        return False
-    machine = platform.machine().casefold()
-    return machine in {"amd64", "x64", "x86_64", "aarch64", "arm64"}
-
-
-def _probe_stream_health(stream_url: str) -> DreameLawnMowerStreamUrlProbeResult:
-    """Check the local stream before Home Assistant advertises it."""
-    return probe_stream_url(
-        stream_url,
-        timeout=_STREAM_HEALTH_TIMEOUT,
-        read_bytes=_STREAM_HEALTH_BYTES,
-        attempts=_STREAM_HEALTH_ATTEMPTS,
-        retry_interval=_STREAM_HEALTH_RETRY_INTERVAL,
-    )
-
-
-def _stream_health_error(health: DreameLawnMowerStreamUrlProbeResult) -> str:
-    """Render a redacted reason for a local stream URL that did not serve FLV."""
-    details = [f"error_category={health.error_category or 'unknown'}"]
-    if health.status_code is not None:
-        details.append(f"status_code={health.status_code}")
-    if health.bytes_read:
-        details.append(f"bytes_read={health.bytes_read}")
-    if health.error:
-        details.append(f"error={health.error}")
-    return (
-        "XP2P runtime returned a local stream URL, but it did not emit an FLV "
-        f"header ({', '.join(details)})."
-    )
+def _probe_stream_health_and_route(
+    runtime: _DreameVideoRuntime,
+    session: DreameLawnMowerXp2pLiveStreamSession,
+) -> DreameLawnMowerStreamUrlProbeResult:
+    """Probe FLV and query route metadata while the HTTP connection is open."""
+    refresh = getattr(runtime, "refresh_stream_link_mode", None)
+    callback = (lambda: refresh(session)) if callable(refresh) else None
+    return _probe_stream_health(session.stream_url, on_stream_open=callback)

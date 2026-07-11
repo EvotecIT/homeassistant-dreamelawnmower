@@ -178,15 +178,26 @@ station. Requesting the camera does not start or move the mower. The existing
 native-library and persistent-runner options remain available as advanced
 overrides for development or unsupported host platforms.
 
+The integration's options expose three video transport policies. The default
+keeps the proven XP2P-compatible path. `Auto` first tries Tencent's separate
+same-LAN service and then uses normal XP2P with direct-capable AUTO negotiation;
+if the SDK falls back to a relay, video remains available. `Same-LAN only`
+never falls back, but it requires firmware that advertises a LAN endpoint. The
+camera's `last_stream_session` attribute reports `stream_route` as `direct`,
+`relay`, or `unknown`; Tencent's native values are `62` for direct and `63` for
+relay.
+
 This proof is intentionally narrower than every camera feature in the vendor
 apps:
 
-- Dreame/Tencent cloud calls still provide authentication and XP2P
-  configuration for the current `startService` path. Tencent also exposes a
-  separate WLAN-discovery and `startLanService` path, but this integration does
-  not use it yet. Explicit same-LAN video is therefore not implemented or
-  proven. The current proof also does not attribute normal XP2P traffic to its
-  internal direct or relay route.
+- Dreame/Tencent cloud calls still provide authentication, camera enablement,
+  and XP2P configuration for the working A2 path. The integration implements
+  Tencent's WLAN discovery and `startLanService`, but the tested A2 firmware did
+  not listen on the discovery port or advertise a LAN endpoint. Normal XP2P in
+  AUTO mode returned valid FLV while the SDK reported route `63` (`relay`), not
+  `62` (`direct`). Direct same-LAN and cloud-independent cold start can therefore
+  work only when mower firmware exposes the required local service; they are not
+  proven on the current A2 firmware.
 - Home Assistant can display and save the current JPEG frame, but the vendor's
   stored photo gallery is not exposed.
 - Live video is field-validated on the A2 only. A3 AWD Pro and MOVA camera

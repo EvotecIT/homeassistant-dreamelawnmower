@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from http.client import HTTPResponse
 from typing import Any
@@ -37,6 +38,7 @@ def probe_stream_url(
     read_bytes: int = 16,
     attempts: int = 1,
     retry_interval: float = 0.25,
+    on_stream_open: Callable[[], Any] | None = None,
 ) -> DreameLawnMowerStreamUrlProbeResult:
     """Open a stream URL briefly and check whether it looks like HTTP-FLV."""
     if not stream_url:
@@ -56,6 +58,7 @@ def probe_stream_url(
             read_bytes=read_bytes,
             attempts=attempt,
             elapsed_seconds=time.monotonic() - started,
+            on_stream_open=on_stream_open,
         )
         if last_result.flv_header_present:
             return _with_elapsed(last_result, started)
@@ -77,16 +80,20 @@ def _probe_stream_url_once(
     read_bytes: int,
     attempts: int,
     elapsed_seconds: float,
+    on_stream_open: Callable[[], Any] | None,
 ) -> DreameLawnMowerStreamUrlProbeResult:
     request = Request(stream_url, headers={"User-Agent": "dreame-lawn-mower-probe"})
     try:
         with urlopen(request, timeout=max(timeout, 0.1)) as response:
-            return _probe_response(
+            result = _probe_response(
                 response,
                 read_bytes=max(read_bytes, 0),
                 attempts=attempts,
                 elapsed_seconds=elapsed_seconds,
             )
+            if result.flv_header_present and on_stream_open is not None:
+                on_stream_open()
+            return result
     except HTTPError as err:
         return DreameLawnMowerStreamUrlProbeResult(
             available=False,

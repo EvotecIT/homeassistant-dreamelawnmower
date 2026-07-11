@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import gzip
 import hashlib
+import io
 import struct
 
 import requests
@@ -14,11 +15,15 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     xp2p_host_worker_blob,
     xp2p_runtime_bootstrap,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.lan_video import (
+    DreameLawnMowerLanVideoEndpoint,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.video_runtime import (
     DreameLawnMowerXp2pLiveStreamRequest,
+    DreameLawnMowerXp2pLiveStreamSession,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.xp2p_config import (
     XP2P_PROTOCOL_AUTO,
@@ -31,6 +36,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.xp2p_config im
 
 DreameLawnMowerXp2pHostAssets = xp2p_host_runtime.DreameLawnMowerXp2pHostAssets
 _encode_request = xp2p_host_runtime._encode_request
+_decode_success_payload = xp2p_host_runtime._decode_success_payload
 _startup_response_timeout = xp2p_host_runtime._startup_response_timeout
 _stun_servers = xp2p_host_runtime._stun_servers
 WORKER_GZIP_BASE64 = xp2p_host_worker_blob.WORKER_GZIP_BASE64
@@ -168,6 +174,13 @@ def test_host_runtime_timeout_covers_worker_retry_budgets() -> None:
         delegate_retry_interval=0.25,
         minimum=0,
     ) == 9.75
+    assert (
+        _startup_response_timeout(
+            include_device_status=False,
+            minimum=0,
+        )
+        == 65.0
+    )
 
 
 def test_embedded_worker_matches_reproducible_hashes() -> None:
@@ -177,6 +190,60 @@ def test_embedded_worker_matches_reproducible_hashes() -> None:
     assert hashlib.sha256(compressed).hexdigest() == WORKER_GZIP_SHA256
     assert hashlib.sha256(worker).hexdigest() == WORKER_SHA256
     assert worker.startswith(b"\x7fELF")
+
+
+def test_host_worker_success_payload_reports_direct_or_relay_route() -> None:
+    assert _decode_success_payload("62\nhttp://127.0.0.1/direct.flv") == (
+        62,
+        "http://127.0.0.1/direct.flv",
+    )
+    assert _decode_success_payload("63\nhttp://127.0.0.1/relay.flv") == (
+        63,
+        "http://127.0.0.1/relay.flv",
+    )
+    assert _decode_success_payload("0\nhttp://127.0.0.1/unknown.flv") == (
+        None,
+        "http://127.0.0.1/unknown.flv",
+    )
+
+
+def test_host_worker_accepts_legacy_url_only_success_payload() -> None:
+    assert _decode_success_payload("http://127.0.0.1/legacy.flv") == (
+        None,
+        "http://127.0.0.1/legacy.flv",
+    )
+
+
+def test_host_runtime_refreshes_authoritative_relay_mode(tmp_path) -> None:
+    payload = b"63"
+
+    class _Process:
+        stdin = io.BytesIO()
+        stdout = io.BytesIO(b"DXR1" + struct.pack("!II", 0, len(payload)) + payload)
+
+        @staticmethod
+        def poll():
+            return None
+
+    runtime = xp2p_host_runtime.DreameLawnMowerXp2pHostRuntime(
+        DreameLawnMowerXp2pHostAssets(
+            worker_path=tmp_path / "worker",
+            linker_path=tmp_path / "linker",
+            library_path=tmp_path / "library",
+            library_search_paths=(tmp_path,),
+        )
+    )
+    process = _Process()
+    session = DreameLawnMowerXp2pLiveStreamSession(
+        service_id="product/device",
+        stream_url="http://127.0.0.1/stream.flv",
+        runner_process=process,
+    )
+
+    assert runtime.refresh_stream_link_mode(session) == 63
+    assert session.stream_link_mode == 63
+    assert session.as_dict()["stream_route"] == "relay"
+    assert process.stdin.getvalue() == b"Q"
 
 
 def test_host_command_keeps_mower_secrets_out_of_argv(tmp_path) -> None:
@@ -205,9 +272,61 @@ def test_host_command_keeps_mower_secrets_out_of_argv(tmp_path) -> None:
     assert "secret-id-1" not in command
     assert "secret-key-1" not in command
     assert payload.startswith(b"DXP1")
-    assert struct.unpack("!I", payload[4:8])[0] == 17
+    assert struct.unpack("!I", payload[4:8])[0] == 20
     assert b"p2p-info-1" in payload
     assert b"secret-key-1" in payload
+
+
+def test_host_lan_request_omits_cloud_credentials_and_encodes_direct_endpoint(
+    tmp_path,
+) -> None:
+    assets = DreameLawnMowerXp2pHostAssets(
+        worker_path=tmp_path / "worker",
+        linker_path=tmp_path / "linker64",
+        library_path=tmp_path / "libiot_video_demo.so",
+        library_search_paths=(tmp_path / "lib",),
+    )
+    request = DreameLawnMowerXp2pLiveStreamRequest.from_lan_runtime_inputs(_inputs())
+    endpoint = DreameLawnMowerLanVideoEndpoint(
+        product_id="product-1",
+        device_name="device-1",
+        address="192.0.2.25",
+        port=9000,
+        response_version="2.4",
+    )
+
+    payload = _encode_request(
+        assets,
+        None,
+        request,
+        None,
+        transport="lan",
+        endpoint=endpoint,
+        command_timeout_us=123,
+        device_status_attempts=4,
+        device_status_retry_interval=0.5,
+        delegate_attempts=5,
+        delegate_retry_interval=0.25,
+    )
+    fields = _request_fields(payload)
+
+    assert fields[6:9] == [b"", b"", b""]
+    assert fields[9].startswith(b"ipc.flv?action=live")
+    assert b"_crypto=off" in fields[9]
+    assert fields[10] == b""
+    assert fields[-3:] == [b"lan", b"192.0.2.25", b"9000"]
+
+
+def _request_fields(payload: bytes) -> list[bytes]:
+    count = struct.unpack("!I", payload[4:8])[0]
+    offset = 8
+    fields = []
+    for _index in range(count):
+        length = struct.unpack("!I", payload[offset : offset + 4])[0]
+        offset += 4
+        fields.append(payload[offset : offset + length])
+        offset += length
+    return fields
 
 
 def test_host_runtime_does_not_inherit_home_assistant_environment(

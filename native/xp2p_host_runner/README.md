@@ -9,6 +9,8 @@ The checked-in source is MIT licensed with this repository. The compressed
 worker embedded in `xp2p_host_worker_blob.py` is produced by `build.sh`; its
 decoded SHA-256 is recorded beside the blob. The script requires an AArch64
 cross compiler plus the pinned AOSP runtime files used by the Python bootstrap.
+Run `embed_worker.py` with the built worker, its deterministic gzip archive,
+and the target Python module to refresh the checked-in blob and both hashes.
 
 The Python bootstrap downloads third-party binaries from their original
 publishers and verifies fixed SHA-256 hashes:

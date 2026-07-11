@@ -658,6 +658,28 @@ def test_stream_url_probe_retries_until_flv_header() -> None:
     assert result.elapsed_seconds >= 0
 
 
+def test_stream_url_probe_invokes_route_callback_after_flv_header() -> None:
+    pytest_socket.enable_socket()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _FlvHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    callbacks: list[str] = []
+
+    try:
+        result = probe_stream_url(
+            f"http://127.0.0.1:{server.server_port}/ipc.flv",
+            timeout=1.0,
+            on_stream_open=lambda: callbacks.append("open"),
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2.0)
+
+    assert result.flv_header_present is True
+    assert callbacks == ["open"]
+
+
 def test_stream_health_accepts_flushed_signature_without_waiting_for_media() -> None:
     reads: list[int] = []
 

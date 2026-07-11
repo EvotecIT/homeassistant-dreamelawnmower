@@ -54,13 +54,18 @@ from .debug_ota_catalog import (
     build_debug_ota_catalog_url,
     normalize_debug_ota_catalog_payload,
 )
-from .map_probe import (
-    MAP_HISTORY_PROPERTY_KEYS,
-    MAP_PROBE_PROPERTY_KEYS,
-    build_cloud_key_definition_summary,
-    build_cloud_property_history_summary,
-    build_cloud_property_summary,
-    build_map_probe_payload,
+from .lan_video import (
+    DEFAULT_LAN_DISCOVERY_ATTEMPTS,
+    DEFAULT_LAN_DISCOVERY_BROADCASTS,
+    DEFAULT_LAN_DISCOVERY_PORT,
+    DEFAULT_LAN_DISCOVERY_TIMEOUT,
+    DEFAULT_LAN_DISCOVERY_VERSION,
+    DreameLawnMowerLanVideoDiscoveryError,
+    DreameLawnMowerLanVideoEndpoint,
+    build_lan_video_probe_packet,
+    discover_lan_video_endpoint,
+    discover_lan_video_endpoints,
+    parse_lan_video_probe_response,
 )
 from .maintenance import (
     CMS_GET_REQUEST,
@@ -73,6 +78,14 @@ from .maintenance import (
     maintenance_status_from_cms,
     normalize_maintenance_item,
     reset_cms_counter,
+)
+from .map_probe import (
+    MAP_HISTORY_PROPERTY_KEYS,
+    MAP_PROBE_PROPERTY_KEYS,
+    build_cloud_key_definition_summary,
+    build_cloud_property_history_summary,
+    build_cloud_property_summary,
+    build_map_probe_payload,
 )
 from .models import (
     DISPLAY_NAME_ALIASES,
@@ -123,6 +136,7 @@ from .schedule import (
 from .stream_health import DreameLawnMowerStreamUrlProbeResult, probe_stream_url
 from .video_runtime import (
     DEFAULT_COMMAND_TIMEOUT_US,
+    DEFAULT_LAN_FLV_PATH_TEMPLATE,
     XP2P_PROTOCOL_AUTO,
     XP2P_PROTOCOL_TCP,
     XP2P_PROTOCOL_UDP,
@@ -157,6 +171,8 @@ __all__ = [
     "DreameLawnMowerDescriptor",
     "DreameLawnMowerError",
     "DreameLawnMowerFirmwareUpdateSupport",
+    "DreameLawnMowerLanVideoDiscoveryError",
+    "DreameLawnMowerLanVideoEndpoint",
     "DreameLawnMowerMapDiagnostics",
     "DreameLawnMowerMapSummary",
     "DreameLawnMowerMapView",
@@ -187,6 +203,12 @@ __all__ = [
     "DEBUG_OTA_LIST_URL",
     "DEBUG_OTA_TRACKS",
     "DEFAULT_COMMAND_TIMEOUT_US",
+    "DEFAULT_LAN_FLV_PATH_TEMPLATE",
+    "DEFAULT_LAN_DISCOVERY_ATTEMPTS",
+    "DEFAULT_LAN_DISCOVERY_BROADCASTS",
+    "DEFAULT_LAN_DISCOVERY_PORT",
+    "DEFAULT_LAN_DISCOVERY_TIMEOUT",
+    "DEFAULT_LAN_DISCOVERY_VERSION",
     "XP2P_PROTOCOL_AUTO",
     "XP2P_PROTOCOL_TCP",
     "XP2P_PROTOCOL_UDP",
@@ -217,6 +239,7 @@ __all__ = [
     "analyze_dreamehome_apk",
     "batch_data_text",
     "build_jadx_command",
+    "build_lan_video_probe_packet",
     "build_camera_probe_payload",
     "build_debug_ota_catalog_url",
     "build_cloud_key_definition_summary",
@@ -243,6 +266,8 @@ __all__ = [
     "key_definition_label",
     "find_jadx_executable",
     "display_name_for_model",
+    "discover_lan_video_endpoint",
+    "discover_lan_video_endpoints",
     "diagnose_native_xp2p_runtime",
     "ensure_xp2p_host_runtime",
     "fetch_xp2p_device_config",
@@ -256,6 +281,7 @@ __all__ = [
     "maintenance_status_from_cms",
     "normalize_debug_ota_catalog_payload",
     "normalize_maintenance_item",
+    "parse_lan_video_probe_response",
     "mowing_preference_mode_name",
     "normalize_mowing_preference_mode",
     "remote_control_block_reason",

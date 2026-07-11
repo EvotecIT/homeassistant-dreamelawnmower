@@ -395,3 +395,25 @@ def test_camera_stream_inputs_accept_app_key_aliases_from_tx_payloads() -> None:
     assert result.app_secret == "xp2p-app-secret-1"
     assert result.app_credential_state == "complete"
     assert result.missing_app_credentials == ()
+
+
+def test_camera_stream_inputs_keep_lan_probe_token_transient_and_redacted() -> None:
+    payload = {
+        "source": "dreame_third_video_tx",
+        "did": "device-1",
+        "tx_rtc_info": {
+            "channel_id": "product-1/device-1",
+            "product_id": "product-1",
+            "device_name": "device-1",
+        },
+        "p2p_info": {},
+        "raw": {"access_token": {"data": {"accessToken": "token-1"}}},
+    }
+
+    result = client_module._camera_stream_runtime_inputs_from_cloud_payload(payload)
+    redacted = result.as_dict(redact=True)
+
+    assert result.lan_client_token == "token-1"
+    assert redacted["lan_client_token_present"] is True
+    assert "lan_client_token" not in redacted
+    assert "token-1" not in repr(result)

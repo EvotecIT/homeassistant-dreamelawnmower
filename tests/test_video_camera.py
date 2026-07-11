@@ -25,9 +25,25 @@ except ModuleNotFoundError:
 from homeassistant.components.camera import CameraEntityFeature
 
 import custom_components.dreame_lawn_mower.video_camera as video_camera_module
+import custom_components.dreame_lawn_mower.video_stream_helpers as video_helpers_module
 from custom_components.dreame_lawn_mower.const import (
+    CONF_VIDEO_TRANSPORT,
     CONF_XP2P_LIBRARY_PATH,
     CONF_XP2P_RUNNER_COMMAND,
+    VIDEO_TRANSPORT_AUTO,
+    VIDEO_TRANSPORT_CLOUD,
+    VIDEO_TRANSPORT_LAN,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
+    DreameLawnMowerCameraStreamRuntimeInputs,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.video_runtime import (
+    DreameLawnMowerXp2pLiveStreamSession,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.xp2p_config import (
+    XP2P_PROTOCOL_AUTO,
+    XP2P_PROTOCOL_TCP,
+    DreameLawnMowerXp2pDeviceConfig,
 )
 from custom_components.dreame_lawn_mower.video_camera import (
     DreameLawnMowerVideoCamera,
@@ -40,7 +56,10 @@ from .fixture_data import load_json_fixture
 def _uninitialized_entity(*, snapshot: object | None = None):
     entity = object.__new__(DreameLawnMowerVideoCamera)
     entity._entry = SimpleNamespace(
-        options={CONF_XP2P_RUNNER_COMMAND: "xp2p-runner"}
+        options={
+            CONF_XP2P_RUNNER_COMMAND: "xp2p-runner",
+            CONF_VIDEO_TRANSPORT: VIDEO_TRANSPORT_CLOUD,
+        }
     )
     entity.coordinator = SimpleNamespace(data=snapshot)
     entity._session = None
@@ -48,6 +67,9 @@ def _uninitialized_entity(*, snapshot: object | None = None):
     entity._attr_is_on = True
     entity._stream_lock = asyncio.Lock()
     entity._snapshot_lock = asyncio.Lock()
+    entity._lan_cache = SimpleNamespace(inputs=None, endpoint=None)
+    entity._last_lan_error = None
+    entity._last_video_transport = None
     return entity
 
 
@@ -58,6 +80,35 @@ def test_video_camera_advertises_stop_control() -> None:
     assert features & CameraEntityFeature.ON_OFF
     assert "async_turn_on" in DreameLawnMowerVideoCamera.__dict__
     assert "async_turn_off" in DreameLawnMowerVideoCamera.__dict__
+
+
+def test_video_camera_auto_policy_prefers_direct_capable_sdk_negotiation() -> None:
+    entity = _uninitialized_entity()
+    entity._entry.options[CONF_VIDEO_TRANSPORT] = VIDEO_TRANSPORT_AUTO
+    inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+        source="test",
+        did="did-1",
+    )
+    fetched = DreameLawnMowerXp2pDeviceConfig(
+        server="stun.example.test",
+        ip="192.0.2.1",
+        port=20003,
+        protocol_type=XP2P_PROTOCOL_TCP,
+        cross=True,
+    )
+
+    with patch.object(
+        video_camera_module,
+        "resolve_xp2p_device_config",
+        return_value=fetched,
+    ):
+        config = entity._resolve_xp2p_config(inputs)
+
+    assert config.server == fetched.server
+    assert config.ip == fetched.ip
+    assert config.port == fetched.port
+    assert config.protocol_type == XP2P_PROTOCOL_AUTO
+    assert config.cross is False
 
 
 def test_video_manifest_declares_home_assistant_stream_dependency() -> None:
@@ -110,7 +161,7 @@ def test_video_camera_available_from_top_level_video_status() -> None:
 
 
 def test_runner_command_uses_windows_backslash_and_quote_semantics() -> None:
-    with patch.object(video_camera_module.platform, "system", return_value="Windows"):
+    with patch.object(video_helpers_module.platform, "system", return_value="Windows"):
         command = _split_runner_command(
             '"C:\\Program Files\\Dreame\\xp2p-runner.exe" --mode process'
         )
@@ -147,10 +198,9 @@ def test_native_library_runtime_receives_device_config_fetcher() -> None:
         result = entity._create_runtime()
 
     assert result is runtime
-    assert (
-        runtime_type.call_args.kwargs["config_fetcher"]
-        is video_camera_module.resolve_xp2p_device_config
-    )
+    config_fetcher = runtime_type.call_args.kwargs["config_fetcher"]
+    assert config_fetcher.__self__ is entity
+    assert config_fetcher.__func__ is DreameLawnMowerVideoCamera._resolve_xp2p_config
 
 
 def test_video_camera_serializes_concurrent_stream_starts() -> None:
@@ -690,6 +740,7 @@ def test_video_camera_disables_video_when_enable_attempt_raises() -> None:
             async def async_get_camera_stream_runtime_inputs(self) -> object:
                 return SimpleNamespace(
                     ready=True,
+                    lan_identity_ready=False,
                     source="dreame_third_video_tx",
                     missing_required=(),
                 )
@@ -718,3 +769,127 @@ def test_video_camera_disables_video_when_enable_attempt_raises() -> None:
         return result, calls
 
     assert asyncio.run(_run()) == (None, [True, False])
+
+
+def test_video_camera_lan_only_starts_and_stops_without_cloud_video_calls() -> None:
+    async def _run() -> tuple[str | None, int, int, str | None]:
+        entity = _uninitialized_entity()
+        entity._entry.options[CONF_VIDEO_TRANSPORT] = VIDEO_TRANSPORT_LAN
+        inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+            source="lan_video_cache",
+            did="did-1",
+            product_id="product-1",
+            device_name="device-1",
+        )
+
+        class _Cache:
+            endpoint = None
+
+            def __init__(self) -> None:
+                self.inputs = inputs
+                self.saved = 0
+
+            async def async_save_session(self, _session: object) -> None:
+                self.saved += 1
+
+        class _Client:
+            async def async_get_camera_stream_runtime_inputs(self) -> object:
+                raise AssertionError(
+                    "LAN-only startup must not fetch video cloud input"
+                )
+
+            async def async_set_camera_stream_enabled(self, _enabled: bool) -> None:
+                raise AssertionError("LAN-only startup must not toggle cloud video")
+
+        class _Runtime:
+            def __init__(self) -> None:
+                self.starts = 0
+
+            def start_lan_stream(
+                self,
+                actual_inputs: object,
+                **_kwargs: object,
+            ) -> DreameLawnMowerXp2pLiveStreamSession:
+                assert actual_inputs is inputs
+                self.starts += 1
+                return DreameLawnMowerXp2pLiveStreamSession(
+                    service_id="product-1/device-1",
+                    stream_url="http://127.0.0.1/lan.flv",
+                    transport=VIDEO_TRANSPORT_LAN,
+                    lan_endpoint_address="192.0.2.25",
+                    lan_endpoint_port=9000,
+                )
+
+            def stop_live_stream(self, _session: object) -> None:
+                return None
+
+        class _Health:
+            flv_header_present = True
+
+            @staticmethod
+            def as_dict() -> dict[str, object]:
+                return {"flv_header_present": True}
+
+        cache = _Cache()
+        runtime = _Runtime()
+        entity._lan_cache = cache
+        entity.coordinator = SimpleNamespace(client=_Client(), data=None)
+        entity._prepared_runtime = runtime
+        entity._runtime_preparation_error = None
+        entity._last_stream_health = None
+        entity._last_error = None
+        entity._attr_is_streaming = False
+        entity._lan_cache_error = None
+        entity._last_stream_disable_error = None
+        entity.async_write_ha_state = lambda: None
+
+        async def _executor(function, *args):
+            return function(*args)
+
+        entity.hass = SimpleNamespace(async_add_executor_job=_executor)
+        with patch.object(
+            video_camera_module,
+            "_probe_stream_health",
+            return_value=_Health(),
+        ):
+            source = await entity._async_start_stream()
+        await entity._async_stop_active_session()
+        return source, runtime.starts, cache.saved, entity._last_stream_disable_error
+
+    assert asyncio.run(_run()) == (
+        "http://127.0.0.1/lan.flv",
+        1,
+        1,
+        None,
+    )
+
+
+def test_video_camera_stop_does_not_call_cloud_cleanup_for_lan_session() -> None:
+    async def _run() -> tuple[int, int]:
+        entity = _uninitialized_entity()
+        runtime = object()
+        session = SimpleNamespace(transport=VIDEO_TRANSPORT_LAN)
+        entity._runtime = runtime
+        entity._session = session
+        entity._attr_is_streaming = True
+        entity.stream = None
+        runtime_stops = 0
+        cloud_disables = 0
+
+        async def _stop(actual_runtime: object, actual_session: object) -> None:
+            nonlocal runtime_stops
+            assert actual_runtime is runtime
+            assert actual_session is session
+            runtime_stops += 1
+
+        async def _disable() -> None:
+            nonlocal cloud_disables
+            cloud_disables += 1
+
+        entity._async_stop_session = _stop
+        entity._async_disable_camera_stream = _disable
+        entity.async_write_ha_state = lambda: None
+        await entity._async_stop_active_session()
+        return runtime_stops, cloud_disables
+
+    assert asyncio.run(_run()) == (1, 0)

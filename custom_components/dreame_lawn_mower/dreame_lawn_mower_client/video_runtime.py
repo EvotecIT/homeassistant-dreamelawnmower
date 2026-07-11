@@ -42,6 +42,9 @@ XP2P_PROTOCOL_UDP = 1
 XP2P_PROTOCOL_TCP = 2
 
 DEFAULT_COMMAND_TIMEOUT_US = 7_500_000
+DEFAULT_LAN_FLV_PATH_TEMPLATE = (
+    "ipc.flv?action=live&_protocol=tcp&quality=high&_crypto=off&channel={channel}"
+)
 ANDROID_XP2P_JNI_SYMBOL_MARKERS = (
     b"Java_com_tencent_xnet_XP2P",
     b"startServiceNative",
@@ -184,6 +187,39 @@ class DreameLawnMowerXp2pLiveStreamRequest:
             device_status_command=device_status_command,
         )
 
+    @classmethod
+    def from_lan_runtime_inputs(
+        cls,
+        inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+    ) -> DreameLawnMowerXp2pLiveStreamRequest:
+        """Build a direct-LAN request without cloud XP2P credentials/config."""
+        missing = inputs.missing_lan_required
+        if missing:
+            raise DreameLawnMowerVideoRuntimeError(
+                "Cannot start same-LAN XP2P stream; missing identity fields: "
+                + ", ".join(missing)
+            )
+        service_id = inputs.xp2p_id or inputs.channel_id or inputs.did
+        if not service_id:
+            raise DreameLawnMowerVideoRuntimeError(
+                "Cannot start same-LAN XP2P stream; missing service id."
+            )
+        stream_channel = str(inputs.stream_channel)
+        return cls(
+            service_id=service_id,
+            delegate_id=service_id,
+            stream_channel=stream_channel,
+            product_id=str(inputs.product_id),
+            device_name=str(inputs.device_name),
+            p2p_info="",
+            flv_path=_format_flv_path(
+                DEFAULT_LAN_FLV_PATH_TEMPLATE,
+                stream_channel,
+            ),
+            live_command=inputs.live_command,
+            device_status_command="",
+        )
+
     def as_dict(self, *, redact: bool = False) -> dict[str, Any]:
         """Return a JSON-safe request payload."""
         payload = {
@@ -228,6 +264,10 @@ class DreameLawnMowerXp2pLiveStreamSession:
     stream_url: str
     delegate_id: str | None = None
     runtime: str = "native_xp2p"
+    transport: str = "cloud"
+    lan_endpoint_address: str | None = None
+    lan_endpoint_port: int | None = None
+    stream_link_mode: int | None = None
     start_result: int = 0
     command_result: int | None = None
     command_response: bytes | None = field(default=None, repr=False)
@@ -249,6 +289,11 @@ class DreameLawnMowerXp2pLiveStreamSession:
             "delegate_id": self.delegate_id,
             "stream_url": self.stream_url,
             "runtime": self.runtime,
+            "transport": self.transport,
+            "lan_endpoint_address": self.lan_endpoint_address,
+            "lan_endpoint_port": self.lan_endpoint_port,
+            "stream_link_mode": self.stream_link_mode,
+            "stream_route": _stream_route(self.stream_link_mode, self.transport),
             "start_result": self.start_result,
             "command_result": self.command_result,
             "command_response_present": bool(self.command_response),
@@ -262,12 +307,26 @@ class DreameLawnMowerXp2pLiveStreamSession:
             "runner_process_alive": _process_alive(self.runner_process),
         }
         if redact:
-            for key in ("service_id", "delegate_id", "stream_url"):
+            for key in (
+                "service_id",
+                "delegate_id",
+                "stream_url",
+                "lan_endpoint_address",
+            ):
                 payload[f"{key}_present"] = bool(payload.pop(key, None))
             payload["runner_command_present"] = bool(
                 payload.pop("runner_command", ())
             )
         return payload
+
+
+def _stream_route(link_mode: int | None, transport: str) -> str:
+    """Return the SDK's authoritative route classification."""
+    if transport == "lan" or link_mode == 62:
+        return "direct"
+    if link_mode == 63:
+        return "relay"
+    return "unknown"
 
 
 class DreameLawnMowerXp2pExternalRunner:

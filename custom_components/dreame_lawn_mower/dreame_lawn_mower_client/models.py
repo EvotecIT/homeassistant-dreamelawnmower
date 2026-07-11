@@ -537,6 +537,7 @@ class DreameLawnMowerCameraStreamRuntimeInputs:
     secret_key: str | None = None
     app_id: str | None = None
     app_secret: str | None = None
+    lan_client_token: str | None = field(default=None, repr=False)
     stream_channel: str | int = 0
     live_command: str = "action=live"
     flv_path_template: str = (
@@ -564,6 +565,18 @@ class DreameLawnMowerCameraStreamRuntimeInputs:
     def ready(self) -> bool:
         """Return whether the minimum XP2P runtime input set is present."""
         return not self.missing_required
+
+    @property
+    def missing_lan_required(self) -> tuple[str, ...]:
+        """Return identity fields missing from direct same-LAN startup."""
+        return tuple(
+            name for name in ("product_id", "device_name") if not getattr(self, name)
+        )
+
+    @property
+    def lan_identity_ready(self) -> bool:
+        """Return whether LAN discovery has enough identity to be attempted."""
+        return not self.missing_lan_required
 
     @property
     def qcloud_credential_state(self) -> str:
@@ -597,6 +610,8 @@ class DreameLawnMowerCameraStreamRuntimeInputs:
         payload["xp2p_id"] = self.xp2p_id
         payload["ready"] = self.ready
         payload["missing_required"] = self.missing_required
+        payload["lan_identity_ready"] = self.lan_identity_ready
+        payload["missing_lan_required"] = self.missing_lan_required
         payload["qcloud_credential_state"] = self.qcloud_credential_state
         payload["missing_qcloud_credentials"] = self.missing_qcloud_credentials
         payload["app_credential_state"] = self.app_credential_state
@@ -608,6 +623,7 @@ class DreameLawnMowerCameraStreamRuntimeInputs:
                 "secret_key",
                 "app_id",
                 "app_secret",
+                "lan_client_token",
             ):
                 payload[f"{key}_present"] = bool(payload.get(key))
                 payload.pop(key, None)

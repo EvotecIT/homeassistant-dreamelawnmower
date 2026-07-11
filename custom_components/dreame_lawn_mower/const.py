@@ -18,6 +18,7 @@ CONF_MAP_LABEL_SCALE = "map_label_scale"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_TOKEN = "token"
 CONF_USERNAME = "username"
+CONF_VIDEO_TRANSPORT = "video_transport"
 CONF_XP2P_LIBRARY_PATH = "xp2p_library_path"
 CONF_XP2P_RUNNER_COMMAND = "xp2p_runner_command"
 CONF_XP2P_RUNNER_MODE = "xp2p_runner_mode"
@@ -43,6 +44,16 @@ XP2P_RUNNER_MODE_ONE_SHOT = "one-shot"
 XP2P_RUNNER_MODE_OPTIONS = {
     XP2P_RUNNER_MODE_PROCESS: "Persistent process",
     XP2P_RUNNER_MODE_ONE_SHOT: "One-shot command",
+}
+
+VIDEO_TRANSPORT_AUTO = "auto"
+VIDEO_TRANSPORT_LAN = "lan"
+VIDEO_TRANSPORT_CLOUD = "cloud"
+DEFAULT_VIDEO_TRANSPORT = VIDEO_TRANSPORT_CLOUD
+VIDEO_TRANSPORT_OPTIONS = {
+    VIDEO_TRANSPORT_AUTO: "Prefer direct same-LAN, fall back to XP2P relay",
+    VIDEO_TRANSPORT_LAN: "Same-LAN only (requires device firmware support)",
+    VIDEO_TRANSPORT_CLOUD: "XP2P relay-compatible",
 }
 
 PLATFORMS: list[Platform] = [
