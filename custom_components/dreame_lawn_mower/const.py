@@ -51,9 +51,9 @@ VIDEO_TRANSPORT_LAN = "lan"
 VIDEO_TRANSPORT_CLOUD = "cloud"
 DEFAULT_VIDEO_TRANSPORT = VIDEO_TRANSPORT_CLOUD
 VIDEO_TRANSPORT_OPTIONS = {
-    VIDEO_TRANSPORT_AUTO: "Prefer direct same-LAN, fall back to XP2P relay",
+    VIDEO_TRANSPORT_AUTO: "Prefer same-LAN, then cached/cloud XP2P",
     VIDEO_TRANSPORT_LAN: "Same-LAN only (requires device firmware support)",
-    VIDEO_TRANSPORT_CLOUD: "XP2P relay-compatible",
+    VIDEO_TRANSPORT_CLOUD: "XP2P (cloud provisioned)",
 }
 
 PLATFORMS: list[Platform] = [
