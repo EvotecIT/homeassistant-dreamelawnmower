@@ -203,7 +203,7 @@ SENSORS = [
     ),
     DreameSensorDescription(
         key="cleaning_mode",
-        name="Cleaning Mode",
+        name="Mowing Mode",
         value_fn=lambda snapshot: snapshot.cleaning_mode_name,
         exists_fn=lambda snapshot: (
             bool(snapshot.cleaning_mode_name)
@@ -214,7 +214,7 @@ SENSORS = [
     ),
     DreameSensorDescription(
         key="current_cleaned_area",
-        name="Current Cleaned Area",
+        name="Current Mowed Area",
         value_fn=lambda snapshot: getattr(snapshot, "cleaned_area", None),
         exists_fn=lambda snapshot: getattr(snapshot, "cleaned_area", None) is not None,
         icon="mdi:texture-box",
@@ -222,7 +222,7 @@ SENSORS = [
     ),
     DreameSensorDescription(
         key="current_cleaning_time",
-        name="Current Cleaning Time",
+        name="Current Mowing Time",
         value_fn=lambda snapshot: getattr(snapshot, "cleaning_time", None),
         exists_fn=lambda snapshot: getattr(snapshot, "cleaning_time", None) is not None,
         icon="mdi:timer-sand",

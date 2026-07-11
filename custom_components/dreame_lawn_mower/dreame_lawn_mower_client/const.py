@@ -25,7 +25,7 @@ from .types import (
 )
 
 
-CLEANING_MODE_MOWING: Final = "sweeping"
+CLEANING_MODE_MOWING: Final = "mowing"
 
 
 STATE_NOT_SET: Final = "not_set"
@@ -395,9 +395,9 @@ PROPERTY_TO_NAME: Final = {
     DreameMowerProperty.TIMEZONE.name: ["timezone", "Timezone"],
     DreameMowerProperty.BLADES_TIME_LEFT.name: [
         "blades_time_left",
-        "Main Brush  Time Left",
+        "Blades Time Left",
     ],
-    DreameMowerProperty.BLADES_LEFT.name: ["blades_left", "Main Brush Left"],
+    DreameMowerProperty.BLADES_LEFT.name: ["blades_left", "Blades Left"],
     DreameMowerProperty.SIDE_BRUSH_TIME_LEFT.name: [
         "side_brush_time_left",
         "Side Brush Time Left",
@@ -544,7 +544,7 @@ ACTION_TO_NAME: Final = {
     DreameMowerAction.UPDATE_MAP_DATA: ["update_map_data", "Update Map Data"],
     DreameMowerAction.LOCATE: ["locate", "Locate"],
     DreameMowerAction.TEST_SOUND: ["test_sound", "Test Sound"],
-    DreameMowerAction.RESET_BLADES: ["reset_blades", "Reset Main Brush"],
+    DreameMowerAction.RESET_BLADES: ["reset_blades", "Reset Blades"],
     DreameMowerAction.RESET_SIDE_BRUSH: ["reset_side_brush", "Reset Side Brush"],
     DreameMowerAction.RESET_FILTER: ["reset_filter", "Reset Filter"],
     DreameMowerAction.RESET_SENSOR: ["reset_sensor", "Reset Sensor"],
@@ -864,7 +864,7 @@ ERROR_CODE_TO_ERROR_DESCRIPTION: Final = {
     ],
     DreameMowerErrorCode.OPTICAL_FLOW: [
         "Optical flow sensor error",
-        "Please try to restart the mower-mop.",
+        "Please try to restart the mower.",
     ],
     DreameMowerErrorCode.BRUSH: [
         "The main brush wrapped",
@@ -909,7 +909,7 @@ ERROR_CODE_TO_ERROR_DESCRIPTION: Final = {
     DreameMowerErrorCode.BATTERY_PERCENTAGE: ["", ""],
     DreameMowerErrorCode.HEART: [
         "Internal error",
-        "Please try to restart the mower-mop.",
+        "Please try to restart the mower.",
     ],
     DreameMowerErrorCode.CAMERA_OCCLUSION: [
         "Visual positioning sensor error",
@@ -917,7 +917,7 @@ ERROR_CODE_TO_ERROR_DESCRIPTION: Final = {
     ],
     DreameMowerErrorCode.MOVE: [
         "Move sensor error",
-        "Please try to restart the mower-mop.",
+        "Please try to restart the mower.",
     ],
     DreameMowerErrorCode.FLOW_SHIELDING: [
         "Optical sensor error",
@@ -925,7 +925,7 @@ ERROR_CODE_TO_ERROR_DESCRIPTION: Final = {
     ],
     DreameMowerErrorCode.INFRARED_SHIELDING: [
         "Infrared shielding error",
-        "Please try to restart the mower-mop.",
+        "Please try to restart the mower.",
     ],
     DreameMowerErrorCode.CHARGE_NO_ELECTRIC: [
         "The charging dock is not powered on",
@@ -937,7 +937,7 @@ ERROR_CODE_TO_ERROR_DESCRIPTION: Final = {
     ],
     DreameMowerErrorCode.FAN_SPEED_ERROR: [
         "Fan speed sensor error",
-        "Please try to restart the mower-mop.",
+        "Please try to restart the mower.",
     ],
     DreameMowerErrorCode.LEFTWHELL_SPEED: [
         "Left wheel may be blocked by foreign objects",
@@ -949,52 +949,52 @@ ERROR_CODE_TO_ERROR_DESCRIPTION: Final = {
     ],
     DreameMowerErrorCode.BMI055_ACCE: [
         "Accelerometer error",
-        "Please try to restart the mower-mop.",
+        "Please try to restart the mower.",
     ],
     DreameMowerErrorCode.BMI055_GYRO: [
         "Gyro error",
-        "Please try to restart the mower-mop.",
+        "Please try to restart the mower.",
     ],
     DreameMowerErrorCode.XV7001: [
         "Gyro error",
-        "Please try to restart the mower-mop.",
+        "Please try to restart the mower.",
     ],
     DreameMowerErrorCode.LEFT_MAGNET: [
         "Left magnet sensor error",
-        "Please try to restart the mower-mop.",
+        "Please try to restart the mower.",
     ],
     DreameMowerErrorCode.RIGHT_MAGNET: [
         "Right magnet sensor error",
-        "Please try to restart the mower-mop.",
+        "Please try to restart the mower.",
     ],
     DreameMowerErrorCode.FLOW_ERROR: [
         "Flow sensor error",
-        "Please try to restart the mower-mop.",
+        "Please try to restart the mower.",
     ],
     DreameMowerErrorCode.INFRARED_FAULT: [
         "Infrared error",
-        "Please try to restart the mower-mop.",
+        "Please try to restart the mower.",
     ],
     DreameMowerErrorCode.CAMERA_FAULT: [
         "Camera error",
-        "Please try to restart the mower-mop.",
+        "Please try to restart the mower.",
     ],
     DreameMowerErrorCode.STRONG_MAGNET: [
         "Strong magnetic field detected",
         "Strong magnetic field detected. Please start away from the virtual wall.",
     ],
-    DreameMowerErrorCode.RTC: ["RTC error", "Please try to restart the mower-mop."],
+    DreameMowerErrorCode.RTC: ["RTC error", "Please try to restart the mower."],
     DreameMowerErrorCode.AUTO_KEY_TRIG: [
         "Internal error",
-        "Please try to restart the mower-mop.",
+        "Please try to restart the mower.",
     ],
     DreameMowerErrorCode.P3V3: [
         "Internal error",
-        "Please try to restart the mower-mop.",
+        "Please try to restart the mower.",
     ],
     DreameMowerErrorCode.CAMERA_IDLE: [
         "Internal error",
-        "Please try to restart the mower-mop.",
+        "Please try to restart the mower.",
     ],
     DreameMowerErrorCode.BLOCKED: [
         "The robot may be blocked or stuck.",
@@ -1042,23 +1042,23 @@ ERROR_CODE_TO_ERROR_DESCRIPTION: Final = {
     ],
     DreameMowerErrorCode.BLOCKED_2: [
         "Cleanup route is blocked.",
-        "Please ensure that all doors in the home are open and clear any obstacles around the mower-mop.",
+        "Please ensure that all doors in the home are open and clear any obstacles around the mower.",
     ],
     DreameMowerErrorCode.BLOCKED_3: [
         "Cleanup route is blocked.",
-        "Please try to delete the restricted area or move the mower-mop out of this area.",
+        "Please try to delete the restricted area or move the mower out of this area.",
     ],
     DreameMowerErrorCode.RESTRICTED: [
-        "Detected that the mower-mop is in a restricted area.",
-        "Please move the mower-mop out of this area.",
+        "Detected that the mower is in a restricted area.",
+        "Please move the mower out of this area.",
     ],
     DreameMowerErrorCode.RESTRICTED_2: [
-        "Detected that the mower-mop is in a restricted area.",
-        "Please move the mower-mop out of this area.",
+        "Detected that the mower is in a restricted area.",
+        "Please move the mower out of this area.",
     ],
     DreameMowerErrorCode.RESTRICTED_3: [
-        "Detected that the mower-mop is in a restricted area.",
-        "Please move the mower-mop out of this area.",
+        "Detected that the mower is in a restricted area.",
+        "Please move the mower out of this area.",
     ],
     DreameMowerErrorCode.LOW_BATTERY_TURN_OFF: [
         "Low battery. Robot will shut down soon.",
@@ -1082,11 +1082,11 @@ ERROR_CODE_TO_ERROR_DESCRIPTION: Final = {
 CONSUMABLE_TO_LIFE_WARNING_DESCRIPTION: Final = {
     DreameMowerProperty.BLADES_LEFT: [
         [
-            "Main brush must be replaced",
+            "Blades must be replaced",
             "The blades are worn out. Please replace it in time and reset the counter.",
         ],
         [
-            "Main brush needs to be replaced soon",
+            "Blades need to be replaced soon",
             "The blades are nearly worn out. Please replace it in time.",
         ],
     ],
