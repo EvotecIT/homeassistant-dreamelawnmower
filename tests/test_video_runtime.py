@@ -8,10 +8,15 @@ from ctypes import POINTER, c_int, c_size_t, c_ubyte, c_void_p, cast
 from pathlib import Path
 from typing import Any
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    xp2p_host_runtime,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.video_runtime import (
+    DEFAULT_XP2P_RUNNER_SHUTDOWN_TIMEOUT,
+    DEFAULT_XP2P_RUNNER_STARTUP_TIMEOUT,
     XP2P_PROTOCOL_TCP,
     XP2P_PROTOCOL_UDP,
     DreameLawnMowerNativeXp2pRuntime,
@@ -41,6 +46,20 @@ class _FakeFunction:
         if callable(self.result):
             return self.result(*args)
         return self.result
+
+
+def test_external_runner_defaults_cover_managed_xp2p_startup_budget() -> None:
+    one_shot = DreameLawnMowerXp2pExternalRunner((sys.executable,))
+    process = DreameLawnMowerXp2pProcessRunner((sys.executable,))
+
+    assert (
+        DEFAULT_XP2P_RUNNER_STARTUP_TIMEOUT
+        == xp2p_host_runtime.DEFAULT_XP2P_HOST_STARTUP_TIMEOUT
+    )
+    assert one_shot.timeout == xp2p_host_runtime.DEFAULT_XP2P_HOST_STARTUP_TIMEOUT
+    assert process.timeout == xp2p_host_runtime.DEFAULT_XP2P_HOST_STARTUP_TIMEOUT
+    assert one_shot.shutdown_timeout == DEFAULT_XP2P_RUNNER_SHUTDOWN_TIMEOUT
+    assert process.shutdown_timeout == DEFAULT_XP2P_RUNNER_SHUTDOWN_TIMEOUT
 
 
 class _FakeStatusFunction(_FakeFunction):

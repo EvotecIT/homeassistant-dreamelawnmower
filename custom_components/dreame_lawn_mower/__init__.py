@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
@@ -34,6 +35,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except Exception as err:  # noqa: BLE001 - normal cloud setup remains available.
         _LOGGER.warning("Failed to load Dreame LAN video cache during setup: %s", err)
     coordinator.video_lan_cache = lan_cache
+    platforms = tuple(PLATFORMS)
     try:
         await coordinator.async_config_entry_first_refresh()
     except ConfigEntryNotReady:
@@ -47,19 +49,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "Dreame cloud is unavailable; starting a previously proven cached "
             "LAN-only video mode"
         )
+        platforms = (Platform.CAMERA,)
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    coordinator.loaded_platforms = platforms
     await async_setup_services(hass)
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await hass.config_entries.async_forward_entry_setups(entry, platforms)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a Dreame lawn mower entry."""
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    platforms = getattr(coordinator, "loaded_platforms", tuple(PLATFORMS))
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, platforms)
     if unload_ok:
-        coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
+        coordinator = hass.data[DOMAIN].pop(entry.entry_id)
         await coordinator.async_shutdown()
         if not any(
             isinstance(value, DreameLawnMowerCoordinator)

@@ -369,6 +369,55 @@ def test_dock_after_active_waits_for_station_state() -> None:
     assert result["after"]["state"] == "charging"
 
 
+def test_dock_after_active_tolerates_transient_refresh_failures() -> None:
+    module = _load_probe_module()
+    docked = SimpleNamespace(
+        state="charging",
+        activity="docked",
+        battery_level=90,
+        docked=True,
+        raw_docked=True,
+        mowing=False,
+        paused=False,
+        returning=False,
+    )
+
+    class _TransientRefreshClient:
+        def __init__(self) -> None:
+            self.refreshes = 0
+            self.dock_called = False
+
+        async def async_dock(self) -> None:
+            self.dock_called = True
+
+        async def async_refresh(self):
+            self.refreshes += 1
+            if self.refreshes == 1:
+                raise TypeError("transient connection state")
+            if self.refreshes == 2:
+                return None
+            return docked
+
+    client = _TransientRefreshClient()
+    output: dict[str, object] = {}
+
+    asyncio.run(
+        module._async_dock_after_active(
+            client,
+            output,
+            timeout=1.0,
+            interval=0.01,
+        )
+    )
+
+    result = output["dock_after_active"]
+    assert client.dock_called is True
+    assert result["wait"]["ready"] is True
+    assert result["wait"]["refresh_errors"] == 1
+    assert result["wait"]["last_refresh_error_type"] == "TypeError"
+    assert result["after"]["state"] == "charging"
+
+
 def test_host_runtime_preflight_blocks_missing_field_runner_before_wait() -> None:
     module = _load_probe_module()
     args = SimpleNamespace(

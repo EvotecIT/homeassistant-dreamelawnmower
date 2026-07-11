@@ -589,20 +589,32 @@ async def _async_wait_for_station_state(
 ) -> tuple[Any, dict[str, object]]:
     deadline = asyncio.get_running_loop().time() + max(timeout, 0.0)
     attempts = 0
-    snapshot = await client.async_refresh()
-    while (
-        not _station_state_reached(snapshot)
-        and asyncio.get_running_loop().time() < deadline
-    ):
+    refresh_errors = 0
+    last_error_type: str | None = None
+    snapshot = None
+    while attempts == 0 or asyncio.get_running_loop().time() < deadline:
         attempts += 1
+        try:
+            refreshed = await client.async_refresh()
+        except Exception as err:  # noqa: BLE001 - cloud refreshes may be transient.
+            refresh_errors += 1
+            last_error_type = type(err).__name__
+        else:
+            if refreshed is not None:
+                snapshot = refreshed
+                if _station_state_reached(snapshot):
+                    break
         await asyncio.sleep(max(interval, 0.1))
-        snapshot = await client.async_refresh()
-    return snapshot, {
-        "waited": attempts > 0,
+    result: dict[str, object] = {
+        "waited": attempts > 1,
         "attempts": attempts,
         "ready": _station_state_reached(snapshot),
         "timeout": timeout,
     }
+    if refresh_errors:
+        result["refresh_errors"] = refresh_errors
+        result["last_refresh_error_type"] = last_error_type
+    return snapshot, result
 
 
 def _station_state_reached(snapshot: Any) -> bool:

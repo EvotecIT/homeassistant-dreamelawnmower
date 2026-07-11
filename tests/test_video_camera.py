@@ -1035,6 +1035,33 @@ def test_video_camera_lan_only_starts_and_stops_without_cloud_video_calls() -> N
     )
 
 
+def test_video_camera_blocks_lan_start_while_mower_is_docked() -> None:
+    async def _run() -> tuple[str | None, list[str]]:
+        snapshot = SimpleNamespace(
+            state="charging",
+            docked=True,
+            raw_docked=True,
+            raw_attributes={},
+        )
+        entity = _uninitialized_entity(snapshot=snapshot)
+        entity._entry.options[CONF_VIDEO_TRANSPORT] = VIDEO_TRANSPORT_LAN
+        entity._lan_cache = SimpleNamespace(inputs=object(), endpoint=object())
+        errors: list[str] = []
+        entity._set_stream_error = errors.append
+        entity._async_stop_active_session = lambda: asyncio.sleep(0)
+        entity._create_runtime = lambda: (_ for _ in ()).throw(
+            AssertionError("Docked LAN startup must stop before creating a runtime")
+        )
+
+        return await entity._async_start_stream(), errors
+
+    source, errors = asyncio.run(_run())
+
+    assert source is None
+    assert len(errors) == 1
+    assert "blocked while the mower is docked" in errors[0]
+
+
 def test_video_camera_stop_does_not_call_cloud_cleanup_for_lan_session() -> None:
     async def _run() -> tuple[int, int]:
         entity = _uninitialized_entity()

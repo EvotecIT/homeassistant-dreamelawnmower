@@ -69,6 +69,7 @@ from .models import (
     DreameLawnMowerSnapshot,
     DreameLawnMowerStatusBlob,
     camera_metadata_advertises_video,
+    camera_stream_block_reason,
     descriptor_from_cloud_record,
     display_name_for_model,
     firmware_update_support_from_device,
@@ -1802,24 +1803,9 @@ class DreameLawnMowerClient:
         )
 
     def _guard_camera_stream_probe_idle(self, device: Any) -> None:
-        status = getattr(device, "status", None)
         snapshot = snapshot_from_device(self._descriptor, device)
-        station_states = {
-            "charging",
-            "charging_completed",
-            "smart_charging",
-            "station_reset",
-        }
-        if snapshot.raw_docked or snapshot.state in station_states:
-            raise DreameLawnMowerConnectionError(
-                "Camera stream handshake probe is blocked while the mower is "
-                "docked. The Dreame app requires moving the mower out of the "
-                "station before remote video monitoring can start."
-            )
-        if bool(getattr(status, "fast_mapping", False)):
-            raise DreameLawnMowerConnectionError(
-                "Camera stream handshake probe is blocked while mapping."
-            )
+        if reason := camera_stream_block_reason(snapshot):
+            raise DreameLawnMowerConnectionError(reason)
 
     def _stream_status_payload(self, device: Any) -> dict[str, Any]:
         try:

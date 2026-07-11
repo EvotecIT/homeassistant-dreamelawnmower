@@ -42,6 +42,10 @@ XP2P_PROTOCOL_UDP = 1
 XP2P_PROTOCOL_TCP = 2
 
 DEFAULT_COMMAND_TIMEOUT_US = 7_500_000
+# Match the managed worker's default 60 status/delegate attempts and retry delays.
+# This keeps advanced runners within Home Assistant's outer video-start timeout.
+DEFAULT_XP2P_RUNNER_STARTUP_TIMEOUT = 545.0
+DEFAULT_XP2P_RUNNER_SHUTDOWN_TIMEOUT = 15.0
 DEFAULT_LAN_FLV_PATH_TEMPLATE = (
     "ipc.flv?action=live&_protocol=tcp&quality=high&_crypto=off&channel={channel}"
 )
@@ -332,13 +336,20 @@ def _stream_route(link_mode: int | None, transport: str) -> str:
 class DreameLawnMowerXp2pExternalRunner:
     """JSON stdin/stdout adapter for an external XP2P playback runner."""
 
-    def __init__(self, command: Sequence[str | Path], *, timeout: float = 15.0) -> None:
+    def __init__(
+        self,
+        command: Sequence[str | Path],
+        *,
+        timeout: float = DEFAULT_XP2P_RUNNER_STARTUP_TIMEOUT,
+        shutdown_timeout: float = DEFAULT_XP2P_RUNNER_SHUTDOWN_TIMEOUT,
+    ) -> None:
         self.command = tuple(str(part) for part in command)
         if not self.command:
             raise DreameLawnMowerVideoRuntimeError(
                 "XP2P external runner command cannot be empty."
             )
         self.timeout = timeout
+        self.shutdown_timeout = shutdown_timeout
 
     def start_live_stream(
         self,
@@ -381,10 +392,17 @@ class DreameLawnMowerXp2pExternalRunner:
                     "stream_url": session.stream_url,
                     "runner_session_id": session.runner_session_id,
                 },
-            }
+            },
+            timeout=self.shutdown_timeout,
         )
 
-    def _run_json(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+    def _run_json(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        effective_timeout = self.timeout if timeout is None else timeout
         sensitive_values = payload_sensitive_values(payload)
         try:
             completed = subprocess.run(
@@ -393,7 +411,7 @@ class DreameLawnMowerXp2pExternalRunner:
                 capture_output=True,
                 check=False,
                 encoding="utf-8",
-                timeout=self.timeout,
+                timeout=effective_timeout,
             )
         except OSError as err:
             raise DreameLawnMowerVideoRuntimeError(
@@ -401,7 +419,7 @@ class DreameLawnMowerXp2pExternalRunner:
             ) from err
         except subprocess.TimeoutExpired as err:
             raise DreameLawnMowerVideoRuntimeError(
-                f"XP2P external runner timed out after {self.timeout:g}s."
+                f"XP2P external runner timed out after {effective_timeout:g}s."
                 + timeout_expired_preview(err, sensitive_values)
             ) from err
         if completed.returncode != 0:
@@ -432,13 +450,20 @@ class DreameLawnMowerXp2pExternalRunner:
 class DreameLawnMowerXp2pProcessRunner:
     """Persistent JSON-line adapter for an XP2P runner that owns the FLV server."""
 
-    def __init__(self, command: Sequence[str | Path], *, timeout: float = 15.0) -> None:
+    def __init__(
+        self,
+        command: Sequence[str | Path],
+        *,
+        timeout: float = DEFAULT_XP2P_RUNNER_STARTUP_TIMEOUT,
+        shutdown_timeout: float = DEFAULT_XP2P_RUNNER_SHUTDOWN_TIMEOUT,
+    ) -> None:
         self.command = tuple(str(part) for part in command)
         if not self.command:
             raise DreameLawnMowerVideoRuntimeError(
                 "XP2P process runner command cannot be empty."
             )
         self.timeout = timeout
+        self.shutdown_timeout = shutdown_timeout
 
     def start_live_stream(
         self,
@@ -543,7 +568,7 @@ class DreameLawnMowerXp2pProcessRunner:
                     },
                 },
             )
-            process.wait(timeout=self.timeout)
+            process.wait(timeout=self.shutdown_timeout)
         except (BrokenPipeError, OSError, subprocess.TimeoutExpired):
             _terminate_process(process)
         finally:

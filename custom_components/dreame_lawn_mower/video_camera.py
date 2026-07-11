@@ -32,6 +32,7 @@ from .const import (
 from .coordinator import DreameLawnMowerCoordinator
 from .dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
+    camera_stream_block_reason,
     snapshot_advertises_video,
 )
 from .dreame_lawn_mower_client.stream_health import DreameLawnMowerStreamUrlProbeResult
@@ -185,12 +186,14 @@ class DreameLawnMowerVideoCamera(
         """Return whether live video can be requested from Home Assistant."""
         if not self._runtime_configured:
             return False
+        snapshot = self.coordinator.data
+        if camera_stream_block_reason(snapshot) is not None:
+            return False
         if (
             self._video_transport != VIDEO_TRANSPORT_CLOUD
             and self._lan_cache.inputs is not None
         ):
             return True
-        snapshot = self.coordinator.data
         if snapshot is None:
             return False
         return snapshot_advertises_video(snapshot)
@@ -394,6 +397,9 @@ class DreameLawnMowerVideoCamera(
             self._set_stream_error(
                 "Configure a native XP2P library path or XP2P runner command."
             )
+            return None
+        if reason := camera_stream_block_reason(self.coordinator.data):
+            self._set_stream_error(reason)
             return None
 
         await self._async_stop_active_session()

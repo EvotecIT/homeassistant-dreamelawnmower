@@ -685,6 +685,33 @@ def remote_control_block_reason(snapshot: Any) -> str | None:
     return None
 
 
+def camera_stream_block_reason(snapshot: Any) -> str | None:
+    """Return why live camera streaming is unsafe for a known mower state."""
+    if snapshot is None:
+        return None
+
+    state = str(getattr(snapshot, "state", None) or "").casefold()
+    raw_attributes = getattr(snapshot, "raw_attributes", None) or {}
+    station_states = {
+        "charging",
+        "charging_completed",
+        "smart_charging",
+        "station_reset",
+    }
+    if (
+        bool(getattr(snapshot, "raw_docked", False))
+        or state in station_states
+    ):
+        return (
+            "Camera stream handshake probe is blocked while the mower is "
+            "docked. The Dreame app requires moving the mower out of the "
+            "station before remote video monitoring can start."
+        )
+    if bool(raw_attributes.get("mapping")) or bool(raw_attributes.get("fast_mapping")):
+        return "Camera stream handshake probe is blocked while mapping."
+    return None
+
+
 def remote_control_state_safe(snapshot: Any) -> bool:
     """Return whether the snapshot state allows a manual-drive step."""
     return remote_control_block_reason(snapshot) is None
