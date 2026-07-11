@@ -80,6 +80,7 @@ from .video_stream_helpers import (
 
 _LOGGER = logging.getLogger(__name__)
 _HA_STREAM_START_TIMEOUT = DEFAULT_XP2P_HOST_STARTUP_TIMEOUT + 30.0
+_SNAPSHOT_STREAM_START_TIMEOUT = 15.0
 
 
 class _DreameVideoRuntime(Protocol):
@@ -333,7 +334,14 @@ class DreameLawnMowerVideoCamera(
         """Decode one JPEG while serializing snapshot-only session ownership."""
         existing_session = self._session
         snapshot_session: DreameLawnMowerXp2pLiveStreamSession | None = None
-        source = await self.stream_source()
+        try:
+            async with asyncio.timeout(_SNAPSHOT_STREAM_START_TIMEOUT):
+                source = await self.stream_source()
+        except TimeoutError:
+            _LOGGER.debug(
+                "Timed out starting Dreame mower video for a still image"
+            )
+            return self._last_image
         if source is None:
             return self._last_image
         try:

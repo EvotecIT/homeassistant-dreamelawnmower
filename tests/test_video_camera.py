@@ -536,6 +536,32 @@ def test_video_camera_returns_jpeg_from_managed_flv_source() -> None:
     assert stops == 1
 
 
+def test_video_camera_snapshot_start_timeout_returns_last_image() -> None:
+    async def _run() -> tuple[bytes | None, bool]:
+        entity = _uninitialized_entity()
+        entity._last_image = b"\xff\xd8cached-jpeg\xff\xd9"
+        cancelled = False
+
+        async def _source() -> str:
+            nonlocal cancelled
+            try:
+                await asyncio.Future()
+            finally:
+                cancelled = True
+            raise AssertionError("unreachable")
+
+        entity.stream_source = _source
+        with patch.object(
+            video_camera_module,
+            "_SNAPSHOT_STREAM_START_TIMEOUT",
+            0.01,
+        ):
+            image = await entity.async_camera_image()
+        return image, cancelled
+
+    assert asyncio.run(_run()) == (b"\xff\xd8cached-jpeg\xff\xd9", True)
+
+
 def test_video_camera_snapshot_does_not_stop_session_adopted_by_hls() -> None:
     async def _run() -> int:
         entity = _uninitialized_entity()
