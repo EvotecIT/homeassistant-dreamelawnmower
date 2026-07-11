@@ -77,6 +77,40 @@ def test_offline_map_camera_does_not_expose_cached_image() -> None:
     assert map_camera_available(snapshot, image_cached=True) is False
 
 
+def test_online_diagnostic_map_camera_does_not_require_map_capability() -> None:
+    snapshot = SimpleNamespace(
+        available=True,
+        mapping_available=False,
+        capabilities=(),
+    )
+
+    assert (
+        map_camera_available(
+            snapshot,
+            image_cached=False,
+            requires_map_capability=False,
+        )
+        is True
+    )
+
+
+def test_offline_diagnostic_map_camera_remains_unavailable() -> None:
+    snapshot = SimpleNamespace(
+        available=False,
+        mapping_available=False,
+        capabilities=(),
+    )
+
+    assert (
+        map_camera_available(
+            snapshot,
+            image_cached=False,
+            requires_map_capability=False,
+        )
+        is False
+    )
+
+
 def test_map_camera_attributes_include_all_app_map_metadata() -> None:
     """Camera attributes expose all app maps, not only the rendered map."""
     view = DreameLawnMowerMapView(

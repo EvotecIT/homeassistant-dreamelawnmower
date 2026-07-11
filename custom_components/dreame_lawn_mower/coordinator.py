@@ -133,6 +133,8 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         except DreameLawnMowerConnectionError as err:
             raise UpdateFailed(str(err)) from err
         if not snapshot.available:
+            self.runtime_status_blob = None
+            self.client.update_runtime_live_tracking(None, active=False)
             return snapshot
         try:
             self.runtime_status_blob = await self.client.async_get_runtime_status_blob(

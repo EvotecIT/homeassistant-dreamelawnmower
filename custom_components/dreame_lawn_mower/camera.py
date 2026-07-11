@@ -63,6 +63,7 @@ class DreameLawnMowerMapCamera(
     _attr_icon = "mdi:map-search-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
+    _requires_map_capability = True
 
     def __init__(
         self,
@@ -84,6 +85,7 @@ class DreameLawnMowerMapCamera(
         return map_camera_available(
             self.coordinator.data,
             image_cached=self._map_cache.last_image is not None,
+            requires_map_capability=self._requires_map_capability,
         )
 
     @property
@@ -223,6 +225,7 @@ class DreameLawnMowerMapDataCamera(DreameLawnMowerMapCamera):
 
     _attr_name = "Map Diagnostics"
     _attr_icon = "mdi:code-json"
+    _requires_map_capability = False
 
     def __init__(
         self,
@@ -304,6 +307,7 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
 
     _attr_name = "All Maps"
     _attr_icon = "mdi:map-multiple-outline"
+    _requires_map_capability = False
 
     def __init__(
         self,

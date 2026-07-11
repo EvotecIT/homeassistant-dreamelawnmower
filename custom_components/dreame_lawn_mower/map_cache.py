@@ -13,10 +13,17 @@ from .dreame_lawn_mower_client.models import DreameLawnMowerMapView
 MapViewRefresh = Callable[[], Awaitable[DreameLawnMowerMapView]]
 
 
-def map_camera_available(snapshot: Any, *, image_cached: bool) -> bool:
+def map_camera_available(
+    snapshot: Any,
+    *,
+    image_cached: bool,
+    requires_map_capability: bool = True,
+) -> bool:
     """Return whether a map camera may expose live or cached map data."""
     if snapshot is None or not getattr(snapshot, "available", False):
         return False
+    if not requires_map_capability:
+        return True
     return bool(
         image_cached
         or getattr(snapshot, "mapping_available", False)
