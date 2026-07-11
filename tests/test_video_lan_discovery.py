@@ -125,11 +125,15 @@ class _FakeSocket:
         responses: Iterable[tuple[bytes, tuple[str, int]]],
         *,
         bind_error: OSError | None = None,
+        clock: _FakeClock | None = None,
     ) -> None:
         self.responses = iter(responses)
         self.bind_error = bind_error
         self.sent: list[tuple[bytes, tuple[str, int]]] = []
         self.closed = False
+        self.clock = clock
+        self.timeout = 0.0
+        self.sent_times: list[float] = []
 
     def setsockopt(self, *_args: object) -> None:
         return None
@@ -138,20 +142,32 @@ class _FakeSocket:
         if self.bind_error is not None:
             raise self.bind_error
 
-    def settimeout(self, _timeout: float) -> None:
-        return None
+    def settimeout(self, timeout: float) -> None:
+        self.timeout = timeout
 
     def sendto(self, data: bytes, address: tuple[str, int]) -> None:
         self.sent.append((data, address))
+        if self.clock is not None:
+            self.sent_times.append(self.clock.now)
 
     def recvfrom(self, _length: int) -> tuple[bytes, tuple[str, int]]:
         try:
             return next(self.responses)
         except StopIteration as err:
+            if self.clock is not None:
+                self.clock.now += self.timeout
             raise TimeoutError from err
 
     def close(self) -> None:
         self.closed = True
+
+
+class _FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
 
 
 def test_lan_discovery_sends_broadcast_and_preferred_unicast(
@@ -174,6 +190,7 @@ def test_lan_discovery_sends_broadcast_and_preferred_unicast(
         timeout=0.1,
         attempts=1,
         preferred_address="192.0.2.25",
+        include_device_name_in_probe=True,
         socket_factory=lambda *_args: fake,
     )
 
@@ -200,8 +217,37 @@ def test_lan_discovery_uses_provisioning_token_without_retaining_it() -> None:
     assert endpoints[0].address == "192.0.2.25"
     request = json.loads(fake.sent[0][0][4:])
     assert request["clientToken"] == "access-token"
-    assert request["params"]["deviceName"] == "mower-camera"
+    assert request["params"] == {"productId": "product-1"}
     assert "access-token" not in repr(endpoints[0])
+
+
+def test_lan_discovery_repeats_probes_at_tencent_one_second_cadence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = _FakeClock()
+    fake = _FakeSocket([], clock=clock)
+    monkeypatch.setattr(
+        "_dreame_lawn_mower_client_internal.lan_video.time.monotonic",
+        clock.monotonic,
+    )
+
+    endpoints = discover_lan_video_endpoints(
+        "product-1",
+        device_name="mower-camera",
+        timeout=2.5,
+        attempts=30,
+        probe_interval=1.0,
+        broadcast_addresses=("255.255.255.255",),
+        socket_factory=lambda *_args: fake,
+    )
+
+    assert endpoints == ()
+    assert fake.sent_times == pytest.approx([0.0, 1.0, 2.0])
+    assert [target for _packet, target in fake.sent] == [
+        ("255.255.255.255", 3072),
+        ("255.255.255.255", 3072),
+        ("255.255.255.255", 3072),
+    ]
 
 
 def test_lan_discovery_classifies_udp_bind_failure() -> None:

@@ -126,6 +126,7 @@ class DreameLawnMowerVideoCamera(
         self.content_type = "image/jpeg"
         self._runtime: _DreameVideoRuntime | None = None
         self._prepared_runtime: _DreameVideoRuntime | None = None
+        self._runtime_prepare_task: asyncio.Task[None] | None = None
         self._session: DreameLawnMowerXp2pLiveStreamSession | None = None
         self._stream_lock = asyncio.Lock()
         self._snapshot_lock = asyncio.Lock()
@@ -159,7 +160,7 @@ class DreameLawnMowerVideoCamera(
         self._last_video_transport: str | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Prepare the managed runtime before HA applies its stream timeout."""
+        """Schedule managed runtime preparation without blocking entity setup."""
         await super().async_added_to_hass()
         if not self._lan_cache.loaded:
             try:
@@ -173,13 +174,31 @@ class DreameLawnMowerVideoCamera(
             and (snapshot is None or not snapshot_advertises_video(snapshot))
         ):
             return
+        self._runtime_prepare_task = self.hass.async_create_task(
+            self._async_prepare_runtime()
+        )
+
+    async def _async_prepare_runtime(self) -> None:
+        """Prepare a configured runtime in the background before first playback."""
         try:
             await self.hass.async_add_executor_job(self._create_runtime)
+        except asyncio.CancelledError:
+            raise
         except Exception as err:  # noqa: BLE001 - retry remains available on play.
             self._runtime_preparation_error = str(err)
             _LOGGER.warning("Failed to prepare Dreame mower live video: %s", err)
         else:
             self._runtime_preparation_error = None
+
+    async def _async_get_runtime(self) -> _DreameVideoRuntime:
+        """Reuse in-flight background preparation before starting a stream."""
+        prepare_task = self._runtime_prepare_task
+        if prepare_task is not None and not prepare_task.done():
+            await prepare_task
+        self._runtime_prepare_task = None
+        if self._prepared_runtime is not None:
+            return self._prepared_runtime
+        return await self.hass.async_add_executor_job(self._create_runtime)
 
     @property
     def available(self) -> bool:
@@ -404,7 +423,7 @@ class DreameLawnMowerVideoCamera(
 
         await self._async_stop_active_session()
         try:
-            runtime = await self.hass.async_add_executor_job(self._create_runtime)
+            runtime = await self._async_get_runtime()
             self._runtime_preparation_error = None
         except Exception as err:  # noqa: BLE001 - HA should receive a clean miss.
             self._set_stream_error(str(err))
@@ -710,11 +729,17 @@ class DreameLawnMowerVideoCamera(
             active_session = self._session
             active_service_id = getattr(active_session, "service_id", None)
             late_service_id = getattr(session, "service_id", None)
+            active_process = getattr(active_session, "runner_process", None)
+            late_process = getattr(session, "runner_process", None)
+            late_owns_distinct_process = (
+                late_process is not None and late_process is not active_process
+            )
             if active_session is session or (
                 active_session is not None
                 and self._runtime is runtime
                 and active_service_id is not None
                 and active_service_id == late_service_id
+                and not late_owns_distinct_process
             ):
                 return
             await self._async_stop_session(runtime, session)
@@ -734,6 +759,14 @@ class DreameLawnMowerVideoCamera(
 
     async def async_will_remove_from_hass(self) -> None:
         """Stop XP2P video when Home Assistant unloads the camera."""
+        prepare_task = self._runtime_prepare_task
+        self._runtime_prepare_task = None
+        if prepare_task is not None and not prepare_task.done():
+            prepare_task.cancel()
+            try:
+                await prepare_task
+            except asyncio.CancelledError:
+                pass
         async with self._stream_lock:
             await self._async_stop_active_session()
 

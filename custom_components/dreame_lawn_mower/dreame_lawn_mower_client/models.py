@@ -691,6 +691,7 @@ def camera_stream_block_reason(snapshot: Any) -> str | None:
         return None
 
     state = str(getattr(snapshot, "state", None) or "").casefold()
+    activity = str(getattr(snapshot, "activity", None) or "").casefold()
     raw_attributes = getattr(snapshot, "raw_attributes", None) or {}
     station_states = {
         "charging",
@@ -709,6 +710,25 @@ def camera_stream_block_reason(snapshot: Any) -> str | None:
         )
     if bool(raw_attributes.get("mapping")) or bool(raw_attributes.get("fast_mapping")):
         return "Camera stream handshake probe is blocked while mapping."
+    if (
+        bool(getattr(snapshot, "returning", False))
+        or state == "returning"
+        or activity == "returning"
+        or bool(raw_attributes.get("returning"))
+    ):
+        return "Camera stream handshake probe is blocked while returning to dock."
+
+    known_video_activity = (
+        bool(getattr(snapshot, "mowing", False))
+        or bool(getattr(snapshot, "paused", False))
+        or state in {"mowing", "paused"}
+        or activity in {"mowing", "paused"}
+    )
+    if bool(raw_attributes.get("running")) and not known_video_activity:
+        return (
+            "Camera stream handshake probe is blocked while the mower reports "
+            "an unrecognized active state."
+        )
     return None
 
 

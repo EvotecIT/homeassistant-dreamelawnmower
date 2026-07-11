@@ -7,7 +7,9 @@ import gzip
 import hashlib
 import io
 import struct
+import threading
 
+import pytest
 import requests
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
@@ -244,6 +246,38 @@ def test_host_runtime_refreshes_authoritative_relay_mode(tmp_path) -> None:
     assert session.stream_link_mode == 63
     assert session.as_dict()["stream_route"] == "relay"
     assert process.stdin.getvalue() == b"Q"
+
+
+def test_host_response_reader_thread_is_daemon() -> None:
+    started = threading.Event()
+    release = threading.Event()
+
+    class _BlockingStream:
+        def read(self, _length: int) -> bytes:
+            started.set()
+            release.wait(timeout=2.0)
+            return b""
+
+    before = frozenset(threading.enumerate())
+    try:
+        with pytest.raises(
+            xp2p_host_runtime.DreameLawnMowerVideoRuntimeError,
+            match="timed out",
+        ):
+            xp2p_host_runtime._read_response(_BlockingStream(), timeout=0.1)
+        assert started.is_set()
+        readers = [
+            thread
+            for thread in threading.enumerate()
+            if thread not in before and thread.name == "dreame-xp2p-host-response"
+        ]
+        assert len(readers) == 1
+        assert readers[0].daemon is True
+    finally:
+        release.set()
+        for thread in threading.enumerate():
+            if thread not in before and thread.name == "dreame-xp2p-host-response":
+                thread.join(timeout=1.0)
 
 
 def test_host_command_keeps_mower_secrets_out_of_argv(tmp_path) -> None:

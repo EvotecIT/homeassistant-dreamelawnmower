@@ -7,6 +7,9 @@ from types import SimpleNamespace
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.camera_probe import (
     build_camera_probe_payload,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
+    camera_stream_block_reason,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
     DreameMowerAction,
     DreameMowerProperty,
@@ -112,6 +115,40 @@ class _FakeCameraDevice:
             if did is not None:
                 self.data[int(str(did))] = item.get("value")
         return True
+
+
+def test_camera_stream_allows_known_mowing_state_required_by_a2() -> None:
+    snapshot = SimpleNamespace(
+        state="mowing",
+        activity="mowing",
+        mowing=True,
+        paused=False,
+        returning=False,
+        raw_docked=False,
+        raw_attributes={"running": True},
+    )
+
+    assert camera_stream_block_reason(snapshot) is None
+
+
+def test_camera_stream_blocks_returning_and_ambiguous_active_states() -> None:
+    returning = SimpleNamespace(
+        state="returning",
+        activity="returning",
+        returning=True,
+        raw_docked=False,
+        raw_attributes={},
+    )
+    ambiguous = SimpleNamespace(
+        state="unknown",
+        activity="idle",
+        returning=False,
+        raw_docked=False,
+        raw_attributes={"running": True},
+    )
+
+    assert "returning" in camera_stream_block_reason(returning)
+    assert "unrecognized active state" in camera_stream_block_reason(ambiguous)
 
 
 class _FakeProtocol:

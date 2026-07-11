@@ -521,7 +521,11 @@ def _read_response(
         except BaseException as err:  # noqa: BLE001 - handed to caller thread.
             result.put(err)
 
-    thread = threading.Thread(target=_read, name="dreame-xp2p-host-response")
+    thread = threading.Thread(
+        target=_read,
+        name="dreame-xp2p-host-response",
+        daemon=True,
+    )
     thread.start()
     try:
         value = result.get(timeout=max(timeout, 0.1))

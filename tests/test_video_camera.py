@@ -67,6 +67,8 @@ def _uninitialized_entity(*, snapshot: object | None = None):
     entity.coordinator = SimpleNamespace(data=snapshot)
     entity._session = None
     entity._runtime = None
+    entity._prepared_runtime = None
+    entity._runtime_prepare_task = None
     entity._stream_idle_monitor = SimpleNamespace(
         schedule=lambda _stream, _session: None,
         async_cancel=lambda: asyncio.sleep(0),
@@ -780,6 +782,99 @@ def test_video_camera_late_native_cleanup_preserves_newer_session() -> None:
         return stopped
 
     assert asyncio.run(_run()) == 0
+
+
+def test_video_camera_late_process_cleanup_stops_distinct_worker() -> None:
+    async def _run() -> int:
+        entity = _uninitialized_entity()
+        runtime = object()
+        entity._runtime = runtime
+        entity._session = SimpleNamespace(
+            service_id="product-1/device-1",
+            runner_process=object(),
+        )
+        stopped = 0
+
+        async def _stop(_runtime: object, _session: object) -> None:
+            nonlocal stopped
+            stopped += 1
+
+        entity._async_stop_session = _stop
+        await entity._async_cleanup_late_start(
+            runtime,
+            SimpleNamespace(
+                service_id="product-1/device-1",
+                runner_process=object(),
+            ),
+        )
+        return stopped
+
+    assert asyncio.run(_run()) == 1
+
+
+def test_video_camera_setup_does_not_wait_for_runtime_preparation() -> None:
+    async def _run() -> tuple[bool, bool]:
+        entity = _uninitialized_entity(
+            snapshot=SimpleNamespace(capabilities=("video",), raw_info={})
+        )
+        entity._lan_cache = SimpleNamespace(loaded=True, inputs=None)
+        entity._runtime_prepare_task = None
+        preparation = asyncio.get_running_loop().create_future()
+        entity.hass = SimpleNamespace(
+            async_create_task=asyncio.create_task,
+            async_add_executor_job=lambda *_args: preparation,
+        )
+
+        async def _base_added(_entity: object) -> None:
+            return None
+
+        with patch.object(
+            video_camera_module.CoordinatorEntity,
+            "async_added_to_hass",
+            new=_base_added,
+        ):
+            await entity.async_added_to_hass()
+        await asyncio.sleep(0)
+        task = entity._runtime_prepare_task
+        assert task is not None
+        pending = not task.done()
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        return pending, preparation.cancelled()
+
+    assert asyncio.run(_run()) == (True, True)
+
+
+def test_video_camera_stream_reuses_inflight_runtime_preparation() -> None:
+    async def _run() -> tuple[bool, bool]:
+        entity = _uninitialized_entity()
+        prepared_runtime = object()
+        entity._prepared_runtime = None
+
+        async def _prepare() -> None:
+            await asyncio.sleep(0)
+            entity._prepared_runtime = prepared_runtime
+
+        preparation = asyncio.create_task(_prepare())
+        entity._runtime_prepare_task = preparation
+
+        def _create() -> object:
+            raise AssertionError("Prepared runtime should be reused")
+
+        entity._create_runtime = _create
+
+        async def _executor(function, *args):
+            return function(*args)
+
+        entity.hass = SimpleNamespace(async_add_executor_job=_executor)
+        runtime = await entity._async_get_runtime()
+        return (
+            runtime is prepared_runtime,
+            entity._runtime_prepare_task is None,
+        )
+
+    assert asyncio.run(_run()) == (True, True)
 
 
 def test_video_camera_hls_idle_stops_owned_session() -> None:

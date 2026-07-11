@@ -13,7 +13,8 @@ from typing import Any
 
 DEFAULT_LAN_DISCOVERY_PORT = 3072
 DEFAULT_LAN_DISCOVERY_TIMEOUT = 5.0
-DEFAULT_LAN_DISCOVERY_ATTEMPTS = 2
+DEFAULT_LAN_DISCOVERY_ATTEMPTS = 30
+DEFAULT_LAN_DISCOVERY_INTERVAL = 1.0
 DEFAULT_LAN_DISCOVERY_VERSION = (2, 4)
 DEFAULT_LAN_DISCOVERY_BROADCASTS = ("255.255.255.255",)
 _PROBE_MESSAGE_TYPE = 1
@@ -153,9 +154,11 @@ def discover_lan_video_endpoints(
     client_token: str | None = None,
     timeout: float = DEFAULT_LAN_DISCOVERY_TIMEOUT,
     attempts: int = DEFAULT_LAN_DISCOVERY_ATTEMPTS,
+    probe_interval: float = DEFAULT_LAN_DISCOVERY_INTERVAL,
     port: int = DEFAULT_LAN_DISCOVERY_PORT,
     broadcast_addresses: Iterable[str] = DEFAULT_LAN_DISCOVERY_BROADCASTS,
     preferred_address: str | None = None,
+    include_device_name_in_probe: bool = False,
     bind_address: str = "",
     socket_factory: Callable[..., socket.socket] = socket.socket,
 ) -> tuple[DreameLawnMowerLanVideoEndpoint, ...]:
@@ -168,7 +171,10 @@ def discover_lan_video_endpoints(
         raise ValueError("LAN discovery port must be between 1 and 65535")
     packet, token = build_lan_video_probe_packet(
         product_id,
-        device_name=device_name,
+        # Tencent's DetectService demo discovers the product broadly and then
+        # filters validated responses by device name. Some device firmware does
+        # not implement the optional targeted-name request consistently.
+        device_name=device_name if include_device_name_in_probe else None,
         client_token=client_token,
     )
     sock = socket_factory(socket.AF_INET, socket.SOCK_DGRAM)
@@ -181,15 +187,32 @@ def discover_lan_video_endpoints(
             raise DreameLawnMowerLanVideoDiscoveryError(
                 f"Could not bind UDP {discovery_port} for LAN video discovery."
             ) from err
-        receive_timeout = min(max(float(timeout), 0.1), 0.5)
-        sock.settimeout(receive_timeout)
-        for _attempt in range(max(int(attempts), 1)):
-            for target in targets:
-                sock.sendto(packet, (target, discovery_port))
-
-        deadline = time.monotonic() + max(float(timeout), 0.1)
+        started = time.monotonic()
+        deadline = started + max(float(timeout), 0.1)
+        send_interval = max(float(probe_interval), 0.05)
+        max_attempts = max(int(attempts), 1)
+        sent_attempts = 0
+        next_send = started
         endpoints: dict[tuple[str, int, str], DreameLawnMowerLanVideoEndpoint] = {}
         while time.monotonic() < deadline:
+            now = time.monotonic()
+            if sent_attempts < max_attempts and now >= next_send:
+                for target in targets:
+                    sock.sendto(packet, (target, discovery_port))
+                sent_attempts += 1
+                # Tencent's Android DetectService sends once per second. Anchor
+                # each send to the original start time so slow responses do not
+                # turn the compatible cadence into a burst.
+                next_send = started + (sent_attempts * send_interval)
+
+            receive_deadline = deadline
+            if sent_attempts < max_attempts:
+                receive_deadline = min(receive_deadline, next_send)
+            receive_timeout = min(
+                max(receive_deadline - time.monotonic(), 0.01),
+                0.5,
+            )
+            sock.settimeout(receive_timeout)
             try:
                 data, sender = sock.recvfrom(_MAX_DATAGRAM_LENGTH)
             except TimeoutError:
