@@ -6,10 +6,22 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from .dreame_lawn_mower_client.models import DreameLawnMowerMapView
 
 MapViewRefresh = Callable[[], Awaitable[DreameLawnMowerMapView]]
+
+
+def map_camera_available(snapshot: Any, *, image_cached: bool) -> bool:
+    """Return whether a map camera may expose live or cached map data."""
+    if snapshot is None or not getattr(snapshot, "available", False):
+        return False
+    return bool(
+        image_cached
+        or getattr(snapshot, "mapping_available", False)
+        or "map" in getattr(snapshot, "capabilities", ())
+    )
 
 
 @dataclass(slots=True)

@@ -49,7 +49,13 @@ async def async_stop_then_dock(
         await dock()
         return True
 
-    await stop()
+    try:
+        await stop()
+    except Exception as err:  # noqa: BLE001 - dock despite stop race/unavailability
+        _LOGGER.warning("Failed to stop mower session: %s; docking anyway.", err)
+        await dock()
+        return False
+
     stopped = False
     try:
         async with asyncio.timeout(timeout):

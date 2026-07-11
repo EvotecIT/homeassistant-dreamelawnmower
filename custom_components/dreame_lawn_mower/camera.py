@@ -25,7 +25,7 @@ from .image import (
     png_bytes_to_jpeg,
 )
 from .map_attributes import map_camera_attributes
-from .map_cache import DreameLawnMowerMapCameraCache
+from .map_cache import DreameLawnMowerMapCameraCache, map_camera_available
 
 _LOGGER = logging.getLogger(__name__)
 _MAP_CACHE_TTL = timedelta(seconds=60)
@@ -81,13 +81,9 @@ class DreameLawnMowerMapCamera(
     @property
     def available(self) -> bool:
         """Return whether the entity can reasonably provide a map."""
-        snapshot = self.coordinator.data
-        if snapshot is None:
-            return False
-        return (
-            self._map_cache.last_image is not None
-            or snapshot.mapping_available
-            or "map" in snapshot.capabilities
+        return map_camera_available(
+            self.coordinator.data,
+            image_cached=self._map_cache.last_image is not None,
         )
 
     @property
@@ -122,6 +118,8 @@ class DreameLawnMowerMapCamera(
     ) -> bytes | None:
         """Return the latest mower map image as JPEG bytes."""
         del width, height
+        if not self.available:
+            return None
         return await self._async_get_map_image()
 
     async def _async_get_map_image(self) -> bytes | None:

@@ -132,6 +132,28 @@ def test_docking_continues_when_stop_state_refresh_fails() -> None:
     dock.assert_awaited_once()
 
 
+def test_docking_continues_when_stop_action_fails() -> None:
+    stop = AsyncMock(side_effect=RuntimeError("stop unavailable"))
+    refresh_state = AsyncMock()
+    dock = AsyncMock()
+
+    stopped = asyncio.run(
+        async_stop_then_dock(
+            initial_state="paused",
+            stop=stop,
+            dock=dock,
+            refresh_state=refresh_state,
+            initial_delay=0,
+            poll_interval=0,
+        )
+    )
+
+    assert stopped is False
+    stop.assert_awaited_once()
+    refresh_state.assert_not_awaited()
+    dock.assert_awaited_once()
+
+
 def test_dock_without_stopping_preserves_session_by_docking_directly() -> None:
     client = object.__new__(DreameLawnMowerClient)
     client._async_call_device_method = AsyncMock()
