@@ -86,6 +86,13 @@ class DreameLawnMowerVideoLanCache:
         )
         await self._async_save()
 
+    async def async_clear_endpoint(self) -> None:
+        """Forget a direct endpoint that failed a health-checked restart."""
+        if self.endpoint is None:
+            return
+        self.endpoint = None
+        await self._async_save()
+
     async def _async_save(self) -> None:
         if self.inputs is None:
             return

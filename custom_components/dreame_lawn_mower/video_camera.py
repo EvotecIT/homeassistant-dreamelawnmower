@@ -56,6 +56,7 @@ from .dreame_lawn_mower_client.xp2p_runtime_bootstrap import (
     ensure_xp2p_host_runtime,
 )
 from .video_lan_cache import DreameLawnMowerVideoLanCache
+from .video_session_lifecycle import DreameLawnMowerHaStreamIdleMonitor
 from .video_stream_helpers import (
     decode_flv_jpeg as _decode_flv_jpeg,
 )
@@ -106,9 +107,7 @@ class DreameLawnMowerVideoCamera(
     _attr_name = "Live Video"
     _attr_icon = "mdi:video-wireless-outline"
     _attr_entity_registry_enabled_default = True
-    _attr_supported_features = (
-        CameraEntityFeature.STREAM | CameraEntityFeature.ON_OFF
-    )
+    _attr_supported_features = CameraEntityFeature.STREAM | CameraEntityFeature.ON_OFF
 
     def __init__(
         self,
@@ -129,6 +128,14 @@ class DreameLawnMowerVideoCamera(
         self._session: DreameLawnMowerXp2pLiveStreamSession | None = None
         self._stream_lock = asyncio.Lock()
         self._snapshot_lock = asyncio.Lock()
+        self._stream_idle_monitor = DreameLawnMowerHaStreamIdleMonitor(
+            coordinator.hass,
+            stream_lock=self._stream_lock,
+            is_current=lambda stream, session: (
+                self.stream is stream and self._session is session
+            ),
+            stop_active=self._async_stop_active_session,
+        )
         self._last_error: str | None = None
         self._last_runtime_inputs_ready: bool | None = None
         self._last_runtime_inputs_source: str | None = None
@@ -290,6 +297,7 @@ class DreameLawnMowerVideoCamera(
                     )
                     ha_stream.set_update_callback(self.async_write_ha_state)
                     self.stream = ha_stream
+                    self._stream_idle_monitor.schedule(ha_stream, session)
                     return ha_stream
             except BaseException:
                 if owns_session and session is not None:
@@ -338,9 +346,7 @@ class DreameLawnMowerVideoCamera(
             async with asyncio.timeout(_SNAPSHOT_STREAM_START_TIMEOUT):
                 source = await self.stream_source()
         except TimeoutError:
-            _LOGGER.debug(
-                "Timed out starting Dreame mower video for a still image"
-            )
+            _LOGGER.debug("Timed out starting Dreame mower video for a still image")
             return self._last_image
         if source is None:
             return self._last_image
@@ -402,8 +408,9 @@ class DreameLawnMowerVideoCamera(
         cloud_inputs_error: Exception | None = None
         if self._video_transport != VIDEO_TRANSPORT_CLOUD:
             lan_inputs = self._lan_cache.inputs
+            cached_endpoint = self._lan_cache.endpoint
             if self._video_transport == VIDEO_TRANSPORT_AUTO and (
-                lan_inputs is None or self._lan_cache.endpoint is None
+                lan_inputs is None or cached_endpoint is None
             ):
                 try:
                     cloud_inputs = await self._async_get_runtime_inputs()
@@ -420,6 +427,48 @@ class DreameLawnMowerVideoCamera(
                 lan_source = await self._async_try_lan_stream(runtime, lan_inputs)
                 if lan_source is not None:
                     return lan_source
+                if (
+                    self._video_transport == VIDEO_TRANSPORT_AUTO
+                    and cached_endpoint is not None
+                ):
+                    cached_error = self._last_lan_error
+                    try:
+                        await self._lan_cache.async_clear_endpoint()
+                        self._lan_cache_error = None
+                    except Exception as err:  # noqa: BLE001 - retry in memory.
+                        self._lan_cache_error = str(err)
+                        _LOGGER.warning(
+                            "Failed to clear stale Dreame LAN endpoint: %s", err
+                        )
+                    try:
+                        cloud_inputs = await self._async_get_runtime_inputs()
+                    except Exception as err:  # noqa: BLE001 - cloud fallback reports.
+                        cloud_inputs_error = err
+                        cached_failure = cached_error or "unknown error"
+                        self._last_lan_error = (
+                            f"Cached endpoint failed: {cached_failure} "
+                            f"Fresh LAN discovery inputs failed: {err}"
+                        )
+                    else:
+                        if cloud_inputs.lan_identity_ready:
+                            lan_source = await self._async_try_lan_stream(
+                                runtime,
+                                cloud_inputs,
+                            )
+                            if lan_source is not None:
+                                return lan_source
+                            self._last_lan_error = (
+                                "Cached endpoint failed: "
+                                f"{cached_error or 'unknown error'} "
+                                "Fresh LAN discovery failed: "
+                                f"{self._last_lan_error or 'unknown error'}"
+                            )
+                        else:
+                            self._last_lan_error = (
+                                "Cached endpoint failed: "
+                                f"{cached_error or 'unknown error'} "
+                                "Fresh cloud inputs did not include LAN identity."
+                            )
             else:
                 self._last_lan_error = (
                     "No cached LAN video identity is available. Use Auto or Cloud "
@@ -639,9 +688,30 @@ class DreameLawnMowerVideoCamera(
                 session = future.result()
             except Exception:  # noqa: BLE001 - native startup already failed.
                 return
-            self.hass.async_create_task(self._async_stop_session(runtime, session))
+            self.hass.async_create_task(
+                self._async_cleanup_late_start(runtime, session)
+            )
 
         start_job.add_done_callback(_completed)
+
+    async def _async_cleanup_late_start(
+        self,
+        runtime: _DreameVideoRuntime,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+    ) -> None:
+        """Stop a late result unless it would tear down a newer active service."""
+        async with self._stream_lock:
+            active_session = self._session
+            active_service_id = getattr(active_session, "service_id", None)
+            late_service_id = getattr(session, "service_id", None)
+            if active_session is session or (
+                active_session is not None
+                and self._runtime is runtime
+                and active_service_id is not None
+                and active_service_id == late_service_id
+            ):
+                return
+            await self._async_stop_session(runtime, session)
 
     async def async_turn_off(self) -> None:
         """Stop the current live video session."""
@@ -663,6 +733,7 @@ class DreameLawnMowerVideoCamera(
 
     async def _async_stop_active_session(self) -> None:
         """Stop the current runtime session if one is active."""
+        await self._stream_idle_monitor.async_cancel()
         ha_stream = getattr(self, "stream", None)
         self.stream = None
         runtime = self._runtime
@@ -726,8 +797,7 @@ class DreameLawnMowerVideoCamera(
             )
             if not diagnostics.ready:
                 raise DreameLawnMowerVideoRuntimeError(
-                    diagnostics.error
-                    or "Configured XP2P native library is not ready."
+                    diagnostics.error or "Configured XP2P native library is not ready."
                 )
             runtime = DreameLawnMowerNativeXp2pRuntime(
                 path,

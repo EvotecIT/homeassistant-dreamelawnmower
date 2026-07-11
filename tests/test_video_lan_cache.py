@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.lan_video import (
+    DreameLawnMowerLanVideoEndpoint,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
+    DreameLawnMowerCameraStreamRuntimeInputs,
+)
 from custom_components.dreame_lawn_mower.video_lan_cache import (
+    DreameLawnMowerVideoLanCache,
     _decode_cache_payload,
 )
 
@@ -90,3 +99,38 @@ def test_lan_cache_rejects_unsafe_endpoint_address(address: str) -> None:
 
     assert inputs is not None
     assert endpoint is None
+
+
+def test_lan_cache_clear_endpoint_persists_identity_without_endpoint() -> None:
+    async def _run() -> tuple[object | None, dict[str, object]]:
+        saved: dict[str, object] = {}
+
+        class _Store:
+            async def async_save(self, payload: dict[str, object]) -> None:
+                saved.update(payload)
+
+        cache = object.__new__(DreameLawnMowerVideoLanCache)
+        cache._store = _Store()
+        cache._did = "did-1"
+        cache.inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+            source="lan_video_cache",
+            did="did-1",
+            product_id="product-1",
+            device_name="device-1",
+        )
+        cache.endpoint = DreameLawnMowerLanVideoEndpoint(
+            product_id="product-1",
+            device_name="device-1",
+            address="192.0.2.25",
+            port=9000,
+            response_version="cached",
+        )
+
+        await cache.async_clear_endpoint()
+        return cache.endpoint, saved
+
+    endpoint, saved = asyncio.run(_run())
+
+    assert endpoint is None
+    assert saved["product_id"] == "product-1"
+    assert "endpoint" not in saved

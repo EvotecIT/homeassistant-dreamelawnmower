@@ -49,6 +49,9 @@ from custom_components.dreame_lawn_mower.video_camera import (
     DreameLawnMowerVideoCamera,
     _split_runner_command,
 )
+from custom_components.dreame_lawn_mower.video_session_lifecycle import (
+    DreameLawnMowerHaStreamIdleMonitor,
+)
 
 from .fixture_data import load_json_fixture
 
@@ -64,6 +67,10 @@ def _uninitialized_entity(*, snapshot: object | None = None):
     entity.coordinator = SimpleNamespace(data=snapshot)
     entity._session = None
     entity._runtime = None
+    entity._stream_idle_monitor = SimpleNamespace(
+        schedule=lambda _stream, _session: None,
+        async_cancel=lambda: asyncio.sleep(0),
+    )
     entity._attr_is_on = True
     entity._stream_lock = asyncio.Lock()
     entity._snapshot_lock = asyncio.Lock()
@@ -218,9 +225,7 @@ def test_video_camera_serializes_concurrent_stream_starts() -> None:
             maximum_active = max(maximum_active, active)
             await asyncio.sleep(0)
             active -= 1
-            entity._session = SimpleNamespace(
-                stream_url="http://127.0.0.1/live.flv"
-            )
+            entity._session = SimpleNamespace(stream_url="http://127.0.0.1/live.flv")
             return entity._session.stream_url
 
         entity._async_start_stream = _start
@@ -498,9 +503,7 @@ def test_video_camera_returns_jpeg_from_managed_flv_source() -> None:
         entity.stream = None
         entity._stream_lock = asyncio.Lock()
         entity._create_stream_lock = None
-        snapshot_session = SimpleNamespace(
-            stream_url="http://127.0.0.1/live.flv"
-        )
+        snapshot_session = SimpleNamespace(stream_url="http://127.0.0.1/live.flv")
         stops = 0
 
         async def _source() -> str:
@@ -755,6 +758,148 @@ def test_video_camera_cancellation_stops_completed_native_startup() -> None:
         return stopped, returned_before_native_start
 
     assert asyncio.run(_run()) == (1, True)
+
+
+def test_video_camera_late_native_cleanup_preserves_newer_session() -> None:
+    async def _run() -> int:
+        entity = _uninitialized_entity()
+        runtime = object()
+        entity._runtime = runtime
+        entity._session = SimpleNamespace(service_id="product-1/device-1")
+        stopped = 0
+
+        async def _stop(_runtime: object, _session: object) -> None:
+            nonlocal stopped
+            stopped += 1
+
+        entity._async_stop_session = _stop
+        await entity._async_cleanup_late_start(
+            runtime,
+            SimpleNamespace(service_id="product-1/device-1"),
+        )
+        return stopped
+
+    assert asyncio.run(_run()) == 0
+
+
+def test_video_camera_hls_idle_stops_owned_session() -> None:
+    async def _run() -> int:
+        entity = _uninitialized_entity()
+        session = SimpleNamespace(service_id="product-1/device-1")
+        outputs_calls = 0
+        stops = 0
+
+        class _Stream:
+            def outputs(self) -> dict[str, object]:
+                nonlocal outputs_calls
+                outputs_calls += 1
+                return {"hls": object()} if outputs_calls == 1 else {}
+
+        stream = _Stream()
+        entity.stream = stream
+        entity._session = session
+
+        async def _stop() -> None:
+            nonlocal stops
+            stops += 1
+            entity.stream = None
+            entity._session = None
+
+        entity._async_stop_active_session = _stop
+        monitor = DreameLawnMowerHaStreamIdleMonitor(
+            SimpleNamespace(async_create_task=asyncio.create_task),
+            stream_lock=entity._stream_lock,
+            is_current=lambda actual_stream, actual_session: (
+                entity.stream is actual_stream and entity._session is actual_session
+            ),
+            stop_active=entity._async_stop_active_session,
+            poll_interval=0,
+        )
+        entity._stream_idle_monitor = monitor
+        monitor.schedule(stream, session)
+        while stops == 0:
+            await asyncio.sleep(0)
+        return stops
+
+    assert asyncio.run(_run()) == 1
+
+
+def test_video_camera_auto_refreshes_after_stale_cached_lan_endpoint() -> None:
+    async def _run() -> tuple[str | None, int, int, list[object]]:
+        entity = _uninitialized_entity()
+        entity._entry.options[CONF_VIDEO_TRANSPORT] = VIDEO_TRANSPORT_AUTO
+        cached_inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+            source="lan_video_cache",
+            did="did-1",
+            product_id="product-1",
+            device_name="device-1",
+        )
+        fresh_inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+            source="dreame_third_video_tx",
+            did="did-1",
+            product_id="product-1",
+            device_name="device-1",
+            lan_client_token="fresh-access-token",
+        )
+
+        class _Cache:
+            def __init__(self) -> None:
+                self.inputs = cached_inputs
+                self.endpoint = object()
+                self.clears = 0
+
+            async def async_clear_endpoint(self) -> None:
+                self.clears += 1
+                self.endpoint = None
+
+            async def async_save_identity(self, _inputs: object) -> None:
+                return None
+
+        class _Client:
+            def __init__(self) -> None:
+                self.fetches = 0
+
+            async def async_get_camera_stream_runtime_inputs(self) -> object:
+                self.fetches += 1
+                return fresh_inputs
+
+            async def async_set_camera_stream_enabled(self, _enabled: bool) -> None:
+                raise AssertionError(
+                    "Fresh LAN retry should succeed before cloud video"
+                )
+
+        cache = _Cache()
+        client = _Client()
+        attempts: list[object] = []
+        entity._lan_cache = cache
+        entity.coordinator = SimpleNamespace(client=client, data=object())
+        entity._lan_cache_error = None
+        entity._runtime_preparation_error = None
+        entity._async_stop_active_session = lambda: asyncio.sleep(0)
+        entity._create_runtime = lambda: object()
+
+        async def _executor(function, *args):
+            return function(*args)
+
+        async def _try_lan(_runtime: object, inputs: object) -> str | None:
+            attempts.append(inputs)
+            if inputs is cached_inputs:
+                entity._last_lan_error = "cached endpoint did not respond"
+                return None
+            return "http://127.0.0.1/fresh-lan.flv"
+
+        entity.hass = SimpleNamespace(async_add_executor_job=_executor)
+        entity._async_try_lan_stream = _try_lan
+        source = await entity._async_start_stream()
+        return source, cache.clears, client.fetches, attempts
+
+    source, clears, fetches, attempts = asyncio.run(_run())
+
+    assert source == "http://127.0.0.1/fresh-lan.flv"
+    assert clears == 1
+    assert fetches == 1
+    assert attempts[0].source == "lan_video_cache"
+    assert attempts[1].lan_client_token == "fresh-access-token"
 
 
 def test_video_camera_disables_video_when_enable_attempt_raises() -> None:
