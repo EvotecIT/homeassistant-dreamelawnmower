@@ -259,10 +259,10 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             "error_source": getattr(snapshot, "error_source", None),
             "raw_error_code": getattr(snapshot, "raw_error_code", None),
             "realtime_error_code": getattr(snapshot, "realtime_error_code", None),
-            "cleaning_mode": snapshot.cleaning_mode,
-            "cleaning_mode_name": snapshot.cleaning_mode_name,
-            "cleaned_area": getattr(snapshot, "cleaned_area", None),
-            "cleaning_time": getattr(snapshot, "cleaning_time", None),
+            "mowing_mode": snapshot.cleaning_mode,
+            "mowing_mode_name": snapshot.cleaning_mode_name,
+            "mowed_area": getattr(snapshot, "cleaned_area", None),
+            "mowing_time": getattr(snapshot, "cleaning_time", None),
             "active_segment_count": getattr(snapshot, "active_segment_count", None),
             "current_zone_id": getattr(snapshot, "current_zone_id", None),
             "current_zone_name": getattr(snapshot, "current_zone_name", None),
@@ -279,7 +279,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             "docked": snapshot.docked,
             "raw_docked": snapshot.raw_docked,
             "mapping_available": snapshot.mapping_available,
-            "scheduled_clean": snapshot.scheduled_clean,
+            "scheduled_mow": snapshot.scheduled_clean,
             "shortcut_task": snapshot.shortcut_task,
             "serial_number": snapshot.serial_number,
             "cloud_update_time": snapshot.cloud_update_time,
@@ -363,6 +363,13 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             )
             if current_vector_map
             else None,
+            # Deprecated vacuum-era aliases of the mowing_* attributes above;
+            # kept one release so existing templates keep working.
+            "cleaning_mode": snapshot.cleaning_mode,
+            "cleaning_mode_name": snapshot.cleaning_mode_name,
+            "cleaned_area": getattr(snapshot, "cleaned_area", None),
+            "cleaning_time": getattr(snapshot, "cleaning_time", None),
+            "scheduled_clean": snapshot.scheduled_clean,
         }
 
     async def async_start_mowing(self) -> None:
