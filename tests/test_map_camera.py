@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 from custom_components.dreame_lawn_mower.map_attributes import map_camera_attributes
-from custom_components.dreame_lawn_mower.map_cache import DreameLawnMowerMapCameraCache
+from custom_components.dreame_lawn_mower.map_cache import (
+    DreameLawnMowerMapCameraCache,
+    map_camera_available,
+)
 from dreame_lawn_mower_client.models import (
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
@@ -61,6 +65,50 @@ def test_map_camera_attributes_include_app_map_summary_counts() -> None:
     assert attributes["app_maps"] is None
     assert attributes["app_map_object_count"] is None
     assert attributes["app_map_objects"] is None
+
+
+def test_offline_map_camera_does_not_expose_cached_image() -> None:
+    snapshot = SimpleNamespace(
+        available=False,
+        mapping_available=True,
+        capabilities=("map",),
+    )
+
+    assert map_camera_available(snapshot, image_cached=True) is False
+
+
+def test_online_diagnostic_map_camera_does_not_require_map_capability() -> None:
+    snapshot = SimpleNamespace(
+        available=True,
+        mapping_available=False,
+        capabilities=(),
+    )
+
+    assert (
+        map_camera_available(
+            snapshot,
+            image_cached=False,
+            requires_map_capability=False,
+        )
+        is True
+    )
+
+
+def test_offline_diagnostic_map_camera_remains_unavailable() -> None:
+    snapshot = SimpleNamespace(
+        available=False,
+        mapping_available=False,
+        capabilities=(),
+    )
+
+    assert (
+        map_camera_available(
+            snapshot,
+            image_cached=False,
+            requires_map_capability=False,
+        )
+        is False
+    )
 
 
 def test_map_camera_attributes_include_all_app_map_metadata() -> None:

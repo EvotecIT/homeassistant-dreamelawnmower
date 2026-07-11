@@ -25,7 +25,7 @@ from .image import (
     png_bytes_to_jpeg,
 )
 from .map_attributes import map_camera_attributes
-from .map_cache import DreameLawnMowerMapCameraCache
+from .map_cache import DreameLawnMowerMapCameraCache, map_camera_available
 
 _LOGGER = logging.getLogger(__name__)
 _MAP_CACHE_TTL = timedelta(seconds=60)
@@ -63,6 +63,7 @@ class DreameLawnMowerMapCamera(
     _attr_icon = "mdi:map-search-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
+    _requires_map_capability = True
 
     def __init__(
         self,
@@ -81,13 +82,10 @@ class DreameLawnMowerMapCamera(
     @property
     def available(self) -> bool:
         """Return whether the entity can reasonably provide a map."""
-        snapshot = self.coordinator.data
-        if snapshot is None:
-            return False
-        return (
-            self._map_cache.last_image is not None
-            or snapshot.mapping_available
-            or "map" in snapshot.capabilities
+        return map_camera_available(
+            self.coordinator.data,
+            image_cached=self._map_cache.last_image is not None,
+            requires_map_capability=self._requires_map_capability,
         )
 
     @property
@@ -122,6 +120,12 @@ class DreameLawnMowerMapCamera(
     ) -> bytes | None:
         """Return the latest mower map image as JPEG bytes."""
         del width, height
+        if not self.available:
+            return None
+        return await self._async_camera_image_impl()
+
+    async def _async_camera_image_impl(self) -> bytes | None:
+        """Build the camera image after shared availability gating."""
         return await self._async_get_map_image()
 
     async def _async_get_map_image(self) -> bytes | None:
@@ -221,6 +225,7 @@ class DreameLawnMowerMapDataCamera(DreameLawnMowerMapCamera):
 
     _attr_name = "Map Diagnostics"
     _attr_icon = "mdi:code-json"
+    _requires_map_capability = False
 
     def __init__(
         self,
@@ -239,13 +244,8 @@ class DreameLawnMowerMapDataCamera(DreameLawnMowerMapCamera):
             attributes["map_view"] = self._map_cache.last_view.as_dict()
         return attributes
 
-    async def async_camera_image(
-        self,
-        width: int | None = None,
-        height: int | None = None,
-    ) -> bytes | None:
+    async def _async_camera_image_impl(self) -> bytes | None:
         """Return a readable diagnostics card as JPEG bytes."""
-        del width, height
         view = await self._async_refresh_map_view()
         summary = view.summary
         lines = [
@@ -307,6 +307,7 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
 
     _attr_name = "All Maps"
     _attr_icon = "mdi:map-multiple-outline"
+    _requires_map_capability = False
 
     def __init__(
         self,
@@ -317,13 +318,8 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
         self._attr_unique_id = f"{self._descriptor.unique_id}_all_maps"
         self.content_type = "image/jpeg"
 
-    async def async_camera_image(
-        self,
-        width: int | None = None,
-        height: int | None = None,
-    ) -> bytes | None:
+    async def _async_camera_image_impl(self) -> bytes | None:
         """Return a JPEG contact sheet for every drawable app map."""
-        del width, height
         try:
             app_maps = await self.coordinator.client.async_get_app_maps(
                 include_payload=True,

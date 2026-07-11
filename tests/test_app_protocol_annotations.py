@@ -221,6 +221,79 @@ def test_status_blob_decoder_exposes_candidate_battery_byte() -> None:
 
     assert decoded is not None
     assert decoded.candidate_battery_level == 93
+    assert decoded.main_state == 4
+    assert decoded.sub_state == 35
+    assert decoded.task_status == "mowing"
+    assert decoded.mowing_session_active is True
+    assert decoded.task_resumable is False
+
+
+def test_status_blob_decoder_exposes_paused_resumable_session_at_dock() -> None:
+    decoded = decode_mower_status_blob(
+        [206, 0, 0, 0, 0, 0, 0, 0, 128, 0, 128, 100, 21, 36, 0, 0, 128, 211, 196, 206]
+    )
+
+    assert decoded is not None
+    assert decoded.main_state == 4
+    assert decoded.sub_state == 36
+    assert decoded.task_status == "paused"
+    assert decoded.mowing_session_active is True
+    assert decoded.task_resumable is True
+
+
+def test_status_blob_decoder_removes_charging_flag_from_battery_byte() -> None:
+    decoded = decode_mower_status_blob(
+        [206, 0, 0, 0, 0, 0, 0, 0, 128, 0, 128, 227, 149, 36, 0, 0, 128, 212, 186, 206]
+    )
+
+    assert decoded is not None
+    assert decoded.candidate_battery_level == 99
+    assert decoded.heartbeat_charging is True
+
+
+def test_status_blob_decoder_reports_idle_outside_mowing_main_state() -> None:
+    decoded = decode_mower_status_blob(
+        [206, 0, 0, 0, 0, 0, 0, 0, 128, 0, 128, 100, 4, 36, 0, 0, 128, 211, 196, 206]
+    )
+
+    assert decoded is not None
+    assert decoded.main_state == 3
+    assert decoded.task_status == "idle"
+    assert decoded.mowing_session_active is False
+    assert decoded.task_resumable is False
+
+
+def test_status_blob_decoder_marks_terminal_task_states_inactive() -> None:
+    for sub_state, expected_status in ((37, "finished"), (38, "failed")):
+        decoded = decode_mower_status_blob(
+            [
+                206,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                128,
+                0,
+                128,
+                100,
+                21,
+                sub_state,
+                0,
+                0,
+                128,
+                211,
+                196,
+                206,
+            ]
+        )
+
+        assert decoded is not None
+        assert decoded.task_status == expected_status
+        assert decoded.mowing_session_active is False
+        assert decoded.task_resumable is False
 
 
 def test_property_annotations_mark_runtime_status_blob_frame() -> None:

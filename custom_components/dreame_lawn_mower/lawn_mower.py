@@ -238,6 +238,13 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             "state_name": snapshot.state_name,
             "task_status": snapshot.task_status,
             "task_status_name": snapshot.task_status_name,
+            "task_status_source": getattr(snapshot, "task_status_source", None),
+            "mowing_session_active": getattr(
+                snapshot,
+                "mowing_session_active",
+                None,
+            ),
+            "task_resumable": getattr(snapshot, "task_resumable", None),
             "unknown_property_count": len(
                 getattr(device, "unknown_properties", {}) or {}
             ),

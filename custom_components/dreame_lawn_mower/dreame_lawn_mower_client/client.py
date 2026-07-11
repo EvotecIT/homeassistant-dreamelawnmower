@@ -43,6 +43,7 @@ from .debug_ota_catalog import (
     build_debug_ota_catalog_url,
     normalize_debug_ota_catalog_payload,
 )
+from .docking import async_stop_then_dock
 from .exceptions import DeviceException, InvalidActionException
 from .maintenance import (
     CMS_GET_REQUEST,
@@ -95,12 +96,20 @@ from .schedule import (
     encode_schedule_payload_text,
     schedule_task_summary,
 )
+from .runtime_state import (
+    RESUME_MOWING_REQUEST,
+    snapshot_session_control_state,
+    snapshot_with_cloud_presence,
+    snapshot_with_heartbeat_task_state,
+)
 from .vector_map import (
     parse_batch_vector_map,
     render_vector_map_png,
     vector_map_to_details,
     vector_map_to_summary,
 )
+
+_CLOUD_PRESENCE_REFRESH_INTERVAL = 60.0
 
 REMOTE_CONTROL_MAX_ROTATION = 1000
 REMOTE_CONTROL_MAX_VELOCITY = 1000
@@ -204,6 +213,8 @@ class DreameLawnMowerClient:
             ...,
         ] = ()
         self._last_runtime_track_blob_hex: str | None = None
+        self._latest_cloud_device_info: Mapping[str, Any] | None = None
+        self._cloud_device_info_refreshed_at = 0.0
 
     @property
     def descriptor(self) -> DreameLawnMowerDescriptor:
@@ -293,10 +304,40 @@ class DreameLawnMowerClient:
             token=getattr(device, "token", None) or self._descriptor.token,
             raw=self._descriptor.raw,
         )
-        return snapshot_from_device(self._descriptor, device)
+        snapshot = snapshot_from_device(self._descriptor, device)
+        try:
+            status_blob = await asyncio.to_thread(
+                self._sync_get_status_blob,
+                False,
+                True,
+            )
+        except DreameLawnMowerConnectionError:
+            status_blob = None
+        if status_blob is not None and status_blob.task_status is not None:
+            snapshot = snapshot_with_heartbeat_task_state(snapshot, status_blob)
+
+        try:
+            cloud_device_info = await asyncio.to_thread(
+                self._sync_get_cached_cloud_device_info,
+            )
+        except DreameLawnMowerConnectionError:
+            cloud_device_info = self._latest_cloud_device_info
+        if isinstance(cloud_device_info, Mapping):
+            snapshot = snapshot_with_cloud_presence(snapshot, cloud_device_info)
+        return snapshot
 
     async def async_start_mowing(self) -> None:
-        """Start or resume mowing."""
+        """Start a new task or resume the heartbeat-confirmed paused task."""
+        try:
+            status_blob = await self.async_get_status_blob(
+                refresh=True,
+                include_cloud=True,
+            )
+        except DreameLawnMowerConnectionError:
+            status_blob = None
+        if status_blob is not None and status_blob.task_resumable:
+            await asyncio.to_thread(self._sync_resume_mowing)
+            return
         await self._async_call_device_method("start_mowing")
 
     async def async_pause(self) -> None:
@@ -304,7 +345,26 @@ class DreameLawnMowerClient:
         await self._async_call_device_method("pause")
 
     async def async_dock(self) -> None:
-        """Return the mower to base."""
+        """End an active mowing session and return the mower to base."""
+        try:
+            snapshot = await self.async_refresh()
+        except DreameLawnMowerConnectionError:
+            await self._async_call_device_method("dock")
+            return
+        initial_state = snapshot_session_control_state(snapshot)
+
+        async def async_refresh_state() -> str | None:
+            return snapshot_session_control_state(await self.async_refresh())
+
+        await async_stop_then_dock(
+            initial_state=initial_state,
+            stop=lambda: self._async_call_device_method("stop"),
+            dock=lambda: self._async_call_device_method("dock"),
+            refresh_state=async_refresh_state,
+        )
+
+    async def async_dock_without_stopping(self) -> None:
+        """Return to base while preserving a resumable mowing session."""
         await self._async_call_device_method("dock")
 
     async def async_clean_segments(self, segment_ids: Sequence[int]) -> Any:
@@ -2123,6 +2183,26 @@ class DreameLawnMowerClient:
             return cloud.get_device_info()
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
+
+    def _sync_get_cached_cloud_device_info(self) -> Mapping[str, Any] | None:
+        """Refresh cloud presence at a bounded rate and retain last-known state."""
+        now = time.monotonic()
+        if (
+            self._cloud_device_info_refreshed_at > 0
+            and now - self._cloud_device_info_refreshed_at
+            < _CLOUD_PRESENCE_REFRESH_INTERVAL
+        ):
+            return self._latest_cloud_device_info
+
+        self._cloud_device_info_refreshed_at = now
+        info = self._sync_get_cloud_device_info("en")
+        if isinstance(info, Mapping):
+            self._latest_cloud_device_info = dict(info)
+        return self._latest_cloud_device_info
+
+    def _sync_resume_mowing(self) -> Any:
+        """Resume a paused mower task through the app task-control protocol."""
+        return self._sync_call_app_action(RESUME_MOWING_REQUEST)
 
     @staticmethod
     def _with_fallback_app_maps(
@@ -5363,6 +5443,9 @@ def _operation_snapshot_summary(snapshot: DreameLawnMowerSnapshot) -> dict[str, 
         "activity": snapshot.activity,
         "task_status": snapshot.task_status,
         "task_status_name": snapshot.task_status_name,
+        "task_status_source": snapshot.task_status_source,
+        "mowing_session_active": snapshot.mowing_session_active,
+        "task_resumable": snapshot.task_resumable,
         "battery_level": snapshot.battery_level,
         "charging": snapshot.charging,
         "raw_charging": snapshot.raw_charging,
