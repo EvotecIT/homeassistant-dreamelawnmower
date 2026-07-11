@@ -36,6 +36,27 @@ def _summarize_samples(samples: list[dict[str, object]]) -> dict[str, object]:
             if isinstance(sample.get("status_blob"), dict)
         ]
     )
+    task_statuses = _unique_values(
+        [
+            (sample.get("status_blob") or {}).get("task_status")
+            for sample in samples
+            if isinstance(sample.get("status_blob"), dict)
+        ]
+    )
+    session_active_flags = _unique_values(
+        [
+            (sample.get("status_blob") or {}).get("mowing_session_active")
+            for sample in samples
+            if isinstance(sample.get("status_blob"), dict)
+        ]
+    )
+    resumable_flags = _unique_values(
+        [
+            (sample.get("status_blob") or {}).get("task_resumable")
+            for sample in samples
+            if isinstance(sample.get("status_blob"), dict)
+        ]
+    )
     compared_candidates = [
         (
             sample.get("battery_level"),
@@ -84,6 +105,9 @@ def _summarize_samples(samples: list[dict[str, object]]) -> dict[str, object]:
         "docked_flags": docked_flags,
         "battery_levels": battery_levels,
         "candidate_battery_levels": candidate_battery_levels,
+        "task_statuses": task_statuses,
+        "mowing_session_active_flags": session_active_flags,
+        "task_resumable_flags": resumable_flags,
         "candidate_battery_matches_snapshot": (
             all(snapshot == candidate for snapshot, candidate in compared_candidates)
             if compared_candidates

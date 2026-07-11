@@ -124,6 +124,9 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             snapshot = await self.client.async_refresh()
         except DreameLawnMowerConnectionError as err:
             raise UpdateFailed(str(err)) from err
+        if not snapshot.available:
+            self.data = None
+            raise UpdateFailed("Mower is offline; cached state was discarded.")
         try:
             self.runtime_status_blob = await self.client.async_get_runtime_status_blob(
                 refresh=False,
@@ -131,7 +134,8 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             )
             self.client.update_runtime_live_tracking(
                 self.runtime_status_blob,
-                active=getattr(snapshot, "activity", None)
+                active=bool(getattr(snapshot, "mowing_session_active", False))
+                or getattr(snapshot, "activity", None)
                 in {"mowing", "paused", "returning"},
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata

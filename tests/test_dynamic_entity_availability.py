@@ -18,6 +18,7 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
     DreameLawnMowerRainProtectionEnabledBinarySensor,
 )
 from custom_components.dreame_lawn_mower.button import (
+    DreameLawnMowerDockWithoutStoppingButton,
     DreameLawnMowerResetMaintenanceButton,
 )
 from custom_components.dreame_lawn_mower.coordinator import _app_map_index_hints
@@ -352,6 +353,34 @@ def test_task_active_binary_sensor_uses_effective_started_flag() -> None:
     assert entity.is_on is False
 
 
+def test_task_active_binary_sensor_prefers_heartbeat_session_state() -> None:
+    entity = object.__new__(DreameLawnMowerBinarySensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            started=False,
+            mowing_session_active=True,
+            raw_attributes={},
+        )
+    )
+    entity.entity_description = _binary_sensor_description("task_active")
+
+    assert entity.is_on is True
+
+
+def test_task_resumable_binary_sensor_uses_heartbeat_state() -> None:
+    entity = object.__new__(DreameLawnMowerBinarySensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            task_resumable=True,
+            raw_attributes={},
+        )
+    )
+    entity.entity_description = _binary_sensor_description("task_resumable")
+
+    assert entity.available is True
+    assert entity.is_on is True
+
+
 def test_raw_started_binary_sensor_preserves_vendor_flag() -> None:
     entity = object.__new__(DreameLawnMowerBinarySensor)
     entity.coordinator = SimpleNamespace(
@@ -532,6 +561,32 @@ def test_reset_maintenance_button_executes_confirmed_reset(monkeypatch) -> None:
     assert coordinator.last_maintenance_reset_result["executed"] is True
     assert notifications[0]["title"] == "Dreame Lawn Mower Maintenance Reset"
     assert notifications[0]["notification_id"].endswith("_reset_maintenance_blade")
+
+
+def test_dock_without_stopping_button_calls_session_preserving_client_action() -> None:
+    class _FakeClient:
+        def __init__(self) -> None:
+            self.called = False
+
+        async def async_dock_without_stopping(self) -> None:
+            self.called = True
+
+    class _FakeCoordinator:
+        def __init__(self) -> None:
+            self.client = _FakeClient()
+            self.refreshed = False
+
+        async def async_request_refresh(self) -> None:
+            self.refreshed = True
+
+    coordinator = _FakeCoordinator()
+    entity = object.__new__(DreameLawnMowerDockWithoutStoppingButton)
+    entity.coordinator = coordinator
+
+    asyncio.run(entity.async_press())
+
+    assert coordinator.client.called is True
+    assert coordinator.refreshed is True
 
 
 def test_raw_returning_binary_sensor_preserves_vendor_flag() -> None:

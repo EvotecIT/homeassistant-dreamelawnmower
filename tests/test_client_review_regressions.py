@@ -9,9 +9,15 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import protoco
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import (
     _normalize_cloud_firmware_check,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.runtime_state import (
+    snapshot_with_cloud_presence,
+)
 from dreame_lawn_mower_client import DreameLawnMowerClient
 from dreame_lawn_mower_client.client import DreameLawnMowerConnectionError
-from dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
+from dreame_lawn_mower_client.models import (
+    DreameLawnMowerDescriptor,
+    DreameLawnMowerSnapshot,
+)
 
 
 def _client() -> DreameLawnMowerClient:
@@ -40,6 +46,30 @@ def _firmware_device() -> SimpleNamespace:
         status=SimpleNamespace(),
         data={},
     )
+
+
+def _snapshot(*, available: bool = True) -> DreameLawnMowerSnapshot:
+    return DreameLawnMowerSnapshot(
+        descriptor=_client().descriptor,
+        available=available,
+        state="charging_completed",
+        state_name="Charging complete",
+        activity="docked",
+    )
+
+
+def test_cloud_offline_presence_marks_cached_snapshot_unavailable() -> None:
+    snapshot = snapshot_with_cloud_presence(_snapshot(), {"online": False})
+
+    assert snapshot.online is False
+    assert snapshot.available is False
+
+
+def test_cloud_online_presence_keeps_successful_snapshot_available() -> None:
+    snapshot = snapshot_with_cloud_presence(_snapshot(), {"online": True})
+
+    assert snapshot.online is True
+    assert snapshot.available is True
 
 
 def test_cloud_mqtt_client_requires_verified_tls(monkeypatch) -> None:

@@ -33,6 +33,7 @@ async def async_setup_entry(
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
+            DreameLawnMowerDockWithoutStoppingButton(coordinator),
             DreameLawnMowerCaptureDebugSnapshotButton(coordinator),
             DreameLawnMowerCaptureOperationSnapshotButton(coordinator),
             DreameLawnMowerCaptureMapProbeButton(coordinator),
@@ -47,6 +48,27 @@ async def async_setup_entry(
             for item in MAINTENANCE_ITEMS
         ]
     )
+
+
+class DreameLawnMowerDockWithoutStoppingButton(
+    DreameLawnMowerEntity,
+    ButtonEntity,
+):
+    """Return the mower to base without ending its current session."""
+
+    _attr_name = "Dock Without Ending Session"
+    _attr_icon = "mdi:home-battery"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_dock_without_stopping"
+        )
+
+    async def async_press(self) -> None:
+        """Dock directly so the current task remains available to resume."""
+        await self.coordinator.client.async_dock_without_stopping()
+        await self.coordinator.async_request_refresh()
 
 
 class DreameLawnMowerCaptureDebugSnapshotButton(
