@@ -645,11 +645,14 @@ def snapshot_from_device(
         or has_only_bare_error_flag
     )
     error_source: str | None = "status" if has_error else None
-    status_reports_no_error = _status_explicitly_reports_no_error(
-        status_has_error=status_has_error,
-        error_code=error_code,
-        error_name=error_name,
-        error_text=error_text,
+    status_reports_no_error = (
+        raw_error_code in MOWER_NON_ERROR_EVENT_CODES
+        or _status_explicitly_reports_no_error(
+            status_has_error=status_has_error,
+            error_code=error_code,
+            error_name=error_name,
+            error_text=error_text,
+        )
     )
     if (
         not has_error

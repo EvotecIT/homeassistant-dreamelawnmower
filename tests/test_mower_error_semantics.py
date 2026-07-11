@@ -53,14 +53,22 @@ class _ErrorDevice:
         return None
 
 
-def _snapshot(code: int, inherited_name: str):
+def _snapshot(
+    code: int,
+    inherited_name: str,
+    *,
+    realtime_error_code: int | None = None,
+):
     descriptor = descriptor_from_cloud_record(
         {"did": "test", "model": "dreame.mower.g2408", "name": "Mower"},
         account_type="dreame",
         country="eu",
     )
     assert descriptor is not None
-    return snapshot_from_device(descriptor, _ErrorDevice(code, inherited_name))
+    device = _ErrorDevice(code, inherited_name)
+    if realtime_error_code is not None:
+        device.realtime_properties = {"2.2": {"value": realtime_error_code}}
+    return snapshot_from_device(descriptor, device)
 
 
 @pytest.mark.parametrize(
@@ -90,5 +98,17 @@ def test_dnd_transition_codes_are_not_active_errors(code: int) -> None:
 
     assert snapshot.activity == "paused"
     assert snapshot.raw_error_code == code
+    assert snapshot.error_source is None
+    assert snapshot.error_display is None
+
+
+@pytest.mark.parametrize("code", [61, 70])
+def test_dnd_transition_suppresses_stale_realtime_error(code: int) -> None:
+    snapshot = _snapshot(code, "route", realtime_error_code=23)
+
+    assert snapshot.activity == "paused"
+    assert snapshot.raw_error_code == code
+    assert snapshot.realtime_error_code == 23
+    assert snapshot.error_code is None
     assert snapshot.error_source is None
     assert snapshot.error_display is None
