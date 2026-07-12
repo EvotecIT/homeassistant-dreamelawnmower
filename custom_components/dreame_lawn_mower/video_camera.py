@@ -207,6 +207,8 @@ class DreameLawnMowerVideoCamera(
         snapshot = self.coordinator.data
         if camera_stream_block_reason(snapshot) is not None:
             return False
+        if snapshot is not None and not getattr(snapshot, "available", True):
+            return False
         cached_lan_ready = (
             self._lan_cache.inputs is not None
             and self._lan_cache.endpoint is not None
@@ -215,8 +217,6 @@ class DreameLawnMowerVideoCamera(
             self._provisioning_cache.inputs is not None
             and self._provisioning_cache.device_config is not None
         )
-        if self._video_transport == VIDEO_TRANSPORT_LAN and cached_lan_ready:
-            return True
         if self._video_transport == VIDEO_TRANSPORT_AUTO and (
             cached_lan_ready or cached_xp2p_ready
         ):
@@ -525,10 +525,6 @@ class DreameLawnMowerVideoCamera(
                     "once while the video cloud is reachable to provision it."
                 )
 
-            if self._video_transport == VIDEO_TRANSPORT_LAN:
-                self._set_stream_error(self._last_lan_error or "Same-LAN video failed.")
-                return None
-
         if cached_xp2p_inputs is not None and cached_xp2p_inputs.ready:
             cached_source = await self._async_try_cached_xp2p_stream(
                 runtime,
@@ -590,6 +586,8 @@ class DreameLawnMowerVideoCamera(
                 self._with_lan_failure(video_helpers.stream_health_error(stream_health))
             )
             return None
+
+        await self._async_cache_healthy_provisioning(cloud_inputs)
 
         return self._adopt_stream_session(
             runtime,
@@ -664,7 +662,7 @@ class DreameLawnMowerVideoCamera(
     async def _async_get_runtime_inputs(
         self,
     ) -> DreameLawnMowerCameraStreamRuntimeInputs:
-        """Fetch cloud inputs and refresh both LAN and private XP2P caches."""
+        """Fetch cloud inputs and stage configuration for health-checked use."""
         inputs = await self.coordinator.client.async_get_camera_stream_runtime_inputs()
         self._last_runtime_inputs_ready = inputs.ready
         self._last_runtime_inputs_source = inputs.source
@@ -677,20 +675,32 @@ class DreameLawnMowerVideoCamera(
                 self._lan_cache_error = str(err)
                 _LOGGER.warning("Failed to save Dreame LAN video identity: %s", err)
         if inputs.ready:
-            config = await self.hass.async_add_executor_job(
-                self._provisioning_cache.resolve_fresh_device_config,
+            await self.hass.async_add_executor_job(
+                self._provisioning_cache.stage_fresh_device_config,
                 inputs,
             )
-            try:
-                await self._provisioning_cache.async_save(inputs, config)
-                self._provisioning_cache_error = None
-            except Exception as err:  # noqa: BLE001 - current stream can continue.
-                self._provisioning_cache_error = str(err)
-                _LOGGER.warning(
-                    "Failed to save Dreame video provisioning cache: %s",
-                    err,
-                )
         return inputs
+
+    async def _async_cache_healthy_provisioning(
+        self,
+        inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+    ) -> None:
+        """Persist fresh XP2P inputs only after FLV health verification."""
+        config = self._provisioning_cache.resolve_device_config(inputs)
+        if config is None:
+            self._provisioning_cache_error = (
+                "Healthy XP2P stream did not retain its resolved device configuration."
+            )
+            return
+        try:
+            await self._provisioning_cache.async_save(inputs, config)
+            self._provisioning_cache_error = None
+        except Exception as err:  # noqa: BLE001 - current stream can continue.
+            self._provisioning_cache_error = str(err)
+            _LOGGER.warning(
+                "Failed to save Dreame video provisioning cache: %s",
+                err,
+            )
 
     async def _async_start_lan_runtime_session(
         self,

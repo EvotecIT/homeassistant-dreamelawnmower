@@ -265,6 +265,13 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
+        video_transport = self._entry_options.get(
+            CONF_VIDEO_TRANSPORT,
+            DEFAULT_VIDEO_TRANSPORT,
+        )
+        if video_transport not in VIDEO_TRANSPORT_OPTIONS:
+            video_transport = DEFAULT_VIDEO_TRANSPORT
+
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
@@ -297,10 +304,7 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                     ),
                     vol.Optional(
                         CONF_VIDEO_TRANSPORT,
-                        default=self._entry_options.get(
-                            CONF_VIDEO_TRANSPORT,
-                            DEFAULT_VIDEO_TRANSPORT,
-                        ),
+                        default=video_transport,
                     ): vol.In(VIDEO_TRANSPORT_OPTIONS),
                     vol.Optional(
                         CONF_XP2P_LIBRARY_PATH,

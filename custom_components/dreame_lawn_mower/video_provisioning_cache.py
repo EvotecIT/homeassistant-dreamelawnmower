@@ -1,4 +1,4 @@
-"""Private persisted provisioning for cloud-independent XP2P restart."""
+"""Private persisted provisioning for cached XP2P restart."""
 
 from __future__ import annotations
 
@@ -108,6 +108,15 @@ class DreameLawnMowerVideoProvisioningCache:
         """Resolve Tencent configuration once before persisting it."""
         return resolve_xp2p_device_config(inputs)
 
+    def stage_fresh_device_config(
+        self,
+        inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+    ) -> DreameLawnMowerXp2pDeviceConfig:
+        """Retain fresh configuration in memory until stream health is proven."""
+        config = self.resolve_fresh_device_config(inputs)
+        self._runtime_input_config = (inputs, config)
+        return config
+
     def resolve_for_transport(
         self,
         inputs: DreameLawnMowerCameraStreamRuntimeInputs,
@@ -115,9 +124,9 @@ class DreameLawnMowerVideoProvisioningCache:
         auto: bool,
     ) -> DreameLawnMowerXp2pDeviceConfig:
         """Return cached/fresh configuration with the requested route policy."""
-        config = self.resolve_device_config(inputs) or resolve_xp2p_device_config(
-            inputs
-        )
+        config = self.resolve_device_config(inputs)
+        if config is None:
+            config = self.stage_fresh_device_config(inputs)
         if not auto:
             return config
         return DreameLawnMowerXp2pDeviceConfig(

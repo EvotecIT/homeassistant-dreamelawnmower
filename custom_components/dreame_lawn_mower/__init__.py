@@ -14,7 +14,6 @@ from .const import (
     DOMAIN,
     PLATFORMS,
     VIDEO_TRANSPORT_AUTO,
-    VIDEO_TRANSPORT_LAN,
 )
 from .coordinator import DreameLawnMowerCoordinator
 from .services import async_setup_services, async_unload_services
@@ -78,8 +77,6 @@ def _cached_video_only_available(
 ) -> bool:
     """Return whether setup may safely expose only a cached camera."""
     transport = entry.options.get(CONF_VIDEO_TRANSPORT)
-    if transport == VIDEO_TRANSPORT_LAN:
-        return lan_cache.inputs is not None and lan_cache.endpoint is not None
     if transport == VIDEO_TRANSPORT_AUTO:
         return (
             (lan_cache.inputs is not None and lan_cache.endpoint is not None)

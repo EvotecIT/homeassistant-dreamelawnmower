@@ -183,15 +183,16 @@ station. Requesting the camera does not start or move the mower. The existing
 native-library and persistent-runner options remain available as advanced
 overrides for development or unsupported host platforms.
 
-The integration's options expose three video transport policies. The default
-keeps the proven XP2P-compatible path. `Auto` first tries Tencent's separate
-same-LAN service and then uses normal XP2P with direct-capable AUTO negotiation.
-`Same-LAN only` never falls back, but it requires firmware that advertises a LAN
-endpoint. The camera's `last_stream_session` attribute reports `stream_route`
-as `direct` only when the separate LAN service was selected; otherwise it stays
-`unknown`. Tencent's misleadingly named `getStreamLinkMode` API returns a
-network/NAT-type bitmask, exposed as `sdk_stream_network_type`, rather than a
-direct-versus-relay result.
+The integration exposes two video transport policies. The default uses the
+proven cloud-provisioned XP2P path. `Auto` can restart from health-checked cached
+provisioning and lets Tencent negotiate the available network route. It also
+probes Tencent's separate same-LAN service when mower firmware advertises one.
+The tested A2 production firmware does not advertise that service, so the
+integration does not offer a LAN-only policy. The camera's
+`last_stream_session` attribute reports `stream_route` as `direct` only when
+the separate LAN service was selected; otherwise it stays `unknown`. Tencent's
+misleadingly named `getStreamLinkMode` API returns a network/NAT-type bitmask,
+exposed as `sdk_stream_network_type`, rather than a direct-versus-relay result.
 
 After a successful cloud-provisioned stream, `Auto` privately caches the minimum
 XP2P identity, P2P material, QCloud/app credentials, and resolved device
@@ -204,19 +205,20 @@ through the normal path if the cached material has expired.
 This proof is intentionally narrower than every camera feature in the vendor
 apps:
 
-- The tested A2 sent normal-XP2P AUTO media directly between the Home Assistant
-  host and the mower's same-LAN IP. A retained socket trace includes the direct
-  peer address, FLV request, HTTP 200 response, and media bytes, so this does not
-  depend on an SDK label. Tencent's separate WLAN discovery and
-  `startLanService` path was also implemented, but this A2 firmware did not
-  answer that discovery request. Dreame/Tencent cloud calls still provide the
+- In one captured A2 session, normal-XP2P AUTO media travelled directly between
+  the Home Assistant host and the mower's same-LAN IP. A retained socket trace
+  includes the direct peer address, FLV request, HTTP 200 response, and media
+  bytes, so this does not depend on an SDK label. Tencent's separate WLAN
+  discovery and `startLanService` path was also implemented, but this A2
+  firmware did not answer that discovery request. Dreame/Tencent cloud calls
+  still provide the
   initial provisioning. A second copied-HA proof deliberately failed the entire
   Dreame client during config-entry reload: the integration entered cached
   camera-only mode, produced another HLS HTTP 200 response, and independently
   decoded 100 more frames without fetching runtime inputs or toggling video in
   Dreame cloud. Tencent XP2P can still use its internet rendezvous/STUN control
-  plane to establish the direct peer route, so this is not a claim that video
-  starts with all internet connectivity removed.
+  plane to establish the direct peer route. Neither transport policy promises
+  startup with all internet connectivity removed.
 - Home Assistant can display and save the current JPEG frame, but the vendor's
   stored photo gallery is not exposed.
 - Live video is field-validated on the A2 only. A3 AWD Pro and MOVA camera

@@ -15,7 +15,6 @@ from .const import (
     DEFAULT_VIDEO_TRANSPORT,
     VIDEO_TRANSPORT_AUTO,
     VIDEO_TRANSPORT_CLOUD,
-    VIDEO_TRANSPORT_LAN,
 )
 from .dreame_lawn_mower_client.stream_health import (
     DreameLawnMowerStreamUrlProbeResult,
@@ -48,10 +47,11 @@ def video_transport(entry: ConfigEntry) -> str:
     value = entry.options.get(CONF_VIDEO_TRANSPORT)
     if value in {
         VIDEO_TRANSPORT_AUTO,
-        VIDEO_TRANSPORT_LAN,
         VIDEO_TRANSPORT_CLOUD,
     }:
         return str(value)
+    # Same-LAN-only was never supported by the tested A2 production firmware.
+    # Normalize prerelease/unknown values to the proven default.
     return DEFAULT_VIDEO_TRANSPORT
 
 
