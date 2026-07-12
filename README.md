@@ -226,6 +226,10 @@ apps:
 - Patrol movement, arbitrary voice-prompt playback, and two-way live talk are
   separate control/audio features and are not implemented by this camera.
 
+Maintainers can find the confirmed protocol split, A2 findings, retained LAN
+implementation, and future device validation checklist in
+[Video Transport and Same-LAN Research](docs/video-transport.md).
+
 ## Help Expand Support
 
 Support across Dreame, MOVA, and rebadged mower variants will improve fastest
