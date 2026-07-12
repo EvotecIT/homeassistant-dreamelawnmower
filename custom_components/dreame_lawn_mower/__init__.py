@@ -57,7 +57,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ):
             raise
         _LOGGER.warning(
-            "Dreame cloud is unavailable; starting a cached video-only mode"
+            "Dreame cloud is unavailable; loading cached camera recovery mode. "
+            "Playback will wait for a fresh safe mower snapshot"
         )
         platforms = (Platform.CAMERA,)
 

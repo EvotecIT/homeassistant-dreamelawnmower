@@ -13,6 +13,12 @@ from homeassistant.components.camera import (
     CameraEntityFeature,
 )
 from homeassistant.components.stream import create_stream
+from homeassistant.components.stream.const import (
+    ATTR_STREAMS,
+)
+from homeassistant.components.stream.const import (
+    DOMAIN as STREAM_DOMAIN,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -443,6 +449,11 @@ class DreameLawnMowerVideoCamera(
         if reason := camera_stream_block_reason(self.coordinator.data):
             self._set_stream_error(reason)
             return None
+        if (
+            self._video_transport == VIDEO_TRANSPORT_AUTO
+            and not await self._async_refresh_auto_start_state()
+        ):
+            return None
 
         await self._async_stop_active_session()
         try:
@@ -595,6 +606,32 @@ class DreameLawnMowerVideoCamera(
             stream_health,
             transport=VIDEO_TRANSPORT_CLOUD,
         )
+
+    async def _async_refresh_auto_start_state(self) -> bool:
+        """Require a fresh safe mower snapshot before a cached Auto start."""
+        try:
+            await self.coordinator.async_refresh()
+        except Exception as err:  # noqa: BLE001 - fail closed before video startup.
+            _LOGGER.debug("Failed to refresh mower state before Auto video: %s", err)
+            self._set_stream_error(
+                "Could not refresh mower state before starting Auto video."
+            )
+            return False
+        if not self.coordinator.last_update_success:
+            self._set_stream_error(
+                "Could not refresh mower state before starting Auto video."
+            )
+            return False
+        snapshot = self.coordinator.data
+        if snapshot is None or not getattr(snapshot, "available", True):
+            self._set_stream_error(
+                "The mower is unavailable after refreshing video safety state."
+            )
+            return False
+        if reason := camera_stream_block_reason(snapshot):
+            self._set_stream_error(reason)
+            return False
+        return True
 
     async def _async_try_lan_stream(
         self,
@@ -872,6 +909,8 @@ class DreameLawnMowerVideoCamera(
                 await ha_stream.stop()
             except Exception as err:  # noqa: BLE001 - continue XP2P cleanup.
                 _LOGGER.debug("Failed to stop Home Assistant camera stream: %s", err)
+            finally:
+                self._unregister_ha_stream(ha_stream)
         if runtime is None or session is None:
             return
         await self._async_stop_session(runtime, session)
@@ -884,6 +923,23 @@ class DreameLawnMowerVideoCamera(
         if camera_toggle_managed:
             await self._async_disable_camera_stream()
         self.async_write_ha_state()
+
+    def _unregister_ha_stream(self, ha_stream: Any) -> None:
+        """Remove a discarded HA Stream from the integration registry."""
+        hass = getattr(self, "hass", None)
+        data = getattr(hass, "data", None)
+        if not isinstance(data, dict):
+            return
+        stream_data = data.get(STREAM_DOMAIN)
+        if not isinstance(stream_data, dict):
+            return
+        streams = stream_data.get(ATTR_STREAMS)
+        if not isinstance(streams, list):
+            return
+        try:
+            streams.remove(ha_stream)
+        except ValueError:
+            pass
 
     async def _async_stop_session(
         self,

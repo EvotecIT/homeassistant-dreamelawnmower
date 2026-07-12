@@ -212,13 +212,12 @@ apps:
   discovery and `startLanService` path was also implemented, but this A2
   firmware did not answer that discovery request. Dreame/Tencent cloud calls
   still provide the
-  initial provisioning. A second copied-HA proof deliberately failed the entire
-  Dreame client during config-entry reload: the integration entered cached
-  camera-only mode, produced another HLS HTTP 200 response, and independently
-  decoded 100 more frames without fetching runtime inputs or toggling video in
-  Dreame cloud. Tencent XP2P can still use its internet rendezvous/STUN control
-  plane to establish the direct peer route. Neither transport policy promises
-  startup with all internet connectivity removed.
+  initial provisioning. `Auto` can reuse health-checked video provisioning
+  without fetching new video inputs or toggling the camera through Dreame cloud,
+  but it first refreshes the mower snapshot and refuses to start when current
+  safety state cannot be verified. Tencent XP2P can also use its internet
+  rendezvous/STUN control plane to establish the direct peer route. Neither
+  transport policy promises startup with all internet connectivity removed.
 - Home Assistant can display and save the current JPEG frame, but the vendor's
   stored photo gallery is not exposed.
 - Live video is field-validated on the A2 only. A3 AWD Pro and MOVA camera

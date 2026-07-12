@@ -405,6 +405,23 @@ def test_camera_stream_handshake_blocks_docked_mower() -> None:
         raise AssertionError("Expected docked mower stream probe to be blocked")
 
 
+def test_camera_stream_toggle_blocks_direct_fast_mapping_status() -> None:
+    device = _FakeCameraDevice()
+    device.status.attributes = {}
+    device.status.fast_mapping = True
+    client = _client_with_device(device)
+    client._sync_update_device = lambda: device
+
+    try:
+        client._sync_set_camera_stream_enabled(True)
+    except DreameLawnMowerConnectionError as err:
+        assert "blocked while mapping" in str(err)
+    else:
+        raise AssertionError("Expected fast mapping to block the camera toggle")
+
+    assert device.actions == []
+
+
 def test_camera_stream_handshake_allows_paused_undocked_mower() -> None:
     device = _FakeCameraDevice()
     device.status.state = DreameMowerState.PAUSED

@@ -19,6 +19,12 @@ neither promises startup without internet connectivity. The tested A2
 production firmware does not advertise Tencent's separate LAN service, so the
 integration does not expose a LAN-only policy.
 
+Before trying a cached LAN or XP2P session, `Auto` refreshes the mower snapshot
+and applies the same docked, returning, mapping, and ambiguous-active-state
+guards as a cloud-provisioned start. If the current state cannot be refreshed,
+the camera fails closed. Cached provisioning avoids repeating video-specific
+configuration calls; it does not bypass live mower safety checks.
+
 ## Two different Tencent paths
 
 The word "LAN" can refer to two different mechanisms. They should not be

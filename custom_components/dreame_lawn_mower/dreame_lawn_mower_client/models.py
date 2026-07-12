@@ -840,7 +840,11 @@ def snapshot_from_device(
         "_",
         " ",
     ).title()
-    status_attributes = getattr(device.status, "attributes", {}) or {}
+    status_attributes = dict(getattr(device.status, "attributes", {}) or {})
+    if "fast_mapping" not in status_attributes:
+        fast_mapping = getattr(device.status, "fast_mapping", None)
+        if fast_mapping:
+            status_attributes["fast_mapping"] = True
     info_raw = getattr(getattr(device, "info", None), "raw", {}) or {}
     last_realtime_message = getattr(device, "last_realtime_message", None) or {}
     last_realtime_payload = last_realtime_message.get("message", {})

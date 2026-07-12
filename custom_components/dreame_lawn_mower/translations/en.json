@@ -49,7 +49,7 @@
           "xp2p_runner_mode": "Host XP2P runner mode"
         },
         "data_description": {
-          "video_transport": "Cloud-provisioned XP2P is the proven default. Auto can reuse health-checked cached provisioning and lets Tencent negotiate the available route. It may also try Tencent's separate LAN service when mower firmware advertises one. The tested A2 firmware does not expose that service, and neither mode promises internet-independent startup.",
+          "video_transport": "Cloud-provisioned XP2P is the proven default. Auto refreshes mower safety state, then can reuse health-checked cached provisioning while Tencent negotiates the available route. It may also try Tencent's separate LAN service when mower firmware advertises one. The tested A2 firmware does not expose that service, and neither mode promises internet-independent startup.",
           "xp2p_library_path": "Advanced video option. Use a dynamic XP2P library built for this Home Assistant host OS and CPU. Android APK/AAR libraries and iOS frameworks are not host runtimes.",
           "xp2p_runner_command": "Advanced video option. Use only a local host runner that owns a compatible XP2P runtime and returns a local FLV URL. Android helpers are not the intended Home Assistant runtime.",
           "xp2p_runner_mode": "Use process mode for a runner that stays alive while Home Assistant streams."
