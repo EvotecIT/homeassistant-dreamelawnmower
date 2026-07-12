@@ -12,7 +12,15 @@ from .fixture_data import load_json_fixture
 
 def _snapshot() -> SimpleNamespace:
     payload = load_json_fixture("a2_paused_left_wheel_error_diagnostics.json")
-    return SimpleNamespace(**payload["data"]["snapshot"])
+    values = payload["data"]["snapshot"]
+    return SimpleNamespace(
+        **values,
+        mower_state_name=values["state_name"],
+        mowing_task_status_name=values["task_status_name"],
+        mowing_mode_name=values["cleaning_mode_name"],
+        mowed_area=values.get("cleaned_area"),
+        mowing_time=values.get("cleaning_time"),
+    )
 
 
 def test_a2_error_fixture_preserves_paused_state_context() -> None:

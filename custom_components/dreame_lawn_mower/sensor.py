@@ -100,13 +100,13 @@ SENSORS = [
     DreameSensorDescription(
         key="state_name",
         name="State Name",
-        value_fn=lambda snapshot: snapshot.state_name,
+        value_fn=lambda snapshot: snapshot.mower_state_name,
         icon="mdi:state-machine",
     ),
     DreameSensorDescription(
         key="task_status",
         name="Task Status",
-        value_fn=lambda snapshot: snapshot.task_status_name or "unknown",
+        value_fn=lambda snapshot: snapshot.mowing_task_status_name or "unknown",
         icon="mdi:clipboard-text-clock-outline",
     ),
     DreameSensorDescription(
@@ -203,28 +203,28 @@ SENSORS = [
     ),
     DreameSensorDescription(
         key="cleaning_mode",
-        name="Cleaning Mode",
-        value_fn=lambda snapshot: snapshot.cleaning_mode_name,
+        name="Mowing Mode",
+        value_fn=lambda snapshot: snapshot.mowing_mode_name,
         exists_fn=lambda snapshot: (
-            bool(snapshot.cleaning_mode_name)
-            and snapshot.cleaning_mode_name != "unknown"
+            bool(snapshot.mowing_mode_name)
+            and snapshot.mowing_mode_name != "unknown"
         ),
         icon="mdi:grass",
         entity_registry_enabled_default=False,
     ),
     DreameSensorDescription(
         key="current_cleaned_area",
-        name="Current Cleaned Area",
-        value_fn=lambda snapshot: getattr(snapshot, "cleaned_area", None),
-        exists_fn=lambda snapshot: getattr(snapshot, "cleaned_area", None) is not None,
+        name="Current Mowed Area",
+        value_fn=lambda snapshot: snapshot.mowed_area,
+        exists_fn=lambda snapshot: snapshot.mowed_area is not None,
         icon="mdi:texture-box",
         native_unit_of_measurement="m²",
     ),
     DreameSensorDescription(
         key="current_cleaning_time",
-        name="Current Cleaning Time",
-        value_fn=lambda snapshot: getattr(snapshot, "cleaning_time", None),
-        exists_fn=lambda snapshot: getattr(snapshot, "cleaning_time", None) is not None,
+        name="Current Mowing Time",
+        value_fn=lambda snapshot: snapshot.mowing_time,
+        exists_fn=lambda snapshot: snapshot.mowing_time is not None,
         icon="mdi:timer-sand",
         native_unit_of_measurement="min",
     ),
@@ -1782,16 +1782,14 @@ class DreameLawnMowerMowingProgressSensor(
     def native_value(self) -> float | int | None:
         """Return the current mowing progress percentage."""
         snapshot = self.coordinator.data
-        cleaned_area = (
-            None if snapshot is None else getattr(snapshot, "cleaned_area", None)
-        )
+        mowed_area = None if snapshot is None else snapshot.mowed_area
         current_map_area = _current_app_map_total_area(
             self.coordinator.app_maps,
             self.coordinator.batch_device_data,
         )
-        if cleaned_area is None or current_map_area in (None, 0):
+        if mowed_area is None or current_map_area in (None, 0):
             return None
-        progress = (float(cleaned_area) / float(current_map_area)) * 100
+        progress = (float(mowed_area) / float(current_map_area)) * 100
         return round(max(0.0, min(progress, 100.0)), 1)
 
     @property
@@ -1806,8 +1804,8 @@ class DreameLawnMowerMowingProgressSensor(
         if snapshot is None:
             return {}
         attributes: dict[str, Any] = {
-            "cleaned_area": getattr(snapshot, "cleaned_area", None),
-            "cleaning_time": getattr(snapshot, "cleaning_time", None),
+            "mowed_area": snapshot.mowed_area,
+            "mowing_time": snapshot.mowing_time,
             "current_zone": _current_zone_label(snapshot),
             "active_segment_count": getattr(snapshot, "active_segment_count", None),
         }

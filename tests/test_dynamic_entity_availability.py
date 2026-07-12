@@ -90,11 +90,11 @@ def _binary_sensor_description(key: str):
     return next(description for description in BINARY_SENSORS if description.key == key)
 
 
-def test_cleaning_mode_sensor_can_become_available_after_startup() -> None:
+def test_mowing_mode_sensor_can_become_available_after_startup() -> None:
     entity = object.__new__(DreameLawnMowerSensor)
     entity.coordinator = SimpleNamespace(
         data=SimpleNamespace(
-            cleaning_mode_name="unknown",
+            mowing_mode_name="unknown",
             raw_attributes={},
         )
     )
@@ -104,7 +104,7 @@ def test_cleaning_mode_sensor_can_become_available_after_startup() -> None:
     assert entity.native_value is None
 
     entity.coordinator.data = SimpleNamespace(
-        cleaning_mode_name="standard",
+        mowing_mode_name="standard",
         raw_attributes={},
     )
 
@@ -126,11 +126,11 @@ def test_activity_sensor_exposes_normalized_client_activity() -> None:
     assert entity.native_value == "returning"
 
 
-def test_current_cleaned_area_sensor_can_become_available_after_startup() -> None:
+def test_current_mowed_area_sensor_can_become_available_after_startup() -> None:
     entity = object.__new__(DreameLawnMowerSensor)
     entity.coordinator = SimpleNamespace(
         data=SimpleNamespace(
-            cleaned_area=None,
+            mowed_area=None,
             raw_attributes={},
         )
     )
@@ -140,7 +140,7 @@ def test_current_cleaned_area_sensor_can_become_available_after_startup() -> Non
     assert entity.native_value is None
 
     entity.coordinator.data = SimpleNamespace(
-        cleaned_area=42,
+        mowed_area=42,
         raw_attributes={},
     )
 
@@ -148,11 +148,11 @@ def test_current_cleaned_area_sensor_can_become_available_after_startup() -> Non
     assert entity.native_value == 42
 
 
-def test_current_cleaning_time_sensor_can_become_available_after_startup() -> None:
+def test_current_mowing_time_sensor_can_become_available_after_startup() -> None:
     entity = object.__new__(DreameLawnMowerSensor)
     entity.coordinator = SimpleNamespace(
         data=SimpleNamespace(
-            cleaning_time=None,
+            mowing_time=None,
             raw_attributes={},
         )
     )
@@ -162,7 +162,7 @@ def test_current_cleaning_time_sensor_can_become_available_after_startup() -> No
     assert entity.native_value is None
 
     entity.coordinator.data = SimpleNamespace(
-        cleaning_time=58,
+        mowing_time=58,
         raw_attributes={},
     )
 
@@ -1577,12 +1577,12 @@ def test_current_vector_map_sensors_follow_active_map() -> None:
     }
 
 
-def test_mowing_progress_sensor_uses_live_cleaned_area_and_current_map_area() -> None:
+def test_mowing_progress_sensor_uses_live_mowed_area_and_current_map_area() -> None:
     entity = object.__new__(DreameLawnMowerMowingProgressSensor)
     entity.coordinator = SimpleNamespace(
         data=SimpleNamespace(
-            cleaned_area=220,
-            cleaning_time=58,
+            mowed_area=220,
+            mowing_time=58,
             current_zone_id=7,
             current_zone_name="Front Lawn",
             active_segment_count=2,
@@ -1628,8 +1628,8 @@ def test_mowing_progress_sensor_uses_live_cleaned_area_and_current_map_area() ->
     assert entity.available is True
     assert entity.native_value == 40.0
     assert entity.extra_state_attributes == {
-        "cleaned_area": 220,
-        "cleaning_time": 58,
+        "mowed_area": 220,
+        "mowing_time": 58,
         "current_zone": "Front Lawn",
         "active_segment_count": 2,
         "current_app_map": {

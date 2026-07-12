@@ -12,7 +12,15 @@ from .fixture_data import load_json_fixture
 
 def _snapshot() -> SimpleNamespace:
     payload = load_json_fixture("a2_paused_diagnostics.json")
-    return SimpleNamespace(**payload["data"]["snapshot"])
+    values = payload["data"]["snapshot"]
+    return SimpleNamespace(
+        **values,
+        mower_state_name=values["state_name"],
+        mowing_task_status_name=values["task_status_name"],
+        mowing_mode_name=values["cleaning_mode_name"],
+        mowed_area=values.get("cleaned_area"),
+        mowing_time=values.get("cleaning_time"),
+    )
 
 
 def test_a2_paused_fixture_has_expected_snapshot_values() -> None:
@@ -81,7 +89,7 @@ def test_a2_paused_fixture_keeps_optional_entities_opt_in() -> None:
     sensors = {description.name: description for description in SENSORS}
     binary_sensors = {description.name: description for description in BINARY_SENSORS}
 
-    assert sensors["Cleaning Mode"].entity_registry_enabled_default is False
+    assert sensors["Mowing Mode"].entity_registry_enabled_default is False
     assert binary_sensors["Child Lock"].entity_registry_enabled_default is False
     assert binary_sensors["Shortcut Task"].entity_registry_enabled_default is False
 

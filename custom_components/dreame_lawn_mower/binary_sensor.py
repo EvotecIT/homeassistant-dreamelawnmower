@@ -206,7 +206,7 @@ BINARY_SENSORS = [
     DreameBinarySensorDescription(
         key="scheduled_task",
         name="Scheduled Task",
-        value_fn=lambda snapshot: snapshot.scheduled_clean,
+        value_fn=lambda snapshot: snapshot.scheduled_mow,
         icon="mdi:calendar-check-outline",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),

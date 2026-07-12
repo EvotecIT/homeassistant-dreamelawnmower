@@ -345,7 +345,7 @@ client = DreameLawnMowerClient(
     descriptor=devices[0],
 )
 snapshot = await client.async_refresh()
-print(snapshot.descriptor.title, snapshot.state_name, snapshot.battery_level)
+print(snapshot.descriptor.title, snapshot.mower_state_name, snapshot.battery_level)
 ```
 
 The Home Assistant integration uses the same client package name inside the

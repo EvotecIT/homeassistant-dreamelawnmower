@@ -192,9 +192,13 @@ def _vector_map_details() -> dict:
 def _snapshot(**overrides: object) -> SimpleNamespace:
     values: dict[str, object] = {
         "state": 1,
+        "mower_state": "mowing",
         "state_name": "mowing",
+        "mower_state_name": "mowing",
         "task_status": 1,
+        "mowing_task_status": "working",
         "task_status_name": "working",
+        "mowing_task_status_name": "working",
         "last_realtime_method": "properties",
         "error_code": 0,
         "error_name": None,
@@ -204,9 +208,13 @@ def _snapshot(**overrides: object) -> SimpleNamespace:
         "raw_error_code": None,
         "realtime_error_code": None,
         "cleaning_mode": 0,
+        "mowing_mode": 0,
         "cleaning_mode_name": "all_area",
+        "mowing_mode_name": "all_area",
         "cleaned_area": 12.5,
+        "mowed_area": 12.5,
         "cleaning_time": 34,
+        "mowing_time": 34,
         "active_segment_count": 1,
         "current_zone_id": 3,
         "current_zone_name": "Zone #3",
@@ -224,6 +232,7 @@ def _snapshot(**overrides: object) -> SimpleNamespace:
         "raw_docked": False,
         "mapping_available": True,
         "scheduled_clean": False,
+        "scheduled_mow": False,
         "shortcut_task": False,
         "serial_number": "SN123",
         "cloud_update_time": 123456,
@@ -601,6 +610,15 @@ def test_lawn_mower_attributes_include_current_vector_map_state() -> None:
     assert attributes["current_vector_map_contour_count"] == 1
     assert attributes["current_vector_map_has_live_path"] is True
     assert attributes["current_vector_map_mow_path_point_count"] == 3
+    assert attributes["mowing_mode"] == 0
+    assert attributes["mowing_mode_name"] == "all_area"
+    assert attributes["mowed_area"] == 12.5
+    assert attributes["mowing_time"] == 34
+    assert attributes["scheduled_mow"] is False
+    assert attributes["cleaning_mode"] == 0
+    assert attributes["cleaned_area"] == 12.5
+    assert attributes["cleaning_time"] == 34
+    assert attributes["scheduled_clean"] is False
 
 
 def test_lawn_mower_attributes_fallback_to_vector_map_ids_for_names() -> None:

@@ -33,7 +33,7 @@ async def main() -> None:
     try:
         snapshot = await client.async_refresh()
         print(snapshot.descriptor.title)
-        print(snapshot.state_name)
+        print(snapshot.mower_state_name)
         print(snapshot.battery_level)
     finally:
         await client.async_close()
@@ -41,4 +41,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-

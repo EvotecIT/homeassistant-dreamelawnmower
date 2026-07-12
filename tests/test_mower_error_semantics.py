@@ -76,6 +76,7 @@ def _snapshot(
     [
         (2, "cliff", "Mower stuck"),
         (23, "heart", "Emergency stop pressed"),
+        (31, "left_wheell_speed", "Left wheel speed"),
         (53, "unknown", "Rain detected"),
         (54, "edge", "Low battery"),
     ],
@@ -90,6 +91,13 @@ def test_mower_error_codes_override_vacuum_labels(
     assert snapshot.activity == "error"
     assert snapshot.error_code == code
     assert snapshot.error_display == expected
+
+
+def test_unconfirmed_vacuum_error_name_is_marked_unverified() -> None:
+    snapshot = _snapshot(1, "drop")
+
+    assert snapshot.error_name == "drop"
+    assert snapshot.error_display == "Unverified drop"
 
 
 @pytest.mark.parametrize("code", [61, 70])

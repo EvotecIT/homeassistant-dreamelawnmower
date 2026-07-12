@@ -60,9 +60,9 @@ async def main() -> None:
     try:
         snapshot = await client.async_refresh()
         print(snapshot.descriptor.title)
-        print(snapshot.state_name)
+        print(snapshot.mower_state_name)
         print(snapshot.battery_level)
-        print(snapshot.task_status_name)
+        print(snapshot.mowing_task_status_name)
         print(snapshot.task_resumable)
     finally:
         await client.async_close()
@@ -72,6 +72,23 @@ asyncio.run(main())
 ```
 
 The same flow is available as `examples/python_client.py`.
+
+## Mower Terminology
+
+Use the mower-native snapshot properties in new scripts and automations:
+
+- `mower_state` and `mower_state_name`
+- `mowing_task_status` and `mowing_task_status_name`
+- `mowing_mode` and `mowing_mode_name`
+- `mowed_area` and `mowing_time`
+- `scheduled_mow`
+
+The inherited `state`, `state_name`, `task_status`, `task_status_name`,
+`cleaning_mode`, `cleaning_mode_name`, `cleaned_area`, `cleaning_time`, and
+`scheduled_clean` fields remain available as compatibility aliases. They keep
+their vendor-facing values during the migration and may be removed in a future
+breaking release. Home Assistant entity registry keys remain unchanged, so an
+upgrade does not create duplicate entities.
 
 ## Useful Client Features
 
