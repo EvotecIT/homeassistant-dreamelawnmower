@@ -39,7 +39,7 @@ async def main() -> None:
         map_summary = map_view.summary
 
         print(snapshot.descriptor.title)
-        print(f"State: {snapshot.state_name}")
+        print(f"State: {snapshot.mower_state_name}")
         print(
             "Map diagnostics:",
             json.dumps(map_view.as_dict(), indent=2, sort_keys=True),

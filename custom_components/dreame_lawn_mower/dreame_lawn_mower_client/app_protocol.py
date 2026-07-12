@@ -6,7 +6,7 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Final
 
-from .models import DreameLawnMowerStatusBlob
+from .models import MOWER_ERROR_CODE_NAMES, DreameLawnMowerStatusBlob
 
 MOWER_RAW_STATUS_PROPERTY_KEY: Final[str] = "1.1"
 MOWER_RUNTIME_STATUS_PROPERTY_KEY: Final[str] = "1.4"
@@ -118,13 +118,17 @@ def mower_error_label(value: object) -> str | None:
         return None
     if code in (-1, 0):
         return "No error"
+    confirmed = _clean_label(MOWER_ERROR_CODE_NAMES.get(code))
+    if confirmed is not None:
+        return confirmed
 
     try:
         from .const import ERROR_CODE_TO_ERROR_NAME
         from .types import DreameMowerErrorCode
 
         enum_value = DreameMowerErrorCode(code)
-        return _clean_label(ERROR_CODE_TO_ERROR_NAME.get(enum_value))
+        inherited = _clean_label(ERROR_CODE_TO_ERROR_NAME.get(enum_value))
+        return f"Unverified {inherited.casefold()}" if inherited else None
     except (ImportError, ValueError):
         return None
 

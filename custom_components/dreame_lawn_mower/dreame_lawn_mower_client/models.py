@@ -16,6 +16,7 @@ REALTIME_ERROR_PROPERTY_KEY = "2.2"
 MOWER_ERROR_CODE_NAMES = {
     2: "mower_stuck",
     23: "emergency_stop_pressed",
+    31: "left_wheel_speed",
     53: "rain_detected",
     54: "low_battery",
 }
@@ -92,6 +93,39 @@ def _is_no_error_text(value: str | None) -> bool:
     if text is None:
         return True
     return text.replace("_", " ").casefold() in {"no error", "none"}
+
+
+_MOWER_TERMINOLOGY = {
+    "sweeping": "mowing",
+    "cleaning": "mowing",
+    "auto_cleaning": "mowing",
+    "clean_summon": "mow_summon",
+    "second_cleaning": "second_mowing",
+    "follow_wall_cleaning": "edge_mowing",
+    "segment_cleaning": "zone_mowing",
+    "zone_cleaning": "zone_mowing",
+    "spot_cleaning": "spot_mowing",
+    "cleaning_paused": "mowing_paused",
+    "auto_cleaning_paused": "mowing_paused",
+    "segment_cleaning_paused": "zone_mowing_paused",
+    "zone_cleaning_paused": "zone_mowing_paused",
+    "spot_cleaning_paused": "spot_mowing_paused",
+    "map_cleaning_paused": "map_mowing_paused",
+    "summon_clean": "summon_mow",
+    "summon_clean_paused": "summon_mow_paused",
+    "curising_path": "cruising_path",
+    "curising_path_paused": "cruising_path_paused",
+    "curising_point": "cruising_point",
+    "curising_point_paused": "cruising_point_paused",
+}
+
+
+def _mower_terminology(value: str | None) -> str | None:
+    """Translate inherited vacuum labels at the public client boundary."""
+    text = _as_optional_str(value)
+    if text is None:
+        return None
+    return _MOWER_TERMINOLOGY.get(text.casefold(), text)
 
 
 def _error_name_from_code(value: int | None) -> str | None:
@@ -171,13 +205,15 @@ def _friendly_error_display(
 ) -> str | None:
     """Return the best user-facing error while preserving raw text elsewhere."""
     if error_code not in (None, -1, 0):
-        return (
-            _friendly_error_name(MOWER_ERROR_CODE_NAMES.get(error_code))
-            or _friendly_error_name(error_name)
+        confirmed = _friendly_error_name(MOWER_ERROR_CODE_NAMES.get(error_code))
+        if confirmed is not None:
+            return confirmed
+        inherited = (
+            _friendly_error_name(error_name)
             or _friendly_error_name(_error_name_from_code(error_code))
             or (None if _is_no_error_text(error_text) else error_text)
-            or f"Error {error_code}"
         )
+        return f"Unverified {inherited.casefold()}" if inherited else f"Error {error_code}"
 
     return _friendly_error_name(error_name) or error_text
 
@@ -266,6 +302,55 @@ class DreameLawnMowerSnapshot:
     capabilities: tuple[str, ...] = field(default_factory=tuple)
     raw_attributes: Mapping[str, Any] = field(default_factory=dict, repr=False)
     raw_info: Mapping[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def mower_state(self) -> str:
+        """Return the normalized state key using mower terminology."""
+        return _mower_terminology(self.state) or self.state
+
+    @property
+    def mower_state_name(self) -> str:
+        """Return the user-facing state using mower terminology."""
+        return _mower_terminology(self.state_name) or self.state_name
+
+    @property
+    def mowing_task_status(self) -> str | None:
+        """Return the normalized task-status key using mower terminology."""
+        return _mower_terminology(self.task_status)
+
+    @property
+    def mowing_task_status_name(self) -> str | None:
+        """Return the user-facing task status using mower terminology."""
+        return _mower_terminology(self.task_status_name)
+
+    @property
+    def scheduled_mow(self) -> bool:
+        """Return whether the current task was started by a schedule."""
+        return self.scheduled_clean
+
+    @property
+    def mowing_mode(self) -> int | None:
+        """Return the mower operating mode.
+
+        ``cleaning_mode`` remains available as a compatibility alias for the
+        inherited vendor protocol name.
+        """
+        return self.cleaning_mode
+
+    @property
+    def mowing_mode_name(self) -> str | None:
+        """Return the mower operating mode name using mower terminology."""
+        return _mower_terminology(self.cleaning_mode_name)
+
+    @property
+    def mowed_area(self) -> int | float | None:
+        """Return the area mowed in the current task."""
+        return self.cleaned_area
+
+    @property
+    def mowing_time(self) -> int | None:
+        """Return the current mowing duration in minutes."""
+        return self.cleaning_time
 
 
 @dataclass(slots=True, frozen=True)

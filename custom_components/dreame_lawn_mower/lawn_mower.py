@@ -234,10 +234,10 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             vector_map_details
         )
         return {
-            "state": snapshot.state,
-            "state_name": snapshot.state_name,
-            "task_status": snapshot.task_status,
-            "task_status_name": snapshot.task_status_name,
+            "state": snapshot.mower_state,
+            "state_name": snapshot.mower_state_name,
+            "task_status": snapshot.mowing_task_status,
+            "task_status_name": snapshot.mowing_task_status_name,
             "task_status_source": getattr(snapshot, "task_status_source", None),
             "mowing_session_active": getattr(
                 snapshot,
@@ -259,10 +259,10 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             "error_source": getattr(snapshot, "error_source", None),
             "raw_error_code": getattr(snapshot, "raw_error_code", None),
             "realtime_error_code": getattr(snapshot, "realtime_error_code", None),
-            "cleaning_mode": snapshot.cleaning_mode,
-            "cleaning_mode_name": snapshot.cleaning_mode_name,
-            "cleaned_area": getattr(snapshot, "cleaned_area", None),
-            "cleaning_time": getattr(snapshot, "cleaning_time", None),
+            "mowing_mode": snapshot.mowing_mode,
+            "mowing_mode_name": snapshot.mowing_mode_name,
+            "mowed_area": snapshot.mowed_area,
+            "mowing_time": snapshot.mowing_time,
             "active_segment_count": getattr(snapshot, "active_segment_count", None),
             "current_zone_id": getattr(snapshot, "current_zone_id", None),
             "current_zone_name": getattr(snapshot, "current_zone_name", None),
@@ -279,7 +279,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             "docked": snapshot.docked,
             "raw_docked": snapshot.raw_docked,
             "mapping_available": snapshot.mapping_available,
-            "scheduled_clean": snapshot.scheduled_clean,
+            "scheduled_mow": snapshot.scheduled_mow,
             "shortcut_task": snapshot.shortcut_task,
             "serial_number": snapshot.serial_number,
             "cloud_update_time": snapshot.cloud_update_time,
@@ -363,6 +363,17 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             )
             if current_vector_map
             else None,
+            # Deprecated public aliases. Entity registry keys and vendor
+            # protocol fields remain unchanged while automations migrate.
+            "raw_state": snapshot.state,
+            "raw_state_name": snapshot.state_name,
+            "raw_task_status": snapshot.task_status,
+            "raw_task_status_name": snapshot.task_status_name,
+            "cleaning_mode": snapshot.cleaning_mode,
+            "cleaning_mode_name": snapshot.cleaning_mode_name,
+            "cleaned_area": snapshot.cleaned_area,
+            "cleaning_time": snapshot.cleaning_time,
+            "scheduled_clean": snapshot.scheduled_clean,
         }
 
     async def async_start_mowing(self) -> None:

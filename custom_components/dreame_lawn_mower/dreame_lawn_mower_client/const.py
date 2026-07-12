@@ -345,8 +345,8 @@ PROPERTY_TO_NAME: Final = {
         "Off-Peak Charging",
     ],
     DreameMowerProperty.STATUS.name: ["status", "Status"],
-    DreameMowerProperty.CLEANING_TIME.name: ["cleaning_time", "Cleaning Time"],
-    DreameMowerProperty.CLEANED_AREA.name: ["cleaned_area", "Cleaned Area"],
+    DreameMowerProperty.CLEANING_TIME.name: ["cleaning_time", "Mowing Time"],
+    DreameMowerProperty.CLEANED_AREA.name: ["cleaned_area", "Mowed Area"],
     DreameMowerProperty.TASK_STATUS.name: ["task_status", "Task Status"],
     DreameMowerProperty.RESUME_CLEANING.name: ["resume_cleaning", "Resume Cleaning"],
     DreameMowerProperty.REMOTE_CONTROL.name: ["remote_control", "Remote Control"],
@@ -364,7 +364,7 @@ PROPERTY_TO_NAME: Final = {
         "ai_obstacle_detection",
         "AI Obstacle Detection",
     ],
-    DreameMowerProperty.CLEANING_MODE.name: ["cleaning_mode", "Cleaning Mode"],
+    DreameMowerProperty.CLEANING_MODE.name: ["cleaning_mode", "Mowing Mode"],
     DreameMowerProperty.CUSTOMIZED_CLEANING.name: [
         "customized_cleaning",
         "Customized Cleaning",
@@ -395,9 +395,9 @@ PROPERTY_TO_NAME: Final = {
     DreameMowerProperty.TIMEZONE.name: ["timezone", "Timezone"],
     DreameMowerProperty.BLADES_TIME_LEFT.name: [
         "blades_time_left",
-        "Main Brush  Time Left",
+        "Blades Time Left",
     ],
-    DreameMowerProperty.BLADES_LEFT.name: ["blades_left", "Main Brush Left"],
+    DreameMowerProperty.BLADES_LEFT.name: ["blades_left", "Blades Left"],
     DreameMowerProperty.SIDE_BRUSH_TIME_LEFT.name: [
         "side_brush_time_left",
         "Side Brush Time Left",
@@ -544,7 +544,7 @@ ACTION_TO_NAME: Final = {
     DreameMowerAction.UPDATE_MAP_DATA: ["update_map_data", "Update Map Data"],
     DreameMowerAction.LOCATE: ["locate", "Locate"],
     DreameMowerAction.TEST_SOUND: ["test_sound", "Test Sound"],
-    DreameMowerAction.RESET_BLADES: ["reset_blades", "Reset Main Brush"],
+    DreameMowerAction.RESET_BLADES: ["reset_blades", "Reset Blades"],
     DreameMowerAction.RESET_SIDE_BRUSH: ["reset_side_brush", "Reset Side Brush"],
     DreameMowerAction.RESET_FILTER: ["reset_filter", "Reset Filter"],
     DreameMowerAction.RESET_SENSOR: ["reset_sensor", "Reset Sensor"],
@@ -1082,11 +1082,11 @@ ERROR_CODE_TO_ERROR_DESCRIPTION: Final = {
 CONSUMABLE_TO_LIFE_WARNING_DESCRIPTION: Final = {
     DreameMowerProperty.BLADES_LEFT: [
         [
-            "Main brush must be replaced",
+            "Blades must be replaced",
             "The blades are worn out. Please replace it in time and reset the counter.",
         ],
         [
-            "Main brush needs to be replaced soon",
+            "Blades need to be replaced soon",
             "The blades are nearly worn out. Please replace it in time.",
         ],
     ],
