@@ -22,6 +22,15 @@ from .exceptions import DeviceException
 from .const import DREAME_STRINGS, MOVA_STRINGS
 
 _LOGGER = logging.getLogger(__name__)
+_TX_VIDEO_API_PATH = "/dreame-third-video/tx/"
+_REDACTED_TX_VIDEO_PAYLOAD = "<redacted TX video payload>"
+
+
+def _cloud_request_log_value(url: str, value: Any) -> Any:
+    """Hide TX video credentials and P2P material from cloud request logs."""
+    if _TX_VIDEO_API_PATH in url and value is not None:
+        return _REDACTED_TX_VIDEO_PAYLOAD
+    return value
 
 
 class DreameMowerDeviceProtocol(MiIOProtocol):
@@ -449,6 +458,79 @@ class DreameMowerDreameHomeCloudProtocol:
             return response["data"]
         return None
 
+    def get_tx_video_access_token(self, os: int = 1) -> Any:
+        response = self.request(
+            f"{self.get_api_url()}/dreame-third-video/tx/user/accesstoken",
+            json.dumps({"os": os}, separators=(",", ":")),
+        )
+        if response and "data" in response and response.get("code", 0) == 0:
+            return response["data"]
+        return response
+
+    def get_tx_video_device_identity(
+        self,
+        access_token: str | None = None,
+        os: int = 1,
+    ) -> Any:
+        if not self._uid:
+            self.get_device_info_v2()
+        params = {"did": self._did, "os": os}
+        if access_token:
+            params["accesstoken"] = access_token
+            params["accessToken"] = access_token
+        if self._uid:
+            params["uid"] = str(self._uid)
+        if self._model:
+            params["model"] = self._model
+
+        response = self.request(
+            f"{self.get_api_url()}/dreame-third-video/tx/mgr/dev/getIdentity",
+            json.dumps(params, separators=(",", ":")),
+        )
+        if response and "data" in response and response.get("code", 0) == 0:
+            return response["data"]
+        return response
+
+    def pair_tx_video_device(
+        self,
+        access_token: str | None = None,
+        os: int = 1,
+    ) -> Any:
+        if not self._uid or not self._model:
+            self.get_device_info_v2()
+        params = {"did": self._did, "os": os}
+        if access_token:
+            params["accesstoken"] = access_token
+        if self._uid:
+            params["uid"] = str(self._uid)
+        if self._model:
+            params["model"] = self._model
+
+        response = self.request(
+            f"{self.get_api_url()}/dreame-third-video/tx/dev/pair",
+            json.dumps(params, separators=(",", ":")),
+        )
+        if response and "data" in response and response["code"] == 0:
+            return response["data"]
+        return response
+
+    def get_tx_video_p2p_info(
+        self,
+        access_token: str | None = None,
+        os: int = 1,
+    ) -> Any:
+        params = {"did": self._did, "os": os}
+        if access_token:
+            params["accesstoken"] = access_token
+            params["accessToken"] = access_token
+        response = self.request(
+            f"{self.get_api_url()}/dreame-third-video/tx/dev/getP2PInfo",
+            json.dumps(params, separators=(",", ":")),
+        )
+        if response and "data" in response and response.get("code", 0) == 0:
+            return response["data"]
+        return response
+
     def get_app_plugin_version(
         self,
         model: str | None = None,
@@ -728,7 +810,10 @@ class DreameMowerDreameHomeCloudProtocol:
 
     def request(self, url: str, data, retry_count=2) -> Any:
         _LOGGER.debug(
-            "DreameMowerDreameHomeCloudProtocol.request %s %s", url, data)
+            "DreameMowerDreameHomeCloudProtocol.request %s %s",
+            url,
+            _cloud_request_log_value(url, data),
+        )
 
         retries = 0
         if not retry_count or retry_count < 0:
@@ -768,7 +853,7 @@ class DreameMowerDreameHomeCloudProtocol:
                     _LOGGER.warning(
                         "DreameMowerDreameHomeCloudProtocol.request: Read timed out. (read timeout=%s): %s",
                         timeout,
-                        data,
+                        _cloud_request_log_value(url, data),
                     )
             except Exception as ex:
                 retries = retries + 1
@@ -784,14 +869,18 @@ class DreameMowerDreameHomeCloudProtocol:
                 self._fail_count = 0
                 self._connected = True
                 _LOGGER.debug(
-                    "DreameMowerDreameHomeCloudProtocol.request response.text: %s", response.text)
+                    "DreameMowerDreameHomeCloudProtocol.request response.text: %s",
+                    _cloud_request_log_value(url, response.text),
+                )
                 return json.loads(response.text)
             elif response.status_code == 401 and self._secondary_key:
                 _LOGGER.debug("Execute api call failed: Token Expired")
                 self.login()
             else:
                 _LOGGER.warn(
-                    "Execute api call failed with response: %s", response.text)
+                    "Execute api call failed with response: %s",
+                    _cloud_request_log_value(url, response.text),
+                )
 
         if self._fail_count == 5:
             self._connected = False

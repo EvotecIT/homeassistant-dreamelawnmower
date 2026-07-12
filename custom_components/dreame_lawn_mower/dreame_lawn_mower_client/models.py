@@ -353,6 +353,62 @@ class DreameLawnMowerSnapshot:
         return self.cleaning_time
 
 
+def camera_metadata_advertises_video(
+    *,
+    camera_streaming: bool = False,
+    camera_light: bool | None = None,
+    ai_detection: bool = False,
+    obstacles: bool = False,
+    permit: Any = None,
+    feature: Any = None,
+    live_key_define: Any = None,
+    video_status: Any = None,
+) -> bool:
+    """Return whether normalized device metadata advertises camera/video support."""
+    permit_tokens = {
+        item.strip().casefold()
+        for item in str(permit or "").split(",")
+        if item.strip()
+    }
+    return bool(
+        camera_streaming
+        or camera_light is not None
+        or ai_detection
+        or obstacles
+        or "video" in permit_tokens
+        or "aiobs" in permit_tokens
+        or "video" in str(feature or "").casefold()
+        or (isinstance(live_key_define, Mapping) and bool(live_key_define))
+        or video_status is not None
+    )
+
+
+def snapshot_advertises_video(snapshot: Any) -> bool:
+    """Return whether normalized mower metadata advertises live video."""
+    capabilities = getattr(snapshot, "capabilities", ()) or ()
+    if any(str(item).strip().casefold() == "video" for item in capabilities):
+        return True
+
+    raw_info = getattr(snapshot, "raw_info", {}) or {}
+    if not isinstance(raw_info, Mapping):
+        return False
+    device_info = raw_info.get("deviceInfo") or {}
+    if not isinstance(device_info, Mapping):
+        device_info = {}
+
+    video_status = device_info.get("videoStatus")
+    if "videoStatus" not in device_info:
+        video_status = raw_info.get("videoStatus")
+    return camera_metadata_advertises_video(
+        permit=device_info.get("permit") or raw_info.get("permit"),
+        feature=device_info.get("feature") or raw_info.get("feature"),
+        live_key_define=(
+            device_info.get("liveKeyDefine") or raw_info.get("liveKeyDefine")
+        ),
+        video_status=video_status,
+    )
+
+
 @dataclass(slots=True, frozen=True)
 class DreameLawnMowerStatusBlob:
     """Structured, conservative view of the app realtime `1.1` status blob."""
@@ -587,6 +643,130 @@ class DreameLawnMowerCameraFeatureSupport:
         return asdict(self)
 
 
+@dataclass(slots=True, frozen=True)
+class DreameLawnMowerCameraStreamRuntimeInputs:
+    """Runtime inputs needed by a native XP2P video runner."""
+
+    source: str
+    did: str
+    channel_id: str | None = None
+    product_id: str | None = None
+    device_name: str | None = None
+    p2p_info: str | None = None
+    secret_id: str | None = None
+    secret_key: str | None = None
+    app_id: str | None = None
+    app_secret: str | None = None
+    lan_client_token: str | None = field(default=None, repr=False)
+    stream_channel: str | int = 0
+    live_command: str = "action=live"
+    flv_path_template: str = (
+        "ipc.flv?action=live&channel={channel}&quality=high&_crypto=on"
+    )
+    raw: Mapping[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def xp2p_id(self) -> str | None:
+        """Return the SDK id shape used by Tencent XP2P examples."""
+        if not self.product_id or not self.device_name:
+            return None
+        return f"{self.product_id}/{self.device_name}"
+
+    @property
+    def missing_required(self) -> tuple[str, ...]:
+        """Return runtime fields still missing before XP2P can be started."""
+        missing: list[str] = []
+        for name in ("product_id", "device_name", "p2p_info"):
+            if not getattr(self, name):
+                missing.append(name)
+        return tuple(missing)
+
+    @property
+    def ready(self) -> bool:
+        """Return whether the minimum XP2P runtime input set is present."""
+        return not self.missing_required
+
+    @property
+    def missing_lan_required(self) -> tuple[str, ...]:
+        """Return identity fields missing from direct same-LAN startup."""
+        return tuple(
+            name for name in ("product_id", "device_name") if not getattr(self, name)
+        )
+
+    @property
+    def lan_identity_ready(self) -> bool:
+        """Return whether LAN discovery has enough identity to be attempted."""
+        return not self.missing_lan_required
+
+    @property
+    def qcloud_credential_state(self) -> str:
+        """Return whether Tencent QCloud credentials are complete."""
+        return _credential_pair_state(self.secret_id, self.secret_key)
+
+    @property
+    def missing_qcloud_credentials(self) -> tuple[str, ...]:
+        """Return QCloud credential fields that were not returned by Dreame."""
+        return _missing_credential_pair(
+            ("secret_id", self.secret_id),
+            ("secret_key", self.secret_key),
+        )
+
+    @property
+    def app_credential_state(self) -> str:
+        """Return whether app-level video credentials are complete."""
+        return _credential_pair_state(self.app_id, self.app_secret)
+
+    @property
+    def missing_app_credentials(self) -> tuple[str, ...]:
+        """Return app credential fields that were not returned by Dreame."""
+        return _missing_credential_pair(
+            ("app_id", self.app_id),
+            ("app_secret", self.app_secret),
+        )
+
+    def as_dict(self, *, redact: bool = False) -> dict[str, Any]:
+        """Return a JSON-safe runtime payload."""
+        payload = asdict(self)
+        payload["xp2p_id"] = self.xp2p_id
+        payload["ready"] = self.ready
+        payload["missing_required"] = self.missing_required
+        payload["lan_identity_ready"] = self.lan_identity_ready
+        payload["missing_lan_required"] = self.missing_lan_required
+        payload["qcloud_credential_state"] = self.qcloud_credential_state
+        payload["missing_qcloud_credentials"] = self.missing_qcloud_credentials
+        payload["app_credential_state"] = self.app_credential_state
+        payload["missing_app_credentials"] = self.missing_app_credentials
+        if redact:
+            for key in (
+                "p2p_info",
+                "secret_id",
+                "secret_key",
+                "app_id",
+                "app_secret",
+                "lan_client_token",
+            ):
+                payload[f"{key}_present"] = bool(payload.get(key))
+                payload.pop(key, None)
+            payload.pop("raw", None)
+        return payload
+
+
+def _credential_pair_state(left: str | None, right: str | None) -> str:
+    present = (bool(left), bool(right))
+    if all(present):
+        return "complete"
+    if any(present):
+        return "partial"
+    return "absent"
+
+
+def _missing_credential_pair(
+    left: tuple[str, str | None],
+    right: tuple[str, str | None],
+) -> tuple[str, ...]:
+    return tuple(name for name, value in (left, right) if not value)
+
+
 def remote_control_block_reason(snapshot: Any) -> str | None:
     """Return why manual remote control is blocked for the snapshot state."""
     if snapshot is None:
@@ -622,6 +802,56 @@ def remote_control_block_reason(snapshot: Any) -> str | None:
     if mower_active and not remote_control_active:
         return "Remote control is blocked while the mower is active."
 
+    return None
+
+
+def camera_stream_block_reason(snapshot: Any) -> str | None:
+    """Return why live camera streaming is unsafe for a known mower state."""
+    if snapshot is None:
+        return None
+
+    state = str(getattr(snapshot, "state", None) or "").casefold()
+    activity = str(getattr(snapshot, "activity", None) or "").casefold()
+    raw_attributes = getattr(snapshot, "raw_attributes", None) or {}
+    station_states = {
+        "docked",
+        "charging",
+        "charging_completed",
+        "smart_charging",
+        "station_reset",
+    }
+    if (
+        bool(getattr(snapshot, "docked", False))
+        or activity in station_states
+        or bool(getattr(snapshot, "raw_docked", False))
+        or state in station_states
+    ):
+        return (
+            "Camera stream handshake probe is blocked while the mower is "
+            "docked. The Dreame app requires moving the mower out of the "
+            "station before remote video monitoring can start."
+        )
+    if bool(raw_attributes.get("mapping")) or bool(raw_attributes.get("fast_mapping")):
+        return "Camera stream handshake probe is blocked while mapping."
+    if (
+        bool(getattr(snapshot, "returning", False))
+        or state == "returning"
+        or activity == "returning"
+        or bool(raw_attributes.get("returning"))
+    ):
+        return "Camera stream handshake probe is blocked while returning to dock."
+
+    known_video_activity = (
+        bool(getattr(snapshot, "mowing", False))
+        or bool(getattr(snapshot, "paused", False))
+        or state in {"mowing", "paused"}
+        or activity in {"mowing", "paused"}
+    )
+    if bool(raw_attributes.get("running")) and not known_video_activity:
+        return (
+            "Camera stream handshake probe is blocked while the mower reports "
+            "an unrecognized active state."
+        )
     return None
 
 
@@ -695,7 +925,11 @@ def snapshot_from_device(
         "_",
         " ",
     ).title()
-    status_attributes = getattr(device.status, "attributes", {}) or {}
+    status_attributes = dict(getattr(device.status, "attributes", {}) or {})
+    if "fast_mapping" not in status_attributes:
+        fast_mapping = getattr(device.status, "fast_mapping", None)
+        if fast_mapping:
+            status_attributes["fast_mapping"] = True
     info_raw = getattr(getattr(device, "info", None), "raw", {}) or {}
     last_realtime_message = getattr(device, "last_realtime_message", None) or {}
     last_realtime_payload = last_realtime_message.get("message", {})

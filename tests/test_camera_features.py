@@ -7,6 +7,9 @@ from types import SimpleNamespace
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.camera_probe import (
     build_camera_probe_payload,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
+    camera_stream_block_reason,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
     DreameMowerAction,
     DreameMowerProperty,
@@ -114,6 +117,52 @@ class _FakeCameraDevice:
         return True
 
 
+def test_camera_stream_allows_known_mowing_state_required_by_a2() -> None:
+    snapshot = SimpleNamespace(
+        state="mowing",
+        activity="mowing",
+        mowing=True,
+        paused=False,
+        returning=False,
+        raw_docked=False,
+        raw_attributes={"running": True},
+    )
+
+    assert camera_stream_block_reason(snapshot) is None
+
+
+def test_camera_stream_blocks_normalized_docked_state_without_raw_flag() -> None:
+    snapshot = SimpleNamespace(
+        state="docked",
+        activity="docked",
+        docked=True,
+        raw_docked=False,
+        raw_attributes={},
+    )
+
+    assert "blocked while the mower is docked" in camera_stream_block_reason(snapshot)
+
+
+def test_camera_stream_blocks_returning_and_ambiguous_active_states() -> None:
+    returning = SimpleNamespace(
+        state="returning",
+        activity="returning",
+        returning=True,
+        raw_docked=False,
+        raw_attributes={},
+    )
+    ambiguous = SimpleNamespace(
+        state="unknown",
+        activity="idle",
+        returning=False,
+        raw_docked=False,
+        raw_attributes={"running": True},
+    )
+
+    assert "returning" in camera_stream_block_reason(returning)
+    assert "unrecognized active state" in camera_stream_block_reason(ambiguous)
+
+
 class _FakeProtocol:
     def get_properties(self, requested: object) -> list[dict[str, object]]:
         return [
@@ -208,6 +257,47 @@ def test_photo_info_request_delegates_to_get_photo_info_action() -> None:
     assert device.actions == [(DreameMowerAction.GET_PHOTO_INFO, None)]
 
 
+def test_camera_stream_app_action_uses_dreame_switch_video_payload() -> None:
+    client = _client_with_device(_FakeCameraDevice())
+    calls: list[dict[str, object]] = []
+    client._sync_call_app_action = lambda payload: calls.append(payload) or {"r": 0}
+
+    assert client._sync_call_app_stream_video(True) == {"r": 0}
+    assert client._sync_call_app_stream_video(False) == {"r": 0}
+
+    assert calls == [
+        {"m": "a", "p": 0, "o": 400, "d": {"on": True}},
+        {"m": "a", "p": 0, "o": 400, "d": {"on": False}},
+    ]
+
+
+def test_camera_stream_app_action_rejects_logical_failure() -> None:
+    client = _client_with_device(_FakeCameraDevice())
+    client._sync_call_app_action = lambda payload: {
+        "r": 405,
+        "d": {"on": payload["d"]["on"]},
+    }
+
+    try:
+        client._sync_call_app_stream_video(True)
+    except DreameLawnMowerConnectionError as err:
+        assert str(err) == "Dreame app video toggle returned an invalid response."
+    else:
+        raise AssertionError("Expected a failed switchVideo app action to fail")
+
+
+def test_camera_stream_app_action_rejects_missing_response() -> None:
+    client = _client_with_device(_FakeCameraDevice())
+    client._sync_call_app_action = lambda payload: None
+
+    try:
+        client._sync_call_app_stream_video(True)
+    except DreameLawnMowerConnectionError as err:
+        assert str(err) == "Dreame app video toggle returned an invalid response."
+    else:
+        raise AssertionError("Expected a missing switchVideo app action to fail")
+
+
 def test_camera_device_property_probe_handles_empty_protocol_response() -> None:
     device = _FakeCameraDevice()
     device._protocol = SimpleNamespace(get_properties=lambda requested: None)
@@ -274,23 +364,24 @@ def test_camera_stream_handshake_starts_and_ends_monitor_session() -> None:
     )
 
 
-def test_camera_stream_handshake_blocks_active_mower() -> None:
+def test_camera_stream_handshake_allows_active_mower() -> None:
     device = _FakeCameraDevice()
+    device.status.state = DreameMowerState.MOWING
+    device.status.status = DreameMowerStatus.CLEANING
     device.status.running = True
     client = _client_with_device(device)
     client._sync_update_device = lambda: device
+    client._sync_get_cloud_user_features = lambda language=None: ""
 
-    try:
-        client._sync_probe_camera_stream_handshake(
-            timeout=0,
-            interval=0.1,
-            operation="monitor",
-            payload_mode="with_session",
-        )
-    except DreameLawnMowerConnectionError as err:
-        assert "blocked while the mower is active" in str(err)
-    else:
-        raise AssertionError("Expected active mower stream probe to be blocked")
+    result = client._sync_probe_camera_stream_handshake(
+        timeout=0,
+        interval=0.1,
+        operation="monitor",
+        payload_mode="with_session",
+    )
+
+    assert result["start_result"] == {"code": 0, "result": "started"}
+    assert result["end_result"] == {"code": 0, "result": "ended"}
 
 
 def test_camera_stream_handshake_blocks_docked_mower() -> None:
@@ -314,9 +405,26 @@ def test_camera_stream_handshake_blocks_docked_mower() -> None:
         raise AssertionError("Expected docked mower stream probe to be blocked")
 
 
-def test_camera_stream_handshake_allows_idle_undocked_mower() -> None:
+def test_camera_stream_toggle_blocks_direct_fast_mapping_status() -> None:
     device = _FakeCameraDevice()
-    device.status.state = DreameMowerState.IDLE
+    device.status.attributes = {}
+    device.status.fast_mapping = True
+    client = _client_with_device(device)
+    client._sync_update_device = lambda: device
+
+    try:
+        client._sync_set_camera_stream_enabled(True)
+    except DreameLawnMowerConnectionError as err:
+        assert "blocked while mapping" in str(err)
+    else:
+        raise AssertionError("Expected fast mapping to block the camera toggle")
+
+    assert device.actions == []
+
+
+def test_camera_stream_handshake_allows_paused_undocked_mower() -> None:
+    device = _FakeCameraDevice()
+    device.status.state = DreameMowerState.PAUSED
     device.status.status = DreameMowerStatus.IDLE
     device.status.docked = False
     client = _client_with_device(device)

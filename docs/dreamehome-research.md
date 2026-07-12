@@ -374,6 +374,97 @@ Home Assistant mirrors this as a disabled-by-default `All Maps` diagnostic
 camera that renders the read-only app-map payloads into one contact sheet. This
 surfaces secondary maps without changing the mower-selected map.
 
+## Confirmed TX video playback sequence
+
+The local Dreamehome `2.5.8.1` decompile and the downloaded A2 React Native
+plugin expose the Tencent XP2P video path in:
+
+- `com.tencent.xnet.XP2P`
+- `com.dreame.plugin.video.tx.dreame_flutter_plugin_tx_video.rn.TXAVVideoPlayer`
+- `com.dreame.plugin.video.tx.dreame_flutter_plugin_tx_video.rn.video.Command`
+
+For live playback, the plugin supplies the device identity, `productId`,
+`deviceName`, and `p2pInfo`. Captures have returned both `channelId` and
+`deviceId` for the identity field. The runtime therefore accepts either name
+and falls back to `productId/deviceName` when no separate channel identifier is
+present. The Java XP2P wrapper uses:
+
+- `productId/deviceName` for native `startService` and `setDeviceXp2pInfo`
+- the returned channel/device identity, or the service identifier fallback, for
+  FLV delegation and shutdown
+
+The app initializes the XP2P config with `autoConfigFromDevice=false`. It uses
+the SDK default STUN/config path during playback rather than making
+`AppDescribeConfigureDeviceP2P` a startup dependency. The identity response
+also contains the encrypted values used for QCloud and for deriving the XP2P
+application credentials, but those application credentials are not a gate for
+the app's default playback path.
+
+After the XP2P callback reports event `1004`, the app checks device state with
+`action=inner_define&channel={channel}&cmd=get_device_st&type=live&quality=standard`.
+Only when that status is `0` does it call `XP2P.delegateHttpFlv(channelId)`,
+store the returned URL prefix, and reset the player. The player then starts
+`urlPrefix + ipc.flv?action=live&channel={channel}&quality=high&_crypto=on`
+for the high-quality live stream.
+
+This matters for probes: the status/readiness command uses `quality=standard`
+even when the final FLV URL requests `quality=high`. Treat a returned local URL
+as only an intermediate step; the proof point remains readable FLV bytes or
+frame data.
+
+A supervised Dreame A2 run on July 10, 2026 first confirmed the host protocol:
+XP2P reported ready event `1004`, the device-status and local delegate calls
+succeeded, and the first 16 stream bytes began with `46 4c 56` (`FLV`). A second
+run copied the integration into a normal Home Assistant `custom_components`
+installation on Linux x86_64, loaded the real mower and camera entities, started
+the managed Python-owned runtime, and passed the stream through Home Assistant's
+HLS pipeline. The HA endpoint returned HTTP 200 with an HLS playlist and
+produced a complete fragmented-MP4 segment.
+
+The final retained segment was 507,615 bytes and independently reopened as H.264
+MP4 at 640 x 360. PyAV decoded 100 frames whose timestamps span 6.599 seconds.
+The real HA camera entity also returned a 29,815-byte JPEG through the
+integration-owned PyAV/Pillow still-image path; this worked in an environment
+without the optional TurboJPEG system library. Visual inspection showed the
+real outdoor mower view rather than a blank or synthetic image. Its SHA-256 was
+`ed54c246ae87183c9a0f549783dbc8adddf68ce129e6f5875b36817e891ef02f`; the MP4
+SHA-256 was
+`c38aeae1e44efc79cf5588f661d2c7cb0eb6e3ab722452729d297f790a8dc934`.
+Home Assistant turned the camera off, no worker remained, and the mower reported
+both `docked=true` and `raw_docked=true` during cleanup. A later read-only HA
+snapshot reported `charging_completed`, `docked=true`, and battery 100%.
+
+This host path does not use an Android phone, emulator, or framework. Python
+owns runtime installation, credential delivery over stdin, process lifetime,
+FLV health checks, and Home Assistant cleanup. A small AArch64/Bionic worker is
+still required to call Tencent's proprietary native XP2P ABI; on x86_64 Linux
+it runs through a pinned qemu-user-static binary. All downloaded runtime files
+are SHA-256 verified before use.
+
+### Separate Tencent LAN, talk, and movement paths
+
+Tencent's public Android SDK
+[WLAN preview demo](https://github.com/tencentyun/iot-link-android/blob/73252a0c23572143818de635867a7874000eea47/sdkdemo/src/main/java/com/tencent/iot/explorer/link/demo/video/preview/WlanVideoPreviewActivity.kt)
+confirms that explicit LAN playback is a different path from the XP2P
+`startService` flow used above. Its WLAN preview:
+
+- discovers a device address and port, then calls
+  `startLanService(id, productId, deviceName, address, port)`
+- builds the FLV endpoint with `getLanUrl(id)` and disables stream encryption
+  for that local proxy request
+- opens the microphone send path with `runSendService` and a `voice` URL
+- sends directional PTZ commands over a separate `command` URL
+
+The managed Home Assistant runtime currently implements downstream video over
+`startService`; it does not perform WLAN discovery, call `startLanService`, send
+microphone audio, or expose movement/patrol controls. The native SDK also
+contains direct and TURN/relay transports, but the retained A2 proof did not
+capture enough route telemetry to say which transport normal XP2P selected.
+
+Consequently, explicit same-LAN playback, A3/MOVA compatibility, two-way talk,
+and patrol are separate follow-up capabilities. Each needs its own device-safe
+proof rather than being inferred from the working A2 camera stream.
+
 Use `python examples/apk_research.py <apk> --max-string-length 220` when
 testing a new Dreamehome APK.
 It creates a compact string index of dex/assets/resources for protocol endpoints,

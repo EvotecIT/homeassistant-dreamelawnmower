@@ -21,7 +21,14 @@ from custom_components.dreame_lawn_mower.const import (
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
     CONF_USERNAME,
+    CONF_VIDEO_TRANSPORT,
+    CONF_XP2P_LIBRARY_PATH,
+    CONF_XP2P_RUNNER_COMMAND,
+    CONF_XP2P_RUNNER_MODE,
+    DEFAULT_VIDEO_TRANSPORT,
     DOMAIN,
+    VIDEO_TRANSPORT_LAN,
+    XP2P_RUNNER_MODE_PROCESS,
 )
 
 
@@ -95,4 +102,19 @@ def test_options_flow_accepts_map_label_scale() -> None:
     assert result["data"] == {
         CONF_SCAN_INTERVAL: 45,
         CONF_MAP_LABEL_SCALE: 2.5,
+        CONF_VIDEO_TRANSPORT: DEFAULT_VIDEO_TRANSPORT,
+        CONF_XP2P_LIBRARY_PATH: "",
+        CONF_XP2P_RUNNER_COMMAND: "",
+        CONF_XP2P_RUNNER_MODE: XP2P_RUNNER_MODE_PROCESS,
     }
+
+
+def test_options_flow_replaces_prerelease_lan_only_default() -> None:
+    flow = DreameLawnMowerOptionsFlow(
+        SimpleNamespace(options={CONF_VIDEO_TRANSPORT: VIDEO_TRANSPORT_LAN})
+    )
+
+    result = asyncio.run(flow.async_step_init())
+    validated = result["data_schema"]({})
+
+    assert validated[CONF_VIDEO_TRANSPORT] == DEFAULT_VIDEO_TRANSPORT

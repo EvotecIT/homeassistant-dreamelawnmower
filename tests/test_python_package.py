@@ -23,13 +23,23 @@ from dreame_lawn_mower_client import (
     MOWING_PREFERENCE_PROPERTY_KEY,
     MOWING_PREFERENCE_UPDATE_FIELDS,
     DreameLawnMowerCameraFeatureSupport,
+    DreameLawnMowerCameraStreamRuntimeInputs,
     DreameLawnMowerClient,
     DreameLawnMowerFirmwareUpdateSupport,
     DreameLawnMowerMapDiagnostics,
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
+    DreameLawnMowerNativeXp2pRuntime,
     DreameLawnMowerRemoteControlSupport,
     DreameLawnMowerStatusBlob,
+    DreameLawnMowerVideoRuntimeError,
+    DreameLawnMowerXp2pAppConfig,
+    DreameLawnMowerXp2pExternalRunner,
+    DreameLawnMowerXp2pHostAssets,
+    DreameLawnMowerXp2pHostRuntime,
+    DreameLawnMowerXp2pLiveStreamRequest,
+    DreameLawnMowerXp2pLiveStreamSession,
+    DreameLawnMowerXp2pRuntimeDiagnostics,
     analyze_decompiled_sources,
     analyze_dreamehome_apk,
     analyze_dreamehome_assets,
@@ -52,8 +62,10 @@ from dreame_lawn_mower_client import (
     decode_mower_task_status,
     decode_mowing_preference_payload,
     decode_schedule_payload_text,
+    diagnose_native_xp2p_runtime,
     encode_mowing_preference_payload,
     encode_schedule_payload_text,
+    ensure_xp2p_host_runtime,
     firmware_update_support_from_device,
     key_definition_label,
     maintenance_status_from_cms,
@@ -100,6 +112,24 @@ def test_public_package_exports_map_helpers() -> None:
     )
     assert DreameLawnMowerMapDiagnostics.__name__.endswith("MapDiagnostics")
     assert DreameLawnMowerStatusBlob.__name__.endswith("StatusBlob")
+    assert DreameLawnMowerCameraStreamRuntimeInputs.__name__.endswith(
+        "CameraStreamRuntimeInputs"
+    )
+    assert DreameLawnMowerNativeXp2pRuntime.__name__.endswith("NativeXp2pRuntime")
+    assert DreameLawnMowerVideoRuntimeError.__name__.endswith("VideoRuntimeError")
+    assert DreameLawnMowerXp2pAppConfig.__name__.endswith("Xp2pAppConfig")
+    assert DreameLawnMowerXp2pExternalRunner.__name__.endswith("Xp2pExternalRunner")
+    assert DreameLawnMowerXp2pHostAssets.__name__.endswith("Xp2pHostAssets")
+    assert DreameLawnMowerXp2pHostRuntime.__name__.endswith("Xp2pHostRuntime")
+    assert DreameLawnMowerXp2pLiveStreamRequest.__name__.endswith(
+        "Xp2pLiveStreamRequest"
+    )
+    assert DreameLawnMowerXp2pLiveStreamSession.__name__.endswith(
+        "Xp2pLiveStreamSession"
+    )
+    assert DreameLawnMowerXp2pRuntimeDiagnostics.__name__.endswith(
+        "Xp2pRuntimeDiagnostics"
+    )
     assert callable(map_summary_from_map_data)
     assert callable(map_summary_to_dict)
     assert callable(map_diagnostics_from_device)
@@ -124,6 +154,8 @@ def test_public_package_exports_map_helpers() -> None:
     assert callable(decode_batch_ota_info)
     assert callable(decode_batch_schedule_payload)
     assert callable(decode_mowing_preference_payload)
+    assert callable(diagnose_native_xp2p_runtime)
+    assert callable(ensure_xp2p_host_runtime)
     assert callable(encode_mowing_preference_payload)
     assert callable(maintenance_status_from_cms)
     assert callable(normalize_debug_ota_catalog_payload)
@@ -160,6 +192,7 @@ def test_public_package_client_has_cloud_probe_helpers() -> None:
     assert hasattr(DreameLawnMowerClient, "async_get_status_blob")
     assert hasattr(DreameLawnMowerClient, "async_probe_camera_sources")
     assert hasattr(DreameLawnMowerClient, "async_probe_camera_stream_handshake")
+    assert hasattr(DreameLawnMowerClient, "async_get_camera_stream_runtime_inputs")
     assert hasattr(DreameLawnMowerClient, "async_request_photo_info")
     assert hasattr(DreameLawnMowerClient, "async_capture_operation_snapshot")
     assert hasattr(DreameLawnMowerClient, "async_get_remote_control_support")

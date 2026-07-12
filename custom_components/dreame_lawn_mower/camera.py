@@ -26,6 +26,7 @@ from .image import (
 )
 from .map_attributes import map_camera_attributes
 from .map_cache import DreameLawnMowerMapCameraCache, map_camera_available
+from .video_camera import DreameLawnMowerVideoCamera
 
 _LOGGER = logging.getLogger(__name__)
 _MAP_CACHE_TTL = timedelta(seconds=60)
@@ -48,6 +49,7 @@ async def async_setup_entry(
             DreameLawnMowerLivePathMapCamera(coordinator, live_map_cache),
             DreameLawnMowerAllMapsCamera(coordinator, map_cache),
             DreameLawnMowerMapDataCamera(coordinator, map_cache),
+            DreameLawnMowerVideoCamera(coordinator, entry),
         ]
     )
 

@@ -29,15 +29,23 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_TOKEN,
     CONF_USERNAME,
+    CONF_VIDEO_TRANSPORT,
+    CONF_XP2P_LIBRARY_PATH,
+    CONF_XP2P_RUNNER_COMMAND,
+    CONF_XP2P_RUNNER_MODE,
     COUNTRY_OPTIONS,
     DEFAULT_COUNTRY,
     DEFAULT_MAP_LABEL_SCALE,
     DEFAULT_SCAN_INTERVAL_SECONDS,
+    DEFAULT_VIDEO_TRANSPORT,
     DOMAIN,
     MAX_MAP_LABEL_SCALE,
     MAX_SCAN_INTERVAL_SECONDS,
     MIN_MAP_LABEL_SCALE,
     MIN_SCAN_INTERVAL_SECONDS,
+    VIDEO_TRANSPORT_OPTIONS,
+    XP2P_RUNNER_MODE_OPTIONS,
+    XP2P_RUNNER_MODE_PROCESS,
 )
 
 
@@ -257,6 +265,13 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
+        video_transport = self._entry_options.get(
+            CONF_VIDEO_TRANSPORT,
+            DEFAULT_VIDEO_TRANSPORT,
+        )
+        if video_transport not in VIDEO_TRANSPORT_OPTIONS:
+            video_transport = DEFAULT_VIDEO_TRANSPORT
+
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
@@ -287,6 +302,31 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                             max=MAX_MAP_LABEL_SCALE,
                         ),
                     ),
+                    vol.Optional(
+                        CONF_VIDEO_TRANSPORT,
+                        default=video_transport,
+                    ): vol.In(VIDEO_TRANSPORT_OPTIONS),
+                    vol.Optional(
+                        CONF_XP2P_LIBRARY_PATH,
+                        default=self._entry_options.get(
+                            CONF_XP2P_LIBRARY_PATH,
+                            "",
+                        ),
+                    ): str,
+                    vol.Optional(
+                        CONF_XP2P_RUNNER_COMMAND,
+                        default=self._entry_options.get(
+                            CONF_XP2P_RUNNER_COMMAND,
+                            "",
+                        ),
+                    ): str,
+                    vol.Optional(
+                        CONF_XP2P_RUNNER_MODE,
+                        default=self._entry_options.get(
+                            CONF_XP2P_RUNNER_MODE,
+                            XP2P_RUNNER_MODE_PROCESS,
+                        ),
+                    ): vol.In(XP2P_RUNNER_MODE_OPTIONS),
                 }
             ),
         )

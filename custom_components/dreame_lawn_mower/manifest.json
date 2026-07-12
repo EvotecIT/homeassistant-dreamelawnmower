@@ -3,6 +3,7 @@
   "name": "Dreame Lawn Mower",
   "codeowners": ["@EvotecIT", "@PrzemyslawKlys"],
   "config_flow": true,
+  "dependencies": ["stream"],
   "documentation": "https://github.com/EvotecIT/homeassistant-dreamelawnmower",
   "integration_type": "device",
   "iot_class": "cloud_polling",

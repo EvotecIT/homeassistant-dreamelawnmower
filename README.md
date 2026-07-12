@@ -75,6 +75,7 @@ region/account details are especially helpful for moving a device from
 - guarded mowing-preference update service with dry-run mode by default
 - read-only map camera using the app-map payload when available
 - disabled-by-default all-maps and map-diagnostics cameras
+- live video camera with a managed XP2P runtime on Linux x86_64 and aarch64 hosts
 - runtime telemetry sensors for mission progress, mission area, mower pose, and live-track length
 - selected-run sensors for mowing action, chosen map, and scoped zone/spot/edge target
 - selected-zone preference sensors for read-only mowing height, efficiency, direction, and obstacle-avoidance details
@@ -107,7 +108,12 @@ The following areas are intentionally cautious:
 - mowing-preference writes are guarded, validated on a supervised A2 no-op write, and still need broader model and firmware validation
 - map rendering is read-only; no-go editing, virtual-wall editing, and other map
   editing flows are not exposed yet
-- camera/photo/video paths are probe-only until runtime safety is clearer
+- live video has been validated end to end on a Dreame A2, including Home
+  Assistant HLS playback; other Tencent-video mower models and firmware still
+  need field validation
+- the managed video runtime currently supports Linux x86_64 and aarch64 Home
+  Assistant hosts, and the mower must be active and away from its station before
+  the vendor permits live video
 - 3D map object downloads are metadata-first and not treated as stable
 - manual driving must stay supervised and uses strict state and battery guards
 
@@ -147,6 +153,81 @@ The config flow asks for:
 
 The integration stores Home Assistant config-entry data only. Do not put
 credentials into repository files, fixtures, or issue attachments.
+
+### Live video
+
+On Linux x86_64 and aarch64 Home Assistant hosts, the `Live Video` camera uses
+the managed runtime by default. No Android phone, emulator, library path, or
+external runner is required. The integration prepares the runtime during entity
+setup, starts it when Home Assistant requests the camera, verifies the local FLV
+source, and stops it when the camera is turned off or unloaded.
+
+The first setup needs internet access. The integration downloads fixed versions
+of Tencent XP2P, the required AOSP Bionic libraries, and qemu-user-static on
+x86_64 hosts. Every file is pinned and SHA-256 verified before use, then cached
+under Home Assistant's `.storage` directory. The Home Assistant/Python client
+owns the lifecycle; Tencent's proprietary P2P transport still runs in the small
+native compatibility worker. It does not require an Android device or Android
+framework.
+
+The Dreame A2 proof uses a normal copied `custom_components` installation, the
+real Home Assistant mower and camera entities, and Home Assistant's HLS output.
+The retained H.264 MP4 reopened independently as 640 x 360 video and decoded
+100 frames spanning 6.599 seconds. The HA camera entity also returned a real
+JPEG through the integration's PyAV/Pillow still-image path, even without the
+optional TurboJPEG system library, and that frame was visually inspected. This
+is a pixel-level playback proof, not only an FLV header or byte-count check.
+
+The mower vendor only allows video while the mower is active and away from its
+station. Requesting the camera does not start or move the mower. The existing
+native-library and persistent-runner options remain available as advanced
+overrides for development or unsupported host platforms.
+
+The integration exposes two video transport policies. The default uses the
+proven cloud-provisioned XP2P path. `Auto` can restart from health-checked cached
+provisioning and lets Tencent negotiate the available network route. It also
+probes Tencent's separate same-LAN service when mower firmware advertises one.
+The tested A2 production firmware does not advertise that service, so the
+integration does not offer a LAN-only policy. The camera's
+`last_stream_session` attribute reports `stream_route` as `direct` only when
+the separate LAN service was selected; otherwise it stays `unknown`. Tencent's
+misleadingly named `getStreamLinkMode` API returns a network/NAT-type bitmask,
+exposed as `sdk_stream_network_type`, rather than a direct-versus-relay result.
+
+After a successful cloud-provisioned stream, `Auto` privately caches the minimum
+XP2P identity, P2P material, QCloud/app credentials, and resolved device
+configuration under Home Assistant's `.storage`. The cache uses Home Assistant's
+private-store permissions and deliberately excludes the Dreame access token,
+LAN discovery token, and raw cloud responses. On a later restart, `Auto` tries
+that cache before any Dreame video-input or camera-toggle call and refreshes it
+through the normal path if the cached material has expired.
+
+This proof is intentionally narrower than every camera feature in the vendor
+apps:
+
+- In one captured A2 session, normal-XP2P AUTO media travelled directly between
+  the Home Assistant host and the mower's same-LAN IP. A retained socket trace
+  includes the direct peer address, FLV request, HTTP 200 response, and media
+  bytes, so this does not depend on an SDK label. Tencent's separate WLAN
+  discovery and `startLanService` path was also implemented, but this A2
+  firmware did not answer that discovery request. Dreame/Tencent cloud calls
+  still provide the
+  initial provisioning. `Auto` can reuse health-checked video provisioning
+  without fetching new video inputs or toggling the camera through Dreame cloud,
+  but it first refreshes the mower snapshot and refuses to start when current
+  safety state cannot be verified. Tencent XP2P can also use its internet
+  rendezvous/STUN control plane to establish the direct peer route. Neither
+  transport policy promises startup with all internet connectivity removed.
+- Home Assistant can display and save the current JPEG frame, but the vendor's
+  stored photo gallery is not exposed.
+- Live video is field-validated on the A2 only. A3 AWD Pro and MOVA camera
+  variants still need their own runtime-input and playback proof.
+- Patrol movement, arbitrary voice-prompt playback, and two-way live talk are
+  separate control/audio features and are not implemented by this camera.
+
+Maintainers can find the confirmed protocol split, A2 findings, retained LAN
+implementation, and future device validation checklist in
+[Video Transport and Same-LAN Research](docs/video-transport.md).
 
 ## Help Expand Support
 
@@ -207,6 +288,7 @@ Common user-facing helpers include:
 - `binary_sensor.<device>_rain_delay_active`
 - `binary_sensor.<device>_returning`
 - `calendar.<device>_schedule`
+- `camera.<device>_live_video` on supported Linux hosts
 
 Many reverse-engineering and validation helpers are disabled by default. Enable
 them from the entity registry only when troubleshooting:
