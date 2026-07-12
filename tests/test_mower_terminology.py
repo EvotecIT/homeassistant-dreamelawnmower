@@ -81,6 +81,8 @@ def test_snapshot_exposes_mower_names_without_removing_legacy_fields() -> None:
     ("legacy", "mower_native"),
     [
         ("cleaning", "mowing"),
+        ("auto_cleaning", "mowing"),
+        ("auto_cleaning_paused", "mowing_paused"),
         ("follow_wall_cleaning", "edge_mowing"),
         ("summon_clean_paused", "summon_mow_paused"),
         ("curising_point", "cruising_point"),

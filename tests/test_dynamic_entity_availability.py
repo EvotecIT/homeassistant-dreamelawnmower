@@ -1583,6 +1583,8 @@ def test_mowing_progress_sensor_uses_live_mowed_area_and_current_map_area() -> N
         data=SimpleNamespace(
             mowed_area=220,
             mowing_time=58,
+            cleaned_area=220,
+            cleaning_time=58,
             current_zone_id=7,
             current_zone_name="Front Lawn",
             active_segment_count=2,
@@ -1630,6 +1632,8 @@ def test_mowing_progress_sensor_uses_live_mowed_area_and_current_map_area() -> N
     assert entity.extra_state_attributes == {
         "mowed_area": 220,
         "mowing_time": 58,
+        "cleaned_area": 220,
+        "cleaning_time": 58,
         "current_zone": "Front Lawn",
         "active_segment_count": 2,
         "current_app_map": {

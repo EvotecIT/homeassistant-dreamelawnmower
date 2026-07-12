@@ -98,6 +98,7 @@ def _is_no_error_text(value: str | None) -> bool:
 _MOWER_TERMINOLOGY = {
     "sweeping": "mowing",
     "cleaning": "mowing",
+    "auto_cleaning": "mowing",
     "clean_summon": "mow_summon",
     "second_cleaning": "second_mowing",
     "follow_wall_cleaning": "edge_mowing",
@@ -105,6 +106,7 @@ _MOWER_TERMINOLOGY = {
     "zone_cleaning": "zone_mowing",
     "spot_cleaning": "spot_mowing",
     "cleaning_paused": "mowing_paused",
+    "auto_cleaning_paused": "mowing_paused",
     "segment_cleaning_paused": "zone_mowing_paused",
     "zone_cleaning_paused": "zone_mowing_paused",
     "spot_cleaning_paused": "spot_mowing_paused",

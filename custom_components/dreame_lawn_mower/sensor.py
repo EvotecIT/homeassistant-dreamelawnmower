@@ -1806,6 +1806,9 @@ class DreameLawnMowerMowingProgressSensor(
         attributes: dict[str, Any] = {
             "mowed_area": snapshot.mowed_area,
             "mowing_time": snapshot.mowing_time,
+            # Compatibility aliases for existing dashboards and automations.
+            "cleaned_area": snapshot.cleaned_area,
+            "cleaning_time": snapshot.cleaning_time,
             "current_zone": _current_zone_label(snapshot),
             "active_segment_count": getattr(snapshot, "active_segment_count", None),
         }
