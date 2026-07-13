@@ -117,6 +117,9 @@ class DreameLawnMowerVideoCamera(
         self._unverified_playback_session: (
             DreameLawnMowerXp2pLiveStreamSession | None
         ) = None
+        self._pending_provisioning_inputs: (
+            DreameLawnMowerCameraStreamRuntimeInputs | None
+        ) = None
         self._stream_lock = asyncio.Lock()
         self._snapshot_lock = asyncio.Lock()
         self._stream_idle_monitor = DreameLawnMowerHaStreamIdleMonitor(
@@ -223,8 +226,7 @@ class DreameLawnMowerVideoCamera(
         if snapshot is not None and not getattr(snapshot, "available", True):
             return False
         cached_lan_ready = (
-            self._lan_cache.inputs is not None
-            and self._lan_cache.endpoint is not None
+            self._lan_cache.inputs is not None and self._lan_cache.endpoint is not None
         )
         cached_xp2p_ready = (
             self._provisioning_cache.inputs is not None
@@ -308,14 +310,17 @@ class DreameLawnMowerVideoCamera(
                 return urljoin(f"{get_url(self.hass)}/", endpoint)
             except Exception as err:  # noqa: BLE001 - expose a clean source miss.
                 self._set_stream_error(
-                    "Home Assistant could not expose the verified video stream: "
-                    f"{err}"
+                    f"Home Assistant could not expose the verified video stream: {err}"
                 )
                 if owns_stream:
                     await self._async_stop_owned_stream(ha_stream)
                 return None
 
-    async def _async_start_raw_source(self) -> str | None:
+    async def _async_start_raw_source(
+        self,
+        *,
+        skip_cached_xp2p: bool = False,
+    ) -> str | None:
         """Start live video and return its private single-consumer FLV URL."""
         async with self._stream_lock:
             if not getattr(self, "_attr_is_on", True):
@@ -325,6 +330,8 @@ class DreameLawnMowerVideoCamera(
                 if self._session_is_usable(self._session):
                     return self._session.stream_url
                 await self._async_stop_active_session()
+            if skip_cached_xp2p:
+                return await self._async_start_stream(skip_cached_xp2p=True)
             return await self._async_start_stream()
 
     async def async_create_stream(self) -> Any | None:
@@ -344,15 +351,40 @@ class DreameLawnMowerVideoCamera(
                     return self.stream
                 await self._async_stop_active_session()
 
+        ha_stream, attempted_transport = await self._async_create_stream_attempt_locked(
+            skip_cached_xp2p=False
+        )
+        if ha_stream is not None:
+            return ha_stream
+        if (
+            attempted_transport == "cached_xp2p"
+            and self._video_transport == VIDEO_TRANSPORT_AUTO
+        ):
+            ha_stream, _ = await self._async_create_stream_attempt_locked(
+                skip_cached_xp2p=True
+            )
+        return ha_stream
+
+    async def _async_create_stream_attempt_locked(
+        self,
+        *,
+        skip_cached_xp2p: bool,
+    ) -> tuple[Any | None, str | None]:
+        """Create and verify one HA stream attempt while creation is serialized."""
         previous_session = self._session
         session: DreameLawnMowerXp2pLiveStreamSession | None = None
         owns_session = False
         try:
             async with asyncio.timeout(_HA_STREAM_START_TIMEOUT):
-                source = await self._async_start_raw_source()
+                source = (
+                    await self._async_start_raw_source(skip_cached_xp2p=True)
+                    if skip_cached_xp2p
+                    else await self._async_start_raw_source()
+                )
             if not source:
-                return None
+                return None, None
             session = self._session
+            attempted_transport = self._last_video_transport
             owns_session = session is not None and session is not previous_session
             dynamic_settings = await self.hass.data[
                 DATA_CAMERA_PREFS
@@ -366,7 +398,7 @@ class DreameLawnMowerVideoCamera(
                 ):
                     if self._session is session:
                         await self._async_stop_active_session()
-                    return None
+                    return None, attempted_transport
                 ha_stream = create_stream(
                     self.hass,
                     source,
@@ -380,8 +412,8 @@ class DreameLawnMowerVideoCamera(
 
             if getattr(self, "_unverified_playback_session", None) is session:
                 if not await self._async_verify_playback_stream(ha_stream, session):
-                    return None
-            return ha_stream
+                    return None, attempted_transport
+            return ha_stream, attempted_transport
         except BaseException:
             if owns_session and session is not None:
                 await self._async_cleanup_failed_stream_setup(session)
@@ -405,18 +437,24 @@ class DreameLawnMowerVideoCamera(
         except Exception as err:  # noqa: BLE001 - expose a clean camera miss.
             await self._async_cleanup_failed_stream_setup(session)
             self._set_stream_error(
-                "Qualified XP2P video could not verify its playback session: "
-                f"{err}"
+                f"Qualified XP2P video could not verify its playback session: {err}"
             )
             return False
 
+        provisioning_inputs: DreameLawnMowerCameraStreamRuntimeInputs | None = None
         async with self._stream_lock:
             if self.stream is not ha_stream or self._session is not session:
                 return False
             self._unverified_playback_session = None
+            provisioning_inputs = self._pending_provisioning_inputs
+            self._pending_provisioning_inputs = None
             if getattr(self, "_last_stream_health", None) is not None:
+                self._last_stream_health["available"] = True
+                self._last_stream_health["flv_header_present"] = True
                 self._last_stream_health["playback_session_verified"] = True
             self._last_image = image
+        if provisioning_inputs is not None:
+            await self._async_cache_healthy_provisioning(provisioning_inputs)
         return True
 
     async def _async_cleanup_failed_stream_setup(
@@ -503,7 +541,11 @@ class DreameLawnMowerVideoCamera(
             # so no live viewer can adopt this stream before it is stopped.
             await self._async_stop_active_session()
 
-    async def _async_start_stream(self) -> str | None:
+    async def _async_start_stream(
+        self,
+        *,
+        skip_cached_xp2p: bool = False,
+    ) -> str | None:
         """Start one serialized XP2P stream session."""
         self._last_stream_health = None
         self._last_lan_error = None
@@ -534,6 +576,22 @@ class DreameLawnMowerVideoCamera(
         except Exception as err:  # noqa: BLE001 - HA should receive a clean miss.
             self._set_stream_error(str(err))
             return None
+
+        if (
+            not skip_cached_xp2p
+            and cached_xp2p_inputs is not None
+            and cached_xp2p_inputs.ready
+        ):
+            try:
+                cached_source = await self._async_try_cached_xp2p_stream(
+                    runtime,
+                    cached_xp2p_inputs,
+                )
+            except DreameLawnMowerVideoRuntimeError as err:
+                self._set_stream_error(self._with_lan_failure(str(err)))
+                return None
+            if cached_source is not None:
+                return cached_source
 
         cloud_inputs: DreameLawnMowerCameraStreamRuntimeInputs | None = None
         cloud_inputs_error: Exception | None = None
@@ -616,18 +674,6 @@ class DreameLawnMowerVideoCamera(
                     "once while the video cloud is reachable to provision it."
                 )
 
-        if cached_xp2p_inputs is not None and cached_xp2p_inputs.ready:
-            try:
-                cached_source = await self._async_try_cached_xp2p_stream(
-                    runtime,
-                    cached_xp2p_inputs,
-                )
-            except DreameLawnMowerVideoRuntimeError as err:
-                self._set_stream_error(self._with_lan_failure(str(err)))
-                return None
-            if cached_source is not None:
-                return cached_source
-
         stream_enable_attempted = False
         session: DreameLawnMowerXp2pLiveStreamSession | None = None
         try:
@@ -646,11 +692,6 @@ class DreameLawnMowerVideoCamera(
             )
             self._last_stream_disable_error = None
             session = await self._async_start_runtime_session(runtime, cloud_inputs)
-            stream_health = await self.hass.async_add_executor_job(
-                video_helpers.probe_stream_health_and_route,
-                runtime,
-                session,
-            )
         except asyncio.CancelledError:
             if runtime is not None and session is not None:
                 await self._async_stop_session(runtime, session)
@@ -673,53 +714,12 @@ class DreameLawnMowerVideoCamera(
             self._set_stream_error(self._with_lan_failure(str(err)))
             return None
 
-        self._last_stream_health = stream_health.as_dict()
-        if not stream_health.flv_header_present:
-            await self._async_stop_session(runtime, session)
-            await self._async_disable_camera_stream()
-            self._set_stream_error(
-                self._with_lan_failure(video_helpers.stream_health_error(stream_health))
-            )
-            return None
-
-        try:
-            try:
-                await self._async_cache_healthy_provisioning(cloud_inputs)
-            except asyncio.CancelledError:
-                await self._async_stop_session_for_handoff(runtime, session)
-                raise
-
-            # Tencent's delegated HTTP-FLV endpoint is session-scoped and is not a
-            # safe multi-consumer source. The health check intentionally consumes
-            # the qualified session; hand Home Assistant a fresh, untouched one.
-            if not await self._async_stop_session_for_handoff(runtime, session):
-                await self._async_disable_camera_stream()
-                self._set_stream_error(
-                    self._with_lan_failure(
-                        "Qualified XP2P probe session could not stop before "
-                        "playback handoff."
-                    )
-                )
-                return None
-            session = None
-            session = await self._async_start_runtime_session(runtime, cloud_inputs)
-        except asyncio.CancelledError:
-            await self._async_disable_camera_stream()
-            raise
-        except Exception as err:  # noqa: BLE001 - HA should receive a clean miss.
-            await self._async_disable_camera_stream()
-            self._set_stream_error(
-                self._with_lan_failure(
-                    f"Qualified XP2P video could not open a playback session: {err}"
-                )
-            )
-            return None
-
         return self._adopt_stream_session(
             runtime,
             session,
-            stream_health,
+            None,
             transport=VIDEO_TRANSPORT_CLOUD,
+            provisioning_inputs=cloud_inputs,
         )
 
     async def _async_refresh_auto_start_state(self) -> bool:
@@ -794,8 +794,7 @@ class DreameLawnMowerVideoCamera(
             raise
         except Exception as err:  # noqa: BLE001 - Auto may fall back to cloud.
             self._last_lan_error = (
-                "Qualified same-LAN video could not open a playback session: "
-                f"{err}"
+                f"Qualified same-LAN video could not open a playback session: {err}"
             )
             return None
         return self._adopt_stream_session(
@@ -815,36 +814,14 @@ class DreameLawnMowerVideoCamera(
             runtime,
             inputs,
             start_session=self._async_start_runtime_session,
-            stop_session=self._async_stop_session,
-            executor=self.hass.async_add_executor_job,
         )
-        if result.session is None or result.health is None:
+        if result.session is None:
             self._last_cached_xp2p_error = result.error
-            return None
-        if not await self._async_stop_session_for_handoff(runtime, result.session):
-            self._last_cached_xp2p_error = (
-                "Qualified cached XP2P probe session could not stop before "
-                "playback handoff."
-            )
-            raise DreameLawnMowerVideoRuntimeError(self._last_cached_xp2p_error)
-        try:
-            session = await self._async_start_runtime_session(
-                runtime,
-                inputs,
-                camera_toggle_managed=False,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as err:  # noqa: BLE001 - Auto may fall back to cloud.
-            self._last_cached_xp2p_error = (
-                "Qualified cached XP2P video could not open a playback session: "
-                f"{err}"
-            )
             return None
         return self._adopt_stream_session(
             runtime,
-            session,
-            result.health,
+            result.session,
+            None,
             transport="cached_xp2p",
         )
 
@@ -929,16 +906,19 @@ class DreameLawnMowerVideoCamera(
         self,
         runtime: _DreameVideoRuntime,
         session: DreameLawnMowerXp2pLiveStreamSession,
-        stream_health: DreameLawnMowerStreamUrlProbeResult,
+        stream_health: DreameLawnMowerStreamUrlProbeResult | None,
         *,
         transport: str,
+        provisioning_inputs: DreameLawnMowerCameraStreamRuntimeInputs | None = None,
     ) -> str:
-        """Adopt one health-checked session as the active HA camera source."""
+        """Reserve one untouched session for Home Assistant's sole consumer."""
         self._runtime = runtime
         self._session = session
         self._unverified_playback_session = session
+        self._pending_provisioning_inputs = provisioning_inputs
         self._last_stream_health = {
-            **stream_health.as_dict(),
+            **(stream_health.as_dict() if stream_health is not None else {}),
+            "verification_source": "home_assistant",
             "playback_session_verified": False,
         }
         self._last_error = None
@@ -1060,6 +1040,7 @@ class DreameLawnMowerVideoCamera(
         self._runtime = None
         self._session = None
         self._unverified_playback_session = None
+        self._pending_provisioning_inputs = None
         self._attr_is_streaming = False
         if ha_stream is not None:
             try:
@@ -1074,8 +1055,7 @@ class DreameLawnMowerVideoCamera(
         camera_toggle_managed = getattr(
             session,
             "camera_toggle_managed",
-            getattr(session, "transport", VIDEO_TRANSPORT_CLOUD)
-            != VIDEO_TRANSPORT_LAN,
+            getattr(session, "transport", VIDEO_TRANSPORT_CLOUD) != VIDEO_TRANSPORT_LAN,
         )
         if camera_toggle_managed:
             await self._async_disable_camera_stream()
