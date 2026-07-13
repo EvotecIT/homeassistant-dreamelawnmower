@@ -384,52 +384,33 @@ class DreameLawnMowerVideoCamera(
         width: int | None,
         height: int | None,
     ) -> bytes | None:
-        """Decode one JPEG while serializing snapshot-only session ownership."""
-        existing_session = self._session
-        snapshot_session: DreameLawnMowerXp2pLiveStreamSession | None = None
+        """Return one JPEG from Home Assistant's single FLV consumer."""
         try:
             async with asyncio.timeout(_SNAPSHOT_STREAM_START_TIMEOUT):
-                source = await self.stream_source()
+                ha_stream = await self.async_create_stream()
         except TimeoutError:
             _LOGGER.debug("Timed out starting Dreame mower video for a still image")
             return self._last_image
-        if source is None:
+        except Exception as err:  # noqa: BLE001 - snapshots may be transient.
+            _LOGGER.debug(
+                "Failed to start Dreame mower video for a still image: %s",
+                err,
+            )
+            return self._last_image
+        if ha_stream is None:
             return self._last_image
         try:
-            current_session = self._session
-            if current_session is not None and current_session is not existing_session:
-                snapshot_session = current_session
-            image = await self.hass.async_add_executor_job(
-                video_helpers.decode_flv_jpeg,
-                source,
-                width,
-                height,
+            image = await ha_stream.async_get_image(
+                width=width,
+                height=height,
+                wait_for_next_keyframe=True,
             )
         except Exception as err:  # noqa: BLE001 - snapshots may be transient.
-            _LOGGER.debug("Failed to decode Dreame mower still image: %s", err)
+            _LOGGER.debug("Failed to read Dreame mower still image: %s", err)
             return self._last_image
-        finally:
-            if snapshot_session is not None:
-                await self._async_stop_snapshot_session(snapshot_session)
         if image is not None:
             self._last_image = image
         return image or self._last_image
-
-    async def _async_stop_snapshot_session(
-        self,
-        snapshot_session: DreameLawnMowerXp2pLiveStreamSession,
-    ) -> None:
-        """Stop a session created only for a still unless HLS adopted it."""
-        while True:
-            async with self._stream_lock:
-                if self._session is not snapshot_session or self.stream is not None:
-                    return
-                create_stream_lock = self._create_stream_lock
-                if create_stream_lock is None or not create_stream_lock.locked():
-                    await self._async_stop_active_session()
-                    return
-            async with create_stream_lock:
-                pass
 
     async def _async_start_stream(self) -> str | None:
         """Start one serialized XP2P stream session."""
@@ -600,6 +581,25 @@ class DreameLawnMowerVideoCamera(
 
         await self._async_cache_healthy_provisioning(cloud_inputs)
 
+        # Tencent's delegated HTTP-FLV endpoint is session-scoped and is not a
+        # safe multi-consumer source. The health check intentionally consumes
+        # the qualified session; hand Home Assistant a fresh, untouched one.
+        await self._async_stop_session(runtime, session)
+        session = None
+        try:
+            session = await self._async_start_runtime_session(runtime, cloud_inputs)
+        except asyncio.CancelledError:
+            await self._async_disable_camera_stream()
+            raise
+        except Exception as err:  # noqa: BLE001 - HA should receive a clean miss.
+            await self._async_disable_camera_stream()
+            self._set_stream_error(
+                self._with_lan_failure(
+                    f"Qualified XP2P video could not open a playback session: {err}"
+                )
+            )
+            return None
+
         return self._adopt_stream_session(
             runtime,
             session,
@@ -666,6 +666,17 @@ class DreameLawnMowerVideoCamera(
         except Exception as err:  # noqa: BLE001 - a live stream remains usable.
             self._lan_cache_error = str(err)
             _LOGGER.warning("Failed to save Dreame LAN video endpoint: %s", err)
+        await self._async_stop_session(runtime, session)
+        try:
+            session = await self._async_start_lan_runtime_session(runtime, inputs)
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:  # noqa: BLE001 - Auto may fall back to cloud.
+            self._last_lan_error = (
+                "Qualified same-LAN video could not open a playback session: "
+                f"{err}"
+            )
+            return None
         return self._adopt_stream_session(
             runtime,
             session,
@@ -689,9 +700,24 @@ class DreameLawnMowerVideoCamera(
         if result.session is None or result.health is None:
             self._last_cached_xp2p_error = result.error
             return None
+        await self._async_stop_session(runtime, result.session)
+        try:
+            session = await self._async_start_runtime_session(
+                runtime,
+                inputs,
+                camera_toggle_managed=False,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:  # noqa: BLE001 - Auto may fall back to cloud.
+            self._last_cached_xp2p_error = (
+                "Qualified cached XP2P video could not open a playback session: "
+                f"{err}"
+            )
+            return None
         return self._adopt_stream_session(
             runtime,
-            result.session,
+            session,
             result.health,
             transport="cached_xp2p",
         )

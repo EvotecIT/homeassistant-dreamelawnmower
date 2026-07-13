@@ -131,6 +131,7 @@ SENSORS = [
         ),
         icon="mdi:numeric",
         entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
     ),
     DreameSensorDescription(
         key="raw_error",
@@ -138,6 +139,7 @@ SENSORS = [
         value_fn=lambda snapshot: getattr(snapshot, "error_text", None) or "none",
         icon="mdi:text-box-search-outline",
         entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
     ),
     DreameSensorDescription(
         key="firmware_version",
@@ -145,6 +147,7 @@ SENSORS = [
         value_fn=lambda snapshot: snapshot.firmware_version,
         icon="mdi:package-up",
         entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
     ),
     DreameSensorDescription(
         key="hardware_version",
@@ -152,6 +155,7 @@ SENSORS = [
         value_fn=lambda snapshot: snapshot.hardware_version,
         icon="mdi:chip",
         entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
     ),
     DreameSensorDescription(
         key="serial_number",
@@ -160,6 +164,7 @@ SENSORS = [
         exists_fn=lambda snapshot: bool(snapshot.serial_number),
         icon="mdi:barcode",
         entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
     ),
     DreameSensorDescription(
         key="cloud_update_time",
@@ -168,6 +173,7 @@ SENSORS = [
         exists_fn=lambda snapshot: bool(snapshot.cloud_update_time),
         icon="mdi:clock-outline",
         entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
     ),
     DreameSensorDescription(
         key="unknown_property_count",
@@ -642,6 +648,7 @@ class DreameLawnMowerFirmwareUpdateStatusSensor(
     _attr_name = "Firmware Update Status"
     _attr_icon = "mdi:update"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
         super().__init__(coordinator)

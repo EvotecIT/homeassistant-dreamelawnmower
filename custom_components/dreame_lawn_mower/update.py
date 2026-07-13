@@ -69,7 +69,12 @@ class DreameLawnMowerFirmwareUpdateEntity(
     def latest_version(self) -> str | None:
         """Return the app-approved target firmware version."""
         support = self.coordinator.firmware_update_support
-        return None if support is None else support.latest_version
+        if support is not None and support.latest_version:
+            return support.latest_version
+        # HA renders an update entity as Unknown when latest_version is None.
+        # No available update means the installed release is also the latest
+        # known release, not an unknown firmware state.
+        return self.installed_version
 
     @property
     def in_progress(self) -> bool | int | None:

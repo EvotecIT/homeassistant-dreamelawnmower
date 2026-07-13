@@ -19,6 +19,8 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
 )
 from custom_components.dreame_lawn_mower.button import (
     DreameLawnMowerCaptureBatchDeviceDataProbeButton,
+    DreameLawnMowerCaptureDebugSnapshotButton,
+    DreameLawnMowerCaptureOperationSnapshotButton,
     DreameLawnMowerCapturePreferenceProbeButton,
     DreameLawnMowerCaptureScheduleProbeButton,
     DreameLawnMowerCaptureTaskStatusProbeButton,
@@ -38,6 +40,7 @@ from custom_components.dreame_lawn_mower.image import (
     png_bytes_to_jpeg,
 )
 from custom_components.dreame_lawn_mower.sensor import (
+    SENSORS,
     DreameLawnMowerAppMapObjectCountSensor,
     DreameLawnMowerConfiguredScheduleCountSensor,
     DreameLawnMowerFirmwareUpdateStatusSensor,
@@ -285,6 +288,30 @@ def test_reset_maintenance_button_is_diagnostic_disabled_by_default() -> None:
         ]
         is False
     )
+
+
+def test_default_entity_surface_hides_duplicate_and_debug_entities() -> None:
+    descriptions = {description.key: description for description in SENSORS}
+    for key in (
+        "error_code",
+        "raw_error",
+        "firmware_version",
+        "hardware_version",
+        "serial_number",
+        "cloud_update_time",
+    ):
+        assert descriptions[key].entity_registry_enabled_default is False
+
+    for entity_class in (
+        DreameLawnMowerCaptureDebugSnapshotButton,
+        DreameLawnMowerCaptureOperationSnapshotButton,
+        DreameLawnMowerFirmwareUpdateAvailableBinarySensor,
+        DreameLawnMowerFirmwareUpdateStatusSensor,
+    ):
+        assert (
+            entity_class.__dict__["__attr_entity_registry_enabled_default"]
+            is False
+        )
 
 
 def test_maintenance_reset_result_attributes_are_compact() -> None:

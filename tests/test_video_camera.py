@@ -604,56 +604,32 @@ def test_video_camera_cancellation_cleans_unadopted_session() -> None:
     assert session is None
 
 
-def test_video_camera_returns_jpeg_from_managed_flv_source() -> None:
-    async def _run() -> tuple[
-        bytes | None,
-        tuple[object, object, object],
-        int,
-    ]:
+def test_video_camera_returns_jpeg_from_home_assistant_stream() -> None:
+    async def _run() -> tuple[bytes | None, dict[str, object]]:
         entity = _uninitialized_entity()
-        calls: list[tuple[object, object, object]] = []
         entity._last_image = None
-        entity.stream = None
-        entity._stream_lock = asyncio.Lock()
-        entity._create_stream_lock = None
-        snapshot_session = SimpleNamespace(stream_url="http://127.0.0.1/live.flv")
-        stops = 0
+        call: dict[str, object] = {}
 
-        async def _source() -> str:
-            entity._session = snapshot_session
-            return snapshot_session.stream_url
+        class _Stream:
+            async def async_get_image(self, **kwargs) -> bytes:
+                call.update(kwargs)
+                return b"\xff\xd8real-jpeg\xff\xd9"
 
-        async def _stop() -> None:
-            nonlocal stops
-            stops += 1
-            entity._session = None
+        async def _create_stream() -> _Stream:
+            return _Stream()
 
-        entity.stream_source = _source
-        entity._async_stop_active_session = _stop
-        entity.hass = SimpleNamespace(
-            async_add_executor_job=lambda function, *args: asyncio.sleep(
-                0,
-                result=function(*args),
-            )
-        )
+        entity.async_create_stream = _create_stream
+        image = await entity.async_camera_image(width=640, height=360)
+        return image, call
 
-        def _decode(source: str, width: int | None, height: int | None) -> bytes:
-            calls.append((source, width, height))
-            return b"\xff\xd8real-jpeg\xff\xd9"
-
-        with patch.object(
-            video_camera_module.video_helpers,
-            "decode_flv_jpeg",
-            _decode,
-        ):
-            image = await entity.async_camera_image(width=640, height=360)
-        return image, calls[0], stops
-
-    image, call, stops = asyncio.run(_run())
+    image, call = asyncio.run(_run())
 
     assert image == b"\xff\xd8real-jpeg\xff\xd9"
-    assert call == ("http://127.0.0.1/live.flv", 640, 360)
-    assert stops == 1
+    assert call == {
+        "width": 640,
+        "height": 360,
+        "wait_for_next_keyframe": True,
+    }
 
 
 def test_video_camera_snapshot_start_timeout_returns_last_image() -> None:
@@ -662,7 +638,7 @@ def test_video_camera_snapshot_start_timeout_returns_last_image() -> None:
         entity._last_image = b"\xff\xd8cached-jpeg\xff\xd9"
         cancelled = False
 
-        async def _source() -> str:
+        async def _create_stream() -> object:
             nonlocal cancelled
             try:
                 await asyncio.Future()
@@ -670,7 +646,7 @@ def test_video_camera_snapshot_start_timeout_returns_last_image() -> None:
                 cancelled = True
             raise AssertionError("unreachable")
 
-        entity.stream_source = _source
+        entity.async_create_stream = _create_stream
         with patch.object(
             video_camera_module,
             "_SNAPSHOT_STREAM_START_TIMEOUT",
@@ -680,110 +656,6 @@ def test_video_camera_snapshot_start_timeout_returns_last_image() -> None:
         return image, cancelled
 
     assert asyncio.run(_run()) == (b"\xff\xd8cached-jpeg\xff\xd9", True)
-
-
-def test_video_camera_snapshot_does_not_stop_session_adopted_by_hls() -> None:
-    async def _run() -> int:
-        entity = _uninitialized_entity()
-        session = SimpleNamespace(stream_url="http://127.0.0.1/live.flv")
-        entity._session = session
-        entity.stream = None
-        entity._stream_lock = asyncio.Lock()
-        entity._create_stream_lock = asyncio.Lock()
-        stops = 0
-
-        async def _stop() -> None:
-            nonlocal stops
-            stops += 1
-
-        entity._async_stop_active_session = _stop
-        await entity._create_stream_lock.acquire()
-        cleanup = asyncio.create_task(entity._async_stop_snapshot_session(session))
-        await asyncio.sleep(0)
-        entity.stream = object()
-        entity._create_stream_lock.release()
-        await cleanup
-        return stops
-
-    assert asyncio.run(_run()) == 0
-
-
-def test_video_camera_snapshot_stops_after_failed_hls_adoption() -> None:
-    async def _run() -> int:
-        entity = _uninitialized_entity()
-        session = SimpleNamespace(stream_url="http://127.0.0.1/live.flv")
-        entity._session = session
-        entity.stream = None
-        entity._stream_lock = asyncio.Lock()
-        entity._create_stream_lock = asyncio.Lock()
-        stops = 0
-
-        async def _stop() -> None:
-            nonlocal stops
-            stops += 1
-            entity._session = None
-
-        entity._async_stop_active_session = _stop
-        await entity._create_stream_lock.acquire()
-        cleanup = asyncio.create_task(entity._async_stop_snapshot_session(session))
-        await asyncio.sleep(0)
-        entity._create_stream_lock.release()
-        await cleanup
-        return stops
-
-    assert asyncio.run(_run()) == 1
-
-
-def test_video_camera_serializes_concurrent_snapshot_sessions() -> None:
-    async def _run() -> tuple[int, int, int]:
-        entity = _uninitialized_entity()
-        entity._last_image = None
-        entity.stream = None
-        entity._stream_lock = asyncio.Lock()
-        entity._create_stream_lock = None
-        first_decode_started = asyncio.Event()
-        release_first_decode = asyncio.Event()
-        source_calls = 0
-        decode_calls = 0
-        stops = 0
-
-        async def _source() -> str:
-            nonlocal source_calls
-            source_calls += 1
-            session = SimpleNamespace(
-                stream_url=f"http://127.0.0.1/live-{source_calls}.flv"
-            )
-            entity._session = session
-            return session.stream_url
-
-        async def _decode_job(_function, *_args) -> bytes:
-            nonlocal decode_calls
-            decode_calls += 1
-            if decode_calls == 1:
-                first_decode_started.set()
-                await release_first_decode.wait()
-            return b"\xff\xd8real-jpeg\xff\xd9"
-
-        async def _stop() -> None:
-            nonlocal stops
-            stops += 1
-            entity._session = None
-
-        entity.stream_source = _source
-        entity._async_stop_active_session = _stop
-        entity.hass = SimpleNamespace(async_add_executor_job=_decode_job)
-
-        first = asyncio.create_task(entity.async_camera_image())
-        await first_decode_started.wait()
-        second = asyncio.create_task(entity.async_camera_image())
-        await asyncio.sleep(0)
-        assert decode_calls == 1
-        assert stops == 0
-        release_first_decode.set()
-        await asyncio.gather(first, second)
-        return source_calls, decode_calls, stops
-
-    assert asyncio.run(_run()) == (2, 2, 2)
 
 
 def test_video_camera_stop_unregisters_cached_home_assistant_stream() -> None:
@@ -1183,7 +1055,7 @@ def test_video_camera_disables_video_when_enable_attempt_raises() -> None:
 
 
 def test_video_camera_caches_provisioning_only_after_healthy_flv() -> None:
-    async def _attempt(*, healthy: bool) -> tuple[str | None, int]:
+    async def _attempt(*, healthy: bool) -> tuple[str | None, int, int, int]:
         entity = _uninitialized_entity()
         inputs = DreameLawnMowerCameraStreamRuntimeInputs(
             source="dreame_third_video_tx",
@@ -1244,25 +1116,30 @@ def test_video_camera_caches_provisioning_only_after_healthy_flv() -> None:
                 return None
 
         class _Runtime:
-            @staticmethod
+            def __init__(self) -> None:
+                self.starts = 0
+                self.stops = 0
+
             def start_live_stream(
+                self,
                 actual_inputs: object,
             ) -> DreameLawnMowerXp2pLiveStreamSession:
                 assert actual_inputs is inputs
+                self.starts += 1
                 return DreameLawnMowerXp2pLiveStreamSession(
                     service_id="product-1/device-1",
-                    stream_url="http://127.0.0.1/cloud.flv",
+                    stream_url=f"http://127.0.0.1/cloud-{self.starts}.flv",
                 )
 
-            @staticmethod
-            def stop_live_stream(_session: object) -> None:
-                return None
+            def stop_live_stream(self, _session: object) -> None:
+                self.stops += 1
 
         cache = _ProvisioningCache()
         entity._provisioning_cache = cache
         entity._lan_cache = _LanCache()
         entity.coordinator = SimpleNamespace(client=_Client(), data=object())
-        entity._prepared_runtime = _Runtime()
+        runtime = _Runtime()
+        entity._prepared_runtime = runtime
         entity._runtime_preparation_error = None
         entity._last_stream_health = None
         entity._last_error = None
@@ -1287,11 +1164,13 @@ def test_video_camera_caches_provisioning_only_after_healthy_flv() -> None:
             return_value=health,
         ):
             source = await entity._async_start_stream()
-        return source, cache.saves
+        return source, cache.saves, runtime.starts, runtime.stops
 
-    assert asyncio.run(_attempt(healthy=False)) == (None, 0)
+    assert asyncio.run(_attempt(healthy=False)) == (None, 0, 1, 1)
     assert asyncio.run(_attempt(healthy=True)) == (
-        "http://127.0.0.1/cloud.flv",
+        "http://127.0.0.1/cloud-2.flv",
+        1,
+        2,
         1,
     )
 
@@ -1386,7 +1265,7 @@ def test_video_camera_auto_uses_cached_xp2p_without_video_cloud_calls() -> None:
 
     assert asyncio.run(_run()) == (
         "http://127.0.0.1/cached.flv",
-        1,
+        2,
         "cached_xp2p",
         False,
     )
