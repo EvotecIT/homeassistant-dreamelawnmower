@@ -343,8 +343,8 @@ def test_video_camera_serializes_concurrent_stream_starts() -> None:
 
         entity._async_start_stream = _start
         results = await asyncio.gather(
-            entity.stream_source(),
-            entity.stream_source(),
+            entity._async_start_raw_source(),
+            entity._async_start_raw_source(),
         )
         return results, maximum_active, start_count
 
@@ -372,7 +372,7 @@ def test_video_camera_does_not_start_while_turned_off() -> None:
 
         entity._async_start_stream = _start
         entity._set_stream_error = lambda _error: None
-        return await entity.stream_source(), starts
+        return await entity._async_start_raw_source(), starts
 
     source, starts = asyncio.run(_run())
 
@@ -403,13 +403,46 @@ def test_video_camera_restarts_a_dead_host_worker() -> None:
 
         entity._async_stop_active_session = _stop
         entity._async_start_stream = _start
-        return await entity.stream_source(), stops, starts
+        return await entity._async_start_raw_source(), stops, starts
 
     source, stops, starts = asyncio.run(_run())
 
     assert source == "http://127.0.0.1/fresh.flv"
     assert stops == 1
     assert starts == 1
+
+
+def test_video_camera_direct_stream_source_uses_verified_ha_proxy() -> None:
+    async def _run() -> tuple[str | None, list[str]]:
+        entity = _uninitialized_entity()
+        providers: list[str] = []
+
+        class _Stream:
+            def add_provider(self, provider: str) -> None:
+                providers.append(provider)
+
+            @staticmethod
+            def endpoint_url(provider: str) -> str:
+                assert provider == video_camera_module.HLS_PROVIDER
+                return "/api/hls/verified/playlist.m3u8"
+
+        async def _create_stream() -> _Stream:
+            return _Stream()
+
+        entity.async_create_stream = _create_stream
+        entity.hass = object()
+        with patch.object(
+            video_camera_module,
+            "get_url",
+            return_value="http://homeassistant.local:8123",
+        ):
+            source = await entity.stream_source()
+        return source, providers
+
+    assert asyncio.run(_run()) == (
+        "http://homeassistant.local:8123/api/hls/verified/playlist.m3u8",
+        [video_camera_module.HLS_PROVIDER],
+    )
 
 
 def test_video_camera_creates_home_assistant_stream_from_live_source() -> None:
@@ -426,7 +459,7 @@ def test_video_camera_creates_home_assistant_stream_from_live_source() -> None:
             entity._session = session
             return session.stream_url
 
-        entity.stream_source = _source
+        entity._async_start_raw_source = _source
 
         dynamic_settings = object()
 
@@ -471,7 +504,7 @@ def test_video_camera_verifies_the_adopted_playback_session_through_ha() -> None
             entity._unverified_playback_session = session
             return session.stream_url
 
-        entity.stream_source = _source
+        entity._async_start_raw_source = _source
 
         class _Preferences:
             async def get_dynamic_stream_settings(self, _entity_id: str) -> object:
@@ -524,7 +557,7 @@ def test_video_camera_rejects_an_unreadable_adopted_playback_session() -> None:
             entity._session = None
             entity._unverified_playback_session = None
 
-        entity.stream_source = _source
+        entity._async_start_raw_source = _source
         entity._async_stop_active_session = _stop
 
         class _Preferences:
@@ -588,7 +621,7 @@ def test_video_camera_replaces_cached_stream_after_worker_exit() -> None:
 
         fresh_stream = SimpleNamespace(set_update_callback=lambda _callback: None)
         entity._async_stop_active_session = _stop
-        entity.stream_source = _source
+        entity._async_start_raw_source = _source
         entity.hass = SimpleNamespace(
             data={video_camera_module.DATA_CAMERA_PREFS: _Preferences()}
         )
@@ -636,7 +669,7 @@ def test_video_camera_does_not_cache_stream_after_turn_off_race() -> None:
                 await release_preferences.wait()
                 return object()
 
-        entity.stream_source = _source
+        entity._async_start_raw_source = _source
         entity._async_stop_active_session = _stop
         entity.hass = SimpleNamespace(
             data={video_camera_module.DATA_CAMERA_PREFS: _Preferences()}
@@ -684,7 +717,7 @@ def test_video_camera_cancellation_cleans_unadopted_session() -> None:
                 preferences_started.set()
                 await asyncio.Future()
 
-        entity.stream_source = _source
+        entity._async_start_raw_source = _source
         entity._async_stop_active_session = _stop
         entity.hass = SimpleNamespace(
             data={video_camera_module.DATA_CAMERA_PREFS: _Preferences()}
@@ -719,7 +752,7 @@ def test_video_camera_returns_jpeg_from_home_assistant_stream() -> None:
         async def _create_stream() -> _Stream:
             return stream
 
-        entity.async_create_stream = _create_stream
+        entity._async_create_stream_locked = _create_stream
         image = await entity.async_camera_image(width=640, height=360)
         return image, call
 
@@ -740,6 +773,10 @@ def test_video_camera_stops_stream_created_only_for_snapshot() -> None:
         stops = 0
 
         class _Stream:
+            @staticmethod
+            def outputs() -> dict[str, object]:
+                return {"hls": object()}
+
             async def async_get_image(self, **_kwargs) -> bytes:
                 return b"\xff\xd8snapshot-jpeg\xff\xd9"
 
@@ -754,7 +791,7 @@ def test_video_camera_stops_stream_created_only_for_snapshot() -> None:
             stops += 1
             entity.stream = None
 
-        entity.async_create_stream = _create_stream
+        entity._async_create_stream_locked = _create_stream
         entity._async_stop_active_session = _stop
         image = await entity.async_camera_image()
         return image, stops
@@ -762,26 +799,29 @@ def test_video_camera_stops_stream_created_only_for_snapshot() -> None:
     assert asyncio.run(_run()) == (b"\xff\xd8snapshot-jpeg\xff\xd9", 1)
 
 
-def test_video_camera_keeps_snapshot_stream_when_a_viewer_attaches() -> None:
-    async def _run() -> tuple[bytes | None, int]:
+def test_video_camera_serializes_snapshot_cleanup_before_viewer_start() -> None:
+    async def _run() -> tuple[bytes | None, bool, bool, int, int]:
         entity = _uninitialized_entity()
         entity._last_image = None
+        entity._create_stream_lock = None
         stops = 0
+        creates = 0
+        image_started = asyncio.Event()
+        release_image = asyncio.Event()
 
-        class _Stream:
-            def __init__(self) -> None:
-                self.active_outputs: dict[str, object] = {}
-
-            def outputs(self) -> dict[str, object]:
-                return self.active_outputs
-
+        class _SnapshotStream:
             async def async_get_image(self, **_kwargs: object) -> bytes:
-                self.active_outputs["hls"] = object()
+                image_started.set()
+                await release_image.wait()
                 return b"\xff\xd8snapshot-jpeg\xff\xd9"
 
-        stream = _Stream()
+        snapshot_stream = _SnapshotStream()
+        viewer_stream = object()
 
-        async def _create_stream() -> _Stream:
+        async def _create_stream() -> object:
+            nonlocal creates
+            creates += 1
+            stream = snapshot_stream if creates == 1 else viewer_stream
             entity.stream = stream
             return stream
 
@@ -790,12 +830,25 @@ def test_video_camera_keeps_snapshot_stream_when_a_viewer_attaches() -> None:
             stops += 1
             entity.stream = None
 
-        entity.async_create_stream = _create_stream
+        entity._async_create_stream_locked = _create_stream
         entity._async_stop_active_session = _stop
-        image = await entity.async_camera_image()
-        return image, stops
+        snapshot_task = asyncio.create_task(entity.async_camera_image())
+        await image_started.wait()
+        viewer_task = asyncio.create_task(entity.async_create_stream())
+        await asyncio.sleep(0)
+        viewer_waited = not viewer_task.done()
+        release_image.set()
+        image = await snapshot_task
+        viewer = await viewer_task
+        return image, viewer_waited, viewer is viewer_stream, stops, creates
 
-    assert asyncio.run(_run()) == (b"\xff\xd8snapshot-jpeg\xff\xd9", 0)
+    assert asyncio.run(_run()) == (
+        b"\xff\xd8snapshot-jpeg\xff\xd9",
+        True,
+        True,
+        1,
+        2,
+    )
 
 
 def test_video_camera_snapshot_start_timeout_returns_last_image() -> None:
@@ -812,7 +865,7 @@ def test_video_camera_snapshot_start_timeout_returns_last_image() -> None:
                 cancelled = True
             raise AssertionError("unreachable")
 
-        entity.async_create_stream = _create_stream
+        entity._async_create_stream_locked = _create_stream
         with patch.object(
             video_camera_module,
             "_SNAPSHOT_STREAM_START_TIMEOUT",
@@ -851,7 +904,7 @@ def test_video_camera_snapshot_image_timeout_returns_last_image() -> None:
             stops += 1
             entity.stream = None
 
-        entity.async_create_stream = _create_stream
+        entity._async_create_stream_locked = _create_stream
         entity._async_stop_active_session = _stop
         with patch.object(video_camera_module, "_SNAPSHOT_IMAGE_TIMEOUT", 0.01):
             image = await entity.async_camera_image()
@@ -1617,6 +1670,64 @@ def test_video_camera_auto_uses_cached_xp2p_without_video_cloud_calls() -> None:
         "cached_xp2p",
         False,
     )
+
+
+def test_video_camera_cached_probe_stop_failure_aborts_cloud_fallback() -> None:
+    async def _run() -> tuple[str | None, str | None]:
+        entity = _uninitialized_entity(
+            snapshot=SimpleNamespace(available=True, raw_attributes={})
+        )
+        entity._entry.options[CONF_VIDEO_TRANSPORT] = VIDEO_TRANSPORT_AUTO
+        inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+            source="video_provisioning_cache",
+            did="did-1",
+            product_id="product-1",
+            device_name="device-1",
+            p2p_info="p2p-info-1",
+        )
+        entity._provisioning_cache.inputs = inputs
+        entity._prepared_runtime = object()
+        entity._runtime_preparation_error = None
+        entity._last_stream_health = None
+        entity._last_error = None
+        entity._attr_is_streaming = False
+        entity.async_write_ha_state = lambda: None
+
+        class _Client:
+            async def async_get_camera_stream_runtime_inputs(self) -> object:
+                raise AssertionError("Stop failure must not fall through to cloud")
+
+            async def async_set_camera_stream_enabled(self, _enabled: bool) -> None:
+                raise AssertionError("Stop failure must not enable cloud video")
+
+        entity.coordinator.client = _Client()
+        entity.hass = SimpleNamespace(async_add_executor_job=object())
+        session = DreameLawnMowerXp2pLiveStreamSession(
+            service_id="product-1/device-1",
+            stream_url="http://127.0.0.1/cached.flv",
+        )
+        health = DreameLawnMowerStreamUrlProbeResult(
+            available=True,
+            flv_header_present=True,
+        )
+
+        async def _failed_stop(_runtime: object, _session: object) -> bool:
+            return False
+
+        entity._async_stop_session_for_handoff = _failed_stop
+        with patch.object(
+            video_camera_module,
+            "async_start_cached_xp2p",
+            return_value=SimpleNamespace(session=session, health=health, error=None),
+        ):
+            source = await entity._async_start_stream()
+        return source, entity._last_error
+
+    source, error = asyncio.run(_run())
+
+    assert source is None
+    assert error is not None
+    assert "cached XP2P probe session could not stop" in error
 
 
 def test_video_camera_auto_refresh_blocks_cached_start_after_mower_docks() -> None:
