@@ -294,18 +294,26 @@ class DreameLawnMowerVideoCamera(
 
     async def stream_source(self) -> str | None:
         """Return HA's verified HLS proxy instead of the single-consumer FLV URL."""
-        ha_stream = await self.async_create_stream()
-        if ha_stream is None:
-            return None
-        try:
-            ha_stream.add_provider(HLS_PROVIDER)
-            endpoint = ha_stream.endpoint_url(HLS_PROVIDER)
-            return urljoin(f"{get_url(self.hass)}/", endpoint)
-        except Exception as err:  # noqa: BLE001 - expose a clean source miss.
-            self._set_stream_error(
-                f"Home Assistant could not expose the verified video stream: {err}"
-            )
-            return None
+        if not getattr(self, "_create_stream_lock", None):
+            self._create_stream_lock = asyncio.Lock()
+        async with self._create_stream_lock:
+            previous_stream = getattr(self, "stream", None)
+            ha_stream = await self._async_create_stream_locked()
+            if ha_stream is None:
+                return None
+            owns_stream = ha_stream is not previous_stream
+            try:
+                ha_stream.add_provider(HLS_PROVIDER)
+                endpoint = ha_stream.endpoint_url(HLS_PROVIDER)
+                return urljoin(f"{get_url(self.hass)}/", endpoint)
+            except Exception as err:  # noqa: BLE001 - expose a clean source miss.
+                self._set_stream_error(
+                    "Home Assistant could not expose the verified video stream: "
+                    f"{err}"
+                )
+                if owns_stream:
+                    await self._async_stop_owned_stream(ha_stream)
+                return None
 
     async def _async_start_raw_source(self) -> str | None:
         """Start live video and return its private single-consumer FLV URL."""
@@ -481,13 +489,13 @@ class DreameLawnMowerVideoCamera(
             return self._last_image
         finally:
             if snapshot_only_stream:
-                await self._async_stop_snapshot_stream(ha_stream)
+                await self._async_stop_owned_stream(ha_stream)
         if image is not None:
             self._last_image = image
         return image or self._last_image
 
-    async def _async_stop_snapshot_stream(self, ha_stream: Any) -> None:
-        """Stop an HA stream created only to serve one still image."""
+    async def _async_stop_owned_stream(self, ha_stream: Any) -> None:
+        """Stop an HA stream created only for the current one-shot operation."""
         async with self._stream_lock:
             if self.stream is not ha_stream:
                 return

@@ -415,6 +415,8 @@ def test_video_camera_restarts_a_dead_host_worker() -> None:
 def test_video_camera_direct_stream_source_uses_verified_ha_proxy() -> None:
     async def _run() -> tuple[str | None, list[str]]:
         entity = _uninitialized_entity()
+        entity._create_stream_lock = None
+        entity.stream = None
         providers: list[str] = []
 
         class _Stream:
@@ -427,9 +429,11 @@ def test_video_camera_direct_stream_source_uses_verified_ha_proxy() -> None:
                 return "/api/hls/verified/playlist.m3u8"
 
         async def _create_stream() -> _Stream:
-            return _Stream()
+            stream = _Stream()
+            entity.stream = stream
+            return stream
 
-        entity.async_create_stream = _create_stream
+        entity._async_create_stream_locked = _create_stream
         entity.hass = object()
         with patch.object(
             video_camera_module,
@@ -443,6 +447,49 @@ def test_video_camera_direct_stream_source_uses_verified_ha_proxy() -> None:
         "http://homeassistant.local:8123/api/hls/verified/playlist.m3u8",
         [video_camera_module.HLS_PROVIDER],
     )
+
+
+def test_video_camera_direct_stream_source_cleans_up_only_its_failed_stream() -> None:
+    async def _run(*, existing: bool) -> tuple[str | None, int, bool]:
+        entity = _uninitialized_entity()
+        entity._create_stream_lock = None
+        entity.async_write_ha_state = lambda: None
+        stops = 0
+
+        class _Stream:
+            @staticmethod
+            def add_provider(_provider: str) -> None:
+                return None
+
+            @staticmethod
+            def endpoint_url(_provider: str) -> str:
+                return "/api/hls/verified/playlist.m3u8"
+
+        stream = _Stream()
+        entity.stream = stream if existing else None
+
+        async def _create_stream() -> _Stream:
+            entity.stream = stream
+            return stream
+
+        async def _stop() -> None:
+            nonlocal stops
+            stops += 1
+            entity.stream = None
+
+        entity._async_create_stream_locked = _create_stream
+        entity._async_stop_active_session = _stop
+        entity.hass = object()
+        with patch.object(
+            video_camera_module,
+            "get_url",
+            side_effect=RuntimeError("no Home Assistant URL"),
+        ):
+            source = await entity.stream_source()
+        return source, stops, entity.stream is stream
+
+    assert asyncio.run(_run(existing=False)) == (None, 1, False)
+    assert asyncio.run(_run(existing=True)) == (None, 0, True)
 
 
 def test_video_camera_creates_home_assistant_stream_from_live_source() -> None:
