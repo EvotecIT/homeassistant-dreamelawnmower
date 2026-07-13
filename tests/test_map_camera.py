@@ -355,8 +355,8 @@ def test_map_camera_cache_refreshes_after_ttl() -> None:
     assert calls == 2
 
 
-def test_map_camera_cache_invalidates_image_when_view_refreshes() -> None:
-    """A refreshed map view must not reuse an older rendered JPEG."""
+def test_map_camera_cache_preserves_image_until_refreshed_view_is_rendered() -> None:
+    """A slow or failed refresh must not blank an already rendered map."""
     cache = DreameLawnMowerMapCameraCache(ttl=timedelta(seconds=60))
     first_now = datetime(2026, 4, 19, 8, 0, tzinfo=UTC)
 
@@ -364,16 +364,28 @@ def test_map_camera_cache_invalidates_image_when_view_refreshes() -> None:
         DreameLawnMowerMapView(source="app_action_map", image_png=b"first"),
         now=first_now,
     )
-    cache.store_image(b"jpeg-first")
+    cache.store_image(b"jpeg-first", source_image=b"first")
+    assert cache.view_image_needs_render() is False
 
     cache.store_view(
         DreameLawnMowerMapView(source="app_action_map", image_png=b"second"),
         now=first_now + timedelta(seconds=61),
     )
 
-    assert cache.last_image is None
+    assert cache.last_image == b"jpeg-first"
     assert cache.last_view is not None
     assert cache.last_view.image_png == b"second"
+    assert cache.view_image_needs_render() is True
+
+
+def test_map_camera_cache_recognizes_unchanged_render_source() -> None:
+    """Identical PNG bytes avoid unnecessary JPEG conversion work."""
+    cache = DreameLawnMowerMapCameraCache(ttl=timedelta(seconds=60))
+
+    cache.store_image(b"jpeg-first", source_image=b"same-png")
+
+    assert cache.image_matches_source(b"same-png") is True
+    assert cache.image_matches_source(b"different-png") is False
 
 
 def test_map_camera_cache_coalesces_concurrent_refreshes() -> None:
@@ -416,6 +428,6 @@ def test_map_camera_cache_stores_error_view() -> None:
     assert view.source == "app_action_map"
     assert view.error == "offline"
     assert cache.last_view is view
-    assert cache.last_image is None
+    assert cache.last_image == b"jpeg-first"
     assert cache.last_error == "offline"
     assert cache.last_refresh_at == now

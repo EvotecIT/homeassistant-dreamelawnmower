@@ -37,6 +37,7 @@ from .dreame_lawn_mower_client.models import (
     DreameLawnMowerStatusBlob,
     display_name_for_model,
 )
+from .runtime_cache import DreameLawnMowerRuntimeTelemetryCache
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,12 +51,15 @@ VOICE_SETTINGS_REFRESH_INTERVAL = timedelta(minutes=5)
 FIRMWARE_UPDATE_REFRESH_INTERVAL = timedelta(minutes=15)
 
 
-def _runtime_tracking_active(snapshot: DreameLawnMowerSnapshot) -> bool:
+def runtime_tracking_active(snapshot: DreameLawnMowerSnapshot) -> bool:
     """Prefer explicit heartbeat session state over legacy activity state."""
     session_active = getattr(snapshot, "mowing_session_active", None)
     if session_active is not None:
         return bool(session_active)
     return getattr(snapshot, "activity", None) in {"mowing", "paused", "returning"}
+
+
+_runtime_tracking_active = runtime_tracking_active
 
 
 class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot]):
@@ -105,6 +109,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         self.selected_spot_id: int | None = None
         self.bluetooth_connected: bool | None = None
         self.runtime_status_blob: DreameLawnMowerStatusBlob | None = None
+        self.runtime_telemetry_cache = DreameLawnMowerRuntimeTelemetryCache()
         self.last_batch_device_data_probe_result: dict[str, Any] | None = None
         self.last_preference_probe_result: dict[str, Any] | None = None
         self.last_preference_write_result: dict[str, Any] | None = None
@@ -141,9 +146,15 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
                 refresh=False,
                 include_cloud=True,
             )
+            runtime_active = runtime_tracking_active(snapshot)
+            self.runtime_telemetry_cache.update(
+                self.runtime_status_blob,
+                allow_zero=runtime_active,
+                active_session=runtime_active,
+            )
             self.client.update_runtime_live_tracking(
                 self.runtime_status_blob,
-                active=_runtime_tracking_active(snapshot),
+                active=runtime_active,
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh runtime status blob: %s", err)

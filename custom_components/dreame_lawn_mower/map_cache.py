@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from typing import Any
 
 from .dreame_lawn_mower_client.models import DreameLawnMowerMapView
@@ -37,6 +38,7 @@ class DreameLawnMowerMapCameraCache:
 
     ttl: timedelta
     last_image: bytes | None = None
+    last_image_source_sha256: str | None = None
     last_view: DreameLawnMowerMapView | None = None
     last_refresh_at: datetime | None = None
     last_error: str | None = None
@@ -73,8 +75,6 @@ class DreameLawnMowerMapCameraCache:
         now: datetime | None = None,
     ) -> None:
         """Store a successful or diagnostic map view."""
-        if view is not self.last_view:
-            self.last_image = None
         self.last_view = view
         self.last_error = view.error
         self.last_refresh_at = now or datetime.now(UTC)
@@ -87,11 +87,29 @@ class DreameLawnMowerMapCameraCache:
         now: datetime | None = None,
     ) -> DreameLawnMowerMapView:
         """Store an error view and return it."""
-        self.last_image = None
         view = DreameLawnMowerMapView(source=source, error=error)
         self.store_view(view, now=now)
         return self.last_view
 
-    def store_image(self, image: bytes) -> None:
+    def image_matches_source(self, source_image: bytes) -> bool:
+        """Return whether the JPEG cache was rendered from these source bytes."""
+        return bool(
+            self.last_image is not None
+            and self.last_image_source_sha256 == sha256(source_image).hexdigest()
+        )
+
+    def view_image_needs_render(self) -> bool:
+        """Return whether the current map view differs from the rendered JPEG."""
+        view = self.last_view
+        return bool(
+            view is not None
+            and view.image_png is not None
+            and not self.image_matches_source(view.image_png)
+        )
+
+    def store_image(self, image: bytes, *, source_image: bytes | None = None) -> None:
         """Store rendered JPEG bytes for reuse by both map camera entities."""
         self.last_image = image
+        self.last_image_source_sha256 = (
+            sha256(source_image).hexdigest() if source_image is not None else None
+        )
