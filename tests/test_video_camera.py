@@ -615,8 +615,11 @@ def test_video_camera_returns_jpeg_from_home_assistant_stream() -> None:
                 call.update(kwargs)
                 return b"\xff\xd8real-jpeg\xff\xd9"
 
+        stream = _Stream()
+        entity.stream = stream
+
         async def _create_stream() -> _Stream:
-            return _Stream()
+            return stream
 
         entity.async_create_stream = _create_stream
         image = await entity.async_camera_image(width=640, height=360)
@@ -630,6 +633,35 @@ def test_video_camera_returns_jpeg_from_home_assistant_stream() -> None:
         "height": 360,
         "wait_for_next_keyframe": True,
     }
+
+
+def test_video_camera_stops_stream_created_only_for_snapshot() -> None:
+    async def _run() -> tuple[bytes | None, int]:
+        entity = _uninitialized_entity()
+        entity._last_image = None
+        stops = 0
+
+        class _Stream:
+            async def async_get_image(self, **_kwargs) -> bytes:
+                return b"\xff\xd8snapshot-jpeg\xff\xd9"
+
+        stream = _Stream()
+
+        async def _create_stream() -> _Stream:
+            entity.stream = stream
+            return stream
+
+        async def _stop() -> None:
+            nonlocal stops
+            stops += 1
+            entity.stream = None
+
+        entity.async_create_stream = _create_stream
+        entity._async_stop_active_session = _stop
+        image = await entity.async_camera_image()
+        return image, stops
+
+    assert asyncio.run(_run()) == (b"\xff\xd8snapshot-jpeg\xff\xd9", 1)
 
 
 def test_video_camera_snapshot_start_timeout_returns_last_image() -> None:
@@ -659,10 +691,11 @@ def test_video_camera_snapshot_start_timeout_returns_last_image() -> None:
 
 
 def test_video_camera_snapshot_image_timeout_returns_last_image() -> None:
-    async def _run() -> tuple[bytes | None, bool]:
+    async def _run() -> tuple[bytes | None, bool, int]:
         entity = _uninitialized_entity()
         entity._last_image = b"\xff\xd8cached-jpeg\xff\xd9"
         cancelled = False
+        stops = 0
 
         class _Stream:
             async def async_get_image(self, **_kwargs) -> bytes:
@@ -673,15 +706,24 @@ def test_video_camera_snapshot_image_timeout_returns_last_image() -> None:
                     cancelled = True
                 raise AssertionError("unreachable")
 
+        stream = _Stream()
+
         async def _create_stream() -> _Stream:
-            return _Stream()
+            entity.stream = stream
+            return stream
+
+        async def _stop() -> None:
+            nonlocal stops
+            stops += 1
+            entity.stream = None
 
         entity.async_create_stream = _create_stream
+        entity._async_stop_active_session = _stop
         with patch.object(video_camera_module, "_SNAPSHOT_IMAGE_TIMEOUT", 0.01):
             image = await entity.async_camera_image()
-        return image, cancelled
+        return image, cancelled, stops
 
-    assert asyncio.run(_run()) == (b"\xff\xd8cached-jpeg\xff\xd9", True)
+    assert asyncio.run(_run()) == (b"\xff\xd8cached-jpeg\xff\xd9", True, 1)
 
 
 def test_video_camera_stop_unregisters_cached_home_assistant_stream() -> None:

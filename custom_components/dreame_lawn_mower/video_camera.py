@@ -386,6 +386,7 @@ class DreameLawnMowerVideoCamera(
         height: int | None,
     ) -> bytes | None:
         """Return one JPEG from Home Assistant's single FLV consumer."""
+        previous_stream = getattr(self, "stream", None)
         try:
             async with asyncio.timeout(_SNAPSHOT_STREAM_START_TIMEOUT):
                 ha_stream = await self.async_create_stream()
@@ -400,6 +401,11 @@ class DreameLawnMowerVideoCamera(
             return self._last_image
         if ha_stream is None:
             return self._last_image
+        outputs = getattr(ha_stream, "outputs", None)
+        has_existing_output = bool(outputs()) if callable(outputs) else False
+        snapshot_only_stream = (
+            ha_stream is not previous_stream and not has_existing_output
+        )
         try:
             async with asyncio.timeout(_SNAPSHOT_IMAGE_TIMEOUT):
                 image = await ha_stream.async_get_image(
@@ -413,9 +419,18 @@ class DreameLawnMowerVideoCamera(
         except Exception as err:  # noqa: BLE001 - snapshots may be transient.
             _LOGGER.debug("Failed to read Dreame mower still image: %s", err)
             return self._last_image
+        finally:
+            if snapshot_only_stream:
+                await self._async_stop_snapshot_stream(ha_stream)
         if image is not None:
             self._last_image = image
         return image or self._last_image
+
+    async def _async_stop_snapshot_stream(self, ha_stream: Any) -> None:
+        """Stop an HA stream created only to serve one still image."""
+        async with self._stream_lock:
+            if self.stream is ha_stream:
+                await self._async_stop_active_session()
 
     async def _async_start_stream(self) -> str | None:
         """Start one serialized XP2P stream session."""
