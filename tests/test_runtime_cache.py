@@ -39,6 +39,25 @@ def test_unchanged_runtime_metrics_keep_original_capture_time() -> None:
     assert cache.captured_at == captured_at
 
 
+def test_active_unchanged_runtime_metrics_refresh_capture_time() -> None:
+    """Repeated active metrics still belong to the current mowing session."""
+    first_capture = datetime(2026, 7, 13, 15, 5, tzinfo=UTC)
+    latest_capture = datetime(2026, 7, 13, 16, 5, tzinfo=UTC)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+
+    assert cache.update(
+        SimpleNamespace(candidate_runtime_current_area_sqm=412.53),
+        now=first_capture,
+        active_session=True,
+    ) is True
+    assert cache.update(
+        SimpleNamespace(candidate_runtime_current_area_sqm=412.53),
+        now=latest_capture,
+        active_session=True,
+    ) is True
+    assert cache.captured_at == latest_capture
+
+
 def test_zero_values_are_valid_session_metrics() -> None:
     """The beginning of a new mission may legitimately report zero progress."""
     blob = SimpleNamespace(candidate_runtime_area_progress_percent=0.0)

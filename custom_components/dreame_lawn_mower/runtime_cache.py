@@ -53,6 +53,7 @@ class DreameLawnMowerRuntimeTelemetryCache:
         *,
         now: datetime | None = None,
         allow_zero: bool = True,
+        active_session: bool = False,
     ) -> bool:
         """Store a useful runtime payload without erasing it with empty polls."""
         if not runtime_blob_has_session_metrics(blob):
@@ -62,6 +63,9 @@ class DreameLawnMowerRuntimeTelemetryCache:
         signature = _session_metric_signature(blob)
         if signature == self._metric_signature:
             self.blob = blob
+            if active_session:
+                self.captured_at = now or datetime.now(UTC)
+                return True
             return False
         self.blob = blob
         self.captured_at = now or datetime.now(UTC)

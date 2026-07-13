@@ -2554,6 +2554,15 @@ def _runtime_session_attributes(coordinator: Any) -> dict[str, Any]:
         else None
     )
     if not live:
+        for key in (
+            "pose_x",
+            "pose_y",
+            "heading_deg",
+            "track_segment_count",
+            "track_point_count",
+            "track_length_m",
+        ):
+            attributes.pop(key, None)
         attributes["cached"] = True
         attributes["captured_at"] = (
             captured_at.isoformat() if captured_at is not None else None

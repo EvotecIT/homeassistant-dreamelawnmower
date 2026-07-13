@@ -1710,7 +1710,12 @@ def test_runtime_mission_sensors_preserve_last_session_after_docking() -> None:
         candidate_runtime_area_progress_percent=77.7,
         candidate_runtime_current_area_sqm=412.53,
         candidate_runtime_total_area_sqm=531.0,
-        candidate_runtime_track_segments=(),
+        candidate_runtime_pose_x=5910,
+        candidate_runtime_pose_y=12400,
+        candidate_runtime_heading_deg=63.5,
+        candidate_runtime_track_segments=(
+            ((9720, 15300), (9720, 15460), (5810, 12180)),
+        ),
         notes=(),
     )
     cache = DreameLawnMowerRuntimeTelemetryCache()
@@ -1732,6 +1737,12 @@ def test_runtime_mission_sensors_preserve_last_session_after_docking() -> None:
     assert total_area.native_value == 531.0
     assert progress.extra_state_attributes["cached"] is True
     assert progress.extra_state_attributes["captured_at"] == captured_at.isoformat()
+    assert "pose_x" not in progress.extra_state_attributes
+    assert "pose_y" not in progress.extra_state_attributes
+    assert "heading_deg" not in progress.extra_state_attributes
+    assert "track_segment_count" not in progress.extra_state_attributes
+    assert "track_point_count" not in progress.extra_state_attributes
+    assert "track_length_m" not in progress.extra_state_attributes
 
 
 def test_runtime_mission_sensor_uses_live_blob_for_heartbeat_active_session() -> None:

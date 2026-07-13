@@ -150,6 +150,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             self.runtime_telemetry_cache.update(
                 self.runtime_status_blob,
                 allow_zero=runtime_active,
+                active_session=runtime_active,
             )
             self.client.update_runtime_live_tracking(
                 self.runtime_status_blob,
