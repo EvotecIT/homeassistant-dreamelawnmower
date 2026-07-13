@@ -87,7 +87,10 @@ def test_firmware_update_entity_uses_installed_version_when_no_target_exists() -
     entity = object.__new__(DreameLawnMowerFirmwareUpdateEntity)
     entity.coordinator = SimpleNamespace(
         data=SimpleNamespace(firmware_version="4.3.6_0625"),
-        firmware_update_support=SimpleNamespace(latest_version=None),
+        firmware_update_support=SimpleNamespace(
+            latest_version=None,
+            update_available=False,
+        ),
     )
 
     assert entity.installed_version == "4.3.6_0625"
@@ -101,6 +104,20 @@ def test_firmware_update_entity_keeps_unknown_target_for_reported_update() -> No
         firmware_update_support=SimpleNamespace(
             latest_version=None,
             update_available=True,
+        ),
+    )
+
+    assert entity.installed_version == "4.3.6_0625"
+    assert entity.latest_version is None
+
+
+def test_firmware_update_entity_keeps_unknown_target_for_uncertain_update() -> None:
+    entity = object.__new__(DreameLawnMowerFirmwareUpdateEntity)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(firmware_version="4.3.6_0625"),
+        firmware_update_support=SimpleNamespace(
+            latest_version=None,
+            update_available=None,
         ),
     )
 
