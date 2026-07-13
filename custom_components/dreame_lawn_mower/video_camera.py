@@ -65,6 +65,7 @@ from .video_session_lifecycle import DreameLawnMowerHaStreamIdleMonitor
 _LOGGER = logging.getLogger(__name__)
 _HA_STREAM_START_TIMEOUT = DEFAULT_XP2P_HOST_STARTUP_TIMEOUT + 30.0
 _SNAPSHOT_STREAM_START_TIMEOUT = 15.0
+_SNAPSHOT_IMAGE_TIMEOUT = 15.0
 
 
 class _DreameVideoRuntime(Protocol):
@@ -400,11 +401,15 @@ class DreameLawnMowerVideoCamera(
         if ha_stream is None:
             return self._last_image
         try:
-            image = await ha_stream.async_get_image(
-                width=width,
-                height=height,
-                wait_for_next_keyframe=True,
-            )
+            async with asyncio.timeout(_SNAPSHOT_IMAGE_TIMEOUT):
+                image = await ha_stream.async_get_image(
+                    width=width,
+                    height=height,
+                    wait_for_next_keyframe=True,
+                )
+        except TimeoutError:
+            _LOGGER.debug("Timed out reading Dreame mower still image")
+            return self._last_image
         except Exception as err:  # noqa: BLE001 - snapshots may be transient.
             _LOGGER.debug("Failed to read Dreame mower still image: %s", err)
             return self._last_image
@@ -579,14 +584,26 @@ class DreameLawnMowerVideoCamera(
             )
             return None
 
-        await self._async_cache_healthy_provisioning(cloud_inputs)
-
-        # Tencent's delegated HTTP-FLV endpoint is session-scoped and is not a
-        # safe multi-consumer source. The health check intentionally consumes
-        # the qualified session; hand Home Assistant a fresh, untouched one.
-        await self._async_stop_session(runtime, session)
-        session = None
         try:
+            try:
+                await self._async_cache_healthy_provisioning(cloud_inputs)
+            except asyncio.CancelledError:
+                await self._async_stop_session_for_handoff(runtime, session)
+                raise
+
+            # Tencent's delegated HTTP-FLV endpoint is session-scoped and is not a
+            # safe multi-consumer source. The health check intentionally consumes
+            # the qualified session; hand Home Assistant a fresh, untouched one.
+            if not await self._async_stop_session_for_handoff(runtime, session):
+                await self._async_disable_camera_stream()
+                self._set_stream_error(
+                    self._with_lan_failure(
+                        "Qualified XP2P probe session could not stop before "
+                        "playback handoff."
+                    )
+                )
+                return None
+            session = None
             session = await self._async_start_runtime_session(runtime, cloud_inputs)
         except asyncio.CancelledError:
             await self._async_disable_camera_stream()
@@ -666,7 +683,13 @@ class DreameLawnMowerVideoCamera(
         except Exception as err:  # noqa: BLE001 - a live stream remains usable.
             self._lan_cache_error = str(err)
             _LOGGER.warning("Failed to save Dreame LAN video endpoint: %s", err)
-        await self._async_stop_session(runtime, session)
+        if not await self._async_stop_session_for_handoff(runtime, session):
+            self._last_lan_error = (
+                "Qualified same-LAN probe session could not stop before "
+                "playback handoff."
+            )
+            return None
+        session = None
         try:
             session = await self._async_start_lan_runtime_session(runtime, inputs)
         except asyncio.CancelledError:
@@ -700,7 +723,12 @@ class DreameLawnMowerVideoCamera(
         if result.session is None or result.health is None:
             self._last_cached_xp2p_error = result.error
             return None
-        await self._async_stop_session(runtime, result.session)
+        if not await self._async_stop_session_for_handoff(runtime, result.session):
+            self._last_cached_xp2p_error = (
+                "Qualified cached XP2P probe session could not stop before "
+                "playback handoff."
+            )
+            return None
         try:
             session = await self._async_start_runtime_session(
                 runtime,
@@ -971,12 +999,27 @@ class DreameLawnMowerVideoCamera(
         self,
         runtime: _DreameVideoRuntime,
         session: DreameLawnMowerXp2pLiveStreamSession,
-    ) -> None:
+    ) -> bool:
         """Stop a runtime session without changing entity state bookkeeping."""
         try:
             await self.hass.async_add_executor_job(runtime.stop_live_stream, session)
+            return True
         except Exception as err:  # noqa: BLE001 - cleanup should not break unload.
             _LOGGER.debug("Failed to stop Dreame mower live video: %s", err)
+            return False
+
+    async def _async_stop_session_for_handoff(
+        self,
+        runtime: _DreameVideoRuntime,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+    ) -> bool:
+        """Finish probe cleanup before cancellation or a replacement session."""
+        stop_task = asyncio.create_task(self._async_stop_session(runtime, session))
+        try:
+            return await asyncio.shield(stop_task)
+        except asyncio.CancelledError:
+            await stop_task
+            raise
 
     async def _async_disable_camera_stream(self) -> None:
         """Best-effort app-side video cleanup."""

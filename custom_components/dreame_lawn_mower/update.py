@@ -71,6 +71,8 @@ class DreameLawnMowerFirmwareUpdateEntity(
         support = self.coordinator.firmware_update_support
         if support is not None and support.latest_version:
             return support.latest_version
+        if support is not None and getattr(support, "update_available", False) is True:
+            return None
         # HA renders an update entity as Unknown when latest_version is None.
         # No available update means the installed release is also the latest
         # known release, not an unknown firmware state.
