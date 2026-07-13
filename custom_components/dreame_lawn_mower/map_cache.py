@@ -98,6 +98,15 @@ class DreameLawnMowerMapCameraCache:
             and self.last_image_source_sha256 == sha256(source_image).hexdigest()
         )
 
+    def view_image_needs_render(self) -> bool:
+        """Return whether the current map view differs from the rendered JPEG."""
+        view = self.last_view
+        return bool(
+            view is not None
+            and view.image_png is not None
+            and not self.image_matches_source(view.image_png)
+        )
+
     def store_image(self, image: bytes, *, source_image: bytes | None = None) -> None:
         """Store rendered JPEG bytes for reuse by both map camera entities."""
         self.last_image = image

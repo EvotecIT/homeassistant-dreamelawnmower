@@ -51,12 +51,15 @@ VOICE_SETTINGS_REFRESH_INTERVAL = timedelta(minutes=5)
 FIRMWARE_UPDATE_REFRESH_INTERVAL = timedelta(minutes=15)
 
 
-def _runtime_tracking_active(snapshot: DreameLawnMowerSnapshot) -> bool:
+def runtime_tracking_active(snapshot: DreameLawnMowerSnapshot) -> bool:
     """Prefer explicit heartbeat session state over legacy activity state."""
     session_active = getattr(snapshot, "mowing_session_active", None)
     if session_active is not None:
         return bool(session_active)
     return getattr(snapshot, "activity", None) in {"mowing", "paused", "returning"}
+
+
+_runtime_tracking_active = runtime_tracking_active
 
 
 class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot]):
@@ -143,7 +146,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
                 refresh=False,
                 include_cloud=True,
             )
-            runtime_active = _runtime_tracking_active(snapshot)
+            runtime_active = runtime_tracking_active(snapshot)
             self.runtime_telemetry_cache.update(
                 self.runtime_status_blob,
                 allow_zero=runtime_active,

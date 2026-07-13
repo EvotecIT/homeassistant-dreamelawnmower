@@ -364,7 +364,8 @@ def test_map_camera_cache_preserves_image_until_refreshed_view_is_rendered() -> 
         DreameLawnMowerMapView(source="app_action_map", image_png=b"first"),
         now=first_now,
     )
-    cache.store_image(b"jpeg-first")
+    cache.store_image(b"jpeg-first", source_image=b"first")
+    assert cache.view_image_needs_render() is False
 
     cache.store_view(
         DreameLawnMowerMapView(source="app_action_map", image_png=b"second"),
@@ -374,6 +375,7 @@ def test_map_camera_cache_preserves_image_until_refreshed_view_is_rendered() -> 
     assert cache.last_image == b"jpeg-first"
     assert cache.last_view is not None
     assert cache.last_view.image_png == b"second"
+    assert cache.view_image_needs_render() is True
 
 
 def test_map_camera_cache_recognizes_unchanged_render_source() -> None:

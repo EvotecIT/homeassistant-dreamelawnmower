@@ -35,7 +35,7 @@ from .control_options import (
 from .control_options import (
     current_map_index as selected_current_map_index,
 )
-from .coordinator import DreameLawnMowerCoordinator
+from .coordinator import DreameLawnMowerCoordinator, runtime_tracking_active
 from .dreame_lawn_mower_client.maintenance import (
     MAINTENANCE_ITEMS,
     MaintenanceItem,
@@ -2525,8 +2525,7 @@ def _batch_schedule_count(result: dict[str, Any] | None) -> int | None:
 
 
 def _runtime_progress_available_for_snapshot(snapshot: Any) -> bool:
-    activity = getattr(snapshot, "activity", None)
-    return activity in {"mowing", "paused", "returning"}
+    return runtime_tracking_active(snapshot)
 
 
 def _runtime_session_blob(coordinator: Any) -> Any:

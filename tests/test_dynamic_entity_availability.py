@@ -1734,6 +1734,40 @@ def test_runtime_mission_sensors_preserve_last_session_after_docking() -> None:
     assert progress.extra_state_attributes["captured_at"] == captured_at.isoformat()
 
 
+def test_runtime_mission_sensor_uses_live_blob_for_heartbeat_active_session() -> None:
+    """Explicit heartbeat state wins while legacy activity still looks docked."""
+    cached_blob = SimpleNamespace(
+        source="cloud",
+        candidate_runtime_progress_percent=80.0,
+        candidate_runtime_area_progress_percent=80.0,
+        candidate_runtime_current_area_sqm=400.0,
+        candidate_runtime_total_area_sqm=500.0,
+        candidate_runtime_track_segments=(),
+        notes=(),
+    )
+    live_blob = SimpleNamespace(
+        source="cloud",
+        candidate_runtime_progress_percent=20.0,
+        candidate_runtime_area_progress_percent=20.0,
+        candidate_runtime_current_area_sqm=100.0,
+        candidate_runtime_total_area_sqm=500.0,
+        candidate_runtime_track_segments=(),
+        notes=(),
+    )
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(cached_blob) is True
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(activity="docked", mowing_session_active=True),
+        runtime_status_blob=live_blob,
+        runtime_telemetry_cache=cache,
+    )
+    progress = object.__new__(DreameLawnMowerRuntimeMissionProgressSensor)
+    progress.coordinator = coordinator
+
+    assert progress.native_value == 20.0
+    assert "cached" not in progress.extra_state_attributes
+
+
 def test_runtime_area_and_pose_sensors_use_runtime_blob_values() -> None:
     coordinator = SimpleNamespace(
         data=SimpleNamespace(activity="mowing"),

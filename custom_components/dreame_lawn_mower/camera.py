@@ -149,7 +149,10 @@ class DreameLawnMowerMapCamera(
     async def _async_get_map_image(self) -> bytes | None:
         """Return cached bytes immediately and refresh stale maps in the background."""
         if self._map_cache.last_image is not None:
-            if not self._map_cache.is_fresh():
+            if (
+                self._map_cache.view_image_needs_render()
+                or not self._map_cache.is_fresh()
+            ):
                 self._start_map_refresh()
             return self._map_cache.last_image
 
