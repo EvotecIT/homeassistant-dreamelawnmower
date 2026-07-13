@@ -324,6 +324,7 @@ class DreameLawnMowerFirmwareUpdateAvailableBinarySensor(
     _attr_name = "Firmware Update Available"
     _attr_icon = "mdi:update"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
         super().__init__(coordinator)

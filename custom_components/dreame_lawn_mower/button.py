@@ -80,6 +80,7 @@ class DreameLawnMowerCaptureDebugSnapshotButton(
     _attr_name = "Capture Debug Snapshot"
     _attr_icon = "mdi:file-document-refresh-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
         super().__init__(coordinator)
@@ -121,6 +122,7 @@ class DreameLawnMowerCaptureOperationSnapshotButton(
     _attr_name = "Capture Operation Snapshot"
     _attr_icon = "mdi:clipboard-pulse-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
         super().__init__(coordinator)

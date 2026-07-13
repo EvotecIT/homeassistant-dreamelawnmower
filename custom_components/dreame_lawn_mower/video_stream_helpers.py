@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 import platform
 import shlex
 from collections.abc import Callable
@@ -29,10 +28,6 @@ _STREAM_HEALTH_ATTEMPTS = 3
 _STREAM_HEALTH_RETRY_INTERVAL = 0.5
 _STREAM_HEALTH_TIMEOUT = 3.0
 _STREAM_HEALTH_BYTES = 16
-_STILL_CONNECT_TIMEOUT = 3.0
-_STILL_READ_TIMEOUT = 7.0
-
-
 def option_text(entry: ConfigEntry, key: str) -> str | None:
     """Return a trimmed non-empty string option."""
     value = entry.options.get(key)
@@ -69,34 +64,6 @@ def safe_state_attribute(value: Any, *, max_depth: int = 4) -> Any:
     if isinstance(value, (list, tuple)):
         return [safe_state_attribute(item, max_depth=max_depth - 1) for item in value]
     return repr(value)
-
-
-def decode_flv_jpeg(
-    stream_url: str,
-    width: int | None,
-    height: int | None,
-) -> bytes | None:
-    """Decode the first FLV video frame to JPEG without optional TurboJPEG."""
-    import av
-    from PIL import Image
-
-    with av.open(
-        stream_url,
-        timeout=(_STILL_CONNECT_TIMEOUT, _STILL_READ_TIMEOUT),
-    ) as container:
-        for frame in container.decode(video=0):
-            image = frame.to_image().convert("RGB")
-            if width or height:
-                target_width = max(int(width or image.width), 1)
-                target_height = max(int(height or image.height), 1)
-                image.thumbnail(
-                    (target_width, target_height),
-                    Image.Resampling.LANCZOS,
-                )
-            encoded = io.BytesIO()
-            image.save(encoded, format="JPEG", quality=90)
-            return encoded.getvalue()
-    return None
 
 
 def split_runner_command(command: str) -> tuple[str, ...]:
