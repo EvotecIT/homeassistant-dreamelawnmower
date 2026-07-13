@@ -44,6 +44,7 @@ from .dreame_lawn_mower_client.maintenance import (
 )
 from .entity import DreameLawnMowerEntity
 from .manual_control import remote_control_block_reason
+from .runtime_cache import DreameLawnMowerRuntimeTelemetryCache
 from .task_status_probe import (
     task_status_probe_result_attributes,
     task_status_probe_state,
@@ -1859,12 +1860,9 @@ class DreameLawnMowerRuntimeMissionProgressSensor(
 
     @property
     def native_value(self) -> float | int | None:
-        """Return the active mission progress percentage from runtime telemetry."""
-        snapshot = self.coordinator.data
-        if snapshot is None or not _runtime_progress_available_for_snapshot(snapshot):
-            return None
+        """Return live or last-known mission progress from runtime telemetry."""
         return _runtime_status_blob_progress_percent(
-            getattr(self.coordinator, "runtime_status_blob", None)
+            _runtime_session_blob(self.coordinator)
         )
 
     @property
@@ -1875,9 +1873,7 @@ class DreameLawnMowerRuntimeMissionProgressSensor(
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the decoded runtime progress details used for the percentage."""
-        return _runtime_status_blob_summary(
-            getattr(self.coordinator, "runtime_status_blob", None)
-        )
+        return _runtime_session_attributes(self.coordinator)
 
 
 class DreameLawnMowerRuntimeCurrentAreaSensor(
@@ -1896,12 +1892,9 @@ class DreameLawnMowerRuntimeCurrentAreaSensor(
 
     @property
     def native_value(self) -> float | int | None:
-        """Return the current completed mission area in square meters."""
-        snapshot = self.coordinator.data
-        if snapshot is None or not _runtime_progress_available_for_snapshot(snapshot):
-            return None
+        """Return the live or last-known completed mission area."""
         return _runtime_status_blob_current_area_sqm(
-            getattr(self.coordinator, "runtime_status_blob", None)
+            _runtime_session_blob(self.coordinator)
         )
 
     @property
@@ -1912,9 +1905,7 @@ class DreameLawnMowerRuntimeCurrentAreaSensor(
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the decoded runtime mission details."""
-        return _runtime_status_blob_summary(
-            getattr(self.coordinator, "runtime_status_blob", None)
-        )
+        return _runtime_session_attributes(self.coordinator)
 
 
 class DreameLawnMowerRuntimeTotalAreaSensor(
@@ -1933,12 +1924,9 @@ class DreameLawnMowerRuntimeTotalAreaSensor(
 
     @property
     def native_value(self) -> float | int | None:
-        """Return the total mission area in square meters."""
-        snapshot = self.coordinator.data
-        if snapshot is None or not _runtime_progress_available_for_snapshot(snapshot):
-            return None
+        """Return the live or last-known total mission area."""
         return _runtime_status_blob_total_area_sqm(
-            getattr(self.coordinator, "runtime_status_blob", None)
+            _runtime_session_blob(self.coordinator)
         )
 
     @property
@@ -1949,9 +1937,7 @@ class DreameLawnMowerRuntimeTotalAreaSensor(
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the decoded runtime mission details."""
-        return _runtime_status_blob_summary(
-            getattr(self.coordinator, "runtime_status_blob", None)
-        )
+        return _runtime_session_attributes(self.coordinator)
 
 
 class DreameLawnMowerRuntimePositionXSensor(
@@ -2541,6 +2527,39 @@ def _batch_schedule_count(result: dict[str, Any] | None) -> int | None:
 def _runtime_progress_available_for_snapshot(snapshot: Any) -> bool:
     activity = getattr(snapshot, "activity", None)
     return activity in {"mowing", "paused", "returning"}
+
+
+def _runtime_session_blob(coordinator: Any) -> Any:
+    """Return live telemetry during a mission and cached telemetry afterward."""
+    snapshot = getattr(coordinator, "data", None)
+    if snapshot is not None and _runtime_progress_available_for_snapshot(snapshot):
+        return getattr(coordinator, "runtime_status_blob", None)
+    cache = getattr(coordinator, "runtime_telemetry_cache", None)
+    if isinstance(cache, DreameLawnMowerRuntimeTelemetryCache):
+        return cache.blob
+    return None
+
+
+def _runtime_session_attributes(coordinator: Any) -> dict[str, Any]:
+    """Return runtime metrics with explicit live-versus-cached metadata."""
+    snapshot = getattr(coordinator, "data", None)
+    live = snapshot is not None and _runtime_progress_available_for_snapshot(snapshot)
+    blob = _runtime_session_blob(coordinator)
+    attributes = _runtime_status_blob_summary(blob)
+    if not attributes:
+        return {}
+    cache = getattr(coordinator, "runtime_telemetry_cache", None)
+    captured_at = (
+        cache.captured_at
+        if not live and isinstance(cache, DreameLawnMowerRuntimeTelemetryCache)
+        else None
+    )
+    if not live:
+        attributes["cached"] = True
+        attributes["captured_at"] = (
+            captured_at.isoformat() if captured_at is not None else None
+        )
+    return {key: value for key, value in attributes.items() if value is not None}
 
 
 def _runtime_status_blob_summary(blob: Any) -> dict[str, Any]:

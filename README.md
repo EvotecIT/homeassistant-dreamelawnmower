@@ -5,19 +5,33 @@
 [![Hassfest](https://img.shields.io/github/actions/workflow/status/EvotecIT/homeassistant-dreamelawnmower/hassfest.yml?branch=main&style=for-the-badge&label=HASSFEST&labelColor=555)](https://github.com/EvotecIT/homeassistant-dreamelawnmower/actions/workflows/hassfest.yml)
 [![License](https://img.shields.io/badge/LICENSE-MIT-yellow?style=for-the-badge&labelColor=555)](LICENSE)
 
-Custom Home Assistant integration for Dreame and MOVA robotic lawn mowers.
+Bring a Dreame or MOVA robotic mower into Home Assistant with mower-native
+controls, schedules, maps, live coverage, and camera support.
 
-The integration uses the cloud/app protocol exposed by Dreamehome and MOVAhome.
-It is being developed against real A2-family hardware and is intentionally
-conservative with anything that can move the mower or change mower settings.
+![Lawn Mower Card Hero layout preview](assets/dreame-lawn-mower-hero-card.png)
+
+The integration follows the Dreamehome and MOVAhome app protocol and is tested
+against real A2-family hardware. Everyday state and controls stay simple, while
+reverse-engineering probes and riskier maintenance operations remain out of the
+default dashboard.
+
+For the dashboard shown above, pair this integration with the
+[Lawn Mower Card](https://github.com/EvotecIT/lovelace-lawn-mower-card). Its Hero
+layout automatically finds the integration's map, mission, coverage, and live
+video entities when their names follow the normal Home Assistant device naming.
+
+## See It In Action
+
+The live-path map combines the stored garden geometry with mower position and
+the current cut trail. The card warms this image while the Overview tab is open,
+so switching to Map does not have to begin with a blank frame.
+
+![Dreame A2 live-path map in the Hero layout](assets/dreame-lawn-mower-hero-map.png)
+
+The standard Home Assistant device page remains available for entity discovery
+and diagnostics:
 
 ![Dreame Lawn Mower device overview](assets/dreame-lawn-mower-overview.png)
-
-## Screenshots
-
-![Rendered mower map](assets/dreame-lawn-mower-map.png)
-
-![Diagnostics and map entities](assets/dreame-lawn-mower-diagnostics.png)
 
 ## Status
 
@@ -77,6 +91,8 @@ region/account details are especially helpful for moving a device from
 - disabled-by-default all-maps and map-diagnostics cameras
 - live video camera with a managed XP2P runtime on Linux x86_64 and aarch64 hosts
 - runtime telemetry sensors for mission progress, mission area, mower pose, and live-track length
+- last-session mission progress and coverage retained after docking, explicitly
+  marked with `cached: true` and a `captured_at` timestamp
 - selected-run sensors for mowing action, chosen map, and scoped zone/spot/edge target
 - selected-zone preference sensors for read-only mowing height, efficiency, direction, and obstacle-avoidance details
 - read-only weather/rain-protection diagnostics
@@ -334,6 +350,20 @@ before confirming a live write.
 The map camera uses the confirmed app-map JSON path first. The renderer is
 read-only and produces a simple Home Assistant camera image from the decoded map
 payload.
+
+Enabled map cameras warm their first image in the background during entity
+startup. After that, the camera returns the last rendered JPEG immediately while
+a map older than 60 seconds refreshes in the background. Identical source images
+reuse the existing JPEG conversion. This cache is intentionally in memory: a
+Home Assistant restart rebuilds it from the mower rather than persisting garden
+geometry to a second on-disk store.
+
+The runtime mission progress, current-area, and total-area sensors also retain
+the latest useful session values after mowing stops. While mowing they represent
+live telemetry; after docking their attributes include `cached: true` and
+`captured_at`. They become live again as soon as a new runtime session reports
+metrics. This keeps dashboards useful without presenting an old mower position
+or trail as current.
 
 If the mower has multiple maps, enable the disabled `All Maps` camera to render
 a contact sheet. Use `Map Diagnostics` when the map image is missing or when you

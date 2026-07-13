@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from custom_components.dreame_lawn_mower import button as button_module
@@ -28,6 +29,9 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.maintenance import (
     MAINTENANCE_ITEM_BY_KEY,
     maintenance_status_from_cms,
+)
+from custom_components.dreame_lawn_mower.runtime_cache import (
+    DreameLawnMowerRuntimeTelemetryCache,
 )
 from custom_components.dreame_lawn_mower.sensor import (
     SENSORS,
@@ -1695,6 +1699,39 @@ def test_runtime_mission_progress_sensor_uses_runtime_blob_area_ratio() -> None:
         "track_length_m": 52.64,
         "notes": ["unexpected_length", "unexpected_runtime_progress_value"],
     }
+
+
+def test_runtime_mission_sensors_preserve_last_session_after_docking() -> None:
+    """The dashboard keeps useful coverage once live runtime telemetry stops."""
+    captured_at = datetime(2026, 7, 13, 15, 5, tzinfo=UTC)
+    blob = SimpleNamespace(
+        source="cloud",
+        candidate_runtime_progress_percent=None,
+        candidate_runtime_area_progress_percent=77.7,
+        candidate_runtime_current_area_sqm=412.53,
+        candidate_runtime_total_area_sqm=531.0,
+        candidate_runtime_track_segments=(),
+        notes=(),
+    )
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(blob, now=captured_at) is True
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(activity="docked"),
+        runtime_status_blob=None,
+        runtime_telemetry_cache=cache,
+    )
+    progress = object.__new__(DreameLawnMowerRuntimeMissionProgressSensor)
+    progress.coordinator = coordinator
+    current_area = object.__new__(DreameLawnMowerRuntimeCurrentAreaSensor)
+    current_area.coordinator = coordinator
+    total_area = object.__new__(DreameLawnMowerRuntimeTotalAreaSensor)
+    total_area.coordinator = coordinator
+
+    assert progress.native_value == 77.7
+    assert current_area.native_value == 412.53
+    assert total_area.native_value == 531.0
+    assert progress.extra_state_attributes["cached"] is True
+    assert progress.extra_state_attributes["captured_at"] == captured_at.isoformat()
 
 
 def test_runtime_area_and_pose_sensors_use_runtime_blob_values() -> None:

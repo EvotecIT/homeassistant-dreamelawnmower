@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 from functools import partial
@@ -66,6 +67,7 @@ class DreameLawnMowerMapCamera(
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
     _requires_map_capability = True
+    _prewarm_map_image = True
 
     def __init__(
         self,
@@ -80,6 +82,20 @@ class DreameLawnMowerMapCamera(
         self._attr_model = self._descriptor.display_model
         self.content_type = "image/jpeg"
         self._map_cache = map_cache
+        self._map_refresh_task: asyncio.Task[bytes | None] | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Warm an enabled map camera without delaying entity setup."""
+        await super().async_added_to_hass()
+        if self._prewarm_map_image and self.available:
+            self._start_map_refresh()
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Cancel a private warm-up task when the entity is removed."""
+        task = self._map_refresh_task
+        if task is not None and not task.done():
+            task.cancel()
+        await super().async_will_remove_from_hass()
 
     @property
     def available(self) -> bool:
@@ -131,18 +147,42 @@ class DreameLawnMowerMapCamera(
         return await self._async_get_map_image()
 
     async def _async_get_map_image(self) -> bytes | None:
-        """Return a cached map image or refresh it on demand."""
-        if self._map_cache.last_image is not None and self._map_cache.is_fresh():
+        """Return cached bytes immediately and refresh stale maps in the background."""
+        if self._map_cache.last_image is not None:
+            if not self._map_cache.is_fresh():
+                self._start_map_refresh()
             return self._map_cache.last_image
 
+        return await asyncio.shield(self._start_map_refresh())
+
+    def _start_map_refresh(self) -> asyncio.Task[bytes | None]:
+        """Start or reuse the entity's in-flight map render."""
+        task = self._map_refresh_task
+        if task is not None and not task.done():
+            return task
+        task = self.hass.async_create_task(self._async_refresh_and_render_map_image())
+        self._map_refresh_task = task
+        task.add_done_callback(self._map_refresh_finished)
+        return task
+
+    def _map_refresh_finished(self, task: asyncio.Task[bytes | None]) -> None:
+        """Forget the completed refresh without clearing its cached result."""
+        if self._map_refresh_task is task:
+            self._map_refresh_task = None
+
+    async def _async_refresh_and_render_map_image(self) -> bytes | None:
+        """Refresh the source view and atomically replace rendered JPEG bytes."""
         view = await self._async_refresh_map_view()
         if view.image_png is not None:
+            if self._map_cache.image_matches_source(view.image_png):
+                self._map_cache.last_error = None
+                return self._map_cache.last_image
             try:
                 image = await self.hass.async_add_executor_job(
                     png_bytes_to_jpeg,
                     view.image_png,
                 )
-                self._map_cache.store_image(image)
+                self._map_cache.store_image(image, source_image=view.image_png)
                 self._map_cache.last_error = None
                 self.async_write_ha_state()
                 return image
@@ -228,6 +268,7 @@ class DreameLawnMowerMapDataCamera(DreameLawnMowerMapCamera):
     _attr_name = "Map Diagnostics"
     _attr_icon = "mdi:code-json"
     _requires_map_capability = False
+    _prewarm_map_image = False
 
     def __init__(
         self,
@@ -310,6 +351,7 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
     _attr_name = "All Maps"
     _attr_icon = "mdi:map-multiple-outline"
     _requires_map_capability = False
+    _prewarm_map_image = False
 
     def __init__(
         self,

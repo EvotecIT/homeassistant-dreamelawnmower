@@ -37,6 +37,7 @@ from .dreame_lawn_mower_client.models import (
     DreameLawnMowerStatusBlob,
     display_name_for_model,
 )
+from .runtime_cache import DreameLawnMowerRuntimeTelemetryCache
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -105,6 +106,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         self.selected_spot_id: int | None = None
         self.bluetooth_connected: bool | None = None
         self.runtime_status_blob: DreameLawnMowerStatusBlob | None = None
+        self.runtime_telemetry_cache = DreameLawnMowerRuntimeTelemetryCache()
         self.last_batch_device_data_probe_result: dict[str, Any] | None = None
         self.last_preference_probe_result: dict[str, Any] | None = None
         self.last_preference_write_result: dict[str, Any] | None = None
@@ -141,6 +143,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
                 refresh=False,
                 include_cloud=True,
             )
+            self.runtime_telemetry_cache.update(self.runtime_status_blob)
             self.client.update_runtime_live_tracking(
                 self.runtime_status_blob,
                 active=_runtime_tracking_active(snapshot),
