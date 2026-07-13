@@ -345,6 +345,12 @@ class DreameLawnMowerSensor(DreameLawnMowerEntity, SensorEntity):
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
         self._attr_icon = description.icon
         self._attr_entity_category = description.entity_category
+        self._attr_entity_registry_enabled_default = (
+            description.entity_registry_enabled_default
+        )
+        self._attr_entity_registry_visible_default = (
+            description.entity_registry_visible_default
+        )
 
     @property
     def native_value(self) -> Any:

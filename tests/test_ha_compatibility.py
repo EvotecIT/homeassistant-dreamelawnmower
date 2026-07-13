@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+from types import SimpleNamespace
 from typing import Any
 
 from homeassistant.const import Platform
@@ -58,6 +59,7 @@ from custom_components.dreame_lawn_mower.sensor import (
     DreameLawnMowerRuntimeHeadingSensor,
     DreameLawnMowerRuntimePositionXSensor,
     DreameLawnMowerRuntimePositionYSensor,
+    DreameLawnMowerSensor,
     DreameLawnMowerWeatherProtectionStatusSensor,
     DreameSensorDescription,
     app_map_object_attributes,
@@ -99,6 +101,26 @@ def test_sensor_description_exposes_ha_compat_fields() -> None:
     assert description.state_class is None
     assert description.last_reset is None
     assert description.options is None
+
+
+def test_sensor_applies_description_registry_defaults() -> None:
+    description = DreameSensorDescription(
+        key="hidden_test",
+        name="Hidden Test",
+        value_fn=lambda _: None,
+        entity_registry_enabled_default=False,
+        entity_registry_visible_default=False,
+    )
+    coordinator = SimpleNamespace(
+        client=SimpleNamespace(
+            descriptor=SimpleNamespace(unique_id="mower-1"),
+        )
+    )
+
+    entity = DreameLawnMowerSensor(coordinator, description)
+
+    assert entity._attr_entity_registry_enabled_default is False
+    assert entity._attr_entity_registry_visible_default is False
 
 
 def test_binary_sensor_description_exposes_ha_compat_fields() -> None:

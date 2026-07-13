@@ -557,7 +557,11 @@ class DreameLawnMowerVideoCamera(
                     lan_inputs = self._lan_cache.inputs
 
             if lan_inputs is not None:
-                lan_source = await self._async_try_lan_stream(runtime, lan_inputs)
+                try:
+                    lan_source = await self._async_try_lan_stream(runtime, lan_inputs)
+                except DreameLawnMowerVideoRuntimeError as err:
+                    self._set_stream_error(str(err))
+                    return None
                 if lan_source is not None:
                     return lan_source
                 if (
@@ -584,10 +588,14 @@ class DreameLawnMowerVideoCamera(
                         )
                     else:
                         if cloud_inputs.lan_identity_ready:
-                            lan_source = await self._async_try_lan_stream(
-                                runtime,
-                                cloud_inputs,
-                            )
+                            try:
+                                lan_source = await self._async_try_lan_stream(
+                                    runtime,
+                                    cloud_inputs,
+                                )
+                            except DreameLawnMowerVideoRuntimeError as err:
+                                self._set_stream_error(str(err))
+                                return None
                             if lan_source is not None:
                                 return lan_source
                             self._last_lan_error = (
@@ -778,7 +786,7 @@ class DreameLawnMowerVideoCamera(
                 "Qualified same-LAN probe session could not stop before "
                 "playback handoff."
             )
-            return None
+            raise DreameLawnMowerVideoRuntimeError(self._last_lan_error)
         session = None
         try:
             session = await self._async_start_lan_runtime_session(runtime, inputs)

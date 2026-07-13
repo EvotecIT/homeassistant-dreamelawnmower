@@ -10,6 +10,8 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 try:
     import turbojpeg  # noqa: F401
 except ModuleNotFoundError:
@@ -45,6 +47,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.stream_health 
     DreameLawnMowerStreamUrlProbeResult,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.video_runtime import (
+    DreameLawnMowerVideoRuntimeError,
     DreameLawnMowerXp2pLiveStreamSession,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.xp2p_config import (
@@ -1558,8 +1561,8 @@ def test_video_camera_cloud_handoff_cancellation_disables_video() -> None:
     assert asyncio.run(_run()) == ([True, False], 1, 1, True)
 
 
-def test_video_camera_lan_handoff_aborts_when_probe_stop_fails() -> None:
-    async def _run() -> tuple[str | None, int, int, str | None]:
+def test_video_camera_lan_handoff_raises_when_probe_stop_fails() -> None:
+    async def _run() -> tuple[int, int, str | None]:
         entity = _uninitialized_entity()
         inputs = DreameLawnMowerCameraStreamRuntimeInputs(
             source="lan_video_cache",
@@ -1610,14 +1613,65 @@ def test_video_camera_lan_handoff_aborts_when_probe_stop_fails() -> None:
             "probe_stream_health_and_route",
             return_value=health,
         ):
-            source = await entity._async_try_lan_stream(runtime, inputs)
-        return source, runtime.starts, runtime.stops, entity._last_lan_error
+            with pytest.raises(DreameLawnMowerVideoRuntimeError):
+                await entity._async_try_lan_stream(runtime, inputs)
+        return runtime.starts, runtime.stops, entity._last_lan_error
 
-    source, starts, stops, error = asyncio.run(_run())
+    starts, stops, error = asyncio.run(_run())
 
-    assert source is None
     assert starts == 1
     assert stops == 1
+    assert error == (
+        "Qualified same-LAN probe session could not stop before playback handoff."
+    )
+
+
+def test_video_camera_lan_probe_stop_failure_aborts_auto_fallback() -> None:
+    async def _run() -> tuple[str | None, str | None]:
+        entity = _uninitialized_entity(
+            snapshot=SimpleNamespace(available=True, raw_attributes={})
+        )
+        entity._entry.options[CONF_VIDEO_TRANSPORT] = VIDEO_TRANSPORT_AUTO
+        entity._prepared_runtime = object()
+        entity._runtime_preparation_error = None
+        entity._last_error = None
+        entity._attr_is_streaming = False
+        entity.async_write_ha_state = lambda: None
+        entity._lan_cache = SimpleNamespace(
+            inputs=DreameLawnMowerCameraStreamRuntimeInputs(
+                source="lan_video_cache",
+                did="did-1",
+                product_id="product-1",
+                device_name="device-1",
+            ),
+            endpoint=object(),
+        )
+
+        class _Client:
+            async def async_get_camera_stream_runtime_inputs(self) -> object:
+                raise AssertionError("Stop failure must not refresh LAN or use cloud")
+
+            async def async_set_camera_stream_enabled(self, _enabled: bool) -> None:
+                raise AssertionError("Stop failure must not enable cloud video")
+
+        entity.coordinator.client = _Client()
+
+        async def _failed_lan_start(
+            _runtime: object,
+            _inputs: object,
+        ) -> str | None:
+            raise DreameLawnMowerVideoRuntimeError(
+                "Qualified same-LAN probe session could not stop before "
+                "playback handoff."
+            )
+
+        entity._async_try_lan_stream = _failed_lan_start
+        source = await entity._async_start_stream()
+        return source, entity._last_error
+
+    source, error = asyncio.run(_run())
+
+    assert source is None
     assert error == (
         "Qualified same-LAN probe session could not stop before playback handoff."
     )
