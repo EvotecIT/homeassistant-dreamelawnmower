@@ -64,6 +64,7 @@ from .video_session_lifecycle import DreameLawnMowerHaStreamIdleMonitor
 
 _LOGGER = logging.getLogger(__name__)
 _HA_STREAM_START_TIMEOUT = DEFAULT_XP2P_HOST_STARTUP_TIMEOUT + 30.0
+_HA_PLAYBACK_VERIFY_TIMEOUT = 15.0
 _SNAPSHOT_STREAM_START_TIMEOUT = 15.0
 _SNAPSHOT_IMAGE_TIMEOUT = 15.0
 
@@ -111,6 +112,9 @@ class DreameLawnMowerVideoCamera(
         self._prepared_runtime: _DreameVideoRuntime | None = None
         self._runtime_prepare_task: asyncio.Task[None] | None = None
         self._session: DreameLawnMowerXp2pLiveStreamSession | None = None
+        self._unverified_playback_session: (
+            DreameLawnMowerXp2pLiveStreamSession | None
+        ) = None
         self._stream_lock = asyncio.Lock()
         self._snapshot_lock = asyncio.Lock()
         self._stream_idle_monitor = DreameLawnMowerHaStreamIdleMonitor(
@@ -344,19 +348,55 @@ class DreameLawnMowerVideoCamera(
                     ha_stream.set_update_callback(self.async_write_ha_state)
                     self.stream = ha_stream
                     self._stream_idle_monitor.schedule(ha_stream, session)
-                    return ha_stream
+
+                if getattr(self, "_unverified_playback_session", None) is session:
+                    if not await self._async_verify_playback_stream(ha_stream, session):
+                        return None
+                return ha_stream
             except BaseException:
                 if owns_session and session is not None:
                     await self._async_cleanup_failed_stream_setup(session)
                 raise
 
+    async def _async_verify_playback_stream(
+        self,
+        ha_stream: Any,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+    ) -> bool:
+        """Verify the adopted session through HA's sole stream consumer."""
+        try:
+            async with asyncio.timeout(_HA_PLAYBACK_VERIFY_TIMEOUT):
+                image = await ha_stream.async_get_image(wait_for_next_keyframe=True)
+            if image is None:
+                raise DreameLawnMowerVideoRuntimeError(
+                    "Home Assistant did not decode a frame from the playback session."
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:  # noqa: BLE001 - expose a clean camera miss.
+            await self._async_cleanup_failed_stream_setup(session)
+            self._set_stream_error(
+                "Qualified XP2P video could not verify its playback session: "
+                f"{err}"
+            )
+            return False
+
+        async with self._stream_lock:
+            if self.stream is not ha_stream or self._session is not session:
+                return False
+            self._unverified_playback_session = None
+            if getattr(self, "_last_stream_health", None) is not None:
+                self._last_stream_health["playback_session_verified"] = True
+            self._last_image = image
+        return True
+
     async def _async_cleanup_failed_stream_setup(
         self,
         session: DreameLawnMowerXp2pLiveStreamSession,
     ) -> None:
-        """Stop a session started for an HA stream that was never adopted."""
+        """Stop a session whose HA stream setup or verification failed."""
         async with self._stream_lock:
-            if self._session is session and self.stream is None:
+            if self._session is session:
                 await self._async_stop_active_session()
 
     @staticmethod
@@ -429,8 +469,12 @@ class DreameLawnMowerVideoCamera(
     async def _async_stop_snapshot_stream(self, ha_stream: Any) -> None:
         """Stop an HA stream created only to serve one still image."""
         async with self._stream_lock:
-            if self.stream is ha_stream:
-                await self._async_stop_active_session()
+            if self.stream is not ha_stream:
+                return
+            outputs = getattr(ha_stream, "outputs", None)
+            if callable(outputs) and outputs():
+                return
+            await self._async_stop_active_session()
 
     async def _async_start_stream(self) -> str | None:
         """Start one serialized XP2P stream session."""
@@ -853,7 +897,11 @@ class DreameLawnMowerVideoCamera(
         """Adopt one health-checked session as the active HA camera source."""
         self._runtime = runtime
         self._session = session
-        self._last_stream_health = stream_health.as_dict()
+        self._unverified_playback_session = session
+        self._last_stream_health = {
+            **stream_health.as_dict(),
+            "playback_session_verified": False,
+        }
         self._last_error = None
         self._last_video_transport = transport
         self._attr_is_on = True
@@ -972,6 +1020,7 @@ class DreameLawnMowerVideoCamera(
         session = self._session
         self._runtime = None
         self._session = None
+        self._unverified_playback_session = None
         self._attr_is_streaming = False
         if ha_stream is not None:
             try:
