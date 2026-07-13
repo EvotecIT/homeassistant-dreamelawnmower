@@ -44,3 +44,32 @@ def test_zero_values_are_valid_session_metrics() -> None:
     blob = SimpleNamespace(candidate_runtime_area_progress_percent=0.0)
 
     assert runtime_blob_has_session_metrics(blob) is True
+
+
+def test_idle_zero_blob_does_not_replace_completed_session() -> None:
+    """An empty idle task block must not erase final mission coverage."""
+    completed = SimpleNamespace(
+        candidate_runtime_area_progress_percent=100.0,
+        candidate_runtime_current_area_sqm=412.53,
+        candidate_runtime_total_area_sqm=412.53,
+    )
+    idle = SimpleNamespace(
+        candidate_runtime_progress_percent=0.0,
+        candidate_runtime_area_progress_percent=0.0,
+        candidate_runtime_current_area_sqm=0.0,
+        candidate_runtime_total_area_sqm=0.0,
+    )
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+
+    assert cache.update(completed) is True
+    assert cache.update(idle, allow_zero=False) is False
+    assert cache.blob is completed
+
+
+def test_active_zero_blob_starts_a_new_session() -> None:
+    """Zero remains valid while an active mission is just beginning."""
+    idle = SimpleNamespace(candidate_runtime_area_progress_percent=0.0)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+
+    assert cache.update(idle, allow_zero=True) is True
+    assert cache.blob is idle

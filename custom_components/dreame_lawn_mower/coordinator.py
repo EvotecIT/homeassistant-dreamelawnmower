@@ -143,10 +143,14 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
                 refresh=False,
                 include_cloud=True,
             )
-            self.runtime_telemetry_cache.update(self.runtime_status_blob)
+            runtime_active = _runtime_tracking_active(snapshot)
+            self.runtime_telemetry_cache.update(
+                self.runtime_status_blob,
+                allow_zero=runtime_active,
+            )
             self.client.update_runtime_live_tracking(
                 self.runtime_status_blob,
-                active=_runtime_tracking_active(snapshot),
+                active=runtime_active,
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh runtime status blob: %s", err)

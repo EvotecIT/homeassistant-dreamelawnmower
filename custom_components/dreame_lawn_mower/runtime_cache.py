@@ -29,6 +29,16 @@ def runtime_blob_has_session_metrics(blob: Any) -> bool:
     )
 
 
+def runtime_blob_has_nonzero_session_metrics(blob: Any) -> bool:
+    """Return whether a runtime payload contains nonzero mission telemetry."""
+    if blob is None:
+        return False
+    return any(
+        isinstance(value := getattr(blob, field, None), int | float) and value != 0
+        for field in _SESSION_METRIC_FIELDS
+    )
+
+
 @dataclass(slots=True)
 class DreameLawnMowerRuntimeTelemetryCache:
     """Preserve the latest useful mission metrics after a session ends."""
@@ -37,9 +47,17 @@ class DreameLawnMowerRuntimeTelemetryCache:
     captured_at: datetime | None = None
     _metric_signature: tuple[Any, ...] | None = None
 
-    def update(self, blob: Any, *, now: datetime | None = None) -> bool:
+    def update(
+        self,
+        blob: Any,
+        *,
+        now: datetime | None = None,
+        allow_zero: bool = True,
+    ) -> bool:
         """Store a useful runtime payload without erasing it with empty polls."""
         if not runtime_blob_has_session_metrics(blob):
+            return False
+        if not allow_zero and not runtime_blob_has_nonzero_session_metrics(blob):
             return False
         signature = _session_metric_signature(blob)
         if signature == self._metric_signature:
