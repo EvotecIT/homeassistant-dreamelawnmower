@@ -6,7 +6,6 @@ import base64
 import hmac
 import requests
 import zlib
-import ssl
 import queue
 from threading import Thread, Timer
 from time import sleep
@@ -20,6 +19,7 @@ from miio.miioprotocol import MiIOProtocol
 
 from .exceptions import DeviceException
 from .const import DREAME_STRINGS, MOVA_STRINGS
+from .mqtt_tls import create_cloud_mqtt_ssl_context
 
 _LOGGER = logging.getLogger(__name__)
 _TX_VIDEO_API_PATH = "/dreame-third-video/tx/"
@@ -267,7 +267,9 @@ class DreameMowerDreameHomeCloudProtocol:
                             self._client.on_disconnect = DreameMowerDreameHomeCloudProtocol._on_client_disconnect
                             self._client.on_message = DreameMowerDreameHomeCloudProtocol._on_client_message
                             self._client.reconnect_delay_set(1, 15)
-                            self._client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
+                            self._client.tls_set_context(
+                                create_cloud_mqtt_ssl_context()
+                            )
                             self._client.tls_insecure_set(False)
                             self._set_client_key()
                             self._client.connect(host[0], int(host[1]), 50)
