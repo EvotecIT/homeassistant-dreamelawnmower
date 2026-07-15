@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import ssl
 from dataclasses import replace
+from hashlib import sha256
+from importlib.resources import files
 from types import SimpleNamespace
 
-from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import protocol
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    mqtt_tls,
+    protocol,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import (
     _normalize_cloud_firmware_check,
 )
@@ -161,12 +166,12 @@ def test_cloud_presence_throttles_failed_refresh_attempt(monkeypatch) -> None:
     assert client._cloud_device_info_refreshed_at == 100.0
 
 
-def test_cloud_mqtt_client_requires_verified_tls(monkeypatch) -> None:
+def test_cloud_mqtt_client_trusts_vendor_ca_with_verified_tls(monkeypatch) -> None:
     mqtt_clients = []
 
     class _MqttClient:
         def __init__(self, *args, **kwargs) -> None:
-            self.tls_set_kwargs = None
+            self.tls_context = None
             self.tls_insecure = None
             self.connected_to = None
             mqtt_clients.append(self)
@@ -174,8 +179,8 @@ def test_cloud_mqtt_client_requires_verified_tls(monkeypatch) -> None:
         def reconnect_delay_set(self, *args) -> None:
             pass
 
-        def tls_set(self, **kwargs) -> None:
-            self.tls_set_kwargs = kwargs
+        def tls_set_context(self, context) -> None:
+            self.tls_context = context
 
         def tls_insecure_set(self, value) -> None:
             self.tls_insecure = value
@@ -214,7 +219,21 @@ def test_cloud_mqtt_client_requires_verified_tls(monkeypatch) -> None:
 
     assert result == {"did": "device-1"}
     assert len(mqtt_clients) == 1
-    assert mqtt_clients[0].tls_set_kwargs == {"cert_reqs": ssl.CERT_REQUIRED}
+    context = mqtt_clients[0].tls_context
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+    assert not context.verify_flags & ssl.VERIFY_X509_STRICT
+
+    vendor_root_pem = (
+        files(mqtt_tls.__package__)
+        .joinpath("certs", "dreame_mqtt_root_ca.pem")
+        .read_text(encoding="ascii")
+    )
+    vendor_root_der = ssl.PEM_cert_to_DER_cert(vendor_root_pem)
+    assert sha256(vendor_root_der).hexdigest() == (
+        "6db9ea84c7e4c9aec692cd540ff52381f5e37dae47df8ebeb948a4461aeae425"
+    )
+    assert vendor_root_der in context.get_ca_certs(binary_form=True)
     assert mqtt_clients[0].tls_insecure is False
     assert mqtt_clients[0].connected_to == ("mqtt.example.invalid", 8883, 50)
 
