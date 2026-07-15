@@ -90,6 +90,13 @@ from .mowing_preferences import (
     normalize_mowing_preference_mode,
     summarize_mowing_preference_info,
 )
+from .mowing_tasks import (
+    MowingTaskResponseError,
+    build_edge_mowing_request,
+    build_spot_mowing_request,
+    build_zone_mowing_request,
+    ensure_mowing_task_succeeded,
+)
 from .schedule import (
     EMPTY_SCHEDULE_VERSION,
     SCHEDULE_CHUNK_SIZE,
@@ -371,31 +378,23 @@ class DreameLawnMowerClient:
         """Return to base while preserving a resumable mowing session."""
         await self._async_call_device_method("dock")
 
-    async def async_clean_segments(self, segment_ids: Sequence[int]) -> Any:
-        """Start segment or zone mowing for explicit map area ids."""
-        return await asyncio.to_thread(self._sync_clean_segments, list(segment_ids))
+    async def async_start_zone_mowing(self, zone_ids: Sequence[int]) -> Any:
+        """Start mower-native zone mowing for explicit map area ids."""
+        return await asyncio.to_thread(self._sync_start_zone_mowing, list(zone_ids))
 
     async def async_start_edge_mowing(
         self,
         contour_ids: Sequence[Sequence[int]],
     ) -> Any:
         """Start edge mowing for one or more contour id pairs."""
-        normalized = [
-            [int(contour_id[0]), int(contour_id[1])]
-            for contour_id in contour_ids
-            if len(contour_id) >= 2
-        ]
-        return await asyncio.to_thread(self._sync_start_edge_mowing, normalized)
+        return await asyncio.to_thread(
+            self._sync_start_edge_mowing,
+            [list(contour_id) for contour_id in contour_ids],
+        )
 
-    async def async_clean_spots(
-        self,
-        points: Sequence[tuple[int, int] | list[int]],
-    ) -> Any:
-        """Start spot mowing for one or more center points."""
-        normalized = [
-            [int(point[0]), int(point[1])] for point in points if len(point) >= 2
-        ]
-        return await asyncio.to_thread(self._sync_clean_spots, normalized)
+    async def async_start_spot_mowing(self, spot_ids: Sequence[int]) -> Any:
+        """Start mower-native spot mowing for explicit saved spot area ids."""
+        return await asyncio.to_thread(self._sync_start_spot_mowing, list(spot_ids))
 
     async def async_switch_current_map(self, map_index: int) -> Any:
         """Switch the active mower map through the app task path."""
@@ -1534,44 +1533,32 @@ class DreameLawnMowerClient:
 
         return payload
 
-    def _sync_clean_segments(self, segment_ids: Sequence[int]) -> Any:
-        """Start segment or zone mowing for the provided area ids."""
-        if not segment_ids:
-            raise ValueError("At least one segment id is required.")
-        device = self._ensure_device()
+    def _sync_start_zone_mowing(self, zone_ids: Sequence[int]) -> Any:
+        """Start mower-native zone mowing for the provided area ids."""
         try:
-            return device.clean_segment([int(segment_id) for segment_id in segment_ids])
-        except (DeviceException, InvalidActionException, ValueError) as err:
+            response = self._sync_call_app_action(build_zone_mowing_request(zone_ids))
+            return ensure_mowing_task_succeeded(response, task_name="zone mowing")
+        except (DeviceException, MowingTaskResponseError) as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
 
     def _sync_start_edge_mowing(self, contour_ids: Sequence[Sequence[int]]) -> Any:
         """Start edge mowing for the provided contour id pairs."""
-        normalized = _normalize_contour_ids(contour_ids)
-        if not normalized:
-            raise ValueError("At least one contour id pair is required.")
         try:
-            return self._sync_call_app_action(
-                {
-                    "m": "a",
-                    "p": 0,
-                    "o": 101,
-                    "d": {"edge": normalized},
-                }
+            response = self._sync_call_app_action(
+                build_edge_mowing_request(contour_ids)
             )
-        except DeviceException as err:
+            return ensure_mowing_task_succeeded(response, task_name="edge mowing")
+        except (DeviceException, MowingTaskResponseError) as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
 
-    def _sync_clean_spots(self, points: Sequence[Sequence[int]]) -> Any:
-        """Start spot mowing for the provided center points."""
-        if not points:
-            raise ValueError("At least one spot point is required.")
-        device = self._ensure_device()
+    def _sync_start_spot_mowing(self, spot_ids: Sequence[int]) -> Any:
+        """Start mower-native spot mowing for the provided saved area ids."""
         try:
-            return device.clean_spot(
-                [[int(point[0]), int(point[1])] for point in points],
-                1,
+            response = self._sync_call_app_action(
+                build_spot_mowing_request(spot_ids)
             )
-        except (DeviceException, InvalidActionException, ValueError) as err:
+            return ensure_mowing_task_succeeded(response, task_name="spot mowing")
+        except (DeviceException, MowingTaskResponseError) as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
 
     def _sync_switch_current_map(self, map_index: int) -> Any:
@@ -5848,17 +5835,6 @@ def _map_view_has_live_path(map_view: DreameLawnMowerMapView) -> bool:
         return False
 
     return bool(details.get("has_live_path"))
-
-
-def _normalize_contour_ids(
-    contour_ids: Sequence[Sequence[int]],
-) -> list[list[int]]:
-    result: list[list[int]] = []
-    for contour_id in contour_ids:
-        if len(contour_id) < 2:
-            continue
-        result.append([int(contour_id[0]), int(contour_id[1])])
-    return result
 
 
 def _json_safe(value: Any, *, max_depth: int = 4) -> Any:

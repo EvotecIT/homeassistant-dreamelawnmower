@@ -213,8 +213,7 @@ SENSORS = [
         name="Mowing Mode",
         value_fn=lambda snapshot: snapshot.mowing_mode_name,
         exists_fn=lambda snapshot: (
-            bool(snapshot.mowing_mode_name)
-            and snapshot.mowing_mode_name != "unknown"
+            bool(snapshot.mowing_mode_name) and snapshot.mowing_mode_name != "unknown"
         ),
         icon="mdi:grass",
         entity_registry_enabled_default=False,
@@ -2787,6 +2786,7 @@ def _selected_target_summary(coordinator: Any) -> dict[str, Any]:
         entries = current_zone_entries(
             getattr(coordinator, "batch_device_data", None),
             getattr(coordinator, "app_maps", None),
+            getattr(coordinator, "vector_map_details", None),
             selected_map_index=selected_map_index,
         )
         selected_zone_id = getattr(coordinator, "selected_zone_id", None)
@@ -2806,7 +2806,7 @@ def _selected_target_summary(coordinator: Any) -> dict[str, Any]:
             return {
                 "target_type": "zone",
                 "target_id": fallback,
-                "target_label": zone_label(fallback),
+                "target_label": str(entries[0]["label"]),
                 "available_target_count": len(entries),
                 "selected_map_index": selected_map_index,
                 "selected_map_label": selected_map,
@@ -2952,6 +2952,7 @@ def _selected_zone_preference_summary(coordinator: Any) -> dict[str, Any]:
     zone_entries = current_zone_entries(
         getattr(coordinator, "batch_device_data", None),
         getattr(coordinator, "app_maps", None),
+        getattr(coordinator, "vector_map_details", None),
         selected_map_index=getattr(coordinator, "selected_map_index", None),
     )
     selected_zone_id = getattr(coordinator, "selected_zone_id", None)

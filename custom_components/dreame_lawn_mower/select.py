@@ -212,7 +212,7 @@ class DreameLawnMowerEdgeSelect(DreameLawnMowerSelectEntity):
         return bool(
             self.coordinator.data is not None
             and current_contour_entries(
-                self.coordinator.vector_map_details,
+                getattr(self.coordinator, "vector_map_details", None),
                 self.coordinator.app_maps,
                 self.coordinator.batch_device_data,
                 selected_map_index=self.coordinator.selected_map_index,
@@ -225,7 +225,7 @@ class DreameLawnMowerEdgeSelect(DreameLawnMowerSelectEntity):
         return [
             entry["label"]
             for entry in current_contour_entries(
-                self.coordinator.vector_map_details,
+                getattr(self.coordinator, "vector_map_details", None),
                 self.coordinator.app_maps,
                 self.coordinator.batch_device_data,
                 selected_map_index=self.coordinator.selected_map_index,
@@ -238,7 +238,7 @@ class DreameLawnMowerEdgeSelect(DreameLawnMowerSelectEntity):
         contour_id = self.coordinator.selected_contour_id
         if contour_id is None:
             options = current_contour_entries(
-                self.coordinator.vector_map_details,
+                getattr(self.coordinator, "vector_map_details", None),
                 self.coordinator.app_maps,
                 self.coordinator.batch_device_data,
                 selected_map_index=self.coordinator.selected_map_index,
@@ -249,7 +249,7 @@ class DreameLawnMowerEdgeSelect(DreameLawnMowerSelectEntity):
     async def async_select_option(self, option: str) -> None:
         """Persist the selected contour in coordinator state."""
         for entry in current_contour_entries(
-            self.coordinator.vector_map_details,
+            getattr(self.coordinator, "vector_map_details", None),
             self.coordinator.app_maps,
             self.coordinator.batch_device_data,
             selected_map_index=self.coordinator.selected_map_index,
@@ -280,6 +280,7 @@ class DreameLawnMowerZoneSelect(DreameLawnMowerSelectEntity):
             and current_zone_entries(
                 self.coordinator.batch_device_data,
                 self.coordinator.app_maps,
+                self.coordinator.vector_map_details,
                 selected_map_index=self.coordinator.selected_map_index,
             )
         )
@@ -292,6 +293,7 @@ class DreameLawnMowerZoneSelect(DreameLawnMowerSelectEntity):
             for entry in current_zone_entries(
                 self.coordinator.batch_device_data,
                 self.coordinator.app_maps,
+                self.coordinator.vector_map_details,
                 selected_map_index=self.coordinator.selected_map_index,
             )
         ]
@@ -304,9 +306,18 @@ class DreameLawnMowerZoneSelect(DreameLawnMowerSelectEntity):
             options = current_zone_entries(
                 self.coordinator.batch_device_data,
                 self.coordinator.app_maps,
+                self.coordinator.vector_map_details,
                 selected_map_index=self.coordinator.selected_map_index,
             )
             return options[0]["label"] if options else None
+        for entry in current_zone_entries(
+            self.coordinator.batch_device_data,
+            self.coordinator.app_maps,
+            getattr(self.coordinator, "vector_map_details", None),
+            selected_map_index=self.coordinator.selected_map_index,
+        ):
+            if entry["area_id"] == zone_id:
+                return str(entry["label"])
         return zone_label(zone_id)
 
     async def async_select_option(self, option: str) -> None:
@@ -314,6 +325,7 @@ class DreameLawnMowerZoneSelect(DreameLawnMowerSelectEntity):
         for entry in current_zone_entries(
             self.coordinator.batch_device_data,
             self.coordinator.app_maps,
+            self.coordinator.vector_map_details,
             selected_map_index=self.coordinator.selected_map_index,
         ):
             if entry["label"] == option:

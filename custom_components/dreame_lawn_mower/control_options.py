@@ -78,6 +78,7 @@ def current_app_map_entry(
 def current_zone_entries(
     batch_device_data: Mapping[str, Any] | None,
     app_maps: Mapping[str, Any] | None = None,
+    vector_map_details: Mapping[str, Any] | None = None,
     selected_map_index: int | None = None,
 ) -> list[dict[str, Any]]:
     """Return selectable zone entries for the current map."""
@@ -86,6 +87,7 @@ def current_zone_entries(
         batch_device_data,
         selected_map_index=selected_map_index,
     )
+    preferences_by_id: dict[int, dict[str, Any]] = {}
     for entry in _batch_preference_maps(batch_device_data):
         if entry.get("idx") != current_idx:
             continue
@@ -94,8 +96,7 @@ def current_zone_entries(
             preferences,
             str | bytes | bytearray,
         ):
-            return []
-        zones: list[dict[str, Any]] = []
+            break
         for item in preferences:
             if not isinstance(item, Mapping):
                 continue
@@ -103,18 +104,89 @@ def current_zone_entries(
             if not isinstance(area_id, int):
                 continue
             # Area 0 is the whole-lawn/global entry; 200+ looks like edge metadata.
-            if area_id <= 0 or area_id >= 200:
-                continue
-            zones.append(
-                {
-                    "area_id": area_id,
-                    "label": f"Zone #{area_id}",
-                    "map_index": current_idx,
-                    "preference": dict(item),
-                }
-            )
-        return zones
-    return []
+            if 0 < area_id < 200:
+                preferences_by_id[area_id] = dict(item)
+        break
+
+    vector_zones = _current_vector_zones(vector_map_details, current_idx)
+    zone_ids = list(preferences_by_id)
+    zone_ids.extend(zone_id for zone_id in vector_zones if zone_id not in zone_ids)
+
+    return [
+        {
+            "area_id": area_id,
+            "label": _zone_display_label(area_id, vector_zones.get(area_id)),
+            "map_index": current_idx,
+            "preference": preferences_by_id.get(area_id, {}),
+        }
+        for area_id in zone_ids
+    ]
+
+
+def _current_vector_zones(
+    vector_map_details: Mapping[str, Any] | None,
+    map_index: int,
+) -> dict[int, str | None]:
+    """Return zone names keyed by id without losing unnamed entries."""
+    if not isinstance(vector_map_details, Mapping):
+        return {}
+
+    candidates: list[Mapping[str, Any]] = []
+    maps = vector_map_details.get("maps")
+    if isinstance(maps, Sequence) and not isinstance(
+        maps,
+        str | bytes | bytearray,
+    ):
+        candidates.extend(
+            entry
+            for entry in maps
+            if isinstance(entry, Mapping) and entry.get("map_index") == map_index
+        )
+    if vector_map_details.get("map_index") == map_index:
+        candidates.append(vector_map_details)
+
+    for candidate in candidates:
+        zones = candidate.get("zones")
+        if isinstance(zones, Sequence) and not isinstance(
+            zones,
+            str | bytes | bytearray,
+        ):
+            result: dict[int, str | None] = {}
+            for zone in zones:
+                if not isinstance(zone, Mapping):
+                    continue
+                zone_id = zone.get("zone_id")
+                if not isinstance(zone_id, int) or zone_id <= 0:
+                    continue
+                name = zone.get("name")
+                result[zone_id] = (
+                    name.strip() if isinstance(name, str) and name.strip() else None
+                )
+            if result:
+                return result
+
+        zone_ids = candidate.get("zone_ids")
+        zone_names = candidate.get("zone_names")
+        if (
+            isinstance(zone_ids, Sequence)
+            and not isinstance(zone_ids, str | bytes | bytearray)
+            and isinstance(zone_names, Sequence)
+            and not isinstance(zone_names, str | bytes | bytearray)
+            and len(zone_ids) == len(zone_names)
+        ):
+            return {
+                zone_id: name.strip()
+                if isinstance(name, str) and name.strip()
+                else None
+                for zone_id, name in zip(zone_ids, zone_names, strict=True)
+                if isinstance(zone_id, int) and zone_id > 0
+            }
+    return {}
+
+
+def _zone_display_label(zone_id: int, name: str | None) -> str:
+    """Return an unambiguous display label with a stable id fallback."""
+    return f"{name} (#{zone_id})" if name else f"Zone #{zone_id}"
 
 
 def current_contour_entries(
