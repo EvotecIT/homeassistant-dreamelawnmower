@@ -6,6 +6,7 @@ import json
 from io import BytesIO
 from types import SimpleNamespace
 
+import pytest
 from PIL import Image
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.vector_map import (
@@ -14,7 +15,10 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.vector_map imp
     vector_map_to_details,
     vector_map_to_summary,
 )
-from dreame_lawn_mower_client import DreameLawnMowerClient
+from dreame_lawn_mower_client import (
+    DreameLawnMowerClient,
+    DreameLawnMowerConnectionError,
+)
 from dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
 
 
@@ -323,6 +327,7 @@ def test_vector_map_details_report_live_path_counts() -> None:
     assert details["total_area"] == 10
     assert details["zone_count"] == 1
     assert details["zone_names"] == ["Front Yard"]
+    assert details["zones"] == [{"zone_id": 1, "name": "Front Yard"}]
     assert details["contour_count"] == 1
     assert details["contour_ids"] == [[1, 0]]
     assert details["available_map_count"] == 2
@@ -338,6 +343,7 @@ def test_vector_map_details_report_live_path_counts() -> None:
             "total_area": 10,
             "zone_ids": [1],
             "zone_names": ["Front Yard"],
+            "zones": [{"zone_id": 1, "name": "Front Yard"}],
             "spot_ids": [9],
             "contour_ids": [[1, 0]],
             "contour_count": 1,
@@ -356,6 +362,7 @@ def test_vector_map_details_report_live_path_counts() -> None:
             "total_area": None,
             "zone_ids": [2],
             "zone_names": ["Back Yard"],
+            "zones": [{"zone_id": 2, "name": "Back Yard"}],
             "spot_ids": [],
             "contour_ids": [[5, 0]],
             "contour_count": 1,
@@ -377,23 +384,40 @@ def test_vector_map_details_report_live_path_counts() -> None:
     assert details["has_live_path"] is True
 
 
-def test_client_edge_and_map_actions_use_expected_app_task_payloads() -> None:
+def test_client_mowing_and_map_actions_use_expected_app_task_payloads() -> None:
     client = _client()
     recorded_payloads: list[dict] = []
     client._sync_call_app_action = lambda payload, **kwargs: (
         recorded_payloads.append(  # type: ignore[method-assign]  # noqa: ARG005
             payload
         )
-        or {"ok": True}
+        or {"m": "r", "r": 0, "d": {}}
     )
 
-    assert client._sync_start_edge_mowing([[1, 0]]) == {"ok": True}
-    assert client._sync_switch_current_map(1) == {"ok": True}
+    success = {"m": "r", "r": 0, "d": {}}
+    assert client._sync_start_edge_mowing([[1, 0]]) == success
+    assert client._sync_start_zone_mowing([1, 3]) == success
+    assert client._sync_start_spot_mowing([9]) == success
+    assert client._sync_switch_current_map(1) == success
 
     assert recorded_payloads == [
         {"m": "a", "p": 0, "o": 101, "d": {"edge": [[1, 0]]}},
+        {"m": "a", "p": 0, "o": 102, "d": {"region": [1, 3]}},
+        {"m": "a", "p": 0, "o": 103, "d": {"area": [9]}},
         {"m": "a", "p": 0, "o": 200, "d": {"idx": 1}},
     ]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [None, {"m": "r", "r": 7, "d": {"reason": "busy"}}],
+)
+def test_client_zone_mowing_rejects_missing_or_failed_reply(response: object) -> None:
+    client = _client()
+    client._sync_call_app_action = lambda payload, **kwargs: response  # type: ignore[method-assign]  # noqa: ARG005
+
+    with pytest.raises(DreameLawnMowerConnectionError, match="zone mowing"):
+        client._sync_start_zone_mowing([1])
 
 
 def test_map_view_uses_batch_vector_map_when_app_map_fails() -> None:

@@ -121,6 +121,13 @@ from .mowing_preferences import (
     normalize_mowing_preference_mode,
     summarize_mowing_preference_info,
 )
+from .mowing_tasks import (
+    MowingTaskResponseError,
+    build_edge_mowing_request,
+    build_spot_mowing_request,
+    build_zone_mowing_request,
+    ensure_mowing_task_succeeded,
+)
 from .schedule import (
     EMPTY_SCHEDULE_VERSION,
     SCHEDULE_CHUNK_SIZE,
@@ -177,6 +184,7 @@ __all__ = [
     "DreameLawnMowerMapDiagnostics",
     "DreameLawnMowerMapSummary",
     "DreameLawnMowerMapView",
+    "MowingTaskResponseError",
     "DreameLawnMowerRemoteControlSupport",
     "DreameLawnMowerSnapshot",
     "DreameLawnMowerStatusBlob",
@@ -249,8 +257,11 @@ __all__ = [
     "build_cloud_property_summary",
     "build_map_probe_payload",
     "build_cms_set_request",
+    "build_edge_mowing_request",
     "build_schedule_enable_status_request",
     "build_schedule_upload_requests",
+    "build_spot_mowing_request",
+    "build_zone_mowing_request",
     "decode_batch_mowing_preferences",
     "decode_batch_ota_info",
     "decode_batch_schedule_payload",
@@ -265,6 +276,7 @@ __all__ = [
     "encode_schedule_payload_text",
     "encode_schedule_plans",
     "encode_schedule_week_payload",
+    "ensure_mowing_task_succeeded",
     "key_definition_label",
     "find_jadx_executable",
     "display_name_for_model",

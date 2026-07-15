@@ -402,6 +402,26 @@ the real active mower map, while zone, spot, and edge starts target explicit
 current-map ids rather than relying only on the generic Home Assistant
 `start_mowing` action.
 
+For example, this starts the saved zone with ID `1` on the mower's active map:
+
+```yaml
+action: dreame_lawn_mower.start_zone_mowing
+target:
+  entity_id: lawn_mower.a3_awd_pro_3500
+data:
+  zone_ids: [1]
+```
+
+Use `entity_id` when the value starts with `lawn_mower.`. A Home Assistant
+`device_id` is a separate device-registry identifier and must not contain an
+entity ID. The lawn mower entity exposes `available_zone_ids`, and zone selects
+use names saved in the Dreame app when vector-map metadata provides them. An
+unnamed zone retains the stable `Zone #<id>` fallback.
+
+Zone, spot, and edge actions are acknowledged by the mower before Home
+Assistant reports success. Unknown current-map IDs, map-scope mismatches, and
+device rejection responses are surfaced as failed actions.
+
 ## Troubleshooting
 
 Start with Home Assistant diagnostics:

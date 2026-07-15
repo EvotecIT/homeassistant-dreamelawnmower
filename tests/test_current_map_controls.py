@@ -167,6 +167,10 @@ def _vector_map_details() -> dict:
                 "map_id": 1,
                 "map_index": 0,
                 "map_name": "Front Lawn Map",
+                "zones": [
+                    {"zone_id": 1, "name": "Front Garden"},
+                    {"zone_id": 3, "name": None},
+                ],
                 "contour_ids": [[1, 0], [3, 0]],
                 "contour_count": 2,
                 "mow_path_count": 0,
@@ -178,6 +182,7 @@ def _vector_map_details() -> dict:
                 "map_id": 2,
                 "map_index": 1,
                 "map_name": "Back Lawn Map",
+                "zones": [{"zone_id": 5, "name": "Back Orchard"}],
                 "contour_ids": [[5, 0]],
                 "contour_count": 1,
                 "mow_path_count": 1,
@@ -304,6 +309,19 @@ def test_current_zone_entries_filter_global_and_edge_area_ids() -> None:
     ]
 
 
+def test_current_zone_entries_use_vector_names_by_id_with_safe_fallback() -> None:
+    entries = current_zone_entries(
+        _batch_device_data(),
+        _app_maps(),
+        _vector_map_details(),
+    )
+
+    assert [entry["label"] for entry in entries] == [
+        "Front Garden (#1)",
+        "Zone #3",
+    ]
+
+
 def test_current_spot_entries_expose_spot_ids_and_centers() -> None:
     entries = current_spot_entries(_app_maps(), _batch_device_data())
 
@@ -424,14 +442,15 @@ def test_zone_select_sets_zone_and_switches_action() -> None:
         data=SimpleNamespace(),
         batch_device_data=_batch_device_data(),
         app_maps=_app_maps(),
+        vector_map_details=_vector_map_details(),
         selected_map_index=None,
         selected_zone_id=None,
         selected_mowing_action="all_area",
         async_update_listeners=lambda: None,
     )
 
-    assert entity.options == ["Zone #1", "Zone #3"]
-    assert entity.current_option == "Zone #1"
+    assert entity.options == ["Front Garden (#1)", "Zone #3"]
+    assert entity.current_option == "Front Garden (#1)"
 
     asyncio.run(entity.async_select_option("Zone #3"))
 
@@ -503,14 +522,15 @@ def test_zone_select_uses_selected_map_scope() -> None:
         data=SimpleNamespace(),
         batch_device_data=_batch_device_data(),
         app_maps=_app_maps(current_map_index=0),
+        vector_map_details=_vector_map_details(),
         selected_map_index=1,
         selected_zone_id=None,
         selected_mowing_action="all_area",
         async_update_listeners=lambda: None,
     )
 
-    assert entity.options == ["Zone #5"]
-    assert entity.current_option == "Zone #5"
+    assert entity.options == ["Back Orchard (#5)"]
+    assert entity.current_option == "Back Orchard (#5)"
 
 
 def test_spot_select_uses_selected_map_scope() -> None:
@@ -585,7 +605,7 @@ def test_lawn_mower_attributes_include_current_vector_map_state() -> None:
     assert attributes["selected_zone_preference"] == {
         "map_index": 1,
         "area_id": 5,
-        "label": "Zone #5",
+        "label": "Back Orchard (#5)",
         "mode": 0,
         "mode_name": "global",
         "reported_version": 10,
@@ -650,8 +670,8 @@ def test_lawn_mower_attributes_fallback_to_vector_map_ids_for_names() -> None:
 def test_lawn_mower_start_uses_selected_edge() -> None:
     client = SimpleNamespace(
         async_start_edge_mowing=AsyncMock(),
-        async_clean_segments=AsyncMock(),
-        async_clean_spots=AsyncMock(),
+        async_start_zone_mowing=AsyncMock(),
+        async_start_spot_mowing=AsyncMock(),
         async_start_mowing=AsyncMock(),
     )
     entity = object.__new__(DreameLawnMower)
@@ -671,8 +691,8 @@ def test_lawn_mower_start_uses_selected_edge() -> None:
     asyncio.run(entity.async_start_mowing())
 
     client.async_start_edge_mowing.assert_awaited_once_with([[3, 0]])
-    client.async_clean_segments.assert_not_called()
-    client.async_clean_spots.assert_not_called()
+    client.async_start_zone_mowing.assert_not_called()
+    client.async_start_spot_mowing.assert_not_called()
     client.async_start_mowing.assert_not_called()
     entity.coordinator.async_request_refresh.assert_awaited_once()
 
@@ -684,12 +704,16 @@ def test_lawn_mower_start_edge_service_uses_explicit_contours() -> None:
     entity = object.__new__(DreameLawnMower)
     entity.coordinator = SimpleNamespace(
         client=client,
+        app_maps=_app_maps(),
+        batch_device_data=_batch_device_data(),
+        vector_map_details=_vector_map_details(),
+        selected_map_index=None,
         async_request_refresh=AsyncMock(),
     )
 
-    asyncio.run(entity.async_start_edge_mowing([[7, 1], ("9", "0")]))
+    asyncio.run(entity.async_start_edge_mowing([[1, 0], ("3", "0")]))
 
-    client.async_start_edge_mowing.assert_awaited_once_with([[7, 1], [9, 0]])
+    client.async_start_edge_mowing.assert_awaited_once_with([[1, 0], [3, 0]])
     entity.coordinator.async_request_refresh.assert_awaited_once()
 
 
@@ -707,6 +731,25 @@ def test_lawn_mower_start_edge_service_requires_valid_pairs() -> None:
         asyncio.run(entity.async_start_edge_mowing([[7]]))
 
     client.async_start_edge_mowing.assert_not_called()
+
+
+def test_lawn_mower_start_edge_service_rejects_unknown_active_map_contour() -> None:
+    client = SimpleNamespace(async_start_edge_mowing=AsyncMock())
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = SimpleNamespace(
+        client=client,
+        app_maps=_app_maps(),
+        batch_device_data=_batch_device_data(),
+        vector_map_details=_vector_map_details(),
+        selected_map_index=None,
+        async_request_refresh=AsyncMock(),
+    )
+
+    with pytest.raises(HomeAssistantError, match=r"Edge contour \(7, 1\)"):
+        asyncio.run(entity.async_start_edge_mowing([[7, 1]]))
+
+    client.async_start_edge_mowing.assert_not_called()
+    entity.coordinator.async_request_refresh.assert_not_awaited()
 
 
 def test_lawn_mower_switch_current_map_service_updates_scope_and_refreshes() -> None:
@@ -1108,8 +1151,8 @@ def test_lawn_mower_plan_map_preference_mode_update_blocks_unconfirmed_write() -
 
 def test_lawn_mower_start_uses_selected_zone() -> None:
     client = SimpleNamespace(
-        async_clean_segments=AsyncMock(),
-        async_clean_spots=AsyncMock(),
+        async_start_zone_mowing=AsyncMock(),
+        async_start_spot_mowing=AsyncMock(),
         async_start_mowing=AsyncMock(),
     )
     entity = object.__new__(DreameLawnMower)
@@ -1128,15 +1171,15 @@ def test_lawn_mower_start_uses_selected_zone() -> None:
 
     asyncio.run(entity.async_start_mowing())
 
-    client.async_clean_segments.assert_awaited_once_with([3])
+    client.async_start_zone_mowing.assert_awaited_once_with([3])
     client.async_start_mowing.assert_not_called()
     entity.coordinator.async_request_refresh.assert_awaited_once()
 
 
-def test_lawn_mower_start_uses_selected_spot_center() -> None:
+def test_lawn_mower_start_uses_selected_spot_area_id() -> None:
     client = SimpleNamespace(
-        async_clean_segments=AsyncMock(),
-        async_clean_spots=AsyncMock(),
+        async_start_zone_mowing=AsyncMock(),
+        async_start_spot_mowing=AsyncMock(),
         async_start_mowing=AsyncMock(),
     )
     entity = object.__new__(DreameLawnMower)
@@ -1155,7 +1198,7 @@ def test_lawn_mower_start_uses_selected_spot_center() -> None:
 
     asyncio.run(entity.async_start_mowing())
 
-    client.async_clean_spots.assert_awaited_once_with([(120, 120)])
+    client.async_start_spot_mowing.assert_awaited_once_with([2])
     client.async_start_mowing.assert_not_called()
     entity.coordinator.async_request_refresh.assert_awaited_once()
 
@@ -1163,8 +1206,8 @@ def test_lawn_mower_start_uses_selected_spot_center() -> None:
 def test_lawn_mower_start_zone_requires_available_zone() -> None:
     client = SimpleNamespace(
         async_start_edge_mowing=AsyncMock(),
-        async_clean_segments=AsyncMock(),
-        async_clean_spots=AsyncMock(),
+        async_start_zone_mowing=AsyncMock(),
+        async_start_spot_mowing=AsyncMock(),
         async_start_mowing=AsyncMock(),
     )
     entity = object.__new__(DreameLawnMower)
@@ -1175,7 +1218,7 @@ def test_lawn_mower_start_zone_requires_available_zone() -> None:
         selected_contour_id=None,
         selected_zone_id=None,
         selected_spot_id=None,
-        vector_map_details=_vector_map_details(),
+        vector_map_details={},
         batch_device_data={"batch_mowing_preferences": {"maps": []}},
         app_maps=_app_maps(),
         async_request_refresh=AsyncMock(),
@@ -1188,8 +1231,8 @@ def test_lawn_mower_start_zone_requires_available_zone() -> None:
 def test_lawn_mower_start_blocks_map_scope_mismatch() -> None:
     client = SimpleNamespace(
         async_start_edge_mowing=AsyncMock(),
-        async_clean_segments=AsyncMock(),
-        async_clean_spots=AsyncMock(),
+        async_start_zone_mowing=AsyncMock(),
+        async_start_spot_mowing=AsyncMock(),
         async_start_mowing=AsyncMock(),
     )
     entity = object.__new__(DreameLawnMower)
@@ -1212,4 +1255,59 @@ def test_lawn_mower_start_blocks_map_scope_mismatch() -> None:
     ):
         asyncio.run(entity.async_start_mowing())
 
-    client.async_clean_segments.assert_not_called()
+    client.async_start_zone_mowing.assert_not_called()
+
+
+def test_lawn_mower_zone_service_uses_validated_current_map_ids() -> None:
+    client = SimpleNamespace(async_start_zone_mowing=AsyncMock())
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = SimpleNamespace(
+        client=client,
+        selected_map_index=None,
+        vector_map_details=_vector_map_details(),
+        batch_device_data=_batch_device_data(),
+        app_maps=_app_maps(),
+        async_request_refresh=AsyncMock(),
+    )
+
+    asyncio.run(entity.async_start_zone_mowing([1, 3]))
+
+    client.async_start_zone_mowing.assert_awaited_once_with([1, 3])
+    entity.coordinator.async_request_refresh.assert_awaited_once()
+
+
+def test_lawn_mower_zone_service_rejects_unknown_active_map_id() -> None:
+    client = SimpleNamespace(async_start_zone_mowing=AsyncMock())
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = SimpleNamespace(
+        client=client,
+        selected_map_index=None,
+        vector_map_details=_vector_map_details(),
+        batch_device_data=_batch_device_data(),
+        app_maps=_app_maps(),
+        async_request_refresh=AsyncMock(),
+    )
+
+    with pytest.raises(HomeAssistantError, match="Zone #9 is not available"):
+        asyncio.run(entity.async_start_zone_mowing([9]))
+
+    client.async_start_zone_mowing.assert_not_called()
+    entity.coordinator.async_request_refresh.assert_not_awaited()
+
+
+def test_lawn_mower_spot_service_sends_saved_area_ids_not_coordinates() -> None:
+    client = SimpleNamespace(async_start_spot_mowing=AsyncMock())
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = SimpleNamespace(
+        client=client,
+        selected_map_index=None,
+        vector_map_details=_vector_map_details(),
+        batch_device_data=_batch_device_data(),
+        app_maps=_app_maps(),
+        async_request_refresh=AsyncMock(),
+    )
+
+    asyncio.run(entity.async_start_spot_mowing([2]))
+
+    client.async_start_spot_mowing.assert_awaited_once_with([2])
+    entity.coordinator.async_request_refresh.assert_awaited_once()

@@ -440,6 +440,10 @@ def vector_map_to_details(
         for zone in vector_map.zones
         if zone.name
     ]
+    zones = [
+        {"zone_id": zone.zone_id, "name": zone.name or None}
+        for zone in vector_map.zones
+    ]
     contour_ids = [list(contour.contour_id) for contour in vector_map.contours]
     available_maps = [
         {
@@ -463,6 +467,10 @@ def vector_map_to_details(
             "total_area": parsed_map.total_area or None,
             "zone_ids": [zone.zone_id for zone in parsed_map.zones],
             "zone_names": [zone.name for zone in parsed_map.zones if zone.name],
+            "zones": [
+                {"zone_id": zone.zone_id, "name": zone.name or None}
+                for zone in parsed_map.zones
+            ],
             "spot_ids": [spot.zone_id for spot in parsed_map.spot_areas],
             "contour_ids": [
                 list(contour.contour_id) for contour in parsed_map.contours
@@ -501,6 +509,7 @@ def vector_map_to_details(
         "total_area": vector_map.total_area or None,
         "zone_count": len(vector_map.zones),
         "zone_names": zone_names,
+        "zones": zones,
         "forbidden_area_count": len(vector_map.forbidden_areas),
         "spot_area_count": len(vector_map.spot_areas),
         "pathway_count": len(vector_map.paths),

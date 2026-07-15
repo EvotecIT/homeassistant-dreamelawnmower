@@ -38,7 +38,6 @@ from .control_options import (
     current_map_index,
     current_spot_entries,
     current_zone_entries,
-    find_spot_center,
     map_entries,
     mowing_action_label,
 )
@@ -195,6 +194,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         zone_entries = current_zone_entries(
             self.coordinator.batch_device_data,
             self.coordinator.app_maps,
+            getattr(self.coordinator, "vector_map_details", None),
             selected_map_index=self.coordinator.selected_map_index,
         )
         contour_entries = current_contour_entries(
@@ -398,12 +398,13 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             zone_entries = current_zone_entries(
                 self.coordinator.batch_device_data,
                 self.coordinator.app_maps,
+                getattr(self.coordinator, "vector_map_details", None),
                 selected_map_index=self.coordinator.selected_map_index,
             )
             zone_id = self._selected_zone_id(zone_entries)
             if zone_id is None:
                 raise HomeAssistantError("No current-map zone is available to start.")
-            await self.coordinator.client.async_clean_segments([zone_id])
+            await self.coordinator.client.async_start_zone_mowing([zone_id])
         elif action == MOWING_ACTION_SPOT:
             self._ensure_selected_map_matches_active()
             spot_entries = current_spot_entries(
@@ -414,17 +415,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             spot_id = self._selected_spot_id(spot_entries)
             if spot_id is None:
                 raise HomeAssistantError("No current-map spot is available to start.")
-            center = find_spot_center(
-                self.coordinator.app_maps,
-                spot_id,
-                self.coordinator.batch_device_data,
-                selected_map_index=self.coordinator.selected_map_index,
-            )
-            if center is None:
-                raise HomeAssistantError(
-                    f"Spot #{spot_id} does not expose a valid center point."
-                )
-            await self.coordinator.client.async_clean_spots([center])
+            await self.coordinator.client.async_start_spot_mowing([spot_id])
         else:
             await self.coordinator.client.async_start_mowing()
         await self.coordinator.async_request_refresh()
@@ -433,33 +424,70 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         """Start mowing for one or more explicit current-map zones."""
         if not zone_ids:
             raise HomeAssistantError("At least one zone id is required.")
-        await self.coordinator.client.async_clean_segments(zone_ids)
+        self._ensure_selected_map_matches_active()
+        zone_entries = current_zone_entries(
+            self.coordinator.batch_device_data,
+            self.coordinator.app_maps,
+            getattr(self.coordinator, "vector_map_details", None),
+            selected_map_index=self.coordinator.selected_map_index,
+        )
+        normalized = [int(zone_id) for zone_id in zone_ids]
+        self._ensure_requested_ids_available(
+            normalized,
+            available_ids=[int(entry["area_id"]) for entry in zone_entries],
+            target_name="Zone",
+        )
+        await self.coordinator.client.async_start_zone_mowing(normalized)
         await self.coordinator.async_request_refresh()
 
     async def async_start_spot_mowing(self, spot_ids: list[int]) -> None:
         """Start mowing for one or more explicit current-map spot ids."""
         if not spot_ids:
             raise HomeAssistantError("At least one spot id is required.")
-
-        points = []
-        for spot_id in spot_ids:
-            center = find_spot_center(
-                self.coordinator.app_maps,
-                int(spot_id),
-                self.coordinator.batch_device_data,
-            )
-            if center is None:
-                raise HomeAssistantError(
-                    f"Spot #{spot_id} does not expose a valid center point."
-                )
-            points.append(center)
-
-        await self.coordinator.client.async_clean_spots(points)
+        self._ensure_selected_map_matches_active()
+        spot_entries = current_spot_entries(
+            self.coordinator.app_maps,
+            self.coordinator.batch_device_data,
+            selected_map_index=self.coordinator.selected_map_index,
+        )
+        normalized = [int(spot_id) for spot_id in spot_ids]
+        self._ensure_requested_ids_available(
+            normalized,
+            available_ids=[int(entry["spot_id"]) for entry in spot_entries],
+            target_name="Spot",
+        )
+        await self.coordinator.client.async_start_spot_mowing(normalized)
         await self.coordinator.async_request_refresh()
 
     async def async_start_edge_mowing(self, contour_ids: list[list[int]]) -> None:
         """Start mowing for one or more explicit current-map edge contour ids."""
         normalized = _normalize_contour_ids(contour_ids)
+        self._ensure_selected_map_matches_active()
+        contour_entries = current_contour_entries(
+            getattr(self.coordinator, "vector_map_details", None),
+            self.coordinator.app_maps,
+            self.coordinator.batch_device_data,
+            selected_map_index=self.coordinator.selected_map_index,
+        )
+        available = {
+            tuple(entry["contour_id"])
+            for entry in contour_entries
+            if isinstance(entry.get("contour_id"), tuple)
+        }
+        missing = [
+            tuple(contour_id)
+            for contour_id in normalized
+            if tuple(contour_id) not in available
+        ]
+        if missing:
+            missing_text = ", ".join(str(contour_id) for contour_id in missing)
+            available_text = ", ".join(
+                str(contour_id) for contour_id in sorted(available)
+            )
+            raise HomeAssistantError(
+                f"Edge contour {missing_text} is not available on the active map. "
+                f"Available contour ids: {available_text or 'none'}."
+            )
         await self.coordinator.client.async_start_edge_mowing(normalized)
         await self.coordinator.async_request_refresh()
 
@@ -511,6 +539,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             zone_entries = current_zone_entries(
                 self.coordinator.batch_device_data,
                 self.coordinator.app_maps,
+                getattr(self.coordinator, "vector_map_details", None),
                 selected_map_index=self.coordinator.selected_map_index,
             )
             target_zone_id = self._resolve_zone_id(zone_entries, zone_id=zone_id)
@@ -675,6 +704,30 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         if any(entry["map_index"] == map_index for entry in known_maps):
             return
         raise HomeAssistantError(f"Map index {map_index} is not available.")
+
+    @staticmethod
+    def _ensure_requested_ids_available(
+        requested_ids: list[int],
+        *,
+        available_ids: list[int],
+        target_name: str,
+    ) -> None:
+        """Reject explicit scoped ids that are absent from current-map metadata."""
+        missing = [
+            target_id for target_id in requested_ids if target_id not in available_ids
+        ]
+        if not missing:
+            return
+        missing_text = ", ".join(f"#{target_id}" for target_id in missing)
+        available_text = ", ".join(f"#{target_id}" for target_id in available_ids)
+        if not available_text:
+            available_text = "none"
+        subject = target_name if len(missing) == 1 else f"{target_name}s"
+        verb = "is" if len(missing) == 1 else "are"
+        raise HomeAssistantError(
+            f"{subject} {missing_text} {verb} not available on the active map. "
+            f"Available {target_name.lower()} ids: {available_text}."
+        )
 
     def _reset_current_map_scope(self, map_index: int) -> None:
         """Align local selection state with a successful active-map switch."""
