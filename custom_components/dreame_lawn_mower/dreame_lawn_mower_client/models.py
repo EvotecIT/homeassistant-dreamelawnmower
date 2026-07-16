@@ -420,6 +420,7 @@ class DreameLawnMowerStatusBlob:
 
     supported: bool
     source: str | None = None
+    received_at: str | None = None
     raw: tuple[int, ...] = field(default_factory=tuple)
     length: int = 0
     hex: str | None = None

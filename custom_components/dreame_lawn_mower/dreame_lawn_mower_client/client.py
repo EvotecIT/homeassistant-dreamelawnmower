@@ -1442,7 +1442,10 @@ class DreameLawnMowerClient:
                 source="realtime",
             )
             if decoded is not None:
-                return decoded
+                return replace(
+                    decoded,
+                    received_at=_property_entry_received_at(realtime_entry),
+                )
 
         if not include_cloud:
             return None
@@ -1455,7 +1458,10 @@ class DreameLawnMowerClient:
                     source="cloud",
                 )
                 if decoded is not None:
-                    return decoded
+                    return replace(
+                        decoded,
+                        received_at=_property_entry_received_at(entry),
+                    )
         return None
 
     def _sync_capture_operation_snapshot(
@@ -1975,7 +1981,7 @@ class DreameLawnMowerClient:
             return vector_view
 
         if app_view.available and app_view.image_png is not None:
-            return app_view
+            return self._with_runtime_position_details(app_view, vector_view)
 
         if vector_view.available and vector_view.image_png is not None:
             return vector_view
@@ -2032,6 +2038,26 @@ class DreameLawnMowerClient:
         runtime_track_point_count = sum(
             len(segment) for segment in runtime_track_segments
         )
+        runtime_pose_x = getattr(runtime_blob, "candidate_runtime_pose_x", None)
+        runtime_pose_y = getattr(runtime_blob, "candidate_runtime_pose_y", None)
+        if runtime_pose_x is not None and runtime_pose_y is not None:
+            details["runtime_pose_x"] = runtime_pose_x
+            details["runtime_pose_y"] = runtime_pose_y
+            details["runtime_heading_deg"] = getattr(
+                runtime_blob,
+                "candidate_runtime_heading_deg",
+                None,
+            )
+            details["runtime_region_id"] = getattr(
+                runtime_blob,
+                "candidate_runtime_region_id",
+                None,
+            )
+            details["runtime_position_updated_at"] = getattr(
+                runtime_blob,
+                "received_at",
+                None,
+            )
         if runtime_track_point_count:
             details["runtime_track_segment_count"] = len(runtime_track_segments)
             details["runtime_track_point_count"] = runtime_track_point_count
@@ -2041,17 +2067,6 @@ class DreameLawnMowerClient:
                     for segment in runtime_track_segments
                 ),
                 2,
-            )
-            details["runtime_pose_x"] = getattr(
-                runtime_blob, "candidate_runtime_pose_x", None
-            )
-            details["runtime_pose_y"] = getattr(
-                runtime_blob, "candidate_runtime_pose_y", None
-            )
-            details["runtime_heading_deg"] = getattr(
-                runtime_blob,
-                "candidate_runtime_heading_deg",
-                None,
             )
             details["has_live_path"] = True
             if summary is not None:
@@ -2218,7 +2233,10 @@ class DreameLawnMowerClient:
             )
 
     def _sync_get_vector_map_batch_data(self) -> Mapping[str, Any] | None:
-        return self._sync_get_batch_device_data(_vector_map_batch_keys())
+        # An empty property list requests every available batch key. M_PATH
+        # history is device-sized and has been observed beyond 28 chunks, so a
+        # fixed key range silently truncates long mowing paths.
+        return self._sync_get_batch_device_data()
 
     def _sync_get_batch_device_data(
         self,
@@ -2273,6 +2291,33 @@ class DreameLawnMowerClient:
         if map_view.app_maps is not None or app_view.app_maps is None:
             return map_view
         return replace(map_view, app_maps=app_view.app_maps)
+
+    @staticmethod
+    def _with_runtime_position_details(
+        map_view: DreameLawnMowerMapView,
+        runtime_view: DreameLawnMowerMapView,
+    ) -> DreameLawnMowerMapView:
+        runtime_details = runtime_view.details
+        if not isinstance(runtime_details, Mapping):
+            return map_view
+        if (
+            runtime_details.get("runtime_pose_x") is None
+            or runtime_details.get("runtime_pose_y") is None
+        ):
+            return map_view
+
+        details = dict(map_view.details or {})
+        for key in (
+            "runtime_pose_x",
+            "runtime_pose_y",
+            "runtime_heading_deg",
+            "runtime_region_id",
+            "runtime_position_updated_at",
+        ):
+            value = runtime_details.get(key)
+            if value is not None:
+                details[key] = value
+        return replace(map_view, details=details)
 
     def _sync_get_cloud_user_features(
         self,
@@ -4125,6 +4170,10 @@ class DreameLawnMowerClient:
         elif key in {MOWER_RAW_STATUS_PROPERTY_KEY, MOWER_RUNTIME_STATUS_PROPERTY_KEY}:
             status_blob = decode_mower_status_blob(value)
             if status_blob is not None:
+                status_blob = replace(
+                    status_blob,
+                    received_at=_property_entry_received_at(rendered),
+                )
                 rendered["status_blob"] = status_blob.as_dict()
         elif key == MOWER_TASK_PROPERTY_KEY:
             task_status = decode_mower_task_status(value)
@@ -4524,6 +4573,15 @@ def _epoch_to_iso(value: Any) -> str | None:
         return None
 
 
+def _property_entry_received_at(entry: Mapping[str, Any]) -> str | None:
+    """Return a vendor or local reception timestamp without inventing freshness."""
+    for key in ("last_seen", "timestamp", "time", "update_time", "updateTime"):
+        received_at = _epoch_to_iso(entry.get(key))
+        if received_at is not None:
+            return received_at
+    return None
+
+
 def _dedupe_ints(values: Sequence[int]) -> list[int]:
     result: list[int] = []
     for value in values:
@@ -4841,13 +4899,6 @@ def _map_view_current_app_map_index(view: DreameLawnMowerMapView) -> int | None:
     if not isinstance(app_maps, Mapping):
         return None
     return _positive_int(app_maps.get("current_map_index"))
-
-
-def _vector_map_batch_keys() -> list[str]:
-    keys = [*(f"MAP.{index}" for index in range(40)), "MAP.info"]
-    keys.extend(f"M_PATH.{index}" for index in range(10))
-    keys.append("M_PATH.info")
-    return keys
 
 
 def _batch_schedule_keys() -> list[str]:

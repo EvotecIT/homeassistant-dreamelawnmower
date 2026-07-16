@@ -67,10 +67,14 @@ def _draw_wrapped_text(
     return y
 
 
-def png_bytes_to_jpeg(image_bytes: bytes) -> bytes:
+def png_bytes_to_jpeg(image_bytes: bytes, *, rotation: int = 0) -> bytes:
     """Convert rendered PNG bytes to JPEG for Home Assistant snapshots."""
+    if rotation not in (0, 90, 180, 270):
+        raise ValueError("rotation must be one of 0, 90, 180, or 270 degrees")
     with Image.open(BytesIO(image_bytes)) as image:
         converted = image.convert("RGB")
+        if rotation:
+            converted = converted.rotate(-rotation, expand=True)
         output = BytesIO()
         converted.save(output, format="JPEG", quality=90)
         return output.getvalue()

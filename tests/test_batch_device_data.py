@@ -263,3 +263,16 @@ def test_client_batch_helpers_use_batch_device_data_api() -> None:
     assert ota_result["ota_progress"] == 0
     assert ota_result["auto_upgrade_enabled"] is False
     assert len(cloud.calls) == 3
+
+
+def test_vector_map_batch_fetch_requests_all_device_sized_path_chunks() -> None:
+    client = _client()
+    cloud = _FakeBatchCloud()
+    cloud.payload["M_PATH.18"] = "late path chunk"
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_get_vector_map_batch_data()
+
+    assert result is not None
+    assert result["M_PATH.18"] == "late path chunk"
+    assert cloud.calls == [[]]

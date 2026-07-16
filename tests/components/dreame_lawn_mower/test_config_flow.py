@@ -16,6 +16,7 @@ from custom_components.dreame_lawn_mower.const import (
     CONF_COUNTRY,
     CONF_DID,
     CONF_MAP_LABEL_SCALE,
+    CONF_MAP_ROTATION,
     CONF_MODEL,
     CONF_NAME,
     CONF_PASSWORD,
@@ -91,10 +92,12 @@ def test_options_flow_accepts_map_label_scale() -> None:
         {
             CONF_SCAN_INTERVAL: "45",
             CONF_MAP_LABEL_SCALE: "2.5",
+            CONF_MAP_ROTATION: 90,
         }
     )
     assert validated[CONF_SCAN_INTERVAL] == 45
     assert validated[CONF_MAP_LABEL_SCALE] == 2.5
+    assert validated[CONF_MAP_ROTATION] == 90
 
     result = asyncio.run(flow.async_step_init(validated))
 
@@ -102,6 +105,7 @@ def test_options_flow_accepts_map_label_scale() -> None:
     assert result["data"] == {
         CONF_SCAN_INTERVAL: 45,
         CONF_MAP_LABEL_SCALE: 2.5,
+        CONF_MAP_ROTATION: 90,
         CONF_VIDEO_TRANSPORT: DEFAULT_VIDEO_TRANSPORT,
         CONF_XP2P_LIBRARY_PATH: "",
         CONF_XP2P_RUNNER_COMMAND: "",

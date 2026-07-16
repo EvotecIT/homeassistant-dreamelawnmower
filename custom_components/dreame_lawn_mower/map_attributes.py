@@ -7,6 +7,16 @@ from typing import Any
 
 from .dreame_lawn_mower_client.models import DreameLawnMowerMapView, map_summary_to_dict
 
+_RUNTIME_POSITION_DETAIL_KEYS = frozenset(
+    {
+        "runtime_pose_x",
+        "runtime_pose_y",
+        "runtime_heading_deg",
+        "runtime_region_id",
+        "runtime_position_updated_at",
+    }
+)
+
 _MAP_SUMMARY_ATTRIBUTE_KEYS = (
     "map_id",
     "frame_id",
@@ -60,6 +70,11 @@ def map_camera_attributes(
     )
     app_maps = {} if view is None or view.app_maps is None else dict(view.app_maps)
     details = {} if view is None or view.details is None else dict(view.details)
+    recorded_details = {
+        key: value
+        for key, value in details.items()
+        if key not in _RUNTIME_POSITION_DETAIL_KEYS
+    }
     attributes.update(
         {
             "app_map_count": app_maps.get("map_count"),
@@ -96,10 +111,17 @@ def map_camera_attributes(
             "runtime_pose_x": details.get("runtime_pose_x"),
             "runtime_pose_y": details.get("runtime_pose_y"),
             "runtime_heading_deg": details.get("runtime_heading_deg"),
+            "runtime_region_id": details.get("runtime_region_id"),
+            "runtime_position_updated_at": details.get("runtime_position_updated_at"),
+            "position_x": details.get("runtime_pose_x"),
+            "position_y": details.get("runtime_pose_y"),
+            "position_heading": details.get("runtime_heading_deg"),
+            "position_segment": details.get("runtime_region_id"),
+            "position_updated_at": details.get("runtime_position_updated_at"),
             "map_has_live_path": details.get("has_live_path"),
             "map_available_vector_map_count": details.get("available_map_count"),
             "map_available_vector_maps": details.get("available_maps"),
-            "map_details": details or None,
+            "map_details": recorded_details or None,
         }
     )
     if summary is not None and attributes.get("map_id") is None:
