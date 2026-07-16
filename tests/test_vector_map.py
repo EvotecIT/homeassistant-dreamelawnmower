@@ -420,6 +420,18 @@ def test_client_zone_mowing_rejects_missing_or_failed_reply(response: object) ->
         client._sync_start_zone_mowing([1])
 
 
+@pytest.mark.parametrize(
+    "response",
+    [None, {"m": "r", "r": 7, "d": {"reason": "busy"}}],
+)
+def test_client_map_switch_rejects_missing_or_failed_reply(response: object) -> None:
+    client = _client()
+    client._sync_call_app_action = lambda payload, **kwargs: response  # type: ignore[method-assign]  # noqa: ARG005
+
+    with pytest.raises(DreameLawnMowerConnectionError, match="map switch"):
+        client._sync_switch_current_map(1)
+
+
 def test_map_view_uses_batch_vector_map_when_app_map_fails() -> None:
     client = _client()
     client._sync_get_app_maps = lambda **kwargs: {  # noqa: ARG005

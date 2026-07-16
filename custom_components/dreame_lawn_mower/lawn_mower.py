@@ -495,19 +495,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         """Switch the mower's active app map."""
         normalized_map_index = int(map_index)
         self._ensure_known_map_index(normalized_map_index)
-
-        await self.coordinator.client.async_switch_current_map(normalized_map_index)
-        self._reset_current_map_scope(normalized_map_index)
-        await self.coordinator.async_request_refresh()
-        await self.coordinator.async_refresh_app_maps(
-            force=True,
-            source="app_maps_switch_current_map",
-        )
-        await self.coordinator.async_refresh_vector_map_details(
-            force=True,
-            source="vector_map_switch_current_map",
-        )
-        self.coordinator.async_update_listeners()
+        await self.coordinator.async_switch_current_map(normalized_map_index)
 
     async def async_plan_zone_mowing_preference_update(
         self,
@@ -728,13 +716,6 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             f"{subject} {missing_text} {verb} not available on the active map. "
             f"Available {target_name.lower()} ids: {available_text}."
         )
-
-    def _reset_current_map_scope(self, map_index: int) -> None:
-        """Align local selection state with a successful active-map switch."""
-        self.coordinator.selected_map_index = map_index
-        self.coordinator.selected_contour_id = None
-        self.coordinator.selected_zone_id = None
-        self.coordinator.selected_spot_id = None
 
     def _resolve_zone_id(
         self,

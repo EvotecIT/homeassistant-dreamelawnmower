@@ -97,6 +97,12 @@ from .mowing_tasks import (
     build_zone_mowing_request,
     ensure_mowing_task_succeeded,
 )
+from .runtime_state import (
+    RESUME_MOWING_REQUEST,
+    snapshot_session_control_state,
+    snapshot_with_cloud_presence,
+    snapshot_with_heartbeat_task_state,
+)
 from .schedule import (
     EMPTY_SCHEDULE_VERSION,
     SCHEDULE_CHUNK_SIZE,
@@ -105,12 +111,6 @@ from .schedule import (
     decode_schedule_payload_text,
     encode_schedule_payload_text,
     schedule_task_summary,
-)
-from .runtime_state import (
-    RESUME_MOWING_REQUEST,
-    snapshot_session_control_state,
-    snapshot_with_cloud_presence,
-    snapshot_with_heartbeat_task_state,
 )
 from .vector_map import (
     parse_batch_vector_map,
@@ -1566,7 +1566,7 @@ class DreameLawnMowerClient:
         if map_index < 0:
             raise ValueError("map_index must be zero or greater.")
         try:
-            return self._sync_call_app_action(
+            response = self._sync_call_app_action(
                 {
                     "m": "a",
                     "p": 0,
@@ -1574,7 +1574,8 @@ class DreameLawnMowerClient:
                     "d": {"idx": int(map_index)},
                 }
             )
-        except DeviceException as err:
+            return ensure_mowing_task_succeeded(response, task_name="map switch")
+        except (DeviceException, MowingTaskResponseError) as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
 
     def _sync_get_vector_map_details(self) -> dict[str, Any]:

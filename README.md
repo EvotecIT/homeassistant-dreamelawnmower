@@ -78,7 +78,8 @@ region/account details are especially helpful for moving a device from
 - button to dock without ending the current mowing session
 - heartbeat-backed task status and automatic resume of a paused mowing session
 - battery, activity, state, task, firmware, and error sensors
-- current-map selector entities for map, mowing action, edge, zone, and spot scope
+- active-map selector that switches the mower, plus mowing action, edge, zone,
+  and spot selectors that follow the selected map
 - current-map services for switching maps and starting explicit zone, spot, or edge runs
 - binary sensors for docked, charging, mowing, paused, returning, and error state
 - binary sensors for active and resumable mowing sessions
@@ -373,7 +374,9 @@ Current map support now includes:
 
 - a read-only `Map` camera for the active map
 - a read-only `All Maps` contact sheet for quick map inventory
-- `select` entities for map, mowing action, edge, zone, and spot scope
+- a `Map` select that switches the mower's active map and refreshes the map,
+  zone, spot, and edge controls
+- `select` entities for mowing action, edge, zone, and spot scope
 - services for switching the active mower map and starting explicit zone, spot,
   or edge jobs
 - runtime live-track telemetry surfaced through sensors and map-camera attributes
