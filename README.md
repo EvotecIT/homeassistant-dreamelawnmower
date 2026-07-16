@@ -88,7 +88,8 @@ region/account details are especially helpful for moving a device from
 - disabled-by-default all-schedules calendar for default and per-map schedule diagnosis
 - guarded schedule enable/disable service with dry-run mode by default
 - guarded mowing-preference update service with dry-run mode by default
-- read-only map camera using the app-map payload when available
+- read-only map camera using the app-map payload when available, with options
+  for label scale and clockwise display rotation
 - disabled-by-default all-maps and map-diagnostics cameras
 - live video camera with a managed XP2P runtime on Linux x86_64 and aarch64 hosts
 - runtime telemetry sensors for mission progress, mission area, mower pose, and live-track length

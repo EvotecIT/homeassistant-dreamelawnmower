@@ -158,6 +158,7 @@ def test_client_status_blob_prefers_cached_realtime_payload() -> None:
         {
             "realtime_properties": {
                 "1.1": {
+                    "last_seen": 1_700_000_000,
                     "value": [
                         206,
                         0,
@@ -189,6 +190,7 @@ def test_client_status_blob_prefers_cached_realtime_payload() -> None:
 
     assert decoded is not None
     assert decoded.source == "realtime"
+    assert decoded.received_at == "2023-11-14T22:13:20+00:00"
     assert decoded.frame_valid is True
     assert decoded.candidate_battery_level == 100
 
@@ -226,6 +228,42 @@ def test_status_blob_decoder_exposes_candidate_battery_byte() -> None:
     assert decoded.task_status == "mowing"
     assert decoded.mowing_session_active is True
     assert decoded.task_resumable is False
+
+
+def test_status_blob_decoder_accepts_a3_awd_pro_22_byte_frame() -> None:
+    decoded = decode_mower_status_blob(
+        [
+            206,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            100,
+            193,
+            255,
+            0,
+            0,
+            128,
+            184,
+            196,
+            0,
+            0,
+            206,
+        ]
+    )
+
+    assert decoded is not None
+    assert decoded.supported is True
+    assert decoded.frame_valid is True
+    assert decoded.candidate_battery_level == 100
+    assert decoded.candidate_runtime_pose_x == 0
+    assert decoded.candidate_runtime_pose_y == 0
 
 
 def test_status_blob_decoder_exposes_paused_resumable_session_at_dock() -> None:

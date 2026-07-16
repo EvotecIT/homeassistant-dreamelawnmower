@@ -39,6 +39,7 @@ MOWER_STATE_LABELS: Final[dict[str, dict[str, str]]] = {
         "14": "Upgrading",
         "15": "Charging paused: battery temperature is too high",
         "16": "Charging paused: battery temperature is too low",
+        "75": "Paused at maintenance point",
     },
     "zh": {
         "1": "割草中",
@@ -64,6 +65,7 @@ MOWER_STATE_KEYS: Final[dict[str, str]] = {
     "14": "upgrading",
     "15": "charging_paused_high_temperature",
     "16": "charging_paused_low_temperature",
+    "75": "paused",
 }
 
 
@@ -396,7 +398,9 @@ def _decode_runtime_task_block(raw: Sequence[int]) -> dict[str, object] | None:
     task_id = raw[offset + 1]
     raw_percent = raw[offset + 2] | (raw[offset + 3] << 8)
     total_area_raw = raw[offset + 4] | (raw[offset + 5] << 8) | (raw[offset + 6] << 16)
-    current_area_raw = raw[offset + 7] | (raw[offset + 8] << 8) | (raw[offset + 9] << 16)
+    current_area_raw = (
+        raw[offset + 7] | (raw[offset + 8] << 8) | (raw[offset + 9] << 16)
+    )
 
     total_area_sqm = round(total_area_raw / 100.0, 2) if total_area_raw else 0.0
     current_area_sqm = round(current_area_raw / 100.0, 2) if current_area_raw else 0.0
@@ -449,7 +453,9 @@ def _decode_runtime_track_segments(
 
     segments: list[tuple[tuple[int, int], ...]] = []
     for offset, length in chunks:
-        segments.extend(_decode_runtime_track_chunk(raw, offset, length, base_x, base_y))
+        segments.extend(
+            _decode_runtime_track_chunk(raw, offset, length, base_x, base_y)
+        )
 
     if not segments:
         return None

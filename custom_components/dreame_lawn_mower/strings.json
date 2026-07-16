@@ -43,6 +43,7 @@
         "data": {
           "scan_interval": "Polling interval in seconds",
           "map_label_scale": "Map label scale",
+          "map_rotation": "Map display rotation",
           "video_transport": "Live video transport",
           "xp2p_library_path": "Host XP2P native library path",
           "xp2p_runner_command": "Host XP2P runner command",

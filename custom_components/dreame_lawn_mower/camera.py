@@ -15,7 +15,13 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_MAP_LABEL_SCALE, DEFAULT_MAP_LABEL_SCALE, DOMAIN
+from .const import (
+    CONF_MAP_LABEL_SCALE,
+    CONF_MAP_ROTATION,
+    DEFAULT_MAP_LABEL_SCALE,
+    DEFAULT_MAP_ROTATION,
+    DOMAIN,
+)
 from .coordinator import DreameLawnMowerCoordinator
 from .dreame_lawn_mower_client.client import render_app_map_payload_png
 from .dreame_lawn_mower_client.models import DreameLawnMowerMapView
@@ -68,6 +74,20 @@ class DreameLawnMowerMapCamera(
     _attr_entity_registry_enabled_default = False
     _requires_map_capability = True
     _prewarm_map_image = True
+    _unrecorded_attributes = frozenset(
+        {
+            "runtime_pose_x",
+            "runtime_pose_y",
+            "runtime_heading_deg",
+            "runtime_region_id",
+            "runtime_position_updated_at",
+            "position_x",
+            "position_y",
+            "position_heading",
+            "position_segment",
+            "position_updated_at",
+        }
+    )
 
     def __init__(
         self,
@@ -182,8 +202,11 @@ class DreameLawnMowerMapCamera(
                 return self._map_cache.last_image
             try:
                 image = await self.hass.async_add_executor_job(
-                    png_bytes_to_jpeg,
-                    view.image_png,
+                    partial(
+                        png_bytes_to_jpeg,
+                        view.image_png,
+                        rotation=self._map_rotation,
+                    )
                 )
                 self._map_cache.store_image(image, source_image=view.image_png)
                 self._map_cache.last_error = None
@@ -228,6 +251,16 @@ class DreameLawnMowerMapCamera(
             self.coordinator.entry.options.get(
                 CONF_MAP_LABEL_SCALE,
                 DEFAULT_MAP_LABEL_SCALE,
+            )
+        )
+
+    @property
+    def _map_rotation(self) -> int:
+        """Return the configured clockwise display rotation."""
+        return int(
+            self.coordinator.entry.options.get(
+                CONF_MAP_ROTATION,
+                DEFAULT_MAP_ROTATION,
             )
         )
 

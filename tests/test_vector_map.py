@@ -476,6 +476,8 @@ def test_vector_map_view_includes_cached_runtime_track_overlay() -> None:
             candidate_runtime_pose_x=50,
             candidate_runtime_pose_y=40,
             candidate_runtime_heading_deg=90.0,
+            candidate_runtime_region_id=7,
+            received_at="2026-07-16T10:02:09+00:00",
         ),
         active=True,
     )
@@ -495,7 +497,37 @@ def test_vector_map_view_includes_cached_runtime_track_overlay() -> None:
     assert view.details["runtime_pose_x"] == 50
     assert view.details["runtime_pose_y"] == 40
     assert view.details["runtime_heading_deg"] == 90.0
+    assert view.details["runtime_region_id"] == 7
+    assert view.details["runtime_position_updated_at"] == ("2026-07-16T10:02:09+00:00")
     assert view.details["has_live_path"] is True
+
+
+def test_vector_map_view_exposes_runtime_position_without_track_points() -> None:
+    client = _client()
+    client._sync_get_vector_map_batch_data = lambda: _batch_payload()
+    client._safe_map_diagnostics = lambda **kwargs: None
+    client.update_runtime_live_tracking(
+        SimpleNamespace(
+            hex="runtime-pose-only",
+            candidate_runtime_track_segments=(),
+            candidate_runtime_pose_x=50,
+            candidate_runtime_pose_y=40,
+            candidate_runtime_heading_deg=90.0,
+            candidate_runtime_region_id=7,
+            received_at="2026-07-16T10:02:09+00:00",
+        ),
+        active=True,
+    )
+
+    view = client._sync_refresh_vector_map_view()
+
+    assert view.details is not None
+    assert view.details["runtime_pose_x"] == 50
+    assert view.details["runtime_pose_y"] == 40
+    assert view.details["runtime_heading_deg"] == 90.0
+    assert view.details["runtime_region_id"] == 7
+    assert view.details["runtime_position_updated_at"] == ("2026-07-16T10:02:09+00:00")
+    assert "runtime_track_point_count" not in view.details
 
 
 def test_vector_map_view_renders_current_app_map_index() -> None:
