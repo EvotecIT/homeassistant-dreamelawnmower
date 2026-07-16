@@ -100,8 +100,8 @@ def test_unconfirmed_vacuum_error_name_is_marked_unverified() -> None:
     assert snapshot.error_display == "Unverified drop"
 
 
-@pytest.mark.parametrize("code", [61, 70])
-def test_dnd_transition_codes_are_not_active_errors(code: int) -> None:
+@pytest.mark.parametrize("code", [50, 61, 70])
+def test_mower_lifecycle_event_codes_are_not_active_errors(code: int) -> None:
     snapshot = _snapshot(code, "route")
 
     assert snapshot.activity == "paused"
@@ -110,8 +110,8 @@ def test_dnd_transition_codes_are_not_active_errors(code: int) -> None:
     assert snapshot.error_display is None
 
 
-@pytest.mark.parametrize("code", [61, 70])
-def test_dnd_transition_suppresses_stale_realtime_error(code: int) -> None:
+@pytest.mark.parametrize("code", [50, 61, 70])
+def test_mower_lifecycle_event_suppresses_stale_realtime_error(code: int) -> None:
     snapshot = _snapshot(code, "route", realtime_error_code=23)
 
     assert snapshot.activity == "paused"
