@@ -452,6 +452,24 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         self.voice_settings_refreshed_at = now
         return payload
 
+    async def async_switch_current_map(self, map_index: int) -> None:
+        """Switch the active mower map and refresh all map-scoped state."""
+        await self.client.async_switch_current_map(map_index)
+        self.selected_map_index = map_index
+        self.selected_contour_id = None
+        self.selected_zone_id = None
+        self.selected_spot_id = None
+        await self.async_request_refresh()
+        await self.async_refresh_app_maps(
+            force=True,
+            source="app_maps_switch_current_map",
+        )
+        await self.async_refresh_vector_map_details(
+            force=True,
+            source="vector_map_switch_current_map",
+        )
+        self.async_update_listeners()
+
     async def async_shutdown(self) -> None:
         """Disconnect client resources."""
         await self.client.async_close()

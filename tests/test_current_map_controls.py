@@ -18,6 +18,7 @@ from custom_components.dreame_lawn_mower.control_options import (
     current_spot_entries,
     current_zone_entries,
 )
+from custom_components.dreame_lawn_mower.coordinator import DreameLawnMowerCoordinator
 from custom_components.dreame_lawn_mower.lawn_mower import DreameLawnMower
 from custom_components.dreame_lawn_mower.select import (
     DreameLawnMowerEdgeSelect,
@@ -417,14 +418,14 @@ def test_current_contour_entries_can_follow_selected_map_override() -> None:
     ]
 
 
-def test_map_select_updates_selected_map_scope() -> None:
+def test_map_select_switches_active_mower_map() -> None:
     entity = object.__new__(DreameLawnMowerMapSelect)
     entity.coordinator = SimpleNamespace(
         data=SimpleNamespace(),
         batch_device_data=_batch_device_data(),
         app_maps=_app_maps(current_map_index=1),
         selected_map_index=None,
-        async_update_listeners=lambda: None,
+        async_switch_current_map=AsyncMock(),
     )
 
     assert entity.options == ["Front Lawn (#1)", "Back Lawn (#2)"]
@@ -432,8 +433,37 @@ def test_map_select_updates_selected_map_scope() -> None:
 
     asyncio.run(entity.async_select_option("Front Lawn (#1)"))
 
-    assert entity.coordinator.selected_map_index == 0
-    assert entity.current_option == "Front Lawn (#1)"
+    entity.coordinator.async_switch_current_map.assert_awaited_once_with(0)
+
+
+def test_coordinator_switch_current_map_updates_device_and_scoped_caches() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.client = SimpleNamespace(async_switch_current_map=AsyncMock())
+    coordinator.selected_map_index = 0
+    coordinator.selected_contour_id = (3, 0)
+    coordinator.selected_zone_id = 3
+    coordinator.selected_spot_id = 2
+    coordinator.async_request_refresh = AsyncMock()
+    coordinator.async_refresh_app_maps = AsyncMock()
+    coordinator.async_refresh_vector_map_details = AsyncMock()
+    coordinator.async_update_listeners = lambda: None
+
+    asyncio.run(coordinator.async_switch_current_map(1))
+
+    coordinator.client.async_switch_current_map.assert_awaited_once_with(1)
+    coordinator.async_request_refresh.assert_awaited_once()
+    coordinator.async_refresh_app_maps.assert_awaited_once_with(
+        force=True,
+        source="app_maps_switch_current_map",
+    )
+    coordinator.async_refresh_vector_map_details.assert_awaited_once_with(
+        force=True,
+        source="vector_map_switch_current_map",
+    )
+    assert coordinator.selected_map_index == 1
+    assert coordinator.selected_contour_id is None
+    assert coordinator.selected_zone_id is None
+    assert coordinator.selected_spot_id is None
 
 
 def test_zone_select_sets_zone_and_switches_action() -> None:
@@ -753,41 +783,17 @@ def test_lawn_mower_start_edge_service_rejects_unknown_active_map_contour() -> N
 
 
 def test_lawn_mower_switch_current_map_service_updates_scope_and_refreshes() -> None:
-    client = SimpleNamespace(
-        async_switch_current_map=AsyncMock(),
-    )
     coordinator = SimpleNamespace(
-        client=client,
         app_maps=_app_maps(current_map_index=0),
         batch_device_data=_batch_device_data(),
-        selected_map_index=0,
-        selected_contour_id=(3, 0),
-        selected_zone_id=3,
-        selected_spot_id=2,
-        async_request_refresh=AsyncMock(),
-        async_refresh_app_maps=AsyncMock(),
-        async_refresh_vector_map_details=AsyncMock(),
-        async_update_listeners=lambda: None,
+        async_switch_current_map=AsyncMock(),
     )
     entity = object.__new__(DreameLawnMower)
     entity.coordinator = coordinator
 
     asyncio.run(entity.async_switch_current_map(1))
 
-    client.async_switch_current_map.assert_awaited_once_with(1)
-    coordinator.async_request_refresh.assert_awaited_once()
-    coordinator.async_refresh_app_maps.assert_awaited_once_with(
-        force=True,
-        source="app_maps_switch_current_map",
-    )
-    coordinator.async_refresh_vector_map_details.assert_awaited_once_with(
-        force=True,
-        source="vector_map_switch_current_map",
-    )
-    assert coordinator.selected_map_index == 1
-    assert coordinator.selected_contour_id is None
-    assert coordinator.selected_zone_id is None
-    assert coordinator.selected_spot_id is None
+    coordinator.async_switch_current_map.assert_awaited_once_with(1)
 
 
 def test_lawn_mower_switch_current_map_service_rejects_unknown_map_index() -> None:

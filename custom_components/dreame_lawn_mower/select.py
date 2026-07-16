@@ -104,7 +104,7 @@ class DreameLawnMowerVoiceLanguageSelect(DreameLawnMowerSelectEntity):
 
 
 class DreameLawnMowerMapSelect(DreameLawnMowerSelectEntity):
-    """Choose which app map the zone and spot selectors should target."""
+    """Choose the mower's active app map."""
 
     _attr_name = "Map"
     _attr_icon = "mdi:map-search-outline"
@@ -154,14 +154,13 @@ class DreameLawnMowerMapSelect(DreameLawnMowerSelectEntity):
         return None
 
     async def async_select_option(self, option: str) -> None:
-        """Persist the selected app-map scope in coordinator state."""
+        """Switch the mower and all map-scoped controls to the selected map."""
         for entry in map_entries(
             self.coordinator.app_maps,
             self.coordinator.batch_device_data,
         ):
             if entry["label"] == option:
-                self.coordinator.selected_map_index = entry["map_index"]
-                self.coordinator.async_update_listeners()
+                await self.coordinator.async_switch_current_map(entry["map_index"])
                 return
         raise ValueError(f"Unknown map option: {option}")
 
