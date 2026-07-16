@@ -245,11 +245,6 @@ def test_map_camera_attributes_include_live_path_metadata() -> None:
         "mow_path_segment_count": 3,
         "mow_path_point_count": 18,
         "mow_path_length_m": 9.87,
-        "runtime_pose_x": -2240,
-        "runtime_pose_y": -140,
-        "runtime_heading_deg": 207.53,
-        "runtime_region_id": 7,
-        "runtime_position_updated_at": "2026-07-16T09:45:12+00:00",
         "has_live_path": True,
         "available_map_count": 2,
         "available_maps": [

@@ -1981,7 +1981,7 @@ class DreameLawnMowerClient:
             return vector_view
 
         if app_view.available and app_view.image_png is not None:
-            return app_view
+            return self._with_runtime_position_details(app_view, vector_view)
 
         if vector_view.available and vector_view.image_png is not None:
             return vector_view
@@ -2291,6 +2291,33 @@ class DreameLawnMowerClient:
         if map_view.app_maps is not None or app_view.app_maps is None:
             return map_view
         return replace(map_view, app_maps=app_view.app_maps)
+
+    @staticmethod
+    def _with_runtime_position_details(
+        map_view: DreameLawnMowerMapView,
+        runtime_view: DreameLawnMowerMapView,
+    ) -> DreameLawnMowerMapView:
+        runtime_details = runtime_view.details
+        if not isinstance(runtime_details, Mapping):
+            return map_view
+        if (
+            runtime_details.get("runtime_pose_x") is None
+            or runtime_details.get("runtime_pose_y") is None
+        ):
+            return map_view
+
+        details = dict(map_view.details or {})
+        for key in (
+            "runtime_pose_x",
+            "runtime_pose_y",
+            "runtime_heading_deg",
+            "runtime_region_id",
+            "runtime_position_updated_at",
+        ):
+            value = runtime_details.get(key)
+            if value is not None:
+                details[key] = value
+        return replace(map_view, details=details)
 
     def _sync_get_cloud_user_features(
         self,

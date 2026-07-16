@@ -445,6 +445,51 @@ def test_map_view_keeps_app_render_when_vector_has_no_live_path() -> None:
     assert view.image_png == b"app"
 
 
+def test_map_view_preserves_runtime_pose_when_app_render_wins() -> None:
+    client = _client()
+    app_view = DreameLawnMowerMapView(
+        source="app_action_map",
+        summary=DreameLawnMowerMapSummary(available=True, map_id=0),
+        image_png=b"app",
+        details={"has_live_path": False, "trajectory_point_count": 3},
+    )
+    vector_view = DreameLawnMowerMapView(
+        source="batch_vector_map",
+        summary=DreameLawnMowerMapSummary(available=True, map_id=0),
+        image_png=b"vector",
+        details={
+            "has_live_path": False,
+            "runtime_pose_x": 50,
+            "runtime_pose_y": 40,
+            "runtime_heading_deg": 90.0,
+            "runtime_region_id": 7,
+            "runtime_position_updated_at": "2026-07-16T17:18:12+00:00",
+        },
+    )
+
+    client._sync_refresh_app_map_view = lambda **kwargs: app_view
+    client._sync_refresh_vector_map_view = lambda **kwargs: vector_view
+    client._sync_refresh_legacy_map_view = lambda timeout, interval: (
+        _ for _ in ()
+    ).throw(  # noqa: ARG005
+        AssertionError("legacy map path should not run when app map works")
+    )
+
+    view = client._sync_refresh_map_view(timeout=0, interval=0)
+
+    assert view.source == "app_action_map"
+    assert view.image_png == b"app"
+    assert view.details == {
+        "has_live_path": False,
+        "trajectory_point_count": 3,
+        "runtime_pose_x": 50,
+        "runtime_pose_y": 40,
+        "runtime_heading_deg": 90.0,
+        "runtime_region_id": 7,
+        "runtime_position_updated_at": "2026-07-16T17:18:12+00:00",
+    }
+
+
 def test_map_view_uses_legacy_path_when_app_map_fails() -> None:
     client = _client()
     client._sync_get_app_maps = lambda **kwargs: {
