@@ -20,10 +20,11 @@ MOWER_ERROR_CODE_NAMES = {
     53: "rain_detected",
     54: "low_battery",
 }
-# Mower firmware also sends transient lifecycle notifications through the error
-# property. Code 50 is emitted while an accepted zone-mowing task starts; 61
-# and 70 are DND start/end notifications.
-MOWER_NON_ERROR_EVENT_CODES = frozenset({50, 61, 70})
+# Mower firmware sends informational device events through property 2.2, which
+# the inherited vacuum model calls an error property. Codes 48/50 are task
+# finish/start, 61/70 are DND start/end, and 63 is a schedule suspension while
+# the mower is already working.
+MOWER_NON_ERROR_EVENT_CODES = frozenset({48, 50, 61, 63, 70})
 
 MODEL_NAME_MAP = {
     "dreame.mower.p2255": "A1",
@@ -947,8 +948,8 @@ def snapshot_from_device(
     error_code = raw_error_code
     status_has_error = bool(getattr(device.status, "has_error", False))
     if raw_error_code in MOWER_NON_ERROR_EVENT_CODES:
-        # Preserve lifecycle notifications for diagnostics without turning the
-        # Home Assistant entity into an error.
+        # Preserve informational mower events for diagnostics without letting
+        # the inherited vacuum error table turn them into entity errors.
         error_name = None
         error_text = None
         error_code = None
