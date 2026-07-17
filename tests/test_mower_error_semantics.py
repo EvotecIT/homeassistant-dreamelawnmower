@@ -13,13 +13,19 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import 
 
 
 class _ErrorDevice:
-    def __init__(self, code: int, inherited_name: str) -> None:
+    def __init__(
+        self,
+        code: int,
+        inherited_name: str,
+        *,
+        state: str = "PAUSED",
+    ) -> None:
         self.available = True
         self.device_connected = True
         self.cloud_connected = True
         self.status = SimpleNamespace(
-            state=SimpleNamespace(name="PAUSED"),
-            state_name="paused",
+            state=SimpleNamespace(name=state),
+            state_name=state.lower(),
             task_status=None,
             task_status_name="unknown",
             error=SimpleNamespace(value=code),
@@ -58,6 +64,7 @@ def _snapshot(
     inherited_name: str,
     *,
     realtime_error_code: int | None = None,
+    state: str = "PAUSED",
 ):
     descriptor = descriptor_from_cloud_record(
         {"did": "test", "model": "dreame.mower.g2408", "name": "Mower"},
@@ -65,7 +72,7 @@ def _snapshot(
         country="eu",
     )
     assert descriptor is not None
-    device = _ErrorDevice(code, inherited_name)
+    device = _ErrorDevice(code, inherited_name, state=state)
     if realtime_error_code is not None:
         device.realtime_properties = {"2.2": {"value": realtime_error_code}}
     return snapshot_from_device(descriptor, device)
@@ -96,11 +103,38 @@ def test_mower_error_codes_override_vacuum_labels(
 def test_unconfirmed_vacuum_error_name_is_marked_unverified() -> None:
     snapshot = _snapshot(1, "drop")
 
+    assert snapshot.activity == "error"
     assert snapshot.error_name == "drop"
     assert snapshot.error_display == "Unverified drop"
 
 
-@pytest.mark.parametrize("code", [50, 61, 70])
+@pytest.mark.parametrize(
+    ("code", "inherited_name"),
+    [(48, "lds_error"), (63, "blocked")],
+)
+def test_mower_info_event_does_not_override_healthy_docked_state(
+    code: int,
+    inherited_name: str,
+) -> None:
+    snapshot = _snapshot(
+        code,
+        inherited_name,
+        realtime_error_code=code,
+        state="CHARGING_COMPLETED",
+    )
+
+    assert snapshot.state == "charging_completed"
+    assert snapshot.activity == "docked"
+    assert snapshot.docked is True
+    assert snapshot.raw_error_code == code
+    assert snapshot.realtime_error_code == code
+    assert snapshot.error_code is None
+    assert snapshot.error_name is None
+    assert snapshot.error_display is None
+    assert snapshot.error_source is None
+
+
+@pytest.mark.parametrize("code", [48, 50, 61, 63, 70])
 def test_mower_lifecycle_event_codes_are_not_active_errors(code: int) -> None:
     snapshot = _snapshot(code, "route")
 
@@ -110,7 +144,7 @@ def test_mower_lifecycle_event_codes_are_not_active_errors(code: int) -> None:
     assert snapshot.error_display is None
 
 
-@pytest.mark.parametrize("code", [50, 61, 70])
+@pytest.mark.parametrize("code", [48, 50, 61, 63, 70])
 def test_mower_lifecycle_event_suppresses_stale_realtime_error(code: int) -> None:
     snapshot = _snapshot(code, "route", realtime_error_code=23)
 
