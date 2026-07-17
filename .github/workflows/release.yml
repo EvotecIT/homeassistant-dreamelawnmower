@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Merged pull request number to release or recover
+        required: true
+        type: number
+      merge_commit_sha:
+        description: Expected merge commit SHA
+        required: false
+        type: string
+      increment:
+        description: auto, none, patch, minor, or major
+        required: false
+        default: auto
+        type: string
+
+jobs:
+  release:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    permissions:
+      checks: read
+      contents: write
+      pull-requests: read
+    uses: EvotecIT/PSPublishModule/.github/workflows/powerforge-homeassistant-release.yml@PowerForge-v1.0.2
+    with:
+      pr_number: ${{ github.event.pull_request.number || inputs.pr_number }}
+      merge_commit_sha: ${{ github.event.pull_request.merge_commit_sha || inputs.merge_commit_sha }}
+      default_branch: ${{ github.event.repository.default_branch }}
+      increment: ${{ inputs.increment || 'auto' }}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
