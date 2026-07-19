@@ -722,9 +722,9 @@ def test_task_status_probe_payload_keeps_compact_app_state() -> None:
             "value": "54",
             "label": "Edge",
             "label_source": "bundled_mower_errors",
-            "active": True,
+            "active": False,
         },
-        "error_active": True,
+        "error_active": False,
         "battery_level": "77",
         "device_time": {"time": "1776587727", "tz": "Europe/Warsaw"},
         "status_matrix": {
@@ -796,9 +796,9 @@ def test_task_status_probe_payload_keeps_compact_app_state() -> None:
             "value": "54",
             "label": "Edge",
             "label_source": "bundled_mower_errors",
-            "active": True,
+            "active": False,
         },
-        "error_active": True,
+        "error_active": False,
         "battery_level": "77",
         "device_time": {"time": "1776587727", "tz": "Europe/Warsaw"},
         "status_matrix": {

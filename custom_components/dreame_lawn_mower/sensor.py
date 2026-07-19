@@ -135,6 +135,13 @@ SENSORS = [
         entity_registry_enabled_default=False,
     ),
     DreameSensorDescription(
+        key="status_notice",
+        name="Status Notice",
+        value_fn=lambda snapshot: snapshot.status_notice_display or "none",
+        icon="mdi:information-outline",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    DreameSensorDescription(
         key="raw_error",
         name="Raw Error",
         value_fn=lambda snapshot: getattr(snapshot, "error_text", None) or "none",

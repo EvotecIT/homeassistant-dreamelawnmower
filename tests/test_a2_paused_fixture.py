@@ -61,6 +61,7 @@ def test_a2_paused_fixture_exposes_expected_sensor_set() -> None:
         "Firmware Version",
         "Hardware Version",
         "State Name",
+        "Status Notice",
         "Task Status",
         "Serial Number",
         "Cloud Update Time",

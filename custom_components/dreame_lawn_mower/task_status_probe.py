@@ -14,6 +14,7 @@ from .dreame_lawn_mower_client.app_protocol import (
     MOWER_TASK_PROPERTY_KEY,
     MOWER_TIME_PROPERTY_KEY,
 )
+from .dreame_lawn_mower_client.device_code_semantics import mower_fault_active
 
 TASK_STATUS_PROBE_KEYS = (
     MOWER_RUNTIME_STATUS_PROPERTY_KEY,
@@ -230,11 +231,7 @@ def _error_summary(entry: Mapping[str, Any] | None) -> dict[str, Any] | None:
 def _error_active(entry: Mapping[str, Any] | None) -> bool | None:
     if not isinstance(entry, Mapping):
         return None
-    value = _entry_value(entry)
-    try:
-        return int(str(value)) not in (-1, 0)
-    except (TypeError, ValueError):
-        return None
+    return mower_fault_active(_entry_value(entry))
 
 
 def _status_blob_summary(entry: Mapping[str, Any] | None) -> dict[str, Any] | None:

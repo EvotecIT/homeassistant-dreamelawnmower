@@ -278,6 +278,7 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
         "activity": "paused",
         "state": "paused",
         "error": {"active": False, "code": None, "display": None, "source": None},
+        "status_notice": {"code": None, "display": None, "source": None},
         "manual_drive": {"safe": True, "block_reason": None},
         "available": True,
         "capabilities": ["lidar_navigation", "map"],
