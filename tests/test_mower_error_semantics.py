@@ -84,11 +84,9 @@ def _snapshot(
         (2, "cliff", "Mower stuck"),
         (23, "heart", "Emergency stop pressed"),
         (31, "left_wheell_speed", "Left wheel speed"),
-        (53, "unknown", "Rain detected"),
-        (54, "edge", "Low battery"),
     ],
 )
-def test_mower_error_codes_override_vacuum_labels(
+def test_mower_fault_codes_override_vacuum_labels(
     code: int,
     inherited_name: str,
     expected: str,
@@ -98,6 +96,41 @@ def test_mower_error_codes_override_vacuum_labels(
     assert snapshot.activity == "error"
     assert snapshot.error_code == code
     assert snapshot.error_display == expected
+
+
+@pytest.mark.parametrize(
+    ("code", "inherited_name", "state", "expected_activity", "expected_notice"),
+    [
+        (53, "unknown", "MOWING", "mowing", "Rain detected"),
+        (54, "edge", "RETURNING", "returning", "Low battery"),
+        (54, "edge", "CHARGING", "docked", "Low battery"),
+    ],
+)
+def test_mower_operating_conditions_are_not_hard_errors(
+    code: int,
+    inherited_name: str,
+    state: str,
+    expected_activity: str,
+    expected_notice: str,
+) -> None:
+    snapshot = _snapshot(
+        code,
+        inherited_name,
+        realtime_error_code=code,
+        state=state,
+    )
+
+    assert snapshot.activity == expected_activity
+    assert snapshot.error_code is None
+    assert snapshot.error_name is None
+    assert snapshot.error_text is None
+    assert snapshot.error_display is None
+    assert snapshot.error_source is None
+    assert snapshot.status_notice_code == code
+    assert snapshot.status_notice_display == expected_notice
+    assert snapshot.status_notice_source == "status"
+    assert snapshot.raw_error_code == code
+    assert snapshot.realtime_error_code == code
 
 
 def test_unconfirmed_vacuum_error_name_is_marked_unverified() -> None:

@@ -369,6 +369,8 @@ def test_snapshot_keeps_realtime_error_diagnostic_when_status_says_no_error() ->
     assert snapshot.error_name == "no_error"
     assert snapshot.error_text == "No error"
     assert snapshot.error_display == "No error"
+    assert snapshot.status_notice_code is None
+    assert snapshot.status_notice_display is None
     assert snapshot.docked is True
     assert snapshot.raw_docked is True
     assert snapshot.charging is True

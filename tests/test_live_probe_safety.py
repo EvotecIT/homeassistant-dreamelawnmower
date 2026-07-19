@@ -330,10 +330,10 @@ def test_task_status_sample_summary_tracks_state_and_task_changes() -> None:
             "value": "54",
             "label": "Edge",
             "label_source": "bundled_mower_errors",
-            "active": True,
+            "active": False,
         },
     ]
-    assert summary["error_active"] is True
+    assert summary["error_active"] is False
     assert summary["error_changed"] is True
     assert summary["service_5_values"] == {"5.106": ["6", "7"]}
     assert summary["service_5_latest"] == {"5.106": "7"}

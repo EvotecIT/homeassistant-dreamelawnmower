@@ -6,25 +6,20 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from .device_code_semantics import (
+    MOWER_DEVICE_CODE_NAMES,
+    MOWER_FAULT_CODE_NAMES,
+    MOWER_NON_FAULT_CODES,
+    MOWER_STATUS_NOTICE_CODE_NAMES,
+    mower_fault_code,
+    mower_status_notice_code,
+)
+
 SUPPORTED_ACCOUNT_TYPES = ("dreame", "mova")
 SUPPORTED_MODEL_MARKER = ".mower."
 MIN_REMOTE_CONTROL_BATTERY_LEVEL = 20
 REMOTE_CONTROL_STATES = {"remote_control"}
 REALTIME_ERROR_PROPERTY_KEY = "2.2"
-
-# User-confirmed mower meanings differ from the inherited vacuum error table.
-MOWER_ERROR_CODE_NAMES = {
-    2: "mower_stuck",
-    23: "emergency_stop_pressed",
-    31: "left_wheel_speed",
-    53: "rain_detected",
-    54: "low_battery",
-}
-# Mower firmware sends informational device events through property 2.2, which
-# the inherited vacuum model calls an error property. Codes 48/50 are task
-# finish/start, 61/70 are DND start/end, and 63 is a schedule suspension while
-# the mower is already working.
-MOWER_NON_ERROR_EVENT_CODES = frozenset({48, 50, 61, 63, 70})
 
 MODEL_NAME_MAP = {
     "dreame.mower.p2255": "A1",
@@ -136,8 +131,8 @@ def _error_name_from_code(value: int | None) -> str | None:
     """Return the bundled vendor error name for a numeric code, if known."""
     if value in (None, -1, 0):
         return None
-    if value in MOWER_ERROR_CODE_NAMES:
-        return MOWER_ERROR_CODE_NAMES[value]
+    if value in MOWER_DEVICE_CODE_NAMES:
+        return MOWER_DEVICE_CODE_NAMES[value]
     try:
         from .const import ERROR_CODE_TO_ERROR_NAME
         from .types import DreameMowerErrorCode
@@ -159,8 +154,7 @@ def _error_code_from_raw(value: Any) -> int | None:
 
 def _active_error_code_from_raw(value: Any) -> int | None:
     """Return a numeric active error code from raw app/status values."""
-    code = _error_code_from_raw(value)
-    return None if code in (-1, 0) or code in MOWER_NON_ERROR_EVENT_CODES else code
+    return mower_fault_code(value)
 
 
 def _realtime_error_code_from_device(device: Any) -> int | None:
@@ -209,7 +203,7 @@ def _friendly_error_display(
 ) -> str | None:
     """Return the best user-facing error while preserving raw text elsewhere."""
     if error_code not in (None, -1, 0):
-        confirmed = _friendly_error_name(MOWER_ERROR_CODE_NAMES.get(error_code))
+        confirmed = _friendly_error_name(MOWER_FAULT_CODE_NAMES.get(error_code))
         if confirmed is not None:
             return confirmed
         inherited = (
@@ -272,6 +266,10 @@ class DreameLawnMowerSnapshot:
     error_text: str | None = None
     error_display: str | None = None
     error_source: str | None = None
+    status_notice_code: int | None = None
+    status_notice_name: str | None = None
+    status_notice_display: str | None = None
+    status_notice_source: str | None = None
     raw_error_code: int | None = None
     realtime_error_code: int | None = None
     firmware_version: str | None = None
@@ -946,10 +944,12 @@ def snapshot_from_device(
     raw_error_code = _raw_error_code_from_device(device, error_obj)
     realtime_error_code = _realtime_error_code_from_device(device)
     error_code = raw_error_code
+    status_notice_code = mower_status_notice_code(raw_error_code)
+    status_notice_source = "status" if status_notice_code is not None else None
     status_has_error = bool(getattr(device.status, "has_error", False))
-    if raw_error_code in MOWER_NON_ERROR_EVENT_CODES:
-        # Preserve informational mower events for diagnostics without letting
-        # the inherited vacuum error table turn them into entity errors.
+    if raw_error_code in MOWER_NON_FAULT_CODES:
+        # Preserve normal mower notices/events for diagnostics without letting
+        # the inherited vacuum error model turn them into entity errors.
         error_name = None
         error_text = None
         error_code = None
@@ -971,7 +971,7 @@ def snapshot_from_device(
     )
     error_source: str | None = "status" if has_error else None
     status_reports_no_error = (
-        raw_error_code in MOWER_NON_ERROR_EVENT_CODES
+        raw_error_code in MOWER_NON_FAULT_CODES
         or _status_explicitly_reports_no_error(
             status_has_error=status_has_error,
             error_code=error_code,
@@ -979,14 +979,18 @@ def snapshot_from_device(
             error_text=error_text,
         )
     )
-    if (
-        not has_error
-        and not status_reports_no_error
-        and _active_error_code_from_raw(realtime_error_code) is not None
-    ):
-        error_code = realtime_error_code
-        has_error = True
-        error_source = f"realtime_property_{REALTIME_ERROR_PROPERTY_KEY}"
+    if not has_error and not status_reports_no_error:
+        realtime_fault_code = _active_error_code_from_raw(realtime_error_code)
+        if realtime_fault_code is not None:
+            error_code = realtime_fault_code
+            has_error = True
+            error_source = f"realtime_property_{REALTIME_ERROR_PROPERTY_KEY}"
+        elif status_notice_code is None:
+            status_notice_code = mower_status_notice_code(realtime_error_code)
+            if status_notice_code is not None:
+                status_notice_source = (
+                    f"realtime_property_{REALTIME_ERROR_PROPERTY_KEY}"
+                )
     capability_list = status_attributes.get("capabilities") or getattr(
         getattr(device, "capability", None),
         "list",
@@ -1115,6 +1119,12 @@ def snapshot_from_device(
             error_text=error_text,
         ),
         error_source=error_source,
+        status_notice_code=status_notice_code,
+        status_notice_name=MOWER_STATUS_NOTICE_CODE_NAMES.get(status_notice_code),
+        status_notice_display=_friendly_error_name(
+            MOWER_STATUS_NOTICE_CODE_NAMES.get(status_notice_code)
+        ),
+        status_notice_source=status_notice_source,
         raw_error_code=raw_error_code,
         realtime_error_code=realtime_error_code,
         firmware_version=getattr(

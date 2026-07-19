@@ -64,6 +64,7 @@ def test_a2_error_fixture_exposes_expected_sensor_set() -> None:
         "Realtime Property Count",
         "Serial Number",
         "State Name",
+        "Status Notice",
         "Task Status",
         "Unknown Property Count",
     }

@@ -318,6 +318,20 @@ def _collect_state_reconciliation(snapshot: Any, device: Any) -> dict[str, Any]:
             ),
             "raw_attribute": _normalize_debug_value(raw_attributes.get("error")),
         },
+        "status_notice": {
+            "code": _normalize_debug_value(
+                getattr(snapshot, "status_notice_code", None)
+            ),
+            "name": _normalize_debug_value(
+                getattr(snapshot, "status_notice_name", None)
+            ),
+            "display": _normalize_debug_value(
+                getattr(snapshot, "status_notice_display", None)
+            ),
+            "source": _normalize_debug_value(
+                getattr(snapshot, "status_notice_source", None)
+            ),
+        },
         "flags": {
             "charging": snapshot_charging,
             "raw_charging": snapshot_raw_charging,
@@ -511,6 +525,17 @@ def _collect_triage_summary(
             ),
             "source": _normalize_debug_value(
                 getattr(snapshot, "error_source", None)
+            ),
+        },
+        "status_notice": {
+            "code": _normalize_debug_value(
+                getattr(snapshot, "status_notice_code", None)
+            ),
+            "display": _normalize_debug_value(
+                getattr(snapshot, "status_notice_display", None)
+            ),
+            "source": _normalize_debug_value(
+                getattr(snapshot, "status_notice_source", None)
             ),
         },
         "manual_drive": _normalize_debug_value(

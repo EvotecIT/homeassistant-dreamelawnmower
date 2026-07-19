@@ -257,6 +257,18 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             "error_text": snapshot.error_text,
             "error_display": snapshot.error_display,
             "error_source": getattr(snapshot, "error_source", None),
+            "status_notice_code": getattr(snapshot, "status_notice_code", None),
+            "status_notice_name": getattr(snapshot, "status_notice_name", None),
+            "status_notice_display": getattr(
+                snapshot,
+                "status_notice_display",
+                None,
+            ),
+            "status_notice_source": getattr(
+                snapshot,
+                "status_notice_source",
+                None,
+            ),
             "raw_error_code": getattr(snapshot, "raw_error_code", None),
             "realtime_error_code": getattr(snapshot, "realtime_error_code", None),
             "mowing_mode": snapshot.mowing_mode,
