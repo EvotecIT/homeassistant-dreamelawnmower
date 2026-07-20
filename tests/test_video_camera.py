@@ -39,6 +39,9 @@ from custom_components.dreame_lawn_mower.const import (
     VIDEO_TRANSPORT_CLOUD,
     VIDEO_TRANSPORT_LAN,
 )
+from custom_components.dreame_lawn_mower.diagnostic_events import (
+    DreameLawnMowerDiagnosticEventStore,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
 )
@@ -161,6 +164,29 @@ def test_video_camera_advertises_stop_control() -> None:
     assert features & CameraEntityFeature.ON_OFF
     assert "async_turn_on" in DreameLawnMowerVideoCamera.__dict__
     assert "async_turn_off" in DreameLawnMowerVideoCamera.__dict__
+
+
+def test_video_failure_is_sanitized_logged_once_and_preserved(caplog) -> None:
+    entity = _uninitialized_entity(
+        snapshot=SimpleNamespace(firmware_version="4.3.6_0625")
+    )
+    entity._descriptor = SimpleNamespace(model="dreame.mower.g2568a")
+    entity.coordinator.diagnostic_events = DreameLawnMowerDiagnosticEventStore()
+    entity.async_write_ha_state = lambda: None
+
+    entity._set_stream_error("accessToken=secret failed", stage="cloud_start")
+    entity._set_stream_error("accessToken=secret failed", stage="cloud_start")
+
+    assert entity._last_error == "accessToken=**REDACTED** failed"
+    assert entity._last_error_code == "video_cloud_start_failed"
+    assert entity._last_error_stage == "cloud_start"
+    assert entity._last_error_at is not None
+    events = entity.coordinator.diagnostic_events.as_list()
+    assert len(events) == 1
+    assert events[0]["count"] == 2
+    assert events[0]["context"]["model"] == "dreame.mower.g2568a"
+    assert caplog.text.count("video_cloud_start_failed") == 1
+    assert "secret" not in caplog.text
 
 
 def test_video_camera_auto_policy_prefers_direct_capable_sdk_negotiation() -> None:
@@ -374,7 +400,7 @@ def test_video_camera_does_not_start_while_turned_off() -> None:
             return "http://127.0.0.1/live.flv"
 
         entity._async_start_stream = _start
-        entity._set_stream_error = lambda _error: None
+        entity._set_stream_error = lambda _error, **_kwargs: None
         return await entity._async_start_raw_source(), starts
 
     source, starts = asyncio.run(_run())
@@ -1345,7 +1371,7 @@ def test_video_camera_disables_video_when_enable_attempt_raises() -> None:
         entity._last_stream_disable_error = None
         entity._async_stop_active_session = lambda: asyncio.sleep(0)
         entity._create_runtime = lambda: object()
-        entity._set_stream_error = lambda _error: None
+        entity._set_stream_error = lambda _error, **_kwargs: None
         entity.hass = SimpleNamespace(
             async_add_executor_job=lambda function, *args: asyncio.sleep(
                 0,
@@ -1840,7 +1866,7 @@ def test_video_camera_auto_refresh_blocks_cached_start_after_mower_docks() -> No
             )
 
         entity.coordinator.async_refresh = _async_refresh
-        entity._set_stream_error = errors.append
+        entity._set_stream_error = lambda error, **_kwargs: errors.append(error)
         entity._create_runtime = lambda: (_ for _ in ()).throw(
             AssertionError("Unsafe cached startup must stop before runtime creation")
         )

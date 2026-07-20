@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
 from datetime import UTC, datetime
@@ -24,27 +25,80 @@ from .dreame_lawn_mower_client.models import (
     remote_control_state_safe,
 )
 
-DIAGNOSTIC_SCHEMA_VERSION = 5
+DIAGNOSTIC_SCHEMA_VERSION = 6
 UNKNOWN_REALTIME_PREFIX = "UNKNOWN_REALTIME_"
 
 REDACT_KEYS = {
     CONF_PASSWORD,
     CONF_TOKEN,
     CONF_USERNAME,
+    "access_token",
+    "api_key",
+    "app_id",
+    "app_key",
+    "app_secret",
+    "authorization",
     "bindDomain",
+    "client_id",
+    "client_secret",
+    "cookie",
+    "coordinates",
+    "device_id",
+    "device_name",
     "did",
+    "entity_picture",
+    "family_id",
+    "gps",
     "host",
+    "lan_client_token",
+    "latitude",
+    "library_path",
     "localip",
+    "longitude",
     "mac",
     "masterName",
     "masterUid",
     "masterUid2UUID",
+    "p2p_info",
+    "pose_x",
+    "pose_y",
+    "position_x",
+    "position_y",
+    "refresh_token",
+    "runtime_pose_x",
+    "runtime_pose_y",
+    "secret_id",
+    "secret_key",
     "serial_number",
+    "session_token",
+    "signature",
     "sn",
     "token",
     "uid",
     "username",
+    "uuid",
+    "xp2p_key",
+    "xp2p_library_path",
+    "xp2p_runner_command",
+    "xp2p_secretKey",
+    "candidate_runtime_pose_x",
+    "candidate_runtime_pose_y",
 }
+
+_NORMALIZED_REDACT_KEYS = {
+    re.sub(r"[^a-z0-9]", "", str(key).casefold()) for key in REDACT_KEYS
+}
+_SENSITIVE_TEXT_VALUE = re.compile(
+    r"(?i)\b(access[_-]?token|app[_-]?(?:id|key|secret)|client[_-]?secret|"
+    r"password|refresh[_-]?token|secret[_-]?(?:id|key)|session[_-]?token|token|"
+    r"xp2p[_-]?(?:key|secretkey))\b(\s*(?:[:=]\s*|\s+))([\"']?)"
+    r"[^\s,;&\"'}]+"
+)
+_BEARER_VALUE = re.compile(r"(?i)\bbearer\s+[^\s,;]+")
+_LOCAL_PATH_VALUE = re.compile(
+    r"(?i)(?<![\w])(?:[a-z]:[\\/]|(?<![:/])/(?:config|home|users|usr|tmp|"
+    r"var|opt|mnt|data|share|addons|ssl|media)/)[^\s,;\"']+"
+)
 
 STATUS_FIELDS = (
     "state_name",
@@ -215,19 +269,33 @@ def _redact_debug_data(value: Any) -> Any:
         return {
             str(key): (
                 "**REDACTED**"
-                if str(key) in REDACT_KEYS
+                if re.sub(r"[^a-z0-9]", "", str(key).casefold())
+                in _NORMALIZED_REDACT_KEYS
                 else _redact_debug_data(item)
             )
             for key, item in value.items()
         }
     if isinstance(value, list):
         return [_redact_debug_data(item) for item in value]
+    if isinstance(value, str):
+        return sanitize_diagnostic_text(value)
     return value
 
 
 def sanitize_debug_data(value: Any) -> Any:
     """Return JSON-friendly debug data with sensitive fields redacted."""
     return _redact_debug_data(_normalize_debug_value(value))
+
+
+def sanitize_diagnostic_text(value: object) -> str:
+    """Redact common credential and local-path forms from a message."""
+    text = str(value)
+    text = _BEARER_VALUE.sub("Bearer **REDACTED**", text)
+    text = _SENSITIVE_TEXT_VALUE.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}**REDACTED**",
+        text,
+    )
+    return _LOCAL_PATH_VALUE.sub("**REDACTED_PATH**", text)
 
 
 def _collect_status_values(device: Any) -> dict[str, Any]:
@@ -554,8 +622,13 @@ def _collect_triage_summary(
 def build_debug_payload(
     *,
     entry_data: Mapping[str, Any] | None,
+    entry_options: Mapping[str, Any] | None = None,
     snapshot: Any,
     device: Any,
+    report_context: Mapping[str, Any] | None = None,
+    coordinator_diagnostics: Mapping[str, Any] | None = None,
+    entity_diagnostics: list[Mapping[str, Any]] | None = None,
+    recent_events: list[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a sanitized structured debug payload for diagnostics or logs."""
     descriptor = getattr(snapshot, "descriptor", None)
@@ -568,7 +641,12 @@ def build_debug_payload(
     payload = {
         "diagnostic_schema_version": DIAGNOSTIC_SCHEMA_VERSION,
         "captured_at": datetime.now(UTC).isoformat(),
+        "report_context": _normalize_debug_value(dict(report_context or {})),
         "entry": _normalize_debug_value(dict(entry_data or {})),
+        "entry_options": _normalize_debug_value(dict(entry_options or {})),
+        "coordinator": _normalize_debug_value(dict(coordinator_diagnostics or {})),
+        "entities": _normalize_debug_value(list(entity_diagnostics or [])),
+        "recent_events": _normalize_debug_value(list(recent_events or [])),
         "descriptor": _normalize_debug_value(descriptor),
         "snapshot": _normalize_debug_value(snapshot),
         "triage": _collect_triage_summary(

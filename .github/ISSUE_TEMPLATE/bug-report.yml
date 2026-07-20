@@ -1,0 +1,104 @@
+name: Bug report
+description: Report a reproducible integration, entity, service, map, schedule, or video problem.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Reproduce the problem once, then download diagnostics before reloading Home Assistant. The report includes sanitized version, host, coordinator, entity, and recent failure information.
+
+        Do not paste credentials, tokens, serial numbers, exact coordinates, or broad raw debug logs.
+  - type: input
+    id: integration_version
+    attributes:
+      label: Integration version
+      description: The installed Dreame Lawn Mower version shown by HACS.
+      placeholder: 0.2.9
+    validations:
+      required: true
+  - type: textarea
+    id: home_assistant_system
+    attributes:
+      label: Home Assistant system
+      description: Include Home Assistant Core version, installation type, host operating system, and CPU architecture from System information.
+      placeholder: Home Assistant 2026.7.x, Home Assistant OS, Linux, x86_64
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Mower model
+      description: Include both the retail name and raw model identifier when known.
+      placeholder: Dreame A2 1200 - dreame.mower.g2568a
+    validations:
+      required: true
+  - type: dropdown
+    id: feature
+    attributes:
+      label: Affected area
+      options:
+        - Setup or authentication
+        - Device availability or state
+        - Mowing controls or services
+        - Maps or zones
+        - Schedules or calendar
+        - Live video or camera
+        - Sensors or diagnostics
+        - Firmware update
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      placeholder: What happened instead, including the visible error?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps and mower state
+      description: Include the exact steps, whether the mower was docked/charging/mowing/paused/returning, and whether the problem is consistent.
+      placeholder: |
+        1. Start ...
+        2. Open ...
+        3. The mower is ...
+    validations:
+      required: true
+  - type: textarea
+    id: vendor_app_comparison
+    attributes:
+      label: Dreamehome or MOVAhome comparison
+      description: Say whether the same operation works in the vendor app at the same time.
+      placeholder: Works in Dreamehome / also fails in Dreamehome / not available in the app.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Downloaded diagnostics
+      description: Drag the diagnostics JSON downloaded immediately after reproducing the problem. Add only short, sanitized log excerpts if they provide information not present in the file.
+      placeholder: Drag the downloaded diagnostics JSON here.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety and privacy checks
+      options:
+        - label: I reproduced the problem immediately before downloading diagnostics.
+          required: true
+        - label: I removed credentials, tokens, serial numbers, exact coordinates, and other private data from anything added manually.
+          required: true
+        - label: I did not run movement or write tests without supervising the mower.
+          required: true

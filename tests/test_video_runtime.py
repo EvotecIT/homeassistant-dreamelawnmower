@@ -435,7 +435,8 @@ def test_native_xp2p_runtime_reports_loader_errors() -> None:
     try:
         DreameLawnMowerNativeXp2pRuntime("missing-xp2p-runtime.so")
     except DreameLawnMowerVideoRuntimeError as err:
-        assert "Could not load XP2P native library" in str(err)
+        assert "Could not load the configured XP2P native library" in str(err)
+        assert "missing-xp2p-runtime.so" not in str(err)
     else:
         raise AssertionError("Expected missing native library to fail")
 
@@ -496,7 +497,12 @@ def test_native_xp2p_runtime_diagnostics_report_loader_errors() -> None:
     assert diagnostics.ready is False
     assert diagnostics.loadable is False
     assert diagnostics.missing_required_symbols == ()
-    assert "Could not load XP2P native library" in str(diagnostics.error)
+    assert "Could not load the configured XP2P native library" in str(
+        diagnostics.error
+    )
+    assert "missing-xp2p-runtime.so" not in str(diagnostics.error)
+    assert diagnostics.as_dict()["library_path_configured"] is True
+    assert "library_path" not in diagnostics.as_dict()
 
 
 def test_native_xp2p_runtime_diagnostics_identify_android_jni_library(
@@ -661,6 +667,24 @@ def test_external_runner_requires_stream_url(tmp_path) -> None:
         assert "stream_url" in str(err)
     else:
         raise AssertionError("Expected missing stream_url to fail")
+
+
+def test_runner_start_errors_do_not_expose_configured_executable_path(
+    tmp_path,
+) -> None:
+    missing_command = tmp_path / "private" / "xp2p-runner"
+    for runner in (
+        DreameLawnMowerXp2pExternalRunner((missing_command,)),
+        DreameLawnMowerXp2pProcessRunner((missing_command,)),
+    ):
+        try:
+            runner.start_live_stream(_runtime_inputs())
+        except DreameLawnMowerVideoRuntimeError as err:
+            message = str(err)
+            assert "configured XP2P" in message
+            assert str(missing_command) not in message
+        else:
+            raise AssertionError("Expected missing runner executable to fail")
 
 
 def test_external_runner_reports_process_failures_without_secret(tmp_path) -> None:

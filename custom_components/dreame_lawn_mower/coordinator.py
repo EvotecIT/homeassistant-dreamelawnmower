@@ -33,6 +33,11 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_SECONDS,
     DOMAIN,
 )
+from .debug import sanitize_diagnostic_text
+from .diagnostic_events import (
+    DreameLawnMowerDiagnosticEventStore,
+    record_diagnostic_event,
+)
 from .dreame_lawn_mower_client.models import (
     DreameLawnMowerStatusBlob,
     display_name_for_model,
@@ -110,6 +115,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         self.bluetooth_connected: bool | None = None
         self.runtime_status_blob: DreameLawnMowerStatusBlob | None = None
         self.runtime_telemetry_cache = DreameLawnMowerRuntimeTelemetryCache()
+        self.diagnostic_events = DreameLawnMowerDiagnosticEventStore()
         self.last_batch_device_data_probe_result: dict[str, Any] | None = None
         self.last_preference_probe_result: dict[str, Any] | None = None
         self.last_preference_write_result: dict[str, Any] | None = None
@@ -136,7 +142,15 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         try:
             snapshot = await self.client.async_refresh()
         except DreameLawnMowerConnectionError as err:
-            raise UpdateFailed(str(err)) from err
+            safe_error = sanitize_diagnostic_text(err)
+            record_diagnostic_event(
+                self,
+                code="coordinator_update_failed",
+                source="coordinator",
+                message=safe_error,
+                context={"exception_type": type(err).__name__},
+            )
+            raise UpdateFailed(safe_error) from err
         if not snapshot.available:
             self.runtime_status_blob = None
             self.client.update_runtime_live_tracking(None, active=False)

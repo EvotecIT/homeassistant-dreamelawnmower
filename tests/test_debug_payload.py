@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from custom_components.dreame_lawn_mower.debug import (
     build_debug_payload,
     sanitize_debug_data,
+    sanitize_diagnostic_text,
 )
 from dreame_lawn_mower_client.models import (
     DreameLawnMowerDescriptor,
@@ -163,7 +164,7 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
         device=device,
     )
 
-    assert payload["diagnostic_schema_version"] == 5
+    assert payload["diagnostic_schema_version"] == 6
     assert payload["entry"]["username"] == "**REDACTED**"
     assert payload["entry"]["password"] == "**REDACTED**"
     assert payload["entry"]["token"] == "**REDACTED**"
@@ -271,7 +272,7 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
     }
     assert payload["state_reconciliation"]["warnings"] == []
     assert payload["triage"] == {
-        "schema_version": 5,
+        "schema_version": 6,
         "known_model": True,
         "model": "dreame.mower.g2408",
         "display_model": "A2",
@@ -315,6 +316,78 @@ def test_sanitize_debug_data_redacts_operation_snapshot_identifiers() -> None:
     assert payload["snapshot"]["descriptor"]["host"] == "**REDACTED**"
     assert payload["snapshot"]["serial_number"] == "**REDACTED**"
     assert payload["status_blob"]["hex"] == "ce00ce"
+
+
+def test_sanitize_debug_data_redacts_mixed_case_runtime_credentials() -> None:
+    payload = sanitize_debug_data(
+        {
+            "appKey": "app-key-value",
+            "appSecret": "app-secret-value",
+            "accessToken": "access-token-value",
+            "p2pInfo": "private-p2p-material",
+            "entity_picture": "/api/camera_proxy/camera.mower?token=secret",
+            "token_present": True,
+            "message": "request failed: accessToken=secret-value",
+        }
+    )
+
+    assert payload == {
+        "appKey": "**REDACTED**",
+        "appSecret": "**REDACTED**",
+        "accessToken": "**REDACTED**",
+        "p2pInfo": "**REDACTED**",
+        "entity_picture": "**REDACTED**",
+        "token_present": True,
+        "message": "request failed: accessToken=**REDACTED**",
+    }
+
+
+def test_sanitize_debug_data_redacts_paths_and_map_coordinates() -> None:
+    payload = sanitize_debug_data(
+        {
+            "libraryPath": "/config/custom_components/private/libxp2p.so",
+            "pose_x": 5910,
+            "pose_y": 12400,
+            "runtime_pose_x": 5910,
+            "candidateRuntimePoseY": 12400,
+            "runtime_heading_deg": 63.5,
+        }
+    )
+
+    assert payload == {
+        "libraryPath": "**REDACTED**",
+        "pose_x": "**REDACTED**",
+        "pose_y": "**REDACTED**",
+        "runtime_pose_x": "**REDACTED**",
+        "candidateRuntimePoseY": "**REDACTED**",
+        "runtime_heading_deg": 63.5,
+    }
+
+
+def test_sanitize_diagnostic_text_redacts_bearer_and_query_credentials() -> None:
+    message = sanitize_diagnostic_text(
+        "Bearer secret-token failed at /video?token=url-token&mode=auto "
+        "using --app-secret cli-secret"
+    )
+
+    assert message == (
+        "Bearer **REDACTED** failed at "
+        "/video?token=**REDACTED**&mode=auto "
+        "using --app-secret **REDACTED**"
+    )
+
+
+def test_sanitize_diagnostic_text_redacts_local_paths_but_keeps_urls() -> None:
+    message = sanitize_diagnostic_text(
+        "failed at C:\\config\\custom_components\\private\\runner.exe and "
+        "/config/custom_components/private/libxp2p.so; "
+        "stream=http://127.0.0.1:5544/ipc.flv"
+    )
+
+    assert message == (
+        "failed at **REDACTED_PATH** and **REDACTED_PATH**; "
+        "stream=http://127.0.0.1:5544/ipc.flv"
+    )
 
 
 def test_build_debug_payload_highlights_state_disagreements() -> None:
@@ -406,7 +479,7 @@ def test_build_debug_payload_highlights_state_disagreements() -> None:
         "raw_mower_state_looks_docked_but_raw_docked_false",
         "raw_mower_state_differs_from_state_name",
     ]
-    assert payload["triage"]["schema_version"] == 5
+    assert payload["triage"]["schema_version"] == 6
     assert payload["triage"]["error"] == {
         "active": True,
         "code": 73,
