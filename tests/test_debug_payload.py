@@ -377,6 +377,19 @@ def test_sanitize_diagnostic_text_redacts_bearer_and_query_credentials() -> None
     )
 
 
+def test_sanitize_diagnostic_text_redacts_json_credentials_and_identifiers() -> None:
+    message = sanitize_diagnostic_text(
+        'cloud failed: {"token":"secret", "accessToken": "other", '
+        '"serialNumber":"serial-123", "did": 456}'
+    )
+
+    assert message == (
+        'cloud failed: {"token":"**REDACTED**", '
+        '"accessToken": "**REDACTED**", '
+        '"serialNumber":"**REDACTED**", "did": **REDACTED**}'
+    )
+
+
 def test_sanitize_diagnostic_text_redacts_local_paths_but_keeps_urls() -> None:
     message = sanitize_diagnostic_text(
         "failed at C:\\config\\custom_components\\private\\runner.exe and "

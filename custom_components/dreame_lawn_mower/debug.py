@@ -91,8 +91,14 @@ _NORMALIZED_REDACT_KEYS = {
 _SENSITIVE_TEXT_VALUE = re.compile(
     r"(?i)\b(access[_-]?token|app[_-]?(?:id|key|secret)|client[_-]?secret|"
     r"password|refresh[_-]?token|secret[_-]?(?:id|key)|session[_-]?token|token|"
-    r"xp2p[_-]?(?:key|secretkey))\b(\s*(?:[:=]\s*|\s+))([\"']?)"
+    r"xp2p[_-]?(?:key|secretkey))\b([\"']?)(\s*(?:[:=]\s*|\s+))([\"']?)"
     r"[^\s,;&\"'}]+"
+)
+_SENSITIVE_IDENTIFIER_TEXT_VALUE = re.compile(
+    r"(?i)\b(bind[_-]?domain|client[_-]?id|coordinates|device[_-]?(?:id|name)|"
+    r"did|family[_-]?id|gps|host|latitude|localip|longitude|mac|master[_-]?name|"
+    r"master[_-]?uid(?:2uuid)?|p2p[_-]?info|serial[_-]?number|sn|uid|username|"
+    r"uuid)\b([\"']?)(\s*[:=]\s*)([\"']?)[^\s,;&\"'}]+"
 )
 _BEARER_VALUE = re.compile(r"(?i)\bbearer\s+[^\s,;]+")
 _LOCAL_PATH_VALUE = re.compile(
@@ -292,7 +298,17 @@ def sanitize_diagnostic_text(value: object) -> str:
     text = str(value)
     text = _BEARER_VALUE.sub("Bearer **REDACTED**", text)
     text = _SENSITIVE_TEXT_VALUE.sub(
-        lambda match: f"{match.group(1)}{match.group(2)}**REDACTED**",
+        lambda match: (
+            f"{match.group(1)}{match.group(2)}{match.group(3)}{match.group(4)}"
+            "**REDACTED**"
+        ),
+        text,
+    )
+    text = _SENSITIVE_IDENTIFIER_TEXT_VALUE.sub(
+        lambda match: (
+            f"{match.group(1)}{match.group(2)}{match.group(3)}{match.group(4)}"
+            "**REDACTED**"
+        ),
         text,
     )
     return _LOCAL_PATH_VALUE.sub("**REDACTED_PATH**", text)

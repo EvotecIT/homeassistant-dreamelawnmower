@@ -165,3 +165,20 @@ def test_entity_diagnostics_redact_runtime_map_coordinates() -> None:
         "position_y": "**REDACTED**",
         "runtime_heading_deg": 63.5,
     }
+
+
+def test_entity_diagnostics_redact_identifier_sensor_state() -> None:
+    entry = SimpleNamespace(
+        entity_id="sensor.garden_mower_serial",
+        unique_id="device-1_serial_number",
+        original_name="Serial Number",
+        translation_key=None,
+        entity_category=SimpleNamespace(value="diagnostic"),
+        disabled_by=None,
+    )
+    state = SimpleNamespace(state="SERIAL-123", attributes={"icon": "mdi:barcode"})
+
+    entities = build_entity_diagnostics([entry], lambda _entity_id: state)
+
+    assert entities[0]["state"] == "**REDACTED**"
+    assert "SERIAL-123" not in repr(entities)

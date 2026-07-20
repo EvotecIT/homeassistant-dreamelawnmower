@@ -29,6 +29,7 @@ _SENSITIVE_ENTITY_STATE_NAMES = frozenset(
     {
         "runtimepositionx",
         "runtimepositiony",
+        "serialnumber",
     }
 )
 
@@ -90,7 +91,8 @@ def build_entity_diagnostics(
         attributes = getattr(state, "attributes", {}) if state is not None else {}
         original_name = getattr(registry_entry, "original_name", None)
         translation_key = getattr(registry_entry, "translation_key", None)
-        if _entity_state_is_sensitive(original_name, translation_key):
+        unique_id = getattr(registry_entry, "unique_id", None)
+        if _entity_state_is_sensitive(original_name, translation_key, unique_id):
             state_value = "**REDACTED**" if state_value is not None else None
         entities.append(
             {
@@ -126,11 +128,16 @@ def _enum_value(value: object) -> object:
 def _entity_state_is_sensitive(
     original_name: object,
     translation_key: object,
+    unique_id: object,
 ) -> bool:
-    """Return whether an entity's scalar state contains private location data."""
-    return any(
+    """Return whether an entity's scalar state contains private report data."""
+    normalized_values = (
         "".join(character for character in str(value).casefold() if character.isalnum())
-        in _SENSITIVE_ENTITY_STATE_NAMES
-        for value in (original_name, translation_key)
+        for value in (original_name, translation_key, unique_id)
         if value is not None
+    )
+    return any(
+        value.endswith(sensitive_name)
+        for value in normalized_values
+        for sensitive_name in _SENSITIVE_ENTITY_STATE_NAMES
     )
