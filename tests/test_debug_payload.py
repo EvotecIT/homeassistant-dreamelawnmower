@@ -390,6 +390,21 @@ def test_sanitize_diagnostic_text_redacts_json_credentials_and_identifiers() -> 
     )
 
 
+def test_sanitize_diagnostic_text_redacts_sensitive_http_headers() -> None:
+    message = sanitize_diagnostic_text(
+        "request failed\n"
+        "Authorization: Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==\n"
+        "Cookie: session=secret; device=private\n"
+        "Content-Type: application/json"
+    )
+
+    assert message == (
+        "request failed\n"
+        "Authorization: **REDACTED**\n"
+        "Cookie: **REDACTED**\n"
+        "Content-Type: application/json"
+    )
+
 def test_sanitize_diagnostic_text_redacts_local_paths_but_keeps_urls() -> None:
     message = sanitize_diagnostic_text(
         "failed at C:\\config\\custom_components\\private\\runner.exe and "

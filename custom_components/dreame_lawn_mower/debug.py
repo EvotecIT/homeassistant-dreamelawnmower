@@ -100,6 +100,10 @@ _SENSITIVE_IDENTIFIER_TEXT_VALUE = re.compile(
     r"master[_-]?uid(?:2uuid)?|p2p[_-]?info|serial[_-]?number|sn|uid|username|"
     r"uuid)\b([\"']?)(\s*[:=]\s*)([\"']?)[^\s,;&\"'}]+"
 )
+_SENSITIVE_HEADER_VALUE = re.compile(
+    r"(?im)\b(authorization|proxy-authorization|cookie|set-cookie)"
+    r"(\s*:\s*)[^\r\n]+"
+)
 _BEARER_VALUE = re.compile(r"(?i)\bbearer\s+[^\s,;]+")
 _LOCAL_PATH_VALUE = re.compile(
     r"(?i)(?<![\w])(?:[a-z]:[\\/]|(?<![:/])/(?:config|home|users|usr|tmp|"
@@ -296,6 +300,10 @@ def sanitize_debug_data(value: Any) -> Any:
 def sanitize_diagnostic_text(value: object) -> str:
     """Redact common credential and local-path forms from a message."""
     text = str(value)
+    text = _SENSITIVE_HEADER_VALUE.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}**REDACTED**",
+        text,
+    )
     text = _BEARER_VALUE.sub("Bearer **REDACTED**", text)
     text = _SENSITIVE_TEXT_VALUE.sub(
         lambda match: (
