@@ -428,19 +428,36 @@ device rejection responses are surfaced as failed actions.
 
 ## Troubleshooting
 
-Start with Home Assistant diagnostics:
+Start with a fresh Home Assistant diagnostics capture:
 
-1. Open the device page.
-2. Download diagnostics.
-3. Check the `triage`, `state_reconciliation`, schedule, and map sections.
+1. Reproduce the problem once.
+2. Before reloading or restarting Home Assistant, open the integration or device
+   page and download diagnostics.
+3. Attach the downloaded JSON to the issue. Add screenshots or short log excerpts
+   only when they show something that is not already in the diagnostics.
+
+The report is sanitized by the integration and includes:
+
+- the installed integration, Home Assistant, Python, operating-system, and CPU
+  architecture versions
+- config-entry and coordinator health
+- current state and diagnostic attributes for every entity belonging to the
+  config entry, including the Live Video camera's last failure stage
+- a bounded list of recent coordinator, map, schedule, and video failures with
+  repeated failures coalesced
+- the existing `triage`, `state_reconciliation`, schedule, map, firmware, and raw
+  property summaries
+
+Do not enable broad debug logging unless a maintainer asks for a specific logger.
+Cloud protocol debug output can contain data that needs additional review before
+it is posted publicly.
 
 For issue reports, include:
 
-- mower model and app/account type
-- firmware version
-- normalized activity/state/error values
-- relevant diagnostic payload sections with secrets redacted
-- whether the issue happens while docked, mowing, returning, raining, or charging
+- the downloaded diagnostics captured immediately after the failure
+- what you expected and the exact steps that failed
+- whether the same operation worked in Dreamehome or MOVAhome at that time
+- screenshots only when the visible result matters
 
 Home Assistant log lines that start with `Captured Dreame lawn mower ...` can be
 converted to JSON with:

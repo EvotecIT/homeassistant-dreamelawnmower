@@ -44,6 +44,22 @@ body:
       placeholder: eu / pl
     validations:
       required: true
+  - type: input
+    id: integration_version
+    attributes:
+      label: Integration version
+      description: The installed Dreame Lawn Mower version shown by HACS.
+      placeholder: 0.2.9
+    validations:
+      required: true
+  - type: textarea
+    id: home_assistant_system
+    attributes:
+      label: Home Assistant system
+      description: Include Home Assistant Core version, installation type, host operating system, and CPU architecture from System information.
+      placeholder: Home Assistant 2026.7.x, Home Assistant OS, Linux, aarch64
+    validations:
+      required: true
   - type: textarea
     id: works
     attributes:
@@ -57,11 +73,27 @@ body:
       description: Tell us what does not work yet or looks wrong.
       placeholder: Map camera empty, schedule not shown, unknown sensors...
   - type: textarea
+    id: reproduction_context
+    attributes:
+      label: Reproduction context
+      description: Describe the steps and the mower state when the problem happens. For video, say whether the mower is active and away from its station.
+      placeholder: Steps, mower activity, dock/charging state, network context, and whether the problem happens every time.
+    validations:
+      required: true
+  - type: textarea
+    id: vendor_app_comparison
+    attributes:
+      label: Dreamehome or MOVAhome comparison
+      description: Say whether the same feature works in the vendor app at the same time.
+      placeholder: Works in Dreamehome / also fails in Dreamehome / not available in the app.
+    validations:
+      required: true
+  - type: textarea
     id: diagnostics
     attributes:
       label: Sanitized diagnostics or debug notes
-      description: Paste sanitized details or describe attached files/screenshots.
-      placeholder: Attached Home Assistant diagnostics and screenshots with tokens removed.
+      description: Reproduce once, then download diagnostics from the integration before reloading Home Assistant. Attach the JSON file and any relevant screenshot. Do not enable broad debug logging unless a maintainer asks for it.
+      placeholder: Drag the downloaded diagnostics JSON here, then add any short notes needed to identify the failed feature.
     validations:
       required: true
   - type: checkboxes
@@ -70,6 +102,8 @@ body:
       label: Safety checks
       options:
         - label: I removed credentials, tokens, serial numbers, and other secrets.
+          required: true
+        - label: I reproduced the problem immediately before downloading diagnostics.
           required: true
         - label: I understand write and drive features may need careful supervision on unvalidated models.
           required: true

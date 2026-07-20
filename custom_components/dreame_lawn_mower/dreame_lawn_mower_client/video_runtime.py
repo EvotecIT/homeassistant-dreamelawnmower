@@ -114,9 +114,9 @@ class DreameLawnMowerXp2pRuntimeDiagnostics:
     error: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        """Return a JSON-safe diagnostics payload."""
+        """Return a JSON-safe diagnostics payload without the local path."""
         return {
-            "library_path": self.library_path,
+            "library_path_configured": bool(self.library_path),
             "loadable": self.loadable,
             "ready": self.ready,
             "required_symbols": self.required_symbols,
@@ -421,7 +421,8 @@ class DreameLawnMowerXp2pExternalRunner:
             )
         except OSError as err:
             raise DreameLawnMowerVideoRuntimeError(
-                f"Could not start XP2P external runner: {err}"
+                "Could not start the configured XP2P external runner "
+                f"({type(err).__name__})."
             ) from err
         except subprocess.TimeoutExpired as err:
             raise DreameLawnMowerVideoRuntimeError(
@@ -489,7 +490,8 @@ class DreameLawnMowerXp2pProcessRunner:
             )
         except OSError as err:
             raise DreameLawnMowerVideoRuntimeError(
-                f"Could not start XP2P process runner: {err}"
+                "Could not start the configured XP2P process runner "
+                f"({type(err).__name__})."
             ) from err
 
         stderr_tail: list[str] = []
@@ -602,7 +604,8 @@ class DreameLawnMowerNativeXp2pRuntime:
             self._library = library if library is not None else CDLL(self.library_path)
         except OSError as err:
             raise DreameLawnMowerVideoRuntimeError(
-                f"Could not load XP2P native library {self.library_path!r}: {err}"
+                "Could not load the configured XP2P native library "
+                f"({type(err).__name__})."
             ) from err
         self._start_service = self._bind(
             "startService",
@@ -963,7 +966,10 @@ def diagnose_native_xp2p_runtime(
     try:
         loaded_library = library if library is not None else CDLL(path)
     except OSError as err:
-        error = f"Could not load XP2P native library {path!r}: {err}"
+        error = (
+            "Could not load the configured XP2P native library "
+            f"({type(err).__name__})."
+        )
         if inspection.get("platform_hint") == "android_jni":
             error += (
                 " The file looks like Dreamehome's Android JNI XP2P library; "

@@ -149,6 +149,26 @@ Keep long probe recipes, protocol notes, app decompilation notes, and live test
 history in `docs/agent-handoff.md`, `docs/dreamehome-research.md`, or focused
 docs like this one.
 
+## Diagnostics Contract
+
+Downloaded diagnostics are the primary public issue-report artifact. Keep the
+collection path safe enough that a user can attach the file without enabling a
+broad protocol logger.
+
+- `debug.py` owns JSON normalization and recursive redaction.
+- `reporting.py` owns version, host, coordinator, and entity report sections.
+- `diagnostic_events.py` owns the bounded in-memory failure history.
+- entities and coordinators should record a concise stable code, safe message,
+  source, and non-secret context at a meaningful failure boundary.
+- repeated identical failures should be coalesced instead of filling the report.
+- do not record raw cloud responses, credentials, tokens, serial numbers, local
+  addresses, exact coordinates, runner commands, or local library paths.
+- when a new entity keeps a useful `last_*` error or health attribute, verify that
+  the generic entity diagnostics collector includes it after sanitization.
+
+Increment `DIAGNOSTIC_SCHEMA_VERSION` when the public report structure changes,
+and add contract tests for both the useful evidence and its redaction.
+
 ## Before Committing
 
 Run at least:

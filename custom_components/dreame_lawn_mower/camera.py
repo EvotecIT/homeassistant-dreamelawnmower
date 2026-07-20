@@ -23,6 +23,8 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import DreameLawnMowerCoordinator
+from .debug import sanitize_diagnostic_text
+from .diagnostic_events import record_diagnostic_event
 from .dreame_lawn_mower_client.client import render_app_map_payload_png
 from .dreame_lawn_mower_client.models import DreameLawnMowerMapView
 from .image import (
@@ -213,8 +215,17 @@ class DreameLawnMowerMapCamera(
                 self.async_write_ha_state()
                 return image
             except Exception as err:
-                _LOGGER.warning("Failed to convert Dreame mower map image: %s", err)
-                self._map_cache.last_error = str(err)
+                safe_error = sanitize_diagnostic_text(err)
+                _LOGGER.warning(
+                    "Failed to convert Dreame mower map image: %s", safe_error
+                )
+                record_diagnostic_event(
+                    self.coordinator,
+                    code="map_image_conversion_failed",
+                    source="map_camera",
+                    message=safe_error,
+                )
+                self._map_cache.last_error = safe_error
                 self.async_write_ha_state()
 
         if self._map_cache.last_image is not None:
@@ -239,8 +250,15 @@ class DreameLawnMowerMapCamera(
             self.async_write_ha_state()
             return view
         except Exception as err:
-            _LOGGER.warning("Failed to refresh Dreame mower map image: %s", err)
-            view = self._map_cache.store_error(str(err))
+            safe_error = sanitize_diagnostic_text(err)
+            _LOGGER.warning("Failed to refresh Dreame mower map image: %s", safe_error)
+            record_diagnostic_event(
+                self.coordinator,
+                code="map_refresh_failed",
+                source="map_camera",
+                message=safe_error,
+            )
+            view = self._map_cache.store_error(safe_error)
             self.async_write_ha_state()
             return view
 
@@ -290,10 +308,17 @@ class DreameLawnMowerLivePathMapCamera(DreameLawnMowerMapCamera):
             self.async_write_ha_state()
             return view
         except Exception as err:
+            safe_error = sanitize_diagnostic_text(err)
             _LOGGER.warning(
-                "Failed to refresh Dreame mower live-path map image: %s", err
+                "Failed to refresh Dreame mower live-path map image: %s", safe_error
             )
-            view = self._map_cache.store_error(str(err), source="batch_vector_map")
+            record_diagnostic_event(
+                self.coordinator,
+                code="live_path_map_refresh_failed",
+                source="map_camera",
+                message=safe_error,
+            )
+            view = self._map_cache.store_error(safe_error, source="batch_vector_map")
             self.async_write_ha_state()
             return view
 
@@ -413,12 +438,21 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
                 )
             )
         except Exception as err:
-            _LOGGER.warning("Failed to refresh Dreame mower all-map image: %s", err)
+            safe_error = sanitize_diagnostic_text(err)
+            _LOGGER.warning(
+                "Failed to refresh Dreame mower all-map image: %s", safe_error
+            )
+            record_diagnostic_event(
+                self.coordinator,
+                code="all_maps_refresh_failed",
+                source="map_camera",
+                message=safe_error,
+            )
             return await self.hass.async_add_executor_job(
                 partial(
                     map_placeholder_jpeg,
                     title="Dreame all maps unavailable",
-                    detail=str(err),
+                    detail=safe_error,
                 )
             )
 

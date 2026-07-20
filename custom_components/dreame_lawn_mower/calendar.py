@@ -16,6 +16,8 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
+from .debug import sanitize_diagnostic_text
+from .diagnostic_events import record_diagnostic_event
 from .entity import DreameLawnMowerEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -93,10 +95,16 @@ class DreameLawnMowerScheduleCalendar(DreameLawnMowerEntity, CalendarEntity):
         try:
             payload = await self.coordinator.client.async_get_app_schedules()
         except Exception as err:  # noqa: BLE001 - calendar should stay read-only
-            self._last_error = str(err)
+            self._last_error = sanitize_diagnostic_text(err)
             self._cached_event_count = 0
             self._cached_selection = None
-            _LOGGER.debug("Failed to fetch mower schedules: %s", err)
+            record_diagnostic_event(
+                self.coordinator,
+                code="schedule_calendar_refresh_failed",
+                source="schedule_calendar",
+                message=self._last_error,
+            )
+            _LOGGER.debug("Failed to fetch mower schedules: %s", self._last_error)
             return []
         self._last_error = None
         self._cached_selection = schedule_calendar_selection(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urljoin
@@ -37,6 +38,8 @@ from .const import (
     XP2P_RUNNER_MODE_PROCESS,
 )
 from .coordinator import DreameLawnMowerCoordinator
+from .debug import sanitize_debug_data, sanitize_diagnostic_text
+from .diagnostic_events import record_diagnostic_event
 from .dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
     camera_stream_block_reason,
@@ -131,6 +134,9 @@ class DreameLawnMowerVideoCamera(
             stop_active=self._async_stop_active_session,
         )
         self._last_error: str | None = None
+        self._last_error_at: str | None = None
+        self._last_error_code: str | None = None
+        self._last_error_stage: str | None = None
         self._last_runtime_inputs_ready: bool | None = None
         self._last_runtime_inputs_source: str | None = None
         self._last_runtime_inputs_missing: tuple[str, ...] = ()
@@ -171,16 +177,18 @@ class DreameLawnMowerVideoCamera(
             try:
                 await self._lan_cache.async_load()
             except Exception as err:  # noqa: BLE001 - Auto/cloud remain available.
-                self._lan_cache_error = str(err)
-                _LOGGER.warning("Failed to load Dreame LAN video cache: %s", err)
+                self._lan_cache_error = sanitize_diagnostic_text(err)
+                _LOGGER.warning(
+                    "Failed to load Dreame LAN video cache: %s", self._lan_cache_error
+                )
         if not self._provisioning_cache.loaded:
             try:
                 await self._provisioning_cache.async_load()
             except Exception as err:  # noqa: BLE001 - cloud remains available.
-                self._provisioning_cache_error = str(err)
+                self._provisioning_cache_error = sanitize_diagnostic_text(err)
                 _LOGGER.warning(
                     "Failed to load Dreame video provisioning cache: %s",
-                    err,
+                    self._provisioning_cache_error,
                 )
         snapshot = self.coordinator.data
         if not self._runtime_configured or (
@@ -200,8 +208,11 @@ class DreameLawnMowerVideoCamera(
         except asyncio.CancelledError:
             raise
         except Exception as err:  # noqa: BLE001 - retry remains available on play.
-            self._runtime_preparation_error = str(err)
-            _LOGGER.warning("Failed to prepare Dreame mower live video: %s", err)
+            self._runtime_preparation_error = sanitize_diagnostic_text(err)
+            _LOGGER.warning(
+                "Failed to prepare Dreame mower live video: %s",
+                self._runtime_preparation_error,
+            )
         else:
             self._runtime_preparation_error = None
 
@@ -282,6 +293,9 @@ class DreameLawnMowerVideoCamera(
             "video_runtime_preparation_error": self._runtime_preparation_error,
             "stream_session_active": self._session is not None,
             "last_stream_error": self._last_error,
+            "last_stream_error_at": getattr(self, "_last_error_at", None),
+            "last_stream_error_code": getattr(self, "_last_error_code", None),
+            "last_stream_error_stage": getattr(self, "_last_error_stage", None),
             "last_runtime_inputs_ready": self._last_runtime_inputs_ready,
             "last_runtime_inputs_source": self._last_runtime_inputs_source,
             "last_runtime_inputs_missing": self._last_runtime_inputs_missing,
@@ -310,7 +324,8 @@ class DreameLawnMowerVideoCamera(
                 return urljoin(f"{get_url(self.hass)}/", endpoint)
             except Exception as err:  # noqa: BLE001 - expose a clean source miss.
                 self._set_stream_error(
-                    f"Home Assistant could not expose the verified video stream: {err}"
+                    f"Home Assistant could not expose the verified video stream: {err}",
+                    stage="ha_proxy",
                 )
                 if owns_stream:
                     await self._async_stop_owned_stream(ha_stream)
@@ -437,7 +452,8 @@ class DreameLawnMowerVideoCamera(
         except Exception as err:  # noqa: BLE001 - expose a clean camera miss.
             await self._async_cleanup_failed_stream_setup(session)
             self._set_stream_error(
-                f"Qualified XP2P video could not verify its playback session: {err}"
+                f"Qualified XP2P video could not verify its playback session: {err}",
+                stage="playback_verification",
             )
             return False
 
@@ -506,7 +522,7 @@ class DreameLawnMowerVideoCamera(
         except Exception as err:  # noqa: BLE001 - snapshots may be transient.
             _LOGGER.debug(
                 "Failed to start Dreame mower video for a still image: %s",
-                err,
+                sanitize_diagnostic_text(err),
             )
             return self._last_image
         if ha_stream is None:
@@ -523,7 +539,10 @@ class DreameLawnMowerVideoCamera(
             _LOGGER.debug("Timed out reading Dreame mower still image")
             return self._last_image
         except Exception as err:  # noqa: BLE001 - snapshots may be transient.
-            _LOGGER.debug("Failed to read Dreame mower still image: %s", err)
+            _LOGGER.debug(
+                "Failed to read Dreame mower still image: %s",
+                sanitize_diagnostic_text(err),
+            )
             return self._last_image
         finally:
             if snapshot_only_stream:
@@ -557,11 +576,12 @@ class DreameLawnMowerVideoCamera(
         )
         if not self._runtime_configured:
             self._set_stream_error(
-                "Configure a native XP2P library path or XP2P runner command."
+                "Configure a native XP2P library path or XP2P runner command.",
+                stage="runtime_configuration",
             )
             return None
         if reason := camera_stream_block_reason(self.coordinator.data):
-            self._set_stream_error(reason)
+            self._set_stream_error(reason, stage="mower_state_gate")
             return None
         if (
             self._video_transport == VIDEO_TRANSPORT_AUTO
@@ -574,7 +594,7 @@ class DreameLawnMowerVideoCamera(
             runtime = await self._async_get_runtime()
             self._runtime_preparation_error = None
         except Exception as err:  # noqa: BLE001 - HA should receive a clean miss.
-            self._set_stream_error(str(err))
+            self._set_stream_error(str(err), stage="runtime_preparation")
             return None
 
         if (
@@ -588,7 +608,10 @@ class DreameLawnMowerVideoCamera(
                     cached_xp2p_inputs,
                 )
             except DreameLawnMowerVideoRuntimeError as err:
-                self._set_stream_error(self._with_lan_failure(str(err)))
+                self._set_stream_error(
+                    self._with_lan_failure(str(err)),
+                    stage="cached_xp2p_start",
+                )
                 return None
             if cached_source is not None:
                 return cached_source
@@ -618,7 +641,7 @@ class DreameLawnMowerVideoCamera(
                 try:
                     lan_source = await self._async_try_lan_stream(runtime, lan_inputs)
                 except DreameLawnMowerVideoRuntimeError as err:
-                    self._set_stream_error(str(err))
+                    self._set_stream_error(str(err), stage="lan_start")
                     return None
                 if lan_source is not None:
                     return lan_source
@@ -631,9 +654,10 @@ class DreameLawnMowerVideoCamera(
                         await self._lan_cache.async_clear_endpoint()
                         self._lan_cache_error = None
                     except Exception as err:  # noqa: BLE001 - retry in memory.
-                        self._lan_cache_error = str(err)
+                        self._lan_cache_error = sanitize_diagnostic_text(err)
                         _LOGGER.warning(
-                            "Failed to clear stale Dreame LAN endpoint: %s", err
+                            "Failed to clear stale Dreame LAN endpoint: %s",
+                            self._lan_cache_error,
                         )
                     try:
                         cloud_inputs = await self._async_get_runtime_inputs()
@@ -652,7 +676,7 @@ class DreameLawnMowerVideoCamera(
                                     cloud_inputs,
                                 )
                             except DreameLawnMowerVideoRuntimeError as err:
-                                self._set_stream_error(str(err))
+                                self._set_stream_error(str(err), stage="lan_start")
                                 return None
                             if lan_source is not None:
                                 return lan_source
@@ -687,8 +711,10 @@ class DreameLawnMowerVideoCamera(
                     + ", ".join(cloud_inputs.missing_required)
                 )
             stream_enable_attempted = True
-            self._last_stream_enable_result = video_helpers.safe_state_attribute(
-                await self.coordinator.client.async_set_camera_stream_enabled(True)
+            self._last_stream_enable_result = sanitize_debug_data(
+                video_helpers.safe_state_attribute(
+                    await self.coordinator.client.async_set_camera_stream_enabled(True)
+                )
             )
             self._last_stream_disable_error = None
             session = await self._async_start_runtime_session(runtime, cloud_inputs)
@@ -703,15 +729,21 @@ class DreameLawnMowerVideoCamera(
                 await self._async_stop_session(runtime, session)
             if stream_enable_attempted:
                 await self._async_disable_camera_stream()
-            self._set_stream_error(self._with_lan_failure(str(err)))
+            self._set_stream_error(
+                self._with_lan_failure(str(err)),
+                stage="cloud_start",
+            )
             return None
         except Exception as err:  # noqa: BLE001 - HA should receive a clean miss.
             if runtime is not None and session is not None:
                 await self._async_stop_session(runtime, session)
             if stream_enable_attempted:
                 await self._async_disable_camera_stream()
-            _LOGGER.warning("Failed to start Dreame mower live video: %s", err)
-            self._set_stream_error(self._with_lan_failure(str(err)))
+            safe_error = sanitize_diagnostic_text(err)
+            self._set_stream_error(
+                self._with_lan_failure(safe_error),
+                stage="cloud_start",
+            )
             return None
 
         return self._adopt_stream_session(
@@ -727,24 +759,30 @@ class DreameLawnMowerVideoCamera(
         try:
             await self.coordinator.async_refresh()
         except Exception as err:  # noqa: BLE001 - fail closed before video startup.
-            _LOGGER.debug("Failed to refresh mower state before Auto video: %s", err)
+            _LOGGER.debug(
+                "Failed to refresh mower state before Auto video: %s",
+                sanitize_diagnostic_text(err),
+            )
             self._set_stream_error(
-                "Could not refresh mower state before starting Auto video."
+                "Could not refresh mower state before starting Auto video.",
+                stage="state_refresh",
             )
             return False
         if not self.coordinator.last_update_success:
             self._set_stream_error(
-                "Could not refresh mower state before starting Auto video."
+                "Could not refresh mower state before starting Auto video.",
+                stage="state_refresh",
             )
             return False
         snapshot = self.coordinator.data
         if snapshot is None or not getattr(snapshot, "available", True):
             self._set_stream_error(
-                "The mower is unavailable after refreshing video safety state."
+                "The mower is unavailable after refreshing video safety state.",
+                stage="state_refresh",
             )
             return False
         if reason := camera_stream_block_reason(snapshot):
-            self._set_stream_error(reason)
+            self._set_stream_error(reason, stage="mower_state_gate")
             return False
         return True
 
@@ -769,7 +807,7 @@ class DreameLawnMowerVideoCamera(
         except Exception as err:  # noqa: BLE001 - Auto may fall back to cloud.
             if session is not None:
                 await self._async_stop_session(runtime, session)
-            self._last_lan_error = str(err)
+            self._last_lan_error = sanitize_diagnostic_text(err)
             return None
         if not stream_health.flv_header_present:
             await self._async_stop_session(runtime, session)
@@ -779,8 +817,11 @@ class DreameLawnMowerVideoCamera(
             await self._lan_cache.async_save_session(session)
             self._lan_cache_error = None
         except Exception as err:  # noqa: BLE001 - a live stream remains usable.
-            self._lan_cache_error = str(err)
-            _LOGGER.warning("Failed to save Dreame LAN video endpoint: %s", err)
+            self._lan_cache_error = sanitize_diagnostic_text(err)
+            _LOGGER.warning(
+                "Failed to save Dreame LAN video endpoint: %s",
+                self._lan_cache_error,
+            )
         if not await self._async_stop_session_for_handoff(runtime, session):
             self._last_lan_error = (
                 "Qualified same-LAN probe session could not stop before "
@@ -794,7 +835,8 @@ class DreameLawnMowerVideoCamera(
             raise
         except Exception as err:  # noqa: BLE001 - Auto may fall back to cloud.
             self._last_lan_error = (
-                f"Qualified same-LAN video could not open a playback session: {err}"
+                "Qualified same-LAN video could not open a playback session: "
+                f"{sanitize_diagnostic_text(err)}"
             )
             return None
         return self._adopt_stream_session(
@@ -816,7 +858,11 @@ class DreameLawnMowerVideoCamera(
             start_session=self._async_start_runtime_session,
         )
         if result.session is None:
-            self._last_cached_xp2p_error = result.error
+            self._last_cached_xp2p_error = (
+                sanitize_diagnostic_text(result.error)
+                if result.error is not None
+                else None
+            )
             return None
         return self._adopt_stream_session(
             runtime,
@@ -838,8 +884,11 @@ class DreameLawnMowerVideoCamera(
                 await self._lan_cache.async_save_identity(inputs)
                 self._lan_cache_error = None
             except Exception as err:  # noqa: BLE001 - cloud transport still works.
-                self._lan_cache_error = str(err)
-                _LOGGER.warning("Failed to save Dreame LAN video identity: %s", err)
+                self._lan_cache_error = sanitize_diagnostic_text(err)
+                _LOGGER.warning(
+                    "Failed to save Dreame LAN video identity: %s",
+                    self._lan_cache_error,
+                )
         if inputs.ready:
             await self.hass.async_add_executor_job(
                 self._provisioning_cache.stage_fresh_device_config,
@@ -862,10 +911,10 @@ class DreameLawnMowerVideoCamera(
             await self._provisioning_cache.async_save(inputs, config)
             self._provisioning_cache_error = None
         except Exception as err:  # noqa: BLE001 - current stream can continue.
-            self._provisioning_cache_error = str(err)
+            self._provisioning_cache_error = sanitize_diagnostic_text(err)
             _LOGGER.warning(
                 "Failed to save Dreame video provisioning cache: %s",
-                err,
+                self._provisioning_cache_error,
             )
 
     async def _async_start_lan_runtime_session(
@@ -922,6 +971,9 @@ class DreameLawnMowerVideoCamera(
             "playback_session_verified": False,
         }
         self._last_error = None
+        self._last_error_at = None
+        self._last_error_code = None
+        self._last_error_stage = None
         self._last_video_transport = transport
         self._attr_is_on = True
         self._attr_is_streaming = True
@@ -1046,7 +1098,10 @@ class DreameLawnMowerVideoCamera(
             try:
                 await ha_stream.stop()
             except Exception as err:  # noqa: BLE001 - continue XP2P cleanup.
-                _LOGGER.debug("Failed to stop Home Assistant camera stream: %s", err)
+                _LOGGER.debug(
+                    "Failed to stop Home Assistant camera stream: %s",
+                    sanitize_diagnostic_text(err),
+                )
             finally:
                 self._unregister_ha_stream(ha_stream)
         if runtime is None or session is None:
@@ -1088,7 +1143,10 @@ class DreameLawnMowerVideoCamera(
             await self.hass.async_add_executor_job(runtime.stop_live_stream, session)
             return True
         except Exception as err:  # noqa: BLE001 - cleanup should not break unload.
-            _LOGGER.debug("Failed to stop Dreame mower live video: %s", err)
+            _LOGGER.debug(
+                "Failed to stop Dreame mower live video: %s",
+                sanitize_diagnostic_text(err),
+            )
             return False
 
     async def _async_stop_session_for_handoff(
@@ -1110,8 +1168,11 @@ class DreameLawnMowerVideoCamera(
             await self.coordinator.client.async_set_camera_stream_enabled(False)
             self._last_stream_disable_error = None
         except Exception as err:  # noqa: BLE001 - cleanup should not break unload.
-            self._last_stream_disable_error = str(err)
-            _LOGGER.debug("Failed to disable Dreame mower app video mode: %s", err)
+            self._last_stream_disable_error = sanitize_diagnostic_text(err)
+            _LOGGER.debug(
+                "Failed to disable Dreame mower app video mode: %s",
+                self._last_stream_disable_error,
+            )
 
     def _create_runtime(self) -> _DreameVideoRuntime:
         """Create the configured runtime adapter."""
@@ -1207,7 +1268,42 @@ class DreameLawnMowerVideoCamera(
     def _runner_command(self) -> str | None:
         return video_helpers.option_text(self._entry, CONF_XP2P_RUNNER_COMMAND)
 
-    def _set_stream_error(self, error: str) -> None:
-        self._last_error = error
+    def _set_stream_error(
+        self,
+        error: str,
+        *,
+        stage: str = "stream_start",
+    ) -> None:
+        safe_error = sanitize_diagnostic_text(error)
+        code = f"video_{stage}_failed"
+        changed = (
+            safe_error != getattr(self, "_last_error", None)
+            or stage != getattr(self, "_last_error_stage", None)
+        )
+        self._last_error = safe_error
+        self._last_error_at = datetime.now(UTC).isoformat()
+        self._last_error_code = code
+        self._last_error_stage = stage
         self._attr_is_streaming = False
+        snapshot = getattr(self.coordinator, "data", None)
+        record_diagnostic_event(
+            self.coordinator,
+            code=code,
+            source="video_camera",
+            message=safe_error,
+            context={
+                "model": getattr(getattr(self, "_descriptor", None), "model", None),
+                "firmware_version": getattr(snapshot, "firmware_version", None),
+                "transport": self._video_transport,
+                "runtime_mode": self._runtime_mode,
+                "managed_runtime_supported": video_helpers.managed_runtime_supported(),
+            },
+        )
+        if changed:
+            _LOGGER.warning(
+                "Dreame mower live video failed [%s]: %s. Reproduce once, then "
+                "download integration diagnostics before reloading Home Assistant.",
+                code,
+                safe_error,
+            )
         self.async_write_ha_state()
