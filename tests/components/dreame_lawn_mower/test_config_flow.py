@@ -6,8 +6,11 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+import voluptuous_serialize
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import config_validation as cv
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.dreame_lawn_mower.config_flow import DreameLawnMowerOptionsFlow
 from custom_components.dreame_lawn_mower.const import (
@@ -34,9 +37,14 @@ from custom_components.dreame_lawn_mower.const import (
 
 
 class _FakeDevice:
-    def __init__(self) -> None:
-        self.did = "device-1"
-        self.name = "Garage Mower"
+    def __init__(
+        self,
+        *,
+        did: str = "device-1",
+        name: str = "Garage Mower",
+    ) -> None:
+        self.did = did
+        self.name = name
         self.model = "dreame.mower.g3255"
         self.display_model = "A3 AWD Pro"
         self.account_type = ACCOUNT_TYPE_DREAME
@@ -47,11 +55,24 @@ class _FakeDevice:
 
     @property
     def title(self) -> str:
-        return "Garage Mower (A3 AWD Pro)"
+        return f"{self.name} ({self.display_model})"
 
     @property
     def unique_id(self) -> str:
         return self.did
+
+
+async def _start_user_flow(hass):
+    return await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": config_entries.SOURCE_USER},
+        data={
+            CONF_ACCOUNT_TYPE: ACCOUNT_TYPE_DREAME,
+            CONF_COUNTRY: "eu",
+            CONF_PASSWORD: "secret",
+            CONF_USERNAME: "user@example.com",
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -64,22 +85,133 @@ async def test_user_flow_creates_entry(hass, monkeypatch) -> None:
         _fake_discover,
     )
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={"source": config_entries.SOURCE_USER},
-        data={
-            CONF_ACCOUNT_TYPE: ACCOUNT_TYPE_DREAME,
-            CONF_COUNTRY: "eu",
-            CONF_PASSWORD: "secret",
-            CONF_USERNAME: "user@example.com",
-        },
-    )
+    result = await _start_user_flow(hass)
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Garage Mower (A3 AWD Pro)"
     assert result["data"][CONF_DID] == "device-1"
     assert result["data"][CONF_MODEL] == "dreame.mower.g3255"
     assert result["data"][CONF_NAME] == "Garage Mower"
+
+
+@pytest.mark.asyncio
+async def test_user_flow_lists_multiple_mowers_by_name(hass, monkeypatch) -> None:
+    async def _fake_discover(**kwargs):
+        return [
+            _FakeDevice(did="device-1", name="Garden Mower"),
+            _FakeDevice(did="device-2", name="Parents' Mower"),
+        ]
+
+    monkeypatch.setattr(
+        "custom_components.dreame_lawn_mower.config_flow.async_discover_devices",
+        _fake_discover,
+    )
+
+    result = await _start_user_flow(hass)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "device"
+    serialized_schema = voluptuous_serialize.convert(
+        result["data_schema"], custom_serializer=cv.custom_serializer
+    )
+    assert serialized_schema[0]["selector"]["select"]["options"] == [
+        {"value": "device-1", "label": "Garden Mower (A3 AWD Pro)"},
+        {"value": "device-2", "label": "Parents' Mower (A3 AWD Pro)"},
+    ]
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"device": "device-2"}
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Parents' Mower (A3 AWD Pro)"
+    assert result["data"][CONF_DID] == "device-2"
+
+
+@pytest.mark.asyncio
+async def test_user_flow_keeps_mowers_with_the_same_name_distinct(
+    hass, monkeypatch
+) -> None:
+    async def _fake_discover(**kwargs):
+        return [
+            _FakeDevice(did="device-1", name="Garden Mower"),
+            _FakeDevice(did="device-2", name="Garden Mower"),
+        ]
+
+    monkeypatch.setattr(
+        "custom_components.dreame_lawn_mower.config_flow.async_discover_devices",
+        _fake_discover,
+    )
+
+    result = await _start_user_flow(hass)
+
+    serialized_schema = voluptuous_serialize.convert(
+        result["data_schema"], custom_serializer=cv.custom_serializer
+    )
+    assert serialized_schema[0]["selector"]["select"]["options"] == [
+        {
+            "value": "device-1",
+            "label": "Garden Mower (A3 AWD Pro) - device-1",
+        },
+        {
+            "value": "device-2",
+            "label": "Garden Mower (A3 AWD Pro) - device-2",
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_user_flow_only_offers_unconfigured_mowers(hass, monkeypatch) -> None:
+    MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="device-1",
+        data={CONF_DID: "device-1"},
+    ).add_to_hass(hass)
+
+    async def _fake_discover(**kwargs):
+        return [
+            _FakeDevice(did="device-1", name="Garden Mower"),
+            _FakeDevice(did="device-2", name="Parents' Mower"),
+        ]
+
+    monkeypatch.setattr(
+        "custom_components.dreame_lawn_mower.config_flow.async_discover_devices",
+        _fake_discover,
+    )
+
+    result = await _start_user_flow(hass)
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == "Parents' Mower (A3 AWD Pro)"
+    assert result["data"][CONF_DID] == "device-2"
+
+
+@pytest.mark.asyncio
+async def test_user_flow_aborts_when_all_mowers_are_configured(
+    hass, monkeypatch
+) -> None:
+    for did in ("device-1", "device-2"):
+        MockConfigEntry(
+            domain=DOMAIN,
+            unique_id=did,
+            data={CONF_DID: did},
+        ).add_to_hass(hass)
+
+    async def _fake_discover(**kwargs):
+        return [
+            _FakeDevice(did="device-1", name="Garden Mower"),
+            _FakeDevice(did="device-2", name="Parents' Mower"),
+        ]
+
+    monkeypatch.setattr(
+        "custom_components.dreame_lawn_mower.config_flow.async_discover_devices",
+        _fake_discover,
+    )
+
+    result = await _start_user_flow(hass)
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
 
 
 def test_options_flow_accepts_map_label_scale() -> None:

@@ -13,6 +13,7 @@
       },
       "device": {
         "title": "Select mower",
+        "description": "Choose one mower to add. Run setup again to add another mower from the same account.",
         "data": {
           "device": "Discovered mower"
         }
@@ -34,6 +35,9 @@
       "invalid_account_type": "The selected account type is not supported by this integration.",
       "invalid_region": "The selected region was rejected by the cloud. Check the account region used in the vendor app.",
       "no_devices": "No supported lawn mower devices were found for this account. Check that the selected region and account type match the vendor app."
+    },
+    "abort": {
+      "already_configured": "All supported mowers on this account are already configured."
     }
   },
   "options": {

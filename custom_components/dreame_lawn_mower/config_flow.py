@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, OptionsFlow
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import selector
 
 from .api import (
     DreameLawnMowerAuthError,
@@ -50,6 +52,8 @@ from .const import (
     XP2P_RUNNER_MODE_OPTIONS,
     XP2P_RUNNER_MODE_PROCESS,
 )
+
+CONF_DEVICE = "device"
 
 
 async def async_discover_devices(
@@ -139,10 +143,19 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 if not devices:
                     self._errors["base"] = "no_devices"
-                elif len(devices) == 1:
-                    return await self._async_create_entry(devices[0])
                 else:
-                    self._devices = {device.title: device for device in devices}
+                    configured_ids = self._async_current_ids()
+                    self._devices = {
+                        device.unique_id: device
+                        for device in devices
+                        if device.unique_id not in configured_ids
+                    }
+                    if not self._devices:
+                        return self.async_abort(reason="already_configured")
+                    if len(self._devices) == 1:
+                        return await self._async_create_entry(
+                            next(iter(self._devices.values()))
+                        )
                     return await self.async_step_device()
 
         return self.async_show_form(
@@ -168,11 +181,32 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle selection when multiple mowers are discovered."""
         if user_input is not None:
-            return await self._async_create_entry(self._devices[user_input["device"]])
+            return await self._async_create_entry(
+                self._devices[user_input[CONF_DEVICE]]
+            )
+
+        title_counts = Counter(device.title for device in self._devices.values())
+        options = [
+            selector.SelectOptionDict(
+                value=unique_id,
+                label=(
+                    device.title
+                    if title_counts[device.title] == 1
+                    else f"{device.title} - {unique_id}"
+                ),
+            )
+            for unique_id, device in self._devices.items()
+        ]
 
         return self.async_show_form(
             step_id="device",
-            data_schema=vol.Schema({vol.Required("device"): vol.In(self._devices)}),
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_DEVICE): selector.SelectSelector(
+                        selector.SelectSelectorConfig(options=options)
+                    )
+                }
+            ),
         )
 
     async def async_step_reauth(
