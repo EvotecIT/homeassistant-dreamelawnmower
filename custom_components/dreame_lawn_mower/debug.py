@@ -155,7 +155,15 @@ def _normalize_debug_value(value: Any) -> Any:
     if is_dataclass(value):
         return _normalize_debug_value(asdict(value))
     if isinstance(value, Enum):
-        return value.name.lower()
+        name = value.name
+        if isinstance(name, str):
+            return name.lower()
+        enum_value = value.value
+        return (
+            str(value)
+            if enum_value is value
+            else _normalize_debug_value(enum_value)
+        )
     if isinstance(value, Mapping):
         return {
             str(key): _normalize_debug_value(item)

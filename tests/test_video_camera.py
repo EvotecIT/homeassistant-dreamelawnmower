@@ -154,6 +154,7 @@ def _uninitialized_entity(*, snapshot: object | None = None):
     entity._runtime_input_config = None
     entity._last_lan_error = None
     entity._last_video_transport = None
+    entity._last_video_transport_attempted = None
     return entity
 
 
@@ -1345,7 +1346,7 @@ def test_video_camera_auto_refreshes_after_stale_cached_lan_endpoint() -> None:
 
 
 def test_video_camera_disables_video_when_enable_attempt_raises() -> None:
-    async def _run() -> tuple[str | None, list[bool]]:
+    async def _run() -> tuple[str | None, list[bool], str | None, str | None]:
         entity = _uninitialized_entity()
         calls: list[bool] = []
 
@@ -1380,9 +1381,14 @@ def test_video_camera_disables_video_when_enable_attempt_raises() -> None:
         )
 
         result = await entity._async_start_stream()
-        return result, calls
+        return (
+            result,
+            calls,
+            entity._last_video_transport,
+            entity._last_video_transport_attempted,
+        )
 
-    assert asyncio.run(_run()) == (None, [True, False])
+    assert asyncio.run(_run()) == (None, [True, False], None, VIDEO_TRANSPORT_CLOUD)
 
 
 def test_video_camera_caches_provisioning_only_after_ha_decodes_frame() -> None:

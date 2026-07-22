@@ -169,6 +169,7 @@ class DreameLawnMowerVideoCamera(
         self._provisioning_cache_error: str | None = None
         self._last_cached_xp2p_error: str | None = None
         self._last_video_transport: str | None = None
+        self._last_video_transport_attempted: str | None = None
 
     async def async_added_to_hass(self) -> None:
         """Schedule managed runtime preparation without blocking entity setup."""
@@ -277,6 +278,7 @@ class DreameLawnMowerVideoCamera(
             "video_transport_policy": self._video_transport,
             "video_block_reason": camera_stream_block_reason(self.coordinator.data),
             "last_video_transport": self._last_video_transport,
+            "last_video_transport_attempted": self._last_video_transport_attempted,
             "lan_video_identity_cached": self._lan_cache.inputs is not None,
             "lan_video_endpoint_cached": self._lan_cache.endpoint is not None,
             "lan_video_cache_error": self._lan_cache_error,
@@ -569,6 +571,7 @@ class DreameLawnMowerVideoCamera(
         self._last_stream_health = None
         self._last_lan_error = None
         self._last_cached_xp2p_error = None
+        self._last_video_transport_attempted = None
         cached_xp2p_inputs = (
             self._provisioning_cache.inputs
             if self._video_transport == VIDEO_TRANSPORT_AUTO
@@ -602,6 +605,7 @@ class DreameLawnMowerVideoCamera(
             and cached_xp2p_inputs is not None
             and cached_xp2p_inputs.ready
         ):
+            self._last_video_transport_attempted = "cached_xp2p"
             try:
                 cached_source = await self._async_try_cached_xp2p_stream(
                     runtime,
@@ -638,6 +642,7 @@ class DreameLawnMowerVideoCamera(
                     lan_inputs = self._lan_cache.inputs
 
             if lan_inputs is not None:
+                self._last_video_transport_attempted = VIDEO_TRANSPORT_LAN
                 try:
                     lan_source = await self._async_try_lan_stream(runtime, lan_inputs)
                 except DreameLawnMowerVideoRuntimeError as err:
@@ -670,6 +675,7 @@ class DreameLawnMowerVideoCamera(
                         )
                     else:
                         if cloud_inputs.lan_identity_ready:
+                            self._last_video_transport_attempted = VIDEO_TRANSPORT_LAN
                             try:
                                 lan_source = await self._async_try_lan_stream(
                                     runtime,
@@ -700,6 +706,7 @@ class DreameLawnMowerVideoCamera(
 
         stream_enable_attempted = False
         session: DreameLawnMowerXp2pLiveStreamSession | None = None
+        self._last_video_transport_attempted = VIDEO_TRANSPORT_CLOUD
         try:
             if cloud_inputs is None:
                 if cloud_inputs_error is not None:
