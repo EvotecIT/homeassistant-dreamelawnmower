@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
+from enum import IntFlag
 from types import SimpleNamespace
 
 from custom_components.dreame_lawn_mower import diagnostics as diagnostics_module
@@ -15,6 +16,12 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import 
     DreameLawnMowerDescriptor,
     DreameLawnMowerSnapshot,
 )
+
+
+class _AnonymousFeature(IntFlag):
+    """Feature flag with no named zero member, matching Home Assistant enums."""
+
+    ENABLED = 1
 
 
 def test_downloaded_diagnostics_combines_report_entities_and_recent_events(
@@ -71,6 +78,7 @@ def test_downloaded_diagnostics_combines_report_entities_and_recent_events(
     state = SimpleNamespace(
         state="idle",
         attributes={
+            "anonymous_feature": _AnonymousFeature(0),
             "last_stream_error_code": "video_cloud_start_failed",
             "last_stream_error": "accessToken=secret failed",
         },
@@ -139,6 +147,7 @@ def test_downloaded_diagnostics_combines_report_entities_and_recent_events(
     assert payload["entities"][0]["attributes"]["last_stream_error"] == (
         "accessToken=**REDACTED** failed"
     )
+    assert payload["entities"][0]["attributes"]["anonymous_feature"] == 0
     assert payload["recent_events"][0]["code"] == "video_cloud_start_failed"
     assert payload["recent_events"][0]["message"] == (
         "accessToken=**REDACTED** failed"
