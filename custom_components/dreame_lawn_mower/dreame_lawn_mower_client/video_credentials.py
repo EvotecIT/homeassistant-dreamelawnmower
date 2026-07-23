@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from Crypto.Cipher import AES
 
-
 # Dreamehome Android 2.5.8.1 supplies this app-level key to TXVideoSdk.
 # The authenticated getIdentity response returns an encrypted QCloud pair;
 # TXVideoSdk keeps the encrypted values for QCloud and decrypts the same pair

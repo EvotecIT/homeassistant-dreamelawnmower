@@ -5458,12 +5458,12 @@ class DreameMowerDeviceInfo:
                 self.version = int(firmware_version[1])
 
     def __repr__(self):
-        return "%s v%s (%s) @ %s - token: %s" % (
-            self.model,
-            self.version,
-            self.mac,
-            self.network_interface["localIp"] if self.network_interface else "",
+        local_ip = (
+            self.network_interface.get("localIp", "")
+            if self.network_interface
+            else ""
         )
+        return f"{self.model} v{self.version} ({self.mac_address}) @ {local_ip}"
 
     @property
     def network_interface(self) -> str:
