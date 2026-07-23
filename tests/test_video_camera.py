@@ -140,6 +140,7 @@ def _uninitialized_entity(*, snapshot: object | None = None):
     entity._runtime = None
     entity._prepared_runtime = None
     entity._runtime_prepare_task = None
+    entity._state_gate_cleanup_task = None
     entity._stream_idle_monitor = SimpleNamespace(
         schedule=lambda _stream, _session: None,
         async_cancel=lambda: asyncio.sleep(0),
@@ -152,9 +153,31 @@ def _uninitialized_entity(*, snapshot: object | None = None):
     entity._provisioning_cache_error = None
     entity._last_cached_xp2p_error = None
     entity._runtime_input_config = None
+    entity._last_error = None
+    entity._last_error_at = None
+    entity._last_error_code = None
+    entity._last_error_stage = None
+    entity._last_runtime_inputs_ready = None
+    entity._last_runtime_inputs_source = None
+    entity._last_runtime_inputs_missing = ()
+    entity._last_runtime_inputs_provisioning_issue = None
+    entity._last_runtime_input_diagnostics = None
+    entity._last_stream_health = None
+    entity._last_stream_enable_result = None
+    entity._last_stream_disable_error = None
+    entity._last_native_runtime_diagnostics = None
+    entity._runtime_preparation_error = None
+    entity._lan_cache_error = None
     entity._last_lan_error = None
     entity._last_video_transport = None
     entity._last_video_transport_attempted = None
+    entity._video_capability_observed = video_camera_module.snapshot_advertises_video(
+        snapshot
+    )
+    entity._last_stream_cleanup_reason = None
+    entity._last_stream_cleanup_error = None
+    entity._last_stream_cleanup_error_stage = None
+    entity._last_stream_cleanup_at = None
     return entity
 
 
@@ -430,6 +453,260 @@ def test_video_camera_available_from_top_level_video_status() -> None:
     entity = _uninitialized_entity(snapshot=snapshot)
 
     assert entity.available is True
+
+
+def test_video_camera_remembers_support_when_metadata_disappears() -> None:
+    snapshot = SimpleNamespace(
+        available=True,
+        state="mowing",
+        activity="mowing",
+        docked=False,
+        raw_docked=False,
+        returning=False,
+        capabilities=("video",),
+        raw_info={},
+        raw_attributes={},
+    )
+    entity = _uninitialized_entity(snapshot=snapshot)
+    entity.coordinator.data = SimpleNamespace(
+        available=True,
+        state="mowing",
+        activity="mowing",
+        docked=False,
+        raw_docked=False,
+        returning=False,
+        capabilities=(),
+        raw_info={},
+        raw_attributes={},
+    )
+
+    with patch.object(
+        video_camera_module.CoordinatorEntity,
+        "_handle_coordinator_update",
+        lambda _entity: None,
+    ):
+        entity._handle_coordinator_update()
+
+    assert entity.available is True
+    assert entity.extra_state_attributes["video_capability_advertised"] is False
+    assert entity.extra_state_attributes["video_capability_observed"] is True
+
+
+def test_video_camera_dock_transition_cleans_up_and_recovers() -> None:
+    async def _run() -> tuple[int, int, bool, bool, str | None]:
+        snapshot = SimpleNamespace(
+            available=True,
+            state="mowing",
+            activity="mowing",
+            docked=False,
+            raw_docked=False,
+            returning=False,
+            capabilities=("video",),
+            raw_info={},
+            raw_attributes={},
+        )
+        entity = _uninitialized_entity(snapshot=snapshot)
+        runtime_stops = 0
+        camera_disables = 0
+
+        class _Runtime:
+            def stop_live_stream(self, _session: object) -> None:
+                nonlocal runtime_stops
+                runtime_stops += 1
+
+        class _Client:
+            async def async_set_camera_stream_enabled(self, _enabled: bool) -> None:
+                nonlocal camera_disables
+                camera_disables += 1
+
+        async def _executor(function, *args):
+            return function(*args)
+
+        entity.coordinator.client = _Client()
+        entity.coordinator.diagnostic_events = DreameLawnMowerDiagnosticEventStore()
+        entity.hass = SimpleNamespace(
+            async_add_executor_job=_executor,
+            async_create_task=asyncio.create_task,
+            data={},
+        )
+        entity.async_write_ha_state = lambda: None
+        entity.stream = None
+        entity._runtime = _Runtime()
+        entity._session = SimpleNamespace(
+            transport=VIDEO_TRANSPORT_CLOUD,
+            camera_toggle_managed=True,
+        )
+        entity._attr_is_streaming = True
+        entity.coordinator.data = SimpleNamespace(
+            available=True,
+            state="charging",
+            activity="charging",
+            docked=True,
+            raw_docked=True,
+            returning=False,
+            capabilities=(),
+            raw_info={},
+            raw_attributes={},
+        )
+
+        with patch.object(
+            video_camera_module.CoordinatorEntity,
+            "_handle_coordinator_update",
+            lambda _entity: None,
+        ):
+            entity._handle_coordinator_update()
+            cleanup_task = entity._state_gate_cleanup_task
+            assert cleanup_task is not None
+            await cleanup_task
+
+            unavailable_while_docked = not entity.available
+            entity.coordinator.data = SimpleNamespace(
+                available=True,
+                state="mowing",
+                activity="mowing",
+                docked=False,
+                raw_docked=False,
+                returning=False,
+                capabilities=(),
+                raw_info={},
+                raw_attributes={},
+            )
+            entity._handle_coordinator_update()
+
+        events = entity.coordinator.diagnostic_events.as_list()
+        return (
+            runtime_stops,
+            camera_disables,
+            unavailable_while_docked,
+            entity.available,
+            events[0]["code"] if events else None,
+        )
+
+    assert asyncio.run(_run()) == (
+        1,
+        1,
+        True,
+        True,
+        "video_state_gate_cleanup",
+    )
+
+
+def test_video_camera_rejects_cloud_session_when_mower_docks_during_start() -> None:
+    async def _run() -> tuple[
+        str | None,
+        int,
+        list[bool],
+        str | None,
+        str | None,
+        str | None,
+    ]:
+        snapshot = SimpleNamespace(
+            available=True,
+            state="mowing",
+            activity="mowing",
+            docked=False,
+            raw_docked=False,
+            returning=False,
+            capabilities=("video",),
+            raw_info={},
+            raw_attributes={},
+        )
+        entity = _uninitialized_entity(snapshot=snapshot)
+        runtime = object()
+        session = SimpleNamespace(
+            stream_url="http://127.0.0.1/late.flv",
+            transport=VIDEO_TRANSPORT_CLOUD,
+            camera_toggle_managed=True,
+        )
+        runtime_stops = 0
+        camera_toggles: list[bool] = []
+
+        class _Client:
+            last_camera_stream_diagnostics = {}
+
+            async def async_get_camera_stream_runtime_inputs(
+                self,
+            ) -> DreameLawnMowerCameraStreamRuntimeInputs:
+                return DreameLawnMowerCameraStreamRuntimeInputs(
+                    source="test",
+                    did="device-1",
+                    product_id="product-1",
+                    device_name="mower-1",
+                    p2p_info="p2p-info",
+                )
+
+            async def async_set_camera_stream_enabled(self, enabled: bool) -> object:
+                camera_toggles.append(enabled)
+                return {"enabled": enabled}
+
+        async def _start_session(
+            _runtime: object,
+            _inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+            *,
+            camera_toggle_managed: bool = True,
+        ) -> object:
+            assert camera_toggle_managed is True
+            entity.coordinator.data = SimpleNamespace(
+                available=True,
+                state="charging",
+                activity="charging",
+                docked=True,
+                raw_docked=True,
+                returning=False,
+                capabilities=(),
+                raw_info={},
+                raw_attributes={},
+            )
+            return session
+
+        async def _stop_session(
+            actual_runtime: object,
+            actual_session: object,
+        ) -> bool:
+            nonlocal runtime_stops
+            assert actual_runtime is runtime
+            assert actual_session is session
+            runtime_stops += 1
+            return True
+
+        async def _save_lan_identity(_inputs: object) -> None:
+            return None
+
+        async def _executor(function, *args):
+            return function(*args)
+
+        entity.coordinator.client = _Client()
+        entity.coordinator.diagnostic_events = DreameLawnMowerDiagnosticEventStore()
+        entity.hass = SimpleNamespace(async_add_executor_job=_executor)
+        entity._lan_cache = SimpleNamespace(
+            inputs=None,
+            endpoint=None,
+            async_save_identity=_save_lan_identity,
+        )
+        entity._prepared_runtime = runtime
+        entity._async_start_runtime_session = _start_session
+        entity._async_stop_session = _stop_session
+        entity.async_write_ha_state = lambda: None
+
+        source = await entity._async_start_stream()
+        events = entity.coordinator.diagnostic_events.as_list()
+        return (
+            source,
+            runtime_stops,
+            camera_toggles,
+            entity._last_error_stage,
+            events[0]["code"] if events else None,
+            entity._last_stream_cleanup_reason,
+        )
+
+    assert asyncio.run(_run()) == (
+        None,
+        1,
+        [True, False],
+        "mower_state_gate",
+        "video_start_state_changed",
+        "state_gate",
+    )
 
 
 def test_runner_command_uses_windows_backslash_and_quote_semantics() -> None:
@@ -856,7 +1133,7 @@ def test_video_camera_does_not_cache_stream_after_turn_off_race() -> None:
             entity._session = session
             return session.stream_url
 
-        async def _stop() -> None:
+        async def _stop(**_kwargs) -> None:
             nonlocal stops
             stops += 1
             entity.stream = None
@@ -1133,6 +1410,7 @@ def test_video_camera_stop_unregisters_cached_home_assistant_stream() -> None:
                 }
             }
         )
+        entity.async_write_ha_state = lambda: None
         await entity._async_stop_active_session()
         return entity.stream, stopped, registry
 
@@ -1186,6 +1464,83 @@ def test_video_camera_stop_continues_after_cached_stream_failure() -> None:
         return runtime_stops, video_disables
 
     assert asyncio.run(_run()) == (1, 1)
+
+
+def test_video_camera_unload_is_bounded_when_every_cleanup_stage_hangs() -> None:
+    async def _run() -> tuple[bool, list[str], str | None, bool]:
+        entity = _uninitialized_entity()
+        entity._descriptor = SimpleNamespace(model="dreame.mower.q2501a")
+        entity.coordinator.diagnostic_events = DreameLawnMowerDiagnosticEventStore()
+        base_remove_called = False
+
+        class _Stream:
+            async def stop(self) -> None:
+                await asyncio.get_running_loop().create_future()
+
+        class _Runtime:
+            def stop_live_stream(self, _session: object) -> None:
+                raise AssertionError("The synthetic executor must stay pending")
+
+        class _Client:
+            async def async_set_camera_stream_enabled(self, _enabled: bool) -> None:
+                await asyncio.get_running_loop().create_future()
+
+        async def _base_remove(_entity: object) -> None:
+            nonlocal base_remove_called
+            base_remove_called = True
+
+        def _pending_executor(*_args):
+            return asyncio.get_running_loop().create_future()
+
+        stream = _Stream()
+        entity.stream = stream
+        entity._runtime = _Runtime()
+        entity._session = SimpleNamespace(
+            transport=VIDEO_TRANSPORT_CLOUD,
+            camera_toggle_managed=True,
+        )
+        entity._attr_is_streaming = True
+        entity.coordinator.client = _Client()
+        entity.hass = SimpleNamespace(
+            async_add_executor_job=_pending_executor,
+            data={
+                video_camera_module.STREAM_DOMAIN: {
+                    video_camera_module.ATTR_STREAMS: [stream],
+                }
+            },
+        )
+        entity.async_write_ha_state = lambda: None
+
+        with (
+            patch.object(video_camera_module, "_HA_STREAM_STOP_TIMEOUT", 0.001),
+            patch.object(video_camera_module, "_RUNTIME_SESSION_STOP_TIMEOUT", 0.001),
+            patch.object(video_camera_module, "_CAMERA_STREAM_DISABLE_TIMEOUT", 0.001),
+            patch.object(
+                video_camera_module.CoordinatorEntity,
+                "async_will_remove_from_hass",
+                new=_base_remove,
+            ),
+        ):
+            await entity.async_will_remove_from_hass()
+
+        events = entity.coordinator.diagnostic_events.as_list()
+        return (
+            base_remove_called,
+            [event["code"] for event in events],
+            entity._last_stream_cleanup_error_stage,
+            entity._session is None and entity.stream is None,
+        )
+
+    assert asyncio.run(_run()) == (
+        True,
+        [
+            "video_home_assistant_stream_stop_failed",
+            "video_runtime_session_stop_failed",
+            "video_camera_stream_disable_failed",
+        ],
+        "camera_stream_disable",
+        True,
+    )
 
 
 def test_video_camera_cancellation_stops_completed_native_startup() -> None:
