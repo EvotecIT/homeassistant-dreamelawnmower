@@ -73,6 +73,14 @@ _ASSIGNED_SENSITIVE_VALUE = re.compile(
     r"username|uuid|xp2p[_-]?(?:info|key|secretkey))\b"
     r"([\"']?)(\s*(?:[:=]\s*|\s+))([\"']?)[^\s,;&\"'}]+"
 )
+_SPACE_SEPARATED_SENSITIVE_VALUE = re.compile(
+    r"(?i)\b("
+    r"access\s+token|app\s+(?:id|key|secret)|channel\s+id|"
+    r"client\s+(?:id|secret)|device\s+(?:id|name)|family\s+id|"
+    r"p2p\s+info|refresh\s+token|secret\s+(?:id|key)|"
+    r"serial\s+number|session\s+token|xp2p\s+(?:info|key|secret\s+key)"
+    r")\b([\"']?)(\s*(?:[:=]\s*|\s+))([\"']?)[^,;&\"'}]+"
+)
 _BEARER_VALUE = re.compile(r"(?i)\bbearer\s+[^\s,;]+")
 _URL_VALUE = re.compile(r"(?i)\bhttps?://[^\s,;\"']+")
 _EMAIL_VALUE = re.compile(r"(?i)\b[^@\s]+@[^@\s]+\.[^@\s]+\b")
@@ -316,6 +324,13 @@ def _sanitize_message(value: str, redactions: Sequence[str]) -> str:
     text = value.replace("\r", " ").replace("\n", " ")
     for sensitive in redactions:
         text = text.replace(sensitive, "**REDACTED**")
+    text = _SPACE_SEPARATED_SENSITIVE_VALUE.sub(
+        lambda match: (
+            f"{match.group(1)}{match.group(2)}{match.group(3)}"
+            f"{match.group(4)}**REDACTED**"
+        ),
+        text,
+    )
     text = _ASSIGNED_SENSITIVE_VALUE.sub(
         lambda match: (
             f"{match.group(1)}{match.group(2)}{match.group(3)}"

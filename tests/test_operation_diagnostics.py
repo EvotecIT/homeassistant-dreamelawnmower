@@ -119,3 +119,19 @@ def test_operation_stage_error_never_requires_a_response_payload() -> None:
     assert stage["error"]["message"] == (
         "Bearer **REDACTED** failed for **REDACTED_EMAIL** **REDACTED_ID**"
     )
+
+
+def test_operation_summary_redacts_space_separated_device_name() -> None:
+    summary = summarize_operation_response(
+        {
+            "message": (
+                "device name=Garage Mower is unavailable while channel id "
+                "10425/private-camera is offline"
+            )
+        }
+    )
+
+    message = summary["messages"][0]["text"]
+    assert message == "device name=**REDACTED**"
+    assert "Garage Mower" not in message
+    assert "10425/private-camera" not in message
