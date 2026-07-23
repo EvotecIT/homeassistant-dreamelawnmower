@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from aiohttp import web
 from homeassistant.exceptions import Unauthorized
 
 from custom_components.dreame_lawn_mower.const import DOMAIN
@@ -115,6 +117,53 @@ def test_point_cloud_api_deduplicates_concurrent_refreshes() -> None:
     assert calls == 1
 
 
+def test_point_cloud_api_keeps_generation_alive_after_waiter_cancellation() -> None:
+    calls = 0
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def download(**kwargs: Any) -> DreameLawnMowerPointCloudDownload:
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+        return _download(kwargs["map_index"])
+
+    hass = SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry-1": SimpleNamespace(
+                    client=SimpleNamespace(
+                        async_download_app_map_point_cloud=download,
+                    )
+                )
+            }
+        }
+    )
+    api = DreameLawnMowerPointCloudAPI(hass)
+
+    async def run() -> None:
+        disconnected = asyncio.create_task(
+            api.async_get("entry-1", 0, refresh=True)
+        )
+        await started.wait()
+        disconnected.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await disconnected
+
+        replacement = asyncio.create_task(
+            api.async_get("entry-1", 0, refresh=True)
+        )
+        await asyncio.sleep(0)
+        assert calls == 1
+        release.set()
+        assert await replacement == _download()
+
+    asyncio.run(run())
+
+    assert calls == 1
+
+
 def test_point_cloud_api_purges_unloaded_entry() -> None:
     calls = 0
 
@@ -214,3 +263,27 @@ def test_point_cloud_view_requires_admin() -> None:
             await view.get(_FakeRequest(is_admin=False), "entry-1", "0")
 
     asyncio.run(run())
+
+
+def test_point_cloud_view_does_not_log_private_exception_details(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    private_detail = (
+        "https://downloads.example.invalid/private-map.pcd?secret=do-not-log"
+    )
+
+    async def get(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError(private_detail)
+
+    view = DreameLawnMowerPointCloudView(SimpleNamespace(async_get=get))
+
+    async def run() -> None:
+        with pytest.raises(web.HTTPBadGateway):
+            await view.get(_FakeRequest(is_admin=True), "entry-1", "0")
+
+    with caplog.at_level(logging.WARNING):
+        asyncio.run(run())
+
+    assert "point-cloud generation failure" in caplog.text
+    assert private_detail not in caplog.text
+    assert "do-not-log" not in caplog.text

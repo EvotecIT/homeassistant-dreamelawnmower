@@ -15,7 +15,6 @@ from homeassistant.components.http.decorators import require_admin
 from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
-from .debug import sanitize_diagnostic_text
 from .dreame_lawn_mower_client import (
     DreameLawnMowerPointCloudDownload,
     DreameLawnMowerPointCloudError,
@@ -59,7 +58,11 @@ class DreameLawnMowerPointCloudAPI:
         self._cache_ttl = cache_ttl
         self._cache_max_entries = cache_max_entries
         self._cache: OrderedDict[tuple[str, int], _CacheEntry] = OrderedDict()
-        self._locks: dict[tuple[str, int], asyncio.Lock] = {}
+        self._inflight: dict[
+            tuple[str, int],
+            asyncio.Task[DreameLawnMowerPointCloudDownload],
+        ] = {}
+        self._entry_epochs: dict[str, int] = {}
 
     async def async_get(
         self,
@@ -76,17 +79,57 @@ class DreameLawnMowerPointCloudAPI:
         if cached is not None and not refresh:
             return cached.download
 
-        lock = self._locks.setdefault(key, asyncio.Lock())
-        async with lock:
-            cached = self._fresh_cache_entry(key, time.monotonic())
-            if cached is not None and (
-                not refresh or cached.created_at >= requested_at
-            ):
-                return cached.download
-
-            download = await coordinator.client.async_download_app_map_point_cloud(
-                map_index=map_index
+        task = self._inflight.get(key)
+        if task is None:
+            epoch = self._entry_epochs.get(entry_id, 0)
+            generation = self._async_generate(
+                key,
+                coordinator,
+                epoch=epoch,
             )
+            create_task = getattr(self._hass, "async_create_task", None)
+            if callable(create_task):
+                task = create_task(
+                    generation,
+                    name=f"{DOMAIN} point cloud {entry_id}:{map_index}",
+                )
+            else:
+                task = asyncio.create_task(
+                    generation,
+                    name=f"{DOMAIN} point cloud {entry_id}:{map_index}",
+                )
+            self._inflight[key] = task
+            task.add_done_callback(
+                lambda completed, *, inflight_key=key: self._generation_done(
+                    inflight_key,
+                    completed,
+                )
+            )
+
+        # The HTTP requester may disconnect while asyncio.to_thread keeps running.
+        # Shield the shared generation so another request joins it instead of
+        # launching a second mower-side job.
+        return await asyncio.shield(task)
+
+    @callback
+    def purge_entry(self, entry_id: str) -> None:
+        """Discard private cache state for one unloaded entry."""
+        for key in [key for key in self._cache if key[0] == entry_id]:
+            self._cache.pop(key, None)
+        self._entry_epochs[entry_id] = self._entry_epochs.get(entry_id, 0) + 1
+
+    async def _async_generate(
+        self,
+        key: tuple[str, int],
+        coordinator: DreameLawnMowerCoordinator,
+        *,
+        epoch: int,
+    ) -> DreameLawnMowerPointCloudDownload:
+        """Run and cache one generation independently of HTTP waiters."""
+        download = await coordinator.client.async_download_app_map_point_cloud(
+            map_index=key[1]
+        )
+        if self._entry_epochs.get(key[0], 0) == epoch:
             self._cache[key] = _CacheEntry(
                 created_at=time.monotonic(),
                 download=download,
@@ -94,15 +137,19 @@ class DreameLawnMowerPointCloudAPI:
             self._cache.move_to_end(key)
             while len(self._cache) > self._cache_max_entries:
                 self._cache.popitem(last=False)
-            return download
+        return download
 
     @callback
-    def purge_entry(self, entry_id: str) -> None:
-        """Discard private cache and lock state for one unloaded entry."""
-        for key in [key for key in self._cache if key[0] == entry_id]:
-            self._cache.pop(key, None)
-        for key in [key for key in self._locks if key[0] == entry_id]:
-            self._locks.pop(key, None)
+    def _generation_done(
+        self,
+        key: tuple[str, int],
+        task: asyncio.Task[DreameLawnMowerPointCloudDownload],
+    ) -> None:
+        """Retire an in-flight generation only after its actual work finishes."""
+        if self._inflight.get(key) is task:
+            self._inflight.pop(key, None)
+        if not task.cancelled():
+            task.exception()
 
     def _coordinator(self, entry_id: str) -> DreameLawnMowerCoordinator:
         coordinator = self._hass.data.get(DOMAIN, {}).get(entry_id)
@@ -160,18 +207,12 @@ class DreameLawnMowerPointCloudView(HomeAssistantView):
         except web.HTTPException:
             raise
         except DreameLawnMowerPointCloudError as err:
-            _LOGGER.warning(
-                "Dreame point-cloud download failed: %s",
-                sanitize_diagnostic_text(err),
-            )
+            _LOGGER.warning("Dreame point-cloud generation or validation failed")
             raise web.HTTPBadGateway(
                 text="The mower point cloud is temporarily unavailable."
             ) from err
         except Exception as err:  # noqa: BLE001 - keep private cloud details private.
-            _LOGGER.warning(
-                "Unexpected Dreame point-cloud download failure: %s",
-                sanitize_diagnostic_text(err),
-            )
+            _LOGGER.warning("Unexpected Dreame point-cloud generation failure")
             raise web.HTTPBadGateway(
                 text="The mower point cloud is temporarily unavailable."
             ) from err

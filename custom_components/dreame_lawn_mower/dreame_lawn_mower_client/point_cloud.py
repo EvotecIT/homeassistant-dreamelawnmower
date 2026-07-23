@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import math
 import struct
 from dataclasses import dataclass
 from typing import Any
 
 DEFAULT_POINT_CLOUD_MAX_BYTES = 64 * 1024 * 1024
 MAX_POINT_CLOUD_HEADER_BYTES = 64 * 1024
-_SUPPORTED_DATA_ENCODINGS = frozenset({"ascii", "binary", "binary_compressed"})
+_SUPPORTED_DATA_ENCODINGS = frozenset({"ascii", "binary"})
 _SUPPORTED_FIELD_TYPES = frozenset({"F", "I", "U"})
 _SUPPORTED_FIELD_SIZES = frozenset({1, 2, 4, 8})
 
@@ -125,6 +126,19 @@ def parse_pcd_metadata(
         raise DreameLawnMowerPointCloudError("PCD contains an unsupported field size.")
     if any(field_type not in _SUPPORTED_FIELD_TYPES for field_type in types):
         raise DreameLawnMowerPointCloudError("PCD contains an unsupported field type.")
+    if any(
+        field_type == "F" and size not in {4, 8}
+        for field_type, size in zip(types, sizes, strict=True)
+    ):
+        raise DreameLawnMowerPointCloudError(
+            "PCD floating-point fields must use 4-byte or 8-byte values."
+        )
+    for coordinate in ("x", "y", "z"):
+        coordinate_index = fields.index(coordinate)
+        if types[coordinate_index] != "F" or counts[coordinate_index] != 1:
+            raise DreameLawnMowerPointCloudError(
+                "PCD x, y, and z coordinates must be scalar floating-point fields."
+            )
     if width * height != points:
         raise DreameLawnMowerPointCloudError(
             "PCD WIDTH and HEIGHT do not match the declared point count."
@@ -134,13 +148,19 @@ def parse_pcd_metadata(
             f"Unsupported PCD DATA encoding {data_encoding!r}."
         )
 
-    bytes_per_point = sum(size * count for size, count in zip(sizes, counts))
+    bytes_per_point = sum(
+        size * count for size, count in zip(sizes, counts, strict=True)
+    )
     payload = raw[header_bytes:]
     _validate_pcd_payload(
         payload,
         data_encoding=data_encoding,
         points=points,
         bytes_per_point=bytes_per_point,
+        fields=fields,
+        sizes=sizes,
+        types=types,
+        counts=counts,
     )
     return DreameLawnMowerPointCloudMetadata(
         version="0.7",
@@ -249,6 +269,10 @@ def _validate_pcd_payload(
     data_encoding: str,
     points: int,
     bytes_per_point: int,
+    fields: tuple[str, ...],
+    sizes: tuple[int, ...],
+    types: tuple[str, ...],
+    counts: tuple[int, ...],
 ) -> None:
     expected_bytes = points * bytes_per_point
     if data_encoding == "binary":
@@ -256,22 +280,14 @@ def _validate_pcd_payload(
             raise DreameLawnMowerPointCloudError(
                 "PCD binary payload length does not match its header."
             )
-        return
-
-    if data_encoding == "binary_compressed":
-        if len(payload) < 8:
-            raise DreameLawnMowerPointCloudError(
-                "PCD compressed payload is missing its size prefix."
-            )
-        compressed_bytes, uncompressed_bytes = struct.unpack_from("<II", payload)
-        if uncompressed_bytes != expected_bytes:
-            raise DreameLawnMowerPointCloudError(
-                "PCD compressed payload size does not match its header."
-            )
-        if len(payload) != 8 + compressed_bytes:
-            raise DreameLawnMowerPointCloudError(
-                "PCD compressed payload length is incomplete."
-            )
+        _validate_binary_coordinates(
+            payload,
+            points=points,
+            bytes_per_point=bytes_per_point,
+            fields=fields,
+            sizes=sizes,
+            counts=counts,
+        )
         return
 
     lines = [line for line in payload.splitlines() if line.strip()]
@@ -279,3 +295,90 @@ def _validate_pcd_payload(
         raise DreameLawnMowerPointCloudError(
             "PCD ASCII payload row count does not match its header."
         )
+    scalar_count = sum(counts)
+    for row in lines:
+        try:
+            values = row.decode("ascii").split()
+        except UnicodeDecodeError as err:
+            raise DreameLawnMowerPointCloudError(
+                "PCD ASCII payload must contain only ASCII text."
+            ) from err
+        if len(values) != scalar_count:
+            raise DreameLawnMowerPointCloudError(
+                "PCD ASCII payload column count does not match its header."
+            )
+        _validate_ascii_scalars(
+            values,
+            sizes=sizes,
+            types=types,
+            counts=counts,
+        )
+
+
+def _validate_binary_coordinates(
+    payload: bytes,
+    *,
+    points: int,
+    bytes_per_point: int,
+    fields: tuple[str, ...],
+    sizes: tuple[int, ...],
+    counts: tuple[int, ...],
+) -> None:
+    """Reject non-finite binary coordinates before a frontend parses them."""
+    field_offsets: dict[str, tuple[int, int]] = {}
+    offset = 0
+    for field, size, count in zip(fields, sizes, counts, strict=True):
+        field_offsets[field] = (offset, size)
+        offset += size * count
+
+    coordinates = tuple(field_offsets[field] for field in ("x", "y", "z"))
+    for point_index in range(points):
+        point_offset = point_index * bytes_per_point
+        for coordinate_offset, coordinate_size in coordinates:
+            value = struct.unpack_from(
+                "<f" if coordinate_size == 4 else "<d",
+                payload,
+                point_offset + coordinate_offset,
+            )[0]
+            if not math.isfinite(value):
+                raise DreameLawnMowerPointCloudError(
+                    "PCD coordinates must contain only finite values."
+                )
+
+
+def _validate_ascii_scalars(
+    values: list[str],
+    *,
+    sizes: tuple[int, ...],
+    types: tuple[str, ...],
+    counts: tuple[int, ...],
+) -> None:
+    """Validate every declared ASCII scalar and its numeric range."""
+    scalar_index = 0
+    for size, field_type, count in zip(sizes, types, counts, strict=True):
+        for _ in range(count):
+            token = values[scalar_index]
+            scalar_index += 1
+            try:
+                if field_type == "F":
+                    value = float(token)
+                    if size == 4:
+                        value = struct.unpack("<f", struct.pack("<f", value))[0]
+                    if not math.isfinite(value):
+                        raise ValueError
+                    continue
+
+                value = int(token, 10)
+                bits = size * 8
+                minimum = -(1 << (bits - 1)) if field_type == "I" else 0
+                maximum = (
+                    (1 << (bits - 1)) - 1
+                    if field_type == "I"
+                    else (1 << bits) - 1
+                )
+                if not minimum <= value <= maximum:
+                    raise ValueError
+            except (OverflowError, ValueError, struct.error) as err:
+                raise DreameLawnMowerPointCloudError(
+                    "PCD ASCII payload contains an invalid scalar value."
+                ) from err

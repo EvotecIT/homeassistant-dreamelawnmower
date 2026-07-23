@@ -108,6 +108,31 @@ def test_parse_pcd_metadata_accepts_binary_xyz_rgb() -> None:
             b"WIDTH 0\nHEIGHT 1\nPOINTS 0\nDATA binary\n",
             "x, y, and z",
         ),
+        (
+            b"VERSION 0.7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\n"
+            b"WIDTH 1\nHEIGHT 1\nPOINTS 1\nDATA ascii\n1 2\n",
+            "column count",
+        ),
+        (
+            b"VERSION 0.7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\n"
+            b"WIDTH 1\nHEIGHT 1\nPOINTS 1\nDATA ascii\n1 invalid 3\n",
+            "invalid scalar",
+        ),
+        (
+            b"VERSION 0.7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\n"
+            b"WIDTH 1\nHEIGHT 1\nPOINTS 1\nDATA ascii\n1e100 2 3\n",
+            "invalid scalar",
+        ),
+        (
+            b"VERSION 0.7\nFIELDS x y z\nSIZE 4 4 4\nTYPE F F F\n"
+            b"WIDTH 1\nHEIGHT 1\nPOINTS 1\nDATA binary_compressed\n"
+            b"\x00\x00\x00\x00\x0c\x00\x00\x00",
+            "Unsupported PCD DATA encoding",
+        ),
+        (
+            _binary_pcd((float("nan"), 2.0, 3.0, 0x123456)),
+            "finite values",
+        ),
     ],
 )
 def test_parse_pcd_metadata_rejects_invalid_payloads(
@@ -125,8 +150,10 @@ def test_download_point_cloud_uses_a2_generation_flow(
     calls: list[dict[str, Any]] = []
     responses = iter(
         [
+            {"r": 0, "d": {"name": ["private/previous-map.pcd"]}},
             {"r": 0},
-            {"r": 0, "d": {"name": [""]}},
+            {"r": 0, "d": {"name": ["private/previous-map.pcd"]}},
+            {"r": 0, "d": {"name": ["private/generated-map.pcd"]}},
             {"r": 0, "d": {"name": ["private/generated-map.pcd"]}},
         ]
     )
@@ -145,16 +172,19 @@ def test_download_point_cloud_uses_a2_generation_flow(
     client._sync_call_app_action = call_app_action
     client._sync_get_cloud_protocol = lambda: cloud
     monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+    downloads = iter([b"not a pcd", content])
     monkeypatch.setattr(
         client_module.urllib.request,
         "urlopen",
-        lambda request, timeout: _FakeResponse(content, request.full_url),
+        lambda request, timeout: _FakeResponse(next(downloads), request.full_url),
     )
 
     result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
 
     assert calls == [
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
         {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
         {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
         {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
     ]

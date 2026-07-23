@@ -82,12 +82,6 @@ from .models import (
     remote_control_state_safe,
     snapshot_from_device,
 )
-from .point_cloud import (
-    DEFAULT_POINT_CLOUD_MAX_BYTES,
-    DreameLawnMowerPointCloudDownload,
-    DreameLawnMowerPointCloudError,
-    parse_pcd_metadata,
-)
 from .mowing_preferences import (
     MOWING_PREFERENCE_MODE_FIELD,
     MOWING_PREFERENCE_PROPERTY_KEY,
@@ -106,6 +100,12 @@ from .mowing_tasks import (
     ensure_mowing_task_succeeded,
 )
 from .operation_diagnostics import build_operation_stage_diagnostics
+from .point_cloud import (
+    DEFAULT_POINT_CLOUD_MAX_BYTES,
+    DreameLawnMowerPointCloudDownload,
+    DreameLawnMowerPointCloudError,
+    parse_pcd_metadata,
+)
 from .runtime_state import (
     RESUME_MOWING_REQUEST,
     snapshot_session_control_state,
@@ -3879,62 +3879,90 @@ class DreameLawnMowerClient:
                 "Point-cloud maximum size must be a positive integer."
             )
 
+        baseline_result = self._sync_call_app_action(
+            {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}}
+        )
+        baseline_name = _point_cloud_object_name(
+            _point_cloud_action_data(
+                baseline_result,
+                "read the existing point-cloud object state",
+            ),
+            map_index,
+        )
+
         trigger_result = self._sync_call_app_action(
             {"m": "a", "p": 0, "o": 10, "d": {"idx": map_index}}
         )
-        _app_action_data(trigger_result)
-
-        deadline = time.monotonic() + timeout
-        object_name: str | None = None
-        while time.monotonic() < deadline:
-            object_result = self._sync_call_app_action(
-                {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}}
-            )
-            data = _app_action_data(object_result)
-            names = data.get("name") if isinstance(data, Mapping) else None
-            if (
-                isinstance(names, Sequence)
-                and not isinstance(names, str | bytes | bytearray)
-                and map_index < len(names)
-            ):
-                candidate = names[map_index]
-                if isinstance(candidate, str) and candidate.strip():
-                    object_name = candidate.strip()
-                    break
-
-            remaining = deadline - time.monotonic()
-            if remaining > 0:
-                time.sleep(min(poll_interval, remaining))
-
-        if object_name is None:
-            raise DreameLawnMowerPointCloudError(
-                "The mower did not publish a point cloud before the timeout."
-            )
+        _point_cloud_action_data(trigger_result, "start point-cloud generation")
 
         cloud = self._sync_get_cloud_protocol()
         if not hasattr(cloud, "get_interim_file_url"):
             raise DreameLawnMowerPointCloudError(
                 "The configured cloud protocol cannot download interim files."
             )
-        try:
-            raw_url = cloud.get_interim_file_url(object_name)
-        except DeviceException as err:
-            raise DreameLawnMowerPointCloudError(
-                "The cloud did not return a point-cloud download URL."
-            ) from err
 
-        url = _point_cloud_download_url(raw_url)
-        content, content_type = _download_point_cloud_content(
-            url,
-            timeout=download_timeout,
-            max_bytes=max_bytes,
-        )
-        metadata = parse_pcd_metadata(content, max_bytes=max_bytes)
-        return DreameLawnMowerPointCloudDownload(
-            map_index=map_index,
-            content=content,
-            metadata=metadata,
-            content_type=content_type,
+        deadline = time.monotonic() + timeout
+        observed_clear = baseline_name is None
+        saw_unusable_point_cloud = False
+        while time.monotonic() < deadline:
+            object_result = self._sync_call_app_action(
+                {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}}
+            )
+            object_name = _point_cloud_object_name(
+                _point_cloud_action_data(
+                    object_result,
+                    "read the generated point-cloud object state",
+                ),
+                map_index,
+            )
+            if object_name is None:
+                observed_clear = True
+            object_extension = (
+                _app_object_extension(object_name)
+                if object_name is not None
+                else None
+            )
+            fresh_object = object_name != baseline_name or observed_clear
+            if (
+                object_name is not None
+                and object_extension is not None
+                and object_extension.casefold() == "pcd"
+                and fresh_object
+            ):
+                try:
+                    raw_url = cloud.get_interim_file_url(object_name)
+                except DeviceException:
+                    saw_unusable_point_cloud = True
+                else:
+                    try:
+                        url = _point_cloud_download_url(raw_url)
+                        content, content_type = _download_point_cloud_content(
+                            url,
+                            timeout=download_timeout,
+                            max_bytes=max_bytes,
+                        )
+                        metadata = parse_pcd_metadata(content, max_bytes=max_bytes)
+                    except DreameLawnMowerPointCloudError:
+                        saw_unusable_point_cloud = True
+                    else:
+                        return DreameLawnMowerPointCloudDownload(
+                            map_index=map_index,
+                            content=content,
+                            metadata=metadata,
+                            content_type=content_type,
+                        )
+
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(poll_interval, remaining))
+
+        if saw_unusable_point_cloud:
+            raise DreameLawnMowerPointCloudError(
+                "The mower published a point cloud, but it could not be downloaded "
+                "and validated before the timeout."
+            )
+        raise DreameLawnMowerPointCloudError(
+            "The mower did not publish or refresh a point cloud before the timeout."
         )
 
     def _sync_get_app_map_text(
@@ -5072,6 +5100,31 @@ def _app_object_extension(value: str) -> str | None:
         return None
     extension = name.rsplit(".", 1)[-1].strip()
     return extension or None
+
+
+def _point_cloud_action_data(value: Any, operation: str) -> Any:
+    """Normalize point-cloud app-action failures without exposing raw payloads."""
+    try:
+        return _app_action_data(value)
+    except DreameLawnMowerConnectionError as err:
+        raise DreameLawnMowerPointCloudError(
+            f"The mower could not {operation}."
+        ) from err
+
+
+def _point_cloud_object_name(value: Any, map_index: int) -> str | None:
+    """Return one indexed object name without exposing the surrounding response."""
+    names = value.get("name") if isinstance(value, Mapping) else None
+    if (
+        not isinstance(names, Sequence)
+        or isinstance(names, str | bytes | bytearray)
+        or map_index >= len(names)
+    ):
+        return None
+    candidate = names[map_index]
+    if not isinstance(candidate, str) or not candidate.strip():
+        return None
+    return candidate.strip()
 
 
 def _validate_point_cloud_map_index(value: int) -> int:
