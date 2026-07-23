@@ -3946,16 +3946,25 @@ class DreameLawnMowerClient:
                         deadline=deadline,
                     )
                     url = _point_cloud_download_url(raw_url)
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise DreameLawnMowerPointCloudError(
+                            "Point-cloud generation timed out."
+                        )
                     content, content_type = _download_point_cloud_content(
                         url,
-                        timeout=download_timeout,
+                        timeout=min(download_timeout, remaining),
                         max_bytes=max_bytes,
                     )
                 except (DeviceException, DreameLawnMowerPointCloudError):
                     saw_unusable_point_cloud = True
                 else:
                     try:
-                        metadata = parse_pcd_metadata(content, max_bytes=max_bytes)
+                        metadata = parse_pcd_metadata(
+                            content,
+                            max_bytes=max_bytes,
+                            deadline=deadline,
+                        )
                     except DreameLawnMowerPointCloudError:
                         saw_unusable_point_cloud = True
                         rejected_object_names.add(object_name)

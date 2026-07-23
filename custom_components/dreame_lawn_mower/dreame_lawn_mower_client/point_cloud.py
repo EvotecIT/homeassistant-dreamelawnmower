@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import struct
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -16,6 +17,7 @@ _SUPPORTED_FIELD_SIZES = frozenset({1, 2, 4, 8})
 _MAX_ASCII_SCALAR_BYTES = 128
 _MAX_ASCII_SCALARS_PER_POINT = 1024
 _MAX_ASCII_ROW_BYTES = 64 * 1024
+_VALIDATION_DEADLINE_CHECK_BYTES = 64 * 1024
 
 
 class DreameLawnMowerPointCloudError(ValueError):
@@ -81,6 +83,7 @@ def parse_pcd_metadata(
     content: bytes,
     *,
     max_bytes: int = DEFAULT_POINT_CLOUD_MAX_BYTES,
+    deadline: float | None = None,
 ) -> DreameLawnMowerPointCloudMetadata:
     """Validate a PCD payload and return coordinate-free metadata."""
     if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes <= 0:
@@ -89,7 +92,9 @@ def parse_pcd_metadata(
         )
     if not isinstance(content, bytes | bytearray | memoryview):
         raise DreameLawnMowerPointCloudError("Point-cloud content must be bytes.")
+    _ensure_validation_deadline(deadline)
     raw = bytes(content)
+    _ensure_validation_deadline(deadline)
     if not raw:
         raise DreameLawnMowerPointCloudError("Point-cloud content is empty.")
     if len(raw) > max_bytes:
@@ -172,7 +177,9 @@ def parse_pcd_metadata(
         sizes=sizes,
         types=types,
         counts=counts,
+        deadline=deadline,
     )
+    _ensure_validation_deadline(deadline)
     return DreameLawnMowerPointCloudMetadata(
         version="0.7",
         fields=fields,
@@ -284,6 +291,7 @@ def _validate_pcd_payload(
     sizes: tuple[int, ...],
     types: tuple[str, ...],
     counts: tuple[int, ...],
+    deadline: float | None,
 ) -> None:
     expected_bytes = points * bytes_per_point
     if data_encoding == "binary":
@@ -298,6 +306,7 @@ def _validate_pcd_payload(
             fields=fields,
             sizes=sizes,
             counts=counts,
+            deadline=deadline,
         )
         return
 
@@ -307,7 +316,12 @@ def _validate_pcd_payload(
         scalar_count * (_MAX_ASCII_SCALAR_BYTES + 1),
     )
     row_count = 0
+    bytes_since_deadline_check = 0
     for row in _iter_nonempty_ascii_rows(payload):
+        bytes_since_deadline_check += len(row) + 1
+        if bytes_since_deadline_check >= _VALIDATION_DEADLINE_CHECK_BYTES:
+            _ensure_validation_deadline(deadline)
+            bytes_since_deadline_check = 0
         row_count += 1
         if row_count > points:
             raise DreameLawnMowerPointCloudError(
@@ -333,6 +347,7 @@ def _validate_pcd_payload(
             types=types,
             counts=counts,
         )
+    _ensure_validation_deadline(deadline)
     if row_count != points:
         raise DreameLawnMowerPointCloudError(
             "PCD ASCII payload row count does not match its header."
@@ -361,6 +376,7 @@ def _validate_binary_coordinates(
     fields: tuple[str, ...],
     sizes: tuple[int, ...],
     counts: tuple[int, ...],
+    deadline: float | None,
 ) -> None:
     """Reject non-finite binary coordinates before a frontend parses them."""
     field_offsets: dict[str, tuple[int, int]] = {}
@@ -370,7 +386,13 @@ def _validate_binary_coordinates(
         offset += size * count
 
     coordinates = tuple(field_offsets[field] for field in ("x", "y", "z"))
+    deadline_check_interval = max(
+        1,
+        _VALIDATION_DEADLINE_CHECK_BYTES // bytes_per_point,
+    )
     for point_index in range(points):
+        if point_index % deadline_check_interval == 0:
+            _ensure_validation_deadline(deadline)
         point_offset = point_index * bytes_per_point
         for coordinate_offset, coordinate_size in coordinates:
             value = struct.unpack_from(
@@ -382,6 +404,15 @@ def _validate_binary_coordinates(
                 raise DreameLawnMowerPointCloudError(
                     "PCD coordinates must contain only finite values."
                 )
+    _ensure_validation_deadline(deadline)
+
+
+def _ensure_validation_deadline(deadline: float | None) -> None:
+    """Stop CPU-bound validation after the caller's absolute deadline."""
+    if deadline is not None and time.monotonic() >= deadline:
+        raise DreameLawnMowerPointCloudError(
+            "Point-cloud validation timed out."
+        )
 
 
 def _validate_ascii_scalars(

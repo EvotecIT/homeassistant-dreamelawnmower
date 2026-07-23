@@ -1166,7 +1166,15 @@ class DreameMowerDreameHomeCloudProtocol:
                 return json.loads(response_text)
             elif response.status_code == 401 and self._secondary_key:
                 _LOGGER.debug("Execute api call failed: Token Expired")
-                self.login()
+                if deadline is None:
+                    self.login()
+                else:
+                    remaining = deadline - time.monotonic()
+                    if remaining > 0:
+                        self.login(
+                            timeout=min(timeout, remaining),
+                            deadline=deadline,
+                        )
             else:
                 _LOGGER.warn(
                     "Execute api call failed with response: %s",

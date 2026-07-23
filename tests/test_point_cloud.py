@@ -24,6 +24,7 @@ from dreame_lawn_mower_client._loader import load_internal_module
 from dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
 
 _internal_client_module = load_internal_module("client")
+_internal_point_cloud_module = load_internal_module("point_cloud")
 _internal_protocol_module = load_internal_module("protocol")
 
 
@@ -443,6 +444,84 @@ def test_point_cloud_action_response_enforces_overall_deadline(
         )
 
     assert applied_timeouts == pytest.approx([0.8])
+
+
+def test_point_cloud_401_reauthentication_uses_remaining_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol_type = _internal_protocol_module.DreameMowerDreameHomeCloudProtocol
+    cloud = object.__new__(protocol_type)
+    strings = [f"header-{index}" for index in range(53)]
+    cloud._strings = strings
+    cloud._country = "eu"
+    cloud._ti = "ti"
+    cloud._key = "key"
+    cloud._key_expire = None
+    cloud._secondary_key = "refresh"
+    cloud._session = SimpleNamespace()
+    cloud._connected = True
+    cloud._fail_count = 0
+    login_options: list[dict[str, Any]] = []
+    cloud.login = lambda **kwargs: login_options.append(kwargs) or True
+    response = SimpleNamespace(status_code=401, close=lambda: None)
+    monkeypatch.setattr(
+        _internal_protocol_module,
+        "_post_cloud_response",
+        lambda session, url, request_options, *, deadline: response,
+    )
+    monkeypatch.setattr(
+        _internal_protocol_module,
+        "_read_cloud_response_text_with_deadline",
+        lambda response, *, deadline: "",
+    )
+    monkeypatch.setattr(
+        _internal_protocol_module.time,
+        "monotonic",
+        lambda: 100.0,
+    )
+
+    assert cloud.request(
+        "https://cloud.example.invalid/action",
+        "{}",
+        retry_count=0,
+        timeout=20,
+        deadline=101.0,
+    ) is None
+
+    assert login_options == [
+        {"timeout": pytest.approx(1.0), "deadline": 101.0}
+    ]
+
+
+def test_pcd_validation_stops_at_absolute_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def monotonic() -> float:
+        nonlocal calls
+        calls += 1
+        return 100.0 if calls < 4 else 101.0
+
+    monkeypatch.setattr(
+        _internal_point_cloud_module.time,
+        "monotonic",
+        monotonic,
+    )
+
+    with pytest.raises(
+        DreameLawnMowerPointCloudError,
+        match="validation timed out",
+    ):
+        parse_pcd_metadata(
+            _binary_pcd(
+                (1.0, 2.0, 3.0, 0x123456),
+                (4.0, 5.0, 6.0, 0x654321),
+            ),
+            deadline=101.0,
+        )
+
+    assert calls >= 4
 
 
 def test_point_cloud_action_log_redacts_private_object_response() -> None:
