@@ -443,7 +443,8 @@ The report is sanitized by the integration and includes:
   architecture versions
 - config-entry and coordinator health
 - current state and diagnostic attributes for every entity belonging to the
-  config entry, including the Live Video camera's last failure stage
+  config entry, including the Live Video camera's last failure stage and a
+  bounded, privacy-safe summary of each TX video cloud stage
 - a bounded list of recent coordinator, map, schedule, and video failures with
   repeated failures coalesced
 - the existing `triage`, `state_reconciliation`, schedule, map, firmware, and raw
@@ -452,6 +453,13 @@ The report is sanitized by the integration and includes:
 Do not enable broad debug logging unless a maintainer asks for a specific logger.
 Cloud protocol debug output can contain data that needs additional review before
 it is posted publicly.
+
+The staged cloud summaries retain field names, value types, safe status codes,
+required-field presence, and sanitized error messages. They do not retain raw
+response values, account or device identifiers, credentials, stream URLs, or
+unbounded payloads. This lets maintainers distinguish unsupported models,
+malformed vendor responses, and missing provisioning without asking users to
+share an account as the first debugging step.
 
 For issue reports, include:
 

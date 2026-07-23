@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from dreame_lawn_mower_client import DreameLawnMowerClient
 from dreame_lawn_mower_client._loader import load_internal_module
 from dreame_lawn_mower_client.models import (
@@ -221,6 +225,21 @@ def test_camera_stream_inputs_use_tx_video_endpoints() -> None:
     )
     assert result["p2p_info"]["available"] is True
     assert result["p2p_info"]["p2p_info"] == "p2p-info-1"
+    diagnostics = result["diagnostics"]
+    assert diagnostics["ready"] is True
+    assert diagnostics["missing_required"] == ()
+    assert diagnostics["completed"] is True
+    assert [stage["stage"] for stage in diagnostics["stages"]] == [
+        "cloud_setup",
+        "cloud_access_token",
+        "cloud_device_identity",
+        "cloud_p2p_info",
+    ]
+    serialized_diagnostics = str(diagnostics)
+    assert "access-token-1" not in serialized_diagnostics
+    assert "p2p-info-1" not in serialized_diagnostics
+    assert ENCRYPTED_APP_ID not in serialized_diagnostics
+    assert ENCRYPTED_APP_SECRET not in serialized_diagnostics
 
 
 def test_tx_video_cloud_logs_redact_request_and_response_material() -> None:
@@ -238,6 +257,40 @@ def test_tx_video_cloud_logs_redact_request_and_response_material() -> None:
         "https://example.invalid/ordinary-endpoint",
         '{"status":"ok"}',
     ) == '{"status":"ok"}'
+
+
+def test_tx_video_user_eligibility_uses_read_only_device_endpoint() -> None:
+    cloud = object.__new__(protocol_module.DreameMowerDreameHomeCloudProtocol)
+    cloud._did = "device-1"
+    cloud.get_api_url = lambda: "https://example.invalid"
+    requests: list[tuple[str, str, dict[str, int]]] = []
+
+    def _request(
+        url: str,
+        payload: str,
+        **kwargs: int,
+    ) -> dict[str, object]:
+        requests.append((url, payload, kwargs))
+        return {"code": 0, "data": {"isDevUser": True}}
+
+    cloud.request = _request
+
+    result = cloud.get_tx_video_user_eligibility(
+        access_token="access-token-1",
+        os=1,
+    )
+
+    assert result == {"isDevUser": True}
+    assert requests == [
+        (
+            "https://example.invalid/dreame-third-video/tx/dev/isDevUser",
+            (
+                '{"did":"device-1","os":1,"accesstoken":"access-token-1",'
+                '"accessToken":"access-token-1"}'
+            ),
+            {"retry_count": 0, "timeout": 5},
+        )
+    ]
 
 
 def test_camera_stream_runtime_inputs_are_redactable_xp2p_contract() -> None:
@@ -296,6 +349,8 @@ def test_camera_stream_runtime_inputs_accept_device_id_alias() -> None:
 
 def test_camera_stream_runtime_inputs_require_tx_identity_fields() -> None:
     class _MissingIdentityCloud(_FakeCloud):
+        eligibility_calls = 0
+
         def get_tx_video_device_identity(
             self,
             access_token: str | None = None,
@@ -309,8 +364,23 @@ def test_camera_stream_runtime_inputs_require_tx_identity_fields() -> None:
                 "name": "Garage Mower",
             }
 
+        def get_tx_video_user_eligibility(
+            self,
+            access_token: str | None = None,
+            os: int = 1,
+        ) -> dict[str, object]:
+            assert access_token == "access-token-1"
+            assert os == 1
+            self.eligibility_calls += 1
+            return {
+                "isDevUser": True,
+                "account": "private-user@example.test",
+                "did": "device-1",
+            }
+
     client = _client()
-    client._sync_get_cloud_protocol = lambda: _MissingIdentityCloud()
+    cloud = _MissingIdentityCloud()
+    client._sync_get_cloud_protocol = lambda: cloud
 
     result = client._sync_get_camera_stream_runtime_inputs()
 
@@ -321,6 +391,134 @@ def test_camera_stream_runtime_inputs_require_tx_identity_fields() -> None:
     assert "product_id" in result.missing_required
     assert "device_name" in result.missing_required
     assert result.p2p_info == "p2p-info-1"
+    assert cloud.eligibility_calls == 1
+    eligibility = result.diagnostics["stages"][-1]
+    assert eligibility["stage"] == "cloud_user_eligibility"
+    assert eligibility["result"]["is_device_user"] == "True"
+    serialized_diagnostics = str(result.diagnostics)
+    assert "private-user@example.test" not in serialized_diagnostics
+    assert "device-1" not in serialized_diagnostics
+
+
+def test_camera_stream_failure_retains_sanitized_stage_diagnostics() -> None:
+    class _FailingCloud(_FakeCloud):
+        def get_tx_video_access_token(self, os: int = 1) -> dict[str, object]:
+            raise client_module.DeviceException(
+                "accessToken=secret-token failed for device-123456"
+            )
+
+    client = _client()
+    client._sync_get_cloud_protocol = lambda: _FailingCloud()
+
+    with pytest.raises(client_module.DreameLawnMowerConnectionError):
+        client._sync_get_camera_stream_inputs()
+
+    diagnostics = client.last_camera_stream_diagnostics
+    assert diagnostics["completed"] is False
+    assert diagnostics["stages"][0]["stage"] == "cloud_setup"
+    assert diagnostics["stages"][1]["stage"] == "cloud_access_token"
+    assert diagnostics["stages"][1]["error"]["type"] == "DeviceException"
+    serialized_diagnostics = str(diagnostics)
+    assert "secret-token" not in serialized_diagnostics
+    assert "device-123456" not in serialized_diagnostics
+
+
+def test_camera_stream_unexpected_failure_records_the_active_stage() -> None:
+    class _MalformedIdentityCloud(_FakeCloud):
+        def get_tx_video_device_identity(
+            self,
+            access_token: str | None = None,
+            os: int = 1,
+        ) -> dict[str, object]:
+            raise json.JSONDecodeError("Expecting value", "", 0)
+
+    client = _client()
+    client._sync_get_cloud_protocol = lambda: _MalformedIdentityCloud()
+
+    with pytest.raises(json.JSONDecodeError):
+        client._sync_get_camera_stream_inputs()
+
+    diagnostics = client.last_camera_stream_diagnostics
+    assert diagnostics["completed"] is False
+    assert diagnostics["stages"][-1]["stage"] == "cloud_device_identity"
+    assert diagnostics["stages"][-1]["error"]["type"] == "JSONDecodeError"
+
+
+def test_camera_stream_later_failure_redacts_identity_values() -> None:
+    class _FailingP2pCloud(_FakeCloud):
+        def get_tx_video_p2p_info(
+            self,
+            access_token: str | None = None,
+            os: int = 1,
+        ) -> dict[str, object]:
+            raise client_module.DeviceException(
+                f"request failed for Mower Camera channel-1 {ENCRYPTED_APP_ID}"
+            )
+
+    client = _client()
+    client._sync_get_cloud_protocol = lambda: _FailingP2pCloud()
+
+    with pytest.raises(client_module.DreameLawnMowerConnectionError):
+        client._sync_get_camera_stream_inputs()
+
+    diagnostics = client.last_camera_stream_diagnostics
+    assert diagnostics["completed"] is False
+    assert diagnostics["stages"][-1]["stage"] == "cloud_p2p_info"
+    serialized_diagnostics = str(diagnostics)
+    assert "Mower Camera" not in serialized_diagnostics
+    assert "channel-1" not in serialized_diagnostics
+    assert ENCRYPTED_APP_ID not in serialized_diagnostics
+
+
+def test_camera_stream_setup_failure_replaces_stale_diagnostics() -> None:
+    client = _client()
+    client._last_camera_stream_diagnostics = {"operation": "stale"}
+
+    def _fail_setup():
+        raise client_module.DreameLawnMowerConnectionError(
+            "Cloud connection is unavailable."
+        )
+
+    client._sync_get_cloud_protocol = _fail_setup
+
+    with pytest.raises(client_module.DreameLawnMowerConnectionError):
+        client._sync_get_camera_stream_inputs()
+
+    diagnostics = client.last_camera_stream_diagnostics
+    assert diagnostics["completed"] is False
+    assert diagnostics["stages"][0]["stage"] == "cloud_setup"
+    assert diagnostics["stages"][0]["error"]["type"] == (
+        "DreameLawnMowerConnectionError"
+    )
+    assert "stale" not in str(diagnostics)
+
+
+def test_camera_stream_eligibility_failure_keeps_incomplete_result() -> None:
+    class _EligibilityFailureCloud(_FakeCloud):
+        def get_tx_video_device_identity(
+            self,
+            access_token: str | None = None,
+            os: int = 1,
+        ) -> dict[str, object]:
+            return {"message": "identity unavailable"}
+
+        def get_tx_video_user_eligibility(
+            self,
+            access_token: str | None = None,
+            os: int = 1,
+        ) -> dict[str, object]:
+            raise ValueError("malformed eligibility response")
+
+    client = _client()
+    client._sync_get_cloud_protocol = lambda: _EligibilityFailureCloud()
+
+    result = client._sync_get_camera_stream_runtime_inputs()
+
+    assert result.ready is False
+    eligibility = result.diagnostics["stages"][-1]
+    assert eligibility["stage"] == "cloud_user_eligibility"
+    assert eligibility["error"]["type"] == "ValueError"
+    assert result.diagnostics["completed"] is True
 
 
 def test_tx_video_identity_decryption_matches_dreamehome_contract() -> None:

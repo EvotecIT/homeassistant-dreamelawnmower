@@ -1,0 +1,155 @@
+"""Privacy and shape tests for reusable staged-operation diagnostics."""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Iterator, Mapping
+from typing import Any
+
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    operation_diagnostics,
+)
+
+build_operation_stage_diagnostics = (
+    operation_diagnostics.build_operation_stage_diagnostics
+)
+summarize_operation_response = operation_diagnostics.summarize_operation_response
+
+
+def test_operation_summary_keeps_shape_codes_and_sanitized_messages() -> None:
+    response = {
+        "code": 403,
+        "message": (
+            "accessToken=secret-access-token denied for deviceName=Mower-123456 "
+            "on channelId=10425/private-camera "
+            "at https://video.example.test/live?token=another-secret"
+        ),
+        "data": {
+            "accessToken": "secret-access-token",
+            "deviceName": "Mower-123456",
+            "channelId": "10425/private-camera",
+            "p2pInfo": "secret-p2p-material",
+            "features": ["video", "audio"],
+        },
+    }
+
+    summary = summarize_operation_response(response)
+    serialized = json.dumps(summary)
+
+    assert summary["codes"] == [{"path": "$.code", "value": 403}]
+    data_field = next(
+        field for field in summary["shape"]["fields"] if field["name"] == "data"
+    )
+    p2p_field = next(
+        field
+        for field in data_field["shape"]["fields"]
+        if field["name"] == "p2pInfo"
+    )
+    assert p2p_field["shape"] == {"type": "string"}
+    assert "accessToken=**REDACTED**" in summary["messages"][0]["text"]
+    assert "deviceName=**REDACTED**" in summary["messages"][0]["text"]
+    assert "channelId=**REDACTED**" in summary["messages"][0]["text"]
+    assert "**REDACTED_URL**" in summary["messages"][0]["text"]
+    assert "secret-access-token" not in serialized
+    assert "Mower-123456" not in serialized
+    assert "10425/private-camera" not in serialized
+    assert "secret-p2p-material" not in serialized
+    assert "another-secret" not in serialized
+
+
+def test_operation_summary_bounds_dynamic_response_fields() -> None:
+    response = {f"field_{index}": index for index in range(45)}
+
+    summary = summarize_operation_response(response)
+
+    assert summary["shape"]["field_count"] == 45
+    assert len(summary["shape"]["fields"]) == 40
+    assert summary["shape"]["truncated"] is True
+
+
+def test_operation_summary_does_not_materialize_complete_mappings() -> None:
+    class _CountingMapping(Mapping[str, Any]):
+        iterations = 0
+
+        def __len__(self) -> int:
+            return 10_000
+
+        def __iter__(self) -> Iterator[str]:
+            for index in range(10_000):
+                self.iterations += 1
+                yield f"field_{index}"
+
+        def __getitem__(self, key: str) -> int:
+            return int(key.removeprefix("field_"))
+
+    response = _CountingMapping()
+
+    summary = summarize_operation_response(response)
+
+    assert response.iterations <= 200
+    assert summary["shape"]["field_count"] == 10_000
+    assert len(summary["shape"]["fields"]) == 40
+    assert summary["shape"]["truncated"] is True
+
+
+def test_operation_summary_applies_a_global_nested_node_budget() -> None:
+    response: dict[str, Any] = {}
+    for index in range(40):
+        response[f"branch_{index}"] = response
+
+    serialized = json.dumps(summarize_operation_response(response))
+
+    assert len(serialized) < 30_000
+    assert '"truncated": true' in serialized
+
+
+def test_operation_stage_error_never_requires_a_response_payload() -> None:
+    stage = build_operation_stage_diagnostics(
+        "cloud_access_token",
+        request_context={"did_present": True, "os": 1},
+        error=RuntimeError(
+            "Bearer secret-access-token failed for user@example.test 12345678"
+        ),
+        sensitive_values=("secret-access-token",),
+    )
+
+    assert "response" not in stage
+    assert stage["request"] == {"did_present": True, "os": 1}
+    assert stage["error"]["type"] == "RuntimeError"
+    assert stage["error"]["message"] == (
+        "Bearer **REDACTED** failed for **REDACTED_EMAIL** **REDACTED_ID**"
+    )
+
+
+def test_operation_summary_redacts_space_separated_device_name() -> None:
+    summary = summarize_operation_response(
+        {
+            "message": (
+                "device name=Garage Mower is unavailable while channel id "
+                "10425/private-camera is offline"
+            )
+        }
+    )
+
+    message = summary["messages"][0]["text"]
+    assert message == "device name=**REDACTED**"
+    assert "Garage Mower" not in message
+    assert "10425/private-camera" not in message
+
+
+def test_operation_summary_redacts_quoted_multi_word_device_name() -> None:
+    summary = summarize_operation_response(
+        {
+            "message": (
+                'deviceName="John\'s Mower" unavailable on '
+                "channelId='Garage \"North\" camera'"
+            )
+        }
+    )
+
+    message = summary["messages"][0]["text"]
+    assert message == (
+        'deviceName="**REDACTED**" unavailable on channelId=\'**REDACTED**\''
+    )
+    assert "John's Mower" not in message
+    assert 'Garage "North" camera' not in message

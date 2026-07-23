@@ -140,6 +140,7 @@ class DreameLawnMowerVideoCamera(
         self._last_runtime_inputs_ready: bool | None = None
         self._last_runtime_inputs_source: str | None = None
         self._last_runtime_inputs_missing: tuple[str, ...] = ()
+        self._last_runtime_input_diagnostics: dict[str, Any] | None = None
         self._last_stream_health: dict[str, Any] | None = None
         self._last_stream_enable_result: Any | None = None
         self._last_stream_disable_error: str | None = None
@@ -301,6 +302,11 @@ class DreameLawnMowerVideoCamera(
             "last_runtime_inputs_ready": self._last_runtime_inputs_ready,
             "last_runtime_inputs_source": self._last_runtime_inputs_source,
             "last_runtime_inputs_missing": self._last_runtime_inputs_missing,
+            "last_runtime_input_diagnostics": getattr(
+                self,
+                "_last_runtime_input_diagnostics",
+                None,
+            ),
             "last_stream_enable_result": self._last_stream_enable_result,
             "last_stream_disable_error": self._last_stream_disable_error,
             "last_native_runtime_diagnostics": self._last_native_runtime_diagnostics,
@@ -882,7 +888,22 @@ class DreameLawnMowerVideoCamera(
         self,
     ) -> DreameLawnMowerCameraStreamRuntimeInputs:
         """Fetch cloud inputs and stage configuration for health-checked use."""
-        inputs = await self.coordinator.client.async_get_camera_stream_runtime_inputs()
+        try:
+            inputs = (
+                await self.coordinator.client.async_get_camera_stream_runtime_inputs()
+            )
+        except Exception:
+            self._last_runtime_input_diagnostics = sanitize_debug_data(
+                getattr(
+                    self.coordinator.client,
+                    "last_camera_stream_diagnostics",
+                    {},
+                )
+            )
+            raise
+        self._last_runtime_input_diagnostics = sanitize_debug_data(
+            getattr(inputs, "diagnostics", {})
+        )
         self._last_runtime_inputs_ready = inputs.ready
         self._last_runtime_inputs_source = inputs.source
         self._last_runtime_inputs_missing = inputs.missing_required

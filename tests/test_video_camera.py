@@ -190,6 +190,71 @@ def test_video_failure_is_sanitized_logged_once_and_preserved(caplog) -> None:
     assert "secret" not in caplog.text
 
 
+def test_video_camera_preserves_runtime_input_telemetry_on_cloud_failure() -> None:
+    async def _raise_cloud_error():
+        raise RuntimeError("cloud request failed")
+
+    entity = _uninitialized_entity()
+    entity.coordinator.client = SimpleNamespace(
+        async_get_camera_stream_runtime_inputs=_raise_cloud_error,
+        last_camera_stream_diagnostics={
+            "operation": "camera_stream_inputs",
+            "stages": [
+                {
+                    "stage": "cloud_access_token",
+                    "error": {
+                        "message": "accessToken=secret-token failed",
+                    },
+                }
+            ],
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="cloud request failed"):
+        asyncio.run(entity._async_get_runtime_inputs())
+
+    diagnostics = entity._last_runtime_input_diagnostics
+    assert diagnostics["stages"][0]["stage"] == "cloud_access_token"
+    assert diagnostics["stages"][0]["error"]["message"] == (
+        "accessToken=**REDACTED** failed"
+    )
+
+
+def test_video_camera_preserves_runtime_input_telemetry_on_incomplete_result() -> None:
+    inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+        source="dreame_third_video_tx",
+        did="device-1",
+        diagnostics={
+            "operation": "camera_stream_inputs",
+            "ready": False,
+            "missing_required": ("product_id", "device_name", "p2p_info"),
+        },
+    )
+
+    async def _runtime_inputs():
+        return inputs
+
+    entity = _uninitialized_entity()
+    entity.coordinator.client = SimpleNamespace(
+        async_get_camera_stream_runtime_inputs=_runtime_inputs,
+    )
+
+    result = asyncio.run(entity._async_get_runtime_inputs())
+
+    assert result is inputs
+    assert entity._last_runtime_input_diagnostics == {
+        "operation": "camera_stream_inputs",
+        "ready": False,
+        "missing_required": ["product_id", "device_name", "p2p_info"],
+    }
+    assert entity._last_runtime_inputs_ready is False
+    assert entity._last_runtime_inputs_missing == (
+        "product_id",
+        "device_name",
+        "p2p_info",
+    )
+
+
 def test_video_camera_auto_policy_prefers_direct_capable_sdk_negotiation() -> None:
     entity = _uninitialized_entity()
     entity._entry.options[CONF_VIDEO_TRANSPORT] = VIDEO_TRANSPORT_AUTO

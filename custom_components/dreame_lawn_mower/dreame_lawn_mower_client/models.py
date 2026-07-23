@@ -670,6 +670,7 @@ class DreameLawnMowerCameraStreamRuntimeInputs:
     flv_path_template: str = (
         "ipc.flv?action=live&channel={channel}&quality=high&_crypto=on"
     )
+    diagnostics: Mapping[str, Any] = field(default_factory=dict, repr=False)
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False)
 
     @property
