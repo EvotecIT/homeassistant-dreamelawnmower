@@ -24,6 +24,7 @@ from dreame_lawn_mower_client._loader import load_internal_module
 from dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
 
 _internal_client_module = load_internal_module("client")
+_internal_deadline_module = load_internal_module("deadline")
 _internal_point_cloud_module = load_internal_module("point_cloud")
 _internal_protocol_module = load_internal_module("protocol")
 
@@ -730,6 +731,47 @@ def test_cloud_header_receive_observes_absolute_deadline() -> None:
         release.set()
 
     assert time.monotonic() - started < 1
+
+
+def test_deadline_slot_is_released_when_late_response_close_fails() -> None:
+    for _ in range(4):
+        release = threading.Event()
+        close_called = threading.Event()
+
+        class BadResponse:
+            def __init__(self, close_event: threading.Event) -> None:
+                self.close_event = close_event
+
+            def close(self) -> None:
+                self.close_event.set()
+                raise RuntimeError("cleanup failed")
+
+        def operation(
+            release_event: threading.Event = release,
+            close_event: threading.Event = close_called,
+        ) -> BadResponse:
+            release_event.wait(5)
+            return BadResponse(close_event)
+
+        try:
+            with pytest.raises(
+                _internal_deadline_module.DeadlineExceededError,
+            ):
+                _internal_deadline_module.run_with_deadline(
+                    operation,
+                    deadline=time.monotonic() + 0.01,
+                )
+        finally:
+            release.set()
+        assert close_called.wait(1)
+
+    assert (
+        _internal_deadline_module.run_with_deadline(
+            lambda: "available",
+            deadline=time.monotonic() + 1,
+        )
+        == "available"
+    )
 
 
 def test_point_cloud_url_lookup_uses_and_enforces_remaining_deadline(

@@ -3816,7 +3816,8 @@ class DreameLawnMowerClient:
         include_urls: bool = False,
     ) -> dict[str, Any]:
         object_result = self._sync_call_app_action(
-            {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}}
+            {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+            redact_response=True,
         )
         data = _app_action_data(object_result)
         names = data.get("name") if isinstance(data, Mapping) else None
@@ -3827,19 +3828,20 @@ class DreameLawnMowerClient:
             names = []
 
         objects: list[dict[str, Any]] = []
-        cloud = self._sync_get_cloud_protocol()
+        cloud = self._sync_get_cloud_protocol() if include_urls else None
         for raw_name in names:
             name = str(raw_name)
             item: dict[str, Any] = {
-                "name": name,
                 "extension": _app_object_extension(name),
                 "url_present": False,
             }
             if include_urls:
+                item["name"] = name
                 try:
                     url = (
                         cloud.get_interim_file_url(name)
-                        if hasattr(cloud, "get_interim_file_url")
+                        if cloud is not None
+                        and hasattr(cloud, "get_interim_file_url")
                         else None
                     )
                     item["url_present"] = bool(url)
@@ -3848,13 +3850,15 @@ class DreameLawnMowerClient:
                     item["error"] = str(err)
             objects.append(item)
 
-        return {
+        result = {
             "source": "app_action_obj_3dmap",
             "object_count": len(objects),
             "objects": objects,
-            "raw": _json_safe(object_result, max_depth=4),
             "urls_included": bool(include_urls),
         }
+        if include_urls:
+            result["raw"] = _json_safe(object_result, max_depth=4)
+        return result
 
     def _sync_download_app_map_point_cloud(
         self,
@@ -5786,7 +5790,7 @@ def _app_map_objects_view_metadata(value: Any) -> dict[str, Any]:
     entries = [
         {
             key: item.get(key)
-            for key in ("name", "extension", "url_present", "error")
+            for key in ("extension", "url_present", "error")
             if item.get(key) is not None
         }
         for item in objects

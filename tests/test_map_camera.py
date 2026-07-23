@@ -124,8 +124,8 @@ def test_map_camera_attributes_include_all_app_map_metadata() -> None:
             "object_count": 2,
             "object_error": None,
             "objects": [
-                {"name": "map-a.bin", "extension": "bin", "url_present": False},
-                {"name": "map-b.bin", "extension": "bin", "url_present": False},
+                {"extension": "bin", "url_present": False},
+                {"extension": "bin", "url_present": False},
             ],
             "maps": [
                 {"idx": 0, "current": True, "available": True},
@@ -149,8 +149,8 @@ def test_map_camera_attributes_include_all_app_map_metadata() -> None:
     assert attributes["app_map_object_count"] == 2
     assert attributes["app_map_object_error"] is None
     assert attributes["app_map_objects"] == [
-        {"name": "map-a.bin", "extension": "bin", "url_present": False},
-        {"name": "map-b.bin", "extension": "bin", "url_present": False},
+        {"extension": "bin", "url_present": False},
+        {"extension": "bin", "url_present": False},
     ]
     assert attributes["app_maps"] == [
         {"idx": 0, "current": True, "available": True},

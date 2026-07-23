@@ -20,7 +20,10 @@ def _close_if_possible(value: Any) -> None:
     """Close a late response without assuming a particular HTTP client."""
     close = getattr(value, "close", None)
     if callable(close):
-        close()
+        try:
+            close()
+        except Exception:
+            pass
 
 
 def run_with_deadline(
@@ -59,10 +62,12 @@ def run_with_deadline(
                 if not state["abandoned"]:
                     state["error"] = err
         finally:
-            if has_value:
-                _close_if_possible(value)
-            finished.set()
-            _operation_slots.release()
+            try:
+                if has_value:
+                    _close_if_possible(value)
+            finally:
+                finished.set()
+                _operation_slots.release()
 
     threading.Thread(
         target=worker,

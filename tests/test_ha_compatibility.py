@@ -1227,12 +1227,10 @@ def test_app_map_object_attributes_are_compact() -> None:
             "extension_counts": {"bin": 1, "obj": 1},
             "objects": [
                 {
-                    "name": "ali_dreame/2025/04/23/device/map-one.0233.bin",
                     "extension": "bin",
                     "url_present": False,
                 },
                 {
-                    "name": "ali_dreame/2025/04/23/device/model.obj",
                     "extension": "obj",
                     "url_present": False,
                 },

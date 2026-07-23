@@ -37,9 +37,11 @@ class _FakeAppMapCloud:
         *,
         siid: int = 2,
         aiid: int = 50,
+        redact_response: bool = False,
     ) -> dict[str, object]:
         assert siid == 2
         assert aiid == 50
+        assert redact_response is (payload.get("t") == "OBJ")
         self.calls.append(payload)
         command = payload.get("t")
         if command == "MAPL":
@@ -273,8 +275,37 @@ def test_app_map_object_urls_are_opt_in() -> None:
     assert objects["source"] == "app_action_obj_3dmap"
     assert objects["object_count"] == 1
     assert objects["urls_included"] is True
+    assert objects["objects"][0]["name"].endswith("map-one.0233.bin")
     assert objects["objects"][0]["url_present"] is True
     assert objects["objects"][0]["url"].startswith("https://example.invalid/")
+
+
+def test_app_map_object_state_omits_names_and_redacts_action_logs() -> None:
+    client = _client()
+    call_options: list[dict[str, object]] = []
+
+    def call_app_action(
+        payload: dict[str, object],
+        **kwargs: object,
+    ) -> dict[str, object]:
+        call_options.append(kwargs)
+        return {
+            "r": 0,
+            "d": {"name": ["private/generated-map.pcd"]},
+        }
+
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda: object()
+
+    objects = client._sync_get_app_map_objects(include_urls=False)
+
+    assert call_options == [{"redact_response": True}]
+    assert objects == {
+        "source": "app_action_obj_3dmap",
+        "object_count": 1,
+        "objects": [{"extension": "pcd", "url_present": False}],
+        "urls_included": False,
+    }
 
 
 def test_map_view_falls_back_to_rendered_app_map() -> None:
@@ -323,13 +354,12 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
         "available_map_count": 1,
         "created_map_count": 1,
         "object_count": 1,
-        "object_error": None,
-        "objects": [
-            {
-                "name": "ali_dreame/2025/04/23/device/map-one.0233.bin",
-                "extension": "bin",
-                "url_present": False,
-            }
+            "object_error": None,
+            "objects": [
+                {
+                    "extension": "bin",
+                    "url_present": False,
+                }
         ],
         "maps": [
             {
