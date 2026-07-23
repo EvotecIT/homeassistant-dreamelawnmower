@@ -25,7 +25,7 @@ def test_property_annotations_label_known_mower_state_and_error_keys() -> None:
     assert state_entry["state_key"] == "charging_completed"
     assert state_entry["decoded_label"] == "Charging Completed"
     assert error_entry["property_hint"] == "mower_error"
-    assert error_entry["decoded_label"] == "Left wheel speed"
+    assert error_entry["decoded_label"] == "Return to station failed"
     assert error_entry["decoded_label_source"] == "bundled_mower_errors"
 
 

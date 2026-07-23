@@ -14,7 +14,11 @@ from .dreame_lawn_mower_client.app_protocol import (
     MOWER_TASK_PROPERTY_KEY,
     MOWER_TIME_PROPERTY_KEY,
 )
-from .dreame_lawn_mower_client.device_code_semantics import mower_fault_active
+from .dreame_lawn_mower_client.device_code_semantics import (
+    mower_device_code,
+    mower_device_code_definition,
+    mower_fault_active,
+)
 
 TASK_STATUS_PROBE_KEYS = (
     MOWER_RUNTIME_STATUS_PROPERTY_KEY,
@@ -39,10 +43,11 @@ def task_status_probe_payload(
     scan: Mapping[str, Any],
     *,
     captured_at: str | None = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Return a compact HA/log payload from one task-status property scan."""
     entries = scan.get("entries", [])
-    summary = task_status_probe_summary(scan)
+    summary = task_status_probe_summary(scan, model=model)
     payload: dict[str, Any] = {
         "captured_at": captured_at,
         "source": "cloud_property_task_status",
@@ -64,7 +69,11 @@ def task_status_probe_payload(
     }
 
 
-def task_status_probe_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
+def task_status_probe_summary(
+    payload: Mapping[str, Any],
+    *,
+    model: str | None = None,
+) -> dict[str, Any]:
     """Return compact app state/task/error evidence from a scan payload."""
     entries = payload.get("entries", [])
     scan_summary = payload.get("summary", {})
@@ -99,8 +108,16 @@ def task_status_probe_summary(payload: Mapping[str, Any]) -> dict[str, Any]:
             "task_status": task_entry.get("task_status")
             if isinstance(task_entry, Mapping)
             else None,
-            "error": _error_summary(error_entry),
-            "error_active": _error_active(error_entry),
+            "error": _error_summary(
+                error_entry,
+                state_entry=state_entry,
+                model=model,
+            ),
+            "error_active": _error_active(
+                error_entry,
+                state_entry=state_entry,
+                model=model,
+            ),
             "battery_level": _entry_value(battery_entry),
             "device_time": _entry_json_value(time_entry),
             "status_matrix": _status_matrix_summary(status_matrix_entry),
@@ -215,7 +232,12 @@ def _state_summary(entry: Mapping[str, Any] | None) -> dict[str, Any] | None:
     )
 
 
-def _error_summary(entry: Mapping[str, Any] | None) -> dict[str, Any] | None:
+def _error_summary(
+    entry: Mapping[str, Any] | None,
+    *,
+    state_entry: Mapping[str, Any] | None = None,
+    model: str | None = None,
+) -> dict[str, Any] | None:
     if not isinstance(entry, Mapping):
         return None
     return _drop_empty(
@@ -223,15 +245,36 @@ def _error_summary(entry: Mapping[str, Any] | None) -> dict[str, Any] | None:
             "value": _entry_value(entry),
             "label": entry.get("decoded_label"),
             "label_source": entry.get("decoded_label_source"),
-            "active": _error_active(entry),
+            "active": _error_active(
+                entry,
+                state_entry=state_entry,
+                model=model,
+            ),
         }
     )
 
 
-def _error_active(entry: Mapping[str, Any] | None) -> bool | None:
+def _error_active(
+    entry: Mapping[str, Any] | None,
+    *,
+    state_entry: Mapping[str, Any] | None = None,
+    model: str | None = None,
+) -> bool | None:
     if not isinstance(entry, Mapping):
         return None
-    return mower_fault_active(_entry_value(entry))
+    value = _entry_value(entry)
+    active = mower_fault_active(value, model=model)
+    if active is not False:
+        return active
+
+    code = mower_device_code(value)
+    definition = mower_device_code_definition(code, model=model)
+    explicit_error_state = str(_entry_value(state_entry)).strip() == "4"
+    return bool(
+        code not in (None, -1)
+        and definition is None
+        and explicit_error_state
+    )
 
 
 def _status_blob_summary(entry: Mapping[str, Any] | None) -> dict[str, Any] | None:

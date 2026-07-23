@@ -321,6 +321,7 @@ class DreameLawnMowerCaptureTaskStatusProbeButton(
         payload = task_status_probe_payload(
             scan,
             captured_at=datetime.now(UTC).isoformat(),
+            model=self._descriptor.model,
         )
         self.coordinator.last_task_status_probe_result = payload
         self.coordinator.async_update_listeners()

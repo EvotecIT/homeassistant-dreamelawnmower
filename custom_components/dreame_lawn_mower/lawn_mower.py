@@ -264,6 +264,11 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
                 "status_notice_display",
                 None,
             ),
+            "status_notice_tier": getattr(
+                snapshot,
+                "status_notice_tier",
+                None,
+            ),
             "status_notice_source": getattr(
                 snapshot,
                 "status_notice_source",

@@ -4,6 +4,7 @@ from io import BytesIO
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from homeassistant.const import Platform
 from PIL import Image, ImageFont
 
@@ -824,6 +825,37 @@ def test_task_status_probe_payload_keeps_compact_app_state() -> None:
         ],
         "error_count": 0,
     }
+
+
+@pytest.mark.parametrize(
+    ("code", "expected_active"),
+    [(999, True), (56, False)],
+)
+def test_task_status_probe_uses_explicit_error_state_only_for_unknown_codes(
+    code: int,
+    expected_active: bool,
+) -> None:
+    payload = task_status_probe_payload(
+        {
+            "entries": [
+                {
+                    "key": "2.1",
+                    "value": "4",
+                    "decoded_label": "Paused due to errors",
+                    "state_key": "paused",
+                },
+                {
+                    "key": "2.2",
+                    "value": str(code),
+                    "decoded_label": "Device code",
+                },
+            ]
+        },
+        model="dreame.mower.g2408",
+    )
+
+    assert payload["summary"]["error_active"] is expected_active
+    assert payload["summary"]["error"]["active"] is expected_active
 
 
 def test_weather_probe_result_attributes_are_compact() -> None:
