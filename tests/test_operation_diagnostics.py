@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator, Mapping
+from typing import Any
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     operation_diagnostics,
@@ -19,11 +21,13 @@ def test_operation_summary_keeps_shape_codes_and_sanitized_messages() -> None:
         "code": 403,
         "message": (
             "accessToken=secret-access-token denied for deviceName=Mower-123456 "
+            "on channelId=10425/private-camera "
             "at https://video.example.test/live?token=another-secret"
         ),
         "data": {
             "accessToken": "secret-access-token",
             "deviceName": "Mower-123456",
+            "channelId": "10425/private-camera",
             "p2pInfo": "secret-p2p-material",
             "features": ["video", "audio"],
         },
@@ -44,9 +48,11 @@ def test_operation_summary_keeps_shape_codes_and_sanitized_messages() -> None:
     assert p2p_field["shape"] == {"type": "string"}
     assert "accessToken=**REDACTED**" in summary["messages"][0]["text"]
     assert "deviceName=**REDACTED**" in summary["messages"][0]["text"]
+    assert "channelId=**REDACTED**" in summary["messages"][0]["text"]
     assert "**REDACTED_URL**" in summary["messages"][0]["text"]
     assert "secret-access-token" not in serialized
     assert "Mower-123456" not in serialized
+    assert "10425/private-camera" not in serialized
     assert "secret-p2p-material" not in serialized
     assert "another-secret" not in serialized
 
@@ -59,6 +65,42 @@ def test_operation_summary_bounds_dynamic_response_fields() -> None:
     assert summary["shape"]["field_count"] == 45
     assert len(summary["shape"]["fields"]) == 40
     assert summary["shape"]["truncated"] is True
+
+
+def test_operation_summary_does_not_materialize_complete_mappings() -> None:
+    class _CountingMapping(Mapping[str, Any]):
+        iterations = 0
+
+        def __len__(self) -> int:
+            return 10_000
+
+        def __iter__(self) -> Iterator[str]:
+            for index in range(10_000):
+                self.iterations += 1
+                yield f"field_{index}"
+
+        def __getitem__(self, key: str) -> int:
+            return int(key.removeprefix("field_"))
+
+    response = _CountingMapping()
+
+    summary = summarize_operation_response(response)
+
+    assert response.iterations <= 200
+    assert summary["shape"]["field_count"] == 10_000
+    assert len(summary["shape"]["fields"]) == 40
+    assert summary["shape"]["truncated"] is True
+
+
+def test_operation_summary_applies_a_global_nested_node_budget() -> None:
+    response: dict[str, Any] = {}
+    for index in range(40):
+        response[f"branch_{index}"] = response
+
+    serialized = json.dumps(summarize_operation_response(response))
+
+    assert len(serialized) < 30_000
+    assert '"truncated": true' in serialized
 
 
 def test_operation_stage_error_never_requires_a_response_payload() -> None:

@@ -529,6 +529,8 @@ class DreameMowerDreameHomeCloudProtocol:
         response = self.request(
             f"{self.get_api_url()}/dreame-third-video/tx/dev/isDevUser",
             json.dumps(params, separators=(",", ":")),
+            retry_count=0,
+            timeout=5,
         )
         if response and "data" in response and response.get("code", 0) == 0:
             return response["data"]
@@ -828,7 +830,7 @@ class DreameMowerDreameHomeCloudProtocol:
             return None
         return api_response["result"]
 
-    def request(self, url: str, data, retry_count=2) -> Any:
+    def request(self, url: str, data, retry_count=2, timeout=20) -> Any:
         _LOGGER.debug(
             "DreameMowerDreameHomeCloudProtocol.request %s %s",
             url,
@@ -839,8 +841,6 @@ class DreameMowerDreameHomeCloudProtocol:
         if not retry_count or retry_count < 0:
             retry_count = 0
         while retries < retry_count + 1:
-            # Original timeout was set to 5, which timed out for map requests.
-            timeout = 20
             try:
                 if self._key_expire and time.time() > self._key_expire:
                     self.login()

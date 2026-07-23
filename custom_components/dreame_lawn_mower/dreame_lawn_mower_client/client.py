@@ -1814,7 +1814,6 @@ class DreameLawnMowerClient:
 
     def _sync_get_camera_stream_inputs(self) -> dict[str, Any]:
         """Fetch and normalize the cloud data used by TXVideoSdk video startup."""
-        cloud = self._sync_get_cloud_protocol()
         diagnostics: dict[str, Any] = {
             "operation": "camera_stream_inputs",
             "version": 1,
@@ -1853,6 +1852,28 @@ class DreameLawnMowerClient:
             diagnostics["stages"].append(
                 build_operation_stage_diagnostics(stage, **arguments)
             )
+
+        setup_request = {"device_initialized": self._device is not None}
+        try:
+            cloud = self._sync_get_cloud_protocol()
+        except Exception as err:
+            record_stage(
+                "cloud_setup",
+                request=setup_request,
+                error=err,
+                include_response=False,
+            )
+            diagnostics["completed"] = False
+            raise
+        record_stage(
+            "cloud_setup",
+            request=setup_request,
+            result={
+                "available": True,
+                "logged_in": bool(getattr(cloud, "logged_in", False)),
+            },
+            include_response=False,
+        )
 
         try:
             access_token = None
@@ -1987,7 +2008,7 @@ class DreameLawnMowerClient:
                     access_token=access_token,
                     os=1,
                 )
-            except DeviceException as err:
+            except Exception as err:
                 record_stage(
                     "cloud_user_eligibility",
                     request=eligibility_request,
