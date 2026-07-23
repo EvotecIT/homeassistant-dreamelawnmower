@@ -1,123 +1,33 @@
-"""Fixture-driven checks for the paused A2 wheel-speed error capture."""
+"""Regression checks for the historical A2 code-31 diagnostic capture."""
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
-from custom_components.dreame_lawn_mower.binary_sensor import BINARY_SENSORS
-from custom_components.dreame_lawn_mower.sensor import SENSORS
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    device_code_semantics,
+)
 
 from .fixture_data import load_json_fixture
 
 
-def _snapshot() -> SimpleNamespace:
+def test_a2_capture_proves_the_old_vacuum_label_was_not_mower_evidence() -> None:
     payload = load_json_fixture("a2_paused_left_wheel_error_diagnostics.json")
-    values = payload["data"]["snapshot"]
-    return SimpleNamespace(
-        **values,
-        mower_state_name=values["state_name"],
-        mowing_task_status_name=values["task_status_name"],
-        mowing_mode_name=values["cleaning_mode_name"],
-        mowed_area=values.get("cleaned_area"),
-        mowing_time=values.get("cleaning_time"),
+    snapshot = payload["data"]["snapshot"]
+
+    # Keep the immutable capture as provenance: the old client used the vacuum
+    # enum to turn A2 code 31 into "left wheel speed".
+    assert snapshot["state"] == "paused"
+    assert snapshot["error_code"] == 31
+    assert snapshot["error_name"] == "left_wheell_speed"
+
+    # The mower-native A2 catalog identifies the same value as a recoverable
+    # return-to-station alert, so it must not latch LawnMowerActivity.ERROR.
+    model = snapshot["descriptor"]["model"]
+    assert (
+        device_code_semantics.mower_device_code_name(31, model=model)
+        == "return_to_station_failed"
     )
-
-
-def test_a2_error_fixture_preserves_paused_state_context() -> None:
-    snapshot = _snapshot()
-
-    assert snapshot.state == "paused"
-    assert snapshot.activity == "error"
-    assert snapshot.battery_level == 74
-    assert snapshot.error_code == 31
-    assert snapshot.error_name == "left_wheell_speed"
-    assert snapshot.error_text == "Left wheell speed"
-    assert snapshot.error_display == "Left wheel speed"
-    assert snapshot.state_name == "paused"
-    assert snapshot.task_status_name == "unknown"
-    assert snapshot.raw_attributes["mower_state"] == "paused"
-    assert snapshot.raw_attributes["running"] is False
-    assert snapshot.started is True
-
-
-def test_a2_error_fixture_exposes_expected_sensor_set() -> None:
-    snapshot = _snapshot()
-
-    visible = {
-        description.name
-        for description in SENSORS
-        if description.exists_fn(snapshot)
-    }
-
-    assert visible == {
-        "Activity",
-        "Battery",
-        "Cloud Update Time",
-        "Error",
-        "Error Code",
-        "Firmware Version",
-        "Hardware Version",
-        "Last Realtime Method",
-        "Manual Drive Block Reason",
-        "Mower State",
-        "Raw Error",
-        "Realtime Property Count",
-        "Serial Number",
-        "State Name",
-        "Status Notice",
-        "Task Status",
-        "Unknown Property Count",
-    }
-
-
-def test_a2_error_fixture_reports_expected_normalized_sensor_values() -> None:
-    snapshot = _snapshot()
-    sensors = {description.name: description for description in SENSORS}
-
-    assert sensors["Activity"].value_fn(snapshot) == "error"
-    assert sensors["State Name"].value_fn(snapshot) == "paused"
-    assert sensors["Task Status"].value_fn(snapshot) == "unknown"
-    assert sensors["Error Code"].value_fn(snapshot) == 31
-    assert sensors["Raw Error"].value_fn(snapshot) == "Left wheell speed"
-    assert sensors["Manual Drive Block Reason"].value_fn(snapshot) == (
-        "Remote control is blocked while error is active."
+    assert (
+        device_code_semantics.mower_device_code_tier(31, model=model)
+        is device_code_semantics.MowerDeviceCodeTier.ALERT
     )
-
-
-def test_a2_error_fixture_exposes_expected_binary_sensor_set() -> None:
-    snapshot = _snapshot()
-
-    visible = {
-        description.name
-        for description in BINARY_SENSORS
-        if description.exists_fn(snapshot)
-    }
-
-    assert visible == {
-        "Charging",
-        "Docked",
-        "Error Active",
-        "Mapping Available",
-        "Manual Drive Safe",
-        "Mowing",
-        "Online",
-        "Paused",
-        "Raw Paused Flag",
-        "Raw Returning Flag",
-        "Raw Running Flag",
-        "Returning",
-        "Scheduled Task",
-        "Task Active",
-    }
-
-
-def test_a2_error_fixture_reports_expected_normalized_state_flags() -> None:
-    snapshot = _snapshot()
-    sensors = {description.name: description for description in BINARY_SENSORS}
-
-    assert sensors["Error Active"].value_fn(snapshot) is True
-    assert sensors["Docked"].value_fn(snapshot) is False
-    assert sensors["Paused"].value_fn(snapshot) is False
-    assert sensors["Mowing"].value_fn(snapshot) is False
-    assert sensors["Returning"].value_fn(snapshot) is False
-    assert sensors["Manual Drive Safe"].value_fn(snapshot) is False
+    assert device_code_semantics.mower_fault_active(31, model=model) is False

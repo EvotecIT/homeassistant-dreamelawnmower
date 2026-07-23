@@ -284,11 +284,12 @@ def test_public_package_exports_app_protocol_helpers() -> None:
     )
     assert mower_state_label("75") == "Paused at maintenance point"
     assert mower_state_label(999) is None
-    assert mower_error_label(31) == "Left wheel speed"
-    assert mower_error_label(1) == "Unverified drop"
+    assert mower_error_label(31) == "Return to station failed"
+    assert mower_error_label(1) == "Robot tilted"
     assert mower_error_label(-1) == "No error"
-    assert mower_error_label(0) == "No error"
-    assert mower_error_label(99999) is None
+    assert mower_error_label(0) == "No device code"
+    assert mower_error_label(0, model="dreame.mower.g2408") == "Robot lifted"
+    assert mower_error_label(99999) == "Unknown mower device code 99999"
     assert decode_mower_status_blob([206, 0, 206]).frame_valid is True
     assert decode_mower_task_status('{"d":{"exe":true},"t":"TASK"}') == {
         "type": "TASK",

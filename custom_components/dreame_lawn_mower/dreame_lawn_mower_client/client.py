@@ -3990,6 +3990,7 @@ class DreameLawnMowerClient:
                 entry,
                 language=language,
                 key_definition=cloud_key_definition,
+                model=self._descriptor.model,
             )
             for entry in sorted(
                 rendered,
@@ -4338,6 +4339,7 @@ class DreameLawnMowerClient:
         *,
         language: str,
         key_definition: Mapping[str, Any] | None = None,
+        model: str | None = None,
     ) -> dict[str, Any]:
         rendered = dict(entry)
         key = str(rendered.get("key", ""))
@@ -4366,7 +4368,7 @@ class DreameLawnMowerClient:
                     rendered["decoded_label"] = label
                     rendered["decoded_label_source"] = "bundled_mower_protocol"
         elif key == MOWER_ERROR_PROPERTY_KEY and not rendered.get("decoded_label"):
-            label = mower_error_label(value)
+            label = mower_error_label(value, model=model)
             if label:
                 rendered["decoded_label"] = label
                 rendered["decoded_label_source"] = "bundled_mower_errors"
@@ -5946,6 +5948,7 @@ def _operation_snapshot_summary(snapshot: DreameLawnMowerSnapshot) -> dict[str, 
         "status_notice_code": snapshot.status_notice_code,
         "status_notice_name": snapshot.status_notice_name,
         "status_notice_display": snapshot.status_notice_display,
+        "status_notice_tier": snapshot.status_notice_tier,
         "status_notice_source": snapshot.status_notice_source,
         "raw_error_code": snapshot.raw_error_code,
         "realtime_error_code": snapshot.realtime_error_code,

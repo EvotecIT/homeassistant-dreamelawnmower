@@ -274,7 +274,7 @@ def _active_error_from_snapshot(snapshot: Any) -> bool:
     """Return whether the normalized snapshot contains an active error signal."""
     error_code = getattr(snapshot, "error_code", None)
     return bool(
-        error_code not in (None, -1, 0)
+        error_code not in (None, -1)
         or not _is_no_error_value(getattr(snapshot, "error_name", None))
         or not _is_no_error_value(getattr(snapshot, "error_text", None))
         or not _is_no_error_value(getattr(snapshot, "error_display", None))
@@ -427,6 +427,9 @@ def _collect_state_reconciliation(snapshot: Any, device: Any) -> dict[str, Any]:
             ),
             "display": _normalize_debug_value(
                 getattr(snapshot, "status_notice_display", None)
+            ),
+            "tier": _normalize_debug_value(
+                getattr(snapshot, "status_notice_tier", None)
             ),
             "source": _normalize_debug_value(
                 getattr(snapshot, "status_notice_source", None)
@@ -633,6 +636,9 @@ def _collect_triage_summary(
             ),
             "display": _normalize_debug_value(
                 getattr(snapshot, "status_notice_display", None)
+            ),
+            "tier": _normalize_debug_value(
+                getattr(snapshot, "status_notice_tier", None)
             ),
             "source": _normalize_debug_value(
                 getattr(snapshot, "status_notice_source", None)

@@ -128,7 +128,7 @@ SENSORS = [
         key="error_code",
         name="Error Code",
         value_fn=lambda snapshot: (
-            "none" if snapshot.error_code in (None, -1, 0) else snapshot.error_code
+            "none" if snapshot.error_code in (None, -1) else snapshot.error_code
         ),
         icon="mdi:numeric",
         entity_category=EntityCategory.DIAGNOSTIC,

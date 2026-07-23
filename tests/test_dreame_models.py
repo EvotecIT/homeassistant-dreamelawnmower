@@ -256,7 +256,7 @@ def test_snapshot_uses_state_name_before_boolean_helpers() -> None:
     assert snapshot.capabilities == ("lidar_navigation", "map")
 
 
-def test_snapshot_prioritizes_error_activity_but_keeps_paused_state_context() -> None:
+def test_snapshot_reclassifies_inherited_code_31_as_mower_alert() -> None:
     descriptor = descriptor_from_cloud_record(
         {
             "did": "device-1",
@@ -271,15 +271,18 @@ def test_snapshot_prioritizes_error_activity_but_keeps_paused_state_context() ->
 
     snapshot = snapshot_from_device(descriptor, _FakeErrorDevice())
 
-    assert snapshot.activity == "error"
+    assert snapshot.activity == "paused"
     assert snapshot.state == "paused"
-    assert snapshot.error_code == 31
-    assert snapshot.error_name == "left_wheell_speed"
-    assert snapshot.error_text == "Left wheell speed"
-    assert snapshot.error_display == "Left wheel speed"
+    assert snapshot.error_code is None
+    assert snapshot.error_name is None
+    assert snapshot.error_text is None
+    assert snapshot.error_display is None
+    assert snapshot.status_notice_code == 31
+    assert snapshot.status_notice_name == "return_to_station_failed"
+    assert snapshot.status_notice_tier == "alert"
 
 
-def test_snapshot_uses_error_code_label_when_text_says_no_error() -> None:
+def test_snapshot_uses_mower_alert_when_vacuum_text_says_no_error() -> None:
     descriptor = descriptor_from_cloud_record(
         {
             "did": "device-1",
@@ -303,11 +306,13 @@ def test_snapshot_uses_error_code_label_when_text_says_no_error() -> None:
 
     snapshot = snapshot_from_device(descriptor, device)
 
-    assert snapshot.activity == "error"
-    assert snapshot.error_code == 31
-    assert snapshot.error_name == "no_error"
-    assert snapshot.error_text == "No error"
-    assert snapshot.error_display == "Left wheel speed"
+    assert snapshot.activity == "paused"
+    assert snapshot.error_code is None
+    assert snapshot.error_name is None
+    assert snapshot.error_text is None
+    assert snapshot.error_display is None
+    assert snapshot.status_notice_code == 31
+    assert snapshot.status_notice_display == "Return to station failed"
 
 
 def test_snapshot_falls_back_to_error_code_when_label_is_unknown() -> None:
@@ -335,7 +340,9 @@ def test_snapshot_falls_back_to_error_code_when_label_is_unknown() -> None:
     snapshot = snapshot_from_device(descriptor, device)
 
     assert snapshot.activity == "error"
-    assert snapshot.error_display == "Error 73"
+    assert snapshot.error_name == "top_cover_open"
+    assert snapshot.error_text is None
+    assert snapshot.error_display == "Top cover open"
 
 
 def test_snapshot_keeps_realtime_error_diagnostic_when_status_says_no_error() -> None:

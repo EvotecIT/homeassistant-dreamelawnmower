@@ -68,7 +68,7 @@ Last updated: 2026-04-21
   `3.1` while preserving genuinely unknown keys for discovery.
 - Home Assistant has disabled-by-default `Capture Task Status Probe` and
   `Last Task Status Probe` diagnostics for a one-shot read-only view of app
-  state `2.1`, error `2.2`, task object `2.50`, device time `2.51`, battery
+  state `2.1`, device code `2.2`, task object `2.50`, device time `2.51`, battery
   `3.1`, and the service-5 discovery cluster.
 - `examples/task_status_probe.py` repeatedly samples the task/status keys and
   summarizes whether mower state or task status changed, including values seen
@@ -304,20 +304,23 @@ Last updated: 2026-04-21
   no decoded weather switch, rain-protection tuple, or active protection end
   time, with no probe errors. A simultaneous task/status sample showed the mower
   charging, battery moving from `42` to `43`, task `TASK` still executing with
-  operation `6`, error code `54` decoded as `Edge`, and unknown key `5.106=1`
-  while charging.
+  operation `6`, and device code `54`. The old `Edge` label came from the
+  inherited vacuum enum; the mower catalog identifies `54` as low-battery
+  return-to-station information. Unknown key `5.106=1` was also present.
 - A later read-only sample on 2026-04-19 showed the mower still charging at
-  battery `63`, task `TASK` still executing with operation `6`, and app error
-  property `2.2=54` (`Edge`) still active. Weather protection again returned
+  battery `63`, task `TASK` still executing with operation `6`, and app device
+  property `2.2=54` still active. Weather protection again returned
   `WRP=[1,8,0]` with no `RPET` end time, so rain protection is configured but
   an active rain-delay window has not yet been observed. After the active-state
   split was added, a live read-only probe returned
   `rain_protection_enabled=true` and `rain_protection_active=false`.
-- Normalized snapshots now use app realtime property `2.2` as a conservative
-  fallback when the legacy status object says `No error`. Home Assistant error
-  sensors and operation/debug snapshots expose the effective error plus
-  `error_source`, `raw_error_code`, and `realtime_error_code` so this mismatch
-  stays debuggable.
+- Normalized snapshots classify property `2.2` with mower-native model
+  metadata. Hard faults drive the Home Assistant error state; alerts,
+  maintenance items, lifecycle messages, and operating conditions remain
+  visible as status notices. Unknown codes stay diagnostic unless the mower
+  also reports its explicit error state. Snapshots expose `error_source`,
+  `raw_error_code`, `realtime_error_code`, and the status-notice tier so the
+  classification remains debuggable.
 - A narrow service-5 read-only scan on 2026-04-19 returned non-empty unknown
   values `5.104=3`, `5.105=1`, `5.106=1`, and `5.107=90`. No app bundle or
   public key-definition label has been found for these yet, so keep them as a
@@ -366,7 +369,8 @@ Last updated: 2026-04-21
   rather than the app-approved OTA target.
 - Realtime key meanings are still being learned. Known useful keys include
   `1.1` as a raw status blob, `1.4` as a runtime status blob, `2.1` as mower
-  state, `2.2` as mower error, `2.50` as task status, `2.51` as device time,
+  state, `2.2` as the mower device-code channel, `2.50` as task status,
+  `2.51` as device time,
   and `3.1` as battery. The service-5 cluster `5.104` through `5.107` is still
   unknown; live samples have shown `5.106` values including `6`, `7`, and `1`
   across mowing, docked, and charging states.

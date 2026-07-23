@@ -13,6 +13,11 @@ from threading import Timer
 from typing import Any, Optional
 
 from .app_protocol import mower_realtime_property_name
+from .device_code_semantics import (
+    MowerDeviceCodeTier,
+    mower_device_code_definition,
+    mower_device_code_name,
+)
 from .types import (
     PIID,
     DIID,
@@ -30,7 +35,6 @@ from .types import (
     DreameMowerState,
     DreameMowerStateOld,
     DreameMowerStatus,
-    DreameMowerErrorCode,
     DreameMowerRelocationStatus,
     DreameMowerCleaningMode,
     DreameMowerStreamStatus,
@@ -70,8 +74,6 @@ from .const import (
     RELOCATION_STATUS_CODE_TO_NAME,
     TASK_STATUS_CODE_TO_NAME,
     STATE_CODE_TO_STATE,
-    ERROR_CODE_TO_ERROR_NAME,
-    ERROR_CODE_TO_ERROR_DESCRIPTION,
     STATUS_CODE_TO_NAME,
     STREAM_STATUS_TO_NAME,
     WIDER_CORNER_COVERAGE_TO_NAME,
@@ -83,7 +85,6 @@ from .const import (
     SEGMENT_VISIBILITY_CODE_TO_NAME,
     VOICE_ASSISTANT_LANGUAGE_TO_NAME,
     TASK_TYPE_TO_NAME,
-    ERROR_CODE_TO_IMAGE_INDEX,
     CONSUMABLE_TO_LIFE_WARNING_DESCRIPTION,
     PROPERTY_TO_NAME,
     DEVICE_KEY,
@@ -130,7 +131,6 @@ from .const import (
     ATTR_HAS_TEMPORARY_MAP,
     ATTR_CAPABILITIES,
 )
-from .resources import ERROR_IMAGE
 from .exceptions import (
     DeviceUpdateFailedException,
     InvalidActionException,
@@ -2249,7 +2249,9 @@ class DreameMowerDevice:
             self._update_property(DreameMowerProperty.SQUEEGEE_LEFT, 100)
             self._update_property(DreameMowerProperty.SQUEEGEE_TIME_LEFT, 100)
         elif action is DreameMowerAction.CLEAR_WARNING:
-            self._update_property(DreameMowerProperty.ERROR, DreameMowerErrorCode.NO_ERROR.value)
+            # Mower property 2.2 uses -1 for no active device code. Vacuum
+            # clients used 0, but the A2 catalog assigns 0 to robot lifted.
+            self._update_property(DreameMowerProperty.ERROR, -1)
 
         # Update listeners
         if cleaning_action or self._consumable_change:
@@ -3002,8 +3004,9 @@ class DreameMowerDevice:
         return self.start_custom(DreameMowerStatus.CLEANING.value, "3")
 
     def clear_warning(self) -> dict[str, Any] | None:
-        """Clear warning error code from the mower cleaner."""
-        if self.status.has_warning:
+        """Clear an actionable device-code notice from the mower."""
+        device_code = self.status.device_code
+        if self.status.has_warning and device_code is not None:
             return self.call_action(
                 DreameMowerAction.CLEAR_WARNING,
                 [
@@ -3012,7 +3015,7 @@ class DreameMowerDevice:
                             DreameMowerProperty.CLEANING_PROPERTIES,
                             self.property_mapping,
                         ),
-                        "value": f"[{self.status.error.value}]",
+                        "value": f"[{device_code}]",
                     }
                 ],
             )
@@ -4107,14 +4110,6 @@ class DreameMowerDeviceStatus:
         self.voice_assistant_language_list = {v: k for k, v in VOICE_ASSISTANT_LANGUAGE_TO_NAME.items()}
         self.segment_cleaning_mode_list = {}
         self.segment_cleaning_route_list = {}
-        self.warning_codes = [
-            DreameMowerErrorCode.BLOCKED,
-            DreameMowerErrorCode.STATION_DISCONNECTED,
-            DreameMowerErrorCode.SELF_TEST_FAILED,
-            DreameMowerErrorCode.LOW_BATTERY_TURN_OFF,
-            DreameMowerErrorCode.UNKNOWN_WARNING_2,
-        ]
-
         self.cleaning_mode = None
         self.ai_policy_accepted = False
         self.go_to_zone: GoToZoneSettings = None
@@ -4381,38 +4376,38 @@ class DreameMowerDeviceStatus:
         return 0 if faults == "" or faults == " " else faults
 
     @property
-    def error(self) -> DreameMowerErrorCode:
-        """Return error of the device."""
+    def device_code(self) -> int | None:
+        """Return the raw mower device code from property 2.2."""
         value = self._get_property(DreameMowerProperty.ERROR)
-        if value is not None and value in DreameMowerErrorCode._value2member_map_:
-            if (
-                value == DreameMowerErrorCode.LOW_BATTERY_TURN_OFF.value
-                or value == DreameMowerErrorCode.UNKNOWN_WARNING_2.value
-            ):
-                return DreameMowerErrorCode.NO_ERROR
-            return DreameMowerErrorCode(value)
-        if value is not None:
-            _LOGGER.debug("ERROR_CODE not supported: %s", value)
-        return DreameMowerErrorCode.UNKNOWN
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            _LOGGER.debug("DEVICE_CODE not numeric: %s", value)
+            return None
+
+    @property
+    def error(self) -> int | None:
+        """Deprecated raw alias for :attr:`device_code`."""
+        return self.device_code
 
     @property
     def error_name(self) -> str:
-        """Return error as string for translation."""
-        if not self.has_error and not self.has_warning:
-            return ERROR_CODE_TO_ERROR_NAME.get(DreameMowerErrorCode.NO_ERROR)
-        return ERROR_CODE_TO_ERROR_NAME.get(self.error, STATE_UNKNOWN)
+        """Return a mower-native device-code name."""
+        value = self.device_code
+        if value in (None, -1):
+            return "no_error"
+        return mower_device_code_name(value, model=self._device_model) or STATE_UNKNOWN
 
     @property
     def error_description(self) -> str:
-        """Return error description of the device."""
-        return ERROR_CODE_TO_ERROR_DESCRIPTION.get(self.error, [STATE_UNKNOWN, ""])
+        """Return a mower-native device-code description."""
+        name = self.error_name
+        return [name.replace("_", " ").capitalize(), ""] if name else [STATE_UNKNOWN, ""]
 
     @property
     def error_image(self) -> str:
-        """Return error image of the device as base64 string."""
-        if not self.has_error:
-            return None
-        return ERROR_IMAGE.get(ERROR_CODE_TO_IMAGE_INDEX.get(self.error, 19))
+        """Return no image; bundled images belong to vacuum fault meanings."""
+        return None
 
     @property
     def robot_status(self) -> int:  # TODO: Convert to enum
@@ -4430,15 +4425,30 @@ class DreameMowerDeviceStatus:
 
     @property
     def has_error(self) -> bool:
-        """Returns true when an error is present."""
-        error = self.error
-        return bool(error.value > 0 and not self.has_warning and error is not DreameMowerErrorCode.BATTERY_LOW)
+        """Return whether the mower-native code is a hard fault."""
+        value = self.device_code
+        definition = mower_device_code_definition(value, model=self._device_model)
+        if definition is not None:
+            return definition.tier is MowerDeviceCodeTier.ERROR
+        if value in (None, -1):
+            return False
+        return self.state is DreameMowerState.ERROR
 
     @property
     def has_warning(self) -> bool:
-        """Returns true when a warning is present and available for dismiss."""
-        error = self.error
-        return bool(error.value > 0 and error in self.warning_codes)
+        """Return whether the mower-native code is an alert/attention item."""
+        value = self.device_code
+        definition = mower_device_code_definition(value, model=self._device_model)
+        return bool(
+            definition is not None
+            and definition.tier
+            in {MowerDeviceCodeTier.ALERT, MowerDeviceCodeTier.ATTENTION}
+        )
+
+    @property
+    def _device_model(self) -> str | None:
+        """Return the current cloud model used for device-code overrides."""
+        return getattr(self._device.info, "model", None) if self._device.info else None
 
     @property
     def scheduled_clean(self) -> bool:

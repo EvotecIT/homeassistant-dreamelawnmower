@@ -266,7 +266,9 @@ A second live scan through `examples/property_probe.py` against a small docked r
 - `2.1 = 13`
   The app-derived mower state label decodes this to `Charging Completed`.
 - `2.2 = 31`
-  This is likely another mower state or error-adjacent field and should be tracked in future scans.
+  The original client decoded this as vacuum “left wheel speed.” The A2 app
+  catalog identifies it as a recoverable return-to-station failure alert, so
+  it remains visible without forcing the mower entity into a hard-error state.
 - `1.1 = [206,0,0,...]`
   This looks like a compact raw status blob rather than a simple scalar property. The current Python scanner now also renders it as `20` bytes of hex: `ce000000000000000080006401ff000080d0b4ce`.
 
@@ -283,7 +285,9 @@ The reusable Python client now includes cloud probe helpers so this research can
 - `async_scan_cloud_properties(...)` for chunked `siid.piid` range scans
 - `build_cloud_property_summary(...)` to quickly identify non-empty, decoded, hinted, and blob-like scan results
 - `mower_state_label(value)` for the app-derived `2.1` state key
-- `mower_error_label(value)` for known mower error codes seen through `2.2`
+- `mower_error_label(value, model=...)` for mower-native device-code labels
+  seen through `2.2`; the model-aware classifier separates hard faults from
+  alerts, attention items, information, and unknown codes
 
 Use `python examples/cloud_probe.py` to query these endpoints directly with the same credentials used by the integration.
 

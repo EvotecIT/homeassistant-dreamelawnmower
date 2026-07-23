@@ -7,12 +7,12 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from .device_code_semantics import (
-    MOWER_DEVICE_CODE_NAMES,
-    MOWER_FAULT_CODE_NAMES,
-    MOWER_NON_FAULT_CODES,
-    MOWER_STATUS_NOTICE_CODE_NAMES,
+    mower_device_code_definition,
+    mower_device_code_name,
+    mower_device_code_tier,
     mower_fault_code,
     mower_status_notice_code,
+    mower_status_notice_name,
 )
 from .video_provisioning_status import classify_xp2p_provisioning_issue
 
@@ -130,21 +130,6 @@ def _mower_terminology(value: str | None) -> str | None:
     return _MOWER_TERMINOLOGY.get(text.casefold(), text)
 
 
-def _error_name_from_code(value: int | None) -> str | None:
-    """Return the bundled vendor error name for a numeric code, if known."""
-    if value in (None, -1, 0):
-        return None
-    if value in MOWER_DEVICE_CODE_NAMES:
-        return MOWER_DEVICE_CODE_NAMES[value]
-    try:
-        from .const import ERROR_CODE_TO_ERROR_NAME
-        from .types import DreameMowerErrorCode
-
-        return ERROR_CODE_TO_ERROR_NAME.get(DreameMowerErrorCode(value))
-    except (ImportError, ValueError):
-        return None
-
-
 def _error_code_from_raw(value: Any) -> int | None:
     """Return a numeric error code from raw app/status values."""
     if value is None:
@@ -155,9 +140,13 @@ def _error_code_from_raw(value: Any) -> int | None:
         return None
 
 
-def _active_error_code_from_raw(value: Any) -> int | None:
+def _active_error_code_from_raw(
+    value: Any,
+    *,
+    model: str | None = None,
+) -> int | None:
     """Return a numeric active error code from raw app/status values."""
-    return mower_fault_code(value)
+    return mower_fault_code(value, model=model)
 
 
 def _realtime_error_code_from_device(device: Any) -> int | None:
@@ -166,7 +155,7 @@ def _realtime_error_code_from_device(device: Any) -> int | None:
     entry = realtime_properties.get(REALTIME_ERROR_PROPERTY_KEY)
     value = entry.get("value") if isinstance(entry, Mapping) else entry
     code = _error_code_from_raw(value)
-    return None if code in (None, -1, 0) else code
+    return None if code in (None, -1) else code
 
 
 def _raw_error_code_from_device(device: Any, error_obj: Any) -> int | None:
@@ -179,23 +168,7 @@ def _raw_error_code_from_device(device: Any, error_obj: Any) -> int | None:
         value = None
     if value is not None:
         return _error_code_from_raw(value)
-    return _error_code_from_raw(getattr(error_obj, "value", None))
-
-
-def _status_explicitly_reports_no_error(
-    *,
-    status_has_error: bool,
-    error_code: int | None,
-    error_name: str | None,
-    error_text: str | None,
-) -> bool:
-    """Return whether the normal status stream explicitly says no error."""
-    return bool(
-        not status_has_error
-        and error_code in (-1, 0)
-        and _is_no_error_text(error_name)
-        and _is_no_error_text(error_text)
-    )
+    return _error_code_from_raw(getattr(error_obj, "value", error_obj))
 
 
 def _friendly_error_display(
@@ -203,20 +176,14 @@ def _friendly_error_display(
     error_code: int | None,
     error_name: str | None,
     error_text: str | None,
+    model: str | None = None,
 ) -> str | None:
     """Return the best user-facing error while preserving raw text elsewhere."""
-    if error_code not in (None, -1, 0):
-        confirmed = _friendly_error_name(MOWER_FAULT_CODE_NAMES.get(error_code))
-        if confirmed is not None:
-            return confirmed
-        inherited = (
-            _friendly_error_name(error_name)
-            or _friendly_error_name(_error_name_from_code(error_code))
-            or (None if _is_no_error_text(error_text) else error_text)
+    if error_code not in (None, -1):
+        mower_name = _friendly_error_name(
+            mower_device_code_name(error_code, model=model)
         )
-        return (
-            f"Unverified {inherited.casefold()}" if inherited else f"Error {error_code}"
-        )
+        return mower_name or f"Unknown mower device code {error_code}"
 
     return _friendly_error_name(error_name) or error_text
 
@@ -272,6 +239,7 @@ class DreameLawnMowerSnapshot:
     status_notice_code: int | None = None
     status_notice_name: str | None = None
     status_notice_display: str | None = None
+    status_notice_tier: str | None = None
     status_notice_source: str | None = None
     raw_error_code: int | None = None
     realtime_error_code: int | None = None
@@ -957,50 +925,83 @@ def snapshot_from_device(
     error_text = _as_optional_str(status_attributes.get("error"))
     raw_error_code = _raw_error_code_from_device(device, error_obj)
     realtime_error_code = _realtime_error_code_from_device(device)
-    error_code = raw_error_code
-    status_notice_code = mower_status_notice_code(raw_error_code)
+    raw_code_definition = mower_device_code_definition(
+        raw_error_code,
+        model=descriptor.model,
+    )
+    raw_fault_code = _active_error_code_from_raw(
+        raw_error_code,
+        model=descriptor.model,
+    )
+    error_code = raw_fault_code
+    status_notice_code = mower_status_notice_code(
+        raw_error_code,
+        model=descriptor.model,
+    )
     status_notice_source = "status" if status_notice_code is not None else None
     status_has_error = bool(getattr(device.status, "has_error", False))
-    if raw_error_code in MOWER_NON_FAULT_CODES:
-        # Preserve normal mower notices/events for diagnostics without letting
-        # the inherited vacuum error model turn them into entity errors.
+
+    if raw_fault_code is not None:
+        # Numeric mower codes own their meaning. Never retain a label or
+        # description produced by the inherited vacuum enum.
+        error_name = mower_device_code_name(
+            raw_fault_code,
+            model=descriptor.model,
+        )
+        error_text = None
+        has_error = True
+    elif raw_error_code not in (None, -1):
+        # Known alerts/info and unknown mower codes remain diagnostic notices.
+        # Unknown numeric overlap with a vacuum code is not a hard fault.
         error_name = None
         error_text = None
-        error_code = None
-        status_has_error = False
-    error_code_active = _active_error_code_from_raw(error_code) is not None
-    error_name_active = not _is_no_error_text(error_name)
-    error_text_active = not _is_no_error_text(error_text)
-    has_only_bare_error_flag = (
-        status_has_error
-        and error_code is None
-        and error_name is None
-        and error_text is None
-    )
-    has_error = bool(
-        error_code_active
-        or error_name_active
-        or error_text_active
-        or has_only_bare_error_flag
-    )
-    error_source: str | None = "status" if has_error else None
-    status_reports_no_error = (
-        raw_error_code in MOWER_NON_FAULT_CODES
-        or _status_explicitly_reports_no_error(
-            status_has_error=status_has_error,
-            error_code=error_code,
-            error_name=error_name,
-            error_text=error_text,
+        has_error = bool(
+            raw_code_definition is None
+            and state == "error"
         )
-    )
-    if not has_error and not status_reports_no_error:
-        realtime_fault_code = _active_error_code_from_raw(realtime_error_code)
+        if has_error:
+            error_code = raw_error_code
+            error_name = mower_device_code_name(
+                raw_error_code,
+                model=descriptor.model,
+            )
+            status_notice_code = None
+            status_notice_source = None
+    elif raw_error_code == -1:
+        error_code = -1
+        has_error = False
+    else:
+        # A bare flag remains a last-resort signal only when no numeric mower
+        # code exists. An explicit mower state of ERROR is stronger evidence.
+        has_error = bool(
+            state == "error"
+            or (
+                status_has_error
+                and error_name is None
+                and error_text is None
+            )
+        )
+
+    error_source: str | None = "status" if has_error else None
+    if not has_error and raw_error_code is None:
+        realtime_fault_code = _active_error_code_from_raw(
+            realtime_error_code,
+            model=descriptor.model,
+        )
         if realtime_fault_code is not None:
             error_code = realtime_fault_code
+            error_name = mower_device_code_name(
+                realtime_fault_code,
+                model=descriptor.model,
+            )
+            error_text = None
             has_error = True
             error_source = f"realtime_property_{REALTIME_ERROR_PROPERTY_KEY}"
         elif status_notice_code is None:
-            status_notice_code = mower_status_notice_code(realtime_error_code)
+            status_notice_code = mower_status_notice_code(
+                realtime_error_code,
+                model=descriptor.model,
+            )
             if status_notice_code is not None:
                 status_notice_source = (
                     f"realtime_property_{REALTIME_ERROR_PROPERTY_KEY}"
@@ -1131,12 +1132,30 @@ def snapshot_from_device(
             error_code=error_code,
             error_name=error_name,
             error_text=error_text,
+            model=descriptor.model,
         ),
         error_source=error_source,
         status_notice_code=status_notice_code,
-        status_notice_name=MOWER_STATUS_NOTICE_CODE_NAMES.get(status_notice_code),
+        status_notice_name=mower_status_notice_name(
+            status_notice_code,
+            model=descriptor.model,
+        ),
         status_notice_display=_friendly_error_name(
-            MOWER_STATUS_NOTICE_CODE_NAMES.get(status_notice_code)
+            mower_status_notice_name(
+                status_notice_code,
+                model=descriptor.model,
+            )
+        ),
+        status_notice_tier=(
+            tier.value
+            if (
+                tier := mower_device_code_tier(
+                    status_notice_code,
+                    model=descriptor.model,
+                )
+            )
+            is not None
+            else ("unknown" if status_notice_code is not None else None)
         ),
         status_notice_source=status_notice_source,
         raw_error_code=raw_error_code,
