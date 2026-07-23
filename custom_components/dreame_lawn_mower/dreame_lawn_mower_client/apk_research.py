@@ -312,7 +312,10 @@ def analyze_dreamehome_assets(
     for file_path in sorted(path.rglob("*")):
         if not file_path.is_file():
             continue
-        if normalized_suffixes and file_path.suffix.casefold() not in normalized_suffixes:
+        if (
+            normalized_suffixes
+            and file_path.suffix.casefold() not in normalized_suffixes
+        ):
             continue
         try:
             stat = file_path.stat()
@@ -568,7 +571,13 @@ def _is_candidate_source_file(name: str) -> bool:
     )
 
 
-def _context_snippet(text: str, index: int, term_length: int, *, context_chars: int) -> str:
+def _context_snippet(
+    text: str,
+    index: int,
+    term_length: int,
+    *,
+    context_chars: int,
+) -> str:
     start = max(0, index - context_chars)
     end = min(len(text), index + term_length + context_chars)
     snippet = text[start:end].replace("\r", " ").replace("\n", " ").strip()

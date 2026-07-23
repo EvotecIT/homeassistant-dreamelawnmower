@@ -5656,6 +5656,107 @@ class DreameMowerMapRenderer:
         self.render_complete = True
         return self._to_buffer(self._image if self._cache else image)
 
+    @staticmethod
+    def _segments_layer_needs_update(
+        *,
+        cache_enabled,
+        previous_map,
+        map_data,
+        has_cached_layer,
+    ):
+        return (
+            not cache_enabled
+            or previous_map is None
+            or previous_map.segments != map_data.segments
+            or previous_map.rotation != map_data.rotation
+            or previous_map.cleaning_map != map_data.cleaning_map
+            or (
+                not previous_map.cleaning_map
+                and previous_map.active_segments != map_data.active_segments
+            )
+            or (
+                not previous_map.cleaning_map
+                and previous_map.hidden_segments != map_data.hidden_segments
+            )
+            or (
+                previous_map.cleaning_map
+                and previous_map.neglected_segments != map_data.neglected_segments
+            )
+            or bool(
+                (not map_data.saved_map or map_data.recovery_map)
+                and previous_map.cleanset
+            )
+            != bool(
+                (not map_data.saved_map or map_data.recovery_map)
+                and map_data.cleanset
+            )
+            or not has_cached_layer
+        )
+
+    @staticmethod
+    def _segment_needs_render(
+        *,
+        cache_enabled,
+        previous_map,
+        cached_segments,
+        map_data,
+        segment_id,
+        segment,
+    ):
+        if not cache_enabled or previous_map is None:
+            return True
+
+        previous_segments = previous_map.segments or {}
+        if segment_id not in cached_segments or segment_id not in previous_segments:
+            return True
+        if (
+            previous_segments[segment_id] != segment
+            or previous_map.rotation != map_data.rotation
+        ):
+            return True
+
+        map_has_cleanset = bool(
+            (not map_data.saved_map or map_data.recovery_map) and map_data.cleanset
+        )
+        previous_map_has_cleanset = bool(
+            (not map_data.saved_map or map_data.recovery_map)
+            and previous_map.cleanset
+        )
+        segment_is_visible = bool(
+            (not map_data.active_segments or segment_id in map_data.active_segments)
+            and (
+                not map_data.hidden_segments
+                or segment_id not in map_data.hidden_segments
+            )
+            and not map_data.cleaning_map
+        )
+        previous_segment_was_visible = bool(
+            (
+                not previous_map.active_segments
+                or segment_id in previous_map.active_segments
+            )
+            and (
+                not previous_map.hidden_segments
+                or segment_id not in previous_map.hidden_segments
+            )
+            and not previous_map.cleaning_map
+        )
+        segment_is_neglected = bool(
+            map_data.cleaning_map
+            and map_data.neglected_segments
+            and segment_id in map_data.neglected_segments
+        )
+        previous_segment_was_neglected = bool(
+            previous_map.cleaning_map
+            and previous_map.neglected_segments
+            and segment_id in previous_map.neglected_segments
+        )
+        return (
+            map_has_cleanset != previous_map_has_cleanset
+            or segment_is_visible != previous_segment_was_visible
+            or segment_is_neglected != previous_segment_was_neglected
+        )
+
     def render_objects(self, cached_layers, map_data, robot_status, station_status, map_image, scale):
         layer_size = (int(map_image.size[0] * scale), int(map_image.size[1] * scale))
         line_width = 3 if map_data.dimensions.scale > 2 else 1
@@ -5868,17 +5969,11 @@ class DreameMowerMapRenderer:
             )
         ):
             layers.append(layer)
-            if (
-                not self._cache
-                or self._map_data is None
-                or self._map_data.segments != map_data.segments
-                or self._map_data.rotation != map_data.rotation
-                or (not self._map_data.cleaning_map and self._map_data.active_segments != map_data.active_segments)
-                or (not self._map_data.cleaning_map and self._map_data.hidden_segments != map_data.hidden_segments)
-                or (self._map_data.cleaning_map and self._map_data.neglected_segments != map_data.neglected_segments)
-                or bool((not map_data.saved_map or map_data.recovery_map) and self._map_data.cleanset)
-                != bool((not map_data.saved_map or map_data.recovery_map) and map_data.cleanset)
-                or not cached_layers.get(layer)
+            if self._segments_layer_needs_update(
+                cache_enabled=self._cache,
+                previous_map=self._map_data,
+                map_data=map_data,
+                has_cached_layer=bool(cached_layers.get(layer)),
             ):
                 if MapRendererLayer.SEGMENT not in cached_layers:
                     cached_layers[MapRendererLayer.SEGMENT] = {}
@@ -5890,43 +5985,13 @@ class DreameMowerMapRenderer:
                 changed = False
                 for k in sorted(map_data.segments.keys()):
                     v = map_data.segments[k]
-                    if (
-                        not self._cache
-                        or self._map_data is None
-                        or k not in cached_layers[MapRendererLayer.SEGMENT]
-                        or not self._map_data.segments
-                        or k not in self._map_data.segments
-                        or self._map_data.segments[k] != v
-                        or self._map_data.rotation != map_data.rotation
-                        or bool((not map_data.saved_map or map_data.recovery_map) and self._map_data.cleanset)
-                        != bool((not map_data.saved_map or map_data.recovery_map) and map_data.cleanset)
-                        or bool(
-                            (
-                                (not map_data.active_segments or k in map_data.active_segments)
-                                and (not map_data.hidden_segments or k not in map_data.hidden_segments)
-                                and not map_data.cleaning_map
-                            )
-                        )
-                        != bool(
-                            (
-                                (not self._map_data.active_segments or k in self._map_data.active_segments)
-                                and (not self._map_data.hidden_segments or k not in self._map_data.hidden_segments)
-                                and not self._map_data.cleaning_map
-                            )
-                        )
-                        or bool(
-                            (
-                                map_data.cleaning_map
-                                and (map_data.neglected_segments and k in map_data.neglected_segments)
-                            )
-                        )
-                        != bool(
-                            (
-                                self._map_data.cleaning_map
-                                and self._map_data.neglected_segments
-                                and k in self._map_data.neglected_segments
-                            )
-                        ),
+                    if self._segment_needs_render(
+                        cache_enabled=self._cache,
+                        previous_map=self._map_data,
+                        cached_segments=cached_layers[MapRendererLayer.SEGMENT],
+                        map_data=map_data,
+                        segment_id=k,
+                        segment=v,
                     ):
                         changed = True
                         cached_layers[MapRendererLayer.SEGMENT][k] = self.render_segment(

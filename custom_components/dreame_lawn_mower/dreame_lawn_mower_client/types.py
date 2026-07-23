@@ -1592,7 +1592,7 @@ class Segment(Zone):
         index: int = 0,
         type: int = 0,
         icon: str = None,
-        neighbors: List[int] = [],
+        neighbors: Optional[List[int]] = None,
         cleaning_times: int = None,
         cleaning_mode: int = None,
         order: int = None,
@@ -1607,9 +1607,10 @@ class Segment(Zone):
         self.type = type
         self.index = index
         self.icon = icon
-        self.neighbors = neighbors
+        self.neighbors = neighbors if neighbors is not None else []
         self.order = order
         self.cleaning_times = cleaning_times
+        self.cleaning_mode = cleaning_mode
         self.cleaning_route = None
         self.color_index = None
         self.floor_material = None
@@ -1739,6 +1740,7 @@ class Segment(Zone):
             or self.order != other.order
             or self.cleaning_times != other.cleaning_times
             or self.cleaning_mode != other.cleaning_mode
+            or self.cleaning_route != other.cleaning_route
             or self.floor_material != other.floor_material
             or self.floor_material_direction != other.floor_material_direction
             or self.floor_material_rotated_direction != other.floor_material_rotated_direction

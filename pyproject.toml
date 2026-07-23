@@ -56,7 +56,16 @@ addopts = "-q"
 [tool.ruff]
 target-version = "py313"
 line-length = 88
-exclude = ["custom_components/dreame_lawn_mower/dreame_lawn_mower_client"]
+exclude = [
+  # These inherited protocol/map modules are being modernized in bounded
+  # refactors. Keep the rest of the reusable client under normal CI linting.
+  "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/const.py",
+  "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/device.py",
+  "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/map.py",
+  "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/protocol.py",
+  "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/resources.py",
+  "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/types.py",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]

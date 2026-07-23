@@ -5,9 +5,8 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any
 
-_ResultT = TypeVar("_ResultT")
 _MAX_ABANDONED_OPERATIONS = 4
 _operation_slots = threading.BoundedSemaphore(_MAX_ABANDONED_OPERATIONS)
 
@@ -26,11 +25,11 @@ def _close_if_possible(value: Any) -> None:
             pass
 
 
-def run_with_deadline(
-    operation: Callable[[], _ResultT],
+def run_with_deadline[ResultT](
+    operation: Callable[[], ResultT],
     *,
     deadline: float,
-) -> _ResultT:
+) -> ResultT:
     """Run a blocking operation without letting it retain its caller forever.
 
     Socket timeouts only bound periods without network activity. A peer can still
