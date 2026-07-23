@@ -46,6 +46,7 @@ from .debug_ota_catalog import (
     normalize_debug_ota_catalog_payload,
 )
 from .docking import async_stop_then_dock
+from .deadline import DeadlineExceededError, run_with_deadline
 from .exceptions import DeviceException, InvalidActionException
 from .maintenance import (
     CMS_GET_REQUEST,
@@ -3907,6 +3908,7 @@ class DreameLawnMowerClient:
         observed_clear = baseline_name is None
         saw_unusable_point_cloud = False
         rejected_object_names: set[str] = set()
+        object_download_attempts: dict[str, int] = {}
         while time.monotonic() < deadline:
             object_result = self._sync_call_point_cloud_action(
                 {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
@@ -3932,23 +3934,27 @@ class DreameLawnMowerClient:
                 and object_extension.casefold() == "pcd"
                 and fresh_object
                 and object_name not in rejected_object_names
+                and object_download_attempts.get(object_name, 0) < 2
             ):
+                object_download_attempts[object_name] = (
+                    object_download_attempts.get(object_name, 0) + 1
+                )
                 try:
                     raw_url = self._sync_get_point_cloud_download_url(
                         cloud,
                         object_name,
                         deadline=deadline,
                     )
-                except DeviceException:
+                    url = _point_cloud_download_url(raw_url)
+                    content, content_type = _download_point_cloud_content(
+                        url,
+                        timeout=download_timeout,
+                        max_bytes=max_bytes,
+                    )
+                except (DeviceException, DreameLawnMowerPointCloudError):
                     saw_unusable_point_cloud = True
                 else:
                     try:
-                        url = _point_cloud_download_url(raw_url)
-                        content, content_type = _download_point_cloud_content(
-                            url,
-                            timeout=download_timeout,
-                            max_bytes=max_bytes,
-                        )
                         metadata = parse_pcd_metadata(content, max_bytes=max_bytes)
                     except DreameLawnMowerPointCloudError:
                         saw_unusable_point_cloud = True
@@ -5350,7 +5356,11 @@ def _download_point_cloud_content(
         },
     )
     try:
-        with _open_point_cloud_response(request, timeout=timeout) as response:
+        with _open_point_cloud_response(
+            request,
+            timeout=timeout,
+            deadline=deadline,
+        ) as response:
             final_url = response.geturl()
             if urllib.parse.urlsplit(final_url).scheme.casefold() != "https":
                 raise DreameLawnMowerPointCloudError(
@@ -5448,10 +5458,19 @@ def _open_point_cloud_response(
     request: urllib.request.Request,
     *,
     timeout: float,
+    deadline: float,
 ) -> Any:
     """Open one point-cloud URL with HTTPS-only redirect handling."""
     opener = urllib.request.build_opener(_HttpsOnlyPointCloudRedirectHandler())
-    return opener.open(request, timeout=timeout)
+    try:
+        return run_with_deadline(
+            lambda: opener.open(request, timeout=timeout),
+            deadline=deadline,
+        )
+    except DeadlineExceededError as err:
+        raise DreameLawnMowerPointCloudError(
+            "The point-cloud download timed out."
+        ) from err
 
 
 def _set_point_cloud_response_timeout(response: Any, timeout: float) -> None:

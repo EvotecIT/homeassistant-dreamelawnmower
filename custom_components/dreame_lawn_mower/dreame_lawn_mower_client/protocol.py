@@ -19,6 +19,7 @@ from miio.miioprotocol import MiIOProtocol
 
 from .exceptions import DeviceException
 from .const import DREAME_STRINGS, MOVA_STRINGS
+from .deadline import DeadlineExceededError, run_with_deadline
 from .mqtt_tls import create_cloud_mqtt_ssl_context
 
 _LOGGER = logging.getLogger(__name__)
@@ -109,6 +110,27 @@ def _read_cloud_response_text_with_deadline(
 
     encoding = getattr(response, "encoding", None) or "utf-8"
     return content.decode(encoding)
+
+
+def _post_cloud_response(
+    session: Any,
+    url: str,
+    request_options: dict[str, Any],
+    *,
+    deadline: float | None,
+) -> Any:
+    """Post while bounding the response-header phase by an absolute deadline."""
+    if deadline is None:
+        return session.post(url, **request_options)
+    try:
+        return run_with_deadline(
+            lambda: session.post(url, **request_options),
+            deadline=deadline,
+        )
+    except DeadlineExceededError as err:
+        raise requests.exceptions.Timeout(
+            "The cloud response timed out."
+        ) from err
 
 
 class DreameMowerDeviceProtocol(MiIOProtocol):
@@ -426,9 +448,11 @@ class DreameMowerDreameHomeCloudProtocol:
             }
             if deadline is not None:
                 request_options["stream"] = True
-            response = self._session.post(
+            response = _post_cloud_response(
+                self._session,
                 self.get_api_url() + self._strings[17],
-                **request_options,
+                request_options,
+                deadline=deadline,
             )
             if deadline is not None:
                 try:
@@ -1086,8 +1110,19 @@ class DreameMowerDreameHomeCloudProtocol:
                     "timeout": timeout,
                 }
                 if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise requests.exceptions.Timeout(
+                            "The cloud response timed out."
+                        )
+                    request_options["timeout"] = min(timeout, remaining)
                     request_options["stream"] = True
-                response = self._session.post(url, **request_options)
+                response = _post_cloud_response(
+                    self._session,
+                    url,
+                    request_options,
+                    deadline=deadline,
+                )
                 if deadline is not None:
                     try:
                         response_text = _read_cloud_response_text_with_deadline(

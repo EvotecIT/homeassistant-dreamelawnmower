@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import struct
+import threading
+import time
 import urllib.error
 from email.message import Message
 from types import SimpleNamespace
@@ -231,7 +233,7 @@ def test_download_point_cloud_uses_a2_generation_flow(
     monkeypatch.setattr(
         _internal_client_module,
         "_open_point_cloud_response",
-        lambda request, *, timeout: _FakeResponse(
+        lambda request, *, timeout, deadline: _FakeResponse(
             next(downloads),
             request.full_url,
         ),
@@ -267,7 +269,12 @@ def test_download_point_cloud_error_does_not_expose_signed_url(
 ) -> None:
     signed_url = "https://downloads.example.invalid/object?secret=do-not-log"
 
-    def fail_download(request: Any, timeout: float) -> None:
+    def fail_download(
+        request: Any,
+        *,
+        timeout: float,
+        deadline: float,
+    ) -> None:
         raise urllib.error.HTTPError(
             request.full_url,
             403,
@@ -355,7 +362,7 @@ def test_download_point_cloud_enforces_overall_deadline(
     monkeypatch.setattr(
         _internal_client_module,
         "_open_point_cloud_response",
-        lambda request, *, timeout: response,
+        lambda request, *, timeout, deadline: response,
     )
 
     with pytest.raises(DreameLawnMowerPointCloudError, match="timed out"):
@@ -517,7 +524,12 @@ def test_point_cloud_does_not_redownload_same_rejected_object(
         )
     )
 
-    def open_response(request: Any, *, timeout: float) -> _FakeResponse:
+    def open_response(
+        request: Any,
+        *,
+        timeout: float,
+        deadline: float,
+    ) -> _FakeResponse:
         nonlocal download_count
         download_count += 1
         return _FakeResponse(b"not a pcd", request.full_url)
@@ -536,6 +548,109 @@ def test_point_cloud_does_not_redownload_same_rejected_object(
 
     assert action_count > 3
     assert download_count == 1
+
+
+def test_point_cloud_retries_transient_download_for_same_object(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    action_count = 0
+    download_count = 0
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        nonlocal action_count
+        action_count += 1
+        if action_count == 1:
+            return {"r": 0, "d": {"name": ["private/previous-map.pcd"]}}
+        if action_count == 2:
+            return {"r": 0}
+        return {"r": 0, "d": {"name": ["private/generated-map.pcd"]}}
+
+    def open_response(
+        request: Any,
+        *,
+        timeout: float,
+        deadline: float,
+    ) -> _FakeResponse:
+        nonlocal download_count
+        download_count += 1
+        if download_count == 1:
+            raise urllib.error.URLError("temporary failure")
+        return _FakeResponse(content, request.full_url)
+
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        )
+    )
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        open_response,
+    )
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert result.content == content
+    assert download_count == 2
+
+
+def test_point_cloud_header_receive_observes_absolute_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = threading.Event()
+
+    class BlockingOpener:
+        def open(self, request: Any, *, timeout: float) -> _FakeResponse:
+            release.wait(5)
+            return _FakeResponse(b"", request.full_url)
+
+    monkeypatch.setattr(
+        _internal_client_module.urllib.request,
+        "build_opener",
+        lambda *handlers: BlockingOpener(),
+    )
+    request = urllib.request.Request(
+        "https://downloads.example.invalid/private-object"
+    )
+    started = time.monotonic()
+    try:
+        with pytest.raises(DreameLawnMowerPointCloudError, match="timed out"):
+            _internal_client_module._open_point_cloud_response(
+                request,
+                timeout=5,
+                deadline=time.monotonic() + 0.05,
+            )
+    finally:
+        release.set()
+
+    assert time.monotonic() - started < 1
+
+
+def test_cloud_header_receive_observes_absolute_deadline() -> None:
+    release = threading.Event()
+
+    class BlockingSession:
+        def post(self, url: str, **options: Any) -> Any:
+            release.wait(5)
+            return SimpleNamespace(close=lambda: None)
+
+    started = time.monotonic()
+    try:
+        with pytest.raises(requests.exceptions.Timeout, match="timed out"):
+            _internal_protocol_module._post_cloud_response(
+                BlockingSession(),
+                "https://cloud.example.invalid/action",
+                {"timeout": 5, "stream": True},
+                deadline=time.monotonic() + 0.05,
+            )
+    finally:
+        release.set()
+
+    assert time.monotonic() - started < 1
 
 
 def test_point_cloud_url_lookup_uses_and_enforces_remaining_deadline(
