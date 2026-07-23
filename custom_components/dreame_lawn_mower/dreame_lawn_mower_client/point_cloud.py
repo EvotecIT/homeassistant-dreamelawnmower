@@ -317,7 +317,10 @@ def _validate_pcd_payload(
     )
     row_count = 0
     bytes_since_deadline_check = 0
-    for row in _iter_nonempty_ascii_rows(payload):
+    for row in _iter_nonempty_ascii_rows(
+        payload,
+        max_row_bytes=max_row_bytes,
+    ):
         bytes_since_deadline_check += len(row) + 1
         if bytes_since_deadline_check >= _VALIDATION_DEADLINE_CHECK_BYTES:
             _ensure_validation_deadline(deadline)
@@ -354,7 +357,11 @@ def _validate_pcd_payload(
         )
 
 
-def _iter_nonempty_ascii_rows(payload: bytes) -> Iterator[bytes]:
+def _iter_nonempty_ascii_rows(
+    payload: bytes,
+    *,
+    max_row_bytes: int,
+) -> Iterator[bytes]:
     """Yield one non-empty ASCII PCD row without materializing all rows."""
     offset = 0
     payload_bytes = len(payload)
@@ -362,6 +369,16 @@ def _iter_nonempty_ascii_rows(payload: bytes) -> Iterator[bytes]:
         newline = payload.find(b"\n", offset)
         if newline < 0:
             newline = payload_bytes
+        row_bytes = newline - offset
+        if row_bytes > max_row_bytes:
+            allowed_trailing_carriage_return = (
+                row_bytes == max_row_bytes + 1
+                and payload[newline - 1] == 0x0D
+            )
+            if not allowed_trailing_carriage_return:
+                raise DreameLawnMowerPointCloudError(
+                    "PCD ASCII payload row exceeds the supported size."
+                )
         row = payload[offset:newline].rstrip(b"\r")
         offset = newline + 1
         if row.strip():

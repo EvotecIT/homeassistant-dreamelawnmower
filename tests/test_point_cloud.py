@@ -568,6 +568,27 @@ def test_ascii_point_cloud_rejects_oversized_row_before_splitting() -> None:
         parse_pcd_metadata(content)
 
 
+def test_ascii_row_iterator_rejects_oversized_row_before_slicing() -> None:
+    class SliceGuard(bytes):
+        def __getitem__(self, key: Any) -> Any:
+            if isinstance(key, slice) and key.stop - key.start > 16:
+                raise AssertionError("oversized row was sliced")
+            return super().__getitem__(key)
+
+    payload = SliceGuard((b"0 " * 100) + b"\n")
+
+    with pytest.raises(
+        DreameLawnMowerPointCloudError,
+        match="row exceeds the supported size",
+    ):
+        list(
+            _internal_point_cloud_module._iter_nonempty_ascii_rows(
+                payload,
+                max_row_bytes=16,
+            )
+        )
+
+
 def test_ascii_point_cloud_rejects_attacker_controlled_scalar_count() -> None:
     content = _ascii_pcd(1)
     content = content.replace(b"FIELDS x y z\n", b"FIELDS x y z extra\n")
