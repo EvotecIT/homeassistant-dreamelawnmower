@@ -158,6 +158,10 @@ from .video_runtime import (
     DreameLawnMowerXp2pRuntimeDiagnostics,
     diagnose_native_xp2p_runtime,
 )
+from .video_provisioning_status import (
+    XP2P_PROVISIONING_DEVICE_TRIPLE_MISSING,
+    classify_xp2p_provisioning_issue,
+)
 from .xp2p_config import (
     DreameLawnMowerXp2pConfigError,
     DreameLawnMowerXp2pDeviceConfig,
@@ -222,6 +226,7 @@ __all__ = [
     "XP2P_PROTOCOL_AUTO",
     "XP2P_PROTOCOL_TCP",
     "XP2P_PROTOCOL_UDP",
+    "XP2P_PROVISIONING_DEVICE_TRIPLE_MISSING",
     "MAP_PROBE_PROPERTY_KEYS",
     "MAP_HISTORY_PROPERTY_KEYS",
     "MOWER_BLUETOOTH_PROPERTY_KEY",
@@ -266,6 +271,7 @@ __all__ = [
     "decode_batch_ota_info",
     "decode_batch_schedule_payload",
     "cms_values_from_app_data",
+    "classify_xp2p_provisioning_issue",
     "decode_mower_status_blob",
     "decode_mower_task_status",
     "decode_mowing_preference_payload",

@@ -194,6 +194,17 @@ def test_remote_control_support_reports_unsafe_state_without_hiding_protocol() -
     )
 
 
+def test_remote_control_ignores_stale_running_flag_while_docked() -> None:
+    device = _FakeRemoteControlDevice()
+    device.status.attributes["running"] = True
+    client = _client_with_device(device)
+
+    support = client._sync_get_remote_control_support()
+
+    assert support.state_safe is True
+    assert support.state_block_reason is None
+
+
 def test_remote_control_move_step_blocks_unsafe_nonzero_commands() -> None:
     device = _FakeRemoteControlDevice()
     device.status.battery_level = 19

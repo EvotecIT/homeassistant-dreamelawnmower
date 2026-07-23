@@ -1,0 +1,47 @@
+{
+  "operation": "camera_stream_inputs",
+  "version": 1,
+  "stages": [
+    {
+      "stage": "cloud_setup",
+      "result": {
+        "available": true,
+        "logged_in": true
+      }
+    },
+    {
+      "stage": "cloud_access_token",
+      "result": {
+        "access_token_present": true
+      }
+    },
+    {
+      "stage": "cloud_device_identity",
+      "response": {
+        "type": "object"
+      },
+      "result": {
+        "channel_id_present": true,
+        "product_id_present": true,
+        "device_name_present": true,
+        "secret_id_present": true,
+        "secret_key_present": true,
+        "app_id_present": true,
+        "app_secret_present": true
+      }
+    },
+    {
+      "stage": "cloud_p2p_info",
+      "response": {
+        "type": "object"
+      },
+      "result": {
+        "p2p_info_present": true,
+        "available": true
+      }
+    }
+  ],
+  "ready": true,
+  "missing_required": [],
+  "completed": true
+}

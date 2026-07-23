@@ -253,6 +253,63 @@ def test_video_camera_preserves_runtime_input_telemetry_on_incomplete_result() -
         "device_name",
         "p2p_info",
     )
+    assert entity._last_runtime_inputs_provisioning_issue is None
+
+
+def test_video_camera_explains_unprovisioned_device_triple() -> None:
+    diagnostics = load_json_fixture("q2501a_ru_xp2p_unprovisioned.json")
+    inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+        source="dreame_third_video_tx",
+        did="sanitized-device",
+        diagnostics=diagnostics,
+    )
+
+    message = video_camera_module._runtime_inputs_not_ready_message(inputs)
+
+    assert "has not provisioned an XP2P video identity" in message
+    assert "current account/region" in message
+    assert "Dreamehome or MOVAhome" in message
+    assert "product_id" not in message
+
+
+def test_video_camera_cloud_start_surfaces_unprovisioned_device_triple() -> None:
+    async def _run() -> tuple[str | None, str | None, str | None]:
+        diagnostics = load_json_fixture("q2501a_ru_xp2p_unprovisioned.json")
+        inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+            source="dreame_third_video_tx",
+            did="sanitized-device",
+            diagnostics=diagnostics,
+        )
+
+        class _Client:
+            async def async_get_camera_stream_runtime_inputs(self) -> object:
+                return inputs
+
+            async def async_set_camera_stream_enabled(
+                self,
+                _enabled: bool,
+            ) -> None:
+                raise AssertionError("Unprovisioned video must not be enabled")
+
+        entity = _uninitialized_entity()
+        entity.coordinator = SimpleNamespace(client=_Client(), data=object())
+        entity._prepared_runtime = object()
+        entity._async_stop_active_session = lambda: asyncio.sleep(0)
+        entity.async_write_ha_state = lambda: None
+
+        source = await entity._async_start_stream()
+        return (
+            source,
+            entity._last_error,
+            entity._last_runtime_inputs_provisioning_issue,
+        )
+
+    source, error, issue = asyncio.run(_run())
+
+    assert source is None
+    assert error is not None
+    assert "has not provisioned an XP2P video identity" in error
+    assert issue == "device_triple_missing"
 
 
 def test_video_camera_auto_policy_prefers_direct_capable_sdk_negotiation() -> None:

@@ -22,6 +22,7 @@ from dreame_lawn_mower_client import (
     MOWER_TIME_PROPERTY_KEY,
     MOWING_PREFERENCE_PROPERTY_KEY,
     MOWING_PREFERENCE_UPDATE_FIELDS,
+    XP2P_PROVISIONING_DEVICE_TRIPLE_MISSING,
     DreameLawnMowerCameraFeatureSupport,
     DreameLawnMowerCameraStreamRuntimeInputs,
     DreameLawnMowerClient,
@@ -55,6 +56,7 @@ from dreame_lawn_mower_client import (
     build_map_probe_payload,
     build_schedule_enable_status_request,
     build_schedule_upload_requests,
+    classify_xp2p_provisioning_issue,
     decode_batch_mowing_preferences,
     decode_batch_ota_info,
     decode_batch_schedule_payload,
@@ -136,6 +138,11 @@ def test_public_package_exports_map_helpers() -> None:
     assert callable(firmware_update_support_from_device)
     assert callable(remote_control_block_reason)
     assert callable(remote_control_state_safe)
+    assert callable(classify_xp2p_provisioning_issue)
+    assert (
+        XP2P_PROVISIONING_DEVICE_TRIPLE_MISSING
+        == "device_triple_missing"
+    )
     assert callable(key_definition_label)
     assert callable(analyze_decompiled_sources)
     assert callable(analyze_dreamehome_assets)
