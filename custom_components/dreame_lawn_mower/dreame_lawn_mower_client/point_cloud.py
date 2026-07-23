@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import struct
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -290,13 +291,14 @@ def _validate_pcd_payload(
         )
         return
 
-    lines = [line for line in payload.splitlines() if line.strip()]
-    if len(lines) != points:
-        raise DreameLawnMowerPointCloudError(
-            "PCD ASCII payload row count does not match its header."
-        )
     scalar_count = sum(counts)
-    for row in lines:
+    row_count = 0
+    for row in _iter_nonempty_ascii_rows(payload):
+        row_count += 1
+        if row_count > points:
+            raise DreameLawnMowerPointCloudError(
+                "PCD ASCII payload row count does not match its header."
+            )
         try:
             values = row.decode("ascii").split()
         except UnicodeDecodeError as err:
@@ -313,6 +315,24 @@ def _validate_pcd_payload(
             types=types,
             counts=counts,
         )
+    if row_count != points:
+        raise DreameLawnMowerPointCloudError(
+            "PCD ASCII payload row count does not match its header."
+        )
+
+
+def _iter_nonempty_ascii_rows(payload: bytes) -> Iterator[bytes]:
+    """Yield one non-empty ASCII PCD row without materializing all rows."""
+    offset = 0
+    payload_bytes = len(payload)
+    while offset < payload_bytes:
+        newline = payload.find(b"\n", offset)
+        if newline < 0:
+            newline = payload_bytes
+        row = payload[offset:newline].rstrip(b"\r")
+        offset = newline + 1
+        if row.strip():
+            yield row
 
 
 def _validate_binary_coordinates(

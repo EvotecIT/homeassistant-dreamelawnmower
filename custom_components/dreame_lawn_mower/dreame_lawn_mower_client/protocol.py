@@ -24,12 +24,16 @@ from .mqtt_tls import create_cloud_mqtt_ssl_context
 _LOGGER = logging.getLogger(__name__)
 _TX_VIDEO_API_PATH = "/dreame-third-video/tx/"
 _REDACTED_TX_VIDEO_PAYLOAD = "<redacted TX video payload>"
+_INTERIM_FILE_API_PATH = "/dreame-user-iot/iotfile/getDownloadUrl"
+_REDACTED_INTERIM_FILE_PAYLOAD = "<redacted interim file payload>"
 
 
 def _cloud_request_log_value(url: str, value: Any) -> Any:
-    """Hide TX video credentials and P2P material from cloud request logs."""
+    """Hide sensitive cloud request and response material from logs."""
     if _TX_VIDEO_API_PATH in url and value is not None:
         return _REDACTED_TX_VIDEO_PAYLOAD
+    if _INTERIM_FILE_API_PATH in url and value is not None:
+        return _REDACTED_INTERIM_FILE_PAYLOAD
     return value
 
 
@@ -132,12 +136,13 @@ class DreameMowerDreameHomeCloudProtocol:
 
         self._queue.put((callback, url, params, retry_count))
 
-    def _api_call(self, url, params=None, retry_count=2):
+    def _api_call(self, url, params=None, retry_count=2, timeout=20):
         return self.request(
             f"{self.get_api_url()}/{url}",
             json.dumps(params, separators=(",", ":")
                        ) if params is not None else None,
             retry_count,
+            timeout,
         )
 
     def get_api_url(self) -> str:
@@ -652,7 +657,13 @@ class DreameMowerDreameHomeCloudProtocol:
             retry_count,
         )
 
-    def send(self, method, parameters, retry_count: int = 2) -> Any:
+    def send(
+        self,
+        method,
+        parameters,
+        retry_count: int = 2,
+        timeout: float = 20,
+    ) -> Any:
         host = ""
         if self._host and len(self._host):
             host = f"-{self._host.split('.')[0]}"
@@ -670,6 +681,7 @@ class DreameMowerDreameHomeCloudProtocol:
                 },
             },
             retry_count,
+            timeout,
         )
         _LOGGER.debug(
             "DreameMowerDreameHomeCloudProtocol.send api_response: %s", api_response)
@@ -713,6 +725,7 @@ class DreameMowerDreameHomeCloudProtocol:
         siid: int = 2,
         aiid: int = 50,
         retry_count: int = 2,
+        timeout: float = 20,
     ) -> Any:
         """Call the mobile-app action bridge used by mower plugin commands."""
         return self.send(
@@ -724,6 +737,7 @@ class DreameMowerDreameHomeCloudProtocol:
                 "in": [payload],
             },
             retry_count=retry_count,
+            timeout=timeout,
         )
 
     def get_file(self, url: str, retry_count: int = 4) -> Any:

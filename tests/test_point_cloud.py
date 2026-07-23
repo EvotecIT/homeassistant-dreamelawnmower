@@ -21,6 +21,7 @@ from dreame_lawn_mower_client._loader import load_internal_module
 from dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
 
 _internal_client_module = load_internal_module("client")
+_internal_protocol_module = load_internal_module("protocol")
 
 
 def _binary_pcd(*points: tuple[float, float, float, int]) -> bytes:
@@ -38,6 +39,22 @@ def _binary_pcd(*points: tuple[float, float, float, int]) -> bytes:
     ).encode()
     payload = b"".join(struct.pack("<fffI", *point) for point in points)
     return header + payload
+
+
+def _ascii_pcd(point_count: int) -> bytes:
+    header = (
+        "# .PCD v0.7\n"
+        "VERSION 0.7\n"
+        "FIELDS x y z\n"
+        "SIZE 4 4 4\n"
+        "TYPE F F F\n"
+        "COUNT 1 1 1\n"
+        f"WIDTH {point_count}\n"
+        "HEIGHT 1\n"
+        f"POINTS {point_count}\n"
+        "DATA ascii\n"
+    ).encode()
+    return header + (b"1 2 3\n" * point_count)
 
 
 def _client() -> DreameLawnMowerClient:
@@ -103,6 +120,16 @@ def test_parse_pcd_metadata_accepts_binary_xyz_rgb() -> None:
     assert metadata.as_dict()["total_bytes"] == len(content)
 
 
+def test_parse_pcd_metadata_validates_ascii_rows_incrementally() -> None:
+    content = _ascii_pcd(10_000)
+
+    metadata = parse_pcd_metadata(content)
+
+    assert metadata.points == 10_000
+    assert metadata.data_encoding == "ascii"
+    assert metadata.payload_bytes == 60_000
+
+
 @pytest.mark.parametrize(
     "content, message",
     [
@@ -157,6 +184,7 @@ def test_download_point_cloud_uses_a2_generation_flow(
 ) -> None:
     client = _client()
     calls: list[dict[str, Any]] = []
+    call_options: list[dict[str, Any]] = []
     responses = iter(
         [
             {"r": 0, "d": {"name": ["private/previous-map.pcd"]}},
@@ -167,8 +195,12 @@ def test_download_point_cloud_uses_a2_generation_flow(
         ]
     )
 
-    def call_app_action(payload: dict[str, Any]) -> dict[str, Any]:
+    def call_app_action(
+        payload: dict[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         calls.append(payload)
+        call_options.append(kwargs)
         return next(responses)
 
     signed_url = "https://downloads.example.invalid/object?private=signature"
@@ -183,9 +215,12 @@ def test_download_point_cloud_uses_a2_generation_flow(
     monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
     downloads = iter([b"not a pcd", content])
     monkeypatch.setattr(
-        client_module.urllib.request,
-        "urlopen",
-        lambda request, timeout: _FakeResponse(next(downloads), request.full_url),
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout: _FakeResponse(
+            next(downloads),
+            request.full_url,
+        ),
     )
 
     result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
@@ -197,6 +232,8 @@ def test_download_point_cloud_uses_a2_generation_flow(
         {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
         {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
     ]
+    assert all(options["retry_count"] == 0 for options in call_options)
+    assert all(0 < options["timeout"] <= 5 for options in call_options)
     assert result.map_index == 0
     assert result.content == content
     assert result.metadata.points == 1
@@ -218,7 +255,11 @@ def test_download_point_cloud_error_does_not_expose_signed_url(
             None,
         )
 
-    monkeypatch.setattr(client_module.urllib.request, "urlopen", fail_download)
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        fail_download,
+    )
 
     with pytest.raises(DreameLawnMowerPointCloudError) as captured:
         _internal_client_module._download_point_cloud_content(
@@ -230,6 +271,42 @@ def test_download_point_cloud_error_does_not_expose_signed_url(
     assert "HTTP status 403" in str(captured.value)
     assert signed_url not in str(captured.value)
     assert signed_url not in repr(captured.value)
+
+
+def test_download_point_cloud_rejects_insecure_redirect_before_following() -> None:
+    request = urllib.request.Request(
+        "https://downloads.example.invalid/private-object"
+    )
+    handler = _internal_client_module._HttpsOnlyPointCloudRedirectHandler()
+
+    with pytest.raises(
+        DreameLawnMowerPointCloudError,
+        match="redirected to an insecure URL",
+    ):
+        handler.redirect_request(
+            request,
+            None,
+            302,
+            "Found",
+            Message(),
+            "http://downloads.example.invalid/private-object",
+        )
+
+
+def test_interim_file_cloud_logs_redact_request_and_response() -> None:
+    url = (
+        "https://eu.example.invalid/"
+        "dreame-user-iot/iotfile/getDownloadUrl"
+    )
+
+    assert _internal_protocol_module._cloud_request_log_value(
+        url,
+        '{"filename":"private/generated-map.pcd"}',
+    ) == "<redacted interim file payload>"
+    assert _internal_protocol_module._cloud_request_log_value(
+        url,
+        '{"data":"https://downloads.example.invalid/object?secret=signature"}',
+    ) == "<redacted interim file payload>"
 
 
 def test_download_point_cloud_enforces_overall_deadline(
@@ -252,12 +329,12 @@ def test_download_point_cloud_enforces_overall_deadline(
     monkeypatch.setattr(
         client_module.time,
         "monotonic",
-        lambda: next(monotonic_values),
+        lambda: next(monotonic_values, 101.1),
     )
     monkeypatch.setattr(
-        client_module.urllib.request,
-        "urlopen",
-        lambda request, timeout: response,
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout: response,
     )
 
     with pytest.raises(DreameLawnMowerPointCloudError, match="timed out"):
@@ -269,3 +346,74 @@ def test_download_point_cloud_enforces_overall_deadline(
 
     assert read_calls == 1
     assert applied_timeouts == pytest.approx([0.8])
+
+
+def test_point_cloud_app_action_uses_and_enforces_remaining_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    options: list[dict[str, Any]] = []
+
+    def call_app_action(
+        payload: dict[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        options.append(kwargs)
+        return {"r": 0, "d": {}}
+
+    client._sync_call_app_action = call_app_action
+    monotonic_values = iter([100.2, 101.1])
+    monkeypatch.setattr(
+        client_module.time,
+        "monotonic",
+        lambda: next(monotonic_values, 101.1),
+    )
+
+    with pytest.raises(DreameLawnMowerPointCloudError, match="timed out"):
+        client._sync_call_point_cloud_action(
+            {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+            operation="read the generated point-cloud object state",
+            deadline=101.0,
+            require_data=True,
+        )
+
+    assert options == [
+        {
+            "retry_count": 0,
+            "timeout": pytest.approx(0.8),
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "failed_poll",
+    [
+        None,
+        {"r": 0, "d": {}},
+    ],
+)
+def test_download_point_cloud_rejects_ambiguous_failed_object_poll(
+    monkeypatch: pytest.MonkeyPatch,
+    failed_poll: Any,
+) -> None:
+    client = _client()
+    responses = iter(
+        [
+            {"r": 0, "d": {"name": ["private/previous-map.pcd"]}},
+            {"r": 0},
+            failed_poll,
+        ]
+    )
+    client._sync_call_app_action = lambda payload, **kwargs: next(responses)
+    client._sync_get_cloud_protocol = lambda: type(
+        "Cloud",
+        (),
+        {"get_interim_file_url": lambda self, name: None},
+    )()
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+
+    with pytest.raises(
+        DreameLawnMowerPointCloudError,
+        match="could not read the generated point-cloud object state",
+    ):
+        client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
