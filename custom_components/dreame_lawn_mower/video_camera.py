@@ -78,6 +78,7 @@ _SNAPSHOT_IMAGE_TIMEOUT = 15.0
 _HA_STREAM_STOP_TIMEOUT = 10.0
 _RUNTIME_SESSION_STOP_TIMEOUT = 20.0
 _CAMERA_STREAM_DISABLE_TIMEOUT = 10.0
+_PENDING_RUNTIME_STOPS: dict[str, set[asyncio.Future[Any]]] = {}
 
 
 def _runtime_inputs_not_ready_message(
@@ -225,6 +226,8 @@ class DreameLawnMowerVideoCamera(
                     "Failed to load Dreame video provisioning cache: %s",
                     self._provisioning_cache_error,
                 )
+        if self._persisted_video_capability:
+            self._video_capability_observed = True
         snapshot = self.coordinator.data
         if not self._runtime_configured or (
             self._lan_cache.inputs is None
@@ -269,21 +272,35 @@ class DreameLawnMowerVideoCamera(
 
         block_reason = camera_stream_block_reason(snapshot)
         cleanup_task = self._state_gate_cleanup_task
+        target_session = self._session
+        target_stream = getattr(self, "stream", None)
         if (
             block_reason is not None
-            and (self._session is not None or getattr(self, "stream", None) is not None)
+            and (target_session is not None or target_stream is not None)
             and (cleanup_task is None or cleanup_task.done())
         ):
             self._state_gate_cleanup_task = self.hass.async_create_task(
-                self._async_cleanup_for_state_gate(block_reason)
+                self._async_cleanup_for_state_gate(
+                    block_reason,
+                    target_session,
+                    target_stream,
+                )
             )
 
         super()._handle_coordinator_update()
 
-    async def _async_cleanup_for_state_gate(self, block_reason: str) -> None:
+    async def _async_cleanup_for_state_gate(
+        self,
+        block_reason: str,
+        target_session: DreameLawnMowerXp2pLiveStreamSession | None,
+        target_stream: Any | None,
+    ) -> None:
         """Stop an active session after the mower enters a blocked state."""
         async with self._stream_lock:
-            if self._session is None and getattr(self, "stream", None) is None:
+            if (
+                self._session is not target_session
+                or getattr(self, "stream", None) is not target_stream
+            ):
                 return
             await self._async_stop_active_session(
                 reason="state_gate",
@@ -386,6 +403,7 @@ class DreameLawnMowerVideoCamera(
                 self._state_gate_cleanup_task is not None
                 and not self._state_gate_cleanup_task.done()
             ),
+            "runtime_cleanup_pending": self._runtime_cleanup_pending,
             "last_native_runtime_diagnostics": self._last_native_runtime_diagnostics,
             "last_stream_health": self._last_stream_health,
             "last_stream_session": self._session.as_dict(redact=True)
@@ -670,6 +688,13 @@ class DreameLawnMowerVideoCamera(
                 stage="runtime_configuration",
             )
             return None
+        if self._runtime_cleanup_pending:
+            self._set_stream_error(
+                "Previous live-video runtime cleanup is still in progress. "
+                "Retry shortly.",
+                stage="runtime_cleanup",
+            )
+            return None
         if self._video_start_is_blocked():
             return None
         if (
@@ -811,6 +836,8 @@ class DreameLawnMowerVideoCamera(
                 raise DreameLawnMowerVideoRuntimeError(
                     _runtime_inputs_not_ready_message(cloud_inputs)
                 )
+            if self._video_start_is_blocked():
+                return None
             stream_enable_attempted = True
             self._last_stream_enable_result = sanitize_debug_data(
                 video_helpers.safe_state_attribute(
@@ -818,6 +845,9 @@ class DreameLawnMowerVideoCamera(
                 )
             )
             self._last_stream_disable_error = None
+            if self._video_start_is_blocked():
+                await self._async_disable_camera_stream()
+                return None
             session = await self._async_start_runtime_session(runtime, cloud_inputs)
         except asyncio.CancelledError:
             if runtime is not None and session is not None:
@@ -1115,19 +1145,6 @@ class DreameLawnMowerVideoCamera(
     ) -> str | None:
         """Adopt a session only while the latest mower state still permits video."""
         if reason := camera_stream_block_reason(self.coordinator.data):
-            self._last_stream_cleanup_reason = "state_gate"
-            self._last_stream_cleanup_error = None
-            self._last_stream_cleanup_error_stage = None
-            await self._async_stop_session(runtime, session)
-            camera_toggle_managed = getattr(
-                session,
-                "camera_toggle_managed",
-                getattr(session, "transport", VIDEO_TRANSPORT_CLOUD)
-                != VIDEO_TRANSPORT_LAN,
-            )
-            if camera_toggle_managed:
-                await self._async_disable_camera_stream()
-            self._last_stream_cleanup_at = datetime.now(UTC).isoformat()
             record_diagnostic_event(
                 self.coordinator,
                 code="video_start_state_changed",
@@ -1137,6 +1154,14 @@ class DreameLawnMowerVideoCamera(
                 context={"trigger": reason, "transport": transport},
             )
             self._set_stream_error(reason, stage="mower_state_gate")
+            cleanup_task = asyncio.create_task(
+                self._async_cleanup_rejected_session(runtime, session)
+            )
+            try:
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError:
+                await cleanup_task
+                raise
             return None
         return self._adopt_stream_session(
             runtime,
@@ -1145,6 +1170,28 @@ class DreameLawnMowerVideoCamera(
             transport=transport,
             provisioning_inputs=provisioning_inputs,
         )
+
+    async def _async_cleanup_rejected_session(
+        self,
+        runtime: _DreameVideoRuntime,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+    ) -> None:
+        """Finish cleanup for a state-gated session before cancellation escapes."""
+        self._last_stream_cleanup_reason = "state_gate"
+        self._last_stream_cleanup_error = None
+        self._last_stream_cleanup_error_stage = None
+        try:
+            await self._async_stop_session(runtime, session)
+            camera_toggle_managed = getattr(
+                session,
+                "camera_toggle_managed",
+                getattr(session, "transport", VIDEO_TRANSPORT_CLOUD)
+                != VIDEO_TRANSPORT_LAN,
+            )
+            if camera_toggle_managed:
+                await self._async_disable_camera_stream()
+        finally:
+            self._last_stream_cleanup_at = datetime.now(UTC).isoformat()
 
     def _with_lan_failure(self, cloud_error: str) -> str:
         """Preserve Auto-mode failures without leaking runtime inputs."""
@@ -1349,11 +1396,16 @@ class DreameLawnMowerVideoCamera(
     ) -> bool:
         """Stop a runtime session without changing entity state bookkeeping."""
         try:
+            stop_job = asyncio.ensure_future(
+                self.hass.async_add_executor_job(runtime.stop_live_stream, session)
+            )
+        except Exception as err:  # noqa: BLE001 - cleanup should not break unload.
+            self._record_stream_cleanup_error("runtime_session_stop", err)
+            return False
+        self._register_runtime_stop(stop_job)
+        try:
             async with asyncio.timeout(_RUNTIME_SESSION_STOP_TIMEOUT):
-                await self.hass.async_add_executor_job(
-                    runtime.stop_live_stream,
-                    session,
-                )
+                await asyncio.shield(stop_job)
             return True
         except TimeoutError:
             self._record_stream_cleanup_error(
@@ -1367,6 +1419,50 @@ class DreameLawnMowerVideoCamera(
         except Exception as err:  # noqa: BLE001 - cleanup should not break unload.
             self._record_stream_cleanup_error("runtime_session_stop", err)
             return False
+
+    def _register_runtime_stop(self, stop_job: asyncio.Future[Any]) -> None:
+        """Fence replacement sessions until an executor-backed stop really ends."""
+        key = self._runtime_stop_key
+        jobs = _PENDING_RUNTIME_STOPS.setdefault(key, set())
+        jobs.add(stop_job)
+
+        def _completed(future: asyncio.Future[Any]) -> None:
+            pending = _PENDING_RUNTIME_STOPS.get(key)
+            if pending is not None:
+                pending.discard(future)
+                if not pending:
+                    _PENDING_RUNTIME_STOPS.pop(key, None)
+            if future.cancelled():
+                return
+            try:
+                future.exception()
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        stop_job.add_done_callback(_completed)
+
+    @property
+    def _runtime_stop_key(self) -> str:
+        """Return a stable mower identity shared across entity reloads."""
+        descriptor = getattr(self, "_descriptor", None)
+        return str(
+            getattr(descriptor, "did", None)
+            or getattr(descriptor, "unique_id", None)
+            or self._attr_unique_id
+        )
+
+    @property
+    def _runtime_cleanup_pending(self) -> bool:
+        """Return whether an earlier native stop still owns this mower service."""
+        jobs = _PENDING_RUNTIME_STOPS.get(self._runtime_stop_key)
+        if not jobs:
+            return False
+        active = {job for job in jobs if not job.done()}
+        if active:
+            _PENDING_RUNTIME_STOPS[self._runtime_stop_key] = active
+            return True
+        _PENDING_RUNTIME_STOPS.pop(self._runtime_stop_key, None)
+        return False
 
     async def _async_stop_session_for_handoff(
         self,
@@ -1509,6 +1605,20 @@ class DreameLawnMowerVideoCamera(
     @property
     def _video_transport(self) -> str:
         return video_helpers.video_transport(self._entry)
+
+    @property
+    def _persisted_video_capability(self) -> bool:
+        """Return whether a prior healthy session proves video support."""
+        return bool(
+            (
+                self._lan_cache.inputs is not None
+                and self._lan_cache.endpoint is not None
+            )
+            or (
+                self._provisioning_cache.inputs is not None
+                and self._provisioning_cache.device_config is not None
+            )
+        )
 
     @property
     def _native_library_path(self) -> str | None:
