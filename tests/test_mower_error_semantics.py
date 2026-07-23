@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -9,12 +10,19 @@ import pytest
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     device_code_semantics,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import (
+    DreameLawnMowerClient,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device import (
     DreameMowerDeviceStatus,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
+    DreameLawnMowerSnapshot,
     descriptor_from_cloud_record,
     snapshot_from_device,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
+    DreameMowerProperty,
 )
 
 MowerDeviceCodeTier = device_code_semantics.MowerDeviceCodeTier
@@ -41,7 +49,7 @@ class _ErrorDevice:
             task_status_name="unknown",
             error=SimpleNamespace(value=code),
             error_name=inherited_name,
-            has_error=True,
+            has_error=code not in (None, -1),
             battery_level=80,
             paused=True,
             returning=False,
@@ -75,9 +83,12 @@ def _snapshot(
     inherited_name: str,
     *,
     realtime_error_code: int | None = None,
+    realtime_error_last_seen: float | None = None,
+    realtime_state_last_seen: float | None = None,
     state: str = "PAUSED",
     model: str = "dreame.mower.g2408",
-):
+    previous_snapshot: DreameLawnMowerSnapshot | None = None,
+) -> DreameLawnMowerSnapshot:
     descriptor = descriptor_from_cloud_record(
         {"did": "test", "model": model, "name": "Mower"},
         account_type="dreame",
@@ -86,8 +97,20 @@ def _snapshot(
     assert descriptor is not None
     device = _ErrorDevice(code, inherited_name, state=state)
     if realtime_error_code is not None:
-        device.realtime_properties = {"2.2": {"value": realtime_error_code}}
-    return snapshot_from_device(descriptor, device)
+        device.realtime_properties["2.2"] = {
+            "value": realtime_error_code,
+            "last_seen": realtime_error_last_seen,
+        }
+    if realtime_state_last_seen is not None:
+        device.realtime_properties["2.1"] = {
+            "value": state,
+            "last_seen": realtime_state_last_seen,
+        }
+    return snapshot_from_device(
+        descriptor,
+        device,
+        previous_snapshot=previous_snapshot,
+    )
 
 
 @pytest.mark.parametrize(
@@ -174,12 +197,12 @@ def test_operational_state_releases_stale_fault_code(
     state: str,
     expected_activity: str,
 ) -> None:
-    fault = _snapshot(0, "drop", realtime_error_code=0)
+    fault = _snapshot(0, "drop")
     recovered = _snapshot(
         0,
         "drop",
-        realtime_error_code=0,
         state=state,
+        previous_snapshot=fault,
     )
 
     assert fault.activity == "error"
@@ -189,15 +212,19 @@ def test_operational_state_releases_stale_fault_code(
     assert recovered.error_display is None
     assert recovered.error_source is None
     assert recovered.raw_error_code == 0
-    assert recovered.realtime_error_code == 0
+    assert recovered.realtime_error_code is None
 
 
 def test_operational_state_releases_stale_realtime_only_fault() -> None:
+    fault = _snapshot(0, "drop")
     snapshot = _snapshot(
         None,
         "",
         realtime_error_code=0,
+        realtime_error_last_seen=100,
+        realtime_state_last_seen=200,
         state="MOWING",
+        previous_snapshot=fault,
     )
 
     assert snapshot.activity == "mowing"
@@ -206,6 +233,185 @@ def test_operational_state_releases_stale_realtime_only_fault() -> None:
     assert snapshot.error_source is None
     assert snapshot.raw_error_code is None
     assert snapshot.realtime_error_code == 0
+
+
+def test_recovered_fault_stays_released_across_repeated_refreshes() -> None:
+    fault = _snapshot(0, "drop")
+    recovered = _snapshot(
+        0,
+        "drop",
+        state="MOWING",
+        previous_snapshot=fault,
+    )
+    repeated = _snapshot(
+        0,
+        "drop",
+        state="MOWING",
+        previous_snapshot=recovered,
+    )
+
+    assert recovered.activity == "mowing"
+    assert repeated.activity == "mowing"
+    assert repeated.error_code is None
+    assert repeated.raw_error_code == 0
+
+
+@pytest.mark.parametrize(
+    ("state_last_seen", "error_last_seen"),
+    [
+        (None, None),
+        (100, 100),
+        (100, 200),
+    ],
+)
+def test_fresh_realtime_fault_overrides_operational_state(
+    state_last_seen: float | None,
+    error_last_seen: float | None,
+) -> None:
+    fault = _snapshot(0, "drop")
+    snapshot = _snapshot(
+        None,
+        "",
+        realtime_error_code=0,
+        realtime_error_last_seen=error_last_seen,
+        realtime_state_last_seen=state_last_seen,
+        state="MOWING",
+        previous_snapshot=fault,
+    )
+
+    assert snapshot.activity == "error"
+    assert snapshot.error_code == 0
+    assert snapshot.error_display == "Robot lifted"
+    assert snapshot.error_source == "realtime_property_2.2"
+
+
+def test_newer_operational_event_releases_realtime_fault_seen_while_mowing() -> None:
+    fresh_fault = _snapshot(
+        None,
+        "",
+        realtime_error_code=0,
+        realtime_error_last_seen=200,
+        realtime_state_last_seen=100,
+        state="MOWING",
+    )
+    recovered = _snapshot(
+        None,
+        "",
+        realtime_error_code=0,
+        realtime_error_last_seen=200,
+        realtime_state_last_seen=300,
+        state="MOWING",
+        previous_snapshot=fresh_fault,
+    )
+
+    assert fresh_fault.activity == "error"
+    assert recovered.activity == "mowing"
+    assert recovered.error_code is None
+    assert recovered.realtime_error_code == 0
+
+
+def test_newer_realtime_fault_relatches_after_recovery() -> None:
+    fault = _snapshot(0, "drop")
+    recovered = _snapshot(
+        None,
+        "",
+        realtime_error_code=0,
+        realtime_error_last_seen=100,
+        realtime_state_last_seen=200,
+        state="MOWING",
+        previous_snapshot=fault,
+    )
+    relatched = _snapshot(
+        None,
+        "",
+        realtime_error_code=0,
+        realtime_error_last_seen=300,
+        realtime_state_last_seen=200,
+        state="MOWING",
+        previous_snapshot=recovered,
+    )
+
+    assert recovered.activity == "mowing"
+    assert relatched.activity == "error"
+    assert relatched.error_code == 0
+    assert relatched.error_source == "realtime_property_2.2"
+
+
+def test_fresh_bare_error_flag_is_not_mistaken_for_suppression() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {"did": "test", "model": "dreame.mower.g2408", "name": "Mower"},
+        account_type="dreame",
+        country="eu",
+    )
+    assert descriptor is not None
+    healthy = _snapshot(None, "", state="CHARGING")
+    device = _ErrorDevice(None, "", state="CHARGING")
+    device.status.has_error = True
+
+    snapshot = snapshot_from_device(
+        descriptor,
+        device,
+        previous_snapshot=healthy,
+    )
+
+    assert snapshot.activity == "error"
+    assert snapshot.error_code is None
+    assert snapshot.error_source == "status"
+
+
+def test_client_carries_fault_state_into_recovery_reconciliation() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {"did": "test", "model": "dreame.mower.g2408", "name": "Mower"},
+        account_type="dreame",
+        country="eu",
+    )
+    assert descriptor is not None
+    fault = _snapshot(0, "drop")
+    device = _ErrorDevice(0, "drop", state="MOWING")
+    client = object.__new__(DreameLawnMowerClient)
+    client._descriptor = descriptor
+    client._latest_snapshot = fault
+    client._sync_update_device = lambda: device
+    client._sync_get_status_blob = lambda *_args: None
+    client._sync_get_cached_cloud_device_info = lambda: None
+
+    recovered = asyncio.run(client.async_refresh())
+    repeated = asyncio.run(client.async_refresh())
+
+    assert recovered.activity == "mowing"
+    assert recovered.error_code is None
+    assert repeated.activity == "mowing"
+    assert repeated.error_code is None
+    assert client._latest_snapshot is repeated
+
+
+def test_remote_control_support_reuses_recovered_fault_context() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {"did": "test", "model": "dreame.mower.g2408", "name": "Mower"},
+        account_type="dreame",
+        country="eu",
+    )
+    assert descriptor is not None
+    fault = _snapshot(0, "drop")
+    device = _ErrorDevice(0, "drop", state="CHARGING")
+    device.property_mapping = {
+        DreameMowerProperty.REMOTE_CONTROL: {"siid": 4, "piid": 15}
+    }
+    device.status.status = None
+    device.status.fast_mapping = False
+    device._remote_control = False
+    client = object.__new__(DreameLawnMowerClient)
+    client._descriptor = descriptor
+    client._latest_snapshot = fault
+    client._ensure_device = lambda: device
+
+    support = client._sync_get_remote_control_support(refresh=False)
+
+    assert support.supported is True
+    assert support.state_safe is True
+    assert support.state_block_reason is None
+    assert client._latest_snapshot.activity == "docked"
+    assert client._latest_snapshot.error_code is None
 
 
 def test_recoverable_alert_does_not_latch_error() -> None:

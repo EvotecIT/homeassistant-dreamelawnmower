@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from threading import RLock
 from types import SimpleNamespace
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device import (
@@ -19,6 +20,7 @@ def _device_stub() -> tuple[DreameMowerDevice, list[str]]:
     device.unknown_properties = {}
     device.realtime_properties = {}
     device.last_realtime_message = None
+    device._state_lock = RLock()
     device._dirty_data = {}
     device._property_update_callback = {}
     device._ready = True
@@ -158,3 +160,37 @@ def test_message_callback_tracks_realtime_properties_and_unmapped_pairs() -> Non
     assert device.realtime_properties["9.4"]["value"] == {"blob": 123}
     assert device.last_realtime_message is not None
     assert device.last_realtime_message["message"]["method"] == "properties_changed"
+    assert len(
+        {
+            entry["last_seen"]
+            for entry in device.realtime_properties.values()
+        }
+    ) == 1
+
+
+def test_message_callback_applies_known_and_realtime_state_under_one_lock() -> None:
+    device, _updates = _device_stub()
+    original_handle_properties = device._handle_properties
+    lock_owned_during_update = False
+
+    def handle_properties(properties: list[dict[str, object]]) -> bool:
+        nonlocal lock_owned_during_update
+        lock_owned_during_update = device._state_lock._is_owned()
+        assert "2.1" in device.realtime_properties
+        assert "2.2" in device.realtime_properties
+        return original_handle_properties(properties)
+
+    device._handle_properties = handle_properties
+
+    DreameMowerDevice._message_callback(
+        device,
+        {
+            "method": "properties_changed",
+            "params": [
+                {"siid": 2, "piid": 1, "value": 1},
+                {"siid": 2, "piid": 2, "value": 0},
+            ],
+        },
+    )
+
+    assert lock_owned_during_update is True

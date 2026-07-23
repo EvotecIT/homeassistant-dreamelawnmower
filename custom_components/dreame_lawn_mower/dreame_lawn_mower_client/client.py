@@ -219,6 +219,7 @@ class DreameLawnMowerClient:
         self._account_type = account_type
         self._descriptor = descriptor
         self._device: Any | None = None
+        self._latest_snapshot: DreameLawnMowerSnapshot | None = None
         self._latest_runtime_status_blob: DreameLawnMowerStatusBlob | None = None
         self._runtime_live_track_segments: tuple[
             tuple[tuple[int, int], ...],
@@ -322,7 +323,7 @@ class DreameLawnMowerClient:
             token=getattr(device, "token", None) or self._descriptor.token,
             raw=self._descriptor.raw,
         )
-        snapshot = snapshot_from_device(self._descriptor, device)
+        snapshot = self._snapshot_from_device(device)
         try:
             status_blob = await asyncio.to_thread(
                 self._sync_get_status_blob,
@@ -342,6 +343,7 @@ class DreameLawnMowerClient:
             cloud_device_info = self._latest_cloud_device_info
         if isinstance(cloud_device_info, Mapping):
             snapshot = snapshot_with_cloud_presence(snapshot, cloud_device_info)
+        self._latest_snapshot = snapshot
         return snapshot
 
     async def async_start_mowing(self) -> None:
@@ -1062,6 +1064,25 @@ class DreameLawnMowerClient:
             raise DreameLawnMowerConnectionError(str(err)) from err
         return device
 
+    def _snapshot_from_device(self, device: Any) -> DreameLawnMowerSnapshot:
+        """Normalize one coherent device state and retain recovery context."""
+        state_lock = getattr(device, "_state_lock", None)
+        if state_lock is None:
+            snapshot = snapshot_from_device(
+                self._descriptor,
+                device,
+                previous_snapshot=getattr(self, "_latest_snapshot", None),
+            )
+        else:
+            with state_lock:
+                snapshot = snapshot_from_device(
+                    self._descriptor,
+                    device,
+                    previous_snapshot=getattr(self, "_latest_snapshot", None),
+                )
+        self._latest_snapshot = snapshot
+        return snapshot
+
     def _sync_get_remote_control_support(
         self,
         refresh: bool = False,
@@ -1096,7 +1117,7 @@ class DreameLawnMowerClient:
         state_safe: bool | None = None
         state_block_reason: str | None = None
         if mapping:
-            snapshot = snapshot_from_device(self._descriptor, device)
+            snapshot = self._snapshot_from_device(device)
             state_block_reason = remote_control_block_reason(snapshot)
             state_safe = state_block_reason is None
 
@@ -1484,7 +1505,7 @@ class DreameLawnMowerClient:
         language: str | None,
     ) -> dict[str, Any]:
         device = self._sync_update_device()
-        snapshot = snapshot_from_device(self._descriptor, device)
+        snapshot = self._snapshot_from_device(device)
         errors: list[dict[str, str]] = []
         payload: dict[str, Any] = {
             "label": label,
@@ -2060,7 +2081,7 @@ class DreameLawnMowerClient:
         )
 
     def _guard_camera_stream_probe_idle(self, device: Any) -> None:
-        snapshot = snapshot_from_device(self._descriptor, device)
+        snapshot = self._snapshot_from_device(device)
         if reason := camera_stream_block_reason(snapshot):
             raise DreameLawnMowerConnectionError(reason)
 
