@@ -135,3 +135,21 @@ def test_operation_summary_redacts_space_separated_device_name() -> None:
     assert message == "device name=**REDACTED**"
     assert "Garage Mower" not in message
     assert "10425/private-camera" not in message
+
+
+def test_operation_summary_redacts_quoted_multi_word_device_name() -> None:
+    summary = summarize_operation_response(
+        {
+            "message": (
+                'deviceName="John\'s Mower" unavailable on '
+                "channelId='Garage \"North\" camera'"
+            )
+        }
+    )
+
+    message = summary["messages"][0]["text"]
+    assert message == (
+        'deviceName="**REDACTED**" unavailable on channelId=\'**REDACTED**\''
+    )
+    assert "John's Mower" not in message
+    assert 'Garage "North" camera' not in message

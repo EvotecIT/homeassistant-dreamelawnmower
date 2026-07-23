@@ -1916,6 +1916,17 @@ class DreameLawnMowerClient:
                 output["tx_rtc_info"] = _normalize_tx_rtc_info(
                     identity,
                 )
+                for field in (
+                    "channel_id",
+                    "product_id",
+                    "device_name",
+                    "secret_id",
+                    "secret_key",
+                    "app_id",
+                    "app_secret",
+                ):
+                    if sensitive_value := output["tx_rtc_info"].get(field):
+                        sensitive_values.append(sensitive_value)
                 record_stage(
                     current_stage,
                     request=current_request,
@@ -1990,6 +2001,15 @@ class DreameLawnMowerClient:
             )
             diagnostics["completed"] = False
             raise DreameLawnMowerConnectionError(str(err)) from err
+        except Exception as err:
+            record_stage(
+                current_stage,
+                request=current_request,
+                error=err,
+                include_response=False,
+            )
+            diagnostics["completed"] = False
+            raise
 
         runtime_inputs = _camera_stream_runtime_inputs_from_cloud_payload(output)
         diagnostics["ready"] = runtime_inputs.ready

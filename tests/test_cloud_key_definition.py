@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from dreame_lawn_mower_client import DreameLawnMowerClient
@@ -419,6 +421,53 @@ def test_camera_stream_failure_retains_sanitized_stage_diagnostics() -> None:
     serialized_diagnostics = str(diagnostics)
     assert "secret-token" not in serialized_diagnostics
     assert "device-123456" not in serialized_diagnostics
+
+
+def test_camera_stream_unexpected_failure_records_the_active_stage() -> None:
+    class _MalformedIdentityCloud(_FakeCloud):
+        def get_tx_video_device_identity(
+            self,
+            access_token: str | None = None,
+            os: int = 1,
+        ) -> dict[str, object]:
+            raise json.JSONDecodeError("Expecting value", "", 0)
+
+    client = _client()
+    client._sync_get_cloud_protocol = lambda: _MalformedIdentityCloud()
+
+    with pytest.raises(json.JSONDecodeError):
+        client._sync_get_camera_stream_inputs()
+
+    diagnostics = client.last_camera_stream_diagnostics
+    assert diagnostics["completed"] is False
+    assert diagnostics["stages"][-1]["stage"] == "cloud_device_identity"
+    assert diagnostics["stages"][-1]["error"]["type"] == "JSONDecodeError"
+
+
+def test_camera_stream_later_failure_redacts_identity_values() -> None:
+    class _FailingP2pCloud(_FakeCloud):
+        def get_tx_video_p2p_info(
+            self,
+            access_token: str | None = None,
+            os: int = 1,
+        ) -> dict[str, object]:
+            raise client_module.DeviceException(
+                f"request failed for Mower Camera channel-1 {ENCRYPTED_APP_ID}"
+            )
+
+    client = _client()
+    client._sync_get_cloud_protocol = lambda: _FailingP2pCloud()
+
+    with pytest.raises(client_module.DreameLawnMowerConnectionError):
+        client._sync_get_camera_stream_inputs()
+
+    diagnostics = client.last_camera_stream_diagnostics
+    assert diagnostics["completed"] is False
+    assert diagnostics["stages"][-1]["stage"] == "cloud_p2p_info"
+    serialized_diagnostics = str(diagnostics)
+    assert "Mower Camera" not in serialized_diagnostics
+    assert "channel-1" not in serialized_diagnostics
+    assert ENCRYPTED_APP_ID not in serialized_diagnostics
 
 
 def test_camera_stream_setup_failure_replaces_stale_diagnostics() -> None:
