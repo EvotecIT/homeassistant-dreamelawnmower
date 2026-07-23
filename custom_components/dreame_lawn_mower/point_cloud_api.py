@@ -44,6 +44,14 @@ class _CacheEntry:
     download: DreameLawnMowerPointCloudDownload
 
 
+@dataclass(frozen=True, slots=True)
+class _InflightGeneration:
+    """Track one generation and the config-entry lifetime that started it."""
+
+    epoch: int
+    task: asyncio.Task[DreameLawnMowerPointCloudDownload]
+
+
 class DreameLawnMowerPointCloudAPI:
     """Coordinate bounded, de-duplicated point-cloud downloads."""
 
@@ -58,10 +66,7 @@ class DreameLawnMowerPointCloudAPI:
         self._cache_ttl = cache_ttl
         self._cache_max_entries = cache_max_entries
         self._cache: OrderedDict[tuple[str, int], _CacheEntry] = OrderedDict()
-        self._inflight: dict[
-            tuple[str, int],
-            asyncio.Task[DreameLawnMowerPointCloudDownload],
-        ] = {}
+        self._inflight: dict[tuple[str, int], _InflightGeneration] = {}
         self._entry_epochs: dict[str, int] = {}
 
     async def async_get(
@@ -79,37 +84,74 @@ class DreameLawnMowerPointCloudAPI:
         if cached is not None and not refresh:
             return cached.download
 
-        task = self._inflight.get(key)
-        if task is None:
-            epoch = self._entry_epochs.get(entry_id, 0)
-            generation = self._async_generate(
-                key,
-                coordinator,
-                epoch=epoch,
+        epoch = self._entry_epochs.get(entry_id, 0)
+        inflight = self._inflight.get(key)
+        if inflight is not None:
+            if inflight.epoch == epoch:
+                return await asyncio.shield(inflight.task)
+            await self._async_discard_stale_generation(key, inflight)
+            return await self.async_get(entry_id, map_index, refresh=refresh)
+
+        other_generation = next(
+            (
+                (other_key, generation)
+                for other_key, generation in self._inflight.items()
+                if other_key[0] == entry_id
+            ),
+            None,
+        )
+        if other_generation is not None:
+            other_key, inflight = other_generation
+            if inflight.epoch != epoch:
+                await self._async_discard_stale_generation(other_key, inflight)
+                return await self.async_get(entry_id, map_index, refresh=refresh)
+            raise DreameLawnMowerPointCloudError(
+                "Another point-cloud generation is already in progress "
+                "for this mower."
             )
-            create_task = getattr(self._hass, "async_create_task", None)
-            if callable(create_task):
-                task = create_task(
-                    generation,
-                    name=f"{DOMAIN} point cloud {entry_id}:{map_index}",
-                )
-            else:
-                task = asyncio.create_task(
-                    generation,
-                    name=f"{DOMAIN} point cloud {entry_id}:{map_index}",
-                )
-            self._inflight[key] = task
-            task.add_done_callback(
-                lambda completed, *, inflight_key=key: self._generation_done(
-                    inflight_key,
-                    completed,
-                )
+
+        generation = self._async_generate(
+            key,
+            coordinator,
+            epoch=epoch,
+        )
+        create_task = getattr(self._hass, "async_create_task", None)
+        if callable(create_task):
+            task = create_task(
+                generation,
+                name=f"{DOMAIN} point cloud {entry_id}:{map_index}",
             )
+        else:
+            task = asyncio.create_task(
+                generation,
+                name=f"{DOMAIN} point cloud {entry_id}:{map_index}",
+            )
+        inflight = _InflightGeneration(epoch=epoch, task=task)
+        self._inflight[key] = inflight
+        task.add_done_callback(
+            lambda completed, *, inflight_key=key: self._generation_done(
+                inflight_key,
+                completed,
+            )
+        )
 
         # The HTTP requester may disconnect while asyncio.to_thread keeps running.
         # Shield the shared generation so another request joins it instead of
         # launching a second mower-side job.
         return await asyncio.shield(task)
+
+    async def _async_discard_stale_generation(
+        self,
+        key: tuple[str, int],
+        inflight: _InflightGeneration,
+    ) -> None:
+        """Wait for old-entry work to finish without returning its result."""
+        try:
+            await asyncio.shield(inflight.task)
+        except Exception:  # noqa: BLE001 - stale result and details are discarded.
+            pass
+        if self._inflight.get(key) is inflight:
+            self._inflight.pop(key, None)
 
     @callback
     def purge_entry(self, entry_id: str) -> None:
@@ -126,17 +168,24 @@ class DreameLawnMowerPointCloudAPI:
         epoch: int,
     ) -> DreameLawnMowerPointCloudDownload:
         """Run and cache one generation independently of HTTP waiters."""
+        if self._entry_epochs.get(key[0], 0) != epoch:
+            raise DreameLawnMowerPointCloudError(
+                "The mower entry changed before point-cloud generation started."
+            )
         download = await coordinator.client.async_download_app_map_point_cloud(
             map_index=key[1]
         )
-        if self._entry_epochs.get(key[0], 0) == epoch:
-            self._cache[key] = _CacheEntry(
-                created_at=time.monotonic(),
-                download=download,
+        if self._entry_epochs.get(key[0], 0) != epoch:
+            raise DreameLawnMowerPointCloudError(
+                "The mower entry changed during point-cloud generation."
             )
-            self._cache.move_to_end(key)
-            while len(self._cache) > self._cache_max_entries:
-                self._cache.popitem(last=False)
+        self._cache[key] = _CacheEntry(
+            created_at=time.monotonic(),
+            download=download,
+        )
+        self._cache.move_to_end(key)
+        while len(self._cache) > self._cache_max_entries:
+            self._cache.popitem(last=False)
         return download
 
     @callback
@@ -146,7 +195,8 @@ class DreameLawnMowerPointCloudAPI:
         task: asyncio.Task[DreameLawnMowerPointCloudDownload],
     ) -> None:
         """Retire an in-flight generation only after its actual work finishes."""
-        if self._inflight.get(key) is task:
+        inflight = self._inflight.get(key)
+        if inflight is not None and inflight.task is task:
             self._inflight.pop(key, None)
         if not task.cancelled():
             task.exception()

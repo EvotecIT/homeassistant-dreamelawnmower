@@ -12,6 +12,9 @@ from aiohttp import web
 from homeassistant.exceptions import Unauthorized
 
 from custom_components.dreame_lawn_mower.const import DOMAIN
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    DreameLawnMowerPointCloudError,
+)
 from custom_components.dreame_lawn_mower.point_cloud_api import (
     POINT_CLOUD_API_DATA_KEY,
     DreameLawnMowerPointCloudAPI,
@@ -162,6 +165,108 @@ def test_point_cloud_api_keeps_generation_alive_after_waiter_cancellation() -> N
     asyncio.run(run())
 
     assert calls == 1
+
+
+def test_point_cloud_api_limits_each_mower_to_one_generation() -> None:
+    calls: list[int] = []
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def download(**kwargs: Any) -> DreameLawnMowerPointCloudDownload:
+        calls.append(kwargs["map_index"])
+        started.set()
+        await release.wait()
+        return _download(kwargs["map_index"])
+
+    hass = SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry-1": SimpleNamespace(
+                    client=SimpleNamespace(
+                        async_download_app_map_point_cloud=download,
+                    )
+                )
+            }
+        }
+    )
+    api = DreameLawnMowerPointCloudAPI(hass)
+
+    async def run() -> None:
+        first = asyncio.create_task(api.async_get("entry-1", 0, refresh=True))
+        await started.wait()
+        with pytest.raises(
+            DreameLawnMowerPointCloudError,
+            match="already in progress",
+        ):
+            await api.async_get("entry-1", 1, refresh=True)
+        assert calls == [0]
+        release.set()
+        assert await first == _download(0)
+
+    asyncio.run(run())
+
+    assert calls == [0]
+
+
+def test_point_cloud_api_discards_inflight_result_after_entry_reload() -> None:
+    old_started = asyncio.Event()
+    old_release = asyncio.Event()
+    old_result = _download()
+    new_result = _download()
+    old_calls = 0
+    new_calls = 0
+
+    async def old_download(**kwargs: Any) -> DreameLawnMowerPointCloudDownload:
+        nonlocal old_calls
+        old_calls += 1
+        old_started.set()
+        await old_release.wait()
+        return old_result
+
+    async def new_download(**kwargs: Any) -> DreameLawnMowerPointCloudDownload:
+        nonlocal new_calls
+        new_calls += 1
+        return new_result
+
+    hass = SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry-1": SimpleNamespace(
+                    client=SimpleNamespace(
+                        async_download_app_map_point_cloud=old_download,
+                    )
+                )
+            }
+        }
+    )
+    api = DreameLawnMowerPointCloudAPI(hass)
+
+    async def run() -> None:
+        old_request = asyncio.create_task(
+            api.async_get("entry-1", 0, refresh=True)
+        )
+        await old_started.wait()
+        api.purge_entry("entry-1")
+        hass.data[DOMAIN]["entry-1"] = SimpleNamespace(
+            client=SimpleNamespace(
+                async_download_app_map_point_cloud=new_download,
+            )
+        )
+
+        reloaded_request = asyncio.create_task(
+            api.async_get("entry-1", 0, refresh=True)
+        )
+        await asyncio.sleep(0)
+        assert new_calls == 0
+        old_release.set()
+        with pytest.raises(DreameLawnMowerPointCloudError, match="entry changed"):
+            await old_request
+        assert await reloaded_request is new_result
+
+    asyncio.run(run())
+
+    assert old_calls == 1
+    assert new_calls == 1
 
 
 def test_point_cloud_api_purges_unloaded_entry() -> None:
