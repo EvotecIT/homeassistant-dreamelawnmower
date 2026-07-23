@@ -14,9 +14,12 @@ MOWER_FAULT_CODE_NAMES: Final[dict[int, str]] = {
 # Normal operating conditions that can change what the mower does without
 # requiring intervention. These remain visible as status notices while the
 # mower entity continues to report its real activity.
+# A2 firmware uses code 56 for bad-weather protection; the inherited vacuum
+# enum reuses 56 for a laser fault and must not decide mower entity state.
 MOWER_STATUS_NOTICE_CODE_NAMES: Final[dict[int, str]] = {
-    53: "rain_detected",
+    53: "scheduled_task_started",
     54: "low_battery",
+    56: "bad_weather_protection_active",
 }
 
 # Mower firmware also sends lifecycle events through property 2.2, which the

@@ -101,9 +101,17 @@ def test_mower_fault_codes_override_vacuum_labels(
 @pytest.mark.parametrize(
     ("code", "inherited_name", "state", "expected_activity", "expected_notice"),
     [
-        (53, "unknown", "MOWING", "mowing", "Rain detected"),
+        (53, "unknown", "MOWING", "mowing", "Scheduled task started"),
         (54, "edge", "RETURNING", "returning", "Low battery"),
         (54, "edge", "CHARGING", "docked", "Low battery"),
+        (
+            56,
+            "laser",
+            "RETURNING",
+            "returning",
+            "Bad weather protection active",
+        ),
+        (56, "laser", "CHARGING", "docked", "Bad weather protection active"),
     ],
 )
 def test_mower_operating_conditions_are_not_hard_errors(
