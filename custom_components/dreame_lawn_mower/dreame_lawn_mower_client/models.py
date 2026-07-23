@@ -20,6 +20,7 @@ SUPPORTED_ACCOUNT_TYPES = ("dreame", "mova")
 SUPPORTED_MODEL_MARKER = ".mower."
 MIN_REMOTE_CONTROL_BATTERY_LEVEL = 20
 REMOTE_CONTROL_STATES = {"remote_control"}
+REALTIME_STATE_PROPERTY_KEY = "2.1"
 REALTIME_ERROR_PROPERTY_KEY = "2.2"
 
 MODEL_NAME_MAP = {
@@ -158,6 +159,76 @@ def _realtime_error_code_from_device(device: Any) -> int | None:
     return None if code in (None, -1) else code
 
 
+def _realtime_property_last_seen(device: Any, key: str) -> float | None:
+    """Return when a realtime property was received, if ordering is known."""
+    realtime_properties = getattr(device, "realtime_properties", {}) or {}
+    entry = realtime_properties.get(key)
+    if not isinstance(entry, Mapping):
+        return None
+    try:
+        return float(entry.get("last_seen"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _fault_recovery_confirmed(
+    previous_snapshot: DreameLawnMowerSnapshot | None,
+    *,
+    current_state_is_operational: bool,
+    error_code: int | None,
+    realtime_error_code: int | None,
+    device: Any,
+    model: str | None,
+) -> bool:
+    """Return whether a newer operational transition supersedes a fault."""
+    if previous_snapshot is None or not current_state_is_operational:
+        return False
+
+    realtime_fault_code = _active_error_code_from_raw(
+        realtime_error_code,
+        model=model,
+    )
+    error_last_seen = _realtime_property_last_seen(
+        device,
+        REALTIME_ERROR_PROPERTY_KEY,
+    )
+    if (
+        previous_snapshot._error_suppression_active
+        and previous_snapshot._suppressed_error_code == error_code
+    ):
+        if realtime_fault_code is None:
+            return True
+        return bool(
+            realtime_fault_code == error_code
+            and previous_snapshot._suppressed_realtime_error_last_seen is not None
+            and error_last_seen is not None
+            and error_last_seen
+            <= previous_snapshot._suppressed_realtime_error_last_seen
+        )
+
+    if previous_snapshot.activity != "error":
+        return False
+
+    if realtime_fault_code is None:
+        return previous_snapshot.state in {
+            "error",
+            "paused",
+            "monitoring_paused",
+        }
+    if realtime_fault_code != error_code:
+        return False
+
+    state_last_seen = _realtime_property_last_seen(
+        device,
+        REALTIME_STATE_PROPERTY_KEY,
+    )
+    return bool(
+        state_last_seen is not None
+        and error_last_seen is not None
+        and state_last_seen > error_last_seen
+    )
+
+
 def _raw_error_code_from_device(device: Any, error_obj: Any) -> int | None:
     """Return the unmodified error property before enum normalization."""
     try:
@@ -243,6 +314,21 @@ class DreameLawnMowerSnapshot:
     status_notice_source: str | None = None
     raw_error_code: int | None = None
     realtime_error_code: int | None = None
+    _error_suppression_active: bool = field(
+        default=False,
+        repr=False,
+        compare=False,
+    )
+    _suppressed_error_code: int | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    _suppressed_realtime_error_last_seen: float | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
     firmware_version: str | None = None
     hardware_version: str | None = None
     serial_number: str | None = None
@@ -901,6 +987,8 @@ def descriptor_from_cloud_record(
 def snapshot_from_device(
     descriptor: DreameLawnMowerDescriptor,
     device: Any,
+    *,
+    previous_snapshot: DreameLawnMowerSnapshot | None = None,
 ) -> DreameLawnMowerSnapshot:
     """Convert the upstream mower device object into a normalized snapshot."""
 
@@ -1041,6 +1129,43 @@ def snapshot_from_device(
         "smart_charging",
     }
 
+    suppressed_error_code: int | None = None
+    suppressed_realtime_error_last_seen: float | None = None
+    error_suppression_active = False
+    if has_error and _fault_recovery_confirmed(
+        previous_snapshot,
+        current_state_is_operational=(
+            state in mowing_states
+            or state in returning_states
+            or state in docked_states
+        ),
+        error_code=error_code,
+        realtime_error_code=realtime_error_code,
+        device=device,
+        model=descriptor.model,
+    ):
+        # The mower can retain the last fault code after it resumes or docks.
+        # Release it only after an observed fault is superseded by operational
+        # evidence; fresh realtime faults remain authoritative.
+        error_suppression_active = True
+        suppressed_error_code = error_code
+        if (
+            _active_error_code_from_raw(
+                realtime_error_code,
+                model=descriptor.model,
+            )
+            == suppressed_error_code
+        ):
+            suppressed_realtime_error_last_seen = _realtime_property_last_seen(
+                device,
+                REALTIME_ERROR_PROPERTY_KEY,
+            )
+        error_code = None
+        error_name = None
+        error_text = None
+        has_error = False
+        error_source = None
+
     if has_error:
         activity = "error"
     elif state in paused_states:
@@ -1160,6 +1285,11 @@ def snapshot_from_device(
         status_notice_source=status_notice_source,
         raw_error_code=raw_error_code,
         realtime_error_code=realtime_error_code,
+        _error_suppression_active=error_suppression_active,
+        _suppressed_error_code=suppressed_error_code,
+        _suppressed_realtime_error_last_seen=(
+            suppressed_realtime_error_last_seen
+        ),
         firmware_version=getattr(
             getattr(device, "info", None),
             "firmware_version",

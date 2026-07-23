@@ -9,7 +9,7 @@ import base64
 import traceback
 from datetime import datetime
 from random import randrange
-from threading import Timer
+from threading import RLock, Timer
 from typing import Any, Optional
 
 from .app_protocol import mower_realtime_property_name
@@ -171,6 +171,7 @@ class DreameMowerDevice:
         self.unknown_properties: dict[int, dict[str, Any]] = {}
         self.realtime_properties: dict[str, dict[str, Any]] = {}
         self.last_realtime_message: dict[str, Any] | None = None
+        self._state_lock = RLock()
         self.auto_switch_data: dict[DreameMowerAutoSwitchProperty, Any] = None
         self.ai_data: dict[DreameMowerStrAIProperty | DreameMowerAIProperty, Any] = None
         self.available: bool = False  # Last update is successful or not
@@ -320,44 +321,44 @@ class DreameMowerDevice:
             return
 
         _LOGGER.debug("Message Callback: %s", message)
-        self._remember_realtime_message(message)
+        with self._state_lock:
+            self._remember_realtime_message(message)
 
-        if "method" in message:
-            self.available = True
-            if message["method"] == "properties_changed" and "params" in message:
-                params = []
-                map_params = []
-                for param in message["params"]:
-                    matched_property = None
-                    properties = [prop for prop in DreameMowerProperty]
-                    for prop in properties:
-                        if prop in self.property_mapping:
-                            mapping = self.property_mapping[prop]
-                            _LOGGER.debug("Mapping: %s", mapping)
-                            if (
-                                "aiid" not in mapping
-                                and param["siid"] == mapping["siid"]
-                                and param["piid"] == mapping["piid"]
-                            ):
-                                matched_property = prop
-                                if prop in self._default_properties:
-                                    param["did"] = str(prop.value)
-                                    param["code"] = 0
-                                    params.append(param)
-                                else:
-                                    if (
+            if "method" in message:
+                self.available = True
+                if message["method"] == "properties_changed" and "params" in message:
+                    params = []
+                    map_params = []
+                    for param in message["params"]:
+                        matched_property = None
+                        properties = [prop for prop in DreameMowerProperty]
+                        for prop in properties:
+                            if prop in self.property_mapping:
+                                mapping = self.property_mapping[prop]
+                                _LOGGER.debug("Mapping: %s", mapping)
+                                if (
+                                    "aiid" not in mapping
+                                    and param["siid"] == mapping["siid"]
+                                    and param["piid"] == mapping["piid"]
+                                ):
+                                    matched_property = prop
+                                    if prop in self._default_properties:
+                                        param["did"] = str(prop.value)
+                                        param["code"] = 0
+                                        params.append(param)
+                                    elif (
                                         prop is DreameMowerProperty.OBJECT_NAME
                                         or prop is DreameMowerProperty.MAP_DATA
                                         or prop is DreameMowerProperty.ROBOT_TIME
                                         or prop is DreameMowerProperty.OLD_MAP_DATA
                                     ):
                                         map_params.append(param)
-                                break
-                    self._remember_realtime_property(param, matched_property)
-                if len(map_params) and self._map_manager:
-                    self._map_manager.handle_properties(map_params)
+                                    break
+                        self._remember_realtime_property(param, matched_property)
+                    if len(map_params) and self._map_manager:
+                        self._map_manager.handle_properties(map_params)
 
-                self._handle_properties(params)
+                    self._handle_properties(params)
 
     def _handle_properties(self, properties) -> bool:
         changed = False
@@ -556,6 +557,11 @@ class DreameMowerDevice:
             if property_enum is not None
             else mower_realtime_property_name(key)
         )
+        received_at = (
+            self.last_realtime_message.get("received_at")
+            if isinstance(self.last_realtime_message, dict)
+            else None
+        )
         self.realtime_properties[key] = {
             "siid": siid,
             "piid": piid,
@@ -563,7 +569,11 @@ class DreameMowerDevice:
             "code": payload.get("code"),
             "value": copy.deepcopy(payload.get("value")),
             "property_name": property_name,
-            "last_seen": time.time(),
+            "last_seen": (
+                received_at
+                if isinstance(received_at, (int, float))
+                else time.time()
+            ),
         }
 
     def _request_properties(self, properties: list[DreameMowerProperty] = None) -> bool:
