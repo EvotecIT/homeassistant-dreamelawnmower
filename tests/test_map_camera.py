@@ -6,6 +6,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+from custom_components.dreame_lawn_mower.camera import DreameLawnMowerMapCamera
 from custom_components.dreame_lawn_mower.map_attributes import map_camera_attributes
 from custom_components.dreame_lawn_mower.map_cache import (
     DreameLawnMowerMapCameraCache,
@@ -158,6 +159,48 @@ def test_map_camera_attributes_include_all_app_map_metadata() -> None:
     ]
     assert attributes["map_has_live_path"] is None
     assert attributes["map_details"] is None
+
+
+def test_point_cloud_path_uses_coordinator_current_map_over_stale_camera_view() -> None:
+    """The 3D endpoint follows a map switch before the camera cache refreshes."""
+    stale_view = DreameLawnMowerMapView(
+        source="app_action_map",
+        app_maps={
+            "current_map_index": 0,
+            "maps": [
+                {"idx": 0, "current": True},
+                {"idx": 1, "current": False},
+            ],
+        },
+    )
+    camera = SimpleNamespace(
+        _map_cache=SimpleNamespace(
+            last_view=stale_view,
+            last_image=None,
+            last_refresh_at=None,
+            last_error=None,
+        ),
+        coordinator=SimpleNamespace(
+            app_maps={
+                "current_map_index": 1,
+                "maps": [
+                    {"idx": 0, "current": False},
+                    {"idx": 1, "current": True},
+                ],
+            },
+            batch_device_data=None,
+            selected_map_index=1,
+            entry=SimpleNamespace(entry_id="entry-1"),
+        ),
+    )
+
+    attributes = DreameLawnMowerMapCamera.extra_state_attributes.fget(camera)
+
+    assert attributes["app_current_map_index"] == 0
+    assert (
+        attributes["point_cloud_api_path"]
+        == "/api/dreame_lawn_mower/point-cloud/entry-1/1"
+    )
 
 
 def test_map_camera_attributes_include_live_path_metadata() -> None:

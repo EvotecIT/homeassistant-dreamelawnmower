@@ -22,6 +22,7 @@ from .const import (
     DEFAULT_MAP_ROTATION,
     DOMAIN,
 )
+from .control_options import current_map_index
 from .coordinator import DreameLawnMowerCoordinator
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
@@ -153,9 +154,11 @@ class DreameLawnMowerMapCamera(
             refreshed_at=self._map_cache.last_refresh_at,
             last_error=self._map_cache.last_error,
         )
-        map_index = attributes.get("app_current_map_index")
-        if isinstance(map_index, bool) or not isinstance(map_index, int):
-            map_index = 0
+        map_index = current_map_index(
+            self.coordinator.app_maps,
+            self.coordinator.batch_device_data,
+            selected_map_index=self.coordinator.selected_map_index,
+        )
         attributes["point_cloud_api_path"] = point_cloud_api_path(
             self.coordinator.entry.entry_id,
             map_index,
