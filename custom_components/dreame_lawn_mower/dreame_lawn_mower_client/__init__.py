@@ -110,6 +110,13 @@ from .models import (
     remote_control_block_reason,
     remote_control_state_safe,
 )
+from .point_cloud import (
+    DEFAULT_POINT_CLOUD_MAX_BYTES,
+    DreameLawnMowerPointCloudDownload,
+    DreameLawnMowerPointCloudError,
+    DreameLawnMowerPointCloudMetadata,
+    parse_pcd_metadata,
+)
 from .mowing_preferences import (
     MOWING_PREFERENCE_MODE_FIELD,
     MOWING_PREFERENCE_PROPERTY_KEY,
@@ -188,6 +195,9 @@ __all__ = [
     "DreameLawnMowerMapDiagnostics",
     "DreameLawnMowerMapSummary",
     "DreameLawnMowerMapView",
+    "DreameLawnMowerPointCloudDownload",
+    "DreameLawnMowerPointCloudError",
+    "DreameLawnMowerPointCloudMetadata",
     "MowingTaskResponseError",
     "DreameLawnMowerRemoteControlSupport",
     "DreameLawnMowerSnapshot",
@@ -223,6 +233,7 @@ __all__ = [
     "DEFAULT_LAN_DISCOVERY_PORT",
     "DEFAULT_LAN_DISCOVERY_TIMEOUT",
     "DEFAULT_LAN_DISCOVERY_VERSION",
+    "DEFAULT_POINT_CLOUD_MAX_BYTES",
     "XP2P_PROTOCOL_AUTO",
     "XP2P_PROTOCOL_TCP",
     "XP2P_PROTOCOL_UDP",
@@ -302,6 +313,7 @@ __all__ = [
     "normalize_debug_ota_catalog_payload",
     "normalize_maintenance_item",
     "parse_lan_video_probe_response",
+    "parse_pcd_metadata",
     "mowing_preference_mode_name",
     "normalize_mowing_preference_mode",
     "remote_control_block_reason",

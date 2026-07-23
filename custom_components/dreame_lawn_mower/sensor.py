@@ -3298,7 +3298,7 @@ def _app_map_object_summary(value: Any) -> dict[str, Any] | None:
     objects = [
         {
             key: item.get(key)
-            for key in ("name", "extension", "url_present", "error")
+            for key in ("extension", "url_present", "error")
             if item.get(key) is not None
         }
         for item in value.get("objects", [])

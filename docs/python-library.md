@@ -103,6 +103,7 @@ upgrade does not create duplicate entities.
 - guarded mowing-preference planning and optional live PRE writes from current
   app payloads, with explicit confirmation required before execution
 - read-only app-map retrieval, all-map summaries, and simple map rendering
+- on-demand app-map point-cloud generation, bounded download, and PCD validation
 - weather/rain-protection and mowing-preference diagnostics
 - firmware/update evidence gathering without claiming unverified OTA support
 - guarded remote-control support helpers for supervised short movement pulses
@@ -114,6 +115,29 @@ Prefer read-only calls while investigating a mower. Methods and examples that
 can move the mower or change mower settings use explicit execution flags,
 confirmation flags, or state guards. Do not run live movement or write probes
 from automations.
+
+## Point Clouds
+
+`async_download_app_map_point_cloud()` owns the complete mower/cloud flow:
+
+```python
+from pathlib import Path
+
+download = await client.async_download_app_map_point_cloud(map_index=0)
+print(download.metadata.as_dict())
+
+# Persist geometry only when you explicitly need a local PCD file.
+Path("garden-map.pcd").write_bytes(download.content)
+```
+
+The method triggers app action `o:10`, polls the transient `OBJ` 3D-map slot,
+resolves its short-lived cloud download immediately, enforces HTTPS, time, and
+size limits, and validates PCD 0.7 before returning. The result deliberately
+does not expose the vendor filename or cloud-signed URL.
+
+Use `python examples/point_cloud_probe.py` to print coordinate-free metadata.
+Add `--out garden-map.pcd` only when you intentionally want to persist private
+garden geometry.
 
 ## Package Layout
 
@@ -141,6 +165,7 @@ service, config-flow, and registry behavior in `custom_components`.
 
 - `examples/cloud_probe.py`
 - `examples/app_map_probe.py`
+- `examples/point_cloud_probe.py`
 - `examples/batch_device_data_probe.py`
 - `examples/schedule_probe.py`
 - `examples/schedule_write_probe.py`

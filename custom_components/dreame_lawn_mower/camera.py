@@ -35,6 +35,7 @@ from .image import (
 )
 from .map_attributes import map_camera_attributes
 from .map_cache import DreameLawnMowerMapCameraCache, map_camera_available
+from .point_cloud_api import current_point_cloud_api_path
 from .video_camera import DreameLawnMowerVideoCamera
 
 _LOGGER = logging.getLogger(__name__)
@@ -146,12 +147,19 @@ class DreameLawnMowerMapCamera(
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Expose the latest cached map summary."""
-        return map_camera_attributes(
+        attributes = map_camera_attributes(
             self._map_cache.last_view,
             image_cached=self._map_cache.last_image is not None,
             refreshed_at=self._map_cache.last_refresh_at,
             last_error=self._map_cache.last_error,
         )
+        attributes["point_cloud_api_path"] = current_point_cloud_api_path(
+            self.coordinator.entry.entry_id,
+            self.coordinator.app_maps,
+            self.coordinator.batch_device_data,
+            selected_map_index=self.coordinator.selected_map_index,
+        )
+        return attributes
 
     async def async_camera_image(
         self,

@@ -341,22 +341,27 @@ The successful map path is the app action bridge described above. On
   Assistant map camera renders the current map image, and its attributes expose
   compact metadata for every app map so secondary maps remain visible without
   switching the rendered camera frame.
-- `OBJ type=3dmap`: two `.bin` object names. Calling the app-side
-  `/dreame-user-iot/iotfile/getDownloadUrl` helper with those names returns
-  OSS-looking URLs, but direct GETs against the tested URLs returned 404 XML.
-  HA map attributes now expose object count and object names/extensions without
-  signed URLs. The binary format is therefore not downloaded or decoded yet.
-- A follow-up live check while the 3D map was visible in Dreamehome again
-  returned two `.bin` object names. Opt-in signed URL generation succeeded, but
-  direct HEAD/GET checks still returned XML error responses (`403`/`404`), so
-  the app download context or required headers remain unsolved.
-- The decompiled Dreamehome plugin shows `getOBJ(type)` sends
-  `{"m":"g","t":"OBJ","d":{"type":type}}`. It also has a direct download flow
-  that calls `/dreame-user-iot/iotfile/getDownloadUrl` with `{filename, model}`
-  and passes the returned URL to `RNFS.downloadFile`; no custom download headers
-  are visible in that flow. A separate mower action helper sends
-  `{"m":"a","o":16,"d":{"type":type,"url":url}}`, but we have not yet verified
-  whether the A2 uses that action for 3D map binaries.
+- Historical `OBJ type=3dmap` reads returned stale `.bin` metadata whose signed
+  URLs failed with `403`/`404`. Those objects are not the generated PCD flow.
+- A live A2 run on 2026-07-23 confirmed the complete sequence:
+  `{"m":"a","p":0,"o":10,"d":{"idx":0}}` requests generation, then
+  `{"m":"g","t":"OBJ","d":{"type":"3dmap"}}` briefly publishes the generated
+  object name. The client must resolve that name immediately through
+  `/dreame-user-iot/iotfile/getDownloadUrl`; the returned HTTPS URL needs no
+  custom download headers.
+- The generated file was a standard PCD 0.7 binary with fields `x y z rgb`,
+  152,318 finite points, 991 observed colors, and 2,437,272 total bytes.
+  Repeating the flow through the new public client returned the same validated
+  format and counts while the mower remained docked at
+  `charging_completed`.
+- `async_download_app_map_point_cloud()` now owns the generation, transient
+  object capture, bounded HTTPS download, and PCD validation. It returns bytes
+  plus coordinate-free metadata and deliberately omits the vendor filename and
+  signed URL.
+- Home Assistant serves those bytes only through an authenticated admin-only
+  local endpoint with `private, no-store` caching, a short in-memory TTL, and
+  in-flight request deduplication. The map camera publishes only its local
+  `point_cloud_api_path`.
 
 Use `python examples/app_map_probe.py --out app-map-current.json` for a focused
 read-only probe that omits raw coordinates by default. Add `--include-payload`
@@ -364,9 +369,13 @@ only for local parser/rendering work.
 
 Use
 `python examples/app_map_probe.py --probe-object-downloads --out app-map-objects.json`
-to generate object URLs internally and record sanitized HEAD/ranged GET results.
-Signed object URLs are redacted from the output unless `--include-object-urls` is
-explicitly added for local-only debugging.
+only when comparing the older metadata objects. It records sanitized
+HEAD/ranged GET results and redacts signed URLs unless
+`--include-object-urls` is explicitly added for local-only debugging.
+
+Use `python examples/point_cloud_probe.py` for the confirmed generation flow.
+It prints PCD metadata without coordinates or signed cloud details. Add
+`--out garden-map.pcd` only for intentional local geometry analysis.
 
 Use
 `python examples/app_map_probe.py --render-dir app-map-renders --out app-map-render.json`

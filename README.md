@@ -91,6 +91,8 @@ region/account details are especially helpful for moving a device from
 - guarded mowing-preference update service with dry-run mode by default
 - read-only map camera using the app-map payload when available, with options
   for label scale and clockwise display rotation
+- on-demand PCD point-cloud generation through an authenticated, admin-only
+  Home Assistant download endpoint
 - disabled-by-default all-maps and map-diagnostics cameras
 - live video camera with a managed XP2P runtime on Linux x86_64 and aarch64 hosts
 - runtime telemetry sensors for mission progress, mission area, mower pose, and live-track length
@@ -133,7 +135,8 @@ The following areas are intentionally cautious:
 - the managed video runtime currently supports Linux x86_64 and aarch64 Home
   Assistant hosts, and the mower must be active and away from its station before
   the vendor permits live video
-- 3D map object downloads are metadata-first and not treated as stable
+- 3D point-cloud generation and PCD download are validated on the Dreame A2;
+  other mower families still need field reports
 - manual driving must stay supervised and uses strict state and battery guards
 
 ## Installation
@@ -372,6 +375,20 @@ If the mower has multiple maps, enable the disabled `All Maps` camera to render
 a contact sheet. Use `Map Diagnostics` when the map image is missing or when you
 need source, counts, and parser evidence.
 
+The map camera also advertises a local `point_cloud_api_path` attribute. A
+Home Assistant administrator can sign that path for a short-lived download.
+The integration asks the mower to generate the selected app map, immediately
+captures the transient object, validates the returned PCD file, and serves it
+with `private, no-store` caching. Vendor filenames, cloud-signed URLs, and point
+coordinates are never written to entity state or logs.
+
+The companion
+[Lawn Mower Card](https://github.com/EvotecIT/lovelace-lawn-mower-card) detects
+this attribute and offers an on-demand 3D viewer. It does not generate or
+download garden geometry during an ordinary dashboard render. Select the Hero
+layout's **3D** tab or press **Load 3D map** in another layout when you want to
+fetch it. Point-cloud access is currently restricted to Home Assistant admins.
+
 Current map support now includes:
 
 - a read-only `Map` camera for the active map
@@ -382,6 +399,7 @@ Current map support now includes:
 - services for switching the active mower map and starting explicit zone, spot,
   or edge jobs
 - runtime live-track telemetry surfaced through sensors and map-camera attributes
+- an admin-only, transient PCD point-cloud download for the selected app map
 - circular and rotated rectangular forbidden areas rendered from their compact
   mower map representation
 
