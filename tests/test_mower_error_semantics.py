@@ -26,7 +26,7 @@ mower_fault_active = device_code_semantics.mower_fault_active
 class _ErrorDevice:
     def __init__(
         self,
-        code: int,
+        code: int | None,
         inherited_name: str,
         *,
         state: str = "PAUSED",
@@ -71,7 +71,7 @@ class _ErrorDevice:
 
 
 def _snapshot(
-    code: int,
+    code: int | None,
     inherited_name: str,
     *,
     realtime_error_code: int | None = None,
@@ -160,6 +160,52 @@ def test_mower_native_name_replaces_vacuum_name() -> None:
     assert snapshot.error_name == "robot_tilted"
     assert snapshot.error_text is None
     assert snapshot.error_display == "Robot tilted"
+
+
+@pytest.mark.parametrize(
+    ("state", "expected_activity"),
+    [
+        ("MOWING", "mowing"),
+        ("RETURNING", "returning"),
+        ("CHARGING", "docked"),
+    ],
+)
+def test_operational_state_releases_stale_fault_code(
+    state: str,
+    expected_activity: str,
+) -> None:
+    fault = _snapshot(0, "drop", realtime_error_code=0)
+    recovered = _snapshot(
+        0,
+        "drop",
+        realtime_error_code=0,
+        state=state,
+    )
+
+    assert fault.activity == "error"
+    assert recovered.activity == expected_activity
+    assert recovered.error_code is None
+    assert recovered.error_name is None
+    assert recovered.error_display is None
+    assert recovered.error_source is None
+    assert recovered.raw_error_code == 0
+    assert recovered.realtime_error_code == 0
+
+
+def test_operational_state_releases_stale_realtime_only_fault() -> None:
+    snapshot = _snapshot(
+        None,
+        "",
+        realtime_error_code=0,
+        state="MOWING",
+    )
+
+    assert snapshot.activity == "mowing"
+    assert snapshot.error_code is None
+    assert snapshot.error_display is None
+    assert snapshot.error_source is None
+    assert snapshot.raw_error_code is None
+    assert snapshot.realtime_error_code == 0
 
 
 def test_recoverable_alert_does_not_latch_error() -> None:

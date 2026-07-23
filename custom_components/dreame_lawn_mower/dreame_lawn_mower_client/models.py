@@ -1041,6 +1041,23 @@ def snapshot_from_device(
         "smart_charging",
     }
 
+    if (
+        has_error
+        and (
+            state in mowing_states
+            or state in returning_states
+            or state in docked_states
+        )
+    ):
+        # The mower can retain the last fault code after it resumes or docks.
+        # Current operational state is stronger evidence that the fault cleared;
+        # keep raw codes for diagnostics without latching entity activity.
+        error_code = None
+        error_name = None
+        error_text = None
+        has_error = False
+        error_source = None
+
     if has_error:
         activity = "error"
     elif state in paused_states:
