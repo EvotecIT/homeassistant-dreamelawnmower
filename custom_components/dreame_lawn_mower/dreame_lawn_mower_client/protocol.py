@@ -374,7 +374,12 @@ class DreameMowerDreameHomeCloudProtocol:
                 return info
         return None
 
-    def login(self) -> bool:
+    def login(
+        self,
+        timeout: float = 10,
+        *,
+        deadline: float | None = None,
+    ) -> bool:
         self._session.close()
         self._session = requests.session()
         self._logged_in = False
@@ -406,14 +411,37 @@ class DreameMowerDreameHomeCloudProtocol:
             if self._country == "cn":
                 headers[self._strings[48]] = self._strings[4]
 
+            request_timeout = timeout
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise requests.exceptions.Timeout(
+                        "The cloud login timed out."
+                    )
+                request_timeout = min(request_timeout, remaining)
+            request_options = {
+                "headers": headers,
+                "data": data,
+                "timeout": request_timeout,
+            }
+            if deadline is not None:
+                request_options["stream"] = True
             response = self._session.post(
                 self.get_api_url() + self._strings[17],
-                headers=headers,
-                data=data,
-                timeout=10,
+                **request_options,
             )
+            if deadline is not None:
+                try:
+                    response_text = _read_cloud_response_text_with_deadline(
+                        response,
+                        deadline=deadline,
+                    )
+                finally:
+                    response.close()
+            else:
+                response_text = response.text
             if response.status_code == 200:
-                data = json.loads(response.text)
+                data = json.loads(response_text)
                 if self._strings[18] in data:
                     self._key = data.get(self._strings[18])
                     self._secondary_key = data.get(self._strings[19])
@@ -426,17 +454,20 @@ class DreameMowerDreameHomeCloudProtocol:
                     self._ti = data.get(self._strings[22], self._ti)
             else:
                 try:
-                    data = json.loads(response.text)
+                    data = json.loads(response_text)
                     if "error_description" in data and "refresh token" in data["error_description"]:
                         self._secondary_key = None
-                        return self.login()
+                        return self.login(timeout=timeout, deadline=deadline)
                 except:
                     pass
-                _LOGGER.error("Login failed: %s => %s -- %s -- %s", response.text,
+                _LOGGER.error("Login failed: %s => %s -- %s -- %s", response_text,
                               self.get_api_url() + self._strings[17], headers, data)
         except requests.exceptions.Timeout:
             response = None
-            _LOGGER.warning("Login Failed: Read timed out. (read timeout=10)")
+            _LOGGER.warning(
+                "Login Failed: Read timed out. (read timeout=%s)",
+                timeout,
+            )
         except Exception as ex:
             response = None
             _LOGGER.error("Login failed: %s", str(ex))
@@ -446,9 +477,19 @@ class DreameMowerDreameHomeCloudProtocol:
             self._connected = True
         return self._logged_in
 
-    def get_devices(self) -> Any:
+    def get_devices(
+        self,
+        retry_count: int = 2,
+        timeout: float = 20,
+        *,
+        deadline: float | None = None,
+    ) -> Any:
         response = self._api_call(
-            f"{self._strings[23]}/{self._strings[24]}/{self._strings[27]}/{self._strings[28]}")
+            f"{self._strings[23]}/{self._strings[24]}/{self._strings[27]}/{self._strings[28]}",
+            retry_count=retry_count,
+            timeout=timeout,
+            deadline=deadline,
+        )
         _LOGGER.debug(
             "DreameMowerDreameHomeCloudProtocol.get_devices %s", response)
         if response:
@@ -486,7 +527,14 @@ class DreameMowerDreameHomeCloudProtocol:
             return data
         return None
 
-    def get_device_info_v2(self, lang: str | None = None) -> Any:
+    def get_device_info_v2(
+        self,
+        lang: str | None = None,
+        retry_count: int = 2,
+        timeout: float = 20,
+        *,
+        deadline: float | None = None,
+    ) -> Any:
         params = {"did": self._did}
         if lang:
             params["lang"] = lang
@@ -494,6 +542,9 @@ class DreameMowerDreameHomeCloudProtocol:
         response = self.request(
             f"{self.get_api_url()}/dreame-user-iot/iotuserbind/device/info",
             json.dumps(params, separators=(",", ":")),
+            retry_count=retry_count,
+            timeout=timeout,
+            deadline=deadline,
         )
         if response and "data" in response and response["code"] == 0:
             data = response["data"]
@@ -663,10 +714,19 @@ class DreameMowerDreameHomeCloudProtocol:
             return response["data"]
         return None
 
-    def get_device_info(self) -> Any:
+    def get_device_info(
+        self,
+        retry_count: int = 2,
+        timeout: float = 20,
+        *,
+        deadline: float | None = None,
+    ) -> Any:
         response = self._api_call(
             f"{self._strings[23]}/{self._strings[24]}/{self._strings[27]}/{self._strings[29]}",
             {"did": self._did},
+            retry_count=retry_count,
+            timeout=timeout,
+            deadline=deadline,
         )
         if response and "data" in response and response["code"] == 0:
             data = response["data"]
@@ -674,6 +734,9 @@ class DreameMowerDreameHomeCloudProtocol:
             response = self._api_call(
                 f"{self._strings[23]}/{self._strings[25]}/{self._strings[30]}",
                 {"did": self._did},
+                retry_count=retry_count,
+                timeout=timeout,
+                deadline=deadline,
             )
             if response and "data" in response and response["code"] == 0:
                 if self._strings[31] in response["data"]:
@@ -684,7 +747,11 @@ class DreameMowerDreameHomeCloudProtocol:
                 else:
                     _LOGGER.debug(
                         "Get Device OTC Info Retrying with fallback... (%s)", response)
-                    devices = self.get_devices()
+                    devices = self.get_devices(
+                        retry_count=retry_count,
+                        timeout=timeout,
+                        deadline=deadline,
+                    )
                     if devices is not None:
                         found = list(
                             filter(
@@ -881,6 +948,8 @@ class DreameMowerDreameHomeCloudProtocol:
         object_name: str = "",
         retry_count: int = 2,
         timeout: float = 20,
+        *,
+        deadline: float | None = None,
     ) -> str:
         api_response = self._api_call(
             f"{self._strings[23]}/{self._strings[39]}/{self._strings[55]}",
@@ -892,6 +961,7 @@ class DreameMowerDreameHomeCloudProtocol:
             },
             retry_count=retry_count,
             timeout=timeout,
+            deadline=deadline,
         )
         if api_response is None or "data" not in api_response:
             return None
@@ -979,7 +1049,22 @@ class DreameMowerDreameHomeCloudProtocol:
         while retries < retry_count + 1:
             try:
                 if self._key_expire and time.time() > self._key_expire:
-                    self.login()
+                    if deadline is None:
+                        self.login()
+                    else:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise requests.exceptions.Timeout(
+                                "The cloud response timed out."
+                            )
+                        if not self.login(
+                            timeout=min(timeout, remaining),
+                            deadline=deadline,
+                        ):
+                            raise requests.exceptions.Timeout(
+                                "The cloud login did not complete before "
+                                "the response deadline."
+                            )
 
                 headers = {
                     "Accept": "*/*",

@@ -3898,7 +3898,7 @@ class DreameLawnMowerClient:
             require_data=False,
         )
 
-        cloud = self._sync_get_cloud_protocol()
+        cloud = self._sync_get_cloud_protocol(deadline=deadline)
         if not hasattr(cloud, "get_interim_file_url"):
             raise DreameLawnMowerPointCloudError(
                 "The configured cloud protocol cannot download interim files."
@@ -4031,6 +4031,7 @@ class DreameLawnMowerClient:
             object_name,
             retry_count=0,
             timeout=remaining,
+            deadline=deadline,
         )
         if time.monotonic() >= deadline:
             raise DreameLawnMowerPointCloudError(
@@ -4093,13 +4094,29 @@ class DreameLawnMowerClient:
         deadline: float | None = None,
         redact_response: bool = False,
     ) -> Any:
-        cloud = self._sync_get_cloud_protocol()
+        cloud = (
+            self._sync_get_cloud_protocol(deadline=deadline)
+            if deadline is not None
+            else self._sync_get_cloud_protocol()
+        )
         if not getattr(cloud, "_host", None):
             try:
+                preflight_options: dict[str, Any] = {}
+                if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise DreameLawnMowerConnectionError(
+                            "Point-cloud cloud setup timed out."
+                        )
+                    preflight_options = {
+                        "retry_count": 0,
+                        "timeout": remaining,
+                        "deadline": deadline,
+                    }
                 if hasattr(cloud, "get_device_info_v2"):
-                    cloud.get_device_info_v2("en")
+                    cloud.get_device_info_v2("en", **preflight_options)
                 elif hasattr(cloud, "get_device_info"):
-                    cloud.get_device_info()
+                    cloud.get_device_info(**preflight_options)
             except DeviceException as err:
                 raise DreameLawnMowerConnectionError(str(err)) from err
         try:
@@ -4109,6 +4126,16 @@ class DreameLawnMowerClient:
             if timeout is not None:
                 request_options["timeout"] = timeout
             if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise DreameLawnMowerConnectionError(
+                        "Point-cloud cloud request timed out."
+                    )
+                request_options["timeout"] = (
+                    min(timeout, remaining)
+                    if timeout is not None
+                    else remaining
+                )
                 request_options["deadline"] = deadline
             if redact_response:
                 request_options["redact_response"] = True
@@ -4619,16 +4646,28 @@ class DreameLawnMowerClient:
 
         return rendered
 
-    def _sync_get_cloud_protocol(self):
+    def _sync_get_cloud_protocol(self, *, deadline: float | None = None):
         device = self._ensure_device()
         protocol = getattr(device, "_protocol", None)
         cloud = getattr(protocol, "cloud", None)
         if cloud is None:
             raise DreameLawnMowerConnectionError("Cloud connection is unavailable.")
-        if not getattr(cloud, "logged_in", False) and not cloud.login():
-            raise DreameLawnMowerConnectionError(
-                "Unable to log in to the mower cloud API."
-            )
+        if not getattr(cloud, "logged_in", False):
+            login_options: dict[str, Any] = {}
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise DreameLawnMowerConnectionError(
+                        "Point-cloud cloud login timed out."
+                    )
+                login_options = {
+                    "timeout": remaining,
+                    "deadline": deadline,
+                }
+            if not cloud.login(**login_options):
+                raise DreameLawnMowerConnectionError(
+                    "Unable to log in to the mower cloud API."
+                )
         return cloud
 
     def _ensure_device(self):

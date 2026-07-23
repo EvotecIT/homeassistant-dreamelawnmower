@@ -225,7 +225,7 @@ def test_download_point_cloud_uses_a2_generation_flow(
     )()
     content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
     client._sync_call_app_action = call_app_action
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
     monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
     downloads = iter([b"not a pcd", content])
     monkeypatch.setattr(
@@ -480,6 +480,21 @@ def test_ascii_point_cloud_rejects_oversized_row_before_splitting() -> None:
         parse_pcd_metadata(content)
 
 
+def test_ascii_point_cloud_rejects_attacker_controlled_scalar_count() -> None:
+    content = _ascii_pcd(1)
+    content = content.replace(b"FIELDS x y z\n", b"FIELDS x y z extra\n")
+    content = content.replace(b"SIZE 4 4 4\n", b"SIZE 4 4 4 4\n")
+    content = content.replace(b"TYPE F F F\n", b"TYPE F F F F\n")
+    content = content.replace(b"COUNT 1 1 1\n", b"COUNT 1 1 1 1000000\n")
+    content = content.replace(b"1 2 3\n", (b"0 " * 10_000) + b"\n")
+
+    with pytest.raises(
+        DreameLawnMowerPointCloudError,
+        match="too many scalar values",
+    ):
+        parse_pcd_metadata(content)
+
+
 def test_point_cloud_does_not_redownload_same_rejected_object(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -508,7 +523,7 @@ def test_point_cloud_does_not_redownload_same_rejected_object(
         return _FakeResponse(b"not a pcd", request.full_url)
 
     client._sync_call_app_action = call_app_action
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
     monkeypatch.setattr(
         _internal_client_module,
         "_open_point_cloud_response",
@@ -516,10 +531,7 @@ def test_point_cloud_does_not_redownload_same_rejected_object(
     )
     monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
 
-    with pytest.raises(
-        DreameLawnMowerPointCloudError,
-        match="could not be downloaded and validated",
-    ):
+    with pytest.raises(DreameLawnMowerPointCloudError):
         client._sync_download_app_map_point_cloud(0, 0.01, 0.001, 10, 1024)
 
     assert action_count > 3
@@ -558,6 +570,114 @@ def test_point_cloud_url_lookup_uses_and_enforces_remaining_deadline(
         {
             "retry_count": 0,
             "timeout": pytest.approx(0.8),
+            "deadline": 101.0,
+        }
+    ]
+
+
+def test_interim_file_protocol_forwards_absolute_deadline() -> None:
+    protocol_type = _internal_protocol_module.DreameMowerDreameHomeCloudProtocol
+    cloud = object.__new__(protocol_type)
+    strings = [""] * 56
+    strings[21] = "country"
+    strings[23] = "iot"
+    strings[35] = "model"
+    strings[39] = "file"
+    strings[40] = "filename"
+    strings[55] = "download"
+    cloud._strings = strings
+    cloud._did = "device-1"
+    cloud._model = "dreame.mower.g2408"
+    cloud._country = "eu"
+    options: list[dict[str, Any]] = []
+
+    def api_call(*args: Any, **kwargs: Any) -> dict[str, str]:
+        options.append(kwargs)
+        return {"data": "https://downloads.example.invalid/object"}
+
+    cloud._api_call = api_call
+
+    assert cloud.get_interim_file_url(
+        "private/generated-map.pcd",
+        retry_count=0,
+        timeout=0.8,
+        deadline=101.0,
+    ) == "https://downloads.example.invalid/object"
+    assert options == [
+        {
+            "retry_count": 0,
+            "timeout": 0.8,
+            "deadline": 101.0,
+        }
+    ]
+
+
+def test_point_cloud_preflight_uses_remaining_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    login_options: list[dict[str, Any]] = []
+    info_options: list[dict[str, Any]] = []
+    action_options: list[dict[str, Any]] = []
+
+    class Cloud:
+        logged_in = False
+        _host = None
+
+        def login(self, **kwargs: Any) -> bool:
+            login_options.append(kwargs)
+            self.logged_in = True
+            return True
+
+        def get_device_info_v2(self, lang: str, **kwargs: Any) -> None:
+            info_options.append(kwargs)
+            self._host = "host.example.invalid"
+
+        def call_app_action(
+            self,
+            payload: dict[str, Any],
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            action_options.append(kwargs)
+            return {"out": [{"value": {"r": 0, "d": {}}}]}
+
+    cloud = Cloud()
+    client._device = SimpleNamespace(
+        _protocol=SimpleNamespace(cloud=cloud),
+    )
+    monotonic_values = iter([100.1, 100.2])
+    monkeypatch.setattr(
+        client_module.time,
+        "monotonic",
+        lambda: next(monotonic_values, 100.2),
+    )
+
+    client._sync_call_app_action(
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        retry_count=0,
+        timeout=0.9,
+        deadline=101.0,
+        redact_response=True,
+    )
+
+    assert login_options == [
+        {"timeout": pytest.approx(0.9), "deadline": 101.0}
+    ]
+    assert info_options == [
+        {
+            "retry_count": 0,
+            "timeout": pytest.approx(0.8),
+            "deadline": 101.0,
+        }
+    ]
+    assert action_options == [
+        {
+            "siid": 2,
+            "aiid": 50,
+            "retry_count": 0,
+            "timeout": pytest.approx(0.8),
+            "deadline": 101.0,
+            "redact_response": True,
         }
     ]
 
@@ -582,7 +702,7 @@ def test_download_point_cloud_rejects_ambiguous_failed_object_poll(
         ]
     )
     client._sync_call_app_action = lambda payload, **kwargs: next(responses)
-    client._sync_get_cloud_protocol = lambda: type(
+    client._sync_get_cloud_protocol = lambda **kwargs: type(
         "Cloud",
         (),
         {"get_interim_file_url": lambda self, name, **kwargs: None},

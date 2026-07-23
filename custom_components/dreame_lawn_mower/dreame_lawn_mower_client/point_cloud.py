@@ -14,6 +14,8 @@ _SUPPORTED_DATA_ENCODINGS = frozenset({"ascii", "binary"})
 _SUPPORTED_FIELD_TYPES = frozenset({"F", "I", "U"})
 _SUPPORTED_FIELD_SIZES = frozenset({1, 2, 4, 8})
 _MAX_ASCII_SCALAR_BYTES = 128
+_MAX_ASCII_SCALARS_PER_POINT = 1024
+_MAX_ASCII_ROW_BYTES = 64 * 1024
 
 
 class DreameLawnMowerPointCloudError(ValueError):
@@ -148,6 +150,13 @@ def parse_pcd_metadata(
     if data_encoding not in _SUPPORTED_DATA_ENCODINGS:
         raise DreameLawnMowerPointCloudError(
             f"Unsupported PCD DATA encoding {data_encoding!r}."
+        )
+    if (
+        data_encoding == "ascii"
+        and sum(counts) > _MAX_ASCII_SCALARS_PER_POINT
+    ):
+        raise DreameLawnMowerPointCloudError(
+            "PCD ASCII point contains too many scalar values."
         )
 
     bytes_per_point = sum(
@@ -293,7 +302,10 @@ def _validate_pcd_payload(
         return
 
     scalar_count = sum(counts)
-    max_row_bytes = scalar_count * (_MAX_ASCII_SCALAR_BYTES + 1)
+    max_row_bytes = min(
+        _MAX_ASCII_ROW_BYTES,
+        scalar_count * (_MAX_ASCII_SCALAR_BYTES + 1),
+    )
     row_count = 0
     for row in _iter_nonempty_ascii_rows(payload):
         row_count += 1
