@@ -20,6 +20,29 @@ For the dashboard shown above, pair this integration with the
 layout automatically finds the integration's map, mission, coverage, and live
 video entities when their names follow the normal Home Assistant device naming.
 
+## More from Evotec
+
+This project is part of our Home Assistant family:
+[Dreame Lawn Mower](https://github.com/EvotecIT/homeassistant-dreamelawnmower),
+[Lawn Mower Card](https://github.com/EvotecIT/lovelace-lawn-mower-card),
+[Siegenia](https://github.com/EvotecIT/homeassistant-siegenia),
+[KEF](https://github.com/EvotecIT/homeassistant-kef),
+[Devialet](https://github.com/EvotecIT/homeassistant-devialet), and
+[EasyControlX](https://github.com/EvotecIT/homeassistant-easycontrolx).
+
+For a native Apple companion,
+[CasaRay](https://casaray.dev/) ([App Store](https://apps.apple.com/us/app/casaray/id6778025328))
+offers a calm whole-home view on iPhone, iPad, and Mac, while
+[Tactra Remote](https://tactra.dev/) ([App Store](https://apps.apple.com/us/app/tactra-remote/id6775426723))
+focuses on Home Assistant media control across iPhone, iPad, Apple Watch, and
+Mac.
+
+CasaRay's complete-home Free experience remains genuinely useful. CasaRay Plus
+and Tactra purchases help fund continued work on that free experience and these
+open-source Home Assistant projects. If you prefer to support the open-source
+work directly, [GitHub Sponsors](https://github.com/sponsors/PrzemyslawKlys) is
+another option. None of them is required to use this project.
+
 ## See It In Action
 
 The live-path map combines the stored garden geometry with mower position and
