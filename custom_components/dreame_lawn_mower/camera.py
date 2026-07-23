@@ -22,7 +22,6 @@ from .const import (
     DEFAULT_MAP_ROTATION,
     DOMAIN,
 )
-from .control_options import current_map_index
 from .coordinator import DreameLawnMowerCoordinator
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
@@ -36,7 +35,7 @@ from .image import (
 )
 from .map_attributes import map_camera_attributes
 from .map_cache import DreameLawnMowerMapCameraCache, map_camera_available
-from .point_cloud_api import point_cloud_api_path
+from .point_cloud_api import current_point_cloud_api_path
 from .video_camera import DreameLawnMowerVideoCamera
 
 _LOGGER = logging.getLogger(__name__)
@@ -154,14 +153,11 @@ class DreameLawnMowerMapCamera(
             refreshed_at=self._map_cache.last_refresh_at,
             last_error=self._map_cache.last_error,
         )
-        map_index = current_map_index(
+        attributes["point_cloud_api_path"] = current_point_cloud_api_path(
+            self.coordinator.entry.entry_id,
             self.coordinator.app_maps,
             self.coordinator.batch_device_data,
             selected_map_index=self.coordinator.selected_map_index,
-        )
-        attributes["point_cloud_api_path"] = point_cloud_api_path(
-            self.coordinator.entry.entry_id,
-            map_index,
         )
         return attributes
 

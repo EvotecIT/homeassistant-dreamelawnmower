@@ -20,6 +20,7 @@ from custom_components.dreame_lawn_mower.point_cloud_api import (
     DreameLawnMowerPointCloudAPI,
     DreameLawnMowerPointCloudView,
     async_setup_point_cloud_api,
+    current_point_cloud_api_path,
     point_cloud_api_path,
 )
 from dreame_lawn_mower_client import (
@@ -321,6 +322,22 @@ def test_point_cloud_api_path_is_local_and_contains_no_cloud_details() -> None:
     assert path == "/api/dreame_lawn_mower/point-cloud/entry-1/2"
     assert path.startswith("/")
     assert "http" not in path
+
+
+def test_current_point_cloud_path_follows_selected_map_before_cache_refresh() -> None:
+    path = current_point_cloud_api_path(
+        "entry-1",
+        {
+            "current_map_index": 0,
+            "maps": [
+                {"idx": 0, "current": True},
+                {"idx": 1, "current": False},
+            ],
+        },
+        selected_map_index=1,
+    )
+
+    assert path == "/api/dreame_lawn_mower/point-cloud/entry-1/1"
 
 
 class _FakeRequest(dict[str, Any]):

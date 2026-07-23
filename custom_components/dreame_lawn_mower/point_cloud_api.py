@@ -6,8 +6,9 @@ import asyncio
 import logging
 import time
 from collections import OrderedDict
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
@@ -15,6 +16,7 @@ from homeassistant.components.http.decorators import require_admin
 from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
+from .control_options import current_map_index
 from .dreame_lawn_mower_client import (
     DreameLawnMowerPointCloudDownload,
     DreameLawnMowerPointCloudError,
@@ -34,6 +36,24 @@ POINT_CLOUD_CACHE_MAX_ENTRIES = 4
 def point_cloud_api_path(entry_id: str, map_index: int) -> str:
     """Return the local authenticated API path advertised to frontends."""
     return f"{POINT_CLOUD_API_PATH}/{entry_id}/{map_index}"
+
+
+def current_point_cloud_api_path(
+    entry_id: str,
+    app_maps: Mapping[str, Any] | None,
+    batch_device_data: Mapping[str, Any] | None = None,
+    *,
+    selected_map_index: int | None = None,
+) -> str:
+    """Return the API path for the coordinator's current map scope."""
+    return point_cloud_api_path(
+        entry_id,
+        current_map_index(
+            app_maps,
+            batch_device_data,
+            selected_map_index=selected_map_index,
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
