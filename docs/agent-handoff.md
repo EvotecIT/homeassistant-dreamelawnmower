@@ -144,20 +144,24 @@ Last updated: 2026-04-21
 - The app-map helper downloads every created map returned by `MAPL`; the HA map
   camera still renders the current map image, but its attributes expose compact
   all-map metadata (`app_map_count`, `app_current_map_index`, `app_maps`, etc.).
-- `OBJ type=3dmap` is also wired as read-only object metadata through
-  `async_get_app_map_objects()`. A live A2 probe returned two `.bin` object
-  names. Expiring object URLs are intentionally opt-in and omitted from default
-  probe output. Direct HTTP GETs against the tested generated URLs returned
-  404 XML, so treat 3D objects as metadata-only until a downloadable path is
-  confirmed. HA map camera attributes expose safe 3D object metadata through
-  `app_map_object_count` and `app_map_objects`, without signed URLs.
-- A follow-up live check while the 3D map was visible in Dreamehome again
-  returned two `.bin` object names. Opt-in signed URL generation succeeded, but
-  direct HEAD/GET checks still returned XML error responses (`403`/`404`), so
-  do not treat the 3D binary download path as solved.
-- `examples/app_map_probe.py --probe-object-downloads` performs that download
-  check repeatably and redacts signed URLs by default. It records sanitized HEAD
-  and ranged GET statuses for each generated object URL.
+- The generated 3D-map path is now solved on the live A2. App action
+  `{"m":"a","p":0,"o":10,"d":{"idx":0}}` requests map generation; polling
+  `OBJ type=3dmap` then exposes a short-lived object name that must be resolved
+  immediately through `getDownloadUrl`.
+- A 2026-07-23 A2 run returned a standard binary PCD 0.7 file with
+  `x y z rgb`, 152,318 points, and 2,437,272 bytes. The public
+  `async_download_app_map_point_cloud()` API reproduced the same result while
+  the mower remained docked at `charging_completed`.
+- `examples/point_cloud_probe.py` prints coordinate-free PCD metadata and writes
+  geometry only when `--out` is explicitly supplied. The older
+  `app_map_probe.py --probe-object-downloads` path remains useful only for
+  comparing stale metadata objects that previously returned `403`/`404`.
+- Home Assistant exposes the generated PCD through an authenticated,
+  admin-only, local download endpoint. It keeps bytes in a short bounded
+  in-memory cache, deduplicates concurrent generation, serves
+  `private, no-store`, and publishes only `point_cloud_api_path` to map-camera
+  state. Vendor object names, signed URLs, and coordinates stay out of state
+  and logs.
 - `examples/app_map_probe.py --render-dir <dir>` now renders every drawable app
   map to PNG files while keeping raw coordinate payloads out of JSON unless
   `--include-payload` is explicitly set. A live read-only A2 run rendered both
@@ -450,6 +454,7 @@ $env:DREAME_ACCOUNT_TYPE = [Environment]::GetEnvironmentVariable('DREAME_ACCOUNT
 python examples\app_map_probe.py --out app-map-current.json
 python examples\app_map_probe.py --probe-object-downloads --out app-map-objects.json
 python examples\app_map_probe.py --render-dir app-map-renders --out app-map-render.json
+python examples\point_cloud_probe.py
 ```
 
 Only use `--include-payload` for local parser/renderer work. It includes raw
@@ -459,7 +464,8 @@ expiring signed URLs to the ignored output file. Use `--skip-objects` when you
 only want the 2D map payload. `--probe-object-downloads` generates URLs
 internally but redacts them unless `--include-object-urls` is also set.
 `--render-dir` writes per-map PNGs and redacts raw coordinates from JSON unless
-`--include-payload` is also set.
+`--include-payload` is also set. The confirmed point-cloud probe prints only
+metadata unless `--out <path>.pcd` is explicitly supplied.
 
 Render the current app-map fallback PNG:
 
@@ -610,9 +616,9 @@ credentials into repo files.
   `semantic` neutral for now; summaries expose `semantic_count`,
   `semantic_boundary_point_count`, and `semantic_key_counts` as evidence fields
   until more mower captures prove what those entries mean.
-- `OBJ type=3dmap` object names and signed-looking download URLs are
-  discoverable, but the tested URLs returned 404 XML. The `.bin` format is not
-  downloaded or decoded yet.
+- Collect point-cloud field reports from non-A2 models. The A2 generation,
+  download, PCD validation, Home Assistant delivery, and Lovelace viewer path
+  are solved; LiDAX and other families still need confirmation.
 - Keep the map camera/entity disabled by default until the renderer has stable
   fixtures from more mower states and models.
 - Keep sampling the realtime/raw status blobs across transitions. Current

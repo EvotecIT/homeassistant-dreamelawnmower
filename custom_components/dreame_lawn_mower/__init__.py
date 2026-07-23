@@ -16,6 +16,11 @@ from .const import (
     VIDEO_TRANSPORT_AUTO,
 )
 from .coordinator import DreameLawnMowerCoordinator
+from .point_cloud_api import (
+    POINT_CLOUD_API_DATA_KEY,
+    DreameLawnMowerPointCloudAPI,
+    async_setup_point_cloud_api,
+)
 from .services import async_setup_services, async_unload_services
 from .video_lan_cache import DreameLawnMowerVideoLanCache
 from .video_provisioning_cache import DreameLawnMowerVideoProvisioningCache
@@ -63,6 +68,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         platforms = (Platform.CAMERA,)
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    async_setup_point_cloud_api(hass)
     coordinator.loaded_platforms = platforms
     await async_setup_services(hass)
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
@@ -96,6 +102,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, platforms)
     if unload_ok:
         coordinator = hass.data[DOMAIN].pop(entry.entry_id)
+        point_cloud_api = hass.data[DOMAIN].get(POINT_CLOUD_API_DATA_KEY)
+        if isinstance(point_cloud_api, DreameLawnMowerPointCloudAPI):
+            point_cloud_api.purge_entry(entry.entry_id)
         await coordinator.async_shutdown()
         if not any(
             isinstance(value, DreameLawnMowerCoordinator)

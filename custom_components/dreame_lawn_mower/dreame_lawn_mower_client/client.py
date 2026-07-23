@@ -9,6 +9,8 @@ import json
 import math
 import re
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
@@ -79,6 +81,12 @@ from .models import (
     remote_control_block_reason,
     remote_control_state_safe,
     snapshot_from_device,
+)
+from .point_cloud import (
+    DEFAULT_POINT_CLOUD_MAX_BYTES,
+    DreameLawnMowerPointCloudDownload,
+    DreameLawnMowerPointCloudError,
+    parse_pcd_metadata,
 )
 from .mowing_preferences import (
     MOWING_PREFERENCE_MODE_FIELD,
@@ -960,6 +968,25 @@ class DreameLawnMowerClient:
         return await asyncio.to_thread(
             self._sync_get_app_map_objects,
             include_urls,
+        )
+
+    async def async_download_app_map_point_cloud(
+        self,
+        *,
+        map_index: int = 0,
+        timeout: float = 45.0,
+        poll_interval: float = 2.0,
+        download_timeout: float = 60.0,
+        max_bytes: int = DEFAULT_POINT_CLOUD_MAX_BYTES,
+    ) -> DreameLawnMowerPointCloudDownload:
+        """Generate, download, and validate a mower app-map point cloud."""
+        return await asyncio.to_thread(
+            self._sync_download_app_map_point_cloud,
+            map_index,
+            timeout,
+            poll_interval,
+            download_timeout,
+            max_bytes,
         )
 
     async def async_get_cloud_properties(
@@ -3828,6 +3855,88 @@ class DreameLawnMowerClient:
             "urls_included": bool(include_urls),
         }
 
+    def _sync_download_app_map_point_cloud(
+        self,
+        map_index: int,
+        timeout: float,
+        poll_interval: float,
+        download_timeout: float,
+        max_bytes: int,
+    ) -> DreameLawnMowerPointCloudDownload:
+        map_index = _validate_point_cloud_map_index(map_index)
+        timeout = _validate_positive_number(timeout, "generation timeout")
+        poll_interval = _validate_positive_number(poll_interval, "poll interval")
+        download_timeout = _validate_positive_number(
+            download_timeout,
+            "download timeout",
+        )
+        if (
+            isinstance(max_bytes, bool)
+            or not isinstance(max_bytes, int)
+            or max_bytes <= 0
+        ):
+            raise DreameLawnMowerPointCloudError(
+                "Point-cloud maximum size must be a positive integer."
+            )
+
+        trigger_result = self._sync_call_app_action(
+            {"m": "a", "p": 0, "o": 10, "d": {"idx": map_index}}
+        )
+        _app_action_data(trigger_result)
+
+        deadline = time.monotonic() + timeout
+        object_name: str | None = None
+        while time.monotonic() < deadline:
+            object_result = self._sync_call_app_action(
+                {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}}
+            )
+            data = _app_action_data(object_result)
+            names = data.get("name") if isinstance(data, Mapping) else None
+            if (
+                isinstance(names, Sequence)
+                and not isinstance(names, str | bytes | bytearray)
+                and map_index < len(names)
+            ):
+                candidate = names[map_index]
+                if isinstance(candidate, str) and candidate.strip():
+                    object_name = candidate.strip()
+                    break
+
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(poll_interval, remaining))
+
+        if object_name is None:
+            raise DreameLawnMowerPointCloudError(
+                "The mower did not publish a point cloud before the timeout."
+            )
+
+        cloud = self._sync_get_cloud_protocol()
+        if not hasattr(cloud, "get_interim_file_url"):
+            raise DreameLawnMowerPointCloudError(
+                "The configured cloud protocol cannot download interim files."
+            )
+        try:
+            raw_url = cloud.get_interim_file_url(object_name)
+        except DeviceException as err:
+            raise DreameLawnMowerPointCloudError(
+                "The cloud did not return a point-cloud download URL."
+            ) from err
+
+        url = _point_cloud_download_url(raw_url)
+        content, content_type = _download_point_cloud_content(
+            url,
+            timeout=download_timeout,
+            max_bytes=max_bytes,
+        )
+        metadata = parse_pcd_metadata(content, max_bytes=max_bytes)
+        return DreameLawnMowerPointCloudDownload(
+            map_index=map_index,
+            content=content,
+            metadata=metadata,
+            content_type=content_type,
+        )
+
     def _sync_get_app_map_text(
         self,
         *,
@@ -4963,6 +5072,121 @@ def _app_object_extension(value: str) -> str | None:
         return None
     extension = name.rsplit(".", 1)[-1].strip()
     return extension or None
+
+
+def _validate_point_cloud_map_index(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 255:
+        raise DreameLawnMowerPointCloudError(
+            "Point-cloud map index must be an integer between 0 and 255."
+        )
+    return value
+
+
+def _validate_positive_number(value: float, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise DreameLawnMowerPointCloudError(
+            f"Point-cloud {label} must be a positive number."
+        )
+    normalized = float(value)
+    if not math.isfinite(normalized) or normalized <= 0:
+        raise DreameLawnMowerPointCloudError(
+            f"Point-cloud {label} must be a positive number."
+        )
+    return normalized
+
+
+def _point_cloud_download_url(value: Any) -> str:
+    candidate = value
+    for _ in range(4):
+        if isinstance(candidate, str):
+            stripped = candidate.strip()
+            if stripped.startswith("{"):
+                try:
+                    candidate = json.loads(stripped)
+                except json.JSONDecodeError:
+                    candidate = stripped
+                else:
+                    continue
+            candidate = stripped
+            break
+        if isinstance(candidate, Mapping):
+            candidate = next(
+                (
+                    candidate[key]
+                    for key in ("url", "downloadUrl", "download_url", "data")
+                    if key in candidate
+                ),
+                None,
+            )
+            continue
+        break
+
+    if not isinstance(candidate, str) or not candidate:
+        raise DreameLawnMowerPointCloudError(
+            "The cloud did not return a point-cloud download URL."
+        )
+    parsed = urllib.parse.urlsplit(candidate)
+    if parsed.scheme.casefold() != "https" or not parsed.netloc:
+        raise DreameLawnMowerPointCloudError(
+            "The cloud returned an invalid point-cloud download URL."
+        )
+    return candidate
+
+
+def _download_point_cloud_content(
+    url: str,
+    *,
+    timeout: float,
+    max_bytes: int,
+) -> tuple[bytes, str]:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/octet-stream, application/pcd, */*",
+            "User-Agent": "homeassistant-dreamelawnmower/point-cloud",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            final_url = response.geturl()
+            if urllib.parse.urlsplit(final_url).scheme.casefold() != "https":
+                raise DreameLawnMowerPointCloudError(
+                    "The point-cloud download redirected to an insecure URL."
+                )
+            content_length = response.headers.get("Content-Length")
+            if content_length is not None:
+                try:
+                    declared_bytes = int(content_length)
+                except ValueError as err:
+                    raise DreameLawnMowerPointCloudError(
+                        "The point-cloud download returned an invalid size."
+                    ) from err
+                if declared_bytes < 0 or declared_bytes > max_bytes:
+                    raise DreameLawnMowerPointCloudError(
+                        "The point-cloud download exceeds the configured size limit."
+                    )
+            content = response.read(max_bytes + 1)
+            content_type = (
+                response.headers.get_content_type()
+                if hasattr(response.headers, "get_content_type")
+                else "application/octet-stream"
+            )
+    except DreameLawnMowerPointCloudError:
+        raise
+    except urllib.error.HTTPError as err:
+        raise DreameLawnMowerPointCloudError(
+            f"The point-cloud download failed with HTTP status {err.code}."
+        ) from err
+    except (urllib.error.URLError, TimeoutError, OSError) as err:
+        raise DreameLawnMowerPointCloudError(
+            "The point-cloud download could not be completed."
+        ) from err
+
+    if len(content) > max_bytes:
+        raise DreameLawnMowerPointCloudError(
+            "The point-cloud download exceeds the configured size limit."
+        )
+    return content, content_type
 
 
 def _normalize_app_map_entries(value: Any) -> list[dict[str, Any]]:
