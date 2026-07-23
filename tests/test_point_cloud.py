@@ -5,6 +5,7 @@ from __future__ import annotations
 import struct
 import urllib.error
 from email.message import Message
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -59,7 +60,13 @@ def _client() -> DreameLawnMowerClient:
 class _FakeResponse:
     def __init__(self, content: bytes, url: str) -> None:
         self._content = content
+        self._offset = 0
         self._url = url
+        self.fp = SimpleNamespace(
+            raw=SimpleNamespace(
+                _sock=SimpleNamespace(settimeout=lambda timeout: None),
+            )
+        )
         self.headers = Message()
         self.headers["Content-Length"] = str(len(content))
         self.headers["Content-Type"] = "application/octet-stream"
@@ -74,7 +81,9 @@ class _FakeResponse:
         return self._url
 
     def read(self, size: int) -> bytes:
-        return self._content[:size]
+        chunk = self._content[self._offset : self._offset + size]
+        self._offset += len(chunk)
+        return chunk
 
 
 def test_parse_pcd_metadata_accepts_binary_xyz_rgb() -> None:
@@ -221,3 +230,42 @@ def test_download_point_cloud_error_does_not_expose_signed_url(
     assert "HTTP status 403" in str(captured.value)
     assert signed_url not in str(captured.value)
     assert signed_url not in repr(captured.value)
+
+
+def test_download_point_cloud_enforces_overall_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signed_url = "https://downloads.example.invalid/object?private=signature"
+    read_calls = 0
+    applied_timeouts: list[float] = []
+    response = _FakeResponse(b"chunk", signed_url)
+    del response.headers["Content-Length"]
+    response.fp.raw._sock.settimeout = applied_timeouts.append
+
+    def read(size: int) -> bytes:
+        nonlocal read_calls
+        read_calls += 1
+        return b"chunk"
+
+    response.read = read
+    monotonic_values = iter([100.0, 100.2, 101.1])
+    monkeypatch.setattr(
+        client_module.time,
+        "monotonic",
+        lambda: next(monotonic_values),
+    )
+    monkeypatch.setattr(
+        client_module.urllib.request,
+        "urlopen",
+        lambda request, timeout: response,
+    )
+
+    with pytest.raises(DreameLawnMowerPointCloudError, match="timed out"):
+        _internal_client_module._download_point_cloud_content(
+            signed_url,
+            timeout=1.0,
+            max_bytes=1024,
+        )
+
+    assert read_calls == 1
+    assert applied_timeouts == pytest.approx([0.8])

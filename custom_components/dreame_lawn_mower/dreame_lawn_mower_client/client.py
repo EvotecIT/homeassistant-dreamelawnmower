@@ -5192,6 +5192,7 @@ def _download_point_cloud_content(
     timeout: float,
     max_bytes: int,
 ) -> tuple[bytes, str]:
+    deadline = time.monotonic() + timeout
     request = urllib.request.Request(
         url,
         headers={
@@ -5218,7 +5219,31 @@ def _download_point_cloud_content(
                     raise DreameLawnMowerPointCloudError(
                         "The point-cloud download exceeds the configured size limit."
                     )
-            content = response.read(max_bytes + 1)
+            content_parts: list[bytes] = []
+            received_bytes = 0
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise DreameLawnMowerPointCloudError(
+                        "The point-cloud download timed out."
+                    )
+                _set_point_cloud_response_timeout(response, remaining)
+                chunk = response.read(
+                    min(64 * 1024, max_bytes + 1 - received_bytes)
+                )
+                if time.monotonic() >= deadline:
+                    raise DreameLawnMowerPointCloudError(
+                        "The point-cloud download timed out."
+                    )
+                if not chunk:
+                    break
+                content_parts.append(chunk)
+                received_bytes += len(chunk)
+                if received_bytes > max_bytes:
+                    raise DreameLawnMowerPointCloudError(
+                        "The point-cloud download exceeds the configured size limit."
+                    )
+            content = b"".join(content_parts)
             content_type = (
                 response.headers.get_content_type()
                 if hasattr(response.headers, "get_content_type")
@@ -5230,16 +5255,38 @@ def _download_point_cloud_content(
         raise DreameLawnMowerPointCloudError(
             f"The point-cloud download failed with HTTP status {err.code}."
         ) from err
-    except (urllib.error.URLError, TimeoutError, OSError) as err:
+    except TimeoutError as err:
+        raise DreameLawnMowerPointCloudError(
+            "The point-cloud download timed out."
+        ) from err
+    except (urllib.error.URLError, OSError) as err:
         raise DreameLawnMowerPointCloudError(
             "The point-cloud download could not be completed."
         ) from err
 
-    if len(content) > max_bytes:
-        raise DreameLawnMowerPointCloudError(
-            "The point-cloud download exceeds the configured size limit."
-        )
     return content, content_type
+
+
+def _set_point_cloud_response_timeout(response: Any, timeout: float) -> None:
+    """Apply the remaining overall deadline to the active response socket."""
+    response_fp = getattr(response, "fp", None)
+    response_raw = getattr(response_fp, "raw", None)
+    candidates = (
+        response,
+        getattr(response, "_sock", None),
+        response_fp,
+        getattr(response_fp, "_sock", None),
+        response_raw,
+        getattr(response_raw, "_sock", None),
+    )
+    for candidate in candidates:
+        set_timeout = getattr(candidate, "settimeout", None)
+        if callable(set_timeout):
+            set_timeout(timeout)
+            return
+    raise DreameLawnMowerPointCloudError(
+        "The point-cloud download deadline could not be enforced."
+    )
 
 
 def _normalize_app_map_entries(value: Any) -> list[dict[str, Any]]:
