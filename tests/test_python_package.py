@@ -1,5 +1,6 @@
 """Regression checks for the standalone mower Python package."""
 
+import dreame_lawn_mower_client.client as client_module
 from dreame_lawn_mower_client import (
     CAMERA_PROBE_PROPERTY_KEYS,
     DEBUG_OTA_LIST_URL,
@@ -98,6 +99,31 @@ from dreame_lawn_mower_client.models import (
 
 def test_public_package_exports_client() -> None:
     assert DreameLawnMowerClient is ClientFromModule
+
+
+def test_client_module_preserves_camera_exports() -> None:
+    expected = {
+        "CAMERA_PROBE_PROPERTY_KEYS",
+        "DreameLawnMowerCameraFeatureSupport",
+        "DreameLawnMowerCameraStreamRuntimeInputs",
+        "build_camera_probe_payload",
+        "build_operation_stage_diagnostics",
+        "camera_metadata_advertises_video",
+        "camera_stream_block_reason",
+        "derive_tx_video_app_credentials",
+    }
+
+    assert expected <= set(client_module.__all__)
+    assert client_module.CAMERA_PROBE_PROPERTY_KEYS is CAMERA_PROBE_PROPERTY_KEYS
+    assert (
+        client_module.DreameLawnMowerCameraFeatureSupport
+        is DreameLawnMowerCameraFeatureSupport
+    )
+    assert (
+        client_module.DreameLawnMowerCameraStreamRuntimeInputs
+        is DreameLawnMowerCameraStreamRuntimeInputs
+    )
+    assert client_module.build_camera_probe_payload is build_camera_probe_payload
 
 
 def test_public_package_exports_map_helpers() -> None:
