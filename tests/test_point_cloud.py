@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import struct
 import threading
 import time
@@ -772,6 +773,64 @@ def test_deadline_slot_is_released_when_late_response_close_fails() -> None:
         )
         == "available"
     )
+
+
+def test_deadline_slot_is_released_when_worker_thread_cannot_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_start(thread: threading.Thread) -> None:
+        raise RuntimeError("thread capacity exhausted")
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(
+            _internal_deadline_module.threading.Thread,
+            "start",
+            fail_start,
+        )
+        for _ in range(4):
+            with pytest.raises(RuntimeError, match="capacity exhausted"):
+                _internal_deadline_module.run_with_deadline(
+                    lambda: "not started",
+                    deadline=time.monotonic() + 1,
+                )
+
+    assert (
+        _internal_deadline_module.run_with_deadline(
+            lambda: "available",
+            deadline=time.monotonic() + 1,
+        )
+        == "available"
+    )
+
+
+def test_point_cloud_generation_deadline_includes_executor_queue_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    queued = asyncio.Event()
+
+    async def wait_in_executor_queue(
+        function: Any,
+        *args: Any,
+    ) -> Any:
+        queued.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(
+        _internal_client_module.asyncio,
+        "to_thread",
+        wait_in_executor_queue,
+    )
+
+    async def run() -> None:
+        with pytest.raises(
+            DreameLawnMowerPointCloudError,
+            match="generation timed out",
+        ):
+            await client.async_download_app_map_point_cloud(timeout=0.01)
+        assert queued.is_set()
+
+    asyncio.run(run())
 
 
 def test_point_cloud_url_lookup_uses_and_enforces_remaining_deadline(

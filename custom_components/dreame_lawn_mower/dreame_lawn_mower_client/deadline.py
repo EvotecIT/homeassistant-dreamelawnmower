@@ -69,11 +69,16 @@ def run_with_deadline(
                 finished.set()
                 _operation_slots.release()
 
-    threading.Thread(
+    worker_thread = threading.Thread(
         target=worker,
         name="dreame-deadline-operation",
         daemon=True,
-    ).start()
+    )
+    try:
+        worker_thread.start()
+    except BaseException:
+        _operation_slots.release()
+        raise
 
     remaining = deadline - time.monotonic()
     if remaining <= 0 or not finished.wait(remaining):

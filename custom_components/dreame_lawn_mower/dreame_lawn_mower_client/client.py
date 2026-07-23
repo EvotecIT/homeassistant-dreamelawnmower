@@ -981,14 +981,23 @@ class DreameLawnMowerClient:
         max_bytes: int = DEFAULT_POINT_CLOUD_MAX_BYTES,
     ) -> DreameLawnMowerPointCloudDownload:
         """Generate, download, and validate a mower app-map point cloud."""
-        return await asyncio.to_thread(
-            self._sync_download_app_map_point_cloud,
-            map_index,
-            timeout,
-            poll_interval,
-            download_timeout,
-            max_bytes,
-        )
+        timeout = _validate_positive_number(timeout, "generation timeout")
+        deadline = time.monotonic() + timeout
+        try:
+            async with asyncio.timeout(timeout):
+                return await asyncio.to_thread(
+                    self._sync_download_app_map_point_cloud,
+                    map_index,
+                    timeout,
+                    poll_interval,
+                    download_timeout,
+                    max_bytes,
+                    deadline,
+                )
+        except TimeoutError as err:
+            raise DreameLawnMowerPointCloudError(
+                "Point-cloud generation timed out."
+            ) from err
 
     async def async_get_cloud_properties(
         self,
@@ -3867,6 +3876,7 @@ class DreameLawnMowerClient:
         poll_interval: float,
         download_timeout: float,
         max_bytes: int,
+        deadline: float | None = None,
     ) -> DreameLawnMowerPointCloudDownload:
         map_index = _validate_point_cloud_map_index(map_index)
         timeout = _validate_positive_number(timeout, "generation timeout")
@@ -3884,7 +3894,15 @@ class DreameLawnMowerClient:
                 "Point-cloud maximum size must be a positive integer."
             )
 
-        deadline = time.monotonic() + timeout
+        deadline = (
+            time.monotonic() + timeout
+            if deadline is None
+            else deadline
+        )
+        if time.monotonic() >= deadline:
+            raise DreameLawnMowerPointCloudError(
+                "Point-cloud generation timed out."
+            )
         baseline_result = self._sync_call_point_cloud_action(
             {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
             operation="read the existing point-cloud object state",
