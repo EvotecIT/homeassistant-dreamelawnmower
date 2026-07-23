@@ -83,6 +83,39 @@ def test_point_cloud_api_caches_recent_downloads() -> None:
     assert calls == 1
 
 
+def test_point_cloud_api_evicts_downloads_when_ttl_expires() -> None:
+    calls = 0
+
+    async def download(**kwargs: Any) -> DreameLawnMowerPointCloudDownload:
+        nonlocal calls
+        calls += 1
+        return _download(kwargs["map_index"])
+
+    hass = SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry-1": SimpleNamespace(
+                    client=SimpleNamespace(
+                        async_download_app_map_point_cloud=download,
+                    )
+                )
+            }
+        }
+    )
+    api = DreameLawnMowerPointCloudAPI(hass, cache_ttl=0.01)
+
+    async def run() -> None:
+        await api.async_get("entry-1", 0)
+        assert api._cache
+        await asyncio.sleep(0.03)
+        assert not api._cache
+        await api.async_get("entry-1", 0)
+
+    asyncio.run(run())
+
+    assert calls == 2
+
+
 def test_point_cloud_api_deduplicates_concurrent_refreshes() -> None:
     calls = 0
     started = asyncio.Event()

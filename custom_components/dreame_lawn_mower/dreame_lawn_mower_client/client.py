@@ -3932,7 +3932,11 @@ class DreameLawnMowerClient:
                 and fresh_object
             ):
                 try:
-                    raw_url = cloud.get_interim_file_url(object_name)
+                    raw_url = self._sync_get_point_cloud_download_url(
+                        cloud,
+                        object_name,
+                        deadline=deadline,
+                    )
                 except DeviceException:
                     saw_unusable_point_cloud = True
                 else:
@@ -4004,6 +4008,30 @@ class DreameLawnMowerClient:
             operation,
             require_data=require_data,
         )
+
+    def _sync_get_point_cloud_download_url(
+        self,
+        cloud: Any,
+        object_name: str,
+        *,
+        deadline: float,
+    ) -> str:
+        """Resolve a signed point-cloud URL within the generation deadline."""
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise DreameLawnMowerPointCloudError(
+                "Point-cloud generation timed out."
+            )
+        raw_url = cloud.get_interim_file_url(
+            object_name,
+            retry_count=0,
+            timeout=remaining,
+        )
+        if time.monotonic() >= deadline:
+            raise DreameLawnMowerPointCloudError(
+                "Point-cloud generation timed out."
+            )
+        return raw_url
 
     def _sync_get_app_map_text(
         self,

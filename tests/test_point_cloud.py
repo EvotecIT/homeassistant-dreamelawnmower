@@ -204,10 +204,23 @@ def test_download_point_cloud_uses_a2_generation_flow(
         return next(responses)
 
     signed_url = "https://downloads.example.invalid/object?private=signature"
+    interim_file_options: list[dict[str, Any]] = []
+
+    def get_interim_file_url(
+        name: str,
+        **kwargs: Any,
+    ) -> str:
+        interim_file_options.append(kwargs)
+        return signed_url
+
     cloud = type(
         "Cloud",
         (),
-        {"get_interim_file_url": lambda self, name: signed_url},
+        {
+            "get_interim_file_url": lambda self, name, **kwargs: (
+                get_interim_file_url(name, **kwargs)
+            )
+        },
     )()
     content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
     client._sync_call_app_action = call_app_action
@@ -234,6 +247,13 @@ def test_download_point_cloud_uses_a2_generation_flow(
     ]
     assert all(options["retry_count"] == 0 for options in call_options)
     assert all(0 < options["timeout"] <= 5 for options in call_options)
+    assert len(interim_file_options) == 2
+    assert all(
+        options["retry_count"] == 0 for options in interim_file_options
+    )
+    assert all(
+        0 < options["timeout"] <= 5 for options in interim_file_options
+    )
     assert result.map_index == 0
     assert result.content == content
     assert result.metadata.points == 1
@@ -385,6 +405,42 @@ def test_point_cloud_app_action_uses_and_enforces_remaining_deadline(
     ]
 
 
+def test_point_cloud_url_lookup_uses_and_enforces_remaining_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    options: list[dict[str, Any]] = []
+
+    def get_interim_file_url(
+        object_name: str,
+        **kwargs: Any,
+    ) -> str:
+        options.append(kwargs)
+        return "https://downloads.example.invalid/object"
+
+    cloud = SimpleNamespace(get_interim_file_url=get_interim_file_url)
+    monotonic_values = iter([100.2, 101.1])
+    monkeypatch.setattr(
+        client_module.time,
+        "monotonic",
+        lambda: next(monotonic_values, 101.1),
+    )
+
+    with pytest.raises(DreameLawnMowerPointCloudError, match="timed out"):
+        client._sync_get_point_cloud_download_url(
+            cloud,
+            "private/generated-map.pcd",
+            deadline=101.0,
+        )
+
+    assert options == [
+        {
+            "retry_count": 0,
+            "timeout": pytest.approx(0.8),
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     "failed_poll",
     [
@@ -408,7 +464,7 @@ def test_download_point_cloud_rejects_ambiguous_failed_object_poll(
     client._sync_get_cloud_protocol = lambda: type(
         "Cloud",
         (),
-        {"get_interim_file_url": lambda self, name: None},
+        {"get_interim_file_url": lambda self, name, **kwargs: None},
     )()
     monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
 

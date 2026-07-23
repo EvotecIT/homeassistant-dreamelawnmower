@@ -771,7 +771,12 @@ class DreameMowerDreameHomeCloudProtocol:
 
         return api_response["data"]
 
-    def get_interim_file_url(self, object_name: str = "") -> str:
+    def get_interim_file_url(
+        self,
+        object_name: str = "",
+        retry_count: int = 2,
+        timeout: float = 20,
+    ) -> str:
         api_response = self._api_call(
             f"{self._strings[23]}/{self._strings[39]}/{self._strings[55]}",
             {
@@ -780,6 +785,8 @@ class DreameMowerDreameHomeCloudProtocol:
                 self._strings[40]: object_name,
                 self._strings[21]: self._country,
             },
+            retry_count=retry_count,
+            timeout=timeout,
         )
         if api_response is None or "data" not in api_response:
             return None

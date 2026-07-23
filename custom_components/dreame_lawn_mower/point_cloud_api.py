@@ -86,6 +86,9 @@ class DreameLawnMowerPointCloudAPI:
         self._cache_ttl = cache_ttl
         self._cache_max_entries = cache_max_entries
         self._cache: OrderedDict[tuple[str, int], _CacheEntry] = OrderedDict()
+        self._cache_expiry_handles: dict[
+            tuple[str, int], asyncio.TimerHandle
+        ] = {}
         self._inflight: dict[tuple[str, int], _InflightGeneration] = {}
         self._entry_epochs: dict[str, int] = {}
 
@@ -177,7 +180,7 @@ class DreameLawnMowerPointCloudAPI:
     def purge_entry(self, entry_id: str) -> None:
         """Discard private cache state for one unloaded entry."""
         for key in [key for key in self._cache if key[0] == entry_id]:
-            self._cache.pop(key, None)
+            self._remove_cache_entry(key)
         self._entry_epochs[entry_id] = self._entry_epochs.get(entry_id, 0) + 1
 
     async def _async_generate(
@@ -199,13 +202,22 @@ class DreameLawnMowerPointCloudAPI:
             raise DreameLawnMowerPointCloudError(
                 "The mower entry changed during point-cloud generation."
             )
+        created_at = time.monotonic()
+        self._remove_cache_entry(key)
         self._cache[key] = _CacheEntry(
-            created_at=time.monotonic(),
+            created_at=created_at,
             download=download,
+        )
+        self._cache_expiry_handles[key] = asyncio.get_running_loop().call_later(
+            max(0.0, self._cache_ttl),
+            self._expire_cache_entry,
+            key,
+            created_at,
         )
         self._cache.move_to_end(key)
         while len(self._cache) > self._cache_max_entries:
-            self._cache.popitem(last=False)
+            oldest_key = next(iter(self._cache))
+            self._remove_cache_entry(oldest_key)
         return download
 
     @callback
@@ -236,10 +248,29 @@ class DreameLawnMowerPointCloudAPI:
         if cached is None:
             return None
         if now - cached.created_at >= self._cache_ttl:
-            self._cache.pop(key, None)
+            self._remove_cache_entry(key)
             return None
         self._cache.move_to_end(key)
         return cached
+
+    @callback
+    def _expire_cache_entry(
+        self,
+        key: tuple[str, int],
+        created_at: float,
+    ) -> None:
+        """Evict only the cache generation scheduled by this timer."""
+        cached = self._cache.get(key)
+        if cached is not None and cached.created_at == created_at:
+            self._remove_cache_entry(key)
+
+    @callback
+    def _remove_cache_entry(self, key: tuple[str, int]) -> None:
+        """Remove one cache entry and cancel its pending expiry timer."""
+        self._cache.pop(key, None)
+        handle = self._cache_expiry_handles.pop(key, None)
+        if handle is not None:
+            handle.cancel()
 
 
 class DreameLawnMowerPointCloudView(HomeAssistantView):
