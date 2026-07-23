@@ -3906,6 +3906,7 @@ class DreameLawnMowerClient:
 
         observed_clear = baseline_name is None
         saw_unusable_point_cloud = False
+        rejected_object_names: set[str] = set()
         while time.monotonic() < deadline:
             object_result = self._sync_call_point_cloud_action(
                 {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
@@ -3930,6 +3931,7 @@ class DreameLawnMowerClient:
                 and object_extension is not None
                 and object_extension.casefold() == "pcd"
                 and fresh_object
+                and object_name not in rejected_object_names
             ):
                 try:
                     raw_url = self._sync_get_point_cloud_download_url(
@@ -3950,6 +3952,7 @@ class DreameLawnMowerClient:
                         metadata = parse_pcd_metadata(content, max_bytes=max_bytes)
                     except DreameLawnMowerPointCloudError:
                         saw_unusable_point_cloud = True
+                        rejected_object_names.add(object_name)
                     else:
                         return DreameLawnMowerPointCloudDownload(
                             map_index=map_index,
@@ -3990,6 +3993,8 @@ class DreameLawnMowerClient:
                 payload,
                 retry_count=0,
                 timeout=remaining,
+                deadline=deadline,
+                redact_response=True,
             )
         except DreameLawnMowerConnectionError as err:
             if time.monotonic() >= deadline:
@@ -4085,6 +4090,8 @@ class DreameLawnMowerClient:
         aiid: int = 50,
         retry_count: int | None = None,
         timeout: float | None = None,
+        deadline: float | None = None,
+        redact_response: bool = False,
     ) -> Any:
         cloud = self._sync_get_cloud_protocol()
         if not getattr(cloud, "_host", None):
@@ -4101,6 +4108,10 @@ class DreameLawnMowerClient:
                 request_options["retry_count"] = retry_count
             if timeout is not None:
                 request_options["timeout"] = timeout
+            if deadline is not None:
+                request_options["deadline"] = deadline
+            if redact_response:
+                request_options["redact_response"] = True
             if hasattr(cloud, "call_app_action"):
                 response = cloud.call_app_action(
                     payload,

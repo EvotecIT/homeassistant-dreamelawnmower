@@ -13,6 +13,7 @@ MAX_POINT_CLOUD_HEADER_BYTES = 64 * 1024
 _SUPPORTED_DATA_ENCODINGS = frozenset({"ascii", "binary"})
 _SUPPORTED_FIELD_TYPES = frozenset({"F", "I", "U"})
 _SUPPORTED_FIELD_SIZES = frozenset({1, 2, 4, 8})
+_MAX_ASCII_SCALAR_BYTES = 128
 
 
 class DreameLawnMowerPointCloudError(ValueError):
@@ -292,12 +293,17 @@ def _validate_pcd_payload(
         return
 
     scalar_count = sum(counts)
+    max_row_bytes = scalar_count * (_MAX_ASCII_SCALAR_BYTES + 1)
     row_count = 0
     for row in _iter_nonempty_ascii_rows(payload):
         row_count += 1
         if row_count > points:
             raise DreameLawnMowerPointCloudError(
                 "PCD ASCII payload row count does not match its header."
+            )
+        if len(row) > max_row_bytes:
+            raise DreameLawnMowerPointCloudError(
+                "PCD ASCII payload row exceeds the supported size."
             )
         try:
             values = row.decode("ascii").split()

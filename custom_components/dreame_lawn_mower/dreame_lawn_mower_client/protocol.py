@@ -26,6 +26,9 @@ _TX_VIDEO_API_PATH = "/dreame-third-video/tx/"
 _REDACTED_TX_VIDEO_PAYLOAD = "<redacted TX video payload>"
 _INTERIM_FILE_API_PATH = "/dreame-user-iot/iotfile/getDownloadUrl"
 _REDACTED_INTERIM_FILE_PAYLOAD = "<redacted interim file payload>"
+_REDACTED_APP_ACTION_RESPONSE = "<redacted app action response>"
+_DEADLINE_RESPONSE_CHUNK_BYTES = 8 * 1024
+_MAX_DEADLINE_RESPONSE_BYTES = 1024 * 1024
 
 
 def _cloud_request_log_value(url: str, value: Any) -> Any:
@@ -35,6 +38,77 @@ def _cloud_request_log_value(url: str, value: Any) -> Any:
     if _INTERIM_FILE_API_PATH in url and value is not None:
         return _REDACTED_INTERIM_FILE_PAYLOAD
     return value
+
+
+def _app_action_response_log_value(value: Any, *, redact: bool) -> Any:
+    """Hide private point-cloud object names from app-action response logs."""
+    if redact and value is not None:
+        return _REDACTED_APP_ACTION_RESPONSE
+    return value
+
+
+def _set_cloud_response_timeout(response: Any, timeout: float) -> None:
+    """Apply the remaining overall deadline to a streamed response socket."""
+    raw = getattr(response, "raw", None)
+    raw_fp = getattr(raw, "_fp", None)
+    response_fp = getattr(raw_fp, "fp", None)
+    response_raw = getattr(response_fp, "raw", None)
+    candidates = (
+        response,
+        raw,
+        getattr(raw, "_sock", None),
+        raw_fp,
+        response_fp,
+        response_raw,
+        getattr(response_raw, "_sock", None),
+    )
+    for candidate in candidates:
+        set_timeout = getattr(candidate, "settimeout", None)
+        if callable(set_timeout):
+            set_timeout(timeout)
+            return
+    raise requests.exceptions.Timeout(
+        "The cloud response deadline could not be enforced."
+    )
+
+
+def _read_cloud_response_text_with_deadline(
+    response: Any,
+    *,
+    deadline: float,
+    max_bytes: int = _MAX_DEADLINE_RESPONSE_BYTES,
+) -> str:
+    """Read a bounded response body while enforcing an absolute deadline."""
+    raw = getattr(response, "raw", None)
+    read_chunk = getattr(raw, "read1", None)
+    if not callable(read_chunk):
+        raise requests.exceptions.Timeout(
+            "The cloud response deadline could not be enforced."
+        )
+
+    content = bytearray()
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise requests.exceptions.Timeout("The cloud response timed out.")
+        _set_cloud_response_timeout(response, remaining)
+        chunk = read_chunk(
+            min(
+                _DEADLINE_RESPONSE_CHUNK_BYTES,
+                max_bytes + 1 - len(content),
+            ),
+            decode_content=True,
+        )
+        if time.monotonic() >= deadline:
+            raise requests.exceptions.Timeout("The cloud response timed out.")
+        if not chunk:
+            break
+        content.extend(chunk)
+        if len(content) > max_bytes:
+            raise ValueError("The cloud response exceeded the maximum size.")
+
+    encoding = getattr(response, "encoding", None) or "utf-8"
+    return content.decode(encoding)
 
 
 class DreameMowerDeviceProtocol(MiIOProtocol):
@@ -136,13 +210,24 @@ class DreameMowerDreameHomeCloudProtocol:
 
         self._queue.put((callback, url, params, retry_count))
 
-    def _api_call(self, url, params=None, retry_count=2, timeout=20):
+    def _api_call(
+        self,
+        url,
+        params=None,
+        retry_count=2,
+        timeout=20,
+        *,
+        deadline: float | None = None,
+        redact_response: bool = False,
+    ):
         return self.request(
             f"{self.get_api_url()}/{url}",
             json.dumps(params, separators=(",", ":")
                        ) if params is not None else None,
             retry_count,
             timeout,
+            deadline=deadline,
+            redact_response=redact_response,
         )
 
     def get_api_url(self) -> str:
@@ -663,6 +748,9 @@ class DreameMowerDreameHomeCloudProtocol:
         parameters,
         retry_count: int = 2,
         timeout: float = 20,
+        *,
+        deadline: float | None = None,
+        redact_response: bool = False,
     ) -> Any:
         host = ""
         if self._host and len(self._host):
@@ -682,9 +770,17 @@ class DreameMowerDreameHomeCloudProtocol:
             },
             retry_count,
             timeout,
+            deadline=deadline,
+            redact_response=redact_response,
+        )
+        logged_response = _app_action_response_log_value(
+            api_response,
+            redact=redact_response,
         )
         _LOGGER.debug(
-            "DreameMowerDreameHomeCloudProtocol.send api_response: %s", api_response)
+            "DreameMowerDreameHomeCloudProtocol.send api_response: %s",
+            logged_response,
+        )
         self._id = self._id + 1
         if isinstance(api_response, Mapping) and api_response.get("code") == 80001:
             # Seems to be a valid error message from the server which translates to:
@@ -692,7 +788,9 @@ class DreameMowerDreameHomeCloudProtocol:
             # While the time out was a return value from the server, implying that the
             # the server correctly handled the request.
             _LOGGER.debug(
-                "DreameMowerDreameHomeCloudProtocol.send 80001, return none: %s", api_response)
+                "DreameMowerDreameHomeCloudProtocol.send 80001, return none: %s",
+                logged_response,
+            )
             return None
 
         if (
@@ -703,7 +801,7 @@ class DreameMowerDreameHomeCloudProtocol:
         ):
             _LOGGER.debug(
                 "DreameMowerDreameHomeCloudProtocol.send accepted without result: %s",
-                api_response,
+                logged_response,
             )
             return None
 
@@ -715,7 +813,9 @@ class DreameMowerDreameHomeCloudProtocol:
             or "result" not in api_response["data"]
         ):
             _LOGGER.warning(
-                "DreameMowerDreameHomeCloudProtocol.send failed: %s", api_response)
+                "DreameMowerDreameHomeCloudProtocol.send failed: %s",
+                logged_response,
+            )
             return None
         return api_response["data"]["result"]
 
@@ -726,6 +826,9 @@ class DreameMowerDreameHomeCloudProtocol:
         aiid: int = 50,
         retry_count: int = 2,
         timeout: float = 20,
+        *,
+        deadline: float | None = None,
+        redact_response: bool = False,
     ) -> Any:
         """Call the mobile-app action bridge used by mower plugin commands."""
         return self.send(
@@ -738,6 +841,8 @@ class DreameMowerDreameHomeCloudProtocol:
             },
             retry_count=retry_count,
             timeout=timeout,
+            deadline=deadline,
+            redact_response=redact_response,
         )
 
     def get_file(self, url: str, retry_count: int = 4) -> Any:
@@ -851,7 +956,16 @@ class DreameMowerDreameHomeCloudProtocol:
             return None
         return api_response["result"]
 
-    def request(self, url: str, data, retry_count=2, timeout=20) -> Any:
+    def request(
+        self,
+        url: str,
+        data,
+        retry_count=2,
+        timeout=20,
+        *,
+        deadline: float | None = None,
+        redact_response: bool = False,
+    ) -> Any:
         _LOGGER.debug(
             "DreameMowerDreameHomeCloudProtocol.request %s %s",
             url,
@@ -861,6 +975,7 @@ class DreameMowerDreameHomeCloudProtocol:
         retries = 0
         if not retry_count or retry_count < 0:
             retry_count = 0
+        response_text = None
         while retries < retry_count + 1:
             try:
                 if self._key_expire and time.time() > self._key_expire:
@@ -880,12 +995,24 @@ class DreameMowerDreameHomeCloudProtocol:
                 if self._country == "cn":
                     headers[self._strings[48]] = self._strings[4]
 
-                response = self._session.post(
-                    url,
-                    headers=headers,
-                    data=data,
-                    timeout=timeout,
-                )
+                request_options = {
+                    "headers": headers,
+                    "data": data,
+                    "timeout": timeout,
+                }
+                if deadline is not None:
+                    request_options["stream"] = True
+                response = self._session.post(url, **request_options)
+                if deadline is not None:
+                    try:
+                        response_text = _read_cloud_response_text_with_deadline(
+                            response,
+                            deadline=deadline,
+                        )
+                    finally:
+                        response.close()
+                else:
+                    response_text = response.text
                 break
             except requests.exceptions.Timeout:
                 retries = retries + 1
@@ -911,16 +1038,22 @@ class DreameMowerDreameHomeCloudProtocol:
                 self._connected = True
                 _LOGGER.debug(
                     "DreameMowerDreameHomeCloudProtocol.request response.text: %s",
-                    _cloud_request_log_value(url, response.text),
+                    _app_action_response_log_value(
+                        _cloud_request_log_value(url, response_text),
+                        redact=redact_response,
+                    ),
                 )
-                return json.loads(response.text)
+                return json.loads(response_text)
             elif response.status_code == 401 and self._secondary_key:
                 _LOGGER.debug("Execute api call failed: Token Expired")
                 self.login()
             else:
                 _LOGGER.warn(
                     "Execute api call failed with response: %s",
-                    _cloud_request_log_value(url, response.text),
+                    _app_action_response_log_value(
+                        _cloud_request_log_value(url, response_text),
+                        redact=redact_response,
+                    ),
                 )
 
         if self._fail_count == 5:

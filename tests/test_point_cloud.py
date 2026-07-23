@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+import requests
 
 import dreame_lawn_mower_client.client as client_module
 from dreame_lawn_mower_client import (
@@ -190,7 +191,7 @@ def test_download_point_cloud_uses_a2_generation_flow(
             {"r": 0, "d": {"name": ["private/previous-map.pcd"]}},
             {"r": 0},
             {"r": 0, "d": {"name": ["private/previous-map.pcd"]}},
-            {"r": 0, "d": {"name": ["private/generated-map.pcd"]}},
+            {"r": 0, "d": {"name": ["private/generated-map-2.pcd"]}},
             {"r": 0, "d": {"name": ["private/generated-map.pcd"]}},
         ]
     )
@@ -401,8 +402,128 @@ def test_point_cloud_app_action_uses_and_enforces_remaining_deadline(
         {
             "retry_count": 0,
             "timeout": pytest.approx(0.8),
+            "deadline": 101.0,
+            "redact_response": True,
         }
     ]
+
+
+def test_point_cloud_action_response_enforces_overall_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    applied_timeouts: list[float] = []
+    raw = SimpleNamespace()
+    raw._fp = SimpleNamespace(
+        fp=SimpleNamespace(
+            raw=SimpleNamespace(
+                _sock=SimpleNamespace(settimeout=applied_timeouts.append)
+            )
+        )
+    )
+    raw.read1 = lambda size, *, decode_content: b'{"code":0}'
+    response = SimpleNamespace(raw=raw, encoding="utf-8")
+    monotonic_values = iter([100.2, 101.1])
+    monkeypatch.setattr(
+        _internal_protocol_module.time,
+        "monotonic",
+        lambda: next(monotonic_values, 101.1),
+    )
+
+    with pytest.raises(requests.exceptions.Timeout, match="timed out"):
+        _internal_protocol_module._read_cloud_response_text_with_deadline(
+            response,
+            deadline=101.0,
+        )
+
+    assert applied_timeouts == pytest.approx([0.8])
+
+
+def test_point_cloud_action_log_redacts_private_object_response() -> None:
+    private_response = {
+        "data": {
+            "result": {
+                "out": [
+                    {
+                        "value": {
+                            "r": 0,
+                            "d": {"name": ["private/generated-map.pcd"]},
+                        }
+                    }
+                ]
+            }
+        }
+    }
+
+    assert _internal_protocol_module._app_action_response_log_value(
+        private_response,
+        redact=True,
+    ) == "<redacted app action response>"
+    assert (
+        _internal_protocol_module._app_action_response_log_value(
+            private_response,
+            redact=False,
+        )
+        is private_response
+    )
+
+
+def test_ascii_point_cloud_rejects_oversized_row_before_splitting() -> None:
+    content = _ascii_pcd(1).replace(
+        b"1 2 3\n",
+        (b"0 " * 10_000) + b"\n",
+    )
+
+    with pytest.raises(
+        DreameLawnMowerPointCloudError,
+        match="row exceeds the supported size",
+    ):
+        parse_pcd_metadata(content)
+
+
+def test_point_cloud_does_not_redownload_same_rejected_object(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    action_count = 0
+    download_count = 0
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        nonlocal action_count
+        action_count += 1
+        if action_count == 1:
+            return {"r": 0, "d": {"name": ["private/previous-map.pcd"]}}
+        if action_count == 2:
+            return {"r": 0}
+        return {"r": 0, "d": {"name": ["private/rejected-map.pcd"]}}
+
+    cloud = SimpleNamespace(
+        get_interim_file_url=lambda name, **kwargs: (
+            "https://downloads.example.invalid/object"
+        )
+    )
+
+    def open_response(request: Any, *, timeout: float) -> _FakeResponse:
+        nonlocal download_count
+        download_count += 1
+        return _FakeResponse(b"not a pcd", request.full_url)
+
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda: cloud
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        open_response,
+    )
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+
+    with pytest.raises(
+        DreameLawnMowerPointCloudError,
+        match="could not be downloaded and validated",
+    ):
+        client._sync_download_app_map_point_cloud(0, 0.01, 0.001, 10, 1024)
+
+    assert action_count > 3
+    assert download_count == 1
 
 
 def test_point_cloud_url_lookup_uses_and_enforces_remaining_deadline(
