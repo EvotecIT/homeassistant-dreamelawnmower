@@ -81,6 +81,35 @@ def test_downloaded_diagnostics_combines_report_entities_and_recent_events(
             "anonymous_feature": _AnonymousFeature(0),
             "last_stream_error_code": "video_cloud_start_failed",
             "last_stream_error": "accessToken=secret failed",
+            "last_runtime_input_diagnostics": {
+                "operation": "camera_stream_inputs",
+                "stages": [
+                    {
+                        "stage": "cloud_device_identity",
+                        "response": {
+                            "type": "object",
+                            "shape": {
+                                "fields": [
+                                    {
+                                        "name": "deviceName",
+                                        "shape": {"type": "string"},
+                                    },
+                                    {
+                                        "name": "productId",
+                                        "shape": {"type": "string"},
+                                    },
+                                ]
+                            },
+                        },
+                        "error": {
+                            "message": (
+                                "accessToken=secret-token failed for "
+                                "deviceName=private-mower"
+                            )
+                        },
+                    }
+                ],
+            },
         },
     )
     hass = SimpleNamespace(
@@ -137,7 +166,7 @@ def test_downloaded_diagnostics_combines_report_entities_and_recent_events(
         diagnostics_module.async_get_config_entry_diagnostics(hass, entry)
     )
 
-    assert payload["diagnostic_schema_version"] == 6
+    assert payload["diagnostic_schema_version"] == 7
     assert payload["report_context"]["integration_version"] == "0.3.0"
     assert payload["report_context"]["home_assistant"]["arch"] == "aarch64"
     assert "user" not in payload["report_context"]["home_assistant"]
@@ -148,6 +177,17 @@ def test_downloaded_diagnostics_combines_report_entities_and_recent_events(
         "accessToken=**REDACTED** failed"
     )
     assert payload["entities"][0]["attributes"]["anonymous_feature"] == 0
+    operation = payload["entities"][0]["attributes"][
+        "last_runtime_input_diagnostics"
+    ]
+    assert operation["stages"][0]["stage"] == "cloud_device_identity"
+    assert operation["stages"][0]["response"]["shape"]["fields"] == [
+        {"name": "deviceName", "shape": {"type": "string"}},
+        {"name": "productId", "shape": {"type": "string"}},
+    ]
+    assert operation["stages"][0]["error"]["message"] == (
+        "accessToken=**REDACTED** failed for deviceName=**REDACTED**"
+    )
     assert payload["recent_events"][0]["code"] == "video_cloud_start_failed"
     assert payload["recent_events"][0]["message"] == (
         "accessToken=**REDACTED** failed"

@@ -516,6 +516,24 @@ class DreameMowerDreameHomeCloudProtocol:
             return response["data"]
         return response
 
+    def get_tx_video_user_eligibility(
+        self,
+        access_token: str | None = None,
+        os: int = 1,
+    ) -> Any:
+        """Return the read-only TX video eligibility response for this device."""
+        params = {"did": self._did, "os": os}
+        if access_token:
+            params["accesstoken"] = access_token
+            params["accessToken"] = access_token
+        response = self.request(
+            f"{self.get_api_url()}/dreame-third-video/tx/dev/isDevUser",
+            json.dumps(params, separators=(",", ":")),
+        )
+        if response and "data" in response and response.get("code", 0) == 0:
+            return response["data"]
+        return response
+
     def get_tx_video_p2p_info(
         self,
         access_token: str | None = None,
