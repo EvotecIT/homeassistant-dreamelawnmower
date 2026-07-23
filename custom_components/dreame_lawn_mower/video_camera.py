@@ -46,6 +46,9 @@ from .dreame_lawn_mower_client.models import (
     snapshot_advertises_video,
 )
 from .dreame_lawn_mower_client.stream_health import DreameLawnMowerStreamUrlProbeResult
+from .dreame_lawn_mower_client.video_provisioning_status import (
+    XP2P_PROVISIONING_DEVICE_TRIPLE_MISSING,
+)
 from .dreame_lawn_mower_client.video_runtime import (
     DreameLawnMowerNativeXp2pRuntime,
     DreameLawnMowerVideoRuntimeError,
@@ -72,6 +75,26 @@ _HA_STREAM_START_TIMEOUT = DEFAULT_XP2P_HOST_STARTUP_TIMEOUT + 30.0
 _HA_PLAYBACK_VERIFY_TIMEOUT = 15.0
 _SNAPSHOT_STREAM_START_TIMEOUT = 15.0
 _SNAPSHOT_IMAGE_TIMEOUT = 15.0
+
+
+def _runtime_inputs_not_ready_message(
+    inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+) -> str:
+    """Return a useful, credential-free explanation for missing XP2P inputs."""
+    if (
+        inputs.provisioning_issue
+        == XP2P_PROVISIONING_DEVICE_TRIPLE_MISSING
+    ):
+        return (
+            "Dreame cloud has not provisioned an XP2P video identity for this "
+            "mower on the current account/region. Confirm that live video works "
+            "in Dreamehome or MOVAhome; contact Dreame support if it is also "
+            "missing there."
+        )
+    return (
+        "Dreame cloud did not return required XP2P fields: "
+        + ", ".join(inputs.missing_required)
+    )
 
 
 class _DreameVideoRuntime(Protocol):
@@ -140,6 +163,7 @@ class DreameLawnMowerVideoCamera(
         self._last_runtime_inputs_ready: bool | None = None
         self._last_runtime_inputs_source: str | None = None
         self._last_runtime_inputs_missing: tuple[str, ...] = ()
+        self._last_runtime_inputs_provisioning_issue: str | None = None
         self._last_runtime_input_diagnostics: dict[str, Any] | None = None
         self._last_stream_health: dict[str, Any] | None = None
         self._last_stream_enable_result: Any | None = None
@@ -302,6 +326,9 @@ class DreameLawnMowerVideoCamera(
             "last_runtime_inputs_ready": self._last_runtime_inputs_ready,
             "last_runtime_inputs_source": self._last_runtime_inputs_source,
             "last_runtime_inputs_missing": self._last_runtime_inputs_missing,
+            "last_runtime_inputs_provisioning_issue": (
+                self._last_runtime_inputs_provisioning_issue
+            ),
             "last_runtime_input_diagnostics": getattr(
                 self,
                 "_last_runtime_input_diagnostics",
@@ -720,8 +747,7 @@ class DreameLawnMowerVideoCamera(
                 cloud_inputs = await self._async_get_runtime_inputs()
             if not cloud_inputs.ready:
                 raise DreameLawnMowerVideoRuntimeError(
-                    "Dreame cloud did not return required XP2P fields: "
-                    + ", ".join(cloud_inputs.missing_required)
+                    _runtime_inputs_not_ready_message(cloud_inputs)
                 )
             stream_enable_attempted = True
             self._last_stream_enable_result = sanitize_debug_data(
@@ -907,6 +933,7 @@ class DreameLawnMowerVideoCamera(
         self._last_runtime_inputs_ready = inputs.ready
         self._last_runtime_inputs_source = inputs.source
         self._last_runtime_inputs_missing = inputs.missing_required
+        self._last_runtime_inputs_provisioning_issue = inputs.provisioning_issue
         if inputs.lan_identity_ready:
             try:
                 await self._lan_cache.async_save_identity(inputs)

@@ -1,0 +1,96 @@
+{
+  "operation": "camera_stream_inputs",
+  "version": 1,
+  "stages": [
+    {
+      "stage": "cloud_setup",
+      "result": {
+        "available": true,
+        "logged_in": true
+      }
+    },
+    {
+      "stage": "cloud_access_token",
+      "result": {
+        "access_token_present": true
+      }
+    },
+    {
+      "stage": "cloud_device_identity",
+      "response": {
+        "type": "object",
+        "codes": [
+          {
+            "path": "$.code",
+            "value": 10000
+          }
+        ],
+        "messages": [
+          {
+            "path": "$.msg",
+            "text": "设备三元组不存在"
+          }
+        ]
+      },
+      "result": {
+        "channel_id_present": false,
+        "product_id_present": false,
+        "device_name_present": false,
+        "secret_id_present": false,
+        "secret_key_present": false,
+        "app_id_present": false,
+        "app_secret_present": false
+      }
+    },
+    {
+      "stage": "cloud_p2p_info",
+      "response": {
+        "type": "object",
+        "codes": [
+          {
+            "path": "$.code",
+            "value": 10000
+          }
+        ],
+        "messages": [
+          {
+            "path": "$.msg",
+            "text": "设备三元组不存在"
+          }
+        ]
+      },
+      "result": {
+        "p2p_info_present": false,
+        "available": true
+      }
+    },
+    {
+      "stage": "cloud_user_eligibility",
+      "response": {
+        "type": "object",
+        "codes": [
+          {
+            "path": "$.code",
+            "value": 10000
+          }
+        ],
+        "messages": [
+          {
+            "path": "$.msg",
+            "text": "设备三元组不存在"
+          }
+        ]
+      },
+      "result": {
+        "is_device_user": null
+      }
+    }
+  ],
+  "ready": false,
+  "missing_required": [
+    "product_id",
+    "device_name",
+    "p2p_info"
+  ],
+  "completed": true
+}

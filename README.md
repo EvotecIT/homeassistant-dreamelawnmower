@@ -53,7 +53,7 @@ Support levels in this table mean:
 | Dreame A2 (`dreame.mower.g2408`) | Validated | Primary live development device, including schedules, maps, remote control, guarded preference writes, and diagnostics |
 | MOVA LiDAX Ultra 1000 (`mova.mower.g2529c`) | Recognized | Added from a MOVAhome EU diagnostics report; commands and battery are reported working, state handling now accepts model-specific cloud property ids |
 | Dreame A3 AWD Pro 3500 (`dreame.mower.g2541e`) | Recognized | Added from a Dreamehome EU diagnostics report; needs broader live confirmation before it is considered validated |
-| Dreame A3 AWD 1000 (`dreame.mower.q2501a`) | Recognized | Core entities, maps, and mower state are field-confirmed on firmware `4.3.6_0418`; live video still needs model-specific runtime proof |
+| Dreame A3 AWD 1000 (`dreame.mower.q2501a`) | Validated | Core entities, maps, mower state, and cloud live video are field-confirmed on firmware `4.3.6_0418`; video worked after the same mower was bound to an EU account, while its previous RU account lacked the required cloud video identity |
 | Newer A-series mower (`dreame.mower.g3255`) | Recognized | Raw model has been observed in code mapping, but the public retail name is still unverified |
 | Dreame A1 (`dreame.mower.p2255`) | Recognized | Model mapping is present; needs fixtures and live validation |
 | Dreame A1 Pro (`dreame.mower.g2422`) | Recognized | Model mapping is present; needs fixtures and live validation |
@@ -460,6 +460,25 @@ response values, account or device identifiers, credentials, stream URLs, or
 unbounded payloads. This lets maintainers distinguish unsupported models,
 malformed vendor responses, and missing provisioning without asking users to
 share an account as the first debugging step.
+
+### Live video identity is not provisioned
+
+The integration reports `device_triple_missing` when both Dreame video identity
+endpoints return vendor code `10000`, `设备三元组不存在` ("device triple does not
+exist"), and the required `product_id`, `device_name`, and `p2p_info` fields are
+absent. This means Dreame has not provisioned the mower's XP2P video identity
+for the current account or region; it is not a video-runtime or model-support
+failure.
+
+Check live video in Dreamehome or MOVAhome first. If it is missing there too,
+contact Dreame support and include the diagnostics capture. A field report for
+an A3 AWD 1000 found this condition on an RU account and confirmed working video
+after the same mower was rebound to an EU account. That is one account/device
+result, not evidence that every device in a region behaves the same way.
+
+Changing account region requires pairing the mower to another account and can
+discard cloud-stored maps and settings. Treat that as a last resort, not the
+normal fix for `device_triple_missing`.
 
 For issue reports, include:
 

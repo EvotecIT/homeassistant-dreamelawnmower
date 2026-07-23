@@ -400,6 +400,53 @@ def test_camera_stream_runtime_inputs_require_tx_identity_fields() -> None:
     assert "device-1" not in serialized_diagnostics
 
 
+def test_camera_stream_inputs_classify_unprovisioned_device_triple() -> None:
+    class _UnprovisionedCloud(_FakeCloud):
+        @staticmethod
+        def _missing_triple() -> dict[str, object]:
+            return {
+                "code": 10000,
+                "success": False,
+                "msg": "设备三元组不存在",
+            }
+
+        def get_tx_video_device_identity(
+            self,
+            access_token: str | None = None,
+            os: int = 1,
+        ) -> dict[str, object]:
+            assert access_token == "access-token-1"
+            assert os == 1
+            return self._missing_triple()
+
+        def get_tx_video_p2p_info(
+            self,
+            access_token: str | None = None,
+            os: int = 1,
+        ) -> dict[str, object]:
+            assert access_token == "access-token-1"
+            assert os == 1
+            return self._missing_triple()
+
+        def get_tx_video_user_eligibility(
+            self,
+            access_token: str | None = None,
+            os: int = 1,
+        ) -> dict[str, object]:
+            assert access_token == "access-token-1"
+            assert os == 1
+            return self._missing_triple()
+
+    client = _client()
+    client._sync_get_cloud_protocol = lambda: _UnprovisionedCloud()
+
+    result = client._sync_get_camera_stream_runtime_inputs()
+
+    assert result.ready is False
+    assert result.provisioning_issue == "device_triple_missing"
+    assert result.diagnostics["provisioning_issue"] == "device_triple_missing"
+
+
 def test_camera_stream_failure_retains_sanitized_stage_diagnostics() -> None:
     class _FailingCloud(_FakeCloud):
         def get_tx_video_access_token(self, os: int = 1) -> dict[str, object]:

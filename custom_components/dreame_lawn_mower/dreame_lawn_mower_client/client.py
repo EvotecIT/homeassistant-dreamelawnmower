@@ -2048,6 +2048,7 @@ class DreameLawnMowerClient:
                     },
                 )
         diagnostics["completed"] = True
+        diagnostics["provisioning_issue"] = runtime_inputs.provisioning_issue
         return output
 
     def _sync_get_camera_stream_runtime_inputs(

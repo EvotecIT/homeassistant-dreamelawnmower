@@ -14,6 +14,7 @@ from .device_code_semantics import (
     mower_fault_code,
     mower_status_notice_code,
 )
+from .video_provisioning_status import classify_xp2p_provisioning_issue
 
 SUPPORTED_ACCOUNT_TYPES = ("dreame", "mova")
 SUPPORTED_MODEL_MARKER = ".mower."
@@ -695,6 +696,14 @@ class DreameLawnMowerCameraStreamRuntimeInputs:
         return not self.missing_required
 
     @property
+    def provisioning_issue(self) -> str | None:
+        """Return a stable issue classified from privacy-safe cloud telemetry."""
+        return classify_xp2p_provisioning_issue(
+            self.diagnostics,
+            missing_required=self.missing_required,
+        )
+
+    @property
     def missing_lan_required(self) -> tuple[str, ...]:
         """Return identity fields missing from direct same-LAN startup."""
         return tuple(
@@ -738,6 +747,7 @@ class DreameLawnMowerCameraStreamRuntimeInputs:
         payload["xp2p_id"] = self.xp2p_id
         payload["ready"] = self.ready
         payload["missing_required"] = self.missing_required
+        payload["provisioning_issue"] = self.provisioning_issue
         payload["lan_identity_ready"] = self.lan_identity_ready
         payload["missing_lan_required"] = self.missing_lan_required
         payload["qcloud_credential_state"] = self.qcloud_credential_state
@@ -785,6 +795,7 @@ def remote_control_block_reason(snapshot: Any) -> str | None:
     activity = str(getattr(snapshot, "activity", None) or "").casefold()
     remote_control_active = state in REMOTE_CONTROL_STATES
     raw_running = bool(raw_attributes.get("running"))
+    docked = bool(getattr(snapshot, "docked", False)) or activity == "docked"
     mapping = bool(raw_attributes.get("mapping"))
     battery_level = getattr(snapshot, "battery_level", None)
 
@@ -805,7 +816,7 @@ def remote_control_block_reason(snapshot: Any) -> str | None:
     mower_active = (
         bool(getattr(snapshot, "mowing", False))
         or activity == "mowing"
-        or raw_running
+        or (raw_running and not docked)
     )
     if mower_active and not remote_control_active:
         return "Remote control is blocked while the mower is active."
