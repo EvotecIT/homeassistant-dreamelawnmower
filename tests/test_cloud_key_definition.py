@@ -15,11 +15,9 @@ from dreame_lawn_mower_client.models import (
 
 client_module = load_internal_module("client")
 credentials_module = load_internal_module("video_credentials")
-protocol_module = load_internal_module("protocol")
+protocol_module = load_internal_module("protocol_cloud")
 
-ENCRYPTED_APP_ID = (
-    "83f131752c9685534334475314dd5ab813ffe385cd526adc8bb2ab7ef3e53427"
-)
+ENCRYPTED_APP_ID = "83f131752c9685534334475314dd5ab813ffe385cd526adc8bb2ab7ef3e53427"
 ENCRYPTED_APP_SECRET = (
     "cbc3bfd0d0dbafe0795c7f040b2e2748a4702bd6263f4d74bb975bbb120537c8"
 )
@@ -128,17 +126,13 @@ def test_cloud_key_definition_fetches_public_payload() -> None:
     assert result["fetched"] is True
     assert result["ver"] == 10
     assert result["source"] == "device_info"
-    assert result["payload"]["keyDefine"]["2.1"]["en"]["13"] == (
-        "Charging Completed"
-    )
+    assert result["payload"]["keyDefine"]["2.1"]["en"]["13"] == ("Charging Completed")
     assert cloud.requested_url == "https://example.invalid/key.json"
 
 
 def test_cloud_key_definition_falls_back_to_device_list_record() -> None:
     client = _client()
-    cloud = _FakeCloud(
-        b'{"keyDefine":{"6.13":{"en":{"map":"Map payload"}}},"ver":11}'
-    )
+    cloud = _FakeCloud(b'{"keyDefine":{"6.13":{"en":{"map":"Map payload"}}},"ver":11}')
     client._sync_get_cloud_protocol = lambda: cloud
     client._sync_get_cloud_device_info = lambda language=None: {"keyDefine": {}}
     client._sync_get_cloud_device_list_page = lambda **kwargs: {
@@ -220,8 +214,7 @@ def test_camera_stream_inputs_use_tx_video_endpoints() -> None:
     assert result["tx_rtc_info"]["app_id"] == "xp2p-app-id-test"
     assert result["tx_rtc_info"]["app_secret"] == "xp2p-app-secret-test"
     assert (
-        result["tx_rtc_info"]["app_credentials_source"]
-        == "dreame_identity_decrypted"
+        result["tx_rtc_info"]["app_credentials_source"] == "dreame_identity_decrypted"
     )
     assert result["p2p_info"]["available"] is True
     assert result["p2p_info"]["p2p_info"] == "p2p-info-1"
@@ -245,18 +238,27 @@ def test_camera_stream_inputs_use_tx_video_endpoints() -> None:
 def test_tx_video_cloud_logs_redact_request_and_response_material() -> None:
     url = "https://example.invalid/dreame-third-video/tx/dev/getP2PInfo"
 
-    assert protocol_module._cloud_request_log_value(
-        url,
-        '{"accessToken":"secret-token"}',
-    ) == "<redacted TX video payload>"
-    assert protocol_module._cloud_request_log_value(
-        url,
-        '{"p2pInfo":"secret-p2p-material"}',
-    ) == "<redacted TX video payload>"
-    assert protocol_module._cloud_request_log_value(
-        "https://example.invalid/ordinary-endpoint",
-        '{"status":"ok"}',
-    ) == '{"status":"ok"}'
+    assert (
+        protocol_module._cloud_request_log_value(
+            url,
+            '{"accessToken":"secret-token"}',
+        )
+        == "<redacted TX video payload>"
+    )
+    assert (
+        protocol_module._cloud_request_log_value(
+            url,
+            '{"p2pInfo":"secret-p2p-material"}',
+        )
+        == "<redacted TX video payload>"
+    )
+    assert (
+        protocol_module._cloud_request_log_value(
+            "https://example.invalid/ordinary-endpoint",
+            '{"status":"ok"}',
+        )
+        == '{"status":"ok"}'
+    )
 
 
 def test_tx_video_user_eligibility_uses_read_only_device_endpoint() -> None:

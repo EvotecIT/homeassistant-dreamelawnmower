@@ -57,12 +57,20 @@ addopts = "-q"
 target-version = "py313"
 line-length = 88
 exclude = [
-  # These inherited protocol/map modules are being modernized in bounded
-  # refactors. Keep the rest of the reusable client under normal CI linting.
+  # These inherited implementation owners retain upstream style debt. They are
+  # named explicitly so new reusable client modules remain under normal linting.
   "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/const.py",
   "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/device.py",
+  "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/device_commands.py",
+  "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/device_map.py",
+  "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/device_state.py",
+  "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/device_status.py",
   "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/map.py",
+  "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/map_editor.py",
+  "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/map_manager.py",
+  "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/map_renderer.py",
   "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/protocol.py",
+  "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/protocol_cloud.py",
   "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/resources.py",
 ]
 
