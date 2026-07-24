@@ -71,10 +71,9 @@ def test_background_map_failure_still_schedules_next_refresh(monkeypatch) -> Non
     manager._update_interval = 30
     manager.update = Mock(side_effect=RuntimeError("temporary failure"))
     manager.schedule_update = Mock()
-    timestamps = iter((100.0, 101.0))
     monkeypatch.setattr(
-        "custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_manager.time.time",
-        lambda: next(timestamps),
+        "custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_manager.time",
+        Mock(time=Mock(side_effect=(100.0, 101.0))),
     )
 
     manager._update_task()
