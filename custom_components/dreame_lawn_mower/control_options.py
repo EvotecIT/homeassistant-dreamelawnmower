@@ -18,6 +18,30 @@ MOWING_ACTION_LABELS: dict[str, str] = {
 }
 
 
+def active_map_index(
+    app_maps: Mapping[str, Any] | None,
+    *,
+    selected_map_index: int | None = None,
+) -> int | None:
+    """Return the authoritative map identity with a pre-refresh fallback."""
+    if isinstance(app_maps, Mapping):
+        current_idx = app_maps.get("current_map_index")
+        if (
+            isinstance(current_idx, int)
+            and not isinstance(current_idx, bool)
+            and current_idx >= 0
+        ):
+            return current_idx
+        return None
+    if (
+        isinstance(selected_map_index, int)
+        and not isinstance(selected_map_index, bool)
+        and selected_map_index >= 0
+    ):
+        return selected_map_index
+    return None
+
+
 def current_map_index(
     app_maps: Mapping[str, Any] | None,
     batch_device_data: Mapping[str, Any] | None = None,

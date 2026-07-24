@@ -31,6 +31,7 @@ from .const import (
     DEFAULT_MAP_THEME,
     DOMAIN,
 )
+from .control_options import active_map_index
 from .coordinator import DreameLawnMowerCoordinator, runtime_tracking_active
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
@@ -217,7 +218,9 @@ class DreameLawnMowerMapCamera(
         """Return cached bytes immediately and refresh stale maps in the background."""
         if self._map_cache.last_image is not None:
             if (
-                self._map_cache.view_image_needs_render()
+                self._map_cache.view_image_needs_render(
+                    render_context=self._map_rotation,
+                )
                 or not self._map_cache.is_fresh()
             ):
                 self._start_map_refresh()
@@ -244,7 +247,10 @@ class DreameLawnMowerMapCamera(
         """Refresh the source view and atomically replace rendered JPEG bytes."""
         view = await self._async_refresh_map_view()
         if view.image_png is not None:
-            if self._map_cache.image_matches_source(view.image_png):
+            if self._map_cache.image_matches_source(
+                view.image_png,
+                render_context=self._map_rotation,
+            ):
                 self._map_cache.last_error = None
                 return self._map_cache.last_image
             try:
@@ -255,7 +261,11 @@ class DreameLawnMowerMapCamera(
                         rotation=self._map_rotation,
                     )
                 )
-                self._map_cache.store_image(image, source_image=view.image_png)
+                self._map_cache.store_image(
+                    image,
+                    source_image=view.image_png,
+                    render_context=self._map_rotation,
+                )
                 self._map_cache.last_error = None
                 self.async_write_ha_state()
                 return image
@@ -333,14 +343,10 @@ class DreameLawnMowerMapCamera(
 
     @property
     def _selected_map_index(self) -> int | None:
-        if self.coordinator.selected_map_index is not None:
-            return self.coordinator.selected_map_index
-        app_maps = self.coordinator.app_maps
-        if isinstance(app_maps, dict):
-            value = app_maps.get("current_map_index")
-            if isinstance(value, int) and not isinstance(value, bool):
-                return value
-        return None
+        return active_map_index(
+            self.coordinator.app_maps,
+            selected_map_index=self.coordinator.selected_map_index,
+        )
 
     @property
     def _map_style(self) -> MapRenderStyle:

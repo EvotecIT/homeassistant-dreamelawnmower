@@ -33,6 +33,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_SECONDS,
     DOMAIN,
 )
+from .control_options import active_map_index
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import (
     DreameLawnMowerDiagnosticEventStore,
@@ -209,14 +210,10 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
 
     def _runtime_map_index(self) -> int | None:
         """Return the map identity used to scope transient runtime overlays."""
-        if isinstance(self.app_maps, dict):
-            value = self.app_maps.get("current_map_index")
-            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-                return value
-            return None
-        if self.selected_map_index is not None:
-            return self.selected_map_index
-        return None
+        return active_map_index(
+            self.app_maps,
+            selected_map_index=self.selected_map_index,
+        )
 
     async def async_refresh_schedules(
         self,
@@ -504,6 +501,16 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         payload["source"] = source
         self.app_maps = payload
         self.app_maps_refreshed_at = now
+        current_idx = active_map_index(payload)
+        if current_idx is not None:
+            if (
+                self.selected_map_index is not None
+                and self.selected_map_index != current_idx
+            ):
+                self.selected_contour_id = None
+                self.selected_zone_id = None
+                self.selected_spot_id = None
+            self.selected_map_index = current_idx
         return payload
 
     async def async_refresh_weather_protection(

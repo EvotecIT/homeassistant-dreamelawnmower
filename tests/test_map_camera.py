@@ -412,6 +412,25 @@ def test_map_camera_cache_recognizes_unchanged_render_source() -> None:
     assert cache.image_matches_source(b"different-png") is False
 
 
+def test_map_camera_cache_includes_rotation_in_render_identity() -> None:
+    cache = DreameLawnMowerMapCameraCache(ttl=timedelta(seconds=60))
+    cache.store_view(
+        DreameLawnMowerMapView(
+            source="app_action_map",
+            image_png=b"same-png",
+        )
+    )
+    cache.store_image(
+        b"jpeg-first",
+        source_image=b"same-png",
+        render_context=0,
+    )
+
+    assert cache.image_matches_source(b"same-png", render_context=0) is True
+    assert cache.image_matches_source(b"same-png", render_context=90) is False
+    assert cache.view_image_needs_render(render_context=90) is True
+
+
 def test_map_camera_cache_coalesces_concurrent_refreshes() -> None:
     """Concurrent map camera refreshes share the same in-flight result."""
     calls = 0

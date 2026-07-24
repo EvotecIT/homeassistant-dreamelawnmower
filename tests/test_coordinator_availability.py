@@ -115,3 +115,25 @@ def test_runtime_map_identity_does_not_fall_back_after_fresh_unknown_map() -> No
     coordinator.selected_map_index = 1
 
     assert coordinator._runtime_map_index() is None
+
+
+def test_app_map_refresh_synchronizes_selected_map_identity() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.client = SimpleNamespace(
+        async_get_app_maps=AsyncMock(
+            return_value={"current_map_index": 2, "maps": []}
+        )
+    )
+    coordinator.app_maps = {"current_map_index": 0}
+    coordinator.app_maps_refreshed_at = None
+    coordinator.selected_map_index = 0
+    coordinator.selected_contour_id = (3, 0)
+    coordinator.selected_zone_id = 3
+    coordinator.selected_spot_id = 2
+
+    asyncio.run(coordinator.async_refresh_app_maps(force=True))
+
+    assert coordinator.selected_map_index == 2
+    assert coordinator.selected_contour_id is None
+    assert coordinator.selected_zone_id is None
+    assert coordinator.selected_spot_id is None

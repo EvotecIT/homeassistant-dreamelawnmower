@@ -28,6 +28,7 @@ from .const import (
     CONF_MAP_MARKER_IMAGE,
     CONF_MAP_MARKER_SCALE,
     CONF_MAP_ROTATION,
+    CONF_MAP_ROTATIONS,
     CONF_MAP_STROKE_SCALE,
     CONF_MAP_THEME,
     CONF_MODEL,
@@ -308,7 +309,10 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
         user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            options = dict(user_input)
+            if CONF_MAP_ROTATIONS in self._entry_options:
+                options[CONF_MAP_ROTATIONS] = self._entry_options[CONF_MAP_ROTATIONS]
+            return self.async_create_entry(title="", data=options)
 
         video_transport = self._entry_options.get(
             CONF_VIDEO_TRANSPORT,

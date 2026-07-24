@@ -14,6 +14,7 @@ from custom_components.dreame_lawn_mower.control_options import (
     MOWING_ACTION_EDGE,
     MOWING_ACTION_SPOT,
     MOWING_ACTION_ZONE,
+    active_map_index,
     current_contour_entries,
     current_spot_entries,
     current_zone_entries,
@@ -194,6 +195,16 @@ def _vector_map_details() -> dict:
             },
         ],
     }
+
+
+def test_active_map_identity_prefers_refreshed_mower_state() -> None:
+    assert (
+        active_map_index(
+            _app_maps(current_map_index=1),
+            selected_map_index=0,
+        )
+        == 1
+    )
 
 
 def _snapshot(**overrides: object) -> SimpleNamespace:
