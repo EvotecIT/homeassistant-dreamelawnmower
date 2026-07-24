@@ -93,6 +93,10 @@ from .vector_map import (
 if TYPE_CHECKING:
     from .map_visuals import MapRenderStyle
 
+# The 3dmap object is real PCD content either way; only the reported file
+# extension differs by cloud vendor (Dreame names it "*.pcd", MOVA "*.bin").
+_POINT_CLOUD_OBJECT_EXTENSIONS = frozenset({"pcd", "bin"})
+
 
 class _DreameLawnMowerClientMapsMixin:
     def _sync_switch_current_map(self, map_index: int) -> Any:
@@ -730,11 +734,18 @@ class _DreameLawnMowerClientMapsMixin:
             object_extension = (
                 _app_object_extension(object_name) if object_name is not None else None
             )
-            fresh_object = object_name != baseline_name or observed_clear
+            # MOVA never renames the 3dmap object on generation, so it would
+            # never look "fresh" here; treat its unchanged baseline object as
+            # acceptable right away instead of waiting out the full timeout.
+            fresh_object = (
+                object_name != baseline_name
+                or observed_clear
+                or self._account_type == "mova"
+            )
             if (
                 object_name is not None
                 and object_extension is not None
-                and object_extension.casefold() == "pcd"
+                and object_extension.casefold() in _POINT_CLOUD_OBJECT_EXTENSIONS
                 and fresh_object
                 and object_name not in rejected_object_names
                 and object_download_attempts.get(object_name, 0) < 2

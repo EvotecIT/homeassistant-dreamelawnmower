@@ -258,6 +258,66 @@ def test_download_point_cloud_uses_a2_generation_flow(
     assert all(options["retry_count"] == 0 for options in interim_file_options)
     assert all(0 < options["timeout"] <= 5 for options in interim_file_options)
     assert result.map_index == 0
+
+
+def test_download_point_cloud_accepts_unchanged_baseline_for_mova(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = DreameLawnMowerClient(
+        username="user@example.invalid",
+        password="secret",
+        country="eu",
+        account_type="mova",
+        descriptor=DreameLawnMowerDescriptor(
+            did="device-1",
+            name="Garage Mower",
+            model="mova.mower.g2408",
+            display_model="A2",
+            account_type="mova",
+            country="eu",
+        ),
+    )
+    calls: list[dict[str, Any]] = []
+    responses = iter(
+        [
+            {"r": 0, "d": {"name": ["private/existing-map.bin"]}},
+            {"r": 0},
+            {"r": 0, "d": {"name": ["private/existing-map.bin"]}},
+        ]
+    )
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        calls.append(payload)
+        return next(responses)
+
+    signed_url = "https://downloads.example.invalid/object?private=signature"
+    cloud = type(
+        "Cloud",
+        (),
+        {"get_interim_file_url": lambda self, name, **kwargs: signed_url},
+    )()
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content, request.full_url
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    # The object never gets renamed (MOVA behavior), but it's downloaded on
+    # the very first poll iteration instead of waiting out the full timeout.
+    assert calls == [
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+    ]
+    assert result.map_index == 0
     assert result.content == content
     assert result.metadata.points == 1
     assert not hasattr(result, "url")
