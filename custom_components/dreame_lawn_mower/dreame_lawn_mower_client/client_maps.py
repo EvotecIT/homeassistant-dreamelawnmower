@@ -194,7 +194,12 @@ class _DreameLawnMowerClientMapsMixin:
         if vector_view.available and vector_view.image_png is not None:
             return vector_view
 
-        legacy_view = self._sync_refresh_legacy_map_view(timeout, interval)
+        legacy_view = self._sync_refresh_legacy_map_view(
+            timeout,
+            interval,
+            label_scale=label_scale,
+            style=style,
+        )
         legacy_view = self._with_fallback_app_maps(legacy_view, app_view)
         if legacy_view.available or legacy_view.image_png is not None:
             return legacy_view
@@ -360,6 +365,9 @@ class _DreameLawnMowerClientMapsMixin:
         self,
         timeout: float,
         interval: float,
+        *,
+        label_scale: float = 1.0,
+        style: MapRenderStyle | None = None,
     ) -> DreameLawnMowerMapView:
         source = "legacy_current_map"
         try:
@@ -390,11 +398,14 @@ class _DreameLawnMowerClientMapsMixin:
         device = self._ensure_device()
         render_map_data = device.get_map_for_render(map_data) or map_data
 
-        from .map_json_renderer import DreameMowerMapDataJsonRenderer
+        from .legacy_map_visuals import render_legacy_map_png
 
         try:
-            renderer = DreameMowerMapDataJsonRenderer()
-            image_png = renderer.render_map(render_map_data)
+            image_png = render_legacy_map_png(
+                render_map_data,
+                label_scale=label_scale,
+                style=style,
+            )
         except Exception as err:
             error = f"Failed to render map data: {err}"
             return DreameLawnMowerMapView(
