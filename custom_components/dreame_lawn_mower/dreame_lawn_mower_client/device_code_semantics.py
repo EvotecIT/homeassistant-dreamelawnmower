@@ -78,11 +78,16 @@ _BASE_DEVICE_CODES: Final[dict[int, MowerDeviceCodeDefinition]] = {
             25: "map_file_damaged",
             26: "mower_too_far_from_map",
             27: "human_detected",
+            37: "path_blocked",
+            73: "top_cover_open",
+        },
+    ),
+    **_definitions(
+        MowerDeviceCodeTier.ATTENTION,
+        {
             28: "blades_worn",
             29: "station_brush_worn",
             30: "maintenance_due",
-            37: "path_blocked",
-            73: "top_cover_open",
         },
     ),
     **_definitions(
@@ -141,8 +146,8 @@ _BASE_DEVICE_CODES: Final[dict[int, MowerDeviceCodeDefinition]] = {
 
 
 # Dreame A2 / g2408 app-plugin differences. In particular, 16 and 59 do not
-# mean what the cross-model registry says, and codes 27-30 are attention items
-# rather than hard faults.
+# mean what the cross-model registry says, and human detection is an attention
+# notice rather than a hard fault.
 _A2_DEVICE_CODE_OVERRIDES: Final[dict[int, MowerDeviceCodeDefinition]] = {
     **_definitions(
         MowerDeviceCodeTier.ERROR,
@@ -155,9 +160,6 @@ _A2_DEVICE_CODE_OVERRIDES: Final[dict[int, MowerDeviceCodeDefinition]] = {
         MowerDeviceCodeTier.ATTENTION,
         {
             27: "human_detected",
-            28: "blades_worn",
-            29: "station_brush_worn",
-            30: "maintenance_due",
             74: "patrol_task_completed",
             75: "maintenance_point_reached",
             76: "maintenance_point_unreachable",
@@ -196,12 +198,6 @@ _MOVA_DEVICE_CODE_OVERRIDES: Final[dict[int, MowerDeviceCodeDefinition]] = {
         {
             0: "robot_lifted",
             55: "cannot_start_low_battery",
-        },
-    ),
-    **_definitions(
-        MowerDeviceCodeTier.ATTENTION,
-        {
-            30: "maintenance_due",
         },
     ),
 }
