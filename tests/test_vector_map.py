@@ -21,7 +21,11 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
     DreameLawnMowerConnectionError,
 )
-from dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
+from dreame_lawn_mower_client.models import (
+    DreameLawnMowerDescriptor,
+    DreameLawnMowerMapSummary,
+    DreameLawnMowerMapView,
+)
 
 
 def _client() -> DreameLawnMowerClient:
@@ -558,6 +562,34 @@ def test_vector_map_view_exposes_runtime_position_without_track_points() -> None
     assert view.details["runtime_region_id"] == 7
     assert view.details["runtime_position_updated_at"] == ("2026-07-16T10:02:09+00:00")
     assert "runtime_track_point_count" not in view.details
+
+
+def test_map_view_prefers_valid_runtime_position_before_track_exists() -> None:
+    client = _client()
+    client._sync_refresh_app_map_view = lambda **kwargs: DreameLawnMowerMapView(  # type: ignore[method-assign]  # noqa: ARG005
+        source="app_action_map",
+        summary=DreameLawnMowerMapSummary(available=True),
+        image_png=b"app-map",
+    )
+    client._sync_get_vector_map_batch_data = lambda: _batch_payload()
+    client._safe_map_diagnostics = lambda **kwargs: None
+    client.update_runtime_live_tracking(
+        SimpleNamespace(
+            hex="runtime-pose-only",
+            candidate_runtime_track_segments=(),
+            candidate_runtime_pose_x=50,
+            candidate_runtime_pose_y=40,
+        ),
+        active=True,
+        map_index=0,
+    )
+
+    view = client._sync_refresh_map_view(timeout=0, interval=0)
+
+    assert view.source == "batch_vector_map"
+    assert view.details is not None
+    assert view.details["runtime_position_valid"] is True
+    assert view.image_png != b"app-map"
 
 
 def test_vector_map_filters_transient_geometry_to_selected_boundary() -> None:

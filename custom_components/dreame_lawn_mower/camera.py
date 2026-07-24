@@ -35,7 +35,11 @@ from .coordinator import DreameLawnMowerCoordinator, runtime_tracking_active
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
 from .dreame_lawn_mower_client.client import render_app_map_payload_png
-from .dreame_lawn_mower_client.map_visuals import MapRenderStyle, map_render_style
+from .dreame_lawn_mower_client.map_visuals import (
+    MapRenderStyle,
+    load_map_marker,
+    map_render_style,
+)
 from .dreame_lawn_mower_client.models import DreameLawnMowerMapView
 from .image import (
     app_maps_contact_sheet_jpeg,
@@ -348,30 +352,10 @@ class DreameLawnMowerMapCamera(
     @property
     def _map_marker_image(self) -> bytes | None:
         """Load a small marker image only from Home Assistant's www directory."""
-        configured = self.coordinator.entry.options.get(CONF_MAP_MARKER_IMAGE)
-        if not isinstance(configured, str) or not configured.strip():
-            return None
-        relative = configured.strip()
-        if relative.startswith("/local/"):
-            relative = relative.removeprefix("/local/")
-        relative_path = Path(relative)
-        if relative_path.is_absolute() or ".." in relative_path.parts:
-            return None
-        www_root = Path(self.hass.config.path("www")).resolve()
-        candidate = (www_root / relative_path).resolve()
-        if www_root not in candidate.parents or candidate.suffix.lower() not in {
-            ".png",
-            ".jpg",
-            ".jpeg",
-            ".webp",
-        }:
-            return None
-        try:
-            if not candidate.is_file() or candidate.stat().st_size > 1024 * 1024:
-                return None
-            return candidate.read_bytes()
-        except OSError:
-            return None
+        return load_map_marker(
+            Path(self.hass.config.path("www")),
+            self.coordinator.entry.options.get(CONF_MAP_MARKER_IMAGE),
+        )
 
     @property
     def _map_refresh_context(self) -> tuple[Any, ...]:

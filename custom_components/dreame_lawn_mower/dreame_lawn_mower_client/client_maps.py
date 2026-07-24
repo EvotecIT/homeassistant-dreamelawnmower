@@ -182,7 +182,10 @@ class _DreameLawnMowerClientMapsMixin:
             ),
             app_view,
         )
-        if _map_view_has_live_path(vector_view):
+        if _map_view_has_live_path(vector_view) or (
+            isinstance(vector_view.details, Mapping)
+            and vector_view.details.get("runtime_position_valid") is True
+        ):
             return vector_view
 
         if app_view.available and app_view.image_png is not None:

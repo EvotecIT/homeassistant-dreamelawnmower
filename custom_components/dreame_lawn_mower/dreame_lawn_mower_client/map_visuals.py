@@ -8,6 +8,7 @@ import zlib
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
@@ -199,6 +200,33 @@ def draw_position_marker(
         (px - inner, py - inner, px + inner, py + inner),
         fill=style.label_halo,
     )
+
+
+def load_map_marker(www_root: Path, configured: Any) -> bytes | None:
+    """Load a constrained custom marker from Home Assistant's www directory."""
+    if not isinstance(configured, str) or not configured.strip():
+        return None
+    relative = configured.strip()
+    if relative.startswith("/local/"):
+        relative = relative.removeprefix("/local/")
+    relative_path = Path(relative)
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        return None
+    root = www_root.resolve()
+    candidate = (root / relative_path).resolve()
+    if root not in candidate.parents or candidate.suffix.lower() not in {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+    }:
+        return None
+    try:
+        if not candidate.is_file() or candidate.stat().st_size > 1024 * 1024:
+            return None
+        return candidate.read_bytes()
+    except OSError:
+        return None
 
 
 def _finite_scale(value: Any, minimum: float, maximum: float) -> float:

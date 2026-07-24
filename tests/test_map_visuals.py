@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_visuals import (
+    load_map_marker,
     map_font,
     map_render_style,
 )
@@ -41,3 +42,19 @@ def test_map_theme_changes_the_complete_render_without_geometry_changes() -> Non
     assert emerald is not None
     assert midnight is not None
     assert emerald != midnight
+
+
+def test_custom_map_marker_is_limited_to_config_www(tmp_path) -> None:
+    www = tmp_path / "www"
+    marker = www / "mower" / "marker.png"
+    marker.parent.mkdir(parents=True)
+    marker.write_bytes(b"safe-marker")
+    unsupported = marker.with_suffix(".svg")
+    unsupported.write_text("<svg />", encoding="utf-8")
+    oversized = marker.with_name("oversized.png")
+    oversized.write_bytes(b"x" * ((1024 * 1024) + 1))
+
+    assert load_map_marker(www, "/local/mower/marker.png") == b"safe-marker"
+    assert load_map_marker(www, "../secret.png") is None
+    assert load_map_marker(www, "mower/marker.svg") is None
+    assert load_map_marker(www, "mower/oversized.png") is None
