@@ -1,0 +1,5 @@
+# Keep repository text canonical across Windows, macOS, and Linux.
+* text=auto eol=lf
+
+# Prevent image assets from ever being considered text.
+*.png binary
