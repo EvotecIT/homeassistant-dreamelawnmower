@@ -4,15 +4,26 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.number import NumberEntity
+from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity
+from .mowing_preference_control import (
+    MOWING_HEIGHT_MAX_CM,
+    MOWING_HEIGHT_MIN_CM,
+    MOWING_HEIGHT_STEP_CM,
+    PREFERENCE_MODE_CUSTOM,
+    async_update_selected_mowing_preference,
+    selected_map_preference_mode,
+    selected_zone_mowing_height,
+    selected_zone_preference_attributes,
+)
 
 
 async def async_setup_entry(
@@ -22,7 +33,12 @@ async def async_setup_entry(
 ) -> None:
     """Set up Dreame mower number entities."""
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([DreameLawnMowerVoiceVolumeNumber(coordinator)])
+    async_add_entities(
+        [
+            DreameLawnMowerVoiceVolumeNumber(coordinator),
+            DreameLawnMowerSelectedZoneMowingHeightNumber(coordinator),
+        ]
+    )
 
 
 class DreameLawnMowerVoiceVolumeNumber(DreameLawnMowerEntity, NumberEntity):
@@ -59,6 +75,98 @@ class DreameLawnMowerVoiceVolumeNumber(DreameLawnMowerEntity, NumberEntity):
         await self.coordinator.client.async_set_voice_volume(round(value))
         await self.coordinator.async_refresh_voice_settings(force=True)
         self.coordinator.async_update_listeners()
+
+
+class DreameLawnMowerSelectedZoneMowingHeightNumber(
+    DreameLawnMowerEntity,
+    NumberEntity,
+):
+    """Control the mowing height for the selected map and zone."""
+
+    _attr_name = "Selected Zone Mowing Height"
+    _attr_icon = "mdi:grass"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_native_min_value = MOWING_HEIGHT_MIN_CM
+    _attr_native_max_value = MOWING_HEIGHT_MAX_CM
+    _attr_native_step = MOWING_HEIGHT_STEP_CM
+    _attr_native_unit_of_measurement = "cm"
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_selected_zone_mowing_height"
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return whether the selected zone height can currently be changed."""
+        return (
+            self.coordinator.data is not None
+            and self.native_value is not None
+            and selected_map_preference_mode(self.coordinator) == PREFERENCE_MODE_CUSTOM
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the selected zone mowing height in centimeters."""
+        return selected_zone_mowing_height(self.coordinator)
+
+    @property
+    def native_min_value(self) -> float:
+        """Include a device-reported value below the conservative UI range."""
+        current = self.native_value
+        return (
+            min(MOWING_HEIGHT_MIN_CM, current)
+            if current is not None
+            else MOWING_HEIGHT_MIN_CM
+        )
+
+    @property
+    def native_max_value(self) -> float:
+        """Include a device-reported value above the conservative UI range."""
+        current = self.native_value
+        return (
+            max(MOWING_HEIGHT_MAX_CM, current)
+            if current is not None
+            else MOWING_HEIGHT_MAX_CM
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return selected map/zone scope and write availability details."""
+        attributes = selected_zone_preference_attributes(self.coordinator)
+        attributes["write_available"] = self.available
+        if not self.available:
+            attributes["write_unavailable_reason"] = (
+                "Select Custom map preference mode before changing zone height."
+                if selected_map_preference_mode(self.coordinator)
+                != PREFERENCE_MODE_CUSTOM
+                else "Selected zone mowing preference data is unavailable."
+            )
+        return attributes
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Persist the selected zone mowing height through the guarded PRE path."""
+        if selected_map_preference_mode(self.coordinator) != PREFERENCE_MODE_CUSTOM:
+            raise HomeAssistantError(
+                "Select Custom map preference mode before changing zone height."
+            )
+        normalized = float(value)
+        if normalized < self.native_min_value or normalized > self.native_max_value:
+            raise HomeAssistantError(
+                f"Mowing height must be between {self.native_min_value:g} and "
+                f"{self.native_max_value:g} cm for this mower."
+            )
+        steps = round(normalized / MOWING_HEIGHT_STEP_CM)
+        if abs(normalized - steps * MOWING_HEIGHT_STEP_CM) > 1e-6:
+            raise HomeAssistantError(
+                f"Mowing height must use {MOWING_HEIGHT_STEP_CM:g} cm steps."
+            )
+        await async_update_selected_mowing_preference(
+            self.coordinator,
+            changes={"mowing_height_cm": normalized},
+        )
 
 
 def _voice_settings_section(value: dict[str, Any] | None) -> dict[str, Any] | None:
