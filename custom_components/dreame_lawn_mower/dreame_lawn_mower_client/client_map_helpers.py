@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import time
@@ -9,6 +10,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from io import BytesIO
 from typing import Any
 
@@ -36,6 +38,28 @@ from .models import (
 from .point_cloud import (
     DreameLawnMowerPointCloudError,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _PointCloudObjectIdentity:
+    """Stable response evidence used to detect a fixed-key object overwrite."""
+
+    content_sha256: str
+    etag: str | None
+    last_modified: str | None
+
+    def differs_from(self, other: _PointCloudObjectIdentity) -> bool:
+        """Return whether content or an object-store validator changed."""
+        if self.content_sha256 != other.content_sha256:
+            return True
+        if self.etag is not None and other.etag is not None:
+            if self.etag != other.etag:
+                return True
+        return (
+            self.last_modified is not None
+            and other.last_modified is not None
+            and self.last_modified != other.last_modified
+        )
 
 
 def _validate_app_map_chunk_size(value: int) -> int:
@@ -168,6 +192,20 @@ def _download_point_cloud_content(
     timeout: float,
     max_bytes: int,
 ) -> tuple[bytes, str]:
+    content, content_type, _ = _download_point_cloud_content_with_identity(
+        url,
+        timeout=timeout,
+        max_bytes=max_bytes,
+    )
+    return content, content_type
+
+
+def _download_point_cloud_content_with_identity(
+    url: str,
+    *,
+    timeout: float,
+    max_bytes: int,
+) -> tuple[bytes, str, _PointCloudObjectIdentity]:
     deadline = time.monotonic() + timeout
     request = urllib.request.Request(
         url,
@@ -213,7 +251,10 @@ def _download_point_cloud_content(
                         "The point-cloud download timed out."
                     )
                 _set_point_cloud_response_timeout(response, remaining)
-                chunk = response.read(min(64 * 1024, max_bytes + 1 - received_bytes))
+                read_bytes = min(64 * 1024, max_bytes + 1 - received_bytes)
+                if declared_bytes is not None:
+                    read_bytes = min(read_bytes, declared_bytes - received_bytes)
+                chunk = response.read(read_bytes)
                 if time.monotonic() >= deadline:
                     raise DreameLawnMowerPointCloudError(
                         "The point-cloud download timed out."
@@ -226,11 +267,20 @@ def _download_point_cloud_content(
                     raise DreameLawnMowerPointCloudError(
                         "The point-cloud download exceeds the configured size limit."
                     )
+            if declared_bytes is not None and received_bytes != declared_bytes:
+                raise DreameLawnMowerPointCloudError(
+                    "The point-cloud download ended before its declared size."
+                )
             content = b"".join(content_parts)
             content_type = (
                 response.headers.get_content_type()
                 if hasattr(response.headers, "get_content_type")
                 else "application/octet-stream"
+            )
+            identity = _PointCloudObjectIdentity(
+                content_sha256=hashlib.sha256(content).hexdigest(),
+                etag=response.headers.get("ETag"),
+                last_modified=response.headers.get("Last-Modified"),
             )
     except DreameLawnMowerPointCloudError:
         raise
@@ -247,7 +297,7 @@ def _download_point_cloud_content(
             "The point-cloud download could not be completed."
         ) from err
 
-    return content, content_type
+    return content, content_type, identity
 
 
 class _HttpsOnlyPointCloudRedirectHandler(urllib.request.HTTPRedirectHandler):

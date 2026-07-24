@@ -81,8 +81,32 @@ def _client() -> DreameLawnMowerClient:
     )
 
 
+def _mova_client() -> DreameLawnMowerClient:
+    return DreameLawnMowerClient(
+        username="user@example.invalid",
+        password="secret",
+        country="eu",
+        account_type="mova",
+        descriptor=DreameLawnMowerDescriptor(
+            did="device-1",
+            name="Garage Mower",
+            model="mova.mower.g2408",
+            display_model="A2",
+            account_type="mova",
+            country="eu",
+        ),
+    )
+
+
 class _FakeResponse:
-    def __init__(self, content: bytes, url: str) -> None:
+    def __init__(
+        self,
+        content: bytes,
+        url: str,
+        *,
+        etag: str | None = None,
+        last_modified: str | None = None,
+    ) -> None:
         self._content = content
         self._offset = 0
         self._url = url
@@ -94,6 +118,10 @@ class _FakeResponse:
         self.headers = Message()
         self.headers["Content-Length"] = str(len(content))
         self.headers["Content-Type"] = "application/octet-stream"
+        if etag is not None:
+            self.headers["ETag"] = etag
+        if last_modified is not None:
+            self.headers["Last-Modified"] = last_modified
 
     def __enter__(self) -> _FakeResponse:
         return self
@@ -258,30 +286,23 @@ def test_download_point_cloud_uses_a2_generation_flow(
     assert all(options["retry_count"] == 0 for options in interim_file_options)
     assert all(0 < options["timeout"] <= 5 for options in interim_file_options)
     assert result.map_index == 0
+    assert result.content == content
+    assert result.metadata.points == 1
+    assert not hasattr(result, "url")
+    assert not hasattr(result, "object_name")
 
 
-def test_download_point_cloud_accepts_unchanged_baseline_for_mova(
+def test_download_point_cloud_waits_for_changed_mova_fixed_object(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = DreameLawnMowerClient(
-        username="user@example.invalid",
-        password="secret",
-        country="eu",
-        account_type="mova",
-        descriptor=DreameLawnMowerDescriptor(
-            did="device-1",
-            name="Garage Mower",
-            model="mova.mower.g2408",
-            display_model="A2",
-            account_type="mova",
-            country="eu",
-        ),
-    )
+    client = _mova_client()
     calls: list[dict[str, Any]] = []
     responses = iter(
         [
             {"r": 0, "d": {"name": ["private/existing-map.bin"]}},
             {"r": 0},
+            {"r": 0, "d": {"name": ["private/existing-map.bin"]}},
+            {"r": 0, "d": {"name": ["private/existing-map.bin"]}},
             {"r": 0, "d": {"name": ["private/existing-map.bin"]}},
         ]
     )
@@ -296,7 +317,16 @@ def test_download_point_cloud_accepts_unchanged_baseline_for_mova(
         (),
         {"get_interim_file_url": lambda self, name, **kwargs: signed_url},
     )()
-    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    baseline_content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    refreshed_content = _binary_pcd((4.0, 5.0, 6.0, 0x654321))
+    downloads = iter(
+        [
+            baseline_content,
+            baseline_content,
+            baseline_content,
+            refreshed_content,
+        ]
+    )
     client._sync_call_app_action = call_app_action
     client._sync_get_cloud_protocol = lambda **kwargs: cloud
     monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
@@ -304,24 +334,175 @@ def test_download_point_cloud_accepts_unchanged_baseline_for_mova(
         _internal_client_module,
         "_open_point_cloud_response",
         lambda request, *, timeout, deadline: _FakeResponse(
-            content, request.full_url
+            next(downloads),
+            request.full_url,
         ),
     )
 
     result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
 
-    # The object never gets renamed (MOVA behavior), but it's downloaded on
-    # the very first poll iteration instead of waiting out the full timeout.
+    # The object never gets renamed (MOVA behavior), so unchanged valid
+    # baseline bytes are ignored until the overwritten content is observable.
     assert calls == [
         {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
         {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
         {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
     ]
     assert result.map_index == 0
-    assert result.content == content
+    assert result.content == refreshed_content
     assert result.metadata.points == 1
     assert not hasattr(result, "url")
     assert not hasattr(result, "object_name")
+
+
+def test_download_point_cloud_accepts_new_mova_object_validator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _mova_client()
+    responses = iter(
+        [
+            {"r": 0, "d": {"name": ["private/existing-map.bin"]}},
+            {"r": 0},
+            {"r": 0, "d": {"name": ["private/existing-map.bin"]}},
+        ]
+    )
+    client._sync_call_app_action = lambda payload, **kwargs: next(responses)
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    downloads = iter(
+        [
+            _FakeResponse(
+                content,
+                "https://downloads.example.invalid/object",
+                etag='"baseline"',
+            ),
+            _FakeResponse(
+                content,
+                "https://downloads.example.invalid/object",
+                etag='"refreshed"',
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: next(downloads),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert result.content == content
+    assert result.metadata.points == 1
+
+
+def test_download_point_cloud_retries_mova_fixed_object_until_valid_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _mova_client()
+    calls: list[dict[str, Any]] = []
+    responses = iter(
+        [
+            {"r": 0, "d": {"name": ["private/existing-map.bin"]}},
+            {"r": 0},
+            {"r": 0, "d": {"name": ["private/existing-map.bin"]}},
+            {"r": 0, "d": {"name": ["private/existing-map.bin"]}},
+            {"r": 0, "d": {"name": ["private/existing-map.bin"]}},
+        ]
+    )
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        calls.append(payload)
+        return next(responses)
+
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    baseline_content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    refreshed_content = _binary_pcd((4.0, 5.0, 6.0, 0x654321))
+    downloads: Any = iter(
+        [
+            _FakeResponse(
+                baseline_content,
+                "https://downloads.example.invalid/object",
+            ),
+            TimeoutError(),
+            _FakeResponse(
+                b"partially overwritten",
+                "https://downloads.example.invalid/object",
+            ),
+            _FakeResponse(
+                refreshed_content,
+                "https://downloads.example.invalid/object",
+            ),
+        ]
+    )
+
+    def open_response(request: Any, *, timeout: float, deadline: float) -> Any:
+        result = next(downloads)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        open_response,
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert calls == [
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+    ]
+    assert result.content == refreshed_content
+    assert result.metadata.points == 1
+
+
+def test_download_point_cloud_does_not_accept_bin_extension_for_dreame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    action_count = 0
+    download_url_calls = 0
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        nonlocal action_count
+        action_count += 1
+        if action_count == 1:
+            return {"r": 0, "d": {"name": ["private/existing-map.pcd"]}}
+        if action_count == 2:
+            return {"r": 0}
+        return {"r": 0, "d": {"name": ["private/generated-map.bin"]}}
+
+    def get_interim_file_url(name: str, **kwargs: Any) -> str:
+        nonlocal download_url_calls
+        download_url_calls += 1
+        return "https://downloads.example.invalid/object"
+
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_interim_file_url=get_interim_file_url,
+    )
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+
+    with pytest.raises(DreameLawnMowerPointCloudError):
+        client._sync_download_app_map_point_cloud(0, 0.01, 0.001, 10, 1024)
+
+    assert download_url_calls == 0
 
 
 def test_download_point_cloud_error_does_not_expose_signed_url(
@@ -359,6 +540,59 @@ def test_download_point_cloud_error_does_not_expose_signed_url(
     assert "HTTP status 403" in str(captured.value)
     assert signed_url not in str(captured.value)
     assert signed_url not in repr(captured.value)
+
+
+def test_download_point_cloud_stops_at_declared_content_length(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signed_url = "https://downloads.example.invalid/private-object"
+    content = b"complete"
+    response = _FakeResponse(content, signed_url)
+    read_sizes: list[int] = []
+    original_read = response.read
+
+    def read(size: int) -> bytes:
+        read_sizes.append(size)
+        return original_read(size)
+
+    response.read = read
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: response,
+    )
+
+    downloaded, _ = _internal_client_module._download_point_cloud_content(
+        signed_url,
+        timeout=10,
+        max_bytes=1024,
+    )
+
+    assert downloaded == content
+    assert read_sizes == [len(content)]
+
+
+def test_download_point_cloud_rejects_truncated_content_length(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    signed_url = "https://downloads.example.invalid/private-object"
+    response = _FakeResponse(b"short", signed_url)
+    response.headers.replace_header("Content-Length", "10")
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: response,
+    )
+
+    with pytest.raises(
+        DreameLawnMowerPointCloudError,
+        match="ended before its declared size",
+    ):
+        _internal_client_module._download_point_cloud_content(
+            signed_url,
+            timeout=10,
+            max_bytes=1024,
+        )
 
 
 def test_download_point_cloud_rejects_insecure_redirect_before_following() -> None:
