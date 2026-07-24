@@ -6,6 +6,8 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+from custom_components.dreame_lawn_mower.camera import DreameLawnMowerMapCamera
+from custom_components.dreame_lawn_mower.const import CONF_MAP_MARKER_IMAGE
 from custom_components.dreame_lawn_mower.map_attributes import map_camera_attributes
 from custom_components.dreame_lawn_mower.map_cache import (
     DreameLawnMowerMapCameraCache,
@@ -224,6 +226,7 @@ def test_map_camera_attributes_include_live_path_metadata() -> None:
     assert attributes["position_segment"] == 7
     assert attributes["position_updated_at"] == "2026-07-16T09:45:12+00:00"
     assert attributes["map_has_live_path"] is True
+    assert attributes["runtime_position_valid"] is None
     assert attributes["map_available_vector_map_count"] == 2
     assert attributes["map_available_vector_maps"] == [
         {"map_id": 1, "map_index": 0, "name": "Primary", "total_area": 10.5},
@@ -252,6 +255,28 @@ def test_map_camera_attributes_include_live_path_metadata() -> None:
             {"map_id": 2, "map_index": 1, "name": "Back", "total_area": 8.0},
         ],
     }
+
+
+def test_custom_map_marker_is_limited_to_config_www(tmp_path) -> None:
+    www = tmp_path / "www"
+    marker = www / "mower" / "marker.png"
+    marker.parent.mkdir(parents=True)
+    marker.write_bytes(b"safe-marker")
+    entity = object.__new__(DreameLawnMowerMapCamera)
+    entity.hass = SimpleNamespace(
+        config=SimpleNamespace(path=lambda value: str(tmp_path / value))
+    )
+    entity.coordinator = SimpleNamespace(
+        entry=SimpleNamespace(
+            options={CONF_MAP_MARKER_IMAGE: "/local/mower/marker.png"}
+        )
+    )
+
+    assert entity._map_marker_image == b"safe-marker"
+
+    entity.coordinator.entry.options[CONF_MAP_MARKER_IMAGE] = "../secret.png"
+
+    assert entity._map_marker_image is None
 
 
 def test_map_camera_attributes_include_app_trajectory_details() -> None:

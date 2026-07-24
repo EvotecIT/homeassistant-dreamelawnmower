@@ -16,6 +16,11 @@ CONF_NAME = "name"
 CONF_PASSWORD = "password"
 CONF_MAP_LABEL_SCALE = "map_label_scale"
 CONF_MAP_ROTATION = "map_rotation"
+CONF_MAP_ROTATIONS = "map_rotations"
+CONF_MAP_THEME = "map_theme"
+CONF_MAP_STROKE_SCALE = "map_stroke_scale"
+CONF_MAP_MARKER_SCALE = "map_marker_scale"
+CONF_MAP_MARKER_IMAGE = "map_marker_image"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_TOKEN = "token"
 CONF_USERNAME = "username"
@@ -27,6 +32,9 @@ CONF_XP2P_RUNNER_MODE = "xp2p_runner_mode"
 DEFAULT_COUNTRY = "eu"
 DEFAULT_MAP_LABEL_SCALE = 1.0
 DEFAULT_MAP_ROTATION = 0
+DEFAULT_MAP_THEME = "emerald"
+DEFAULT_MAP_STROKE_SCALE = 1.0
+DEFAULT_MAP_MARKER_SCALE = 1.0
 DEFAULT_SCAN_INTERVAL_SECONDS = 60
 MIN_MAP_LABEL_SCALE = 0.5
 MAX_MAP_LABEL_SCALE = 4.0
@@ -37,6 +45,12 @@ MAP_ROTATION_OPTIONS = {
     90: "90 degrees clockwise",
     180: "180 degrees",
     270: "270 degrees clockwise",
+}
+MAP_THEME_OPTIONS = {
+    "emerald": "Emerald",
+    "dark": "Dark",
+    "midnight": "Midnight",
+    "high_contrast": "High contrast",
 }
 
 ACCOUNT_TYPE_DREAME = "dreame"

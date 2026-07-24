@@ -113,3 +113,7 @@ class DreameLawnMowerMapCameraCache:
         self.last_image_source_sha256 = (
             sha256(source_image).hexdigest() if source_image is not None else None
         )
+
+    def invalidate_view(self) -> None:
+        """Expire source metadata while preserving the last good image."""
+        self.last_refresh_at = None

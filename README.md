@@ -115,11 +115,14 @@ region/account details are especially helpful for moving a device from
 - binary sensors for active and resumable mowing sessions
 - binary sensor for Bluetooth-connected runtime state
 - read-only schedule calendar using the mower-native app schedule protocol
+- standard per-plan schedule switches for direct dashboard and automation use
 - disabled-by-default all-schedules calendar for default and per-map schedule diagnosis
 - guarded schedule enable/disable service with dry-run mode by default
 - guarded mowing-preference update service with dry-run mode by default
-- read-only map camera using the app-map payload when available, with options
-  for label scale and clockwise display rotation
+- self-refreshing map cameras with live session overlays, Unicode labels,
+  coordinated light/dark themes, line and marker scaling, and per-map rotation
+- optional custom mower marker loaded only from Home Assistant's `config/www`
+  folder, with path, type, size, and image-dimension limits
 - on-demand PCD point-cloud generation through an authenticated, admin-only
   Home Assistant download endpoint
 - disabled-by-default all-maps and map-diagnostics cameras
@@ -368,6 +371,12 @@ events.
 Enable the disabled `All Schedules` calendar only when you intentionally want to
 inspect every decoded schedule slot.
 
+Each decoded plan is also exposed as a normal Home Assistant switch. Turning a
+plan on or off uses the mower-native schedule write, then reads the schedules
+again before updating the entity. These switches are suitable for dashboards,
+automations, and voice assistants; no service flags are needed for an ordinary
+switch action.
+
 The guarded `dreame_lawn_mower.set_schedule_plan_enabled` service is dry-run
 first. It sends a write only when both `execute: true` and
 `confirm_schedule_write: true` are set.
@@ -400,16 +409,31 @@ preference payload before sending it.
 
 ## Maps
 
-The map camera uses the confirmed app-map JSON path first. The renderer is
-read-only and produces a simple Home Assistant camera image from the decoded map
-payload.
+The map camera uses the confirmed app-map JSON path first and falls back to the
+vector source when it carries the active session. Both renderers use the same
+palette, bundled Unicode font, path widths, and marker settings.
 
 Enabled map cameras warm their first image in the background during entity
-startup. After that, the camera returns the last rendered JPEG immediately while
-a map older than 60 seconds refreshes in the background. Identical source images
-reuse the existing JPEG conversion. This cache is intentionally in memory: a
-Home Assistant restart rebuilds it from the mower rather than persisting garden
+startup. While a mowing session is active, coordinator updates also refresh the
+map source without waiting for a browser request. The camera still returns the
+last good JPEG immediately while a refresh runs. Identical source images reuse
+the existing JPEG conversion. This cache is intentionally in memory: a Home
+Assistant restart rebuilds it from the mower rather than persisting garden
 geometry to a second on-disk store.
+
+Transient paths and positions are scoped to the selected map and mowing task.
+Changing either clears the prior session trail. A mower position outside the
+selected map boundary is retained in diagnostics but withheld from the image,
+and persisted mower trail data is not presented as live while the session is
+inactive.
+
+Under **Settings → Devices & services → Dreame Lawn Mower → Configure**, choose
+an Emerald, Dark, Midnight, or High contrast theme and adjust label, line, and
+marker scale. Use **Selected Map Display Rotation** to store a different
+rotation for each map. To use a custom mower marker, place a PNG, JPEG, or WebP
+under `/config/www` and enter its relative path, such as
+`mower/my-marker.png`. The integration ignores absolute paths, traversal,
+unsupported types, files over 1 MB, and images larger than 512 by 512 pixels.
 
 The runtime mission progress, current-area, and total-area sensors also retain
 the latest useful session values after mowing stops. While mowing they represent
@@ -442,6 +466,7 @@ Current map support now includes:
 - a read-only `All Maps` contact sheet for quick map inventory
 - a `Map` select that switches the mower's active map and refreshes the map,
   zone, spot, and edge controls
+- a `Selected Map Display Rotation` select that stores orientation per map
 - `select` entities for mowing action, edge, zone, and spot scope
 - a `select` for selected-map preference mode and a `number` slider for the
   selected-zone mowing height

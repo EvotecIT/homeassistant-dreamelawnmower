@@ -53,6 +53,7 @@ VECTOR_MAP_REFRESH_INTERVAL = timedelta(minutes=5)
 WEATHER_PROTECTION_REFRESH_INTERVAL = timedelta(minutes=5)
 MAINTENANCE_REFRESH_INTERVAL = timedelta(minutes=5)
 VOICE_SETTINGS_REFRESH_INTERVAL = timedelta(minutes=5)
+SCHEDULE_REFRESH_INTERVAL = timedelta(minutes=5)
 FIRMWARE_UPDATE_REFRESH_INTERVAL = timedelta(minutes=15)
 
 
@@ -107,6 +108,9 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         self.maintenance_status_refreshed_at: datetime | None = None
         self.voice_settings: dict[str, Any] | None = None
         self.voice_settings_refreshed_at: datetime | None = None
+        self.schedules: dict[str, Any] | None = None
+        self.schedules_refreshed_at: datetime | None = None
+        self._schedule_write_lock = asyncio.Lock()
         self.selected_mowing_action = "all_area"
         self.selected_map_index: int | None = None
         self.selected_contour_id: tuple[int, int] | None = None
@@ -169,6 +173,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             self.client.update_runtime_live_tracking(
                 self.runtime_status_blob,
                 active=runtime_active,
+                map_index=self._runtime_map_index(),
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh runtime status blob: %s", err)
@@ -190,7 +195,62 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         await self.async_refresh_weather_protection(force=False)
         await self.async_refresh_maintenance_status(force=False)
         await self.async_refresh_voice_settings(force=False)
+        await self.async_refresh_schedules(force=False)
         return snapshot
+
+    def _runtime_map_index(self) -> int | None:
+        """Return the map identity used to scope transient runtime overlays."""
+        if self.selected_map_index is not None:
+            return self.selected_map_index
+        if isinstance(self.app_maps, dict):
+            value = self.app_maps.get("current_map_index")
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                return value
+        return None
+
+    async def async_refresh_schedules(
+        self,
+        *,
+        force: bool = False,
+    ) -> dict[str, Any] | None:
+        """Refresh the shared schedule cache without failing the main poll."""
+        now = datetime.now(UTC)
+        if (
+            not force
+            and self.schedules is not None
+            and self.schedules_refreshed_at is not None
+            and now - self.schedules_refreshed_at < SCHEDULE_REFRESH_INTERVAL
+        ):
+            return self.schedules
+        try:
+            payload = await self.client.async_get_app_schedules()
+        except Exception as err:  # noqa: BLE001 - optional cloud capability
+            _LOGGER.debug("Failed to refresh mower schedules: %s", err)
+            return self.schedules
+        self.schedules = payload
+        self.schedules_refreshed_at = now
+        return payload
+
+    async def async_set_schedule_plan_enabled(
+        self,
+        *,
+        map_index: int,
+        plan_id: int,
+        enabled: bool,
+    ) -> dict[str, Any]:
+        """Write one schedule plan and reconcile every schedule consumer."""
+        async with self._schedule_write_lock:
+            result = await self.client.async_set_app_schedule_plan_enabled(
+                map_index=map_index,
+                plan_id=plan_id,
+                enabled=enabled,
+                execute=True,
+                confirm_write=True,
+            )
+            self.last_schedule_write_result = result
+            await self.async_refresh_schedules(force=True)
+            self.async_update_listeners()
+            return result
 
     async def async_refresh_batch_device_data(
         self,

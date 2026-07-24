@@ -7,7 +7,7 @@ import json
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .app_protocol import (
     MOWER_ERROR_PROPERTY_KEY,
@@ -82,11 +82,16 @@ from .point_cloud import (
     parse_pcd_metadata,
 )
 from .vector_map import (
+    filter_runtime_track_segments,
     parse_batch_vector_map,
+    position_within_vector_map,
     render_vector_map_png,
     vector_map_to_details,
     vector_map_to_summary,
 )
+
+if TYPE_CHECKING:
+    from .map_visuals import MapRenderStyle
 
 
 class _DreameLawnMowerClientMapsMixin:
@@ -146,25 +151,34 @@ class _DreameLawnMowerClientMapsMixin:
         timeout: float,
         interval: float,
         label_scale: float = 1.0,
+        style: MapRenderStyle | None = None,
     ) -> bytes | None:
-        return self._sync_refresh_map_view(timeout, interval, label_scale).image_png
+        return self._sync_refresh_map_view(
+            timeout,
+            interval,
+            label_scale,
+            style,
+        ).image_png
 
     def _sync_refresh_map_view(
         self,
         timeout: float,
         interval: float,
         label_scale: float = 1.0,
+        style: MapRenderStyle | None = None,
     ) -> DreameLawnMowerMapView:
         app_view = self._sync_refresh_app_map_view(
             legacy_error=None,
             legacy_reason="app_action_map_primary",
             label_scale=label_scale,
+            style=style,
         )
 
         vector_view = self._with_fallback_app_maps(
             self._sync_refresh_vector_map_view(
                 label_scale=label_scale,
                 current_map_index=_map_view_current_app_map_index(app_view),
+                style=style,
             ),
             app_view,
         )
@@ -189,6 +203,7 @@ class _DreameLawnMowerClientMapsMixin:
         *,
         label_scale: float = 1.0,
         current_map_index: int | None = None,
+        style: MapRenderStyle | None = None,
     ) -> DreameLawnMowerMapView:
         source = "batch_vector_map"
         try:
@@ -222,18 +237,47 @@ class _DreameLawnMowerClientMapsMixin:
                 ),
             )
 
+        runtime_blob = self._latest_runtime_status_blob
+        if self._runtime_session_active is False:
+            vector_map.mow_paths = ()
+        if (
+            runtime_blob is not None
+            and self._runtime_live_map_index is not None
+            and self._runtime_live_map_index != vector_map.map_index
+        ):
+            self._runtime_live_track_segments = ()
+            self._last_runtime_track_blob_hex = None
+            self._runtime_live_map_index = vector_map.map_index
         summary = vector_map_to_summary(vector_map)
         details = vector_map_to_details(vector_map)
-        runtime_blob = self._latest_runtime_status_blob
-        runtime_track_segments = self._runtime_live_track_segments
+        runtime_context_matches = self._runtime_live_map_index in (
+            None,
+            vector_map.map_index,
+        )
+        runtime_track_segments = (
+            filter_runtime_track_segments(
+                vector_map,
+                self._runtime_live_track_segments,
+            )
+            if runtime_context_matches
+            else ()
+        )
         runtime_track_point_count = sum(
             len(segment) for segment in runtime_track_segments
         )
         runtime_pose_x = getattr(runtime_blob, "candidate_runtime_pose_x", None)
         runtime_pose_y = getattr(runtime_blob, "candidate_runtime_pose_y", None)
+        runtime_position = (
+            _runtime_blob_position(runtime_blob) if runtime_context_matches else None
+        )
+        runtime_position_valid = position_within_vector_map(
+            vector_map,
+            runtime_position,
+        )
         if runtime_pose_x is not None and runtime_pose_y is not None:
             details["runtime_pose_x"] = runtime_pose_x
             details["runtime_pose_y"] = runtime_pose_y
+            details["runtime_position_valid"] = runtime_position_valid
             details["runtime_heading_deg"] = getattr(
                 runtime_blob,
                 "candidate_runtime_heading_deg",
@@ -271,7 +315,8 @@ class _DreameLawnMowerClientMapsMixin:
                 vector_map,
                 label_scale=label_scale,
                 runtime_track_segments=runtime_track_segments,
-                runtime_position=_runtime_blob_position(runtime_blob),
+                runtime_position=runtime_position if runtime_position_valid else None,
+                style=style,
             )
         except Exception as err:  # noqa: BLE001 - diagnostics path
             return DreameLawnMowerMapView(
@@ -375,6 +420,7 @@ class _DreameLawnMowerClientMapsMixin:
         legacy_error: str | None,
         legacy_reason: str,
         label_scale: float = 1.0,
+        style: MapRenderStyle | None = None,
     ) -> DreameLawnMowerMapView:
         source = "app_action_map"
         try:
@@ -400,6 +446,7 @@ class _DreameLawnMowerClientMapsMixin:
             image_png, width, height = _render_app_map_payload_png(
                 payload,
                 label_scale=label_scale,
+                style=style,
             )
             return DreameLawnMowerMapView(
                 source=source,

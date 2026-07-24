@@ -6,6 +6,7 @@ import asyncio
 import logging
 from datetime import timedelta
 from functools import partial
+from pathlib import Path
 from typing import Any
 
 from homeassistant.components.camera import Camera
@@ -17,15 +18,24 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CONF_MAP_LABEL_SCALE,
+    CONF_MAP_MARKER_IMAGE,
+    CONF_MAP_MARKER_SCALE,
     CONF_MAP_ROTATION,
+    CONF_MAP_ROTATIONS,
+    CONF_MAP_STROKE_SCALE,
+    CONF_MAP_THEME,
     DEFAULT_MAP_LABEL_SCALE,
+    DEFAULT_MAP_MARKER_SCALE,
     DEFAULT_MAP_ROTATION,
+    DEFAULT_MAP_STROKE_SCALE,
+    DEFAULT_MAP_THEME,
     DOMAIN,
 )
-from .coordinator import DreameLawnMowerCoordinator
+from .coordinator import DreameLawnMowerCoordinator, runtime_tracking_active
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
 from .dreame_lawn_mower_client.client import render_app_map_payload_png
+from .dreame_lawn_mower_client.map_visuals import MapRenderStyle, map_render_style
 from .dreame_lawn_mower_client.models import DreameLawnMowerMapView
 from .image import (
     app_maps_contact_sheet_jpeg,
@@ -106,6 +116,7 @@ class DreameLawnMowerMapCamera(
         self.content_type = "image/jpeg"
         self._map_cache = map_cache
         self._map_refresh_task: asyncio.Task[bytes | None] | None = None
+        self._last_refresh_context: tuple[Any, ...] | None = None
 
     async def async_added_to_hass(self) -> None:
         """Warm an enabled map camera without delaying entity setup."""
@@ -119,6 +130,19 @@ class DreameLawnMowerMapCamera(
         if task is not None and not task.done():
             task.cancel()
         await super().async_will_remove_from_hass()
+
+    def _handle_coordinator_update(self) -> None:
+        """Refresh enabled map cameras when transient map context changes."""
+        context = self._map_refresh_context
+        active = bool(
+            self.coordinator.data and runtime_tracking_active(self.coordinator.data)
+        )
+        if context != self._last_refresh_context or active:
+            self._last_refresh_context = context
+            self._map_cache.invalidate_view()
+            if self.available:
+                self._start_map_refresh()
+        super()._handle_coordinator_update()
 
     @property
     def available(self) -> bool:
@@ -253,6 +277,7 @@ class DreameLawnMowerMapCamera(
                     timeout=_MAP_TIMEOUT_SECONDS,
                     interval=_MAP_POLL_INTERVAL_SECONDS,
                     label_scale=self._map_label_scale,
+                    style=self._map_style,
                 )
             )
             self.async_write_ha_state()
@@ -283,11 +308,83 @@ class DreameLawnMowerMapCamera(
     @property
     def _map_rotation(self) -> int:
         """Return the configured clockwise display rotation."""
+        rotations = self.coordinator.entry.options.get(CONF_MAP_ROTATIONS, {})
+        map_index = self._selected_map_index
+        if isinstance(rotations, dict) and map_index is not None:
+            value = rotations.get(str(map_index), rotations.get(map_index))
+            if value in (0, 90, 180, 270):
+                return int(value)
         return int(
-            self.coordinator.entry.options.get(
-                CONF_MAP_ROTATION,
-                DEFAULT_MAP_ROTATION,
-            )
+            self.coordinator.entry.options.get(CONF_MAP_ROTATION, DEFAULT_MAP_ROTATION)
+        )
+
+    @property
+    def _selected_map_index(self) -> int | None:
+        if self.coordinator.selected_map_index is not None:
+            return self.coordinator.selected_map_index
+        app_maps = self.coordinator.app_maps
+        if isinstance(app_maps, dict):
+            value = app_maps.get("current_map_index")
+            if isinstance(value, int) and not isinstance(value, bool):
+                return value
+        return None
+
+    @property
+    def _map_style(self) -> MapRenderStyle:
+        options = self.coordinator.entry.options
+        return map_render_style(
+            options.get(CONF_MAP_THEME, DEFAULT_MAP_THEME),
+            stroke_scale=options.get(
+                CONF_MAP_STROKE_SCALE,
+                DEFAULT_MAP_STROKE_SCALE,
+            ),
+            marker_scale=options.get(
+                CONF_MAP_MARKER_SCALE,
+                DEFAULT_MAP_MARKER_SCALE,
+            ),
+            marker_image=self._map_marker_image,
+        )
+
+    @property
+    def _map_marker_image(self) -> bytes | None:
+        """Load a small marker image only from Home Assistant's www directory."""
+        configured = self.coordinator.entry.options.get(CONF_MAP_MARKER_IMAGE)
+        if not isinstance(configured, str) or not configured.strip():
+            return None
+        relative = configured.strip()
+        if relative.startswith("/local/"):
+            relative = relative.removeprefix("/local/")
+        relative_path = Path(relative)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            return None
+        www_root = Path(self.hass.config.path("www")).resolve()
+        candidate = (www_root / relative_path).resolve()
+        if www_root not in candidate.parents or candidate.suffix.lower() not in {
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".webp",
+        }:
+            return None
+        try:
+            if not candidate.is_file() or candidate.stat().st_size > 1024 * 1024:
+                return None
+            return candidate.read_bytes()
+        except OSError:
+            return None
+
+    @property
+    def _map_refresh_context(self) -> tuple[Any, ...]:
+        blob = self.coordinator.runtime_status_blob
+        options = self.coordinator.entry.options
+        return (
+            self._selected_map_index,
+            getattr(blob, "hex", None),
+            options.get(CONF_MAP_THEME, DEFAULT_MAP_THEME),
+            options.get(CONF_MAP_STROKE_SCALE, DEFAULT_MAP_STROKE_SCALE),
+            options.get(CONF_MAP_MARKER_SCALE, DEFAULT_MAP_MARKER_SCALE),
+            options.get(CONF_MAP_MARKER_IMAGE, ""),
+            self._map_rotation,
         )
 
 
@@ -311,6 +408,8 @@ class DreameLawnMowerLivePathMapCamera(DreameLawnMowerMapCamera):
             view = await self._map_cache.async_get_view(
                 lambda: self.coordinator.client.async_refresh_vector_map_view(
                     label_scale=self._map_label_scale,
+                    current_map_index=self._selected_map_index,
+                    style=self._map_style,
                 )
             )
             self.async_write_ha_state()
@@ -443,6 +542,7 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
                     _all_maps_contact_sheet_from_payload,
                     app_maps,
                     label_scale=self._map_label_scale,
+                    style=self._map_style,
                 )
             )
         except Exception as err:
@@ -469,6 +569,7 @@ def _all_maps_contact_sheet_from_payload(
     app_maps: dict[str, Any],
     *,
     label_scale: float = 1.0,
+    style: MapRenderStyle | None = None,
 ) -> bytes:
     """Render all drawable app map payloads into one contact sheet."""
     rendered: list[dict[str, object]] = []
@@ -487,6 +588,7 @@ def _all_maps_contact_sheet_from_payload(
                 image_png, width, height = render_app_map_payload_png(
                     payload,
                     label_scale=label_scale,
+                    style=style,
                 )
                 entry.update(
                     {

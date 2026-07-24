@@ -10,7 +10,9 @@ import pytest
 from PIL import Image
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.vector_map import (
+    filter_runtime_track_segments,
     parse_batch_vector_map,
+    position_within_vector_map,
     render_vector_map_png,
     vector_map_to_details,
     vector_map_to_summary,
@@ -281,6 +283,34 @@ def test_parse_batch_vector_map_can_select_current_map_index() -> None:
     assert len(vector_map.mow_paths) == 1
 
 
+def test_recreated_map_index_uses_newest_geometry_generation() -> None:
+    stale = {
+        "mowingAreas": {"value": []},
+        "boundary": {"x1": 0, "y1": 0, "x2": 10, "y2": 10},
+        "mapIndex": 0,
+        "name": "Old garden",
+    }
+    current = {
+        "mowingAreas": {"value": []},
+        "boundary": {"x1": 0, "y1": 0, "x2": 80, "y2": 60},
+        "mapIndex": 0,
+        "name": "Ogród",
+    }
+    first = json.dumps([json.dumps(stale, separators=(",", ":"))])
+    second = json.dumps([json.dumps(current, separators=(",", ":"))])
+
+    vector_map = parse_batch_vector_map(
+        {"MAP.0": first + second, "MAP.info": str(len(first))},
+        current_map_index=0,
+    )
+
+    assert vector_map is not None
+    assert vector_map.name == "Ogród"
+    assert vector_map.boundary is not None
+    assert vector_map.boundary.width == 80
+    assert len(vector_map.available_maps) == 1
+
+
 def test_vector_map_summary_and_renderer_return_drawable_output() -> None:
     vector_map = parse_batch_vector_map(_batch_payload())
 
@@ -368,11 +398,11 @@ def test_vector_map_details_report_live_path_counts() -> None:
             "contour_count": 1,
             "clean_point_count": 0,
             "cruise_point_count": 0,
-            "mow_path_count": 1,
-            "mow_path_segment_count": 2,
-            "mow_path_point_count": 4,
-            "mow_path_length_m": 5.66,
-            "has_live_path": True,
+            "mow_path_count": 0,
+            "mow_path_segment_count": 0,
+            "mow_path_point_count": 0,
+            "mow_path_length_m": 0,
+            "has_live_path": False,
         },
     ]
     assert details["clean_point_count"] == 1
@@ -528,6 +558,81 @@ def test_vector_map_view_exposes_runtime_position_without_track_points() -> None
     assert view.details["runtime_region_id"] == 7
     assert view.details["runtime_position_updated_at"] == ("2026-07-16T10:02:09+00:00")
     assert "runtime_track_point_count" not in view.details
+
+
+def test_vector_map_filters_transient_geometry_to_selected_boundary() -> None:
+    vector_map = parse_batch_vector_map(_batch_payload())
+
+    assert vector_map is not None
+    assert position_within_vector_map(vector_map, (50, 40)) is True
+    assert position_within_vector_map(vector_map, (800, 900)) is False
+    assert filter_runtime_track_segments(
+        vector_map,
+        (((10, 20), (30, 40), (800, 900), (50, 40), (60, 50)),),
+    ) == (
+        ((10, 20), (30, 40)),
+        ((50, 40), (60, 50)),
+    )
+
+
+def test_runtime_track_resets_when_map_or_task_changes() -> None:
+    client = _client()
+    first = SimpleNamespace(
+        hex="runtime-1",
+        candidate_runtime_task_id=4,
+        candidate_runtime_track_segments=(((10, 20), (30, 40)),),
+    )
+    second = SimpleNamespace(
+        hex="runtime-2",
+        candidate_runtime_task_id=5,
+        candidate_runtime_track_segments=(((40, 40), (50, 50)),),
+    )
+
+    client.update_runtime_live_tracking(first, active=True, map_index=0)
+    client.update_runtime_live_tracking(second, active=True, map_index=1)
+
+    assert client._runtime_live_map_index == 1
+    assert client._runtime_live_task_id == 5
+    assert client._runtime_live_track_segments == (((40, 40), (50, 50)),)
+
+
+def test_vector_map_view_withholds_position_from_another_map() -> None:
+    client = _client()
+    client._sync_get_vector_map_batch_data = lambda: _batch_payload()
+    client._safe_map_diagnostics = lambda **kwargs: None
+    client.update_runtime_live_tracking(
+        SimpleNamespace(
+            hex="runtime-map-1",
+            candidate_runtime_task_id=8,
+            candidate_runtime_track_segments=(((10, 20), (30, 40)),),
+            candidate_runtime_pose_x=800,
+            candidate_runtime_pose_y=900,
+            candidate_runtime_heading_deg=0,
+            candidate_runtime_region_id=1,
+            received_at="2026-07-24T10:00:00+00:00",
+        ),
+        active=True,
+        map_index=1,
+    )
+
+    view = client._sync_refresh_vector_map_view(current_map_index=0)
+
+    assert view.details is not None
+    assert view.details["runtime_position_valid"] is False
+    assert "runtime_track_point_count" not in view.details
+
+
+def test_vector_map_view_omits_persisted_mow_path_when_session_is_inactive() -> None:
+    client = _client()
+    client._sync_get_vector_map_batch_data = lambda: _batch_payload()
+    client._safe_map_diagnostics = lambda **kwargs: None
+    client.update_runtime_live_tracking(None, active=False, map_index=0)
+
+    view = client._sync_refresh_vector_map_view(current_map_index=0)
+
+    assert view.details is not None
+    assert view.details["mow_path_point_count"] == 0
+    assert view.details["has_live_path"] is False
 
 
 def test_vector_map_view_renders_current_app_map_index() -> None:

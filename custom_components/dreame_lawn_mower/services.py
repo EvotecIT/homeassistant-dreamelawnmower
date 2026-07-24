@@ -268,17 +268,23 @@ async def async_setup_services(hass: HomeAssistant) -> None:
     async def async_handle_set_schedule_plan_enabled(call: ServiceCall) -> None:
         coordinator = _coordinator_from_call(hass, call)
         _guard_schedule_write_request(call)
-        result = await coordinator.client.async_set_app_schedule_plan_enabled(
-            map_index=call.data[ATTR_MAP_INDEX],
-            plan_id=call.data[ATTR_PLAN_ID],
-            enabled=call.data[ATTR_ENABLED],
-            execute=call.data[ATTR_EXECUTE],
-            confirm_write=call.data[ATTR_CONFIRM_SCHEDULE_WRITE],
-        )
-        coordinator.last_schedule_write_result = result
-        coordinator.async_update_listeners()
         if call.data[ATTR_EXECUTE]:
+            result = await coordinator.async_set_schedule_plan_enabled(
+                map_index=call.data[ATTR_MAP_INDEX],
+                plan_id=call.data[ATTR_PLAN_ID],
+                enabled=call.data[ATTR_ENABLED],
+            )
             await coordinator.async_request_refresh()
+        else:
+            result = await coordinator.client.async_set_app_schedule_plan_enabled(
+                map_index=call.data[ATTR_MAP_INDEX],
+                plan_id=call.data[ATTR_PLAN_ID],
+                enabled=call.data[ATTR_ENABLED],
+                execute=False,
+                confirm_write=False,
+            )
+            coordinator.last_schedule_write_result = result
+            coordinator.async_update_listeners()
         _notify_schedule_plan_enabled(coordinator, result)
 
     async def async_handle_plan_schedule_upload(call: ServiceCall) -> None:

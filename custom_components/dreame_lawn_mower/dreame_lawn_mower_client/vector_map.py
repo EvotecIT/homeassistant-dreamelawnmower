@@ -11,8 +11,16 @@ from dataclasses import dataclass, field
 from io import BytesIO
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
+from .map_visuals import (
+    MapRenderStyle,
+    draw_position_marker,
+    line_width,
+    map_font,
+    map_render_style,
+    marker_radius,
+)
 from .models import DreameLawnMowerMapSummary
 
 _PATH_SENTINEL = (32767, -32768)
@@ -22,31 +30,9 @@ _CIRCLE_SEGMENTS = 36
 _MAX_IMAGE_SIDE = 2048
 _MIN_IMAGE_SIDE = 400
 _PADDING = 40
-_BACKGROUND_COLOR = (245, 245, 240, 255)
-_FORBIDDEN_COLOR = (200, 50, 50, 120)
-_FORBIDDEN_OUTLINE_COLOR = (200, 50, 50, 220)
-_PATH_COLOR = (180, 180, 180, 200)
-_PATH_WIDTH = 3
-_MOW_PATH_COLOR = (50, 120, 50, 180)
-_MOW_PATH_WIDTH = 2
-_RUNTIME_PATH_COLOR = (55, 145, 220, 220)
-_RUNTIME_PATH_WIDTH = 4
-_RUNTIME_POSITION_COLOR = (255, 140, 0, 255)
-_SPOT_COLOR = (110, 170, 225, 120)
-_SPOT_OUTLINE_COLOR = (70, 130, 190, 220)
-_POINT_COLOR = (55, 55, 55, 255)
-_LABEL_COLOR = (60, 60, 60, 255)
 _LABEL_FONT_SIZE = 18
 _MIN_LABEL_SCALE = 0.5
 _MAX_LABEL_SCALE = 4.0
-_ZONE_COLORS = (
-    ((164, 210, 145, 200), (134, 190, 115, 255)),
-    ((160, 200, 220, 200), (130, 170, 200, 255)),
-    ((240, 200, 170, 200), (220, 175, 140, 255)),
-    ((240, 180, 180, 200), (220, 150, 150, 255)),
-    ((230, 220, 160, 200), (210, 200, 130, 255)),
-    ((190, 170, 220, 200), (170, 145, 200, 255)),
-)
 
 
 @dataclass(slots=True)
@@ -183,7 +169,13 @@ def parse_batch_vector_map(
     if not parsed_maps:
         return None
 
-    primary = _select_primary_vector_map(parsed_maps, current_map_index)
+    parsed_maps_by_id: dict[int, DreameLawnMowerVectorMap] = {}
+    for vector_map in parsed_maps:
+        # Re-created maps can reuse an index. The last record is the newest
+        # generation in the mower payload and must replace stale geometry.
+        parsed_maps_by_id[vector_map.map_id] = vector_map
+    current_maps = tuple(parsed_maps_by_id.values())
+    primary = _select_primary_vector_map(current_maps, current_map_index)
 
     available_maps = tuple(
         DreameLawnMowerAvailableMap(
@@ -192,16 +184,12 @@ def parse_batch_vector_map(
             name=vector_map.name,
             total_area=vector_map.total_area,
         )
-        for vector_map in sorted(parsed_maps, key=lambda item: item.map_id)
+        for vector_map in sorted(current_maps, key=lambda item: item.map_id)
     )
 
     mow_paths = _parse_mow_paths(batch_data)
-    parsed_maps_by_id: dict[int, DreameLawnMowerVectorMap] = {
-        vector_map.map_id: vector_map for vector_map in parsed_maps
-    }
     for vector_map in parsed_maps_by_id.values():
         vector_map.available_maps = available_maps
-        vector_map.mow_paths = mow_paths
         vector_map.maps = parsed_maps_by_id
 
     primary.available_maps = available_maps
@@ -218,7 +206,7 @@ def _select_primary_vector_map(
         selected = next(
             (
                 vector_map
-                for vector_map in parsed_maps
+                for vector_map in reversed(parsed_maps)
                 if vector_map.map_index == current_map_index
             ),
             None,
@@ -227,8 +215,12 @@ def _select_primary_vector_map(
             return selected
 
     return next(
-        (vector_map for vector_map in parsed_maps if vector_map.map_index == 0),
-        parsed_maps[0],
+        (
+            vector_map
+            for vector_map in reversed(parsed_maps)
+            if vector_map.map_index == 0
+        ),
+        parsed_maps[-1],
     )
 
 
@@ -238,6 +230,7 @@ def render_vector_map_png(
     label_scale: float = 1.0,
     runtime_track_segments: Sequence[Sequence[tuple[int, int]]] | None = None,
     runtime_position: tuple[int, int] | None = None,
+    style: MapRenderStyle | None = None,
 ) -> bytes | None:
     """Render a mower vector map to PNG bytes."""
     if vector_map is None or vector_map.boundary is None:
@@ -254,7 +247,14 @@ def render_vector_map_png(
 
     image_width = int(map_width * scale) + (2 * _PADDING)
     image_height = int(map_height * scale) + (2 * _PADDING)
-    image = Image.new("RGBA", (image_width, image_height), _BACKGROUND_COLOR)
+    style = style or map_render_style()
+    runtime_track_segments = filter_runtime_track_segments(
+        vector_map,
+        runtime_track_segments,
+    )
+    if not position_within_vector_map(vector_map, runtime_position):
+        runtime_position = None
+    image = Image.new("RGBA", (image_width, image_height), style.background)
     draw = ImageDraw.Draw(image)
     font = _label_font(label_scale)
     label_halo_width = max(1, int(round(_normalize_label_scale(label_scale) * 2)))
@@ -267,9 +267,15 @@ def render_vector_map_png(
     for index, zone in enumerate(vector_map.zones):
         if len(zone.points) < 3:
             continue
-        fill_color, outline_color = _ZONE_COLORS[index % len(_ZONE_COLORS)]
+        fill_color = style.zone_fills[index % len(style.zone_fills)]
+        outline_color = style.zone_outlines[index % len(style.zone_outlines)]
         polygon = [to_pixel(x, y) for x, y in zone.points]
-        draw.polygon(polygon, fill=fill_color, outline=outline_color, width=2)
+        draw.polygon(
+            polygon,
+            fill=fill_color,
+            outline=outline_color,
+            width=line_width(style, 2),
+        )
 
     for area in vector_map.forbidden_areas:
         if len(area.points) < 3:
@@ -277,9 +283,9 @@ def render_vector_map_png(
         polygon = [to_pixel(x, y) for x, y in area.points]
         draw.polygon(
             polygon,
-            fill=_FORBIDDEN_COLOR,
-            outline=_FORBIDDEN_OUTLINE_COLOR,
-            width=2,
+            fill=style.forbidden_fill,
+            outline=style.forbidden_outline,
+            width=line_width(style, 2),
         )
 
     for area in vector_map.spot_areas:
@@ -288,9 +294,9 @@ def render_vector_map_png(
         polygon = [to_pixel(x, y) for x, y in area.points]
         draw.polygon(
             polygon,
-            fill=_SPOT_COLOR,
-            outline=_SPOT_OUTLINE_COLOR,
-            width=2,
+            fill=style.spot_fill,
+            outline=style.spot_outline,
+            width=line_width(style, 2),
         )
 
     for mow_path in vector_map.mow_paths:
@@ -299,8 +305,8 @@ def render_vector_map_png(
                 continue
             draw.line(
                 [to_pixel(x, y) for x, y in segment],
-                fill=_MOW_PATH_COLOR,
-                width=_MOW_PATH_WIDTH,
+                fill=style.mow_path,
+                width=line_width(style, 2),
             )
 
     for segment in runtime_track_segments or ():
@@ -308,8 +314,8 @@ def render_vector_map_png(
             continue
         draw.line(
             [to_pixel(x, y) for x, y in segment],
-            fill=_RUNTIME_PATH_COLOR,
-            width=_RUNTIME_PATH_WIDTH,
+            fill=style.live_path,
+            width=line_width(style, 4),
         )
 
     for path in vector_map.paths:
@@ -317,17 +323,21 @@ def render_vector_map_png(
             continue
         draw.line(
             [to_pixel(x, y) for x, y in path.points],
-            fill=_PATH_COLOR,
-            width=_PATH_WIDTH,
+            fill=style.navigation_path,
+            width=line_width(style, 3),
         )
 
     for point in (*vector_map.clean_points, *vector_map.cruise_points):
         px, py = to_pixel(point[0], point[1])
-        draw.ellipse((px - 4, py - 4, px + 4, py + 4), fill=_POINT_COLOR)
+        radius = marker_radius(style, 4)
+        draw.ellipse(
+            (px - radius, py - radius, px + radius, py + radius),
+            fill=style.point,
+        )
 
     if runtime_position is not None:
         px, py = to_pixel(runtime_position[0], runtime_position[1])
-        draw.ellipse((px - 6, py - 6, px + 6, py + 6), fill=_RUNTIME_POSITION_COLOR)
+        draw_position_marker(image, draw, (px, py), style)
 
     for zone in vector_map.zones:
         if len(zone.points) < 3 or not zone.name:
@@ -342,28 +352,55 @@ def render_vector_map_png(
                 draw.text(
                     (px + dx, py + dy),
                     zone.name,
-                    fill=(255, 255, 255, 170),
+                    fill=style.label_halo,
                     font=font,
                     anchor="mm",
                 )
-        draw.text((px, py), zone.name, fill=_LABEL_COLOR, font=font, anchor="mm")
+        draw.text((px, py), zone.name, fill=style.label, font=font, anchor="mm")
 
     buffer = BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
 
 
-def _label_font(label_scale: float) -> ImageFont.ImageFont:
+def position_within_vector_map(
+    vector_map: DreameLawnMowerVectorMap,
+    position: tuple[int, int] | None,
+) -> bool:
+    """Return whether a transient mower position belongs to this map."""
+    if position is None or vector_map.boundary is None:
+        return False
+    x, y = position
+    boundary = vector_map.boundary
+    return boundary.x1 <= x <= boundary.x2 and boundary.y1 <= y <= boundary.y2
+
+
+def filter_runtime_track_segments(
+    vector_map: DreameLawnMowerVectorMap,
+    segments: Sequence[Sequence[tuple[int, int]]] | None,
+) -> tuple[tuple[tuple[int, int], ...], ...]:
+    """Keep only contiguous transient track portions inside the selected map."""
+    if vector_map.boundary is None:
+        return ()
+    filtered: list[tuple[tuple[int, int], ...]] = []
+    for segment in segments or ():
+        current: list[tuple[int, int]] = []
+        for point in segment:
+            normalized = (int(point[0]), int(point[1]))
+            if position_within_vector_map(vector_map, normalized):
+                current.append(normalized)
+                continue
+            if len(current) >= 2:
+                filtered.append(tuple(current))
+            current = []
+        if len(current) >= 2:
+            filtered.append(tuple(current))
+    return tuple(filtered)
+
+
+def _label_font(label_scale: float) -> Any:
     size = max(8, int(round(_LABEL_FONT_SIZE * _normalize_label_scale(label_scale))))
-    for font_name in ("DejaVuSans-Bold.ttf", "Arial.ttf"):
-        try:
-            return ImageFont.truetype(font_name, size=size)
-        except OSError:
-            continue
-    try:
-        return ImageFont.load_default(size=size)
-    except TypeError:
-        return ImageFont.load_default()
+    return map_font(size, bold=True)
 
 
 def _normalize_label_scale(label_scale: float) -> float:
@@ -435,11 +472,7 @@ def vector_map_to_details(
         for mow_path in vector_map.mow_paths
         for segment in mow_path.segments
     )
-    zone_names = [
-        zone.name
-        for zone in vector_map.zones
-        if zone.name
-    ]
+    zone_names = [zone.name for zone in vector_map.zones if zone.name]
     zones = [
         {"zone_id": zone.zone_id, "name": zone.name or None}
         for zone in vector_map.zones
@@ -665,16 +698,8 @@ def _resolve_zone_points(
         sine = math.sin(theta)
         return tuple(
             (
-                round(
-                    center_x
-                    + (x - center_x) * cosine
-                    - (y - center_y) * sine
-                ),
-                round(
-                    center_y
-                    + (x - center_x) * sine
-                    + (y - center_y) * cosine
-                ),
+                round(center_x + (x - center_x) * cosine - (y - center_y) * sine),
+                round(center_y + (x - center_x) * sine + (y - center_y) * cosine),
             )
             for x, y in points
         )

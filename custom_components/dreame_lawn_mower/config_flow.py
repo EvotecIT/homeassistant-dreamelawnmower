@@ -25,7 +25,11 @@ from .const import (
     CONF_HOST,
     CONF_MAC,
     CONF_MAP_LABEL_SCALE,
+    CONF_MAP_MARKER_IMAGE,
+    CONF_MAP_MARKER_SCALE,
     CONF_MAP_ROTATION,
+    CONF_MAP_STROKE_SCALE,
+    CONF_MAP_THEME,
     CONF_MODEL,
     CONF_NAME,
     CONF_PASSWORD,
@@ -39,11 +43,15 @@ from .const import (
     COUNTRY_OPTIONS,
     DEFAULT_COUNTRY,
     DEFAULT_MAP_LABEL_SCALE,
+    DEFAULT_MAP_MARKER_SCALE,
     DEFAULT_MAP_ROTATION,
+    DEFAULT_MAP_STROKE_SCALE,
+    DEFAULT_MAP_THEME,
     DEFAULT_SCAN_INTERVAL_SECONDS,
     DEFAULT_VIDEO_TRANSPORT,
     DOMAIN,
     MAP_ROTATION_OPTIONS,
+    MAP_THEME_OPTIONS,
     MAX_MAP_LABEL_SCALE,
     MAX_SCAN_INTERVAL_SECONDS,
     MIN_MAP_LABEL_SCALE,
@@ -346,6 +354,35 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                             DEFAULT_MAP_ROTATION,
                         ),
                     ): vol.In(MAP_ROTATION_OPTIONS),
+                    vol.Optional(
+                        CONF_MAP_THEME,
+                        default=self._entry_options.get(
+                            CONF_MAP_THEME,
+                            DEFAULT_MAP_THEME,
+                        ),
+                    ): vol.In(MAP_THEME_OPTIONS),
+                    vol.Optional(
+                        CONF_MAP_STROKE_SCALE,
+                        default=self._entry_options.get(
+                            CONF_MAP_STROKE_SCALE,
+                            DEFAULT_MAP_STROKE_SCALE,
+                        ),
+                    ): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=3.0)),
+                    vol.Optional(
+                        CONF_MAP_MARKER_SCALE,
+                        default=self._entry_options.get(
+                            CONF_MAP_MARKER_SCALE,
+                            DEFAULT_MAP_MARKER_SCALE,
+                        ),
+                    ): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=3.0)),
+                    vol.Optional(
+                        CONF_MAP_MARKER_IMAGE,
+                        default=self._entry_options.get(CONF_MAP_MARKER_IMAGE, ""),
+                    ): selector.TextSelector(
+                        selector.TextSelectorConfig(
+                            type=selector.TextSelectorType.TEXT,
+                        )
+                    ),
                     vol.Optional(
                         CONF_VIDEO_TRANSPORT,
                         default=video_transport,

@@ -113,6 +113,7 @@ def map_camera_attributes(
             "runtime_heading_deg": details.get("runtime_heading_deg"),
             "runtime_region_id": details.get("runtime_region_id"),
             "runtime_position_updated_at": details.get("runtime_position_updated_at"),
+            "runtime_position_valid": details.get("runtime_position_valid"),
             "position_x": details.get("runtime_pose_x"),
             "position_y": details.get("runtime_pose_y"),
             "position_heading": details.get("runtime_heading_deg"),

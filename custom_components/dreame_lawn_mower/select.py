@@ -10,7 +10,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import (
+    CONF_MAP_ROTATION,
+    CONF_MAP_ROTATIONS,
+    DEFAULT_MAP_ROTATION,
+    DOMAIN,
+    MAP_ROTATION_OPTIONS,
+)
 from .control_options import (
     MOWING_ACTION_EDGE,
     MOWING_ACTION_LABELS,
@@ -52,6 +58,7 @@ async def async_setup_entry(
         [
             DreameLawnMowerVoiceLanguageSelect(coordinator),
             DreameLawnMowerMapSelect(coordinator),
+            DreameLawnMowerSelectedMapRotationSelect(coordinator),
             DreameLawnMowerMowingActionSelect(coordinator),
             DreameLawnMowerSelectedMapPreferenceModeSelect(coordinator),
             DreameLawnMowerEdgeSelect(coordinator),
@@ -169,6 +176,72 @@ class DreameLawnMowerMapSelect(DreameLawnMowerSelectEntity):
                 await self.coordinator.async_switch_current_map(entry["map_index"])
                 return
         raise ValueError(f"Unknown map option: {option}")
+
+
+class DreameLawnMowerSelectedMapRotationSelect(DreameLawnMowerSelectEntity):
+    """Choose display rotation for the map currently selected on the mower."""
+
+    _attr_name = "Selected Map Display Rotation"
+    _attr_icon = "mdi:screen-rotation"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_selected_map_rotation"
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.data is not None and self._map_index is not None
+
+    @property
+    def options(self) -> list[str]:
+        return list(MAP_ROTATION_OPTIONS.values())
+
+    @property
+    def current_option(self) -> str | None:
+        map_index = self._map_index
+        if map_index is None:
+            return None
+        rotations = self.coordinator.entry.options.get(CONF_MAP_ROTATIONS, {})
+        fallback = self.coordinator.entry.options.get(
+            CONF_MAP_ROTATION,
+            DEFAULT_MAP_ROTATION,
+        )
+        value = (
+            rotations.get(str(map_index), fallback)
+            if isinstance(rotations, dict)
+            else fallback
+        )
+        return MAP_ROTATION_OPTIONS.get(value, MAP_ROTATION_OPTIONS[0])
+
+    async def async_select_option(self, option: str) -> None:
+        map_index = self._map_index
+        if map_index is None:
+            raise ValueError("No mower map is selected.")
+        rotation = next(
+            (value for value, label in MAP_ROTATION_OPTIONS.items() if label == option),
+            None,
+        )
+        if rotation is None:
+            raise ValueError(f"Unknown rotation option: {option}")
+        rotations = dict(self.coordinator.entry.options.get(CONF_MAP_ROTATIONS, {}))
+        rotations[str(map_index)] = rotation
+        options = dict(self.coordinator.entry.options)
+        options[CONF_MAP_ROTATIONS] = rotations
+        self.coordinator.hass.config_entries.async_update_entry(
+            self.coordinator.entry,
+            options=options,
+        )
+        self.coordinator.async_update_listeners()
+
+    @property
+    def _map_index(self) -> int | None:
+        value = current_map_index(
+            self.coordinator.app_maps,
+            self.coordinator.batch_device_data,
+            selected_map_index=self.coordinator.selected_map_index,
+        )
+        return value if value >= 0 else None
 
 
 class DreameLawnMowerMowingActionSelect(DreameLawnMowerSelectEntity):

@@ -93,7 +93,9 @@ class DreameLawnMowerScheduleCalendar(DreameLawnMowerEntity, CalendarEntity):
     ) -> list[CalendarEvent]:
         """Return mower schedule events in the requested time window."""
         try:
-            payload = await self.coordinator.client.async_get_app_schedules()
+            payload = await self.coordinator.async_refresh_schedules(force=False)
+            if payload is None:
+                raise ValueError("Mower schedules are not available.")
         except Exception as err:  # noqa: BLE001 - calendar should stay read-only
             self._last_error = sanitize_diagnostic_text(err)
             self._cached_event_count = 0
