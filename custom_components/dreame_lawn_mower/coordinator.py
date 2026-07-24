@@ -299,6 +299,36 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
                     plan["enabled"] = enabled
                     return
 
+    async def async_plan_schedule_upload(
+        self,
+        *,
+        map_index: int,
+        plans: Sequence[Mapping[str, Any]],
+        chunk_size: int,
+        execute: bool,
+        confirm_write: bool,
+    ) -> dict[str, Any]:
+        """Plan or execute a schedule upload and reconcile shared consumers."""
+        result = await self.client.async_plan_app_schedule_upload(
+            map_index=map_index,
+            plans=plans,
+            chunk_size=chunk_size,
+            execute=execute,
+            confirm_write=confirm_write,
+        )
+        self.last_schedule_write_result = result
+        if not execute:
+            self.async_update_listeners()
+            return result
+
+        # Never let a recently cached pre-upload payload hide the new plans.
+        self.schedules_refreshed_at = None
+        try:
+            await self.async_refresh_schedules(force=True)
+        finally:
+            self.async_update_listeners()
+        return result
+
     async def async_refresh_batch_device_data(
         self,
         *,

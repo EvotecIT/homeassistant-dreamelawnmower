@@ -44,6 +44,24 @@ def test_map_theme_changes_the_complete_render_without_geometry_changes() -> Non
     assert emerald != midnight
 
 
+def test_high_contrast_theme_preserves_accessibility_scale_defaults() -> None:
+    style = map_render_style("high_contrast")
+
+    assert style.stroke_scale == 1.35
+    assert style.marker_scale == 1.2
+
+
+def test_user_scales_compose_with_theme_accessibility_defaults() -> None:
+    style = map_render_style(
+        "high_contrast",
+        stroke_scale=2.0,
+        marker_scale=2.0,
+    )
+
+    assert style.stroke_scale == 2.7
+    assert style.marker_scale == 2.4
+
+
 def test_custom_map_marker_is_limited_to_config_www(tmp_path) -> None:
     www = tmp_path / "www"
     marker = www / "mower" / "marker.png"

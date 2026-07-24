@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from custom_components.dreame_lawn_mower.calendar import (
     DreameLawnMowerAllSchedulesCalendar,
+    DreameLawnMowerScheduleCalendar,
     schedule_calendar_attributes,
     schedule_calendar_events,
     schedule_calendar_selection,
@@ -346,3 +347,39 @@ def test_schedule_calendar_events_skip_disabled_plans() -> None:
         )
         == []
     )
+
+
+def test_schedule_calendar_rebuilds_cached_event_after_switch_change() -> None:
+    entity = object.__new__(DreameLawnMowerScheduleCalendar)
+    entity._descriptor = type("Descriptor", (), {"name": "Bodzio"})()
+    entity._cached_event = object()
+    entity._cached_event_count = 1
+    entity._cached_selection = None
+    entity._last_error = None
+    payload = {
+        "schedules": [
+            {
+                "idx": 0,
+                "plans": [
+                    {
+                        "plan_id": 0,
+                        "enabled": False,
+                        "weeks": [
+                            {
+                                "week_day": 0,
+                                "tasks": [{"start": 600, "end": 700}],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+
+    entity._refresh_cached_event_from_payload(
+        payload,
+        now=datetime(2026, 4, 19, 0, 0, tzinfo=UTC),
+    )
+
+    assert entity.event is None
+    assert entity.extra_state_attributes["event_count"] == 0

@@ -85,6 +85,36 @@ class DreameLawnMowerScheduleCalendar(DreameLawnMowerEntity, CalendarEntity):
         )
         self._cached_event = events[0] if events else None
 
+    def _handle_coordinator_update(self) -> None:
+        """Rebuild cached calendar state when the shared schedule cache changes."""
+        payload = self.coordinator.schedules
+        if isinstance(payload, Mapping):
+            self._refresh_cached_event_from_payload(payload)
+        super()._handle_coordinator_update()
+
+    def _refresh_cached_event_from_payload(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        now: datetime | None = None,
+    ) -> None:
+        """Refresh the current/next event from an already reconciled cache."""
+        start = now or dt_util.now()
+        self._last_error = None
+        self._cached_selection = schedule_calendar_selection(
+            payload,
+            include_all_schedules=self._include_all_schedules,
+        )
+        events = schedule_calendar_events(
+            payload,
+            start,
+            start + timedelta(days=SCHEDULE_LOOKAHEAD_DAYS),
+            include_all_schedules=self._include_all_schedules,
+            mower_name=self._descriptor.name,
+        )
+        self._cached_event_count = len(events)
+        self._cached_event = events[0] if events else None
+
     async def async_get_events(
         self,
         hass: HomeAssistant,

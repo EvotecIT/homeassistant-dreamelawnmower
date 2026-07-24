@@ -130,8 +130,16 @@ def map_render_style(
     preset = MAP_RENDER_STYLES.get(str(name or "").lower(), _EMERALD)
     return replace(
         preset,
-        stroke_scale=_finite_scale(stroke_scale, 0.5, 3.0),
-        marker_scale=_finite_scale(marker_scale, 0.5, 3.0),
+        stroke_scale=_finite_scale(
+            preset.stroke_scale * _finite_scale(stroke_scale, 0.5, 3.0),
+            0.5,
+            3.0,
+        ),
+        marker_scale=_finite_scale(
+            preset.marker_scale * _finite_scale(marker_scale, 0.5, 3.0),
+            0.5,
+            3.0,
+        ),
         marker_image=marker_image,
     )
 

@@ -168,3 +168,39 @@ def test_forced_schedule_readback_propagates_cloud_failure() -> None:
         asyncio.run(coordinator.async_refresh_schedules(force=True))
 
     assert coordinator.schedules == {"schedules": []}
+
+
+def test_schedule_upload_force_refreshes_shared_cache_after_execution() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.client = SimpleNamespace(
+        async_plan_app_schedule_upload=AsyncMock(
+            return_value={"executed": True, "request_count": 2}
+        )
+    )
+    coordinator.async_refresh_schedules = AsyncMock(return_value={"schedules": []})
+    coordinator.async_update_listeners = Mock()
+    coordinator.last_schedule_write_result = None
+    coordinator.schedules_refreshed_at = object()
+    plans = [{"plan_id": 1, "enabled": True, "weeks": []}]
+
+    result = asyncio.run(
+        coordinator.async_plan_schedule_upload(
+            map_index=0,
+            plans=plans,
+            chunk_size=100,
+            execute=True,
+            confirm_write=True,
+        )
+    )
+
+    assert result == {"executed": True, "request_count": 2}
+    coordinator.client.async_plan_app_schedule_upload.assert_awaited_once_with(
+        map_index=0,
+        plans=plans,
+        chunk_size=100,
+        execute=True,
+        confirm_write=True,
+    )
+    assert coordinator.schedules_refreshed_at is None
+    coordinator.async_refresh_schedules.assert_awaited_once_with(force=True)
+    coordinator.async_update_listeners.assert_called_once()
