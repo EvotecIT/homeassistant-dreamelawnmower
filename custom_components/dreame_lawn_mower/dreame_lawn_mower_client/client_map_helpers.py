@@ -188,6 +188,7 @@ def _download_point_cloud_content(
                     "The point-cloud download redirected to an insecure URL."
                 )
             content_length = response.headers.get("Content-Length")
+            declared_bytes: int | None = None
             if content_length is not None:
                 try:
                     declared_bytes = int(content_length)
@@ -201,7 +202,11 @@ def _download_point_cloud_content(
                     )
             content_parts: list[bytes] = []
             received_bytes = 0
-            while True:
+            # Once every declared byte has been read, http.client has already
+            # consumed and may auto-close the underlying socket, so stop
+            # before attempting one more (doomed) timeout-bounded read whose
+            # only purpose would be to observe an EOF we already know about.
+            while declared_bytes is None or received_bytes < declared_bytes:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise DreameLawnMowerPointCloudError(
