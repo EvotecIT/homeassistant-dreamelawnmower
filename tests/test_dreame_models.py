@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from dreame_lawn_mower_client.models import (
     descriptor_from_cloud_record,
     display_name_for_model,
@@ -503,6 +505,57 @@ def test_snapshot_treats_docked_sticky_returning_as_raw_only() -> None:
     assert snapshot.raw_started is True
     assert snapshot.returning is False
     assert snapshot.raw_returning is True
+
+
+@pytest.mark.parametrize(
+    ("raw_docked", "raw_charging"),
+    [
+        (True, False),
+        (False, True),
+        (True, True),
+    ],
+)
+def test_snapshot_prefers_station_flags_over_stale_returning_state(
+    raw_docked: bool,
+    raw_charging: bool,
+) -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "dreame.mower.q2501a",
+            "customName": "Garden Mower",
+        },
+        account_type="dreame",
+        country="eu",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.state = SimpleNamespace(name="RETURNING")
+    device.status.state_name = "returning"
+    device.status.docked = raw_docked
+    device.status.returning = True
+    device.status.running = True
+    device.status.attributes = {
+        **device.status.attributes,
+        "charging": raw_charging,
+        "mower_state": "returning",
+        "returning": True,
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.state == "returning"
+    assert snapshot.activity == "docked"
+    assert snapshot.docked is True
+    assert snapshot.raw_docked is raw_docked
+    assert snapshot.charging is raw_charging
+    assert snapshot.raw_charging is raw_charging
+    assert snapshot.started is False
+    assert snapshot.returning is False
+    assert snapshot.raw_returning is True
+    assert snapshot.mowing is False
 
 
 def test_snapshot_treats_returning_running_flag_as_returning_not_mowing() -> None:

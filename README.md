@@ -161,9 +161,9 @@ The following areas are intentionally cautious:
   still need broader model and firmware validation
 - map rendering is read-only; no-go editing, virtual-wall editing, and other map
   editing flows are not exposed yet
-- live video has been validated end to end on a Dreame A2, including Home
-  Assistant HLS playback; other Tencent-video mower models and firmware still
-  need field validation
+- live video has been validated end to end on a Dreame A2 and on an A3 AWD 1000
+  (`dreame.mower.q2501a`, firmware `4.3.6_0418`) using an EU account; other
+  Tencent-video mower models and firmware still need field validation
 - the managed video runtime currently supports Linux x86_64 and aarch64 Home
   Assistant hosts, and the mower must be active and away from its station before
   the vendor permits live video
@@ -237,6 +237,14 @@ station. Requesting the camera does not start or move the mower. The existing
 native-library and persistent-runner options remain available as advanced
 overrides for development or unsupported host platforms.
 
+On the field-tested A3 AWD 1000, XP2P negotiation takes about 30–40 seconds and
+the media source supports one consumer at a time. Opening a still-image request
+while the Home Assistant panel is already playing HLS can make that competing
+request fail. A vendor-timed session can also finish normally and leave the
+camera idle on its last frame; request **Stream** again to negotiate a new
+session. These timings and limits are model/firmware observations, not promises
+for every mower.
+
 The integration exposes two video transport policies. The default uses the
 proven cloud-provisioned XP2P path. `Auto` can restart from health-checked cached
 provisioning and lets Tencent negotiate the available network route. It also
@@ -274,8 +282,8 @@ apps:
   transport policy promises startup with all internet connectivity removed.
 - Home Assistant can display and save the current JPEG frame, but the vendor's
   stored photo gallery is not exposed.
-- Live video is field-validated on the A2 only. A3 AWD Pro and MOVA camera
-  variants still need their own runtime-input and playback proof.
+- Live video is field-validated on the A2 and A3 AWD 1000. A3 AWD Pro and MOVA
+  camera variants still need their own runtime-input and playback proof.
 - Patrol movement, arbitrary voice-prompt playback, and two-way live talk are
   separate control/audio features and are not implemented by this camera.
 
