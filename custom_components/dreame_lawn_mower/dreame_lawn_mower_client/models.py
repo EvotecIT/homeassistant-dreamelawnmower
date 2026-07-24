@@ -1132,6 +1132,15 @@ def snapshot_from_device(
         "charging",
         "smart_charging",
     }
+    raw_docked = bool(getattr(device.status, "docked", False))
+    raw_charging_source = status_attributes.get(
+        "charging",
+        getattr(device.status, "charging", None),
+    )
+    raw_charging = (
+        None if raw_charging_source is None else bool(raw_charging_source)
+    )
+    confirmed_at_station = bool(raw_docked or raw_charging)
 
     suppressed_error_code: int | None = None
     suppressed_realtime_error_last_seen: float | None = None
@@ -1172,6 +1181,10 @@ def snapshot_from_device(
 
     if has_error:
         activity = "error"
+    elif state in returning_states and confirmed_at_station:
+        # The app state can lag on RETURNING after the mower is physically
+        # docked. Explicit dock/charging flags are stronger station evidence.
+        activity = "docked"
     elif state in paused_states:
         activity = "paused"
     elif state in returning_states:
@@ -1190,16 +1203,8 @@ def snapshot_from_device(
         activity = "mowing"
     else:
         activity = "idle"
-    raw_docked = bool(getattr(device.status, "docked", False))
     effective_docked = bool(
         raw_docked or state in docked_states or activity == "docked"
-    )
-    raw_charging_source = status_attributes.get(
-        "charging",
-        getattr(device.status, "charging", None),
-    )
-    raw_charging = (
-        None if raw_charging_source is None else bool(raw_charging_source)
     )
     effective_charging = bool(raw_charging or state in charging_states)
     raw_started = bool(
