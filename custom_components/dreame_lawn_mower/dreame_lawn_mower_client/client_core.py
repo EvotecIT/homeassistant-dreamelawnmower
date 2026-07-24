@@ -64,6 +64,11 @@ from .runtime_state import (
 
 
 class _DreameLawnMowerClientCoreMixin:
+    async def async_get_cached_snapshot(self) -> DreameLawnMowerSnapshot:
+        """Return a snapshot from the latest in-memory device state."""
+        device = await asyncio.to_thread(self._ensure_device)
+        return await asyncio.to_thread(self._snapshot_from_device, device)
+
     async def _async_call_device_method(self, method_name: str) -> Any:
         device = await asyncio.to_thread(self._ensure_device)
         method = getattr(device, method_name)
@@ -707,4 +712,5 @@ class _DreameLawnMowerClientCoreMixin:
             self._account_type,
             self._descriptor.did,
         )
+        self._device.listen(self._update_callback)
         return self._device

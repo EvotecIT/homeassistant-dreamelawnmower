@@ -158,6 +158,53 @@ def test_active_runtime_tracking_survives_status_blob_failure() -> None:
     assert tracking_updates == [(None, True, 2)]
 
 
+def test_cached_device_update_publishes_realtime_runtime_position() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    snapshot = SimpleNamespace(
+        available=True,
+        mowing_session_active=True,
+        activity="mowing",
+    )
+    status_blob = SimpleNamespace()
+    tracking_updates: list[tuple[object, bool, int | None]] = []
+    coordinator._client_update_task = Mock()
+    coordinator.app_maps = {"current_map_index": 2}
+    coordinator.selected_map_index = 2
+    coordinator.runtime_status_blob = None
+    coordinator.runtime_telemetry_cache = SimpleNamespace(update=Mock())
+    coordinator.bluetooth_connected = None
+    coordinator.client = SimpleNamespace(
+        async_get_cached_snapshot=AsyncMock(return_value=snapshot),
+        async_get_runtime_status_blob=AsyncMock(return_value=status_blob),
+        async_get_bluetooth_connected=AsyncMock(return_value=True),
+        update_runtime_live_tracking=lambda value, *, active, map_index=None: (
+            tracking_updates.append((value, active, map_index))
+        ),
+    )
+    coordinator.async_set_updated_data = Mock()
+
+    asyncio.run(coordinator._async_process_client_update())
+
+    coordinator.client.async_get_runtime_status_blob.assert_awaited_once_with(
+        refresh=False,
+        include_cloud=False,
+    )
+    coordinator.client.async_get_bluetooth_connected.assert_awaited_once_with(
+        refresh=False,
+        include_cloud=False,
+    )
+    coordinator.runtime_telemetry_cache.update.assert_called_once_with(
+        status_blob,
+        allow_zero=True,
+        active_session=True,
+    )
+    assert tracking_updates == [(status_blob, True, 2)]
+    assert coordinator.runtime_status_blob is status_blob
+    assert coordinator.bluetooth_connected is True
+    coordinator.async_set_updated_data.assert_called_once_with(snapshot)
+    assert coordinator._client_update_task is None
+
+
 def test_runtime_map_identity_does_not_fall_back_after_fresh_unknown_map() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator.app_maps = {"current_map_index": None}

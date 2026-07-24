@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -129,6 +130,8 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         self.last_task_status_probe_result: dict[str, Any] | None = None
         self.last_weather_probe_result: dict[str, Any] | None = None
         self.last_maintenance_reset_result: dict[str, Any] | None = None
+        self._client_update_task: asyncio.Task[None] | None = None
+        self._shutting_down = False
 
         super().__init__(
             hass,
@@ -141,6 +144,80 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
                 )
             ),
         )
+        self.client.set_update_callback(self._handle_client_update)
+
+    def _handle_client_update(self) -> None:
+        """Bridge device-thread MQTT updates onto the Home Assistant loop."""
+        if self._shutting_down:
+            return
+        self.hass.loop.call_soon_threadsafe(self._schedule_client_update)
+
+    def _schedule_client_update(self) -> None:
+        """Coalesce device callbacks while one cached-state update is running."""
+        if self._shutting_down or self._client_update_task is not None:
+            return
+        self._client_update_task = self.hass.async_create_task(
+            self._async_process_client_update(),
+            f"{DOMAIN}-realtime-update",
+        )
+
+    async def _async_process_client_update(self) -> None:
+        """Publish cached MQTT state without waiting for the polling interval."""
+        try:
+            # Collapse a burst of property callbacks into the newest device state.
+            await asyncio.sleep(0)
+            snapshot = await self.client.async_get_cached_snapshot()
+            if not snapshot.available:
+                self.runtime_status_blob = None
+                self.client.update_runtime_live_tracking(None, active=False)
+                self.async_set_updated_data(snapshot)
+                return
+
+            runtime_active = runtime_tracking_active(snapshot)
+            runtime_map_index = self._runtime_map_index()
+            try:
+                self.runtime_status_blob = (
+                    await self.client.async_get_runtime_status_blob(
+                        refresh=False,
+                        include_cloud=False,
+                    )
+                )
+                self.runtime_telemetry_cache.update(
+                    self.runtime_status_blob,
+                    allow_zero=runtime_active,
+                    active_session=runtime_active,
+                )
+                self.client.update_runtime_live_tracking(
+                    self.runtime_status_blob,
+                    active=runtime_active,
+                    map_index=runtime_map_index,
+                )
+            except Exception as err:  # noqa: BLE001 - best-effort MQTT metadata
+                _LOGGER.debug("Failed to process realtime status blob: %s", err)
+                self.runtime_status_blob = None
+                self.client.update_runtime_live_tracking(
+                    None,
+                    active=runtime_active,
+                    map_index=runtime_map_index,
+                )
+
+            try:
+                self.bluetooth_connected = (
+                    await self.client.async_get_bluetooth_connected(
+                        refresh=False,
+                        include_cloud=False,
+                    )
+                )
+            except Exception as err:  # noqa: BLE001 - best-effort MQTT metadata
+                _LOGGER.debug(
+                    "Failed to process realtime Bluetooth state: %s",
+                    err,
+                )
+            self.async_set_updated_data(snapshot)
+        except Exception as err:  # noqa: BLE001 - callback must not escape HA task
+            _LOGGER.debug("Failed to process cached mower update: %s", err)
+        finally:
+            self._client_update_task = None
 
     async def _async_update_data(self) -> DreameLawnMowerSnapshot:
         """Fetch the latest mower snapshot."""
@@ -643,6 +720,13 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
 
     async def async_shutdown(self) -> None:
         """Disconnect client resources."""
+        self._shutting_down = True
+        self.client.set_update_callback(None)
+        task = self._client_update_task
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
         await self.client.async_close()
 
 

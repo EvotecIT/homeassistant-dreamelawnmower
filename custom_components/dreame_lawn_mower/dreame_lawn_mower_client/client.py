@@ -322,6 +322,7 @@ class DreameLawnMowerClient(
         self._account_type = account_type
         self._descriptor = descriptor
         self._device: Any | None = None
+        self._update_callback: _typing.Callable[[], None] | None = None
         self._latest_snapshot: DreameLawnMowerSnapshot | None = None
         self._latest_runtime_status_blob: DreameLawnMowerStatusBlob | None = None
         self._runtime_live_track_segments: tuple[
@@ -345,6 +346,15 @@ class DreameLawnMowerClient(
     def device(self) -> Any | None:
         """Return the currently connected upstream device instance."""
         return self._device
+
+    def set_update_callback(
+        self,
+        callback: _typing.Callable[[], None] | None,
+    ) -> None:
+        """Register a callback for cached device updates from MQTT or polling."""
+        self._update_callback = callback
+        if self._device is not None:
+            self._device.listen(callback)
 
     def update_runtime_live_tracking(
         self,
@@ -1124,5 +1134,6 @@ class DreameLawnMowerClient(
     async def async_close(self) -> None:
         """Disconnect long-lived device resources."""
         if self._device is not None:
+            self._device.listen(None)
             await asyncio.to_thread(self._device.disconnect)
             self._device = None
