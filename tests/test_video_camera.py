@@ -663,8 +663,8 @@ def test_video_camera_restores_support_from_healthy_cache_after_docked_reload() 
     assert asyncio.run(_run()) == (True, True)
 
 
-def test_video_camera_dock_transition_cleans_up_and_recovers() -> None:
-    async def _run() -> tuple[int, int, bool, bool, str | None]:
+def test_video_camera_dock_transition_recovers_from_stale_raw_returning() -> None:
+    async def _run() -> tuple[int, int, bool, bool, list[str], str | None]:
         snapshot = SimpleNamespace(
             available=True,
             state="mowing",
@@ -689,6 +689,9 @@ def test_video_camera_dock_transition_cleans_up_and_recovers() -> None:
             async def async_set_camera_stream_enabled(self, _enabled: bool) -> None:
                 nonlocal camera_disables
                 camera_disables += 1
+                raise RuntimeError(
+                    "Dreame app video toggle returned an invalid response"
+                )
 
         async def _executor(function, *args):
             return function(*args)
@@ -740,7 +743,11 @@ def test_video_camera_dock_transition_cleans_up_and_recovers() -> None:
                 returning=False,
                 capabilities=(),
                 raw_info={},
-                raw_attributes={},
+                raw_attributes={
+                    "running": True,
+                    "returning": True,
+                    "status": "Returning",
+                },
             )
             entity._handle_coordinator_update()
 
@@ -750,7 +757,8 @@ def test_video_camera_dock_transition_cleans_up_and_recovers() -> None:
             camera_disables,
             unavailable_while_docked,
             entity.available,
-            events[0]["code"] if events else None,
+            [event["code"] for event in events],
+            entity._last_stream_cleanup_error_stage,
         )
 
     assert asyncio.run(_run()) == (
@@ -758,7 +766,11 @@ def test_video_camera_dock_transition_cleans_up_and_recovers() -> None:
         1,
         True,
         True,
-        "video_state_gate_cleanup",
+        [
+            "video_state_gate_cleanup",
+            "video_camera_stream_disable_failed",
+        ],
+        "camera_stream_disable",
     )
 
 
