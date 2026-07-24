@@ -113,6 +113,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         self.schedules: dict[str, Any] | None = None
         self.schedules_refreshed_at: datetime | None = None
         self._schedule_write_lock = asyncio.Lock()
+        self._preference_write_lock = asyncio.Lock()
         self.selected_mowing_action = "all_area"
         self.selected_map_index: int | None = None
         self.selected_contour_id: tuple[int, int] | None = None
@@ -132,6 +133,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         self.last_weather_probe_result: dict[str, Any] | None = None
         self.last_maintenance_reset_result: dict[str, Any] | None = None
         self._client_update_task: asyncio.Task[None] | None = None
+        self._client_update_pending = False
         self._shutting_down = False
 
         super().__init__(
@@ -155,8 +157,12 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
 
     def _schedule_client_update(self) -> None:
         """Coalesce device callbacks while one cached-state update is running."""
-        if self._shutting_down or self._client_update_task is not None:
+        if self._shutting_down:
             return
+        if self._client_update_task is not None:
+            self._client_update_pending = True
+            return
+        self._client_update_pending = False
         self._client_update_task = self.hass.async_create_task(
             self._async_process_client_update(),
             f"{DOMAIN}-realtime-update",
@@ -219,6 +225,12 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             _LOGGER.debug("Failed to process cached mower update: %s", err)
         finally:
             self._client_update_task = None
+            if (
+                getattr(self, "_client_update_pending", False)
+                and not getattr(self, "_shutting_down", False)
+            ):
+                self._client_update_pending = False
+                self._schedule_client_update()
 
     async def _async_update_data(self) -> DreameLawnMowerSnapshot:
         """Fetch the latest mower snapshot."""
@@ -454,6 +466,39 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         self.batch_device_data = payload
         self.batch_device_data_refreshed_at = now
         return payload
+
+    async def async_plan_mowing_preference_update(
+        self,
+        *,
+        map_index: int,
+        area_id: int | None,
+        changes: Mapping[str, Any],
+        execute: bool,
+        confirm_write: bool,
+    ) -> dict[str, Any]:
+        """Serialize full-payload mowing preference reads and writes."""
+        async with self._preference_write_lock:
+            result = await self.client.async_plan_app_mowing_preference_update(
+                map_index=map_index,
+                area_id=area_id,
+                changes=changes,
+                execute=execute,
+                confirm_write=confirm_write,
+            )
+            self.last_preference_write_result = result
+            if execute:
+                self.batch_device_data_refreshed_at = None
+                try:
+                    await self.async_refresh_batch_device_data(
+                        force=True,
+                        source="mowing_preference_write",
+                    )
+                    await self.async_request_refresh()
+                finally:
+                    self.async_update_listeners()
+            else:
+                self.async_update_listeners()
+            return result
 
     async def _async_fetch_batch_device_data(
         self,
@@ -723,6 +768,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
     async def async_shutdown(self) -> None:
         """Disconnect client resources."""
         self._shutting_down = True
+        self._client_update_pending = False
         self.client.set_update_callback(None)
         task = self._client_update_task
         if task is not None and task is not asyncio.current_task():

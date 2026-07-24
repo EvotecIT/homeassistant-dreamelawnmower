@@ -10,6 +10,7 @@ from custom_components.dreame_lawn_mower.map_attributes import map_camera_attrib
 from custom_components.dreame_lawn_mower.map_cache import (
     DreameLawnMowerMapCameraCache,
     map_camera_available,
+    map_camera_followup_refresh_required,
     map_camera_should_refresh,
 )
 from dreame_lawn_mower_client.models import (
@@ -122,6 +123,12 @@ def test_all_maps_camera_skips_cached_view_refresh_on_coordinator_updates() -> N
         )
         is False
     )
+
+
+def test_map_camera_queues_new_context_after_inflight_refresh() -> None:
+    assert map_camera_followup_refresh_required(pending=True, available=True) is True
+    assert map_camera_followup_refresh_required(pending=False, available=True) is False
+    assert map_camera_followup_refresh_required(pending=True, available=False) is False
 
 
 def test_map_camera_attributes_include_all_app_map_metadata() -> None:

@@ -52,6 +52,7 @@ from .map_attributes import map_camera_attributes
 from .map_cache import (
     DreameLawnMowerMapCameraCache,
     map_camera_available,
+    map_camera_followup_refresh_required,
     map_camera_should_refresh,
 )
 from .point_cloud_api import current_point_cloud_api_path
@@ -126,6 +127,7 @@ class DreameLawnMowerMapCamera(
         self.content_type = "image/jpeg"
         self._map_cache = map_cache
         self._map_refresh_task: asyncio.Task[bytes | None] | None = None
+        self._map_refresh_pending = False
         self._last_refresh_context: tuple[Any, ...] | None = None
 
     async def async_added_to_hass(self) -> None:
@@ -136,6 +138,7 @@ class DreameLawnMowerMapCamera(
 
     async def async_will_remove_from_hass(self) -> None:
         """Cancel a private warm-up task when the entity is removed."""
+        self._map_refresh_pending = False
         task = self._map_refresh_task
         if task is not None and not task.done():
             task.cancel()
@@ -155,6 +158,11 @@ class DreameLawnMowerMapCamera(
             self._last_refresh_context = context
             self._map_cache.invalidate_view()
             if self.available:
+                if (
+                    self._map_refresh_task is not None
+                    and not self._map_refresh_task.done()
+                ):
+                    self._map_refresh_pending = True
                 self._start_map_refresh()
         super()._handle_coordinator_update()
 
@@ -242,6 +250,14 @@ class DreameLawnMowerMapCamera(
         """Forget the completed refresh without clearing its cached result."""
         if self._map_refresh_task is task:
             self._map_refresh_task = None
+            if self._map_refresh_pending:
+                self._map_refresh_pending = False
+                self._map_cache.invalidate_view()
+                if map_camera_followup_refresh_required(
+                    pending=True,
+                    available=self.available,
+                ):
+                    self._start_map_refresh()
 
     async def _async_refresh_and_render_map_image(self) -> bytes | None:
         """Refresh the source view and atomically replace rendered JPEG bytes."""

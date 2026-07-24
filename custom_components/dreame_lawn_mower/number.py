@@ -116,10 +116,13 @@ class _DreameLawnMowerMowingHeightNumber(
 
     def _validate_height(self, value: float) -> float:
         normalized = float(value)
-        if normalized < self.native_min_value or normalized > self.native_max_value:
+        minimum, maximum = mowing_height_limits(
+            getattr(getattr(self, "_descriptor", None), "model", None)
+        )
+        if normalized < minimum or normalized > maximum:
             raise HomeAssistantError(
-                f"Mowing height must be between {self.native_min_value:g} and "
-                f"{self.native_max_value:g} cm for this mower."
+                f"Mowing height must be between {minimum:g} and "
+                f"{maximum:g} cm for this mower."
             )
         steps = round(normalized / MOWING_HEIGHT_STEP_CM)
         if abs(normalized - steps * MOWING_HEIGHT_STEP_CM) > 1e-6:

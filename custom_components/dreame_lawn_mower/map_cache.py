@@ -24,6 +24,15 @@ def map_camera_should_refresh(
     return manages_cached_view and (context_changed or runtime_active)
 
 
+def map_camera_followup_refresh_required(
+    *,
+    pending: bool,
+    available: bool,
+) -> bool:
+    """Return whether a context change queued during rendering needs a follow-up."""
+    return pending and available
+
+
 def map_camera_available(
     snapshot: Any,
     *,

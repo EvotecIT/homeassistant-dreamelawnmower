@@ -205,6 +205,83 @@ def test_cached_device_update_publishes_realtime_runtime_position() -> None:
     assert coordinator._client_update_task is None
 
 
+def test_cached_device_update_queues_callback_received_while_processing() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._client_update_task = Mock()
+    coordinator._client_update_pending = False
+    coordinator._shutting_down = False
+
+    coordinator._schedule_client_update()
+
+    assert coordinator._client_update_pending is True
+
+
+def test_cached_device_update_reschedules_pending_callback() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._client_update_task = Mock()
+    coordinator._client_update_pending = True
+    coordinator._shutting_down = False
+    coordinator.runtime_status_blob = None
+    coordinator.client = SimpleNamespace(
+        async_get_cached_snapshot=AsyncMock(
+            return_value=SimpleNamespace(available=False)
+        ),
+        update_runtime_live_tracking=Mock(),
+    )
+    coordinator.async_set_updated_data = Mock()
+    coordinator._schedule_client_update = Mock()
+
+    asyncio.run(coordinator._async_process_client_update())
+
+    assert coordinator._client_update_task is None
+    assert coordinator._client_update_pending is False
+    coordinator._schedule_client_update.assert_called_once_with()
+
+
+def test_preference_updates_are_serialized_around_full_payload_operation() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._preference_write_lock = asyncio.Lock()
+    coordinator.last_preference_write_result = None
+    coordinator.async_update_listeners = Mock()
+    active = 0
+    maximum_active = 0
+
+    async def plan_update(**kwargs):
+        nonlocal active, maximum_active
+        active += 1
+        maximum_active = max(maximum_active, active)
+        await asyncio.sleep(0)
+        active -= 1
+        return {"area_id": kwargs["area_id"]}
+
+    coordinator.client = SimpleNamespace(
+        async_plan_app_mowing_preference_update=plan_update
+    )
+
+    async def run_updates() -> None:
+        await asyncio.gather(
+            coordinator.async_plan_mowing_preference_update(
+                map_index=1,
+                area_id=1,
+                changes={"mowing_height_cm": 4.0},
+                execute=False,
+                confirm_write=False,
+            ),
+            coordinator.async_plan_mowing_preference_update(
+                map_index=1,
+                area_id=2,
+                changes={"mowing_height_cm": 5.0},
+                execute=False,
+                confirm_write=False,
+            ),
+        )
+
+    asyncio.run(run_updates())
+
+    assert maximum_active == 1
+    assert coordinator.async_update_listeners.call_count == 2
+
+
 def test_runtime_map_identity_does_not_fall_back_after_fresh_unknown_map() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator.app_maps = {"current_map_index": None}

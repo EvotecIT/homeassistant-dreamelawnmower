@@ -99,6 +99,8 @@ class DreameLawnMowerGoToMaintenancePointButton(
         for entry in entries:
             if entry["point_id"] == selected:
                 return int(entry["point_id"])
+        if selected is not None:
+            return None
         return int(entries[0]["point_id"]) if entries else None
 
     @property
@@ -114,12 +116,33 @@ class DreameLawnMowerGoToMaintenancePointButton(
 
     async def async_press(self) -> None:
         """Drive to the selected mower-configured maintenance point."""
+        await self.coordinator.async_request_refresh()
+        app_maps_refreshed_at = self.coordinator.app_maps_refreshed_at
+        vector_map_refreshed_at = self.coordinator.vector_map_details_refreshed_at
+        await self.coordinator.async_refresh_app_maps(
+            force=True,
+            source="app_maps_maintenance_point_command",
+        )
+        await self.coordinator.async_refresh_vector_map_details(
+            force=True,
+            source="vector_map_maintenance_point_command",
+        )
+        if (
+            self.coordinator.app_maps_refreshed_at == app_maps_refreshed_at
+            or self.coordinator.vector_map_details_refreshed_at
+            == vector_map_refreshed_at
+        ):
+            raise ValueError(
+                "Fresh map metadata is required before moving to a maintenance point."
+            )
         point_id = self._point_id()
         if point_id is None:
             raise ValueError(
                 "No maintenance point is configured on the selected mower map."
             )
-        if not self.available:
+        snapshot = self.coordinator.data
+        activity = str(getattr(snapshot, "activity", "") or "").casefold()
+        if snapshot is None or activity not in {"idle", "docked"}:
             raise ValueError(
                 "The mower must be idle or docked before going to a maintenance point."
             )

@@ -43,6 +43,25 @@ def _coordinator(*, activity: str = "idle") -> SimpleNamespace:
         client=SimpleNamespace(async_go_to_maintenance_point=AsyncMock()),
         async_update_listeners=Mock(),
         async_request_refresh=AsyncMock(),
+        app_maps_refreshed_at=None,
+        vector_map_details_refreshed_at=None,
+        async_refresh_app_maps=AsyncMock(),
+        async_refresh_vector_map_details=AsyncMock(),
+    )
+
+
+def _complete_fresh_map_refresh(coordinator: SimpleNamespace) -> None:
+    async def refresh_app_maps(**kwargs):
+        coordinator.app_maps_refreshed_at = object()
+        return coordinator.app_maps
+
+    async def refresh_vector_map_details(**kwargs):
+        coordinator.vector_map_details_refreshed_at = object()
+        return coordinator.vector_map_details
+
+    coordinator.async_refresh_app_maps.side_effect = refresh_app_maps
+    coordinator.async_refresh_vector_map_details.side_effect = (
+        refresh_vector_map_details
     )
 
 
@@ -67,6 +86,7 @@ def test_maintenance_point_select_uses_map_point_ids() -> None:
 
 def test_go_to_maintenance_point_uses_selected_configured_id() -> None:
     coordinator = _coordinator(activity="docked")
+    _complete_fresh_map_refresh(coordinator)
     coordinator.selected_maintenance_point_id = 302
     entity = object.__new__(DreameLawnMowerGoToMaintenancePointButton)
     entity.coordinator = coordinator
@@ -76,16 +96,41 @@ def test_go_to_maintenance_point_uses_selected_configured_id() -> None:
     asyncio.run(entity.async_press())
 
     coordinator.client.async_go_to_maintenance_point.assert_awaited_once_with(302)
-    coordinator.async_request_refresh.assert_awaited_once()
+    assert coordinator.async_request_refresh.await_count == 2
 
 
 def test_go_to_maintenance_point_is_blocked_during_mowing() -> None:
     coordinator = _coordinator(activity="mowing")
+    _complete_fresh_map_refresh(coordinator)
     entity = object.__new__(DreameLawnMowerGoToMaintenancePointButton)
     entity.coordinator = coordinator
 
     assert entity.available is False
     with pytest.raises(ValueError, match="idle or docked"):
+        asyncio.run(entity.async_press())
+
+    coordinator.client.async_go_to_maintenance_point.assert_not_awaited()
+
+
+def test_go_to_maintenance_point_refuses_stale_map_metadata() -> None:
+    coordinator = _coordinator(activity="docked")
+    entity = object.__new__(DreameLawnMowerGoToMaintenancePointButton)
+    entity.coordinator = coordinator
+
+    with pytest.raises(ValueError, match="Fresh map metadata"):
+        asyncio.run(entity.async_press())
+
+    coordinator.client.async_go_to_maintenance_point.assert_not_awaited()
+
+
+def test_go_to_maintenance_point_does_not_fallback_from_removed_selection() -> None:
+    coordinator = _coordinator(activity="docked")
+    coordinator.selected_maintenance_point_id = 999
+    _complete_fresh_map_refresh(coordinator)
+    entity = object.__new__(DreameLawnMowerGoToMaintenancePointButton)
+    entity.coordinator = coordinator
+
+    with pytest.raises(ValueError, match="No maintenance point"):
         asyncio.run(entity.async_press())
 
     coordinator.client.async_go_to_maintenance_point.assert_not_awaited()

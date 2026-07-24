@@ -726,5 +726,6 @@ class _DreameLawnMowerClientCoreMixin:
             self._account_type,
             self._descriptor.did,
         )
-        self._device.listen(self._update_callback)
+        if self._update_callback is not None:
+            self._device.listen(self._update_callback)
         return self._device

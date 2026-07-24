@@ -40,7 +40,7 @@ def _coordinator(*, mode_name: str = "custom") -> SimpleNamespace:
             }
         )
     )
-    return SimpleNamespace(
+    coordinator = SimpleNamespace(
         client=client,
         data=SimpleNamespace(available=True),
         app_maps={
@@ -111,6 +111,20 @@ def _coordinator(*, mode_name: str = "custom") -> SimpleNamespace:
         async_request_refresh=AsyncMock(),
         async_update_listeners=lambda: None,
     )
+
+    async def plan_mowing_preference_update(**kwargs):
+        result = await client.async_plan_app_mowing_preference_update(**kwargs)
+        coordinator.last_preference_write_result = result
+        if kwargs["execute"]:
+            await coordinator.async_refresh_batch_device_data(
+                force=True,
+                source="mowing_preference_write",
+            )
+            await coordinator.async_request_refresh()
+        return result
+
+    coordinator.async_plan_mowing_preference_update = plan_mowing_preference_update
+    return coordinator
 
 
 def test_preference_mode_select_reads_and_writes_selected_map_mode() -> None:
@@ -189,6 +203,21 @@ def test_mowing_height_number_rejects_unsupported_control_values(value: float) -
 
     with pytest.raises(HomeAssistantError):
         asyncio.run(entity.async_set_native_value(value))
+
+    coordinator.client.async_plan_app_mowing_preference_update.assert_not_awaited()
+
+
+def test_mowing_height_write_rejects_reported_outlier_on_normal_model() -> None:
+    coordinator = _coordinator()
+    coordinator.batch_device_data["batch_mowing_preferences"]["maps"][0][
+        "preferences"
+    ][1]["mowing_height_cm"] = 10.0
+    entity = object.__new__(DreameLawnMowerSelectedZoneMowingHeightNumber)
+    entity.coordinator = coordinator
+
+    assert entity.native_max_value == 10.0
+    with pytest.raises(HomeAssistantError, match="between 3 and 7"):
+        asyncio.run(entity.async_set_native_value(8.0))
 
     coordinator.client.async_plan_app_mowing_preference_update.assert_not_awaited()
 

@@ -191,13 +191,33 @@ async def async_update_selected_mowing_preference(
                 requested_zone_id=zone_id,
             )
 
-    result = await coordinator.client.async_plan_app_mowing_preference_update(
+    coordinator_writer = getattr(
+        coordinator,
+        "async_plan_mowing_preference_update",
+        None,
+    )
+    writer = (
+        coordinator_writer
+        if callable(coordinator_writer)
+        else coordinator.client.async_plan_app_mowing_preference_update
+    )
+    result = await writer(
         map_index=selected_map_index,
         area_id=target_zone_id,
         changes=dict(changes),
         execute=execute,
         confirm_write=confirm_write,
     )
+    if not callable(coordinator_writer):
+        coordinator.last_preference_write_result = result
+        if execute:
+            await coordinator.async_refresh_batch_device_data(
+                force=True,
+                source="mowing_preference_write",
+            )
+            await coordinator.async_request_refresh()
+        else:
+            coordinator.async_update_listeners()
     selection_scope: dict[str, Any] = {
         "selected_map_index": selected_map_index,
         "selected_map_label": _map_label(maps, selected_map_index),
@@ -212,15 +232,6 @@ async def async_update_selected_mowing_preference(
                 target_zone_id,
             )
     result["selection_scope"] = selection_scope
-    coordinator.last_preference_write_result = result
-    if execute:
-        await coordinator.async_refresh_batch_device_data(
-            force=True,
-            source="mowing_preference_write",
-        )
-        await coordinator.async_request_refresh()
-    else:
-        coordinator.async_update_listeners()
     return result
 
 
