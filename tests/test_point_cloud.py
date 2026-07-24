@@ -24,10 +24,11 @@ from dreame_lawn_mower_client import (
 from dreame_lawn_mower_client._loader import load_internal_module
 from dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
 
-_internal_client_module = load_internal_module("client")
+_internal_client_module = load_internal_module("client_map_helpers")
+_internal_client_facade_module = load_internal_module("client")
 _internal_deadline_module = load_internal_module("deadline")
 _internal_point_cloud_module = load_internal_module("point_cloud")
-_internal_protocol_module = load_internal_module("protocol")
+_internal_protocol_module = load_internal_module("protocol_cloud")
 
 
 def _binary_pcd(*points: tuple[float, float, float, int]) -> bytes:
@@ -223,8 +224,8 @@ def test_download_point_cloud_uses_a2_generation_flow(
         "Cloud",
         (),
         {
-            "get_interim_file_url": lambda self, name, **kwargs: (
-                get_interim_file_url(name, **kwargs)
+            "get_interim_file_url": lambda self, name, **kwargs: get_interim_file_url(
+                name, **kwargs
             )
         },
     )()
@@ -254,12 +255,8 @@ def test_download_point_cloud_uses_a2_generation_flow(
     assert all(options["retry_count"] == 0 for options in call_options)
     assert all(0 < options["timeout"] <= 5 for options in call_options)
     assert len(interim_file_options) == 2
-    assert all(
-        options["retry_count"] == 0 for options in interim_file_options
-    )
-    assert all(
-        0 < options["timeout"] <= 5 for options in interim_file_options
-    )
+    assert all(options["retry_count"] == 0 for options in interim_file_options)
+    assert all(0 < options["timeout"] <= 5 for options in interim_file_options)
     assert result.map_index == 0
     assert result.content == content
     assert result.metadata.points == 1
@@ -305,9 +302,7 @@ def test_download_point_cloud_error_does_not_expose_signed_url(
 
 
 def test_download_point_cloud_rejects_insecure_redirect_before_following() -> None:
-    request = urllib.request.Request(
-        "https://downloads.example.invalid/private-object"
-    )
+    request = urllib.request.Request("https://downloads.example.invalid/private-object")
     handler = _internal_client_module._HttpsOnlyPointCloudRedirectHandler()
 
     with pytest.raises(
@@ -325,19 +320,22 @@ def test_download_point_cloud_rejects_insecure_redirect_before_following() -> No
 
 
 def test_interim_file_cloud_logs_redact_request_and_response() -> None:
-    url = (
-        "https://eu.example.invalid/"
-        "dreame-user-iot/iotfile/getDownloadUrl"
-    )
+    url = "https://eu.example.invalid/dreame-user-iot/iotfile/getDownloadUrl"
 
-    assert _internal_protocol_module._cloud_request_log_value(
-        url,
-        '{"filename":"private/generated-map.pcd"}',
-    ) == "<redacted interim file payload>"
-    assert _internal_protocol_module._cloud_request_log_value(
-        url,
-        '{"data":"https://downloads.example.invalid/object?secret=signature"}',
-    ) == "<redacted interim file payload>"
+    assert (
+        _internal_protocol_module._cloud_request_log_value(
+            url,
+            '{"filename":"private/generated-map.pcd"}',
+        )
+        == "<redacted interim file payload>"
+    )
+    assert (
+        _internal_protocol_module._cloud_request_log_value(
+            url,
+            '{"data":"https://downloads.example.invalid/object?secret=signature"}',
+        )
+        == "<redacted interim file payload>"
+    )
 
 
 def test_download_point_cloud_enforces_overall_deadline(
@@ -482,17 +480,18 @@ def test_point_cloud_401_reauthentication_uses_remaining_deadline(
         lambda: 100.0,
     )
 
-    assert cloud.request(
-        "https://cloud.example.invalid/action",
-        "{}",
-        retry_count=0,
-        timeout=20,
-        deadline=101.0,
-    ) is None
+    assert (
+        cloud.request(
+            "https://cloud.example.invalid/action",
+            "{}",
+            retry_count=0,
+            timeout=20,
+            deadline=101.0,
+        )
+        is None
+    )
 
-    assert login_options == [
-        {"timeout": pytest.approx(1.0), "deadline": 101.0}
-    ]
+    assert login_options == [{"timeout": pytest.approx(1.0), "deadline": 101.0}]
 
 
 def test_pcd_validation_stops_at_absolute_deadline(
@@ -542,10 +541,13 @@ def test_point_cloud_action_log_redacts_private_object_response() -> None:
         }
     }
 
-    assert _internal_protocol_module._app_action_response_log_value(
-        private_response,
-        redact=True,
-    ) == "<redacted app action response>"
+    assert (
+        _internal_protocol_module._app_action_response_log_value(
+            private_response,
+            redact=True,
+        )
+        == "<redacted app action response>"
+    )
     assert (
         _internal_protocol_module._app_action_response_log_value(
             private_response,
@@ -715,9 +717,7 @@ def test_point_cloud_header_receive_observes_absolute_deadline(
         "build_opener",
         lambda *handlers: BlockingOpener(),
     )
-    request = urllib.request.Request(
-        "https://downloads.example.invalid/private-object"
-    )
+    request = urllib.request.Request("https://downloads.example.invalid/private-object")
     started = time.monotonic()
     try:
         with pytest.raises(DreameLawnMowerPointCloudError, match="timed out"):
@@ -838,7 +838,7 @@ def test_point_cloud_generation_deadline_includes_executor_queue_time(
         await asyncio.Event().wait()
 
     monkeypatch.setattr(
-        _internal_client_module.asyncio,
+        _internal_client_facade_module.asyncio,
         "to_thread",
         wait_in_executor_queue,
     )
@@ -913,12 +913,15 @@ def test_interim_file_protocol_forwards_absolute_deadline() -> None:
 
     cloud._api_call = api_call
 
-    assert cloud.get_interim_file_url(
-        "private/generated-map.pcd",
-        retry_count=0,
-        timeout=0.8,
-        deadline=101.0,
-    ) == "https://downloads.example.invalid/object"
+    assert (
+        cloud.get_interim_file_url(
+            "private/generated-map.pcd",
+            retry_count=0,
+            timeout=0.8,
+            deadline=101.0,
+        )
+        == "https://downloads.example.invalid/object"
+    )
     assert options == [
         {
             "retry_count": 0,
@@ -976,9 +979,7 @@ def test_point_cloud_preflight_uses_remaining_deadline(
         redact_response=True,
     )
 
-    assert login_options == [
-        {"timeout": pytest.approx(0.9), "deadline": 101.0}
-    ]
+    assert login_options == [{"timeout": pytest.approx(0.9), "deadline": 101.0}]
     assert info_options == [
         {
             "retry_count": 0,
