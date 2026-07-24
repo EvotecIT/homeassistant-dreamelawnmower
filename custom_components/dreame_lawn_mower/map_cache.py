@@ -14,6 +14,16 @@ from .dreame_lawn_mower_client.models import DreameLawnMowerMapView
 MapViewRefresh = Callable[[], Awaitable[DreameLawnMowerMapView]]
 
 
+def map_camera_should_refresh(
+    *,
+    context_changed: bool,
+    runtime_active: bool,
+    manages_cached_view: bool = True,
+) -> bool:
+    """Return whether a coordinator update should refresh a cached map view."""
+    return manages_cached_view and (context_changed or runtime_active)
+
+
 def map_camera_available(
     snapshot: Any,
     *,

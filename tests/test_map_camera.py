@@ -10,6 +10,7 @@ from custom_components.dreame_lawn_mower.map_attributes import map_camera_attrib
 from custom_components.dreame_lawn_mower.map_cache import (
     DreameLawnMowerMapCameraCache,
     map_camera_available,
+    map_camera_should_refresh,
 )
 from dreame_lawn_mower_client.models import (
     DreameLawnMowerMapSummary,
@@ -106,6 +107,18 @@ def test_offline_diagnostic_map_camera_remains_unavailable() -> None:
             snapshot,
             image_cached=False,
             requires_map_capability=False,
+        )
+        is False
+    )
+
+
+def test_all_maps_camera_skips_cached_view_refresh_on_coordinator_updates() -> None:
+    """A direct-fetch diagnostic camera must not start the shared map refresher."""
+    assert (
+        map_camera_should_refresh(
+            context_changed=True,
+            runtime_active=True,
+            manages_cached_view=False,
         )
         is False
     )

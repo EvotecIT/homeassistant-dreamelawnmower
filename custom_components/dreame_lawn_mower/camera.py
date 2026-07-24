@@ -48,7 +48,11 @@ from .image import (
     png_bytes_to_jpeg,
 )
 from .map_attributes import map_camera_attributes
-from .map_cache import DreameLawnMowerMapCameraCache, map_camera_available
+from .map_cache import (
+    DreameLawnMowerMapCameraCache,
+    map_camera_available,
+    map_camera_should_refresh,
+)
 from .point_cloud_api import current_point_cloud_api_path
 from .video_camera import DreameLawnMowerVideoCamera
 
@@ -91,6 +95,7 @@ class DreameLawnMowerMapCamera(
     _attr_entity_registry_enabled_default = False
     _requires_map_capability = True
     _prewarm_map_image = True
+    _refresh_cached_view_on_coordinator_update = True
     _unrecorded_attributes = frozenset(
         {
             "runtime_pose_x",
@@ -141,7 +146,11 @@ class DreameLawnMowerMapCamera(
         active = bool(
             self.coordinator.data and runtime_tracking_active(self.coordinator.data)
         )
-        if context != self._last_refresh_context or active:
+        if map_camera_should_refresh(
+            context_changed=context != self._last_refresh_context,
+            runtime_active=active,
+            manages_cached_view=self._refresh_cached_view_on_coordinator_update,
+        ):
             self._last_refresh_context = context
             self._map_cache.invalidate_view()
             if self.available:
@@ -504,6 +513,7 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
     _attr_icon = "mdi:map-multiple-outline"
     _requires_map_capability = False
     _prewarm_map_image = False
+    _refresh_cached_view_on_coordinator_update = False
 
     def __init__(
         self,

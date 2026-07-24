@@ -159,12 +159,22 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             self.runtime_status_blob = None
             self.client.update_runtime_live_tracking(None, active=False)
             return snapshot
+        runtime_active = runtime_tracking_active(snapshot)
+        previous_app_maps_refreshed_at = self.app_maps_refreshed_at
+        await self.async_refresh_app_maps(force=runtime_active)
+        runtime_map_index = self._runtime_map_index()
+        if (
+            runtime_active
+            and self.app_maps_refreshed_at is previous_app_maps_refreshed_at
+        ):
+            # A forced refresh failed and returned the old cache. Do not stamp new
+            # runtime points with an identity that may belong to another map.
+            runtime_map_index = None
         try:
             self.runtime_status_blob = await self.client.async_get_runtime_status_blob(
                 refresh=False,
                 include_cloud=True,
             )
-            runtime_active = runtime_tracking_active(snapshot)
             self.runtime_telemetry_cache.update(
                 self.runtime_status_blob,
                 allow_zero=runtime_active,
@@ -173,7 +183,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             self.client.update_runtime_live_tracking(
                 self.runtime_status_blob,
                 active=runtime_active,
-                map_index=self._runtime_map_index(),
+                map_index=runtime_map_index,
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh runtime status blob: %s", err)
@@ -187,7 +197,6 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh Bluetooth connection state: %s", err)
             self.bluetooth_connected = None
-        await self.async_refresh_app_maps(force=False)
         await self.async_refresh_batch_device_data(force=False)
         await self.async_refresh_firmware_update_support(force=False)
         await self.async_refresh_app_map_objects(force=False)
@@ -200,12 +209,13 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
 
     def _runtime_map_index(self) -> int | None:
         """Return the map identity used to scope transient runtime overlays."""
-        if self.selected_map_index is not None:
-            return self.selected_map_index
         if isinstance(self.app_maps, dict):
             value = self.app_maps.get("current_map_index")
             if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
                 return value
+            return None
+        if self.selected_map_index is not None:
+            return self.selected_map_index
         return None
 
     async def async_refresh_schedules(
@@ -226,6 +236,8 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
             payload = await self.client.async_get_app_schedules()
         except Exception as err:  # noqa: BLE001 - optional cloud capability
             _LOGGER.debug("Failed to refresh mower schedules: %s", err)
+            if force:
+                raise
             return self.schedules
         self.schedules = payload
         self.schedules_refreshed_at = now
@@ -248,9 +260,44 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
                 confirm_write=True,
             )
             self.last_schedule_write_result = result
-            await self.async_refresh_schedules(force=True)
-            self.async_update_listeners()
+            self._reconcile_cached_schedule_plan_enabled(
+                map_index=map_index,
+                plan_id=plan_id,
+                enabled=enabled,
+            )
+            try:
+                await self.async_refresh_schedules(force=True)
+            finally:
+                # The confirmed write is reflected immediately even when the
+                # follow-up cloud read cannot verify it yet.
+                self.async_update_listeners()
             return result
+
+    def _reconcile_cached_schedule_plan_enabled(
+        self,
+        *,
+        map_index: int,
+        plan_id: int,
+        enabled: bool,
+    ) -> None:
+        """Apply a confirmed schedule write to the shared cache."""
+        schedules = (
+            self.schedules.get("schedules")
+            if isinstance(self.schedules, dict)
+            else None
+        )
+        if not isinstance(schedules, list):
+            return
+        for schedule in schedules:
+            if not isinstance(schedule, dict) or schedule.get("idx") != map_index:
+                continue
+            plans = schedule.get("plans")
+            if not isinstance(plans, list):
+                return
+            for plan in plans:
+                if isinstance(plan, dict) and plan.get("plan_id") == plan_id:
+                    plan["enabled"] = enabled
+                    return
 
     async def async_refresh_batch_device_data(
         self,
