@@ -436,11 +436,17 @@ def test_cancelled_foreground_refresh_records_cancelled_outcome() -> None:
 def test_shutdown_drains_metadata_before_closing_shared_client() -> None:
     async def scenario() -> None:
         coordinator = object.__new__(DreameLawnMowerCoordinator)
+        metadata_started = asyncio.Event()
         metadata_finished = asyncio.Event()
         close_calls: list[str] = []
 
         async def metadata() -> None:
-            await metadata_finished.wait()
+            metadata_started.set()
+            try:
+                await metadata_finished.wait()
+            except asyncio.CancelledError:
+                await metadata_finished.wait()
+                raise
 
         async def close() -> None:
             close_calls.append("close")
@@ -449,10 +455,15 @@ def test_shutdown_drains_metadata_before_closing_shared_client() -> None:
         coordinator._client_update_pending = False
         coordinator._client_update_task = None
         coordinator._metadata_refresh_task = asyncio.create_task(metadata())
+        coordinator._metadata_shutdown_close_task = None
+        coordinator.hass = SimpleNamespace(
+            async_create_task=lambda coroutine, _name: asyncio.create_task(coroutine)
+        )
         coordinator.client = SimpleNamespace(
             set_update_callback=Mock(),
             async_close=close,
         )
+        await metadata_started.wait()
 
         shutdown = asyncio.create_task(coordinator.async_shutdown())
         await asyncio.sleep(0)
@@ -460,6 +471,58 @@ def test_shutdown_drains_metadata_before_closing_shared_client() -> None:
 
         metadata_finished.set()
         await shutdown
+
+        assert close_calls == ["close"]
+
+    asyncio.run(scenario())
+
+
+def test_shutdown_defers_client_close_after_metadata_grace_expires() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        metadata_started = asyncio.Event()
+        metadata_finished = asyncio.Event()
+        close_calls: list[str] = []
+
+        async def metadata() -> None:
+            metadata_started.set()
+            try:
+                await metadata_finished.wait()
+            except asyncio.CancelledError:
+                await metadata_finished.wait()
+                raise
+
+        async def close() -> None:
+            close_calls.append("close")
+
+        coordinator._shutting_down = False
+        coordinator._client_update_pending = False
+        coordinator._client_update_task = None
+        coordinator._metadata_refresh_task = asyncio.create_task(metadata())
+        coordinator._metadata_shutdown_close_task = None
+        coordinator.hass = SimpleNamespace(
+            async_create_task=lambda coroutine, _name: asyncio.create_task(coroutine)
+        )
+        coordinator.client = SimpleNamespace(
+            set_update_callback=Mock(),
+            async_close=close,
+        )
+        await metadata_started.wait()
+
+        with patch(
+            "custom_components.dreame_lawn_mower.coordinator_refresh."
+            "METADATA_SHUTDOWN_GRACE_SECONDS",
+            0.01,
+        ):
+            await asyncio.wait_for(coordinator.async_shutdown(), timeout=1)
+
+        assert close_calls == []
+        cleanup = coordinator._metadata_shutdown_close_task
+        assert cleanup is not None
+        assert not cleanup.done()
+
+        metadata_finished.set()
+        await asyncio.wait_for(cleanup, timeout=1)
 
         assert close_calls == ["close"]
 

@@ -133,6 +133,7 @@ class DreameLawnMowerCoordinator(
         self._client_update_task: asyncio.Task[None] | None = None
         self._client_update_pending = False
         self._metadata_refresh_task: asyncio.Task[None] | None = None
+        self._metadata_shutdown_close_task: asyncio.Task[None] | None = None
         self._metadata_refresh_semaphore = asyncio.Semaphore(
             METADATA_REFRESH_CONCURRENCY
         )
@@ -821,13 +822,8 @@ class DreameLawnMowerCoordinator(
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
-        metadata_task = self._metadata_refresh_task
-        if metadata_task is not None and metadata_task is not asyncio.current_task():
-            # asyncio cancellation cannot stop an already-running to_thread
-            # vendor request. Let the serialized metadata worker drain before
-            # disconnecting its shared protocol/session.
-            await metadata_task
-        await self.client.async_close()
+        if await self._async_drain_metadata_for_shutdown():
+            await self.client.async_close()
 
 
 def _app_map_index_hints(app_maps: Mapping[str, Any] | None) -> list[int]:

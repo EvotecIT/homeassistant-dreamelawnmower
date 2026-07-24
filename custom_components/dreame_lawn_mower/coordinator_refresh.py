@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from typing import Any
 
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -30,6 +31,7 @@ _LOGGER = logging.getLogger(__name__)
 # requests session. Keep its background calls serialized until that owner
 # provides an explicit concurrency contract.
 METADATA_REFRESH_CONCURRENCY = 1
+METADATA_SHUTDOWN_GRACE_SECONDS = 5.0
 SLOW_FOREGROUND_REFRESH_SECONDS = 15.0
 SLOW_METADATA_REFRESH_SECONDS = 30.0
 
@@ -349,6 +351,42 @@ class DreameLawnMowerRefreshMixin:
         """Suppress publication while an in-flight vendor call drains safely."""
         self._metadata_refresh_pending = False
         self._metadata_refresh_publish = False
+
+    async def _async_drain_metadata_for_shutdown(self) -> bool:
+        """Cancel queued metadata and bound the wait for an in-flight request."""
+        metadata_task = self._metadata_refresh_task
+        if metadata_task is None or metadata_task is asyncio.current_task():
+            return True
+
+        close_task = getattr(self, "_metadata_shutdown_close_task", None)
+        if close_task is not None and not close_task.done():
+            return False
+
+        metadata_task.cancel()
+        try:
+            async with asyncio.timeout(METADATA_SHUTDOWN_GRACE_SECONDS):
+                await asyncio.shield(metadata_task)
+        except asyncio.CancelledError:
+            if not metadata_task.done():
+                raise
+        except TimeoutError:
+            self._metadata_shutdown_close_task = self.hass.async_create_task(
+                self._async_close_after_metadata(metadata_task),
+                f"{DOMAIN}-metadata-shutdown",
+            )
+            return False
+        return True
+
+    async def _async_close_after_metadata(
+        self,
+        metadata_task: asyncio.Task[None],
+    ) -> None:
+        """Close the shared client once a cancellation-resistant request drains."""
+        try:
+            with suppress(asyncio.CancelledError):
+                await metadata_task
+        finally:
+            await self.client.async_close()
 
     @staticmethod
     def _log_performance_sample(
