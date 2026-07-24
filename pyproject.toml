@@ -64,7 +64,6 @@ exclude = [
   "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/map.py",
   "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/protocol.py",
   "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/resources.py",
-  "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/types.py",
 ]
 
 [tool.ruff.lint]

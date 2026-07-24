@@ -1,5 +1,5 @@
 from typing import Final
-from .types import (
+from .device_types import (
     DreameMowerChargingStatus,
     DreameMowerTaskStatus,
     DreameMowerState,

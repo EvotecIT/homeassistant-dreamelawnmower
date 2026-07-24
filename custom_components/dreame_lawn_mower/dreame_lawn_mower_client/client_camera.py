@@ -370,7 +370,7 @@ class _DreameLawnMowerCameraMixin:
             device = self._ensure_device()
 
         try:
-            from .types import DreameMowerAction, DreameMowerProperty
+            from .device_types import DreameMowerAction, DreameMowerProperty
         except ImportError:
             return DreameLawnMowerCameraFeatureSupport(
                 supported=False,
@@ -503,7 +503,7 @@ class _DreameLawnMowerCameraMixin:
 
         device = self._ensure_device()
         try:
-            from .types import DreameMowerAction
+            from .device_types import DreameMowerAction
 
             result = device.call_action(DreameMowerAction.GET_PHOTO_INFO, parameters)
         except (DeviceException, InvalidActionException) as err:
@@ -565,7 +565,7 @@ class _DreameLawnMowerCameraMixin:
             raise DreameLawnMowerConnectionError(reason)
 
         try:
-            from .types import DreameMowerProperty
+            from .device_types import DreameMowerProperty
         except ImportError as err:
             raise DreameLawnMowerConnectionError(
                 "Camera protocol types are unavailable."
@@ -671,7 +671,7 @@ class _DreameLawnMowerCameraMixin:
         if payload_mode == "empty_session":
             payload["session"] = ""
 
-        from .types import PIID, DreameMowerAction
+        from .device_types import PIID, DreameMowerAction
 
         return device.call_action(
             DreameMowerAction.STREAM_VIDEO,
@@ -940,7 +940,7 @@ class _DreameLawnMowerCameraMixin:
 
     def _stream_status_payload(self, device: Any) -> dict[str, Any]:
         try:
-            from .types import DreameMowerProperty
+            from .device_types import DreameMowerProperty
         except ImportError:
             stream_status_raw = None
         else:
@@ -960,7 +960,7 @@ class _DreameLawnMowerCameraMixin:
     def _sync_probe_camera_device_properties(self) -> dict[str, Any]:
         device = self._ensure_device()
         try:
-            from .types import DreameMowerProperty
+            from .device_types import DreameMowerProperty
         except ImportError:
             return {"error": "Camera protocol types are unavailable."}
 
