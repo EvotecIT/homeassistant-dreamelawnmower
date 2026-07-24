@@ -131,6 +131,24 @@ def test_camera_stream_allows_known_mowing_state_required_by_a2() -> None:
     assert camera_stream_block_reason(snapshot) is None
 
 
+def test_camera_stream_prefers_normalized_mowing_over_stale_raw_returning() -> None:
+    snapshot = SimpleNamespace(
+        state="mowing",
+        activity="mowing",
+        mowing=True,
+        paused=False,
+        returning=False,
+        raw_docked=False,
+        raw_attributes={
+            "running": True,
+            "returning": True,
+            "status": "Returning",
+        },
+    )
+
+    assert camera_stream_block_reason(snapshot) is None
+
+
 def test_camera_stream_blocks_normalized_docked_state_without_raw_flag() -> None:
     snapshot = SimpleNamespace(
         state="docked",
@@ -158,8 +176,18 @@ def test_camera_stream_blocks_returning_and_ambiguous_active_states() -> None:
         raw_docked=False,
         raw_attributes={"running": True},
     )
+    raw_returning = SimpleNamespace(
+        state="unknown",
+        activity="idle",
+        mowing=False,
+        paused=False,
+        returning=False,
+        raw_docked=False,
+        raw_attributes={"returning": True},
+    )
 
     assert "returning" in camera_stream_block_reason(returning)
+    assert "returning" in camera_stream_block_reason(raw_returning)
     assert "unrecognized active state" in camera_stream_block_reason(ambiguous)
 
 
