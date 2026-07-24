@@ -28,6 +28,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import 
     DreameLawnMowerCameraStreamRuntimeInputs,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.video_runtime import (
+    DreameLawnMowerVideoRuntimeError,
     DreameLawnMowerXp2pLiveStreamRequest,
     DreameLawnMowerXp2pLiveStreamSession,
 )
@@ -221,6 +222,25 @@ def test_real_managed_worker_accepts_request_on_native_host(tmp_path) -> None:
 
     assert result.returncode == 1
     assert result.stdout.startswith(b"DXR1" + struct.pack("!I", 1))
+
+    runtime = xp2p_host_runtime.DreameLawnMowerXp2pHostRuntime(
+        assets,
+        startup_timeout=10,
+        config_fetcher=lambda _inputs: DreameLawnMowerXp2pDeviceConfig(),
+    )
+    with pytest.raises(DreameLawnMowerVideoRuntimeError):
+        runtime.start_live_stream(
+            _inputs(),
+            command_timeout_us=100_000,
+            device_status_attempts=1,
+            device_status_retry_interval=0,
+            delegate_attempts=1,
+            delegate_retry_interval=0,
+        )
+
+    assert runtime.last_failure is not None
+    assert isinstance(runtime.last_failure.get("worker_status"), int)
+    assert runtime.last_failure.get("returncode") != -11
 
 
 def test_host_worker_success_payload_reports_direct_or_relay_route() -> None:
