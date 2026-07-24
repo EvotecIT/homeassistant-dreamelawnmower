@@ -51,6 +51,9 @@ from custom_components.dreame_lawn_mower.const import (
 from custom_components.dreame_lawn_mower.diagnostic_events import (
     DreameLawnMowerDiagnosticEventStore,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    DreameLawnMowerXp2pHostAssets,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
 )
@@ -210,12 +213,28 @@ def test_managed_runtime_environment_is_privacy_safe(
 ) -> None:
     monkeypatch.setattr(video_helpers_module.platform, "system", lambda: "Linux")
     monkeypatch.setattr(video_helpers_module.platform, "machine", lambda: "AMD64")
+    monkeypatch.setattr(video_helpers_module.platform, "release", lambda: "6.12-test")
+    monkeypatch.setattr(
+        video_helpers_module.platform,
+        "libc_ver",
+        lambda: ("glibc", "2.39"),
+    )
+    monkeypatch.setattr(
+        video_helpers_module.os,
+        "sysconf",
+        lambda _name: 4096,
+        raising=False,
+    )
 
     assert video_helpers_module.managed_runtime_environment() == {
         "system": "linux",
         "machine": "x86_64",
         "execution_mode": "qemu_aarch64",
         "supported": True,
+        "kernel_release": "6.12-test",
+        "page_size": 4096,
+        "libc": "glibc",
+        "libc_version": "2.39",
     }
 
 
@@ -1123,6 +1142,73 @@ def test_native_library_runtime_receives_device_config_fetcher() -> None:
     config_fetcher = runtime_type.call_args.kwargs["config_fetcher"]
     assert config_fetcher.__self__ is entity
     assert config_fetcher.__func__ is DreameLawnMowerVideoCamera._resolve_xp2p_config
+
+
+def test_managed_runtime_retries_after_transient_probe_failure(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    entity = _uninitialized_entity()
+    entity._entry.options.pop(CONF_XP2P_RUNNER_COMMAND)
+    entity.hass = SimpleNamespace(
+        config=SimpleNamespace(path=lambda *parts: str(tmp_path.joinpath(*parts)))
+    )
+    failed_assets = DreameLawnMowerXp2pHostAssets(
+        worker_path=tmp_path / "worker",
+        linker_path=tmp_path / "linker64",
+        library_path=tmp_path / "libiot_video_demo.so",
+        library_search_paths=(tmp_path,),
+        startup_probe={
+            "ready": False,
+            "stage": "response_wait",
+            "exception": "TimeoutExpired",
+        },
+    )
+    ready_assets = DreameLawnMowerXp2pHostAssets(
+        worker_path=tmp_path / "worker",
+        linker_path=tmp_path / "linker64",
+        library_path=tmp_path / "libiot_video_demo.so",
+        library_search_paths=(tmp_path,),
+        startup_probe={
+            "ready": True,
+            "returncode": 1,
+            "exit": "exit_code=1",
+            "response_status": 1,
+        },
+    )
+    prepared = iter((failed_assets, ready_assets))
+    monkeypatch.setattr(
+        video_helpers_module,
+        "managed_runtime_supported",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        video_camera_module,
+        "ensure_xp2p_host_runtime",
+        lambda _root: next(prepared),
+    )
+
+    with pytest.raises(
+        DreameLawnMowerVideoRuntimeError,
+        match="compatibility probe failed",
+    ):
+        entity._create_runtime()
+
+    assert entity._prepared_runtime is None
+    assert entity._last_managed_runtime_diagnostics == {
+        "stage": "runtime_probe",
+        "startup_probe": {
+            "ready": False,
+            "stage": "response_wait",
+            "exception": "TimeoutExpired",
+        },
+    }
+
+    runtime = entity._create_runtime()
+
+    assert runtime is entity._prepared_runtime
+    assert runtime.assets is ready_assets
+    assert entity._last_managed_runtime_diagnostics is None
 
 
 def test_video_camera_serializes_concurrent_stream_starts() -> None:

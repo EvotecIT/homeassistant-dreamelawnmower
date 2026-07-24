@@ -10,7 +10,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -104,6 +104,11 @@ class DreameLawnMowerXp2pHostAssets:
     library_path: Path
     library_search_paths: tuple[Path, ...]
     qemu_path: Path | None = None
+    startup_probe: dict[str, Any] | None = field(
+        default=None,
+        compare=False,
+        hash=False,
+    )
 
     def command(self) -> tuple[str, ...]:
         """Return the non-secret worker command."""
@@ -200,6 +205,7 @@ class DreameLawnMowerXp2pHostRuntime:
         """Start a host-owned local HTTP-FLV session."""
         self.last_failure = None
         self.assets.validate()
+        self.require_compatible_worker()
         request = DreameLawnMowerXp2pLiveStreamRequest.from_runtime_inputs(inputs)
         device_config = self.config_fetcher(inputs)
         stun_file = _write_stun_file(_stun_servers(device_config))
@@ -231,6 +237,7 @@ class DreameLawnMowerXp2pHostRuntime:
         """Start direct same-LAN HTTP-FLV without cloud config or credentials."""
         self.last_failure = None
         self.assets.validate()
+        self.require_compatible_worker()
         request = DreameLawnMowerXp2pLiveStreamRequest.from_lan_runtime_inputs(inputs)
         if endpoint is None:
             endpoint = self.lan_discoverer(
@@ -414,6 +421,8 @@ class DreameLawnMowerXp2pHostRuntime:
                 failure["exit"] = _format_worker_returncode(failure_returncode)
             if native_detail:
                 failure["native_trace"] = native_detail
+            if self.assets.startup_probe is not None:
+                failure["startup_probe"] = self.assets.startup_probe
             self.last_failure = failure
             if isinstance(err, DreameLawnMowerVideoRuntimeError):
                 if startup_stage != "response_wait":
@@ -425,6 +434,20 @@ class DreameLawnMowerXp2pHostRuntime:
             raise DreameLawnMowerVideoRuntimeError(
                 "XP2P host worker could not start (" + ", ".join(details) + ")."
             ) from err
+
+    def require_compatible_worker(self) -> None:
+        """Stop before a real request when the safe startup probe failed."""
+        probe = self.assets.startup_probe
+        if probe is None or probe.get("ready") is True:
+            return
+        self.last_failure = {
+            "stage": "runtime_probe",
+            "startup_probe": probe,
+        }
+        exit_detail = probe.get("exit", "unknown exit")
+        raise DreameLawnMowerVideoRuntimeError(
+            f"XP2P host worker compatibility probe failed ({exit_detail})."
+        )
 
     def stop_live_stream(self, session: DreameLawnMowerXp2pLiveStreamSession) -> None:
         """Stop the worker and remove its transient STUN configuration."""

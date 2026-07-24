@@ -857,8 +857,16 @@ class DreameLawnMowerVideoCamera(
                 ensure_xp2p_host_runtime(runtime_root),
                 config_fetcher=self._resolve_xp2p_config,
             )
+            try:
+                runtime.require_compatible_worker()
+            except DreameLawnMowerVideoRuntimeError:
+                self._last_managed_runtime_diagnostics = (
+                    video_helpers.safe_state_attribute(runtime.last_failure)
+                )
+                raise
             self._prepared_runtime = runtime
             self._last_native_runtime_diagnostics = None
+            self._last_managed_runtime_diagnostics = None
             return runtime
 
         raise DreameLawnMowerVideoRuntimeError(
