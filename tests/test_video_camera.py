@@ -29,6 +29,15 @@ from homeassistant.components.camera import CameraEntityFeature
 import custom_components.dreame_lawn_mower.video_camera as video_camera_module
 import custom_components.dreame_lawn_mower.video_stream_helpers as video_helpers_module
 from custom_components.dreame_lawn_mower import (
+    video_camera_startup as video_camera_startup_module,
+)
+from custom_components.dreame_lawn_mower import (
+    video_camera_state as video_camera_state_module,
+)
+from custom_components.dreame_lawn_mower import (
+    video_camera_types as video_camera_types_module,
+)
+from custom_components.dreame_lawn_mower import (
     video_provisioning_cache as provisioning_cache_module,
 )
 from custom_components.dreame_lawn_mower.const import (
@@ -194,6 +203,92 @@ def test_video_camera_advertises_stop_control() -> None:
     assert features & CameraEntityFeature.ON_OFF
     assert "async_turn_on" in DreameLawnMowerVideoCamera.__dict__
     assert "async_turn_off" in DreameLawnMowerVideoCamera.__dict__
+
+
+def test_video_camera_facade_preserves_split_method_surface() -> None:
+    """Keep reflection and direct module imports stable after decomposition."""
+    split_methods = {
+        video_camera_state_module.DreameLawnMowerVideoStateMixin: (
+            "_handle_coordinator_update",
+            "_async_cleanup_for_state_gate",
+            "available",
+            "device_info",
+            "extra_state_attributes",
+        ),
+        video_camera_startup_module.DreameLawnMowerVideoStartupMixin: (
+            "_async_start_stream",
+            "_async_refresh_auto_start_state",
+            "_video_start_is_blocked",
+            "_async_try_lan_stream",
+            "_async_try_cached_xp2p_stream",
+            "_async_get_runtime_inputs",
+            "_async_cache_healthy_provisioning",
+            "_async_start_lan_runtime_session",
+            "_adopt_stream_session",
+            "_async_adopt_stream_session",
+            "_async_cleanup_rejected_session",
+            "_with_lan_failure",
+            "_async_start_runtime_session",
+            "_schedule_late_start_cleanup",
+            "_async_cleanup_late_start",
+        ),
+    }
+
+    for mixin, method_names in split_methods.items():
+        for method_name in method_names:
+            assert (
+                DreameLawnMowerVideoCamera.__dict__[method_name]
+                is mixin.__dict__[method_name]
+            )
+
+    assert (
+        video_camera_module._runtime_inputs_not_ready_message
+        is video_camera_startup_module._runtime_inputs_not_ready_message
+    )
+    assert (
+        video_camera_module._DreameVideoRuntime
+        is video_camera_types_module._DreameVideoRuntime
+    )
+
+
+def test_split_startup_observes_historical_facade_monkeypatch() -> None:
+    """Keep dependency injection through the original module path working."""
+
+    async def _run() -> tuple[
+        str | None,
+        list[object],
+        object,
+        object,
+        DreameLawnMowerVideoCamera,
+    ]:
+        entity = _uninitialized_entity()
+        observed: list[object] = []
+        runtime = object()
+        inputs = object()
+
+        async def _start_cached(
+            patched_runtime: object,
+            patched_inputs: object,
+            *,
+            start_session: object,
+        ) -> SimpleNamespace:
+            observed.extend((patched_runtime, patched_inputs, start_session))
+            return SimpleNamespace(session=None, error=None)
+
+        with patch.object(
+            video_camera_module,
+            "async_start_cached_xp2p",
+            _start_cached,
+        ):
+            result = await entity._async_try_cached_xp2p_stream(runtime, inputs)
+        return result, observed, runtime, inputs, entity
+
+    result, observed, runtime, inputs, entity = asyncio.run(_run())
+
+    assert result is None
+    assert observed[0] is runtime
+    assert observed[1] is inputs
+    assert observed[2].__self__ is entity
 
 
 def test_video_failure_is_sanitized_logged_once_and_preserved(caplog) -> None:
