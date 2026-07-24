@@ -15,12 +15,14 @@ import tempfile
 import threading
 import zipfile
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 
 import requests
 
 from .video_runtime import DreameLawnMowerVideoRuntimeError
+from .xp2p_host_probe import probe_xp2p_host_worker
 from .xp2p_host_runtime import DreameLawnMowerXp2pHostAssets
 from .xp2p_host_worker_blob import (
     WORKER_GZIP_BASE64,
@@ -145,39 +147,51 @@ def ensure_xp2p_host_runtime(
     runtime_path = root_path / f"runtime-v{RUNTIME_LAYOUT_VERSION}-{architecture}"
     with _INSTALL_LOCK:
         assets = _validated_assets(runtime_path, architecture)
-        if assets is not None:
-            return assets
-        root_path.mkdir(parents=True, exist_ok=True)
-        staging = Path(
-            tempfile.mkdtemp(
-                prefix=f".{runtime_path.name}-",
-                dir=root_path,
-            )
-        )
-        try:
-            _install_runtime(
-                staging,
-                architecture,
-                http_client=http_client or requests,
-                timeout=timeout,
-            )
-            installed = _validated_assets(staging, architecture)
-            if installed is None:
-                raise DreameLawnMowerVideoRuntimeError(
-                    "Installed XP2P host runtime failed integrity validation."
-                )
-            if runtime_path.exists():
-                _remove_runtime_path(runtime_path, root_path)
-            staging.replace(runtime_path)
-        except Exception:
-            _remove_runtime_path(staging, root_path)
-            raise
-        assets = _validated_assets(runtime_path, architecture)
         if assets is None:
-            raise DreameLawnMowerVideoRuntimeError(
-                "XP2P host runtime disappeared after installation."
+            root_path.mkdir(parents=True, exist_ok=True)
+            staging = Path(
+                tempfile.mkdtemp(
+                    prefix=f".{runtime_path.name}-",
+                    dir=root_path,
+                )
             )
-        return assets
+            try:
+                _install_runtime(
+                    staging,
+                    architecture,
+                    http_client=http_client or requests,
+                    timeout=timeout,
+                )
+                installed = _validated_assets(staging, architecture)
+                if installed is None:
+                    raise DreameLawnMowerVideoRuntimeError(
+                        "Installed XP2P host runtime failed integrity validation."
+                    )
+                if runtime_path.exists():
+                    _remove_runtime_path(runtime_path, root_path)
+                staging.replace(runtime_path)
+            except Exception:
+                _remove_runtime_path(staging, root_path)
+                raise
+            assets = _validated_assets(runtime_path, architecture)
+            if assets is None:
+                raise DreameLawnMowerVideoRuntimeError(
+                    "XP2P host runtime disappeared after installation."
+                )
+    return _with_startup_probe(assets)
+
+
+def _with_startup_probe(
+    assets: DreameLawnMowerXp2pHostAssets,
+) -> DreameLawnMowerXp2pHostAssets:
+    """Attach one safe worker-launch result to the prepared runtime."""
+    return replace(
+        assets,
+        startup_probe=probe_xp2p_host_worker(
+            assets.command(),
+            assets.environment(),
+        ),
+    )
 
 
 def _install_runtime(

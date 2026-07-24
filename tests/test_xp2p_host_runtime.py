@@ -6,6 +6,8 @@ import base64
 import gzip
 import hashlib
 import io
+import os
+import platform
 import struct
 import subprocess
 import threading
@@ -15,6 +17,7 @@ import pytest
 import requests
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    xp2p_host_probe,
     xp2p_host_runtime,
     xp2p_host_worker_blob,
     xp2p_runtime_bootstrap,
@@ -26,6 +29,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import 
     DreameLawnMowerCameraStreamRuntimeInputs,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.video_runtime import (
+    DreameLawnMowerVideoRuntimeError,
     DreameLawnMowerXp2pLiveStreamRequest,
     DreameLawnMowerXp2pLiveStreamSession,
 )
@@ -194,6 +198,121 @@ def test_embedded_worker_matches_reproducible_hashes() -> None:
     assert hashlib.sha256(compressed).hexdigest() == WORKER_GZIP_SHA256
     assert hashlib.sha256(worker).hexdigest() == WORKER_SHA256
     assert worker.startswith(b"\x7fELF")
+
+
+def test_real_managed_worker_accepts_request_on_native_host(tmp_path) -> None:
+    """Prove the installed worker starts on the architecture used by CI."""
+    if (
+        platform.system().casefold() != "linux"
+        or os.environ.get("DREAME_XP2P_REAL_RUNTIME_TEST") != "1"
+    ):
+        pytest.skip("real managed runtime validation is opt-in")
+
+    assets = xp2p_runtime_bootstrap.ensure_xp2p_host_runtime(
+        tmp_path,
+        machine=platform.machine(),
+    )
+    assert assets.startup_probe is not None
+    assert assets.startup_probe["ready"] is True
+    assert assets.startup_probe["stage"] == "response_decode"
+    assert assets.startup_probe["returncode"] == 1
+    assert assets.startup_probe["exit"] == "exit_code=1"
+    assert assets.startup_probe["response_status"] == 1
+
+    runtime = xp2p_host_runtime.DreameLawnMowerXp2pHostRuntime(
+        assets,
+        startup_timeout=10,
+        config_fetcher=lambda _inputs: DreameLawnMowerXp2pDeviceConfig(),
+    )
+    with pytest.raises(DreameLawnMowerVideoRuntimeError):
+        runtime.start_live_stream(
+            _inputs(),
+            command_timeout_us=100_000,
+            device_status_attempts=1,
+            device_status_retry_interval=0,
+            delegate_attempts=1,
+            delegate_retry_interval=0,
+        )
+
+    assert runtime.last_failure is not None
+    assert isinstance(runtime.last_failure.get("worker_status"), int)
+    assert runtime.last_failure.get("returncode") != -11
+
+
+def test_host_probe_reports_signal_without_exposing_paths(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=(),
+            returncode=-11,
+            stdout=b"",
+            stderr=b"/config/.storage/dreame-xp2p/linker64 crashed",
+        ),
+    )
+
+    assert xp2p_host_probe.probe_xp2p_host_worker(("worker",), {}) == {
+        "ready": False,
+        "stage": "response_wait",
+        "returncode": -11,
+        "exit": "signal=11",
+        "native_trace": "[redacted-path] crashed",
+    }
+
+
+def test_host_runtime_rejects_failed_compatibility_probe(tmp_path) -> None:
+    runtime = xp2p_host_runtime.DreameLawnMowerXp2pHostRuntime(
+        DreameLawnMowerXp2pHostAssets(
+            worker_path=tmp_path / "worker",
+            linker_path=tmp_path / "linker64",
+            library_path=tmp_path / "libiot_video_demo.so",
+            library_search_paths=(tmp_path,),
+            startup_probe={
+                "ready": False,
+                "returncode": -11,
+                "exit": "signal=11",
+            },
+        )
+    )
+    for path in (
+        runtime.assets.worker_path,
+        runtime.assets.linker_path,
+        runtime.assets.library_path,
+    ):
+        path.touch(mode=0o755)
+
+    with pytest.raises(
+        DreameLawnMowerVideoRuntimeError,
+        match=r"compatibility probe failed \(signal=11\)",
+    ):
+        runtime.start_live_stream(_inputs())
+
+    assert runtime.last_failure == {
+        "stage": "runtime_probe",
+        "startup_probe": {
+            "ready": False,
+            "returncode": -11,
+            "exit": "signal=11",
+        },
+    }
+
+
+def test_host_assets_remain_hashable_with_probe_diagnostics(tmp_path) -> None:
+    assets = DreameLawnMowerXp2pHostAssets(
+        worker_path=tmp_path / "worker",
+        linker_path=tmp_path / "linker64",
+        library_path=tmp_path / "libiot_video_demo.so",
+        library_search_paths=(tmp_path,),
+        startup_probe={
+            "ready": True,
+            "returncode": 1,
+            "exit": "exit_code=1",
+        },
+    )
+
+    assert hash(assets) == hash(replace(assets, startup_probe=None))
 
 
 def test_host_worker_success_payload_reports_direct_or_relay_route() -> None:
@@ -434,6 +553,12 @@ def test_host_runtime_reports_abnormal_worker_exit_without_secrets(
         linker_path=tmp_path / "linker64",
         library_path=tmp_path / "libiot_video_demo.so",
         library_search_paths=(tmp_path / "lib",),
+        startup_probe={
+            "ready": True,
+            "returncode": 1,
+            "exit": "exit_code=1",
+            "response_status": 1,
+        },
     )
     runtime = xp2p_host_runtime.DreameLawnMowerXp2pHostRuntime(
         assets,
@@ -466,6 +591,7 @@ def test_host_runtime_reports_abnormal_worker_exit_without_secrets(
     assert runtime.last_failure is not None
     assert runtime.last_failure["stage"] == "request_write"
     assert runtime.last_failure["returncode"] == -11
+    assert runtime.last_failure["startup_probe"]["ready"] is True
     native_trace = runtime.last_failure["native_trace"]
     assert "[redacted]" in native_trace
     assert long_secret[-64:] not in native_trace

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import platform
 import shlex
 from collections.abc import Callable
@@ -93,7 +94,7 @@ def managed_runtime_supported() -> bool:
     return managed_runtime_environment()["supported"]
 
 
-def managed_runtime_environment() -> dict[str, str | bool]:
+def managed_runtime_environment() -> dict[str, str | bool | int]:
     """Return privacy-safe host facts needed to diagnose managed XP2P startup."""
     system = platform.system().strip().casefold() or "unknown"
     machine = platform.machine().strip().casefold() or "unknown"
@@ -111,11 +112,20 @@ def managed_runtime_environment() -> dict[str, str | bool]:
         if supported
         else "unsupported"
     )
+    libc_name, libc_version = platform.libc_ver()
+    try:
+        page_size = int(os.sysconf("SC_PAGE_SIZE"))
+    except (AttributeError, OSError, ValueError):
+        page_size = 0
     return {
         "system": system,
         "machine": normalized_machine,
         "execution_mode": execution_mode,
         "supported": supported,
+        "kernel_release": platform.release().strip() or "unknown",
+        "page_size": page_size,
+        "libc": libc_name.strip().casefold() or "unknown",
+        "libc_version": libc_version.strip() or "unknown",
     }
 
 

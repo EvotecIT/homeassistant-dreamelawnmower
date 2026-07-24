@@ -42,3 +42,26 @@ jobs:
         env:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
         run: pytest tests --ignore=tests/components/dreame_lawn_mower/test_config_flow.py
+
+  xp2p-runtime-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Validate native runtime in Home Assistant Container
+        env:
+          HOME_ASSISTANT_IMAGE: >-
+            ghcr.io/home-assistant/home-assistant:2026.7.2
+        run: |
+          docker run --rm \
+            --volume "$PWD:/work" \
+            --workdir /work \
+            --env DREAME_XP2P_REAL_RUNTIME_TEST=1 \
+            --env PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+            "$HOME_ASSISTANT_IMAGE" \
+            bash -ceu '
+              python -m pip install --disable-pip-version-check pytest
+              python -m pytest tests/test_xp2p_host_runtime.py \
+                -k real_managed_worker_accepts_request_on_native_host
+            '
