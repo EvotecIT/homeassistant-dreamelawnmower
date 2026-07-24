@@ -498,6 +498,35 @@ def test_a2_app_tiers_are_preserved(
     assert mower_device_code_tier(code, model="dreame.mower.g2408") is tier
 
 
+@pytest.mark.parametrize(
+    ("code", "expected_name"),
+    [
+        (28, "blades_worn"),
+        (29, "station_brush_worn"),
+        (30, "maintenance_due"),
+    ],
+)
+def test_attention_notices_do_not_override_mowing_for_model_variants(
+    code: int,
+    expected_name: str,
+) -> None:
+    snapshot = _snapshot(
+        code,
+        "fan_speed_error",
+        realtime_error_code=code,
+        state="MOWING",
+        model="dreame.mower.x1234",
+    )
+
+    assert snapshot.state == "mowing"
+    assert snapshot.activity == "mowing"
+    assert snapshot.error_code is None
+    assert snapshot.error_display is None
+    assert snapshot.status_notice_code == code
+    assert snapshot.status_notice_name == expected_name
+    assert snapshot.status_notice_tier == "attention"
+
+
 def test_a2_catalog_has_a_meaning_for_every_observed_app_code() -> None:
     for code in range(78):
         assert (
