@@ -9,10 +9,24 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.const import (
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map import (
     DreameMapMowerMapManager,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map import (
+    DreameMowerMapOptimizer as LegacyDreameMowerMapOptimizer,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_optimizer import (
+    DreameMowerMapOptimizer,
+)
 
 
 class _DummyProtocol:
     """Minimal protocol stand-in for map-manager unit checks."""
+
+
+def test_map_optimizer_keeps_historical_import_and_manager_contract() -> None:
+    assert LegacyDreameMowerMapOptimizer is DreameMowerMapOptimizer
+
+    manager = DreameMapMowerMapManager(_DummyProtocol())
+
+    assert type(manager.optimizer) is DreameMowerMapOptimizer
 
 
 def test_handle_properties_skips_map_property_without_value() -> None:
