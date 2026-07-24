@@ -94,7 +94,11 @@ def _point_cloud_object_name(value: Any, map_index: int) -> str | None:
 def _validate_point_cloud_map_index(value: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 255:
         raise DreameLawnMowerPointCloudError(
-            "Point-cloud map index must be an integer between 0 and 255."
+            "Point-cloud map index must be an integer between 0 and 255.",
+            code="point_cloud_invalid_request",
+            stage="request",
+            retryable=False,
+            public_message="The 3D map request contains an invalid map index.",
         )
     return value
 
@@ -102,12 +106,20 @@ def _validate_point_cloud_map_index(value: int) -> int:
 def _validate_positive_number(value: float, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise DreameLawnMowerPointCloudError(
-            f"Point-cloud {label} must be a positive number."
+            f"Point-cloud {label} must be a positive number.",
+            code="point_cloud_invalid_request",
+            stage="request",
+            retryable=False,
+            public_message=f"The 3D map request contains an invalid {label}.",
         )
     normalized = float(value)
     if not math.isfinite(normalized) or normalized <= 0:
         raise DreameLawnMowerPointCloudError(
-            f"Point-cloud {label} must be a positive number."
+            f"Point-cloud {label} must be a positive number.",
+            code="point_cloud_invalid_request",
+            stage="request",
+            retryable=False,
+            public_message=f"The 3D map request contains an invalid {label}.",
         )
     return normalized
 

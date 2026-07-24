@@ -8,7 +8,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
@@ -17,10 +17,12 @@ from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
 from .control_options import current_map_index
+from .diagnostic_events import record_diagnostic_event
 from .dreame_lawn_mower_client import (
     DreameLawnMowerPointCloudDownload,
     DreameLawnMowerPointCloudError,
 )
+from .performance import format_performance_sample
 
 if TYPE_CHECKING:
     from .coordinator import DreameLawnMowerCoordinator
@@ -31,6 +33,29 @@ POINT_CLOUD_API_DATA_KEY = "point_cloud_api"
 POINT_CLOUD_API_PATH = f"/api/{DOMAIN}/point-cloud"
 POINT_CLOUD_CACHE_TTL_SECONDS = 60.0
 POINT_CLOUD_CACHE_MAX_ENTRIES = 4
+POINT_CLOUD_PROBLEM_SCHEMA_VERSION = 1
+
+_POINT_CLOUD_PROBLEM_STATUS = {
+    "point_cloud_generation_in_progress": 409,
+    "point_cloud_invalid_request": 400,
+    "point_cloud_timeout": 504,
+    "point_cloud_not_published": 504,
+    "point_cloud_download_invalid": 504,
+    "point_cloud_entry_reloaded": 503,
+    "point_cloud_download_unsupported": 503,
+}
+_POINT_CLOUD_PROBLEM_TITLE = {
+    "point_cloud_generation_in_progress": "3D map generation already in progress",
+    "point_cloud_invalid_request": "Invalid 3D map request",
+    "point_cloud_timeout": "3D map generation timed out",
+    "point_cloud_not_published": "The mower did not publish a fresh 3D map",
+    "point_cloud_download_invalid": "The generated 3D map could not be used",
+    "point_cloud_entry_reloaded": "The mower integration was reloaded",
+    "point_cloud_download_unsupported": "3D map download is unavailable",
+    "point_cloud_mower_request_failed": "The mower rejected the 3D map request",
+    "point_cloud_mower_response_invalid": "The mower returned an invalid response",
+    "point_cloud_failed": "3D map unavailable",
+}
 
 
 def point_cloud_api_path(entry_id: str, map_index: int) -> str:
@@ -128,9 +153,18 @@ class DreameLawnMowerPointCloudAPI:
             if inflight.epoch != epoch:
                 await self._async_discard_stale_generation(other_key, inflight)
                 return await self.async_get(entry_id, map_index, refresh=refresh)
-            raise DreameLawnMowerPointCloudError(
-                "Another point-cloud generation is already in progress "
-                "for this mower."
+            self._reject_request(
+                coordinator,
+                DreameLawnMowerPointCloudError(
+                    "Another point-cloud generation is already in progress "
+                    "for this mower.",
+                    code="point_cloud_generation_in_progress",
+                    stage="queue",
+                    public_message=(
+                        "A 3D map is already being generated for this mower."
+                    ),
+                    retry_after_seconds=5,
+                ),
             )
 
         generation = self._async_generate(
@@ -191,17 +225,78 @@ class DreameLawnMowerPointCloudAPI:
         epoch: int,
     ) -> DreameLawnMowerPointCloudDownload:
         """Run and cache one generation independently of HTTP waiters."""
-        if self._entry_epochs.get(key[0], 0) != epoch:
-            raise DreameLawnMowerPointCloudError(
-                "The mower entry changed before point-cloud generation started."
-            )
-        download = await coordinator.client.async_download_app_map_point_cloud(
-            map_index=key[1]
+        performance = getattr(coordinator, "performance", None)
+        cycle = (
+            performance.start("point_cloud_generation")
+            if hasattr(performance, "start")
+            else None
         )
-        if self._entry_epochs.get(key[0], 0) != epoch:
-            raise DreameLawnMowerPointCloudError(
-                "The mower entry changed during point-cloud generation."
+        try:
+            if self._entry_epochs.get(key[0], 0) != epoch:
+                raise DreameLawnMowerPointCloudError(
+                    "The mower entry changed before point-cloud generation started.",
+                    code="point_cloud_entry_reloaded",
+                    stage="lifecycle",
+                    public_message=(
+                        "The mower integration was reloaded before the 3D map "
+                        "request started."
+                    ),
+                    retry_after_seconds=2,
+                )
+            if cycle is not None:
+                download = await cycle.measure(
+                    "generate_download_validate",
+                    lambda: coordinator.client.async_download_app_map_point_cloud(
+                        map_index=key[1]
+                    ),
+                )
+            else:
+                download = (
+                    await coordinator.client.async_download_app_map_point_cloud(
+                        map_index=key[1]
+                    )
+                )
+            if self._entry_epochs.get(key[0], 0) != epoch:
+                raise DreameLawnMowerPointCloudError(
+                    "The mower entry changed during point-cloud generation.",
+                    code="point_cloud_entry_reloaded",
+                    stage="lifecycle",
+                    public_message=(
+                        "The mower integration was reloaded while generating the "
+                        "3D map."
+                    ),
+                    retry_after_seconds=2,
+                )
+        except DreameLawnMowerPointCloudError as err:
+            sample = cycle.finish(outcome=err.code) if cycle is not None else None
+            self._record_generation_failure(coordinator, err, sample)
+            raise
+        except Exception as err:
+            public_error = DreameLawnMowerPointCloudError(
+                "Unexpected point-cloud generation failure.",
+                code="point_cloud_failed",
+                stage="generation",
+                public_message="The mower point cloud is temporarily unavailable.",
+                retry_after_seconds=10,
             )
+            sample = (
+                cycle.finish(outcome=public_error.code)
+                if cycle is not None
+                else None
+            )
+            self._record_generation_failure(coordinator, public_error, sample)
+            raise public_error from err
+        else:
+            if cycle is not None:
+                sample = cycle.finish()
+                total, phases = format_performance_sample(sample)
+                _LOGGER.info(
+                    "Dreame mower performance: operation=point_cloud_generation "
+                    "outcome=completed total=%.3fs phases=%s",
+                    total,
+                    phases,
+                )
+
         created_at = time.monotonic()
         self._remove_cache_entry(key)
         self._cache[key] = _CacheEntry(
@@ -219,6 +314,66 @@ class DreameLawnMowerPointCloudAPI:
             oldest_key = next(iter(self._cache))
             self._remove_cache_entry(oldest_key)
         return download
+
+    def _reject_request(
+        self,
+        coordinator: DreameLawnMowerCoordinator,
+        error: DreameLawnMowerPointCloudError,
+    ) -> NoReturn:
+        """Record and raise a safe request-level point-cloud failure."""
+        record_diagnostic_event(
+            coordinator,
+            code=error.code,
+            source="point_cloud_api",
+            message=error.public_message,
+            context={
+                "stage": error.stage,
+                "retryable": error.retryable,
+                "retry_after_seconds": error.retry_after_seconds,
+            },
+        )
+        _LOGGER.warning(
+            "Dreame point-cloud request failed: code=%s stage=%s retryable=%s",
+            error.code,
+            error.stage,
+            error.retryable,
+        )
+        raise error
+
+    def _record_generation_failure(
+        self,
+        coordinator: DreameLawnMowerCoordinator,
+        error: DreameLawnMowerPointCloudError,
+        sample: Any,
+    ) -> None:
+        """Keep one privacy-safe failure event and benchmark sample."""
+        context: dict[str, Any] = {
+            "stage": error.stage,
+            "retryable": error.retryable,
+            "retry_after_seconds": error.retry_after_seconds,
+            "timeout_seconds": error.timeout_seconds,
+        }
+        if sample is not None:
+            context["duration_ms"] = round(sample.total_seconds * 1000, 1)
+            total, phases = format_performance_sample(sample)
+        else:
+            total, phases = 0.0, "none"
+        record_diagnostic_event(
+            coordinator,
+            code=error.code,
+            source="point_cloud_api",
+            message=error.public_message,
+            context=context,
+        )
+        _LOGGER.warning(
+            "Dreame mower performance: operation=point_cloud_generation "
+            "outcome=%s total=%.3fs phases=%s stage=%s retryable=%s",
+            error.code,
+            total,
+            phases,
+            error.stage,
+            error.retryable,
+        )
 
     @callback
     def _generation_done(
@@ -291,12 +446,31 @@ class DreameLawnMowerPointCloudView(HomeAssistantView):
         map_index: str,
     ) -> web.Response:
         """Generate and return one private PCD download."""
+        started_at = time.monotonic()
         try:
             normalized_index = int(map_index)
-        except ValueError as err:
-            raise web.HTTPBadRequest(text="Invalid point-cloud map index.") from err
+        except ValueError:
+            return _point_cloud_problem_response(
+                DreameLawnMowerPointCloudError(
+                    "Invalid point-cloud map index.",
+                    code="point_cloud_invalid_request",
+                    stage="request",
+                    retryable=False,
+                    public_message="The 3D map request contains an invalid map index.",
+                ),
+                elapsed_seconds=time.monotonic() - started_at,
+            )
         if not 0 <= normalized_index <= 255:
-            raise web.HTTPBadRequest(text="Invalid point-cloud map index.")
+            return _point_cloud_problem_response(
+                DreameLawnMowerPointCloudError(
+                    "Invalid point-cloud map index.",
+                    code="point_cloud_invalid_request",
+                    stage="request",
+                    retryable=False,
+                    public_message="The 3D map request contains an invalid map index.",
+                ),
+                elapsed_seconds=time.monotonic() - started_at,
+            )
 
         refresh = request.query.get("refresh") == "1"
         try:
@@ -308,16 +482,31 @@ class DreameLawnMowerPointCloudView(HomeAssistantView):
         except web.HTTPException:
             raise
         except DreameLawnMowerPointCloudError as err:
-            _LOGGER.warning("Dreame point-cloud generation or validation failed")
-            raise web.HTTPBadGateway(
-                text="The mower point cloud is temporarily unavailable."
-            ) from err
-        except Exception as err:  # noqa: BLE001 - keep private cloud details private.
-            _LOGGER.warning("Unexpected Dreame point-cloud generation failure")
-            raise web.HTTPBadGateway(
-                text="The mower point cloud is temporarily unavailable."
-            ) from err
+            return _point_cloud_problem_response(
+                err,
+                elapsed_seconds=time.monotonic() - started_at,
+            )
+        except Exception:  # noqa: BLE001 - keep private cloud details private.
+            elapsed_seconds = time.monotonic() - started_at
+            _LOGGER.warning(
+                "Dreame point-cloud request failed: code=point_cloud_failed "
+                "stage=delivery elapsed=%.3fs retryable=True",
+                elapsed_seconds,
+            )
+            return _point_cloud_problem_response(
+                DreameLawnMowerPointCloudError(
+                    "Unexpected point-cloud delivery failure.",
+                    code="point_cloud_failed",
+                    stage="delivery",
+                    public_message=(
+                        "The mower point cloud is temporarily unavailable."
+                    ),
+                    retry_after_seconds=10,
+                ),
+                elapsed_seconds=elapsed_seconds,
+            )
 
+        elapsed_ms = round((time.monotonic() - started_at) * 1000, 1)
         return web.Response(
             body=download.content,
             content_type="application/octet-stream",
@@ -327,8 +516,50 @@ class DreameLawnMowerPointCloudView(HomeAssistantView):
                     f'attachment; filename="dreame-map-{normalized_index}.pcd"'
                 ),
                 "X-Content-Type-Options": "nosniff",
+                "X-Dreame-Operation-Elapsed-Ms": str(elapsed_ms),
+                "Server-Timing": f"dreame-point-cloud;dur={elapsed_ms}",
             },
         )
+
+
+def _point_cloud_problem_response(
+    error: DreameLawnMowerPointCloudError,
+    *,
+    elapsed_seconds: float,
+) -> web.Response:
+    """Return a bounded, machine-readable, privacy-safe failure response."""
+    status = _POINT_CLOUD_PROBLEM_STATUS.get(error.code, 502)
+    elapsed_ms = round(max(0.0, elapsed_seconds) * 1000, 1)
+    headers = {
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+        "X-Dreame-Problem-Code": error.code,
+        "X-Dreame-Problem-Stage": error.stage,
+        "X-Dreame-Operation-Elapsed-Ms": str(elapsed_ms),
+        "Server-Timing": f"dreame-point-cloud;dur={elapsed_ms}",
+    }
+    if error.retry_after_seconds is not None:
+        headers["Retry-After"] = str(error.retry_after_seconds)
+    return web.json_response(
+        {
+            "schema_version": POINT_CLOUD_PROBLEM_SCHEMA_VERSION,
+            "title": _POINT_CLOUD_PROBLEM_TITLE.get(
+                error.code,
+                "3D map unavailable",
+            ),
+            "status": status,
+            "detail": error.public_message,
+            "code": error.code,
+            "stage": error.stage,
+            "retryable": error.retryable,
+            "retry_after_seconds": error.retry_after_seconds,
+            "elapsed_ms": elapsed_ms,
+            "timeout_seconds": error.timeout_seconds,
+        },
+        status=status,
+        content_type="application/problem+json",
+        headers=headers,
+    )
 
 
 @callback

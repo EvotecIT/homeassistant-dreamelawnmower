@@ -21,7 +21,26 @@ _VALIDATION_DEADLINE_CHECK_BYTES = 64 * 1024
 
 
 class DreameLawnMowerPointCloudError(ValueError):
-    """Raised when a downloaded point cloud is invalid or unsupported."""
+    """Describe a point-cloud failure without exposing private cloud details."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "point_cloud_failed",
+        stage: str = "point_cloud",
+        retryable: bool = True,
+        public_message: str = "The mower point cloud is temporarily unavailable.",
+        timeout_seconds: float | None = None,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.stage = stage
+        self.retryable = retryable
+        self.public_message = public_message
+        self.timeout_seconds = timeout_seconds
+        self.retry_after_seconds = retry_after_seconds
 
 
 @dataclass(frozen=True, slots=True)
