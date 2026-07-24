@@ -61,6 +61,17 @@ MOWING_PREFERENCE_UPDATE_FIELDS = (
     "obstacle_avoidance_ai",
     "obstacle_avoidance_ai_classes",
     "edge_mowing_safe",
+    "obstacle_avoidance_sensitivity",
+    "edge_cutting_attachment",
+    "steering_mode",
+    "cutter_position_height",
+)
+
+_OPTIONAL_PAYLOAD_FIELDS = (
+    (17, "obstacle_avoidance_sensitivity"),
+    (18, "edge_cutting_attachment"),
+    (19, "steering_mode"),
+    (20, "cutter_position_height"),
 )
 
 
@@ -103,6 +114,11 @@ def decode_mowing_preference_payload(payload: Sequence[Any]) -> dict[str, Any]:
         "obstacle_avoidance_ai": obstacle_ai_mask,
         "obstacle_avoidance_ai_classes": _ai_class_names(obstacle_ai_mask),
         "edge_mowing_safe": _bool_at(values, 16, default=True),
+        "obstacle_avoidance_sensitivity": _int_at(values, 17),
+        "edge_cutting_attachment": _bool_at(values, 18),
+        "steering_mode": _int_at(values, 19),
+        "cutter_position_height": _int_at(values, 20),
+        "_raw_payload": tuple(values),
     }
     return preference
 
@@ -151,7 +167,7 @@ def normalize_mowing_preference_mode(value: Any) -> int:
 def encode_mowing_preference_payload(preference: Mapping[str, Any]) -> list[int]:
     """Encode a decoded mower preference dict back into the app payload shape."""
     obstacle_ai = _obstacle_ai_mask(preference)
-    return [
+    values = [
         _required_int(preference, "version"),
         _required_int(preference, "map_index"),
         _required_int(preference, "area_id"),
@@ -170,6 +186,25 @@ def encode_mowing_preference_payload(preference: Mapping[str, Any]) -> list[int]
         obstacle_ai,
         _encode_bool(preference.get("edge_mowing_safe"), default=True),
     ]
+    raw_payload = preference.get("_raw_payload")
+    if isinstance(raw_payload, Sequence) and not isinstance(
+        raw_payload,
+        str | bytes | bytearray,
+    ):
+        raw_values = list(raw_payload)
+        if len(raw_values) > len(values):
+            values.extend(raw_values[len(values) :])
+    for index, field in _OPTIONAL_PAYLOAD_FIELDS:
+        if field not in preference or preference.get(field) is None:
+            continue
+        while len(values) <= index:
+            values.append(0)
+        values[index] = (
+            _encode_bool(preference.get(field))
+            if field == "edge_cutting_attachment"
+            else _required_int(preference, field)
+        )
+    return values
 
 
 def apply_mowing_preference_changes(
@@ -260,6 +295,7 @@ def _normalize_preference_change(field: str, value: Any) -> tuple[str, Any]:
         "edge_mowing_obstacle_avoidance",
         "obstacle_avoidance_enabled",
         "edge_mowing_safe",
+        "edge_cutting_attachment",
     }:
         return field, _normalize_bool(field, value)
     if field == "obstacle_avoidance_ai_classes":

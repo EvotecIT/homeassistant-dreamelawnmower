@@ -15,6 +15,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .calendar import schedule_calendar_selection
 from .const import DOMAIN
+from .control_options import current_maintenance_point_entries
 from .coordinator import DreameLawnMowerCoordinator
 from .debug import build_debug_payload, sanitize_debug_data
 from .dreame_lawn_mower_client.maintenance import MAINTENANCE_ITEMS, MaintenanceItem
@@ -42,6 +43,7 @@ async def async_setup_entry(
             DreameLawnMowerCaptureScheduleProbeButton(coordinator),
             DreameLawnMowerCapturePreferenceProbeButton(coordinator),
             DreameLawnMowerCaptureWeatherProbeButton(coordinator),
+            DreameLawnMowerGoToMaintenancePointButton(coordinator),
         ]
         + [
             DreameLawnMowerResetMaintenanceButton(coordinator, item)
@@ -68,6 +70,83 @@ class DreameLawnMowerDockWithoutStoppingButton(
     async def async_press(self) -> None:
         """Dock directly so the current task remains available to resume."""
         await self.coordinator.client.async_dock_without_stopping()
+        await self.coordinator.async_request_refresh()
+
+
+class DreameLawnMowerGoToMaintenancePointButton(
+    DreameLawnMowerEntity,
+    ButtonEntity,
+):
+    """Drive the idle mower to a configured maintenance point."""
+
+    _attr_name = "Go to Maintenance Point"
+    _attr_icon = "mdi:robot-mower-outline"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_go_to_maintenance_point"
+        )
+
+    def _point_id(self) -> int | None:
+        entries = current_maintenance_point_entries(
+            getattr(self.coordinator, "vector_map_details", None),
+            self.coordinator.app_maps,
+            self.coordinator.batch_device_data,
+            selected_map_index=self.coordinator.selected_map_index,
+        )
+        selected = self.coordinator.selected_maintenance_point_id
+        for entry in entries:
+            if entry["point_id"] == selected:
+                return int(entry["point_id"])
+        if selected is not None:
+            return None
+        return int(entries[0]["point_id"]) if entries else None
+
+    @property
+    def available(self) -> bool:
+        """Allow the movement command only from a known idle state."""
+        snapshot = self.coordinator.data
+        activity = str(getattr(snapshot, "activity", "") or "").casefold()
+        return (
+            snapshot is not None
+            and self._point_id() is not None
+            and activity in {"idle", "docked"}
+        )
+
+    async def async_press(self) -> None:
+        """Drive to the selected mower-configured maintenance point."""
+        await self.coordinator.async_request_refresh()
+        app_maps_refreshed_at = self.coordinator.app_maps_refreshed_at
+        vector_map_refreshed_at = self.coordinator.vector_map_details_refreshed_at
+        await self.coordinator.async_refresh_app_maps(
+            force=True,
+            source="app_maps_maintenance_point_command",
+        )
+        await self.coordinator.async_refresh_vector_map_details(
+            force=True,
+            source="vector_map_maintenance_point_command",
+        )
+        if (
+            self.coordinator.app_maps_refreshed_at == app_maps_refreshed_at
+            or self.coordinator.vector_map_details_refreshed_at
+            == vector_map_refreshed_at
+        ):
+            raise ValueError(
+                "Fresh map metadata is required before moving to a maintenance point."
+            )
+        point_id = self._point_id()
+        if point_id is None:
+            raise ValueError(
+                "No maintenance point is configured on the selected mower map."
+            )
+        snapshot = self.coordinator.data
+        activity = str(getattr(snapshot, "activity", "") or "").casefold()
+        if snapshot is None or activity not in {"idle", "docked"}:
+            raise ValueError(
+                "The mower must be idle or docked before going to a maintenance point."
+            )
+        await self.coordinator.client.async_go_to_maintenance_point(point_id)
         await self.coordinator.async_request_refresh()
 
 

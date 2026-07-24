@@ -3,6 +3,9 @@
 from datetime import timedelta
 from types import SimpleNamespace
 
+from custom_components.dreame_lawn_mower.performance import (
+    DreameLawnMowerPerformanceTracker,
+)
 from custom_components.dreame_lawn_mower.reporting import (
     build_coordinator_diagnostics,
     build_entity_diagnostics,
@@ -103,7 +106,34 @@ def test_coordinator_diagnostics_sanitize_last_failure() -> None:
         "last_exception_type": "RuntimeError",
         "last_exception": "refresh failed token=**REDACTED**",
         "update_interval_seconds": 30.0,
+        "performance": None,
     }
+
+
+def test_coordinator_diagnostics_include_privacy_safe_performance_history() -> None:
+    values = iter((0.0, 0.5))
+    performance = DreameLawnMowerPerformanceTracker(
+        clock=lambda: next(values),
+    )
+    performance.start("foreground_refresh").finish()
+
+    diagnostics = build_coordinator_diagnostics(
+        SimpleNamespace(
+            last_update_success=True,
+            last_exception=None,
+            update_interval=timedelta(seconds=30),
+            performance=performance,
+        )
+    )
+
+    assert diagnostics["performance"]["summary"]["foreground_refresh"] == {
+        "count": 1,
+        "latest_ms": 500.0,
+        "average_ms": 500.0,
+        "maximum_ms": 500.0,
+        "outcomes": {"completed": 1},
+    }
+    assert diagnostics["performance"]["samples"][0]["phases_ms"] == {}
 
 
 def test_entity_diagnostics_redact_runtime_map_coordinates() -> None:

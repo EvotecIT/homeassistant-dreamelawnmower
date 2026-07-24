@@ -10,6 +10,8 @@ from custom_components.dreame_lawn_mower.map_attributes import map_camera_attrib
 from custom_components.dreame_lawn_mower.map_cache import (
     DreameLawnMowerMapCameraCache,
     map_camera_available,
+    map_camera_followup_refresh_required,
+    map_camera_should_refresh,
 )
 from dreame_lawn_mower_client.models import (
     DreameLawnMowerMapSummary,
@@ -109,6 +111,24 @@ def test_offline_diagnostic_map_camera_remains_unavailable() -> None:
         )
         is False
     )
+
+
+def test_all_maps_camera_skips_cached_view_refresh_on_coordinator_updates() -> None:
+    """A direct-fetch diagnostic camera must not start the shared map refresher."""
+    assert (
+        map_camera_should_refresh(
+            context_changed=True,
+            runtime_active=True,
+            manages_cached_view=False,
+        )
+        is False
+    )
+
+
+def test_map_camera_queues_new_context_after_inflight_refresh() -> None:
+    assert map_camera_followup_refresh_required(pending=True, available=True) is True
+    assert map_camera_followup_refresh_required(pending=False, available=True) is False
+    assert map_camera_followup_refresh_required(pending=True, available=False) is False
 
 
 def test_map_camera_attributes_include_all_app_map_metadata() -> None:
@@ -224,6 +244,7 @@ def test_map_camera_attributes_include_live_path_metadata() -> None:
     assert attributes["position_segment"] == 7
     assert attributes["position_updated_at"] == "2026-07-16T09:45:12+00:00"
     assert attributes["map_has_live_path"] is True
+    assert attributes["runtime_position_valid"] is None
     assert attributes["map_available_vector_map_count"] == 2
     assert attributes["map_available_vector_maps"] == [
         {"map_id": 1, "map_index": 0, "name": "Primary", "total_area": 10.5},
@@ -396,6 +417,25 @@ def test_map_camera_cache_recognizes_unchanged_render_source() -> None:
 
     assert cache.image_matches_source(b"same-png") is True
     assert cache.image_matches_source(b"different-png") is False
+
+
+def test_map_camera_cache_includes_rotation_in_render_identity() -> None:
+    cache = DreameLawnMowerMapCameraCache(ttl=timedelta(seconds=60))
+    cache.store_view(
+        DreameLawnMowerMapView(
+            source="app_action_map",
+            image_png=b"same-png",
+        )
+    )
+    cache.store_image(
+        b"jpeg-first",
+        source_image=b"same-png",
+        render_context=0,
+    )
+
+    assert cache.image_matches_source(b"same-png", render_context=0) is True
+    assert cache.image_matches_source(b"same-png", render_context=90) is False
+    assert cache.view_image_needs_render(render_context=90) is True
 
 
 def test_map_camera_cache_coalesces_concurrent_refreshes() -> None:

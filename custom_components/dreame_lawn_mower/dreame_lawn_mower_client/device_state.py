@@ -198,6 +198,12 @@ class _DreameMowerDeviceStateMixin:
                     self._handle_properties(params)
 
     def _handle_properties(self, properties) -> bool:
+        if not isinstance(properties, list | tuple):
+            _LOGGER.debug(
+                "Ignoring invalid property response of type %s",
+                type(properties).__name__,
+            )
+            return False
         changed = False
         callbacks = []
         for prop in properties:

@@ -652,11 +652,19 @@ class DreameLawnMowerVideoStartupMixin:
         )
         try:
             session = await asyncio.shield(start_job)
+            self._last_managed_runtime_diagnostics = None
             session.provisioning_source = inputs.source
             session.camera_toggle_managed = camera_toggle_managed
             return session
         except asyncio.CancelledError:
             self._schedule_late_start_cleanup(runtime, start_job)
+            raise
+        except DreameLawnMowerVideoRuntimeError:
+            self._last_managed_runtime_diagnostics = (
+                video_helpers.safe_state_attribute(
+                    getattr(runtime, "last_failure", None)
+                )
+            )
             raise
 
     def _schedule_late_start_cleanup(

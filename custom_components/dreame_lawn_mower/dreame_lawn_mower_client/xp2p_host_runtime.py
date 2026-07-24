@@ -185,6 +185,7 @@ class DreameLawnMowerXp2pHostRuntime:
         self.startup_timeout = startup_timeout
         self.config_fetcher = config_fetcher
         self.lan_discoverer = lan_discoverer
+        self.last_failure: dict[str, Any] | None = None
 
     def start_live_stream(
         self,
@@ -197,6 +198,7 @@ class DreameLawnMowerXp2pHostRuntime:
         delegate_retry_interval: float = _DEFAULT_RETRY_INTERVAL,
     ) -> DreameLawnMowerXp2pLiveStreamSession:
         """Start a host-owned local HTTP-FLV session."""
+        self.last_failure = None
         self.assets.validate()
         request = DreameLawnMowerXp2pLiveStreamRequest.from_runtime_inputs(inputs)
         device_config = self.config_fetcher(inputs)
@@ -227,6 +229,7 @@ class DreameLawnMowerXp2pHostRuntime:
         delegate_retry_interval: float = _DEFAULT_RETRY_INTERVAL,
     ) -> DreameLawnMowerXp2pLiveStreamSession:
         """Start direct same-LAN HTTP-FLV without cloud config or credentials."""
+        self.last_failure = None
         self.assets.validate()
         request = DreameLawnMowerXp2pLiveStreamRequest.from_lan_runtime_inputs(inputs)
         if endpoint is None:
@@ -273,6 +276,9 @@ class DreameLawnMowerXp2pHostRuntime:
     ) -> DreameLawnMowerXp2pLiveStreamSession:
         """Launch the isolated Bionic worker for cloud or direct-LAN transport."""
         command = self.assets.command()
+        sensitive_values = payload_sensitive_values(
+            {"request": request.as_dict(redact=False)}
+        )
         try:
             process = subprocess.Popen(
                 command,
@@ -284,6 +290,11 @@ class DreameLawnMowerXp2pHostRuntime:
         except OSError as err:
             if stun_file is not None:
                 stun_file.unlink(missing_ok=True)
+            self.last_failure = {
+                "stage": "process_start",
+                "exception": type(err).__name__,
+                "errno": err.errno,
+            }
             raise DreameLawnMowerVideoRuntimeError(
                 f"Could not start the XP2P host worker: {err}"
             ) from err
@@ -293,10 +304,10 @@ class DreameLawnMowerXp2pHostRuntime:
             process.stderr,
             name="dreame-xp2p-host-stderr",
             tail=stderr_tail,
+            limit=_redaction_buffer_limit(sensitive_values),
         )
-        sensitive_values = payload_sensitive_values(
-            {"request": request.as_dict(redact=False)}
-        )
+        startup_stage = "request_encode"
+        worker_status: int | None = None
         try:
             payload = _encode_request(
                 self.assets,
@@ -315,9 +326,11 @@ class DreameLawnMowerXp2pHostRuntime:
                 raise DreameLawnMowerVideoRuntimeError(
                     "XP2P host worker stdin is unavailable."
                 )
+            startup_stage = "request_write"
             process.stdin.write(payload)
             process.stdin.flush()
-            status, response = _read_response(
+            startup_stage = "response_wait"
+            worker_status, response = _read_response(
                 process.stdout,
                 timeout=_startup_response_timeout(
                     command_timeout_us=command_timeout_us,
@@ -329,9 +342,13 @@ class DreameLawnMowerXp2pHostRuntime:
                     include_device_status=transport != "lan",
                 ),
             )
+            startup_stage = "response_decode"
             response_text = response.decode("utf-8", "replace")
-            if status != 0:
-                message = _WORKER_ERRORS.get(status, "XP2P host worker failed.")
+            if worker_status != 0:
+                message = _WORKER_ERRORS.get(
+                    worker_status,
+                    "XP2P host worker failed.",
+                )
                 detail = safe_output_preview(response_text, sensitive_values)
                 if detail and detail != message:
                     message = f"{message} {detail}"
@@ -366,16 +383,47 @@ class DreameLawnMowerXp2pHostRuntime:
                 runner_stderr_thread=stderr_thread,
             )
         except Exception as err:
+            failure_returncode = _failure_returncode(process)
             _terminate_process(process)
             _join_thread(stderr_thread)
             if stun_file is not None:
                 stun_file.unlink(missing_ok=True)
+            details = [
+                f"stage={startup_stage}",
+                f"exception={type(err).__name__}",
+            ]
+            if failure_returncode is not None:
+                details.append(_format_worker_returncode(failure_returncode))
+            error_detail = safe_output_preview(err, sensitive_values)
+            if error_detail and not isinstance(err, DreameLawnMowerVideoRuntimeError):
+                details.append(f"error={error_detail}")
+            native_detail = safe_output_preview(
+                _tail_text(stderr_tail),
+                sensitive_values,
+            )
+            if native_detail:
+                details.append(f"native={native_detail}")
+            failure = {
+                "stage": startup_stage,
+                "exception": type(err).__name__,
+            }
+            if worker_status is not None:
+                failure["worker_status"] = worker_status
+            if failure_returncode is not None:
+                failure["returncode"] = failure_returncode
+                failure["exit"] = _format_worker_returncode(failure_returncode)
+            if native_detail:
+                failure["native_trace"] = native_detail
+            self.last_failure = failure
             if isinstance(err, DreameLawnMowerVideoRuntimeError):
-                raise
-            stderr = _tail_text(stderr_tail)
-            detail = safe_output_preview(stderr, sensitive_values)
+                if startup_stage != "response_wait":
+                    raise
+                message = error_detail or "XP2P host worker response failed."
+                raise DreameLawnMowerVideoRuntimeError(
+                    message + " (" + ", ".join(details) + ")."
+                ) from err
             raise DreameLawnMowerVideoRuntimeError(
-                "XP2P host worker could not start." + (f" {detail}" if detail else "")
+                "XP2P host worker could not start (" + ", ".join(details) + ")."
             ) from err
 
     def stop_live_stream(self, session: DreameLawnMowerXp2pLiveStreamSession) -> None:
@@ -585,6 +633,7 @@ def _start_binary_drain_thread(
     *,
     name: str,
     tail: list[bytes] | None = None,
+    limit: int = RUNNER_OUTPUT_PREVIEW_LIMIT,
 ) -> threading.Thread | None:
     if stream is None:
         return None
@@ -594,7 +643,7 @@ def _start_binary_drain_thread(
             while chunk := stream.read(8192):
                 if tail is not None:
                     previous = tail[0] if tail else b""
-                    tail[:] = [(previous + chunk)[-RUNNER_OUTPUT_PREVIEW_LIMIT:]]
+                    tail[:] = [(previous + chunk)[-max(limit, 1) :]]
         except (OSError, ValueError):
             return
 
@@ -621,6 +670,33 @@ def _terminate_process(process: Any) -> None:
     except subprocess.TimeoutExpired:
         process.kill()
         process.wait(timeout=2.0)
+
+
+def _failure_returncode(process: Any) -> int | None:
+    """Capture an already-exited worker without mistaking cleanup for failure."""
+    returncode = process.poll()
+    if returncode is not None:
+        return int(returncode)
+    try:
+        return int(process.wait(timeout=0.2))
+    except subprocess.TimeoutExpired:
+        return None
+
+
+def _format_worker_returncode(returncode: int) -> str:
+    """Return a stable, privacy-safe worker exit description."""
+    if returncode < 0:
+        return f"signal={-returncode}"
+    return f"exit_code={returncode}"
+
+
+def _redaction_buffer_limit(sensitive_values: Sequence[str]) -> int:
+    """Retain enough raw tail to redact a credential crossing the preview edge."""
+    longest_secret = max(
+        (len(value.encode("utf-8")) for value in sensitive_values),
+        default=0,
+    )
+    return RUNNER_OUTPUT_PREVIEW_LIMIT + longest_secret
 
 
 def _seconds_to_milliseconds(value: float) -> int:

@@ -21,6 +21,13 @@ from .deadline import DeadlineExceededError, run_with_deadline
 from .exceptions import (
     DreameLawnMowerError as DreameLawnMowerError,
 )
+from .map_visuals import (
+    MapRenderStyle,
+    line_width,
+    map_font,
+    map_render_style,
+    marker_radius,
+)
 from .models import (
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
@@ -563,15 +570,21 @@ def render_app_map_payload_png(
     payload: Any,
     *,
     label_scale: float = 1.0,
+    style: MapRenderStyle | None = None,
 ) -> tuple[bytes, int, int]:
     """Render a mower-native app map payload to PNG bytes."""
-    return _render_app_map_payload_png(payload, label_scale=label_scale)
+    return _render_app_map_payload_png(
+        payload,
+        label_scale=label_scale,
+        style=style,
+    )
 
 
 def _render_app_map_payload_png(
     payload: Any,
     *,
     label_scale: float = 1.0,
+    style: MapRenderStyle | None = None,
 ) -> tuple[bytes, int, int]:
     if not isinstance(payload, Mapping):
         raise ValueError("App map payload is missing.")
@@ -609,49 +622,69 @@ def _render_app_map_payload_png(
             int(round((max_y - y) * scale + padding)),
         )
 
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw
 
-    image = Image.new("RGBA", (width, height), (248, 250, 252, 255))
+    style = style or map_render_style()
+    image = Image.new("RGBA", (width, height), style.background)
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
-    for polygon in sorted(map_polygons, key=len, reverse=True):
+    for index, polygon in enumerate(sorted(map_polygons, key=len, reverse=True)):
         projected = [project(point) for point in polygon]
         if len(projected) >= 3:
+            fill = style.zone_fills[index % len(style.zone_fills)]
+            outline = style.zone_outlines[index % len(style.zone_outlines)]
             draw.polygon(
                 projected,
-                fill=(187, 230, 197, 150),
-                outline=(44, 125, 83, 255),
+                fill=fill,
+                outline=outline,
             )
-            draw.line(projected + [projected[0]], fill=(44, 125, 83, 255), width=4)
+            draw.line(
+                projected + [projected[0]],
+                fill=outline,
+                width=line_width(style, 4),
+            )
 
     for polygon in spot_polygons:
         projected = [project(point) for point in polygon]
         if len(projected) >= 3:
             draw.polygon(
                 projected,
-                fill=(250, 204, 21, 95),
-                outline=(161, 98, 7, 255),
+                fill=style.spot_fill,
+                outline=style.spot_outline,
             )
-            draw.line(projected + [projected[0]], fill=(161, 98, 7, 255), width=3)
+            draw.line(
+                projected + [projected[0]],
+                fill=style.spot_outline,
+                width=line_width(style, 3),
+            )
 
     for trajectory in trajectories:
         projected = [project(point) for point in trajectory]
         if len(projected) >= 2:
-            draw.line(projected, fill=(37, 99, 235, 255), width=4, joint="curve")
+            draw.line(
+                projected,
+                fill=style.live_path,
+                width=line_width(style, 4),
+                joint="curve",
+            )
 
     for point in points:
         x, y = project(point)
-        draw.ellipse((x - 6, y - 6, x + 6, y + 6), fill=(15, 23, 42, 255))
+        radius = marker_radius(style, 6)
+        draw.ellipse(
+            (x - radius, y - radius, x + radius, y + radius),
+            fill=style.point,
+        )
 
-    font = _app_map_label_font(ImageFont, label_scale)
+    font = _app_map_label_font(label_scale)
     for entry in [*map_entries, *spot_entries]:
         label = entry.get("label")
         polygon = entry.get("points")
         if not isinstance(label, str) or not polygon:
             continue
         center = project(_app_map_polygon_center(polygon))
-        _draw_app_map_label(draw, center, label, font)
+        _draw_app_map_label(draw, center, label, font, style=style)
 
     image = Image.alpha_composite(image, overlay).convert("RGB")
     buffer = BytesIO()
@@ -731,17 +764,9 @@ def _app_map_polygon_center(
     )
 
 
-def _app_map_label_font(image_font: Any, label_scale: float) -> Any:
+def _app_map_label_font(label_scale: float) -> Any:
     size = max(8, int(round(18 * _normalize_app_map_label_scale(label_scale))))
-    for font_name in ("DejaVuSans-Bold.ttf", "Arial.ttf"):
-        try:
-            return image_font.truetype(font_name, size=size)
-        except OSError:
-            continue
-    try:
-        return image_font.load_default(size=size)
-    except TypeError:
-        return image_font.load_default()
+    return map_font(size, bold=True)
 
 
 def _normalize_app_map_label_scale(label_scale: float) -> float:
@@ -755,9 +780,9 @@ def _draw_app_map_label(
     center: tuple[int, int],
     label: str,
     font: Any,
+    *,
+    style: MapRenderStyle,
 ) -> None:
-    halo = (248, 250, 252, 235)
-    fill = (15, 23, 42, 255)
     for offset_x, offset_y in (
         (-2, 0),
         (2, 0),
@@ -771,7 +796,7 @@ def _draw_app_map_label(
         draw.multiline_text(
             (center[0] + offset_x, center[1] + offset_y),
             label,
-            fill=halo,
+            fill=style.label_halo,
             font=font,
             anchor="mm",
             align="center",
@@ -780,7 +805,7 @@ def _draw_app_map_label(
     draw.multiline_text(
         center,
         label,
-        fill=fill,
+        fill=style.label,
         font=font,
         anchor="mm",
         align="center",

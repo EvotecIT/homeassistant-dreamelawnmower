@@ -5,6 +5,7 @@ from __future__ import annotations
 import ssl
 from dataclasses import replace
 from hashlib import sha256
+from importlib import import_module
 from importlib.resources import files
 from types import SimpleNamespace
 
@@ -42,6 +43,30 @@ def _client() -> DreameLawnMowerClient:
             country="eu",
         ),
     )
+
+
+def test_device_creation_without_external_listener_preserves_internal_callbacks(
+    monkeypatch,
+) -> None:
+    class FakeDevice:
+        def __init__(self, *args):
+            del args
+            self._property_update_callback = {1: [object()]}
+            self.listen_calls = []
+
+        def listen(self, callback) -> None:
+            self.listen_calls.append(callback)
+            if callback is None:
+                self._property_update_callback = {}
+
+    internal_device = import_module("_dreame_lawn_mower_client_internal.device")
+    monkeypatch.setattr(internal_device, "DreameMowerDevice", FakeDevice)
+    client = _client()
+
+    created = client._ensure_device()
+
+    assert created.listen_calls == []
+    assert created._property_update_callback
 
 
 def _firmware_device() -> SimpleNamespace:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from homeassistant.components.lawn_mower import LawnMowerActivity
@@ -14,6 +14,7 @@ from custom_components.dreame_lawn_mower.control_options import (
     MOWING_ACTION_EDGE,
     MOWING_ACTION_SPOT,
     MOWING_ACTION_ZONE,
+    active_map_index,
     current_contour_entries,
     current_spot_entries,
     current_zone_entries,
@@ -24,6 +25,7 @@ from custom_components.dreame_lawn_mower.select import (
     DreameLawnMowerEdgeSelect,
     DreameLawnMowerMapSelect,
     DreameLawnMowerMowingActionSelect,
+    DreameLawnMowerSelectedMapRotationSelect,
     DreameLawnMowerSpotSelect,
     DreameLawnMowerZoneSelect,
 )
@@ -193,6 +195,16 @@ def _vector_map_details() -> dict:
             },
         ],
     }
+
+
+def test_active_map_identity_prefers_refreshed_mower_state() -> None:
+    assert (
+        active_map_index(
+            _app_maps(current_map_index=1),
+            selected_map_index=0,
+        )
+        == 1
+    )
 
 
 def _snapshot(**overrides: object) -> SimpleNamespace:
@@ -434,6 +446,37 @@ def test_map_select_switches_active_mower_map() -> None:
     asyncio.run(entity.async_select_option("Front Lawn (#1)"))
 
     entity.coordinator.async_switch_current_map.assert_awaited_once_with(0)
+
+
+def test_selected_map_rotation_is_persisted_per_map() -> None:
+    update_entry = Mock()
+    entity = object.__new__(DreameLawnMowerSelectedMapRotationSelect)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(),
+        batch_device_data=_batch_device_data(),
+        app_maps=_app_maps(current_map_index=1),
+        selected_map_index=None,
+        entry=SimpleNamespace(
+            options={"map_rotation": 180, "map_rotations": {"0": 90}}
+        ),
+        hass=SimpleNamespace(
+            config_entries=SimpleNamespace(async_update_entry=update_entry)
+        ),
+        async_update_listeners=Mock(),
+    )
+
+    assert entity.current_option == "180 degrees"
+
+    asyncio.run(entity.async_select_option("270 degrees clockwise"))
+
+    update_entry.assert_called_once_with(
+        entity.coordinator.entry,
+        options={
+            "map_rotation": 180,
+            "map_rotations": {"0": 90, "1": 270},
+        },
+    )
+    entity.coordinator.async_update_listeners.assert_called_once()
 
 
 def test_coordinator_switch_current_map_updates_device_and_scoped_caches() -> None:

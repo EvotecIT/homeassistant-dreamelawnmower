@@ -218,6 +218,7 @@ class DreameLawnMowerVideoCamera(
         self._last_stream_cleanup_error_stage: str | None = None
         self._last_stream_cleanup_at: str | None = None
         self._last_native_runtime_diagnostics: dict[str, Any] | None = None
+        self._last_managed_runtime_diagnostics: dict[str, Any] | None = None
         self._runtime_preparation_error: str | None = None
         self._last_image: bytes | None = None
         self._lan_cache = getattr(coordinator, "video_lan_cache", None)

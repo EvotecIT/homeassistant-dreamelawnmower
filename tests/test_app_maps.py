@@ -536,3 +536,50 @@ def test_map_view_uses_legacy_path_when_app_map_fails() -> None:
     assert view.source == "app_action_map"
     assert view.available is False
     assert view.error == "No app-map payload was returned."
+
+
+def test_map_view_threads_presentation_options_to_legacy_fallback() -> None:
+    client = _client()
+    captured: dict[str, object] = {}
+    style = object()
+    client._sync_refresh_app_map_view = lambda **kwargs: DreameLawnMowerMapView(
+        source="app_action_map",
+        error="no app map",
+    )
+    client._sync_refresh_vector_map_view = lambda **kwargs: DreameLawnMowerMapView(
+        source="batch_vector_map",
+        error="no vector map",
+    )
+
+    def legacy_view(
+        timeout: float,
+        interval: float,
+        **kwargs: object,
+    ) -> DreameLawnMowerMapView:
+        captured.update(
+            timeout=timeout,
+            interval=interval,
+            **kwargs,
+        )
+        return DreameLawnMowerMapView(
+            source="legacy_current_map",
+            summary=DreameLawnMowerMapSummary(available=True, map_id=1),
+            image_png=b"legacy",
+        )
+
+    client._sync_refresh_legacy_map_view = legacy_view
+
+    view = client._sync_refresh_map_view(
+        timeout=3,
+        interval=0.25,
+        label_scale=2.5,
+        style=style,
+    )
+
+    assert view.image_png == b"legacy"
+    assert captured == {
+        "timeout": 3,
+        "interval": 0.25,
+        "label_scale": 2.5,
+        "style": style,
+    }

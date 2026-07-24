@@ -180,7 +180,7 @@ def test_client_status_blob_prefers_cached_realtime_payload() -> None:
                         212,
                         196,
                         206,
-                    ]
+                    ],
                 },
             }
         },
@@ -470,6 +470,37 @@ def test_client_runtime_status_blob_prefers_cached_realtime_payload() -> None:
     )
 
 
+def test_client_update_callback_attaches_and_detaches_from_device() -> None:
+    client = DreameLawnMowerClient(
+        username="user",
+        password="pass",
+        country="eu",
+        account_type="dreame",
+        descriptor=DreameLawnMowerDescriptor(
+            did="1",
+            name="Mower",
+            model="dreame.mower.g2408",
+            display_model="A2",
+            account_type="dreame",
+            country="eu",
+        ),
+    )
+    callbacks: list[object] = []
+    client._device = type(
+        "FakeDevice",
+        (),
+        {"listen": lambda _self, callback: callbacks.append(callback)},
+    )()
+
+    def callback() -> None:
+        pass
+
+    client.set_update_callback(callback)
+    client.set_update_callback(None)
+
+    assert callbacks == [callback, None]
+
+
 def test_client_bluetooth_connected_prefers_cached_realtime_payload() -> None:
     client = DreameLawnMowerClient(
         username="user",
@@ -514,9 +545,7 @@ def test_client_bluetooth_connected_reads_cloud_property_strings() -> None:
         ),
     )
     client._device = type("FakeDevice", (), {"realtime_properties": {}})()
-    client._sync_get_cloud_properties = lambda keys: [
-        {"key": "1.53", "value": "false"}
-    ]
+    client._sync_get_cloud_properties = lambda keys: [{"key": "1.53", "value": "false"}]
 
     assert client._sync_get_bluetooth_connected(include_cloud=True) is False
 

@@ -694,6 +694,17 @@ class DreameMowerMapDataJsonRenderer:
             json.dumps(self._map_data_json, separators=(",", ":")),
         )
 
+    def embed_map_data(self, image_png: bytes) -> bytes:
+        """Embed the last rendered map metadata into a presentation PNG."""
+        if self._map_data_json is None:
+            raise ValueError("Map metadata must be rendered before it can be embedded.")
+        with Image.open(BytesIO(image_png)) as image:
+            image.load()
+            return self._to_buffer(
+                image.convert("RGBA"),
+                json.dumps(self._map_data_json, separators=(",", ":")),
+            )
+
     @property
     def default_map_image(self) -> bytes:
         return self._to_buffer(self._default_map_image, self._default_map_data)

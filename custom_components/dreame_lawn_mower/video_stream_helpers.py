@@ -90,10 +90,33 @@ def split_runner_command(command: str) -> tuple[str, ...]:
 
 def managed_runtime_supported() -> bool:
     """Return whether the self-managed runtime supports this HA host."""
-    if platform.system().casefold() != "linux":
-        return False
-    machine = platform.machine().casefold()
-    return machine in {"amd64", "x64", "x86_64", "aarch64", "arm64"}
+    return managed_runtime_environment()["supported"]
+
+
+def managed_runtime_environment() -> dict[str, str | bool]:
+    """Return privacy-safe host facts needed to diagnose managed XP2P startup."""
+    system = platform.system().strip().casefold() or "unknown"
+    machine = platform.machine().strip().casefold() or "unknown"
+    if machine in {"amd64", "x64", "x86_64"}:
+        normalized_machine = "x86_64"
+    elif machine in {"aarch64", "arm64"}:
+        normalized_machine = "aarch64"
+    else:
+        normalized_machine = machine
+    supported = system == "linux" and normalized_machine in {"x86_64", "aarch64"}
+    execution_mode = (
+        "qemu_aarch64"
+        if supported and normalized_machine == "x86_64"
+        else "native_aarch64"
+        if supported
+        else "unsupported"
+    )
+    return {
+        "system": system,
+        "machine": normalized_machine,
+        "execution_mode": execution_mode,
+        "supported": supported,
+    }
 
 
 def probe_stream_health(

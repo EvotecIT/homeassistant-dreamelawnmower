@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -16,6 +17,7 @@ from .const import (
     VIDEO_TRANSPORT_AUTO,
 )
 from .coordinator import DreameLawnMowerCoordinator
+from .performance import format_performance_sample
 from .point_cloud_api import (
     POINT_CLOUD_API_DATA_KEY,
     DreameLawnMowerPointCloudAPI,
@@ -26,54 +28,121 @@ from .video_lan_cache import DreameLawnMowerVideoLanCache
 from .video_provisioning_cache import DreameLawnMowerVideoProvisioningCache
 
 _LOGGER = logging.getLogger(__name__)
+SLOW_SETUP_SECONDS = 15.0
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Dreame lawn mower from a config entry."""
     coordinator = DreameLawnMowerCoordinator(hass, entry)
+    setup_cycle = coordinator.performance.start("setup")
+    setup_outcome = "completed"
     lan_cache = DreameLawnMowerVideoLanCache(
         hass,
         entry_id=entry.entry_id,
         did=coordinator.client.descriptor.did,
     )
-    try:
-        await lan_cache.async_load()
-    except Exception as err:  # noqa: BLE001 - normal cloud setup remains available.
-        _LOGGER.warning("Failed to load Dreame LAN video cache during setup: %s", err)
-    coordinator.video_lan_cache = lan_cache
     provisioning_cache = DreameLawnMowerVideoProvisioningCache(
         hass,
         entry_id=entry.entry_id,
         did=coordinator.client.descriptor.did,
     )
     try:
-        await provisioning_cache.async_load()
-    except Exception as err:  # noqa: BLE001 - cloud setup remains available.
-        _LOGGER.warning("Failed to load Dreame video provisioning cache: %s", err)
-    coordinator.video_provisioning_cache = provisioning_cache
-    platforms = tuple(PLATFORMS)
-    try:
-        await coordinator.async_config_entry_first_refresh()
-    except ConfigEntryNotReady:
-        if not _cached_video_only_available(
-            entry,
-            lan_cache=lan_cache,
-            provisioning_cache=provisioning_cache,
-        ):
-            raise
-        _LOGGER.warning(
-            "Dreame cloud is unavailable; loading cached camera recovery mode. "
-            "Playback will wait for a fresh safe mower snapshot"
-        )
-        platforms = (Platform.CAMERA,)
+        try:
+            await setup_cycle.measure("lan_video_cache", lan_cache.async_load)
+        except Exception as err:  # noqa: BLE001 - cloud setup remains available.
+            _LOGGER.warning(
+                "Failed to load Dreame LAN video cache during setup: %s",
+                err,
+            )
+        coordinator.video_lan_cache = lan_cache
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
-    async_setup_point_cloud_api(hass)
-    coordinator.loaded_platforms = platforms
-    await async_setup_services(hass)
-    await hass.config_entries.async_forward_entry_setups(entry, platforms)
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
-    return True
+        try:
+            await setup_cycle.measure(
+                "video_provisioning_cache",
+                provisioning_cache.async_load,
+            )
+        except Exception as err:  # noqa: BLE001 - cloud setup remains available.
+            _LOGGER.warning(
+                "Failed to load Dreame video provisioning cache: %s",
+                err,
+            )
+        coordinator.video_provisioning_cache = provisioning_cache
+
+        platforms = tuple(PLATFORMS)
+        try:
+            await setup_cycle.measure(
+                "first_refresh",
+                coordinator.async_config_entry_first_refresh,
+            )
+        except ConfigEntryNotReady:
+            if not _cached_video_only_available(
+                entry,
+                lan_cache=lan_cache,
+                provisioning_cache=provisioning_cache,
+            ):
+                raise
+            _LOGGER.warning(
+                "Dreame cloud is unavailable; loading cached camera recovery mode. "
+                "Playback will wait for a fresh safe mower snapshot"
+            )
+            platforms = (Platform.CAMERA,)
+
+        hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+        async_setup_point_cloud_api(hass)
+        coordinator.loaded_platforms = platforms
+        await setup_cycle.measure("services", lambda: async_setup_services(hass))
+        await setup_cycle.measure(
+            "platforms",
+            lambda: hass.config_entries.async_forward_entry_setups(entry, platforms),
+        )
+        entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+        return True
+    except asyncio.CancelledError:
+        setup_outcome = "cancelled"
+        await _async_cleanup_failed_setup(hass, entry, coordinator)
+        raise
+    except Exception as err:  # noqa: BLE001 - retain setup failure behavior
+        setup_outcome = type(err).__name__
+        await _async_cleanup_failed_setup(hass, entry, coordinator)
+        raise
+    finally:
+        sample = setup_cycle.finish(outcome=setup_outcome)
+        total, phases = format_performance_sample(sample)
+        message = (
+            "Dreame mower performance: operation=setup outcome=%s total=%.3fs "
+            "phases=[%s] metadata_background=%s"
+        )
+        args = (
+            sample.outcome,
+            total,
+            phases,
+            getattr(coordinator, "_metadata_refresh_task", None) is not None,
+        )
+        if total >= SLOW_SETUP_SECONDS:
+            _LOGGER.warning(message, *args)
+        else:
+            _LOGGER.info(message, *args)
+
+
+async def _async_cleanup_failed_setup(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: DreameLawnMowerCoordinator,
+) -> None:
+    """Drain coordinator resources registered before a failed setup."""
+    domain_data = hass.data.get(DOMAIN)
+    if (
+        isinstance(domain_data, dict)
+        and domain_data.get(entry.entry_id) is coordinator
+    ):
+        domain_data.pop(entry.entry_id, None)
+    try:
+        await coordinator.async_shutdown()
+    except Exception as err:  # noqa: BLE001 - preserve the original setup error
+        _LOGGER.warning(
+            "Failed to fully close Dreame mower after setup error: %s",
+            err,
+        )
 
 
 def _cached_video_only_available(

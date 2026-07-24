@@ -494,8 +494,12 @@ class DreameMapMowerMapManager:
             self._update_timer = None
 
         start = time.time()
-        self.update()
-        self.schedule_update(max(self._update_interval - (time.time() - start), 1))
+        try:
+            self.update()
+        except Exception as ex:
+            _LOGGER.warning("Background map update failed: %s", ex)
+        finally:
+            self.schedule_update(max(self._update_interval - (time.time() - start), 1))
 
     def _queue_partial_map(self, map_data) -> None:
         if map_data.map_id != self._latest_map_id:

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 RUNNER_OUTPUT_PREVIEW_LIMIT = 400
+_LOCAL_PATH = re.compile(
+    r"(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/]|/(?!/))[^ \t\r\n'\"=,;)]*"
+)
 SENSITIVE_RUNNER_PAYLOAD_KEYS = {
     "delegate_id",
     "device_name",
@@ -90,6 +94,7 @@ def safe_output_preview(value: Any, sensitive_values: Sequence[str]) -> str:
     for sensitive in sorted(sensitive_values, key=len, reverse=True):
         if sensitive:
             text = text.replace(sensitive, "[redacted]")
+    text = _LOCAL_PATH.sub("[redacted-path]", text)
     if len(text) > RUNNER_OUTPUT_PREVIEW_LIMIT:
         text = text[-RUNNER_OUTPUT_PREVIEW_LIMIT:]
     return text

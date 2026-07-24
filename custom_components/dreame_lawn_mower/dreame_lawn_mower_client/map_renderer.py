@@ -178,6 +178,10 @@ class DreameMowerMapRenderer:
         self._robot_type: int = robot_type
         self._low_resolution: bool = low_resolution
         self._low_memory: bool = low_resolution
+        self.presentation_stroke_scale: float = 1.0
+        self.presentation_marker_scale: float = 1.0
+        self.presentation_label_scale: float = 1.0
+        self.presentation_marker_image: Image.Image | None = None
         self._square: bool = square
         self._cache: bool = cache
         self._has_mask: bool = False
@@ -1684,8 +1688,24 @@ class DreameMowerMapRenderer:
 
     def render_objects(self, cached_layers, map_data, robot_status, station_status, map_image, scale):
         layer_size = (int(map_image.size[0] * scale), int(map_image.size[1] * scale))
-        line_width = 3 if map_data.dimensions.scale > 2 else 1
-        border_width = 2 if map_data.dimensions.scale > 2 else 1
+        line_width = max(
+            1,
+            int(
+                round(
+                    (3 if map_data.dimensions.scale > 2 else 1)
+                    * self.presentation_stroke_scale
+                )
+            ),
+        )
+        border_width = max(
+            1,
+            int(
+                round(
+                    (2 if map_data.dimensions.scale > 2 else 1)
+                    * self.presentation_stroke_scale
+                )
+            ),
+        )
         changes = []
         layers = []
 
@@ -1716,7 +1736,9 @@ class DreameMowerMapRenderer:
 
         robot_icon_size = max(7, min(14, robot_icon_size))
         icon_size = max(3, min(12, icon_size))
-        segment_icon_size = icon_size
+        segment_icon_size = icon_size * self.presentation_label_scale
+        robot_icon_size *= self.presentation_marker_scale
+        icon_size *= self.presentation_marker_scale
 
         if map_data.dimensions.scale <= 2:
             robot_icon_size = robot_icon_size * 0.7
@@ -2527,6 +2549,8 @@ class DreameMowerMapRenderer:
             if self.icon_set == 2 or (self._robot_type == RobotType.VSLAM and self.icon_set == 3)
             else icon_size
         )
+        if self.presentation_marker_image is not None:
+            self._robot_icon = self.presentation_marker_image
         if self._robot_icon is None:
             if self.icon_set == 2:
                 if self._robot_type == RobotType.VSLAM:

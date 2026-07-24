@@ -49,6 +49,7 @@ from .models import (
 from .mowing_tasks import (
     MowingTaskResponseError,
     build_edge_mowing_request,
+    build_maintenance_point_request,
     build_spot_mowing_request,
     build_zone_mowing_request,
     ensure_mowing_task_succeeded,
@@ -64,6 +65,11 @@ from .runtime_state import (
 
 
 class _DreameLawnMowerClientCoreMixin:
+    async def async_get_cached_snapshot(self) -> DreameLawnMowerSnapshot:
+        """Return a snapshot from the latest in-memory device state."""
+        device = await asyncio.to_thread(self._ensure_device)
+        return await asyncio.to_thread(self._snapshot_from_device, device)
+
     async def _async_call_device_method(self, method_name: str) -> Any:
         device = await asyncio.to_thread(self._ensure_device)
         method = getattr(device, method_name)
@@ -475,6 +481,19 @@ class _DreameLawnMowerClientCoreMixin:
         except (DeviceException, MowingTaskResponseError) as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
 
+    def _sync_go_to_maintenance_point(self, point_id: int) -> Any:
+        """Drive to one mower-configured maintenance point."""
+        try:
+            response = self._sync_call_app_action(
+                build_maintenance_point_request([point_id])
+            )
+            return ensure_mowing_task_succeeded(
+                response,
+                task_name="maintenance point",
+            )
+        except (DeviceException, MowingTaskResponseError) as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+
     def _sync_get_batch_device_data(
         self,
         keys: Sequence[str] | None = None,
@@ -707,4 +726,6 @@ class _DreameLawnMowerClientCoreMixin:
             self._account_type,
             self._descriptor.did,
         )
+        if self._update_callback is not None:
+            self._device.listen(self._update_callback)
         return self._device

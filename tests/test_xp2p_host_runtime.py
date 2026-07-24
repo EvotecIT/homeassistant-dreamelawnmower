@@ -7,7 +7,9 @@ import gzip
 import hashlib
 import io
 import struct
+import subprocess
 import threading
+from dataclasses import replace
 
 import pytest
 import requests
@@ -387,6 +389,187 @@ def test_host_runtime_does_not_inherit_home_assistant_environment(
     assert native.environment() == {
         "LD_LIBRARY_PATH": native.library_search_path,
     }
+
+
+def test_host_runtime_reports_abnormal_worker_exit_without_secrets(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    long_secret = "s" * 600
+
+    class _BrokenStdin:
+        @staticmethod
+        def write(_payload):
+            raise BrokenPipeError(long_secret)
+
+        @staticmethod
+        def flush():
+            raise AssertionError("flush should not follow a failed write")
+
+    class _CrashedProcess:
+        stdin = _BrokenStdin()
+        stdout = io.BytesIO()
+        stderr = io.BytesIO(
+            b"x"
+            + long_secret.encode()
+            + b"y" * 340
+            + b" /config/.storage/dreame-xp2p/qemu-aarch64-static\n"
+        )
+
+        @staticmethod
+        def poll():
+            return -11
+
+        @staticmethod
+        def wait(*, timeout):
+            assert timeout == 0.2
+            return -11
+
+        @staticmethod
+        def terminate():
+            raise AssertionError("an exited worker must not be terminated")
+
+    assets = DreameLawnMowerXp2pHostAssets(
+        worker_path=tmp_path / "worker",
+        linker_path=tmp_path / "linker64",
+        library_path=tmp_path / "libiot_video_demo.so",
+        library_search_paths=(tmp_path / "lib",),
+    )
+    runtime = xp2p_host_runtime.DreameLawnMowerXp2pHostRuntime(
+        assets,
+        config_fetcher=lambda _inputs: DreameLawnMowerXp2pDeviceConfig(),
+    )
+    monkeypatch.setattr(
+        DreameLawnMowerXp2pHostAssets,
+        "validate",
+        lambda _self: None,
+    )
+    monkeypatch.setattr(
+        subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: _CrashedProcess(),
+    )
+
+    with pytest.raises(
+        xp2p_host_runtime.DreameLawnMowerVideoRuntimeError,
+    ) as caught:
+        runtime.start_live_stream(replace(_inputs(), secret_key=long_secret))
+
+    message = str(caught.value)
+    assert "stage=request_write" in message
+    assert "exception=BrokenPipeError" in message
+    assert "signal=11" in message
+    assert long_secret not in message
+    assert "/config/" not in message
+    assert "[redacted]" in message
+    assert "[redacted-path]" in message
+    assert runtime.last_failure is not None
+    assert runtime.last_failure["stage"] == "request_write"
+    assert runtime.last_failure["returncode"] == -11
+    native_trace = runtime.last_failure["native_trace"]
+    assert "[redacted]" in native_trace
+    assert long_secret[-64:] not in native_trace
+    assert "[redacted-path]" in native_trace
+    assert "/config/" not in native_trace
+
+
+def test_host_runtime_preserves_context_when_worker_closes_response(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    class _CrashedProcess:
+        stdin = io.BytesIO()
+        stdout = io.BytesIO()
+        stderr = io.BytesIO(b"xp2p-worker: optional configuration applied\n")
+        returncode = None
+
+        @classmethod
+        def poll(cls):
+            return cls.returncode
+
+        @classmethod
+        def wait(cls, *, timeout):
+            assert timeout == 0.2
+            cls.returncode = -6
+            return cls.returncode
+
+        @classmethod
+        def terminate(cls):
+            raise AssertionError("an exited worker must not be terminated")
+
+    runtime = xp2p_host_runtime.DreameLawnMowerXp2pHostRuntime(
+        DreameLawnMowerXp2pHostAssets(
+            worker_path=tmp_path / "worker",
+            linker_path=tmp_path / "linker64",
+            library_path=tmp_path / "libiot_video_demo.so",
+            library_search_paths=(tmp_path / "lib",),
+        ),
+        config_fetcher=lambda _inputs: DreameLawnMowerXp2pDeviceConfig(),
+    )
+    monkeypatch.setattr(
+        DreameLawnMowerXp2pHostAssets,
+        "validate",
+        lambda _self: None,
+    )
+    monkeypatch.setattr(
+        subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: _CrashedProcess(),
+    )
+
+    with pytest.raises(
+        xp2p_host_runtime.DreameLawnMowerVideoRuntimeError,
+    ) as caught:
+        runtime.start_live_stream(_inputs())
+
+    message = str(caught.value)
+    assert "XP2P host worker closed its response pipe" in message
+    assert "stage=response_wait" in message
+    assert "signal=6" in message
+    assert "native=xp2p-worker: optional configuration applied" in message
+    assert runtime.last_failure == {
+        "stage": "response_wait",
+        "exception": "DreameLawnMowerVideoRuntimeError",
+        "returncode": -6,
+        "exit": "signal=6",
+        "native_trace": "xp2p-worker: optional configuration applied",
+    }
+
+
+@pytest.mark.parametrize(
+    "start_method",
+    ("start_live_stream", "start_lan_stream"),
+)
+def test_host_runtime_clears_previous_failure_before_input_validation(
+    monkeypatch,
+    tmp_path,
+    start_method,
+) -> None:
+    runtime = xp2p_host_runtime.DreameLawnMowerXp2pHostRuntime(
+        DreameLawnMowerXp2pHostAssets(
+            worker_path=tmp_path / "worker",
+            linker_path=tmp_path / "linker64",
+            library_path=tmp_path / "libiot_video_demo.so",
+            library_search_paths=(tmp_path / "lib",),
+        )
+    )
+    runtime.last_failure = {
+        "stage": "response_wait",
+        "exit": "signal=11",
+    }
+    monkeypatch.setattr(
+        DreameLawnMowerXp2pHostAssets,
+        "validate",
+        lambda _self: None,
+    )
+
+    with pytest.raises(
+        xp2p_host_runtime.DreameLawnMowerVideoRuntimeError,
+        match="missing .* fields: product_id",
+    ):
+        getattr(runtime, start_method)(replace(_inputs(), product_id=None))
+
+    assert runtime.last_failure is None
 
 
 def test_runtime_bootstrap_repairs_file_shaped_cache(

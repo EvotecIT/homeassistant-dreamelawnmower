@@ -6,6 +6,7 @@ import pytest
 
 from dreame_lawn_mower_client.mowing_tasks import (
     MowingTaskResponseError,
+    build_maintenance_point_request,
     build_spot_mowing_request,
     build_zone_mowing_request,
     ensure_mowing_task_succeeded,
@@ -28,6 +29,23 @@ def test_spot_mowing_request_uses_saved_area_ids() -> None:
         "o": 103,
         "d": {"area": [2, 4]},
     }
+
+
+def test_maintenance_point_request_uses_configured_point_id() -> None:
+    assert build_maintenance_point_request([301]) == {
+        "m": "a",
+        "p": 0,
+        "o": 109,
+        "d": {"point": [301]},
+    }
+
+
+@pytest.mark.parametrize("point_ids", [[], [0], [-1], [True], [1, 2, 3, 4, 5, 6]])
+def test_maintenance_point_request_rejects_invalid_ids(
+    point_ids: list[int],
+) -> None:
+    with pytest.raises(ValueError, match="(?i)maintenance point"):
+        build_maintenance_point_request(point_ids)
 
 
 @pytest.mark.parametrize("zone_ids", [[], [0], [-1], [True]])

@@ -151,6 +151,9 @@ class DreameLawnMowerVideoStateMixin:
             "xp2p_library_configured": bool(self._native_library_path),
             "xp2p_runner_configured": bool(self._runner_command),
             "managed_xp2p_runtime_supported": video_helpers.managed_runtime_supported(),
+            "managed_xp2p_runtime_environment": (
+                video_helpers.managed_runtime_environment()
+            ),
             "video_runtime_preparation_error": self._runtime_preparation_error,
             "stream_session_active": self._session is not None,
             "last_stream_error": self._last_error,
@@ -180,6 +183,11 @@ class DreameLawnMowerVideoStateMixin:
             ),
             "runtime_cleanup_pending": self._runtime_cleanup_pending,
             "last_native_runtime_diagnostics": self._last_native_runtime_diagnostics,
+            "last_managed_runtime_diagnostics": getattr(
+                self,
+                "_last_managed_runtime_diagnostics",
+                None,
+            ),
             "last_stream_health": self._last_stream_health,
             "last_stream_session": self._session.as_dict(redact=True)
             if self._session is not None

@@ -9,6 +9,7 @@ import json as json
 import math as math
 import re as re
 import time
+import typing as _typing
 import urllib as urllib
 from collections.abc import Mapping, Sequence
 from dataclasses import replace as replace
@@ -194,9 +195,10 @@ from .vector_map import render_vector_map_png as render_vector_map_png
 from .vector_map import vector_map_to_details as vector_map_to_details
 from .vector_map import vector_map_to_summary as vector_map_to_summary
 
-_CLOUD_PRESENCE_REFRESH_INTERVAL = (
-    _client_constants.CLOUD_PRESENCE_REFRESH_INTERVAL
-)
+if _typing.TYPE_CHECKING:
+    from .map_visuals import MapRenderStyle
+
+_CLOUD_PRESENCE_REFRESH_INTERVAL = _client_constants.CLOUD_PRESENCE_REFRESH_INTERVAL
 
 _app_action_data = _client_helpers._app_action_data
 _app_map_area_label = _client_helpers._app_map_area_label
@@ -320,6 +322,7 @@ class DreameLawnMowerClient(
         self._account_type = account_type
         self._descriptor = descriptor
         self._device: Any | None = None
+        self._update_callback: _typing.Callable[[], None] | None = None
         self._latest_snapshot: DreameLawnMowerSnapshot | None = None
         self._latest_runtime_status_blob: DreameLawnMowerStatusBlob | None = None
         self._runtime_live_track_segments: tuple[
@@ -327,6 +330,9 @@ class DreameLawnMowerClient(
             ...,
         ] = ()
         self._last_runtime_track_blob_hex: str | None = None
+        self._runtime_live_map_index: int | None = None
+        self._runtime_live_task_id: int | None = None
+        self._runtime_session_active: bool | None = None
         self._latest_cloud_device_info: Mapping[str, Any] | None = None
         self._cloud_device_info_refreshed_at = 0.0
         self._last_camera_stream_diagnostics: Mapping[str, Any] = {}
@@ -341,21 +347,52 @@ class DreameLawnMowerClient(
         """Return the currently connected upstream device instance."""
         return self._device
 
+    def set_update_callback(
+        self,
+        callback: _typing.Callable[[], None] | None,
+    ) -> None:
+        """Register a callback for cached device updates from MQTT or polling."""
+        self._update_callback = callback
+        if self._device is not None:
+            self._device.listen(callback)
+
     def update_runtime_live_tracking(
         self,
         status_blob: DreameLawnMowerStatusBlob | None,
         *,
         active: bool,
+        map_index: int | None = None,
     ) -> None:
         """Cache active-session runtime track history for live map overlays."""
         self._latest_runtime_status_blob = status_blob
+        self._runtime_session_active = active
         if not active:
             self._runtime_live_track_segments = ()
             self._last_runtime_track_blob_hex = None
+            self._runtime_live_map_index = None
+            self._runtime_live_task_id = None
             return
 
         if status_blob is None:
             return
+
+        task_id = getattr(status_blob, "candidate_runtime_task_id", None)
+        context_changed = (
+            self._runtime_live_map_index is not None
+            and map_index is not None
+            and self._runtime_live_map_index != map_index
+        ) or (
+            self._runtime_live_task_id is not None
+            and task_id is not None
+            and self._runtime_live_task_id != task_id
+        )
+        if context_changed:
+            self._runtime_live_track_segments = ()
+            self._last_runtime_track_blob_hex = None
+        if map_index is not None:
+            self._runtime_live_map_index = map_index
+        if task_id is not None:
+            self._runtime_live_task_id = task_id
 
         blob_hex = getattr(status_blob, "hex", None)
         if blob_hex and blob_hex == self._last_runtime_track_blob_hex:
@@ -500,6 +537,13 @@ class DreameLawnMowerClient(
     async def async_start_spot_mowing(self, spot_ids: Sequence[int]) -> Any:
         """Start mower-native spot mowing for explicit saved spot area ids."""
         return await asyncio.to_thread(self._sync_start_spot_mowing, list(spot_ids))
+
+    async def async_go_to_maintenance_point(self, point_id: int) -> Any:
+        """Drive to one configured map maintenance point."""
+        return await asyncio.to_thread(
+            self._sync_go_to_maintenance_point,
+            int(point_id),
+        )
 
     async def async_switch_current_map(self, map_index: int) -> Any:
         """Switch the active mower map through the app task path."""
@@ -650,12 +694,14 @@ class DreameLawnMowerClient(
         timeout: float = 8.0,
         interval: float = 0.5,
         label_scale: float = 1.0,
+        style: MapRenderStyle | None = None,
     ) -> bytes | None:
         """Try to refresh the current mower map and return a rendered PNG."""
         view = await self.async_refresh_map_view(
             timeout=timeout,
             interval=interval,
             label_scale=label_scale,
+            style=style,
         )
         return view.image_png
 
@@ -665,6 +711,7 @@ class DreameLawnMowerClient(
         timeout: float = 8.0,
         interval: float = 0.5,
         label_scale: float = 1.0,
+        style: MapRenderStyle | None = None,
     ) -> DreameLawnMowerMapView:
         """Try to refresh map data and return metadata plus rendered image bytes."""
         return await asyncio.to_thread(
@@ -672,6 +719,7 @@ class DreameLawnMowerClient(
             timeout,
             interval,
             label_scale,
+            style,
         )
 
     async def async_refresh_vector_map_view(
@@ -679,12 +727,14 @@ class DreameLawnMowerClient(
         *,
         label_scale: float = 1.0,
         current_map_index: int | None = None,
+        style: MapRenderStyle | None = None,
     ) -> DreameLawnMowerMapView:
         """Refresh the batch/vector map path used for live mowing overlays."""
         return await asyncio.to_thread(
             self._sync_refresh_vector_map_view,
             label_scale=label_scale,
             current_map_index=current_map_index,
+            style=style,
         )
 
     async def async_get_app_schedules(
@@ -1091,5 +1141,6 @@ class DreameLawnMowerClient(
     async def async_close(self) -> None:
         """Disconnect long-lived device resources."""
         if self._device is not None:
+            self._device.listen(None)
             await asyncio.to_thread(self._device.disconnect)
             self._device = None

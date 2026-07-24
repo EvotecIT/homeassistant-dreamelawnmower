@@ -205,6 +205,20 @@ def test_video_camera_advertises_stop_control() -> None:
     assert "async_turn_off" in DreameLawnMowerVideoCamera.__dict__
 
 
+def test_managed_runtime_environment_is_privacy_safe(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(video_helpers_module.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(video_helpers_module.platform, "machine", lambda: "AMD64")
+
+    assert video_helpers_module.managed_runtime_environment() == {
+        "system": "linux",
+        "machine": "x86_64",
+        "execution_mode": "qemu_aarch64",
+        "supported": True,
+    }
+
+
 def test_video_camera_facade_preserves_split_method_surface() -> None:
     """Keep reflection and direct module imports stable after decomposition."""
     split_methods = {
@@ -1978,6 +1992,43 @@ def test_video_camera_cancellation_stops_completed_native_startup() -> None:
         return stopped, returned_before_native_start
 
     assert asyncio.run(_run()) == (1, True)
+
+
+def test_video_camera_exposes_managed_runtime_failure_context() -> None:
+    async def _run() -> dict[str, object] | None:
+        entity = _uninitialized_entity()
+        start_job = asyncio.get_running_loop().create_future()
+        start_job.set_exception(
+            DreameLawnMowerVideoRuntimeError("managed worker failed")
+        )
+        entity.hass = SimpleNamespace(
+            async_add_executor_job=lambda *_args: start_job,
+        )
+        runtime = SimpleNamespace(
+            start_live_stream=lambda _inputs: None,
+            last_failure={
+                "stage": "response_wait",
+                "exception": "DreameLawnMowerVideoRuntimeError",
+                "returncode": -11,
+                "exit": "signal=11",
+                "native_trace": "xp2p-worker: runtime loaded",
+            }
+        )
+
+        with pytest.raises(
+            DreameLawnMowerVideoRuntimeError,
+            match="managed worker failed",
+        ):
+            await entity._async_start_runtime_session(runtime, object())
+        return entity._last_managed_runtime_diagnostics
+
+    assert asyncio.run(_run()) == {
+        "stage": "response_wait",
+        "exception": "DreameLawnMowerVideoRuntimeError",
+        "returncode": -11,
+        "exit": "signal=11",
+        "native_trace": "xp2p-worker: runtime loaded",
+    }
 
 
 def test_video_camera_late_native_cleanup_preserves_newer_session() -> None:
