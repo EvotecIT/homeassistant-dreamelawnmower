@@ -34,6 +34,11 @@ from .dreame_lawn_mower_client.client import (
     VOICE_LANGUAGE_LABELS,
 )
 from .entity import DreameLawnMowerEntity
+from .mowing_preference_control import (
+    PREFERENCE_MODE_OPTIONS,
+    async_update_selected_mowing_preference,
+    selected_map_preference_mode,
+)
 
 
 async def async_setup_entry(
@@ -48,6 +53,7 @@ async def async_setup_entry(
             DreameLawnMowerVoiceLanguageSelect(coordinator),
             DreameLawnMowerMapSelect(coordinator),
             DreameLawnMowerMowingActionSelect(coordinator),
+            DreameLawnMowerSelectedMapPreferenceModeSelect(coordinator),
             DreameLawnMowerEdgeSelect(coordinator),
             DreameLawnMowerZoneSelect(coordinator),
             DreameLawnMowerSpotSelect(coordinator),
@@ -193,6 +199,44 @@ class DreameLawnMowerMowingActionSelect(DreameLawnMowerSelectEntity):
                 self.coordinator.async_update_listeners()
                 return
         raise ValueError(f"Unknown mowing action option: {option}")
+
+
+class DreameLawnMowerSelectedMapPreferenceModeSelect(DreameLawnMowerSelectEntity):
+    """Choose whether the selected map uses global or custom zone preferences."""
+
+    _attr_name = "Selected Map Preference Mode"
+    _attr_icon = "mdi:tune-variant"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_selected_map_preference_mode"
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return whether selected-map preference metadata is available."""
+        return self.coordinator.data is not None and self.current_option is not None
+
+    @property
+    def options(self) -> list[str]:
+        """Return supported mower preference modes."""
+        return list(PREFERENCE_MODE_OPTIONS)
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the selected map preference mode."""
+        return selected_map_preference_mode(self.coordinator)
+
+    async def async_select_option(self, option: str) -> None:
+        """Persist the selected map preference mode through the PREP path."""
+        if option not in PREFERENCE_MODE_OPTIONS:
+            raise ValueError(f"Unknown preference mode option: {option}")
+        await async_update_selected_mowing_preference(
+            self.coordinator,
+            changes={"preference_mode": option.casefold()},
+        )
 
 
 class DreameLawnMowerEdgeSelect(DreameLawnMowerSelectEntity):

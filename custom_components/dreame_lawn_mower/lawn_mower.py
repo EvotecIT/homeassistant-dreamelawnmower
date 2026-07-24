@@ -46,6 +46,7 @@ from .dreame_lawn_mower_client.mowing_preferences import (
     normalize_mowing_preference_mode,
 )
 from .entity import DreameLawnMowerEntity
+from .mowing_preference_control import async_update_selected_mowing_preference
 from .services import (
     ATTR_CONFIRM_PREFERENCE_WRITE,
     ATTR_EXECUTE,
@@ -522,33 +523,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         **changes: Any,
     ) -> None:
         """Build or execute a scoped preference update for the selected map/zone."""
-        maps = map_entries(
-            self.coordinator.app_maps,
-            self.coordinator.batch_device_data,
-        )
-        selected_map_index = self._selected_map_index(maps)
-        if selected_map_index is None:
-            raise HomeAssistantError(
-                "No selected or current map is available for mowing "
-                "preference planning."
-            )
-
         requested_changes = preference_change_request(changes)
-        zone_scoped_change = any(
-            key != ATTR_PREFERENCE_MODE for key in requested_changes
-        )
-
-        zone_entries: list[dict[str, object]] = []
-        target_zone_id: int | None = None
-        if zone_scoped_change:
-            zone_entries = current_zone_entries(
-                self.coordinator.batch_device_data,
-                self.coordinator.app_maps,
-                getattr(self.coordinator, "vector_map_details", None),
-                selected_map_index=self.coordinator.selected_map_index,
-            )
-            target_zone_id = self._resolve_zone_id(zone_entries, zone_id=zone_id)
-
         _guard_preference_write_request(
             SimpleNamespace(
                 data={
@@ -557,31 +532,13 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
                 }
             )
         )
-        result = await self.coordinator.client.async_plan_app_mowing_preference_update(
-            map_index=selected_map_index,
-            area_id=target_zone_id,
+        await async_update_selected_mowing_preference(
+            self.coordinator,
             changes=requested_changes,
+            zone_id=zone_id,
             execute=execute,
             confirm_write=confirm_preference_write,
         )
-        selection_scope: dict[str, Any] = {
-            "selected_map_index": selected_map_index,
-            "selected_map_label": self._selected_map_label(
-                maps,
-                selected_map_index,
-            ),
-        }
-        if target_zone_id is not None:
-            selection_scope["selected_zone_id"] = target_zone_id
-            selection_scope["selected_zone_label"] = self._zone_label_for_id(
-                zone_entries,
-                target_zone_id,
-            )
-        result["selection_scope"] = selection_scope
-        self.coordinator.last_preference_write_result = result
-        self.coordinator.async_update_listeners()
-        if execute:
-            await self.coordinator.async_request_refresh()
 
     async def async_plan_map_preference_mode_update(
         self,

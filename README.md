@@ -128,7 +128,9 @@ region/account details are especially helpful for moving a device from
 - last-session mission progress and coverage retained after docking, explicitly
   marked with `cached: true` and a `captured_at` timestamp
 - selected-run sensors for mowing action, chosen map, and scoped zone/spot/edge target
-- selected-zone preference sensors for read-only mowing height, efficiency, direction, and obstacle-avoidance details
+- selected-zone preference sensors for mowing height, efficiency, direction, and obstacle-avoidance details
+- standard Home Assistant controls for selected-map preference mode and
+  selected-zone mowing height
 - read-only weather/rain-protection diagnostics
 - read-only weather/rain-protection entities from cached app settings
 - read-only mowing-preference diagnostics
@@ -155,7 +157,8 @@ The following areas are intentionally cautious:
   available, so operation snapshots can show plausible newer builds without
   conflating them with the app-approved update target
 - rain-protection writes are not exposed yet
-- mowing-preference writes are guarded, validated on a supervised A2 no-op write, and still need broader model and firmware validation
+- mowing-preference writes are validated on a supervised A2 no-op write and
+  still need broader model and firmware validation
 - map rendering is read-only; no-go editing, virtual-wall editing, and other map
   editing flows are not exposed yet
 - live video has been validated end to end on a Dreame A2, including Home
@@ -380,6 +383,21 @@ The guarded preference fields include per-zone safe edge mowing through
 `edge_mowing_safe`. Use the dry-run result to inspect the candidate payload
 before confirming a live write.
 
+For normal dashboard and automation use, the integration also exposes:
+
+- **Selected Map Preference Mode**, a `select` entity with `Global` and
+  `Custom` options
+- **Selected Zone Mowing Height**, a `number` entity in centimeters with
+  0.5 cm steps
+
+The height control follows the map and zone chosen by the integration's normal
+selectors. It is writable in `Custom` preference mode; in `Global` mode it
+becomes unavailable instead of implying that a zone-specific value can be
+changed. These standard entities work with Home Assistant dashboards,
+automations, voice assistants, and the companion Lawn Mower Card. The guarded
+service remains available when you need to inspect the complete candidate
+preference payload before sending it.
+
 ## Maps
 
 The map camera uses the confirmed app-map JSON path first. The renderer is
@@ -425,6 +443,8 @@ Current map support now includes:
 - a `Map` select that switches the mower's active map and refreshes the map,
   zone, spot, and edge controls
 - `select` entities for mowing action, edge, zone, and spot scope
+- a `select` for selected-map preference mode and a `number` slider for the
+  selected-zone mowing height
 - services for switching the active mower map and starting explicit zone, spot,
   or edge jobs
 - runtime live-track telemetry surfaced through sensors and map-camera attributes
