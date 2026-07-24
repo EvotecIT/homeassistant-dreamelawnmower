@@ -172,6 +172,7 @@ def test_forced_schedule_readback_propagates_cloud_failure() -> None:
 
 def test_schedule_upload_force_refreshes_shared_cache_after_execution() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._schedule_write_lock = asyncio.Lock()
     coordinator.client = SimpleNamespace(
         async_plan_app_schedule_upload=AsyncMock(
             return_value={"executed": True, "request_count": 2}
@@ -204,3 +205,37 @@ def test_schedule_upload_force_refreshes_shared_cache_after_execution() -> None:
     assert coordinator.schedules_refreshed_at is None
     coordinator.async_refresh_schedules.assert_awaited_once_with(force=True)
     coordinator.async_update_listeners.assert_called_once()
+
+
+def test_executed_schedule_upload_waits_for_shared_write_lock() -> None:
+    async def exercise() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        coordinator._schedule_write_lock = asyncio.Lock()
+        coordinator.client = SimpleNamespace(
+            async_plan_app_schedule_upload=AsyncMock(
+                return_value={"executed": True, "request_count": 1}
+            )
+        )
+        coordinator.async_refresh_schedules = AsyncMock(return_value={"schedules": []})
+        coordinator.async_update_listeners = Mock()
+        coordinator.last_schedule_write_result = None
+        coordinator.schedules_refreshed_at = object()
+
+        await coordinator._schedule_write_lock.acquire()
+        upload = asyncio.create_task(
+            coordinator.async_plan_schedule_upload(
+                map_index=0,
+                plans=[{"plan_id": 1, "enabled": True, "weeks": []}],
+                chunk_size=100,
+                execute=True,
+                confirm_write=True,
+            )
+        )
+        await asyncio.sleep(0)
+
+        coordinator.client.async_plan_app_schedule_upload.assert_not_awaited()
+        coordinator._schedule_write_lock.release()
+        await upload
+        coordinator.client.async_plan_app_schedule_upload.assert_awaited_once()
+
+    asyncio.run(exercise())

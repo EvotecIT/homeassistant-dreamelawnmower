@@ -109,6 +109,55 @@ def test_active_runtime_tracking_uses_fresh_app_map_identity() -> None:
     assert tracking_updates == [(status_blob, True, 2)]
 
 
+def test_active_runtime_tracking_survives_status_blob_failure() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    snapshot = SimpleNamespace(
+        available=True,
+        mowing_session_active=True,
+        activity="mowing",
+    )
+    tracking_updates: list[tuple[object, bool, int | None]] = []
+    coordinator.app_maps = {"current_map_index": 2}
+    coordinator.app_maps_refreshed_at = datetime(2026, 7, 24, 10, tzinfo=UTC)
+    coordinator.selected_map_index = 2
+    coordinator.runtime_status_blob = SimpleNamespace(status="old")
+    coordinator.runtime_telemetry_cache = SimpleNamespace(update=Mock())
+    coordinator.client = SimpleNamespace(
+        async_refresh=AsyncMock(return_value=snapshot),
+        async_get_runtime_status_blob=AsyncMock(
+            side_effect=RuntimeError("telemetry unavailable")
+        ),
+        async_get_bluetooth_connected=AsyncMock(return_value=False),
+        update_runtime_live_tracking=lambda value, *, active, map_index=None: (
+            tracking_updates.append((value, active, map_index))
+        ),
+    )
+
+    async def refresh_app_maps(*, force: bool) -> dict[str, object]:
+        assert force is True
+        coordinator.app_maps_refreshed_at = datetime.now(UTC)
+        return coordinator.app_maps
+
+    coordinator.async_refresh_app_maps = refresh_app_maps
+    for name in (
+        "async_refresh_batch_device_data",
+        "async_refresh_firmware_update_support",
+        "async_refresh_app_map_objects",
+        "async_refresh_vector_map_details",
+        "async_refresh_weather_protection",
+        "async_refresh_maintenance_status",
+        "async_refresh_voice_settings",
+        "async_refresh_schedules",
+    ):
+        setattr(coordinator, name, AsyncMock())
+
+    result = asyncio.run(coordinator._async_update_data())
+
+    assert result is snapshot
+    assert coordinator.runtime_status_blob is None
+    assert tracking_updates == [(None, True, 2)]
+
+
 def test_runtime_map_identity_does_not_fall_back_after_fresh_unknown_map() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator.app_maps = {"current_map_index": None}

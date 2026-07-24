@@ -189,7 +189,11 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh runtime status blob: %s", err)
             self.runtime_status_blob = None
-            self.client.update_runtime_live_tracking(None, active=False)
+            self.client.update_runtime_live_tracking(
+                None,
+                active=runtime_active,
+                map_index=runtime_map_index,
+            )
         try:
             self.bluetooth_connected = await self.client.async_get_bluetooth_connected(
                 refresh=False,
@@ -306,25 +310,34 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         confirm_write: bool,
     ) -> dict[str, Any]:
         """Plan or execute a schedule upload and reconcile shared consumers."""
-        result = await self.client.async_plan_app_schedule_upload(
-            map_index=map_index,
-            plans=plans,
-            chunk_size=chunk_size,
-            execute=execute,
-            confirm_write=confirm_write,
-        )
-        self.last_schedule_write_result = result
         if not execute:
+            result = await self.client.async_plan_app_schedule_upload(
+                map_index=map_index,
+                plans=plans,
+                chunk_size=chunk_size,
+                execute=False,
+                confirm_write=confirm_write,
+            )
+            self.last_schedule_write_result = result
             self.async_update_listeners()
             return result
 
-        # Never let a recently cached pre-upload payload hide the new plans.
-        self.schedules_refreshed_at = None
-        try:
-            await self.async_refresh_schedules(force=True)
-        finally:
-            self.async_update_listeners()
-        return result
+        async with self._schedule_write_lock:
+            result = await self.client.async_plan_app_schedule_upload(
+                map_index=map_index,
+                plans=plans,
+                chunk_size=chunk_size,
+                execute=True,
+                confirm_write=confirm_write,
+            )
+            self.last_schedule_write_result = result
+            # Never let a recently cached pre-upload payload hide the new plans.
+            self.schedules_refreshed_at = None
+            try:
+                await self.async_refresh_schedules(force=True)
+            finally:
+                self.async_update_listeners()
+            return result
 
     async def async_refresh_batch_device_data(
         self,
