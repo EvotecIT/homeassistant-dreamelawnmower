@@ -139,7 +139,8 @@ from .exceptions import (
     InvalidValueException,
 )
 from .protocol import DreameMowerProtocol
-from .map import DreameMapMowerMapManager, DreameMowerMapDecoder
+from .map import DreameMapMowerMapManager
+from .map_decoder import DreameMowerMapDecoder
 
 _LOGGER = logging.getLogger(__name__)
 

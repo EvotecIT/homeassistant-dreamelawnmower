@@ -1683,7 +1683,7 @@ class DreameLawnMowerClient(_DreameLawnMowerCameraMixin):
         device = self._ensure_device()
         render_map_data = device.get_map_for_render(map_data) or map_data
 
-        from .map import DreameMowerMapDataJsonRenderer
+        from .map_json_renderer import DreameMowerMapDataJsonRenderer
 
         try:
             renderer = DreameMowerMapDataJsonRenderer()
