@@ -232,7 +232,7 @@ def _fault_recovery_confirmed(
 def _raw_error_code_from_device(device: Any, error_obj: Any) -> int | None:
     """Return the unmodified error property before enum normalization."""
     try:
-        from .types import DreameMowerProperty
+        from .device_types import DreameMowerProperty
 
         value = device.get_property(DreameMowerProperty.ERROR)
     except (AttributeError, ImportError, TypeError, ValueError):
@@ -1208,7 +1208,7 @@ def snapshot_from_device(
 
     child_lock = None
     try:
-        from .types import DreameMowerProperty
+        from .device_types import DreameMowerProperty
 
         child_lock_value = device.get_property(DreameMowerProperty.CHILD_LOCK)
         if child_lock_value is not None:

@@ -18,7 +18,7 @@ from .device_code_semantics import (
     mower_device_code_definition,
     mower_device_code_name,
 )
-from .types import (
+from .device_types import (
     PIID,
     DIID,
     ACTION_AVAILABILITY,
@@ -46,25 +46,27 @@ from .types import (
     DreameMowerTaskType,
     DreameMapRecoveryStatus,
     DreameMapBackupStatus,
-    CleaningHistory,
     DreameMowerDeviceCapability,
     DirtyData,
     RobotType,
-    MapData,
-    Segment,
     Shortcut,
     ShortcutTask,
     ObstacleType,
-    CleanupMethod,
     GoToZoneSettings,
-    Path,
     PathType,
-    Coordinate,
     ATTR_ACTIVE_AREAS,
     ATTR_ACTIVE_POINTS,
     ATTR_ACTIVE_SEGMENTS,
     ATTR_PREDEFINED_POINTS,
     ATTR_ACTIVE_CRUISE_POINTS,
+)
+from .map_types import (
+    CleaningHistory,
+    CleanupMethod,
+    Coordinate,
+    MapData,
+    Path,
+    Segment,
 )
 from .const import (
     STATE_UNKNOWN,

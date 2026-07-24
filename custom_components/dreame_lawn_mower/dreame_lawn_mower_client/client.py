@@ -1063,7 +1063,7 @@ class DreameLawnMowerClient(_DreameLawnMowerCameraMixin):
             device = self._ensure_device()
 
         try:
-            from .types import DreameMowerProperty, DreameMowerStatus
+            from .device_types import DreameMowerProperty, DreameMowerStatus
         except ImportError:
             return DreameLawnMowerRemoteControlSupport(
                 supported=False,
