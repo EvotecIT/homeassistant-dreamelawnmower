@@ -9,7 +9,7 @@ import hmac
 import requests
 import zlib
 import queue
-from threading import Thread, Timer
+from threading import RLock, Thread, Timer
 from time import sleep
 import time
 import locale
@@ -137,6 +137,7 @@ class DreameMowerDreameHomeCloudProtocol:
         self._country = country
         self._location = country
         self._did = did
+        self._request_lock = RLock()
         self._session = requests.session()
         self._queue = queue.Queue()
         self._thread = None
@@ -161,6 +162,14 @@ class DreameMowerDreameHomeCloudProtocol:
         self._uid = None
         self._uuid = None
         self._strings = None
+
+    def _operation_lock(self):
+        """Return the shared cloud lock, including legacy constructed fixtures."""
+        lock = getattr(self, "_request_lock", None)
+        if lock is None:
+            lock = RLock()
+            self._request_lock = lock
+        return lock
 
     def _api_task(self):
         while True:
@@ -306,6 +315,10 @@ class DreameMowerDreameHomeCloudProtocol:
                 self._stream_key = prop[self._strings[11]]
 
     def connect(self, message_callback=None, connected_callback=None):
+        with self._operation_lock():
+            return self._connect_unlocked(message_callback, connected_callback)
+
+    def _connect_unlocked(self, message_callback=None, connected_callback=None):
         if self._logged_in:
             info = self.get_device_info()
             if info:
@@ -344,6 +357,15 @@ class DreameMowerDreameHomeCloudProtocol:
         return None
 
     def login(
+        self,
+        timeout: float = 10,
+        *,
+        deadline: float | None = None,
+    ) -> bool:
+        with self._operation_lock():
+            return self._login_unlocked(timeout, deadline=deadline)
+
+    def _login_unlocked(
         self,
         timeout: float = 10,
         *,
@@ -755,6 +777,21 @@ class DreameMowerDreameHomeCloudProtocol:
         return None, None
 
     def send_async(self, callback, method, parameters, retry_count: int = 2):
+        with self._operation_lock():
+            return self._send_async_unlocked(
+                callback,
+                method,
+                parameters,
+                retry_count,
+            )
+
+    def _send_async_unlocked(
+        self,
+        callback,
+        method,
+        parameters,
+        retry_count: int = 2,
+    ):
         host = ""
         if self._host and len(self._host):
             host = f"-{self._host.split('.')[0]}"
@@ -781,6 +818,26 @@ class DreameMowerDreameHomeCloudProtocol:
         )
 
     def send(
+        self,
+        method,
+        parameters,
+        retry_count: int = 2,
+        timeout: float = 20,
+        *,
+        deadline: float | None = None,
+        redact_response: bool = False,
+    ) -> Any:
+        with self._operation_lock():
+            return self._send_unlocked(
+                method,
+                parameters,
+                retry_count,
+                timeout,
+                deadline=deadline,
+                redact_response=redact_response,
+            )
+
+    def _send_unlocked(
         self,
         method,
         parameters,
@@ -1007,6 +1064,26 @@ class DreameMowerDreameHomeCloudProtocol:
         deadline: float | None = None,
         redact_response: bool = False,
     ) -> Any:
+        with self._operation_lock():
+            return self._request_unlocked(
+                url,
+                data,
+                retry_count,
+                timeout,
+                deadline=deadline,
+                redact_response=redact_response,
+            )
+
+    def _request_unlocked(
+        self,
+        url: str,
+        data,
+        retry_count=2,
+        timeout=20,
+        *,
+        deadline: float | None = None,
+        redact_response: bool = False,
+    ) -> Any:
         _LOGGER.debug(
             "DreameMowerDreameHomeCloudProtocol.request %s %s",
             url,
@@ -1137,7 +1214,21 @@ class DreameMowerDreameHomeCloudProtocol:
             self._fail_count = self._fail_count + 1
         return None
 
-    def get(self, url: str, params: Mapping[str, Any] | None = None, retry_count=2) -> Any:
+    def get(
+        self,
+        url: str,
+        params: Mapping[str, Any] | None = None,
+        retry_count=2,
+    ) -> Any:
+        with self._operation_lock():
+            return self._get_unlocked(url, params, retry_count)
+
+    def _get_unlocked(
+        self,
+        url: str,
+        params: Mapping[str, Any] | None = None,
+        retry_count=2,
+    ) -> Any:
         _LOGGER.debug("DreameMowerDreameHomeCloudProtocol.get %s %s", url, params)
 
         retries = 0
@@ -1208,6 +1299,10 @@ class DreameMowerDreameHomeCloudProtocol:
         return None
 
     def disconnect(self):
+        with self._operation_lock():
+            self._disconnect_unlocked()
+
+    def _disconnect_unlocked(self):
         self._session.close()
         self._connected = False
         self._logged_in = False

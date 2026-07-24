@@ -555,6 +555,9 @@ The report is sanitized by the integration and includes:
 - the installed integration, Home Assistant, Python, operating-system, and CPU
   architecture versions
 - config-entry and coordinator health
+- privacy-safe setup, foreground-refresh, and background-metadata timings,
+  including bounded recent samples plus the latest and aggregate duration for
+  each operation
 - current state and diagnostic attributes for every entity belonging to the
   config entry, including the Live Video camera's last failure stage and a
   bounded, privacy-safe summary of each TX video cloud stage
@@ -566,6 +569,19 @@ The report is sanitized by the integration and includes:
 Do not enable broad debug logging unless a maintainer asks for a specific logger.
 Cloud protocol debug output can contain data that needs additional review before
 it is posted publicly.
+
+Startup and refresh measurements are also written as log lines beginning with
+`Dreame mower performance`. The first setup and metadata hydration are logged at
+info level, while unusually slow foreground or background refreshes are logged
+as warnings. Each line reports only operation names and elapsed time; it does
+not contain credentials, mower identifiers, map data, or coordinates.
+
+For startup reports, include both the `setup` and `metadata_refresh` entries
+from downloaded diagnostics. `setup` is the blocking Home Assistant load path.
+`metadata_refresh` covers optional maps, schedules, firmware, weather,
+maintenance, and preference metadata that continues in the background after
+the mower entity can load. The per-phase timings show which vendor endpoint is
+slow without requiring broad protocol debug logging.
 
 The staged cloud summaries retain field names, value types, safe status codes,
 required-field presence, and sanitized error messages. They do not retain raw

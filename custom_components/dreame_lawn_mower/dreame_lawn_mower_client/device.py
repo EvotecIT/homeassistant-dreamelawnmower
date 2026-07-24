@@ -416,15 +416,10 @@ class DreameMowerDevice(
                         self.status.docked and not self.status.started,
                     )
 
-                    if self.status.current_map is None:
-                        self._map_manager.schedule_update(15)
-                        try:
-                            self._map_manager.update()
-                            self._last_map_request = self._last_settings_request
-                        except Exception as ex:
-                            _LOGGER.error("Initial map update failed! %s", str(ex))
-                        self._map_manager.schedule_update()
-                    else:
+                    # set_update_interval starts the existing map-manager worker.
+                    # Do not also run its cloud map request synchronously in the
+                    # first state snapshot; app-map metadata hydrates separately.
+                    if self.status.current_map is not None:
                         self.update_map()
 
                 if self.cloud_connected:

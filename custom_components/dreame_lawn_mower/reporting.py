@@ -59,6 +59,7 @@ def build_coordinator_diagnostics(coordinator: object) -> dict[str, Any]:
     """Return the latest coordinator health without exposing account data."""
     update_interval = getattr(coordinator, "update_interval", None)
     last_exception = getattr(coordinator, "last_exception", None)
+    performance = getattr(coordinator, "performance", None)
     return {
         "last_update_success": getattr(coordinator, "last_update_success", None),
         "last_exception_type": (
@@ -73,6 +74,9 @@ def build_coordinator_diagnostics(coordinator: object) -> dict[str, Any]:
             update_interval.total_seconds()
             if hasattr(update_interval, "total_seconds")
             else None
+        ),
+        "performance": (
+            performance.as_dict() if hasattr(performance, "as_dict") else None
         ),
     }
 

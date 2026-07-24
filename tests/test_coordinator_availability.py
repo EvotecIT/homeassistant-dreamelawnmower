@@ -87,6 +87,7 @@ def test_active_runtime_tracking_uses_fresh_app_map_identity() -> None:
         assert force is True
         coordinator.app_maps = {"current_map_index": 2}
         coordinator.app_maps_refreshed_at = datetime.now(UTC)
+        coordinator.app_maps_refresh_succeeded = True
         return coordinator.app_maps
 
     coordinator.async_refresh_app_maps = refresh_app_maps
@@ -136,6 +137,7 @@ def test_active_runtime_tracking_survives_status_blob_failure() -> None:
     async def refresh_app_maps(*, force: bool) -> dict[str, object]:
         assert force is True
         coordinator.app_maps_refreshed_at = datetime.now(UTC)
+        coordinator.app_maps_refresh_succeeded = True
         return coordinator.app_maps
 
     coordinator.async_refresh_app_maps = refresh_app_maps
@@ -168,6 +170,7 @@ def test_cached_device_update_publishes_realtime_runtime_position() -> None:
     status_blob = SimpleNamespace()
     tracking_updates: list[tuple[object, bool, int | None]] = []
     coordinator._client_update_task = Mock()
+    coordinator._runtime_map_identity_verified = True
     coordinator.app_maps = {"current_map_index": 2}
     coordinator.selected_map_index = 2
     coordinator.runtime_status_blob = None
@@ -203,6 +206,38 @@ def test_cached_device_update_publishes_realtime_runtime_position() -> None:
     assert coordinator.bluetooth_connected is True
     coordinator.async_set_updated_data.assert_called_once_with(snapshot)
     assert coordinator._client_update_task is None
+
+
+def test_cached_device_update_waits_for_verified_active_map_identity() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    snapshot = SimpleNamespace(
+        available=True,
+        mowing_session_active=True,
+        activity="mowing",
+    )
+    status_blob = SimpleNamespace()
+    coordinator._client_update_task = Mock()
+    coordinator._runtime_map_identity_verified = False
+    coordinator.app_maps = {"current_map_index": 2}
+    coordinator.selected_map_index = 2
+    coordinator.runtime_status_blob = None
+    coordinator.runtime_telemetry_cache = SimpleNamespace(update=Mock())
+    coordinator.bluetooth_connected = None
+    coordinator.client = SimpleNamespace(
+        async_get_cached_snapshot=AsyncMock(return_value=snapshot),
+        async_get_runtime_status_blob=AsyncMock(return_value=status_blob),
+        async_get_bluetooth_connected=AsyncMock(return_value=True),
+        update_runtime_live_tracking=Mock(),
+    )
+    coordinator.async_set_updated_data = Mock()
+
+    asyncio.run(coordinator._async_process_client_update())
+
+    coordinator.client.update_runtime_live_tracking.assert_called_once_with(
+        status_blob,
+        active=True,
+        map_index=None,
+    )
 
 
 def test_cached_device_update_queues_callback_received_while_processing() -> None:
