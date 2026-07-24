@@ -118,6 +118,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         self.selected_contour_id: tuple[int, int] | None = None
         self.selected_zone_id: int | None = None
         self.selected_spot_id: int | None = None
+        self.selected_maintenance_point_id: int | None = None
         self.bluetooth_connected: bool | None = None
         self.runtime_status_blob: DreameLawnMowerStatusBlob | None = None
         self.runtime_telemetry_cache = DreameLawnMowerRuntimeTelemetryCache()
@@ -707,6 +708,7 @@ class DreameLawnMowerCoordinator(DataUpdateCoordinator[DreameLawnMowerSnapshot])
         self.selected_contour_id = None
         self.selected_zone_id = None
         self.selected_spot_id = None
+        self.selected_maintenance_point_id = None
         await self.async_request_refresh()
         await self.async_refresh_app_maps(
             force=True,

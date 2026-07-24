@@ -49,6 +49,7 @@ from .models import (
 from .mowing_tasks import (
     MowingTaskResponseError,
     build_edge_mowing_request,
+    build_maintenance_point_request,
     build_spot_mowing_request,
     build_zone_mowing_request,
     ensure_mowing_task_succeeded,
@@ -477,6 +478,19 @@ class _DreameLawnMowerClientCoreMixin:
         try:
             response = self._sync_call_app_action(build_spot_mowing_request(spot_ids))
             return ensure_mowing_task_succeeded(response, task_name="spot mowing")
+        except (DeviceException, MowingTaskResponseError) as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+
+    def _sync_go_to_maintenance_point(self, point_id: int) -> Any:
+        """Drive to one mower-configured maintenance point."""
+        try:
+            response = self._sync_call_app_action(
+                build_maintenance_point_request([point_id])
+            )
+            return ensure_mowing_task_succeeded(
+                response,
+                task_name="maintenance point",
+            )
         except (DeviceException, MowingTaskResponseError) as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
 

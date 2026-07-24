@@ -467,16 +467,20 @@ def _selected_zone_preference_summary(coordinator: Any) -> dict[str, Any]:
                 "selected_map_label": selected_map_label,
                 "selected_zone_id": selected_zone_id,
                 "selected_zone_label": zone_label_value,
+                "preference_scope": "zone",
                 "mode": map_entry.get("mode"),
                 "mode_name": map_entry.get("mode_name"),
                 "reported_version": preference.get("reported_version"),
                 "mowing_height_cm": preference.get("mowing_height_cm"),
+                "efficient_mode": preference.get("efficient_mode"),
                 "efficient_mode_name": preference.get("efficient_mode_name"),
+                "mowing_direction_mode": preference.get("mowing_direction_mode"),
                 "mowing_direction_mode_name": preference.get(
                     "mowing_direction_mode_name"
                 ),
                 "mowing_direction_degrees": preference.get("mowing_direction_degrees"),
                 "edge_mowing_auto": preference.get("edge_mowing_auto"),
+                "edge_mowing_walk_mode": preference.get("edge_mowing_walk_mode"),
                 "edge_mowing_walk_mode_name": preference.get(
                     "edge_mowing_walk_mode_name"
                 ),
@@ -494,6 +498,7 @@ def _selected_zone_preference_summary(coordinator: Any) -> dict[str, Any]:
                 "obstacle_avoidance_distance_cm": preference.get(
                     "obstacle_avoidance_distance_cm"
                 ),
+                "obstacle_avoidance_ai": preference.get("obstacle_avoidance_ai"),
                 "obstacle_avoidance_ai_classes": preference.get(
                     "obstacle_avoidance_ai_classes"
                 ),

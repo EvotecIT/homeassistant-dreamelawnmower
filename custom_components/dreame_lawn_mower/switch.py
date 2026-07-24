@@ -14,6 +14,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity
+from .preference_switch import (
+    AI_CLASS_SWITCHES,
+    PREFERENCE_SWITCHES,
+    DreameLawnMowerPreferenceAiClassSwitch,
+    DreameLawnMowerPreferenceSwitch,
+)
 
 VOICE_PROMPT_SWITCHES = (
     (
@@ -52,14 +58,24 @@ async def async_setup_entry(
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
-            DreameLawnMowerVoicePromptSwitch(
-                coordinator,
-                key=key,
-                name=name,
-                index=index,
-                icon=icon,
-            )
-            for key, name, index, icon in VOICE_PROMPT_SWITCHES
+            *(
+                DreameLawnMowerPreferenceSwitch(coordinator, description)
+                for description in PREFERENCE_SWITCHES
+            ),
+            *(
+                DreameLawnMowerPreferenceAiClassSwitch(coordinator, description)
+                for description in AI_CLASS_SWITCHES
+            ),
+            *(
+                DreameLawnMowerVoicePromptSwitch(
+                    coordinator,
+                    key=key,
+                    name=name,
+                    index=index,
+                    icon=icon,
+                )
+                for key, name, index, icon in VOICE_PROMPT_SWITCHES
+            ),
         ]
     )
     known_schedule_plans: set[tuple[int, int]] = set()

@@ -538,6 +538,13 @@ class DreameLawnMowerClient(
         """Start mower-native spot mowing for explicit saved spot area ids."""
         return await asyncio.to_thread(self._sync_start_spot_mowing, list(spot_ids))
 
+    async def async_go_to_maintenance_point(self, point_id: int) -> Any:
+        """Drive to one configured map maintenance point."""
+        return await asyncio.to_thread(
+            self._sync_go_to_maintenance_point,
+            int(point_id),
+        )
+
     async def async_switch_current_map(self, map_index: int) -> Any:
         """Switch the active mower map through the app task path."""
         return await asyncio.to_thread(self._sync_switch_current_map, int(map_index))

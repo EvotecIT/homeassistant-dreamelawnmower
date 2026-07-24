@@ -127,6 +127,29 @@ def test_decode_mowing_preference_payload_names_known_fields() -> None:
         "obstacle_avoidance_ai": 7,
         "obstacle_avoidance_ai_classes": ["people", "animals", "objects"],
         "edge_mowing_safe": True,
+        "obstacle_avoidance_sensitivity": None,
+        "edge_cutting_attachment": None,
+        "steering_mode": None,
+        "cutter_position_height": None,
+        "_raw_payload": (
+            8,
+            0,
+            11,
+            1,
+            40,
+            2,
+            90,
+            1,
+            0,
+            1,
+            1,
+            2,
+            1,
+            15,
+            20,
+            7,
+            1,
+        ),
     }
 
 
@@ -212,6 +235,50 @@ def test_encode_mowing_preference_payload_round_trips_decoded_values() -> None:
         20,
         7,
         1,
+    ]
+
+
+def test_encode_mowing_preference_payload_preserves_newer_vendor_fields() -> None:
+    payload = [
+        12,
+        0,
+        0,
+        1,
+        40,
+        1,
+        90,
+        1,
+        0,
+        1,
+        1,
+        2,
+        1,
+        15,
+        20,
+        7,
+        1,
+        3,
+        1,
+        2,
+        35,
+        99,
+    ]
+    decoded = decode_mowing_preference_payload(payload)
+
+    updated, changed_fields = apply_mowing_preference_changes(
+        decoded,
+        {"mowing_height_cm": 5.0},
+    )
+
+    assert changed_fields == ["mowing_height_cm"]
+    assert updated["obstacle_avoidance_sensitivity"] == 3
+    assert updated["edge_cutting_attachment"] is True
+    assert updated["steering_mode"] == 2
+    assert updated["cutter_position_height"] == 35
+    assert encode_mowing_preference_payload(updated) == [
+        *payload[:4],
+        50,
+        *payload[5:],
     ]
 
 
@@ -365,6 +432,56 @@ def test_plan_app_mowing_preference_update_can_execute_mode_only_request() -> No
     assert result["request_verified"] is True
     assert result["response_data"] == {"r": 0, "ok": True}
     assert [call["t"] for call in cloud.calls] == ["PREI", "PRE", "PRE", "PREP"]
+
+
+def test_plan_app_mowing_preference_update_targets_global_area_zero() -> None:
+    client = _client()
+    current = decode_mowing_preference_payload(
+        [12, 1, 0, 1, 40, 0, 0, 1, 0, 1, 0, 2, 1, 5, 15, 7, 1, 3, 1, 2, 30]
+    )
+    client._sync_get_mowing_preferences = lambda *args, **kwargs: {
+        "available": True,
+        "maps": [
+            {
+                "idx": 1,
+                "mode": 0,
+                "mode_name": "global",
+                "area_count": 1,
+                "preferences": [current],
+            }
+        ],
+    }
+
+    result = client._sync_plan_app_mowing_preference_update(
+        map_index=1,
+        area_id=0,
+        changes={"mowing_height_cm": 4.5},
+    )
+
+    assert result["area_id"] == 0
+    assert result["payload"] == [
+        12,
+        1,
+        0,
+        1,
+        45,
+        0,
+        0,
+        1,
+        0,
+        1,
+        0,
+        2,
+        1,
+        5,
+        15,
+        7,
+        1,
+        3,
+        1,
+        2,
+        30,
+    ]
 
 
 def test_plan_app_mowing_preference_update_can_execute_mode_and_settings_sequence() -> (

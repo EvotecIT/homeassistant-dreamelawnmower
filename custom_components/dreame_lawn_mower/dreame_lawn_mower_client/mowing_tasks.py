@@ -8,6 +8,7 @@ from typing import Any
 MOWING_TASK_EDGE = 101
 MOWING_TASK_ZONE = 102
 MOWING_TASK_SPOT = 103
+MOWING_TASK_MAINTENANCE_POINT = 109
 
 
 class MowingTaskResponseError(ValueError):
@@ -44,6 +45,20 @@ def build_edge_mowing_request(
     if not normalized:
         raise ValueError("At least one contour id pair is required.")
     return _build_mowing_task_request(MOWING_TASK_EDGE, "edge", normalized)
+
+
+def build_maintenance_point_request(
+    point_ids: Sequence[int],
+) -> dict[str, Any]:
+    """Build the app action that drives to a configured maintenance point."""
+    normalized = _normalize_area_ids(point_ids, area_type="maintenance point")
+    if len(normalized) > 5:
+        raise ValueError("At most five maintenance point ids are supported.")
+    return _build_mowing_task_request(
+        MOWING_TASK_MAINTENANCE_POINT,
+        "point",
+        normalized,
+    )
 
 
 def ensure_mowing_task_succeeded(

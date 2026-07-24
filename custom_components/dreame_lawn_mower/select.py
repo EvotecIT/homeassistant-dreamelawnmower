@@ -24,6 +24,7 @@ from .control_options import (
     MOWING_ACTION_ZONE,
     contour_label,
     current_contour_entries,
+    current_maintenance_point_entries,
     current_map_index,
     current_spot_entries,
     current_zone_entries,
@@ -45,6 +46,10 @@ from .mowing_preference_control import (
     async_update_selected_mowing_preference,
     selected_map_preference_mode,
 )
+from .preference_select import (
+    PREFERENCE_SELECTS,
+    DreameLawnMowerPreferenceSelect,
+)
 
 
 async def async_setup_entry(
@@ -61,6 +66,11 @@ async def async_setup_entry(
             DreameLawnMowerSelectedMapRotationSelect(coordinator),
             DreameLawnMowerMowingActionSelect(coordinator),
             DreameLawnMowerSelectedMapPreferenceModeSelect(coordinator),
+            *(
+                DreameLawnMowerPreferenceSelect(coordinator, description)
+                for description in PREFERENCE_SELECTS
+            ),
+            DreameLawnMowerMaintenancePointSelect(coordinator),
             DreameLawnMowerEdgeSelect(coordinator),
             DreameLawnMowerZoneSelect(coordinator),
             DreameLawnMowerSpotSelect(coordinator),
@@ -310,6 +320,54 @@ class DreameLawnMowerSelectedMapPreferenceModeSelect(DreameLawnMowerSelectEntity
             self.coordinator,
             changes={"preference_mode": option.casefold()},
         )
+
+
+class DreameLawnMowerMaintenancePointSelect(DreameLawnMowerSelectEntity):
+    """Choose a configured maintenance point for the action button."""
+
+    _attr_name = "Maintenance Point"
+    _attr_icon = "mdi:map-marker-wrench"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_maintenance_point"
+
+    def _entries(self) -> list[dict[str, Any]]:
+        return current_maintenance_point_entries(
+            getattr(self.coordinator, "vector_map_details", None),
+            self.coordinator.app_maps,
+            self.coordinator.batch_device_data,
+            selected_map_index=self.coordinator.selected_map_index,
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return whether the selected map contains maintenance points."""
+        return self.coordinator.data is not None and bool(self._entries())
+
+    @property
+    def options(self) -> list[str]:
+        """Return configured maintenance-point labels."""
+        return [entry["label"] for entry in self._entries()]
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the selected maintenance-point label."""
+        entries = self._entries()
+        selected = self.coordinator.selected_maintenance_point_id
+        for entry in entries:
+            if entry["point_id"] == selected:
+                return entry["label"]
+        return entries[0]["label"] if entries else None
+
+    async def async_select_option(self, option: str) -> None:
+        """Store the selected maintenance point in coordinator state."""
+        for entry in self._entries():
+            if entry["label"] == option:
+                self.coordinator.selected_maintenance_point_id = entry["point_id"]
+                self.coordinator.async_update_listeners()
+                return
+        raise ValueError(f"Unknown maintenance point option: {option}")
 
 
 class DreameLawnMowerEdgeSelect(DreameLawnMowerSelectEntity):

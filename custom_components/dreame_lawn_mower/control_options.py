@@ -301,6 +301,56 @@ def current_spot_entries(
     return result
 
 
+def current_maintenance_point_entries(
+    vector_map_details: Mapping[str, Any] | None,
+    app_maps: Mapping[str, Any] | None = None,
+    batch_device_data: Mapping[str, Any] | None = None,
+    selected_map_index: int | None = None,
+) -> list[dict[str, Any]]:
+    """Return configured maintenance points for the selected map."""
+    if not isinstance(vector_map_details, Mapping):
+        return []
+    current_idx = current_map_index(
+        app_maps,
+        batch_device_data,
+        selected_map_index=selected_map_index,
+    )
+    maps = vector_map_details.get("maps")
+    candidates = (
+        maps
+        if isinstance(maps, Sequence)
+        and not isinstance(maps, str | bytes | bytearray)
+        else [vector_map_details]
+    )
+    for map_entry in candidates:
+        if (
+            not isinstance(map_entry, Mapping)
+            or map_entry.get("map_index") != current_idx
+        ):
+            continue
+        points = map_entry.get("clean_points")
+        if not isinstance(points, Sequence) or isinstance(
+            points,
+            str | bytes | bytearray,
+        ):
+            return []
+        return [
+            {
+                "point_id": point["point_id"],
+                "label": str(
+                    point.get("label")
+                    or f"Maintenance Point #{point['point_id']}"
+                ),
+                "map_index": current_idx,
+            }
+            for point in points
+            if isinstance(point, Mapping)
+            and isinstance(point.get("point_id"), int)
+            and point["point_id"] > 0
+        ]
+    return []
+
+
 def find_spot_center(
     app_maps: Mapping[str, Any] | None,
     spot_id: int,
