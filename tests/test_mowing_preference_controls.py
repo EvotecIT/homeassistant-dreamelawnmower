@@ -62,6 +62,7 @@ def _coordinator(*, mode_name: str = "custom") -> SimpleNamespace:
         selected_map_index=1,
         selected_zone_id=5,
         last_preference_write_result=None,
+        async_refresh_batch_device_data=AsyncMock(),
         async_request_refresh=AsyncMock(),
         async_update_listeners=lambda: None,
     )
@@ -84,6 +85,10 @@ def test_preference_mode_select_reads_and_writes_selected_map_mode() -> None:
         changes={"preference_mode": "custom"},
         execute=True,
         confirm_write=True,
+    )
+    coordinator.async_refresh_batch_device_data.assert_awaited_once_with(
+        force=True,
+        source="mowing_preference_write",
     )
     coordinator.async_request_refresh.assert_awaited_once()
 
@@ -108,6 +113,10 @@ def test_mowing_height_number_reads_and_writes_selected_zone() -> None:
         changes={"mowing_height_cm": 4.5},
         execute=True,
         confirm_write=True,
+    )
+    coordinator.async_refresh_batch_device_data.assert_awaited_once_with(
+        force=True,
+        source="mowing_preference_write",
     )
     coordinator.async_request_refresh.assert_awaited_once()
 

@@ -897,6 +897,7 @@ def test_lawn_mower_plan_zone_preference_update_can_execute_confirmed_write() ->
         selected_zone_id=5,
         selected_spot_id=None,
         last_preference_write_result=None,
+        async_refresh_batch_device_data=AsyncMock(),
         async_request_refresh=AsyncMock(),
         async_update_listeners=lambda: None,
     )
@@ -919,6 +920,10 @@ def test_lawn_mower_plan_zone_preference_update_can_execute_confirmed_write() ->
         },
         execute=True,
         confirm_write=True,
+    )
+    coordinator.async_refresh_batch_device_data.assert_awaited_once_with(
+        force=True,
+        source="mowing_preference_write",
     )
     coordinator.async_request_refresh.assert_awaited_once()
 
@@ -1100,6 +1105,7 @@ def test_lawn_mower_plan_map_preference_mode_update_can_execute_confirmed_write(
         selected_zone_id=None,
         selected_spot_id=None,
         last_preference_write_result=None,
+        async_refresh_batch_device_data=AsyncMock(),
         async_request_refresh=AsyncMock(),
         async_update_listeners=lambda: None,
     )
@@ -1120,6 +1126,10 @@ def test_lawn_mower_plan_map_preference_mode_update_can_execute_confirmed_write(
         changes={"preference_mode": 1},
         execute=True,
         confirm_write=True,
+    )
+    coordinator.async_refresh_batch_device_data.assert_awaited_once_with(
+        force=True,
+        source="mowing_preference_write",
     )
     coordinator.async_request_refresh.assert_awaited_once()
 

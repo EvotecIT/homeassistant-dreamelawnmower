@@ -112,9 +112,14 @@ async def async_update_selected_mowing_preference(
         )
     result["selection_scope"] = selection_scope
     coordinator.last_preference_write_result = result
-    coordinator.async_update_listeners()
     if execute:
+        await coordinator.async_refresh_batch_device_data(
+            force=True,
+            source="mowing_preference_write",
+        )
         await coordinator.async_request_refresh()
+    else:
+        coordinator.async_update_listeners()
     return result
 
 
