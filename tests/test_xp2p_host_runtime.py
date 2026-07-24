@@ -6,6 +6,8 @@ import base64
 import gzip
 import hashlib
 import io
+import os
+import platform
 import struct
 import subprocess
 import threading
@@ -194,6 +196,31 @@ def test_embedded_worker_matches_reproducible_hashes() -> None:
     assert hashlib.sha256(compressed).hexdigest() == WORKER_GZIP_SHA256
     assert hashlib.sha256(worker).hexdigest() == WORKER_SHA256
     assert worker.startswith(b"\x7fELF")
+
+
+def test_real_managed_worker_accepts_request_on_native_host(tmp_path) -> None:
+    """Prove the installed worker starts on the architecture used by CI."""
+    if (
+        platform.system().casefold() != "linux"
+        or os.environ.get("DREAME_XP2P_REAL_RUNTIME_TEST") != "1"
+    ):
+        pytest.skip("real managed runtime validation is opt-in")
+
+    assets = xp2p_runtime_bootstrap.ensure_xp2p_host_runtime(
+        tmp_path,
+        machine=platform.machine(),
+    )
+    result = subprocess.run(
+        assets.command(),
+        input=b"invalid request",
+        capture_output=True,
+        env=assets.environment(),
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert result.stdout.startswith(b"DXR1" + struct.pack("!I", 1))
 
 
 def test_host_worker_success_payload_reports_direct_or_relay_route() -> None:
