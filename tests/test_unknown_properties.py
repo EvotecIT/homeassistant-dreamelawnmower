@@ -71,6 +71,14 @@ def test_handle_properties_tolerates_unknown_property_ids() -> None:
     }
 
 
+def test_handle_properties_tolerates_empty_cloud_response() -> None:
+    device, updates = _device_stub()
+
+    assert DreameMowerDevice._handle_properties(device, None) is False
+    assert DreameMowerDevice._handle_properties(device, {"code": 0}) is False
+    assert updates == []
+
+
 def test_handle_properties_matches_model_specific_did_by_siid_piid() -> None:
     device, updates = _device_stub()
     model_specific_did = -115364054

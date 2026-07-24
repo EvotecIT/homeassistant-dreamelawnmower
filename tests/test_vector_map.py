@@ -251,6 +251,7 @@ def test_parse_batch_vector_map_handles_map_info_split_and_mow_paths() -> None:
     assert len(vector_map.contours) == 1
     assert vector_map.contours[0].contour_id == (1, 0)
     assert vector_map.clean_points == ((25, 25),)
+    assert vector_map.clean_point_ids == (301,)
     assert [
         (entry.map_id, entry.map_index, entry.name)
         for entry in vector_map.available_maps
@@ -348,6 +349,10 @@ def test_vector_map_details_report_live_path_counts() -> None:
             "contour_ids": [[1, 0]],
             "contour_count": 1,
             "clean_point_count": 1,
+            "clean_point_ids": [301],
+            "clean_points": [
+                {"point_id": 301, "label": "Maintenance Point #301"}
+            ],
             "cruise_point_count": 0,
             "mow_path_count": 1,
             "mow_path_segment_count": 2,
@@ -367,6 +372,8 @@ def test_vector_map_details_report_live_path_counts() -> None:
             "contour_ids": [[5, 0]],
             "contour_count": 1,
             "clean_point_count": 0,
+            "clean_point_ids": [],
+            "clean_points": [],
             "cruise_point_count": 0,
             "mow_path_count": 1,
             "mow_path_segment_count": 2,
@@ -376,6 +383,10 @@ def test_vector_map_details_report_live_path_counts() -> None:
         },
     ]
     assert details["clean_point_count"] == 1
+    assert details["clean_point_ids"] == [301]
+    assert details["clean_points"] == [
+        {"point_id": 301, "label": "Maintenance Point #301"}
+    ]
     assert details["cruise_point_count"] == 0
     assert details["mow_path_count"] == 1
     assert details["mow_path_segment_count"] == 2
@@ -398,12 +409,14 @@ def test_client_mowing_and_map_actions_use_expected_app_task_payloads() -> None:
     assert client._sync_start_edge_mowing([[1, 0]]) == success
     assert client._sync_start_zone_mowing([1, 3]) == success
     assert client._sync_start_spot_mowing([9]) == success
+    assert client._sync_go_to_maintenance_point(301) == success
     assert client._sync_switch_current_map(1) == success
 
     assert recorded_payloads == [
         {"m": "a", "p": 0, "o": 101, "d": {"edge": [[1, 0]]}},
         {"m": "a", "p": 0, "o": 102, "d": {"region": [1, 3]}},
         {"m": "a", "p": 0, "o": 103, "d": {"area": [9]}},
+        {"m": "a", "p": 0, "o": 109, "d": {"point": [301]}},
         {"m": "a", "p": 0, "o": 200, "d": {"idx": 1}},
     ]
 

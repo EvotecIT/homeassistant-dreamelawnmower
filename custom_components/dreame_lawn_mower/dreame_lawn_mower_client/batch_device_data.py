@@ -351,6 +351,16 @@ def _decode_batch_preference_map_entry(
                     raw_preference.get("edgeMowingSafe"),
                     default=True,
                 ),
+                "obstacle_avoidance_sensitivity": _to_int(
+                    raw_preference.get("obstacleAvoidanceSensitivity")
+                ),
+                "edge_cutting_attachment": _bool_or_none(
+                    raw_preference.get("edgeCuttingAttachment")
+                ),
+                "steering_mode": _to_int(raw_preference.get("steeringMode")),
+                "cutter_position_height": _to_int(
+                    raw_preference.get("cutterPositionHeight")
+                ),
             }
             if include_raw:
                 preference["raw_setting"] = dict(raw_preference)

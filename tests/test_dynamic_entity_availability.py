@@ -2203,10 +2203,11 @@ def test_selected_zone_preference_sensors_expose_read_only_zone_settings() -> No
     assert classes_entity.native_value == "People, Animals, Objects"
     assert height_entity.extra_state_attributes == {
         "selected_map_index": 1,
-        "selected_map_label": "Back (#2)",
-        "selected_zone_id": 3,
-        "selected_zone_label": "Zone #3",
-        "mode": 0,
+            "selected_map_label": "Back (#2)",
+            "selected_zone_id": 3,
+            "selected_zone_label": "Zone #3",
+            "preference_scope": "zone",
+            "mode": 0,
         "mode_name": "global",
         "reported_version": 17,
         "mowing_height_cm": 4.0,

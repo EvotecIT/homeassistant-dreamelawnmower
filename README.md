@@ -110,6 +110,8 @@ region/account details are especially helpful for moving a device from
 - battery, activity, state, task, firmware, and error sensors
 - active-map selector that switches the mower, plus mowing action, edge, zone,
   and spot selectors that follow the selected map
+- maintenance-point selector and action button for maps where a maintenance
+  point has been configured in the mower app
 - current-map services for switching maps and starting explicit zone, spot, or edge runs
 - binary sensors for docked, charging, mowing, paused, returning, and error state
 - binary sensors for active and resumable mowing sessions
@@ -129,8 +131,9 @@ region/account details are especially helpful for moving a device from
   marked with `cached: true` and a `captured_at` timestamp
 - selected-run sensors for mowing action, chosen map, and scoped zone/spot/edge target
 - selected-zone preference sensors for mowing height, efficiency, direction, and obstacle-avoidance details
-- standard Home Assistant controls for selected-map preference mode and
-  selected-zone mowing height
+- standard Home Assistant controls for global/custom preference mode, global
+  and selected-zone cutting height, mowing efficiency, edge behavior, and
+  obstacle avoidance
 - read-only weather/rain-protection diagnostics
 - read-only weather/rain-protection entities from cached app settings
 - read-only mowing-preference diagnostics
@@ -395,16 +398,23 @@ For normal dashboard and automation use, the integration also exposes:
 
 - **Selected Map Preference Mode**, a `select` entity with `Global` and
   `Custom` options
-- **Selected Zone Mowing Height**, a `number` entity in centimeters with
-  0.5 cm steps
+- **Selected Map Mowing Height**, available while the selected map uses
+  `Global` preferences
+- **Selected Zone Mowing Height**, available while the selected map uses
+  `Custom` preferences
+- selects for mowing efficiency, obstacle height and distance, and edge-cutting
+  style
+- switches for automatic and safe edge cutting, edge obstacle avoidance, lidar
+  obstacle recognition, and the people, animal, and object recognition classes
 
-The height control follows the map and zone chosen by the integration's normal
-selectors. It is writable in `Custom` preference mode; in `Global` mode it
-becomes unavailable instead of implying that a zone-specific value can be
-changed. These standard entities work with Home Assistant dashboards,
-automations, voice assistants, and the companion Lawn Mower Card. The guarded
-service remains available when you need to inspect the complete candidate
-preference payload before sending it.
+The cutting-height controls use 0.5 cm steps. A2 and other standard mower
+families expose 3-7 cm; verified AWD families expose 3-10 cm. Every other
+preference control follows the current `Global` record or the zone chosen by
+the normal map and zone selectors, so a dashboard never presents a zone value
+as if it were a whole-lawn setting. These standard entities work with Home
+Assistant dashboards, automations, voice assistants, and the companion Lawn
+Mower Card. The guarded service remains available when you need to inspect the
+complete candidate preference payload before sending it.
 
 ## Maps
 
@@ -449,10 +459,13 @@ Current map support now includes:
 - a read-only `Map` camera for the active map
 - a read-only `All Maps` contact sheet for quick map inventory
 - a `Map` select that switches the mower's active map and refreshes the map,
-  zone, spot, and edge controls
-- `select` entities for mowing action, edge, zone, and spot scope
-- a `select` for selected-map preference mode and a `number` slider for the
-  selected-zone mowing height
+  zone, spot, edge, and maintenance-point controls
+- `select` entities for mowing action, edge, zone, spot, and maintenance-point
+  scope
+- preference controls that follow either the selected map's global record or
+  its selected custom zone
+- a **Go to Maintenance Point** button when the selected map contains a point
+  configured in the mower app
 - services for switching the active mower map and starting explicit zone, spot,
   or edge jobs
 - runtime live-track telemetry surfaced through sensors and map-camera attributes

@@ -131,6 +131,7 @@ class DreameLawnMowerVectorMap:
     paths: tuple[DreameLawnMowerVectorPath, ...] = field(default_factory=tuple)
     contours: tuple[DreameLawnMowerVectorContour, ...] = field(default_factory=tuple)
     clean_points: tuple[tuple[int, int], ...] = field(default_factory=tuple)
+    clean_point_ids: tuple[int, ...] = field(default_factory=tuple)
     cruise_points: tuple[tuple[int, int], ...] = field(default_factory=tuple)
     obstacles: tuple[Mapping[str, Any], ...] = field(default_factory=tuple)
     boundary: DreameLawnMowerVectorBoundary | None = None
@@ -477,6 +478,11 @@ def vector_map_to_details(
             ],
             "contour_count": len(parsed_map.contours),
             "clean_point_count": len(parsed_map.clean_points),
+            "clean_point_ids": list(parsed_map.clean_point_ids),
+            "clean_points": [
+                {"point_id": point_id, "label": f"Maintenance Point #{point_id}"}
+                for point_id in parsed_map.clean_point_ids
+            ],
             "cruise_point_count": len(parsed_map.cruise_points),
             "mow_path_count": len(parsed_map.mow_paths),
             "mow_path_segment_count": sum(
@@ -516,6 +522,11 @@ def vector_map_to_details(
         "contour_count": len(vector_map.contours),
         "contour_ids": contour_ids,
         "clean_point_count": len(vector_map.clean_points),
+        "clean_point_ids": list(vector_map.clean_point_ids),
+        "clean_points": [
+            {"point_id": point_id, "label": f"Maintenance Point #{point_id}"}
+            for point_id in vector_map.clean_point_ids
+        ],
         "cruise_point_count": len(vector_map.cruise_points),
         "mow_path_count": len(vector_map.mow_paths),
         "mow_path_segment_count": mow_path_segment_count,
@@ -587,13 +598,15 @@ def _parse_vector_map_json(value: str) -> DreameLawnMowerVectorMap:
             y2=int(boundary_data["y2"]),
         )
 
+    clean_point_entries = _parse_identified_point_collection(data.get("cleanPoints"))
     return DreameLawnMowerVectorMap(
         zones=_parse_zone_collection(data.get("mowingAreas")),
         forbidden_areas=_parse_zone_collection(data.get("forbiddenAreas")),
         spot_areas=_parse_zone_collection(data.get("spotAreas")),
         paths=_parse_path_collection(data.get("paths")),
         contours=_parse_contour_collection(data.get("contours")),
-        clean_points=_parse_point_collection(data.get("cleanPoints")),
+        clean_points=tuple(point for _, point in clean_point_entries),
+        clean_point_ids=tuple(point_id for point_id, _ in clean_point_entries),
         cruise_points=_parse_point_collection(data.get("cruisePoints")),
         obstacles=_parse_object_collection(data.get("obstacles")),
         boundary=boundary,
@@ -728,6 +741,19 @@ def _parse_point_collection(value: Any) -> tuple[tuple[int, int], ...]:
             point = _extract_single_point(point_data)
             if point is not None:
                 points.append(point)
+    return tuple(points)
+
+
+def _parse_identified_point_collection(
+    value: Any,
+) -> tuple[tuple[int, tuple[int, int]], ...]:
+    points: list[tuple[int, tuple[int, int]]] = []
+    for point_id, point_data in _parse_map_entries(value):
+        if not isinstance(point_data, Mapping):
+            continue
+        point = _extract_single_point(point_data)
+        if point is not None:
+            points.append((point_id, point))
     return tuple(points)
 
 
