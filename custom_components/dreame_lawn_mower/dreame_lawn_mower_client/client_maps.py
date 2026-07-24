@@ -659,12 +659,26 @@ class _DreameLawnMowerClientMapsMixin:
             or max_bytes <= 0
         ):
             raise DreameLawnMowerPointCloudError(
-                "Point-cloud maximum size must be a positive integer."
+                "Point-cloud maximum size must be a positive integer.",
+                code="point_cloud_invalid_request",
+                stage="request",
+                retryable=False,
+                public_message="The 3D map request contains an invalid size limit.",
             )
 
         deadline = time.monotonic() + timeout if deadline is None else deadline
         if time.monotonic() >= deadline:
-            raise DreameLawnMowerPointCloudError("Point-cloud generation timed out.")
+            raise DreameLawnMowerPointCloudError(
+                "Point-cloud generation timed out.",
+                code="point_cloud_timeout",
+                stage="generation",
+                public_message=(
+                    f"The mower did not finish the 3D map request within "
+                    f"{timeout:g} seconds."
+                ),
+                timeout_seconds=timeout,
+                retry_after_seconds=10,
+            )
         baseline_result = self._sync_call_point_cloud_action(
             {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
             operation="read the existing point-cloud object state",
@@ -686,7 +700,14 @@ class _DreameLawnMowerClientMapsMixin:
         cloud = self._sync_get_cloud_protocol(deadline=deadline)
         if not hasattr(cloud, "get_interim_file_url"):
             raise DreameLawnMowerPointCloudError(
-                "The configured cloud protocol cannot download interim files."
+                "The configured cloud protocol cannot download interim files.",
+                code="point_cloud_download_unsupported",
+                stage="download",
+                retryable=False,
+                public_message=(
+                    "This Home Assistant connection cannot download the mower's "
+                    "generated 3D map."
+                ),
             )
 
         observed_clear = baseline_name is None
@@ -765,10 +786,25 @@ class _DreameLawnMowerClientMapsMixin:
         if saw_unusable_point_cloud:
             raise DreameLawnMowerPointCloudError(
                 "The mower published a point cloud, but it could not be downloaded "
-                "and validated before the timeout."
+                "and validated before the timeout.",
+                code="point_cloud_download_invalid",
+                stage="download_validation",
+                public_message=(
+                    "The mower published a 3D map, but Home Assistant could not "
+                    f"download and validate it within {timeout:g} seconds."
+                ),
+                timeout_seconds=timeout,
+                retry_after_seconds=10,
             )
         raise DreameLawnMowerPointCloudError(
-            "The mower did not publish or refresh a point cloud before the timeout."
+            "The mower did not publish or refresh a point cloud before the timeout.",
+            code="point_cloud_not_published",
+            stage="generation",
+            public_message=(
+                f"The mower did not publish a fresh 3D map within {timeout:g} seconds."
+            ),
+            timeout_seconds=timeout,
+            retry_after_seconds=10,
         )
 
     def _sync_call_point_cloud_action(
@@ -782,7 +818,13 @@ class _DreameLawnMowerClientMapsMixin:
         """Call one point-cloud action within the shared generation deadline."""
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise DreameLawnMowerPointCloudError("Point-cloud generation timed out.")
+            raise DreameLawnMowerPointCloudError(
+                "Point-cloud generation timed out.",
+                code="point_cloud_timeout",
+                stage="mower_request",
+                public_message="The mower did not finish the 3D map request in time.",
+                retry_after_seconds=10,
+            )
         try:
             response = self._sync_call_app_action(
                 payload,
@@ -794,18 +836,47 @@ class _DreameLawnMowerClientMapsMixin:
         except DreameLawnMowerConnectionError as err:
             if time.monotonic() >= deadline:
                 raise DreameLawnMowerPointCloudError(
-                    "Point-cloud generation timed out."
+                    "Point-cloud generation timed out.",
+                    code="point_cloud_timeout",
+                    stage="mower_request",
+                    public_message=(
+                        "The mower did not finish the 3D map request in time."
+                    ),
+                    retry_after_seconds=10,
                 ) from err
             raise DreameLawnMowerPointCloudError(
-                f"The mower could not {operation}."
+                f"The mower could not {operation}.",
+                code="point_cloud_mower_request_failed",
+                stage="mower_request",
+                public_message=(
+                    "The mower rejected or could not complete the 3D map request."
+                ),
+                retry_after_seconds=10,
             ) from err
         if time.monotonic() >= deadline:
-            raise DreameLawnMowerPointCloudError("Point-cloud generation timed out.")
-        return _point_cloud_action_data(
-            response,
-            operation,
-            require_data=require_data,
-        )
+            raise DreameLawnMowerPointCloudError(
+                "Point-cloud generation timed out.",
+                code="point_cloud_timeout",
+                stage="mower_request",
+                public_message="The mower did not finish the 3D map request in time.",
+                retry_after_seconds=10,
+            )
+        try:
+            return _point_cloud_action_data(
+                response,
+                operation,
+                require_data=require_data,
+            )
+        except DreameLawnMowerPointCloudError as err:
+            raise DreameLawnMowerPointCloudError(
+                str(err),
+                code="point_cloud_mower_response_invalid",
+                stage="mower_response",
+                public_message=(
+                    "The mower returned an invalid response for the 3D map request."
+                ),
+                retry_after_seconds=10,
+            ) from err
 
     def _sync_get_point_cloud_download_url(
         self,

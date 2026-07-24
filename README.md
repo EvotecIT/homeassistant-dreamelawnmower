@@ -477,6 +477,9 @@ this attribute and offers an on-demand 3D viewer. It does not generate or
 download garden geometry during an ordinary dashboard render. Select the Hero
 layout's **3D** tab or press **Load 3D map** in another layout when you want to
 fetch it. Point-cloud access is currently restricted to Home Assistant admins.
+The mower has up to 45 seconds to publish a fresh file. A failed request returns
+a privacy-safe problem code and stage instead of exposing the vendor object name
+or signed download URL.
 
 Current map support now includes:
 
@@ -558,6 +561,8 @@ The report is sanitized by the integration and includes:
 - privacy-safe setup, foreground-refresh, and background-metadata timings,
   including bounded recent samples plus the latest and aggregate duration for
   each operation
+- on-demand `point_cloud_generation` timings and a stable failure code, stage,
+  retryability flag, and timeout when a 3D map request fails
 - current state and diagnostic attributes for every entity belonging to the
   config entry, including the Live Video camera's last failure stage and a
   bounded, privacy-safe summary of each TX video cloud stage
@@ -570,11 +575,13 @@ Do not enable broad debug logging unless a maintainer asks for a specific logger
 Cloud protocol debug output can contain data that needs additional review before
 it is posted publicly.
 
-Startup and refresh measurements are also written as log lines beginning with
-`Dreame mower performance`. The first setup and metadata hydration are logged at
-info level, while unusually slow foreground or background refreshes are logged
-as warnings. Each line reports only operation names and elapsed time; it does
-not contain credentials, mower identifiers, map data, or coordinates.
+Startup, refresh, and on-demand 3D map measurements are also written as log
+lines beginning with `Dreame mower performance`. The first setup, metadata
+hydration, and successful point-cloud generation are logged at info level.
+Unusually slow refreshes and failed point-cloud generations are logged as
+warnings. Each line reports only operation names, outcome codes, stages, and
+elapsed time; it does not contain credentials, mower identifiers, map data,
+object names, URLs, or coordinates.
 
 For startup reports, include both the `setup` and `metadata_refresh` entries
 from downloaded diagnostics. `setup` is the blocking Home Assistant load path.
@@ -582,6 +589,12 @@ from downloaded diagnostics. `setup` is the blocking Home Assistant load path.
 maintenance, and preference metadata that continues in the background after
 the mower entity can load. The per-phase timings show which vendor endpoint is
 slow without requiring broad protocol debug logging.
+
+For a 3D map report, retry once and download diagnostics before restarting Home
+Assistant. Include the visible `point_cloud_*` reference from the card. The
+matching recent event explains whether the mower failed to publish a fresh
+object, the object could not be downloaded and validated, another generation
+was already running, or the integration reloaded during the request.
 
 The staged cloud summaries retain field names, value types, safe status codes,
 required-field presence, and sanitized error messages. They do not retain raw

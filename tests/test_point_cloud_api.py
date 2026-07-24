@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from aiohttp import web
 from homeassistant.exceptions import Unauthorized
 
 from custom_components.dreame_lawn_mower.const import DOMAIN
+from custom_components.dreame_lawn_mower.diagnostic_events import (
+    DreameLawnMowerDiagnosticEventStore,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     DreameLawnMowerPointCloudError,
+)
+from custom_components.dreame_lawn_mower.performance import (
+    DreameLawnMowerPerformanceTracker,
 )
 from custom_components.dreame_lawn_mower.point_cloud_api import (
     POINT_CLOUD_API_DATA_KEY,
@@ -334,6 +340,50 @@ def test_point_cloud_api_purges_unloaded_entry() -> None:
     assert calls == 2
 
 
+def test_point_cloud_api_records_safe_failure_and_timing() -> None:
+    private_detail = "https://downloads.example.invalid/map?token=private"
+
+    async def download(**kwargs: Any) -> DreameLawnMowerPointCloudDownload:
+        raise DreameLawnMowerPointCloudError(
+            private_detail,
+            code="point_cloud_not_published",
+            stage="generation",
+            public_message=(
+                "The mower did not publish a fresh 3D map within 45 seconds."
+            ),
+            timeout_seconds=45,
+            retry_after_seconds=10,
+        )
+
+    coordinator = SimpleNamespace(
+        client=SimpleNamespace(async_download_app_map_point_cloud=download),
+        diagnostic_events=DreameLawnMowerDiagnosticEventStore(),
+        performance=DreameLawnMowerPerformanceTracker(),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    api = DreameLawnMowerPointCloudAPI(hass)
+
+    async def run() -> None:
+        with pytest.raises(DreameLawnMowerPointCloudError):
+            await api.async_get("entry-1", 0)
+
+    asyncio.run(run())
+
+    event = coordinator.diagnostic_events.as_list()[0]
+    assert event["code"] == "point_cloud_not_published"
+    assert event["source"] == "point_cloud_api"
+    assert event["context"]["stage"] == "generation"
+    assert event["context"]["timeout_seconds"] == 45
+    assert private_detail not in repr(event)
+    performance = coordinator.performance.as_dict()
+    assert performance["summary"]["point_cloud_generation"]["outcomes"] == {
+        "point_cloud_not_published": 1
+    }
+    assert performance["latest_by_operation"]["point_cloud_generation"][
+        "phases_ms"
+    ].keys() == {"generate_download_validate"}
+
+
 def test_point_cloud_api_registration_is_idempotent() -> None:
     registered: list[object] = []
     hass = SimpleNamespace(
@@ -420,6 +470,65 @@ def test_point_cloud_view_requires_admin() -> None:
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("map_index", ["invalid", "-1", "256"])
+def test_point_cloud_view_returns_structured_invalid_request(
+    map_index: str,
+) -> None:
+    view = DreameLawnMowerPointCloudView(SimpleNamespace())
+
+    response = asyncio.run(
+        view.get(_FakeRequest(is_admin=True), "entry-1", map_index)
+    )
+    payload = json.loads(response.text)
+
+    assert response.status == 400
+    assert response.content_type == "application/problem+json"
+    assert payload["code"] == "point_cloud_invalid_request"
+    assert payload["stage"] == "request"
+    assert payload["retryable"] is False
+    assert "map index" in payload["detail"]
+
+
+def test_point_cloud_view_returns_actionable_problem_details() -> None:
+    async def get(*args: Any, **kwargs: Any) -> None:
+        raise DreameLawnMowerPointCloudError(
+            "Internal point-cloud polling detail.",
+            code="point_cloud_not_published",
+            stage="generation",
+            public_message=(
+                "The mower did not publish a fresh 3D map within 45 seconds."
+            ),
+            timeout_seconds=45,
+            retry_after_seconds=10,
+        )
+
+    view = DreameLawnMowerPointCloudView(SimpleNamespace(async_get=get))
+    response = asyncio.run(
+        view.get(_FakeRequest(is_admin=True), "entry-1", "0")
+    )
+    payload = json.loads(response.text)
+
+    assert response.status == 504
+    assert response.content_type == "application/problem+json"
+    assert response.headers["Cache-Control"] == "private, no-store"
+    assert response.headers["Retry-After"] == "10"
+    assert response.headers["X-Dreame-Problem-Code"] == (
+        "point_cloud_not_published"
+    )
+    assert payload == {
+        "schema_version": 1,
+        "title": "The mower did not publish a fresh 3D map",
+        "status": 504,
+        "detail": "The mower did not publish a fresh 3D map within 45 seconds.",
+        "code": "point_cloud_not_published",
+        "stage": "generation",
+        "retryable": True,
+        "retry_after_seconds": 10,
+        "elapsed_ms": pytest.approx(0, abs=10),
+        "timeout_seconds": 45,
+    }
+
+
 def test_point_cloud_view_does_not_log_private_exception_details(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -432,13 +541,14 @@ def test_point_cloud_view_does_not_log_private_exception_details(
 
     view = DreameLawnMowerPointCloudView(SimpleNamespace(async_get=get))
 
-    async def run() -> None:
-        with pytest.raises(web.HTTPBadGateway):
-            await view.get(_FakeRequest(is_admin=True), "entry-1", "0")
-
     with caplog.at_level(logging.WARNING):
-        asyncio.run(run())
+        response = asyncio.run(
+            view.get(_FakeRequest(is_admin=True), "entry-1", "0")
+        )
 
-    assert "point-cloud generation failure" in caplog.text
+    assert response.status == 502
+    assert json.loads(response.text)["code"] == "point_cloud_failed"
+    assert "code=point_cloud_failed" in caplog.text
     assert private_detail not in caplog.text
     assert "do-not-log" not in caplog.text
+    assert private_detail not in response.text

@@ -847,8 +847,12 @@ def test_point_cloud_generation_deadline_includes_executor_queue_time(
         with pytest.raises(
             DreameLawnMowerPointCloudError,
             match="generation timed out",
-        ):
+        ) as captured:
             await client.async_download_app_map_point_cloud(timeout=0.01)
+        assert captured.value.code == "point_cloud_timeout"
+        assert captured.value.stage == "generation"
+        assert captured.value.timeout_seconds == 0.01
+        assert captured.value.retryable is True
         assert queued.is_set()
 
     asyncio.run(run())
@@ -1029,5 +1033,40 @@ def test_download_point_cloud_rejects_ambiguous_failed_object_poll(
     with pytest.raises(
         DreameLawnMowerPointCloudError,
         match="could not read the generated point-cloud object state",
-    ):
+    ) as captured:
         client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+    assert captured.value.code == "point_cloud_mower_response_invalid"
+    assert captured.value.stage == "mower_response"
+
+
+@pytest.mark.parametrize(
+    ("map_index", "timeout", "poll_interval", "download_timeout", "max_bytes"),
+    [
+        (-1, 5, 0.1, 10, 1024),
+        (0, 0, 0.1, 10, 1024),
+        (0, 5, 0, 10, 1024),
+        (0, 5, 0.1, 0, 1024),
+        (0, 5, 0.1, 10, 0),
+    ],
+)
+def test_download_point_cloud_classifies_invalid_request_values(
+    map_index: int,
+    timeout: float,
+    poll_interval: float,
+    download_timeout: float,
+    max_bytes: int,
+) -> None:
+    client = _client()
+
+    with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+        client._sync_download_app_map_point_cloud(
+            map_index,
+            timeout,
+            poll_interval,
+            download_timeout,
+            max_bytes,
+        )
+
+    assert captured.value.code == "point_cloud_invalid_request"
+    assert captured.value.stage == "request"
+    assert captured.value.retryable is False

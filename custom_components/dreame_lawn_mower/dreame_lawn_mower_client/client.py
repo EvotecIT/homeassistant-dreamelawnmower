@@ -1057,7 +1057,15 @@ class DreameLawnMowerClient(
                 )
         except TimeoutError as err:
             raise DreameLawnMowerPointCloudError(
-                "Point-cloud generation timed out."
+                "Point-cloud generation timed out.",
+                code="point_cloud_timeout",
+                stage="generation",
+                public_message=(
+                    f"The mower did not finish the 3D map request within "
+                    f"{timeout:g} seconds."
+                ),
+                timeout_seconds=timeout,
+                retry_after_seconds=10,
             ) from err
 
     async def async_get_cloud_properties(

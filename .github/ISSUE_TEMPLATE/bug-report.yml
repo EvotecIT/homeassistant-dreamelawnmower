@@ -43,6 +43,7 @@ body:
         - Device availability or state
         - Mowing controls or services
         - Maps or zones
+        - 3D point cloud
         - Schedules or calendar
         - Live video or camera
         - Sensors or diagnostics
