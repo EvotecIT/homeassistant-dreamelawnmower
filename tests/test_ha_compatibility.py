@@ -8,7 +8,27 @@ import pytest
 from homeassistant.const import Platform
 from PIL import Image, ImageFont
 
-from custom_components.dreame_lawn_mower import image as image_helpers
+from custom_components.dreame_lawn_mower import (
+    control_options,
+    runtime_cache,
+    sensor_diagnostics,
+    sensor_map_data,
+    sensor_map_entities,
+    sensor_operations,
+    sensor_runtime,
+)
+from custom_components.dreame_lawn_mower import (
+    coordinator as coordinator_module,
+)
+from custom_components.dreame_lawn_mower import (
+    image as image_helpers,
+)
+from custom_components.dreame_lawn_mower import (
+    sensor as sensor_module,
+)
+from custom_components.dreame_lawn_mower import (
+    task_status_probe as task_status_probe_module,
+)
 from custom_components.dreame_lawn_mower.binary_sensor import (
     DreameBinarySensorDescription,
     DreameLawnMowerAutomaticFirmwareUpdatesBinarySensor,
@@ -32,6 +52,9 @@ from custom_components.dreame_lawn_mower.button import (
     schedule_probe_payload,
 )
 from custom_components.dreame_lawn_mower.const import PLATFORMS
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    maintenance as maintenance_module,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import (
     DreameLawnMowerClient,
 )
@@ -82,6 +105,63 @@ from custom_components.dreame_lawn_mower.task_status_probe import (
 from custom_components.dreame_lawn_mower.update import (
     DreameLawnMowerFirmwareUpdateEntity,
 )
+
+
+def test_sensor_facade_preserves_split_implementation_exports() -> None:
+    """Keep historical direct imports from the sensor platform working."""
+    implementation_modules = (
+        sensor_diagnostics,
+        sensor_map_data,
+        sensor_map_entities,
+        sensor_operations,
+        sensor_runtime,
+    )
+
+    for implementation_module in implementation_modules:
+        owned_callables = {
+            name: value
+            for name, value in vars(implementation_module).items()
+            if callable(value)
+            and getattr(value, "__module__", None) == implementation_module.__name__
+        }
+        assert owned_callables
+        for name, value in owned_callables.items():
+            assert getattr(sensor_module, name) is value
+
+
+def test_sensor_facade_preserves_historical_domain_exports() -> None:
+    """Keep domain dependencies historically exposed by the platform importable."""
+    expected_exports = {
+        "MOWING_ACTION_EDGE": control_options.MOWING_ACTION_EDGE,
+        "MOWING_ACTION_SPOT": control_options.MOWING_ACTION_SPOT,
+        "MOWING_ACTION_ZONE": control_options.MOWING_ACTION_ZONE,
+        "contour_label": control_options.contour_label,
+        "current_contour_entries": control_options.current_contour_entries,
+        "current_spot_entries": control_options.current_spot_entries,
+        "current_zone_entries": control_options.current_zone_entries,
+        "map_entries": control_options.map_entries,
+        "mowing_action_label": control_options.mowing_action_label,
+        "selected_current_map_index": control_options.current_map_index,
+        "spot_label": control_options.spot_label,
+        "zone_label": control_options.zone_label,
+        "runtime_tracking_active": coordinator_module.runtime_tracking_active,
+        "MaintenanceItem": maintenance_module.MaintenanceItem,
+        "maintenance_item_status": maintenance_module.maintenance_item_status,
+        "maintenance_status_attributes": (
+            maintenance_module.maintenance_status_attributes
+        ),
+        "DreameLawnMowerRuntimeTelemetryCache": (
+            runtime_cache.DreameLawnMowerRuntimeTelemetryCache
+        ),
+        "task_status_probe_result_attributes": (
+            task_status_probe_module.task_status_probe_result_attributes
+        ),
+        "task_status_probe_state": task_status_probe_module.task_status_probe_state,
+    }
+
+    assert len(expected_exports) == 19
+    for name, value in expected_exports.items():
+        assert getattr(sensor_module, name) is value
 
 
 def test_sensor_description_exposes_ha_compat_fields() -> None:
