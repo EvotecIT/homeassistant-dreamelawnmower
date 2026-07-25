@@ -171,6 +171,7 @@ class DreameLawnMowerPointCloudAPI:
             key,
             coordinator,
             epoch=epoch,
+            refresh=refresh,
         )
         create_task = getattr(self._hass, "async_create_task", None)
         if callable(create_task):
@@ -223,6 +224,7 @@ class DreameLawnMowerPointCloudAPI:
         coordinator: DreameLawnMowerCoordinator,
         *,
         epoch: int,
+        refresh: bool,
     ) -> DreameLawnMowerPointCloudDownload:
         """Run and cache one generation independently of HTTP waiters."""
         performance = getattr(coordinator, "performance", None)
@@ -243,7 +245,10 @@ class DreameLawnMowerPointCloudAPI:
                     ),
                     retry_after_seconds=2,
                 )
-            allow_stored = _single_active_map_index(coordinator) == key[1]
+            allow_stored = (
+                not refresh
+                and _single_active_map_index(coordinator) == key[1]
+            )
             if cycle is not None:
                 download = await cycle.measure(
                     "generate_download_validate",
@@ -451,6 +456,10 @@ def _single_active_map_index(
         and isinstance(entry.get("idx"), int)
         and not isinstance(entry.get("idx"), bool)
         and entry["idx"] >= 0
+        and not (
+            entry.get("created") is False
+            and entry.get("available") is False
+        )
     }
     if len(indices) != 1:
         return None

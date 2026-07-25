@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import struct
 import threading
 import time
@@ -654,6 +655,21 @@ def test_announcement_probe_preserves_support_when_value_is_empty() -> None:
     )
 
     assert result == (True, None, None)
+
+
+def test_announcement_probe_treats_malformed_json_as_unsupported() -> None:
+    client = _client()
+
+    def get_properties(key: str, **kwargs: Any) -> None:
+        raise json.JSONDecodeError("Expecting value", "", 0)
+
+    result = client._sync_get_announced_point_cloud_object(
+        SimpleNamespace(get_properties=get_properties),
+        requested_after_ms=0,
+        deadline=time.monotonic() + 1,
+    )
+
+    assert result == (False, None, None)
 
 
 def test_announcement_probe_rejects_changed_object_from_before_request() -> None:

@@ -1046,7 +1046,7 @@ class _DreameLawnMowerClientMapsMixin:
                 timeout=probe_timeout,
                 deadline=probe_deadline,
             )
-        except DeviceException:
+        except (DeviceException, json.JSONDecodeError):
             return False, None, None
 
         for entry in self._normalize_cloud_property_entries(payload):

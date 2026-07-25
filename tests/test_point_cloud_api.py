@@ -157,6 +157,88 @@ def test_point_cloud_api_does_not_use_stored_object_with_multiple_maps() -> None
     assert options == [{"map_index": 0, "allow_stored": False}]
 
 
+def test_point_cloud_api_ignores_empty_trailing_map_slots() -> None:
+    options: list[dict[str, Any]] = []
+
+    async def download(**kwargs: Any) -> DreameLawnMowerPointCloudDownload:
+        options.append(kwargs)
+        return _download(kwargs["map_index"])
+
+    hass = SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry-1": SimpleNamespace(
+                    app_maps={
+                        "current_map_index": 0,
+                        "available_map_count": 1,
+                        "created_map_count": 1,
+                        "map_count": 2,
+                        "maps": [
+                            {
+                                "idx": 0,
+                                "current": True,
+                                "created": True,
+                                "available": True,
+                            },
+                            {
+                                "idx": 1,
+                                "current": False,
+                                "created": False,
+                                "available": False,
+                            },
+                        ],
+                    },
+                    selected_map_index=0,
+                    client=SimpleNamespace(
+                        async_download_app_map_point_cloud=download,
+                    ),
+                )
+            }
+        }
+    )
+    api = DreameLawnMowerPointCloudAPI(hass)
+
+    asyncio.run(api.async_get("entry-1", 0))
+
+    assert options == [{"map_index": 0, "allow_stored": True}]
+
+
+def test_point_cloud_api_refresh_forces_fresh_generation() -> None:
+    options: list[dict[str, Any]] = []
+
+    async def download(**kwargs: Any) -> DreameLawnMowerPointCloudDownload:
+        options.append(kwargs)
+        return _download(kwargs["map_index"])
+
+    hass = SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry-1": SimpleNamespace(
+                    app_maps={
+                        "current_map_index": 0,
+                        "maps": [
+                            {
+                                "idx": 0,
+                                "created": True,
+                                "available": True,
+                            }
+                        ],
+                    },
+                    selected_map_index=0,
+                    client=SimpleNamespace(
+                        async_download_app_map_point_cloud=download,
+                    ),
+                )
+            }
+        }
+    )
+    api = DreameLawnMowerPointCloudAPI(hass)
+
+    asyncio.run(api.async_get("entry-1", 0, refresh=True))
+
+    assert options == [{"map_index": 0, "allow_stored": False}]
+
+
 def test_point_cloud_api_evicts_downloads_when_ttl_expires() -> None:
     calls = 0
 
