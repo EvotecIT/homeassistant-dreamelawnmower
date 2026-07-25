@@ -498,6 +498,54 @@ def test_download_point_cloud_retries_announced_object_until_signable(
     assert result.metadata.points == 1
 
 
+def test_download_point_cloud_retries_malformed_signer_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    client._sync_call_app_action = lambda payload, **kwargs: {"r": 0}
+    now_ms = int(time.time() * 1000)
+    update_dates = iter([now_ms - 1_000, now_ms + 1_000])
+    signer_results: Any = iter(
+        [
+            json.JSONDecodeError("Expecting value", "", 0),
+            "https://downloads.example.invalid/object",
+        ]
+    )
+
+    def get_interim_file_url(name: str, **options: Any) -> str:
+        result = next(signer_results)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    cloud = SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {
+                "key": key,
+                "value": "private/generated-map.bin",
+                "updateDate": next(update_dates, now_ms + 1_000),
+            }
+        ],
+        get_interim_file_url=get_interim_file_url,
+    )
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert result.content == content
+    assert result.metadata.points == 1
+
+
 def test_download_point_cloud_does_not_fallback_from_stale_announcement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

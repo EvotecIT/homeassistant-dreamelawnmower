@@ -1107,11 +1107,22 @@ class _DreameLawnMowerClientMapsMixin:
         download_timeout: float,
         max_bytes: int,
     ) -> tuple[bytes, str, _PointCloudObjectIdentity]:
-        raw_url = self._sync_get_point_cloud_download_url(
-            cloud,
-            object_name,
-            deadline=deadline,
-        )
+        try:
+            raw_url = self._sync_get_point_cloud_download_url(
+                cloud,
+                object_name,
+                deadline=deadline,
+            )
+        except json.JSONDecodeError as err:
+            raise DreameLawnMowerPointCloudError(
+                "Point-cloud signer returned an invalid response.",
+                code="point_cloud_download_invalid",
+                stage="download",
+                public_message=(
+                    "The mower's generated 3D map is not ready to download."
+                ),
+                retry_after_seconds=2,
+            ) from err
         url = _point_cloud_download_url(raw_url)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
