@@ -1807,7 +1807,6 @@ def test_point_cloud_action_response_enforces_overall_deadline(
 
 
 def test_point_cloud_action_marks_dispatch_before_waiting_for_response(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     protocol_type = _internal_protocol_module.DreameMowerDreameHomeCloudProtocol
     cloud = object.__new__(protocol_type)
@@ -1819,7 +1818,6 @@ def test_point_cloud_action_marks_dispatch_before_waiting_for_response(
     cloud._id = 1
     cloud._key_expire = None
     cloud._secondary_key = None
-    cloud._session = SimpleNamespace()
     cloud._connected = True
     cloud._fail_count = 0
     cloud._ti = ""
@@ -1833,20 +1831,8 @@ def test_point_cloud_action_marks_dispatch_before_waiting_for_response(
         ),
     )
 
-    def post_response(
-        session: Any,
-        url: str,
-        request_options: dict[str, Any],
-        *,
-        deadline: float | None,
-    ) -> Any:
-        events.append("post")
-        return response
-
-    monkeypatch.setattr(
-        _internal_protocol_module,
-        "_post_cloud_response",
-        post_response,
+    cloud._session = SimpleNamespace(
+        post=lambda url, **request_options: events.append("post") or response,
     )
 
     result = cloud.call_app_action(
@@ -1857,6 +1843,53 @@ def test_point_cloud_action_marks_dispatch_before_waiting_for_response(
 
     assert events == ["dispatch", "post"]
     assert result == {"out": [{"value": {"r": 0}}]}
+
+
+def test_point_cloud_dispatch_waits_for_network_worker_slot() -> None:
+    operation_slots = _internal_deadline_module._operation_slots
+    acquired_slots = 0
+    caller_started = threading.Event()
+    events: list[str] = []
+    result: list[Any] = []
+    response = SimpleNamespace(status_code=200)
+    session = SimpleNamespace(
+        post=lambda url, **request_options: events.append("post") or response,
+    )
+    def post_with_deadline() -> None:
+        caller_started.set()
+        result.append(
+            _internal_protocol_module._post_cloud_response(
+                session,
+                "https://cloud.example.invalid/action",
+                {"timeout": 1, "stream": True},
+                deadline=time.monotonic() + 1,
+                on_dispatch=lambda: events.append("dispatch"),
+            )
+        )
+
+    caller = threading.Thread(
+        target=post_with_deadline,
+    )
+
+    try:
+        for _ in range(_internal_deadline_module._MAX_ABANDONED_OPERATIONS):
+            assert operation_slots.acquire(timeout=1)
+            acquired_slots += 1
+        caller.start()
+        assert caller_started.wait(timeout=1)
+        time.sleep(0.05)
+        assert events == []
+
+        operation_slots.release()
+        acquired_slots -= 1
+        caller.join(timeout=1)
+    finally:
+        for _ in range(acquired_slots):
+            operation_slots.release()
+
+    assert not caller.is_alive()
+    assert events == ["dispatch", "post"]
+    assert result == [response]
 
 
 def test_point_cloud_401_reauthentication_uses_remaining_deadline(

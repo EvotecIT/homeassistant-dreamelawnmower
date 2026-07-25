@@ -118,13 +118,19 @@ def _post_cloud_response(
     request_options: dict[str, Any],
     *,
     deadline: float | None,
+    on_dispatch: Callable[[], None] | None = None,
 ) -> Any:
     """Post while bounding the response-header phase by an absolute deadline."""
-    if deadline is None:
+    def post() -> Any:
+        if on_dispatch is not None:
+            on_dispatch()
         return session.post(url, **request_options)
+
+    if deadline is None:
+        return post()
     try:
         return run_with_deadline(
-            lambda: session.post(url, **request_options),
+            post,
             deadline=deadline,
         )
     except DeadlineExceededError as err:
@@ -1169,13 +1175,14 @@ class DreameMowerDreameHomeCloudProtocol:
                         )
                     request_options["timeout"] = min(timeout, remaining)
                     request_options["stream"] = True
+                post_options: dict[str, Any] = {"deadline": deadline}
                 if on_dispatch is not None:
-                    on_dispatch()
+                    post_options["on_dispatch"] = on_dispatch
                 response = _post_cloud_response(
                     self._session,
                     url,
                     request_options,
-                    deadline=deadline,
+                    **post_options,
                 )
                 if deadline is not None:
                     try:
