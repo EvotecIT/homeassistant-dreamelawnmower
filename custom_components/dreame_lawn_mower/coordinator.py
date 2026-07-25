@@ -147,6 +147,7 @@ class DreameLawnMowerCoordinator(
         super().__init__(
             hass,
             logger=_LOGGER,
+            config_entry=entry,
             name=DOMAIN,
             update_interval=timedelta(
                 seconds=entry.options.get(

@@ -7,9 +7,21 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+
 import custom_components.dreame_lawn_mower as integration_module
+import custom_components.dreame_lawn_mower.coordinator as coordinator_module
 from custom_components.dreame_lawn_mower import async_setup_entry
-from custom_components.dreame_lawn_mower.const import DOMAIN
+from custom_components.dreame_lawn_mower.const import (
+    CONF_ACCOUNT_TYPE,
+    CONF_COUNTRY,
+    CONF_DID,
+    CONF_MODEL,
+    CONF_NAME,
+    CONF_PASSWORD,
+    CONF_USERNAME,
+    DOMAIN,
+)
 from custom_components.dreame_lawn_mower.coordinator import (
     METADATA_REFRESH_CONCURRENCY,
     DreameLawnMowerCoordinator,
@@ -17,6 +29,42 @@ from custom_components.dreame_lawn_mower.coordinator import (
 from custom_components.dreame_lawn_mower.performance import (
     DreameLawnMowerPerformanceTracker,
 )
+
+
+def test_coordinator_registers_its_config_entry_with_home_assistant() -> None:
+    entry = SimpleNamespace(
+        data={
+            CONF_DID: "device-id",
+            CONF_NAME: "Test mower",
+            CONF_MODEL: "dreame.mower.test",
+            CONF_ACCOUNT_TYPE: "dreame",
+            CONF_COUNTRY: "eu",
+            CONF_USERNAME: "user@example.invalid",
+            CONF_PASSWORD: "secret",
+        },
+        options={},
+    )
+    client = Mock()
+
+    with (
+        patch.object(
+            coordinator_module,
+            "DreameLawnMowerClient",
+            return_value=client,
+        ),
+        patch.object(
+            DataUpdateCoordinator,
+            "__init__",
+            return_value=None,
+        ) as coordinator_init,
+    ):
+        coordinator = DreameLawnMowerCoordinator(Mock(), entry)
+
+    assert coordinator.entry is entry
+    assert coordinator_init.call_args.kwargs["config_entry"] is entry
+    client.set_update_callback.assert_called_once_with(
+        coordinator._handle_client_update
+    )
 
 
 def test_first_refresh_does_not_wait_for_optional_metadata() -> None:
