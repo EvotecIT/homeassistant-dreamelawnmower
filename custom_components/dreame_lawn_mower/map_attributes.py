@@ -50,6 +50,7 @@ def map_camera_attributes(
     image_cached: bool,
     refreshed_at: datetime | None,
     last_error: str | None,
+    runtime_status_blob: Any = None,
 ) -> dict[str, Any]:
     """Return Home Assistant attributes for a cached map camera view."""
     summary = map_summary_to_dict(None if view is None else view.summary)
@@ -127,4 +128,42 @@ def map_camera_attributes(
     )
     if summary is not None and attributes.get("map_id") is None:
         attributes["map_id"] = summary["map_id"]
+    runtime_pose_x = getattr(
+        runtime_status_blob,
+        "candidate_runtime_pose_x",
+        None,
+    )
+    runtime_pose_y = getattr(
+        runtime_status_blob,
+        "candidate_runtime_pose_y",
+        None,
+    )
+    if runtime_pose_x is not None and runtime_pose_y is not None:
+        runtime_heading = getattr(
+            runtime_status_blob,
+            "candidate_runtime_heading_deg",
+            None,
+        )
+        runtime_region = getattr(
+            runtime_status_blob,
+            "candidate_runtime_region_id",
+            None,
+        )
+        runtime_updated_at = getattr(runtime_status_blob, "received_at", None)
+        attributes.update(
+            {
+                "runtime_pose_x": runtime_pose_x,
+                "runtime_pose_y": runtime_pose_y,
+                "runtime_heading_deg": runtime_heading,
+                "runtime_region_id": runtime_region,
+                "runtime_position_updated_at": runtime_updated_at,
+                "position_x": runtime_pose_x,
+                "position_y": runtime_pose_y,
+                "position_heading": runtime_heading,
+                "position_segment": runtime_region,
+                "position_updated_at": runtime_updated_at,
+            }
+        )
+        if runtime_updated_at != details.get("runtime_position_updated_at"):
+            attributes["runtime_position_valid"] = None
     return attributes
