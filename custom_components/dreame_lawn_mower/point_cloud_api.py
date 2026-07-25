@@ -230,7 +230,10 @@ class DreameLawnMowerPointCloudAPI:
         except Exception:  # noqa: BLE001 - the refresh starts independently.
             return None
         finally:
-            if self._inflight.get(key) is inflight:
+            if (
+                inflight.task.done()
+                and self._inflight.get(key) is inflight
+            ):
                 self._inflight.pop(key, None)
 
     async def _async_discard_stale_generation(

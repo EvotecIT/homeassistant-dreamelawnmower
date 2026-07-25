@@ -349,7 +349,7 @@ def test_download_point_cloud_uses_fresh_lidar_announcement(
     assert result.metadata.points == 1
 
 
-def test_download_point_cloud_rejects_announcement_from_during_action(
+def test_download_point_cloud_uses_action_dispatch_as_freshness_boundary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _client()
@@ -367,6 +367,8 @@ def test_download_point_cloud_rejects_announcement_from_during_action(
     def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         actions.append(payload)
         clock[0] = 2.0
+        kwargs["on_dispatch"]()
+        clock[0] = 3.0
         return {"r": 0}
 
     def get_properties(key: str, **kwargs: Any) -> list[dict[str, Any]]:
@@ -783,9 +785,11 @@ def test_download_point_cloud_preserves_time_for_later_announcement_reprobe(
         operation: str,
         deadline: float,
         require_data: bool,
+        on_dispatch: Any = None,
     ) -> Any:
         action_calls.append(payload)
         if payload.get("m") == "a":
+            on_dispatch()
             return None
         if len(action_calls) == 1:
             return {"name": ["private/stale-map.pcd"]}
@@ -849,9 +853,11 @@ def test_download_point_cloud_eventually_allows_slow_legacy_fallback(
         operation: str,
         deadline: float,
         require_data: bool,
+        on_dispatch: Any = None,
     ) -> Any:
         action_calls.append(payload)
         if payload.get("m") == "a":
+            on_dispatch()
             return None
         if len(action_calls) == 1:
             return {"name": ["private/stale-map.pcd"]}
@@ -932,6 +938,7 @@ def test_download_point_cloud_bounds_inconclusive_legacy_baseline(
         operation: str,
         deadline: float,
         require_data: bool,
+        on_dispatch: Any = None,
     ) -> Any:
         action_calls.append(payload)
         if payload.get("m") == "g":
@@ -941,6 +948,7 @@ def test_download_point_cloud_bounds_inconclusive_legacy_baseline(
                 "bounded baseline timed out",
                 code="point_cloud_timeout",
             )
+        on_dispatch()
         return None
 
     cloud = SimpleNamespace(
@@ -1011,8 +1019,10 @@ def test_download_point_cloud_does_not_treat_timed_out_baseline_as_clear(
         operation: str,
         deadline: float,
         require_data: bool,
+        on_dispatch: Any = None,
     ) -> Any:
         if payload.get("m") == "a":
+            on_dispatch()
             return None
         result = next(legacy_results)
         if isinstance(result, DreameLawnMowerPointCloudError):
@@ -1794,6 +1804,59 @@ def test_point_cloud_action_response_enforces_overall_deadline(
         )
 
     assert applied_timeouts == pytest.approx([0.8])
+
+
+def test_point_cloud_action_marks_dispatch_before_waiting_for_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    protocol_type = _internal_protocol_module.DreameMowerDreameHomeCloudProtocol
+    cloud = object.__new__(protocol_type)
+    cloud._request_lock = threading.RLock()
+    cloud._strings = [f"value-{index}" for index in range(57)]
+    cloud._country = "eu"
+    cloud._host = "host.example.invalid"
+    cloud._did = "device-1"
+    cloud._id = 1
+    cloud._key_expire = None
+    cloud._secondary_key = None
+    cloud._session = SimpleNamespace()
+    cloud._connected = True
+    cloud._fail_count = 0
+    cloud._ti = ""
+    cloud._key = "key"
+    events: list[str] = []
+    response = SimpleNamespace(
+        status_code=200,
+        text=(
+            '{"code":0,"data":{"result":{"out":'
+            '[{"value":{"r":0}}]}}}'
+        ),
+    )
+
+    def post_response(
+        session: Any,
+        url: str,
+        request_options: dict[str, Any],
+        *,
+        deadline: float | None,
+    ) -> Any:
+        events.append("post")
+        return response
+
+    monkeypatch.setattr(
+        _internal_protocol_module,
+        "_post_cloud_response",
+        post_response,
+    )
+
+    result = cloud.call_app_action(
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+        retry_count=0,
+        on_dispatch=lambda: events.append("dispatch"),
+    )
+
+    assert events == ["dispatch", "post"]
+    assert result == {"out": [{"value": {"r": 0}}]}
 
 
 def test_point_cloud_401_reauthentication_uses_remaining_deadline(

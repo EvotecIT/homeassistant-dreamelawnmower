@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -832,13 +832,24 @@ class _DreameLawnMowerClientMapsMixin:
             except (DeviceException, DreameLawnMowerPointCloudError):
                 baseline_identity = None
 
+        generation_requested_at_ms: int | None = None
+
+        def mark_generation_dispatched() -> None:
+            nonlocal generation_requested_at_ms
+            if generation_requested_at_ms is None:
+                generation_requested_at_ms = int(time.time() * 1000)
+
         self._sync_call_point_cloud_action(
             {"m": "a", "p": 0, "o": 10, "d": {"idx": map_index}},
             operation="start point-cloud generation",
             deadline=deadline,
             require_data=False,
+            on_dispatch=mark_generation_dispatched,
         )
-        generation_requested_at_ms = int(time.time() * 1000)
+        if generation_requested_at_ms is None:
+            # Preserve compatibility with alternate/mock cloud transports that
+            # do not expose the dispatch hook.
+            mark_generation_dispatched()
 
         observed_clear = baseline_known and baseline_name is None
         saw_unusable_point_cloud = False
@@ -1257,6 +1268,7 @@ class _DreameLawnMowerClientMapsMixin:
         operation: str,
         deadline: float,
         require_data: bool,
+        on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
         """Call one point-cloud action within the shared generation deadline."""
         remaining = deadline - time.monotonic()
@@ -1269,13 +1281,15 @@ class _DreameLawnMowerClientMapsMixin:
                 retry_after_seconds=10,
             )
         try:
-            response = self._sync_call_app_action(
-                payload,
-                retry_count=0,
-                timeout=remaining,
-                deadline=deadline,
-                redact_response=True,
-            )
+            action_options: dict[str, Any] = {
+                "retry_count": 0,
+                "timeout": remaining,
+                "deadline": deadline,
+                "redact_response": True,
+            }
+            if on_dispatch is not None:
+                action_options["on_dispatch"] = on_dispatch
+            response = self._sync_call_app_action(payload, **action_options)
         except DreameLawnMowerConnectionError as err:
             if time.monotonic() >= deadline:
                 raise DreameLawnMowerPointCloudError(
@@ -1396,6 +1410,7 @@ class _DreameLawnMowerClientMapsMixin:
         timeout: float | None = None,
         deadline: float | None = None,
         redact_response: bool = False,
+        on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
         cloud = (
             self._sync_get_cloud_protocol(deadline=deadline)
@@ -1440,6 +1455,8 @@ class _DreameLawnMowerClientMapsMixin:
                 request_options["deadline"] = deadline
             if redact_response:
                 request_options["redact_response"] = True
+            if on_dispatch is not None:
+                request_options["on_dispatch"] = on_dispatch
             if hasattr(cloud, "call_app_action"):
                 response = cloud.call_app_action(
                     payload,

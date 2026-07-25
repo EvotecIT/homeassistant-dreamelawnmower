@@ -413,6 +413,64 @@ def test_point_cloud_api_refresh_joins_stored_fallback_generation() -> None:
     assert options == [{"map_index": 0, "allow_stored": True}]
 
 
+def test_point_cloud_api_cancelled_refresh_keeps_stored_work_inflight() -> None:
+    calls = 0
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def download(**kwargs: Any) -> DreameLawnMowerPointCloudDownload:
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+        return _download(source="generated")
+
+    hass = SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry-1": SimpleNamespace(
+                    app_maps={
+                        "current_map_index": 0,
+                        "maps": [{"idx": 0, "created": True}],
+                    },
+                    selected_map_index=0,
+                    client=SimpleNamespace(
+                        async_download_app_map_point_cloud=download,
+                    ),
+                )
+            }
+        }
+    )
+    api = DreameLawnMowerPointCloudAPI(hass)
+
+    async def run() -> None:
+        first = asyncio.create_task(api.async_get("entry-1", 0))
+        await started.wait()
+        cancelled_refresh = asyncio.create_task(
+            api.async_get("entry-1", 0, refresh=True)
+        )
+        await asyncio.sleep(0)
+        cancelled_refresh.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled_refresh
+
+        replacement = asyncio.create_task(
+            api.async_get("entry-1", 0, refresh=True)
+        )
+        await asyncio.sleep(0)
+        assert calls == 1
+        release.set()
+        first_result, replacement_result = await asyncio.gather(
+            first,
+            replacement,
+        )
+        assert replacement_result is first_result
+
+    asyncio.run(run())
+
+    assert calls == 1
+
+
 def test_point_cloud_api_keeps_generation_alive_after_waiter_cancellation() -> None:
     calls = 0
     started = asyncio.Event()

@@ -9,6 +9,7 @@ import hmac
 import requests
 import zlib
 import queue
+from collections.abc import Callable
 from threading import RLock, Thread, Timer
 from time import sleep
 import time
@@ -201,6 +202,7 @@ class DreameMowerDreameHomeCloudProtocol:
         *,
         deadline: float | None = None,
         redact_response: bool = False,
+        on_dispatch: Callable[[], None] | None = None,
     ):
         return self.request(
             f"{self.get_api_url()}/{url}",
@@ -210,6 +212,7 @@ class DreameMowerDreameHomeCloudProtocol:
             timeout,
             deadline=deadline,
             redact_response=redact_response,
+            on_dispatch=on_dispatch,
         )
 
     def get_api_url(self) -> str:
@@ -830,6 +833,7 @@ class DreameMowerDreameHomeCloudProtocol:
         *,
         deadline: float | None = None,
         redact_response: bool = False,
+        on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
         with self._operation_lock():
             return self._send_unlocked(
@@ -839,6 +843,7 @@ class DreameMowerDreameHomeCloudProtocol:
                 timeout,
                 deadline=deadline,
                 redact_response=redact_response,
+                on_dispatch=on_dispatch,
             )
 
     def _send_unlocked(
@@ -850,6 +855,7 @@ class DreameMowerDreameHomeCloudProtocol:
         *,
         deadline: float | None = None,
         redact_response: bool = False,
+        on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
         host = ""
         if self._host and len(self._host):
@@ -871,6 +877,7 @@ class DreameMowerDreameHomeCloudProtocol:
             timeout,
             deadline=deadline,
             redact_response=redact_response,
+            on_dispatch=on_dispatch,
         )
         logged_response = _app_action_response_log_value(
             api_response,
@@ -928,6 +935,7 @@ class DreameMowerDreameHomeCloudProtocol:
         *,
         deadline: float | None = None,
         redact_response: bool = False,
+        on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
         """Call the mobile-app action bridge used by mower plugin commands."""
         return self.send(
@@ -942,6 +950,7 @@ class DreameMowerDreameHomeCloudProtocol:
             timeout=timeout,
             deadline=deadline,
             redact_response=redact_response,
+            on_dispatch=on_dispatch,
         )
 
     def get_file(self, url: str, retry_count: int = 4) -> Any:
@@ -1079,6 +1088,7 @@ class DreameMowerDreameHomeCloudProtocol:
         *,
         deadline: float | None = None,
         redact_response: bool = False,
+        on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
         with self._operation_lock():
             return self._request_unlocked(
@@ -1088,6 +1098,7 @@ class DreameMowerDreameHomeCloudProtocol:
                 timeout,
                 deadline=deadline,
                 redact_response=redact_response,
+                on_dispatch=on_dispatch,
             )
 
     def _request_unlocked(
@@ -1099,6 +1110,7 @@ class DreameMowerDreameHomeCloudProtocol:
         *,
         deadline: float | None = None,
         redact_response: bool = False,
+        on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
         _LOGGER.debug(
             "DreameMowerDreameHomeCloudProtocol.request %s %s",
@@ -1157,6 +1169,8 @@ class DreameMowerDreameHomeCloudProtocol:
                         )
                     request_options["timeout"] = min(timeout, remaining)
                     request_options["stream"] = True
+                if on_dispatch is not None:
+                    on_dispatch()
                 response = _post_cloud_response(
                     self._session,
                     url,
