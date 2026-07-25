@@ -628,16 +628,71 @@ def test_download_point_cloud_caps_optional_announcement_probe(
 
     result = client._sync_download_app_map_point_cloud(0, 45, 0.1, 10, 1024)
 
-    assert len(property_options) == 1
+    assert len(property_options) == 2
     assert property_options[0]["retry_count"] == 0
     assert 1.9 < property_options[0]["timeout"] <= 2.0
     assert property_options[0]["deadline"] > time.monotonic()
+    assert property_options[1]["retry_count"] == 0
+    assert 0 < property_options[1]["timeout"] <= 0.5
     assert calls == [
         {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
         {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
         {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
     ]
     assert result.content == content
+
+
+def test_download_point_cloud_recovers_from_transient_announcement_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    actions: list[dict[str, Any]] = []
+    client._sync_call_app_action = lambda payload, **kwargs: (
+        actions.append(payload)
+        or (
+            {"r": 0, "d": {"name": ["private/stale-map.pcd"]}}
+            if payload.get("m") == "g"
+            else {"r": 0}
+        )
+    )
+    now_ms = int(time.time() * 1000)
+    property_results = iter(
+        [
+            None,
+            [
+                {
+                    "key": "99.20",
+                    "value": "private/generated-map.bin",
+                    "updateDate": now_ms + 1_000,
+                }
+            ],
+        ]
+    )
+    cloud = SimpleNamespace(
+        get_properties=lambda key, **options: next(property_results),
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert actions == [
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+    ]
+    assert result.content == content
+    assert result.metadata.points == 1
 
 
 @pytest.mark.parametrize(

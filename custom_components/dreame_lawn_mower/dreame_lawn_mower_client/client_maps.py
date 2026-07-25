@@ -102,6 +102,8 @@ _POINT_CLOUD_ANNOUNCEMENT_PROPERTY_KEY = "99.20"
 _POINT_CLOUD_ANNOUNCEMENT_CLOCK_SKEW_MS = 5_000
 _POINT_CLOUD_ANNOUNCEMENT_PROBE_TIMEOUT_SECONDS = 2.0
 _POINT_CLOUD_ANNOUNCEMENT_INITIAL_BUDGET_FRACTION = 0.05
+_POINT_CLOUD_ANNOUNCEMENT_REPROBE_ATTEMPTS = 3
+_POINT_CLOUD_ANNOUNCEMENT_REPROBE_TIMEOUT_SECONDS = 0.5
 _POINT_CLOUD_ANNOUNCEMENT_RETRY_MAX_SECONDS = 8.0
 _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS = 5.0
 _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS = (
@@ -820,6 +822,7 @@ class _DreameLawnMowerClientMapsMixin:
         rejected_object_names: set[str] = set()
         object_download_attempts: dict[str, int] = {}
         announcement_download_attempts: dict[tuple[str, int], int] = {}
+        announcement_reprobe_attempts = 0
         while time.monotonic() < deadline:
             announced_name = None
             announced_identity = None
@@ -832,6 +835,34 @@ class _DreameLawnMowerClientMapsMixin:
                         deadline=deadline,
                     )
                 )
+            elif (
+                announcement_reprobe_attempts
+                < _POINT_CLOUD_ANNOUNCEMENT_REPROBE_ATTEMPTS
+            ):
+                # A transient cloud timeout during the preflight probe must not
+                # permanently select the legacy OBJ route. Keep that fallback
+                # active while briefly re-probing the dedicated announcement
+                # property after generation has started.
+                announcement_reprobe_attempts += 1
+                remaining = max(0.0, deadline - time.monotonic())
+                reprobe_budget = min(
+                    _POINT_CLOUD_ANNOUNCEMENT_REPROBE_TIMEOUT_SECONDS,
+                    remaining,
+                )
+                announcement_supported, announced_name, announced_identity = (
+                    self._sync_get_announced_point_cloud_object(
+                        cloud,
+                        requested_after_ms=generation_requested_at_ms,
+                        baseline=announcement_baseline,
+                        fallback_reserve_seconds=max(
+                            0.0,
+                            remaining - reprobe_budget,
+                        ),
+                        deadline=deadline,
+                    )
+                )
+                if announcement_supported:
+                    use_announcement_path = True
             if announced_name is not None:
                 attempt_key = announced_identity or (announced_name, 0)
                 attempts = announcement_download_attempts.get(attempt_key, 0)
