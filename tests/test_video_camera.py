@@ -1422,7 +1422,7 @@ def test_video_camera_creates_home_assistant_stream_from_live_source() -> None:
     assert call.kwargs["stream_label"] == "camera.dreame_live_video"
 
 
-def test_video_camera_verifies_the_adopted_playback_session_through_ha() -> None:
+def test_video_camera_verifies_hls_without_turbojpeg() -> None:
     async def _run() -> tuple[object | None, dict[str, object], bytes | None]:
         entity = _uninitialized_entity()
         entity._create_stream_lock = None
@@ -1446,13 +1446,27 @@ def test_video_camera_verifies_the_adopted_playback_session_through_ha() -> None
                 return object()
 
         class _Stream:
+            def __init__(self) -> None:
+                self.output = SimpleNamespace(
+                    last_segment=SimpleNamespace(
+                        complete=True,
+                        init=b"ftyp",
+                        data_size=1024,
+                    )
+                )
+
             def set_update_callback(self, _callback: object) -> None:
                 return None
 
-            async def async_get_image(self, **kwargs: object) -> bytes:
-                assert kwargs == {"wait_for_next_keyframe": True}
-                assert entity._session is session
-                return b"\xff\xd8playback-frame\xff\xd9"
+            def add_provider(self, provider: str) -> object:
+                assert provider == video_camera_module.HLS_PROVIDER
+                return self.output
+
+            async def start(self) -> None:
+                return None
+
+            async def async_get_image(self, **kwargs: object) -> None:
+                raise AssertionError("HLS verification must not start JPEG conversion")
 
         entity.hass = SimpleNamespace(
             data={video_camera_module.DATA_CAMERA_PREFS: _Preferences()}
@@ -1465,7 +1479,7 @@ def test_video_camera_verifies_the_adopted_playback_session_through_ha() -> None
 
     assert result is not None
     assert health["playback_session_verified"] is True
-    assert image == b"\xff\xd8playback-frame\xff\xd9"
+    assert image is None
 
 
 def test_video_camera_rejects_an_unreadable_adopted_playback_session() -> None:
@@ -1503,7 +1517,15 @@ def test_video_camera_rejects_an_unreadable_adopted_playback_session() -> None:
             def set_update_callback(self, _callback: object) -> None:
                 return None
 
-            async def async_get_image(self, **_kwargs: object) -> None:
+            def add_provider(self, provider: str) -> object:
+                assert provider == video_camera_module.HLS_PROVIDER
+
+                async def _recv() -> bool:
+                    return False
+
+                return SimpleNamespace(last_segment=None, recv=_recv)
+
+            async def start(self) -> None:
                 return None
 
         entity.hass = SimpleNamespace(
@@ -1517,7 +1539,59 @@ def test_video_camera_rejects_an_unreadable_adopted_playback_session() -> None:
 
     assert result is None
     assert stops == 1
-    assert error is not None and "did not decode a frame" in error
+    assert error is not None and "ended before producing HLS media" in error
+
+
+def test_video_camera_hls_verification_does_not_start_optional_jpeg() -> None:
+    async def _run() -> tuple[bool, bytes | None, int]:
+        entity = _uninitialized_entity()
+        session = object()
+        stream = object()
+        prior_image = b"\xff\xd8prior-frame\xff\xd9"
+        entity.stream = stream
+        entity._session = session
+        entity._unverified_playback_session = session
+        entity._last_image = prior_image
+        entity._last_stream_health = {"flv_header_present": True}
+        cleanup_calls = 0
+
+        class _Output:
+            last_segment = SimpleNamespace(
+                complete=True,
+                init=b"ftyp",
+                data_size=1024,
+            )
+
+        class _Stream:
+            def add_provider(self, provider: str) -> object:
+                assert provider == video_camera_module.HLS_PROVIDER
+                return _Output()
+
+            async def start(self) -> None:
+                return None
+
+            async def async_get_image(self, **kwargs: object) -> bytes:
+                raise AssertionError("HLS verification must not start JPEG conversion")
+
+        actual_stream = _Stream()
+        entity.stream = actual_stream
+
+        async def _cleanup(_session: object) -> None:
+            nonlocal cleanup_calls
+            cleanup_calls += 1
+
+        entity._async_cleanup_failed_stream_setup = _cleanup
+        verified = await entity._async_verify_playback_stream(
+            actual_stream,
+            session,
+        )
+        return verified, entity._last_image, cleanup_calls
+
+    verified, image, cleanup_calls = asyncio.run(_run())
+
+    assert verified is True
+    assert image == b"\xff\xd8prior-frame\xff\xd9"
+    assert cleanup_calls == 0
 
 
 def test_video_camera_replaces_cached_stream_after_worker_exit() -> None:
@@ -2407,7 +2481,7 @@ def test_video_camera_disables_video_when_enable_attempt_raises() -> None:
     assert asyncio.run(_run()) == (None, [True, False], None, VIDEO_TRANSPORT_CLOUD)
 
 
-def test_video_camera_caches_provisioning_only_after_ha_decodes_frame() -> None:
+def test_video_camera_caches_provisioning_only_after_ha_produces_hls() -> None:
     async def _run() -> tuple[str | None, int, int, int, int, dict[str, object]]:
         entity = _uninitialized_entity()
         inputs = DreameLawnMowerCameraStreamRuntimeInputs(
@@ -2511,8 +2585,21 @@ def test_video_camera_caches_provisioning_only_after_ha_decodes_frame() -> None:
         session = entity._session
 
         class _Stream:
+            def add_provider(self, provider: str) -> object:
+                assert provider == video_camera_module.HLS_PROVIDER
+                return SimpleNamespace(
+                    last_segment=SimpleNamespace(
+                        complete=True,
+                        init=b"ftyp",
+                        data_size=1024,
+                    )
+                )
+
+            async def start(self) -> None:
+                return None
+
             async def async_get_image(self, **kwargs: object) -> bytes:
-                assert kwargs == {"wait_for_next_keyframe": True}
+                assert kwargs == {"wait_for_next_keyframe": False}
                 return b"\xff\xd8cloud-frame\xff\xd9"
 
         stream = _Stream()

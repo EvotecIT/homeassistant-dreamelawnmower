@@ -443,13 +443,35 @@ class DreameLawnMowerVideoCamera(
         """Verify the adopted session through HA's sole stream consumer."""
         try:
             async with asyncio.timeout(_HA_PLAYBACK_VERIFY_TIMEOUT):
-                image = await ha_stream.async_get_image(wait_for_next_keyframe=True)
-            if image is None:
-                raise DreameLawnMowerVideoRuntimeError(
-                    "Home Assistant did not decode a frame from the playback session."
-                )
+                hls_output = ha_stream.add_provider(HLS_PROVIDER)
+                await ha_stream.start()
+                while True:
+                    segment = hls_output.last_segment
+                    if (
+                        segment is not None
+                        and segment.complete
+                        and segment.init
+                        and segment.data_size > 0
+                    ):
+                        break
+                    if segment is None:
+                        if not await hls_output.recv():
+                            raise RuntimeError(
+                                "Home Assistant stream ended before producing "
+                                "HLS media"
+                            )
+                    else:
+                        await hls_output.part_recv(timeout=5.0)
         except asyncio.CancelledError:
             raise
+        except TimeoutError:
+            await self._async_cleanup_failed_stream_setup(session)
+            self._set_stream_error(
+                "Qualified XP2P video did not produce Home Assistant HLS media "
+                f"within {_HA_PLAYBACK_VERIFY_TIMEOUT:g} seconds.",
+                stage="playback_verification",
+            )
+            return False
         except Exception as err:  # noqa: BLE001 - expose a clean camera miss.
             await self._async_cleanup_failed_stream_setup(session)
             self._set_stream_error(
@@ -469,7 +491,6 @@ class DreameLawnMowerVideoCamera(
                 self._last_stream_health["available"] = True
                 self._last_stream_health["flv_header_present"] = True
                 self._last_stream_health["playback_session_verified"] = True
-            self._last_image = image
         if provisioning_inputs is not None:
             await self._async_cache_healthy_provisioning(provisioning_inputs)
         return True
