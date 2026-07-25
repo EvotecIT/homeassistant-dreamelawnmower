@@ -100,8 +100,9 @@ _MOVA_POINT_CLOUD_OBJECT_EXTENSIONS = frozenset({"pcd", "bin"})
 _POINT_CLOUD_ANNOUNCEMENT_EXTENSIONS = frozenset({"pcd", "bin"})
 _POINT_CLOUD_ANNOUNCEMENT_PROPERTY_KEY = "99.20"
 _POINT_CLOUD_ANNOUNCEMENT_CLOCK_SKEW_MS = 5_000
-_POINT_CLOUD_ANNOUNCEMENT_PROBE_TIMEOUT_SECONDS = 8.0
-_POINT_CLOUD_ANNOUNCEMENT_MAX_DOWNLOAD_ATTEMPTS = 3
+_POINT_CLOUD_ANNOUNCEMENT_PROBE_TIMEOUT_SECONDS = 2.0
+_POINT_CLOUD_ANNOUNCEMENT_INITIAL_BUDGET_FRACTION = 0.05
+_POINT_CLOUD_ANNOUNCEMENT_RETRY_MAX_SECONDS = 8.0
 _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS = 5.0
 
 
@@ -704,11 +705,23 @@ class _DreameLawnMowerClientMapsMixin:
                 ),
             )
 
+        remaining = max(0.0, deadline - time.monotonic())
+        initial_probe_budget = min(
+            _POINT_CLOUD_ANNOUNCEMENT_PROBE_TIMEOUT_SECONDS,
+            max(
+                0.005,
+                timeout * _POINT_CLOUD_ANNOUNCEMENT_INITIAL_BUDGET_FRACTION,
+            ),
+            remaining,
+        )
         announcement_supported, stored_name, announcement_baseline = (
             self._sync_get_announced_point_cloud_object(
                 cloud,
                 requested_after_ms=0,
-                fallback_reserve_seconds=min(15.0, timeout / 2),
+                fallback_reserve_seconds=max(
+                    0.0,
+                    remaining - initial_probe_budget,
+                ),
                 deadline=deadline,
             )
         )
@@ -816,15 +829,6 @@ class _DreameLawnMowerClientMapsMixin:
             if announced_name is not None:
                 attempt_key = announced_identity or (announced_name, 0)
                 attempts = announcement_download_attempts.get(attempt_key, 0)
-                if (
-                    attempts
-                    >= _POINT_CLOUD_ANNOUNCEMENT_MAX_DOWNLOAD_ATTEMPTS
-                ):
-                    saw_unusable_point_cloud = True
-                    remaining = deadline - time.monotonic()
-                    if remaining > 0:
-                        time.sleep(min(poll_interval, remaining))
-                    continue
                 announcement_download_attempts[attempt_key] = attempts + 1
                 try:
                     content, content_type, _ = (
@@ -845,6 +849,11 @@ class _DreameLawnMowerClientMapsMixin:
                     # The mower announces the object before upload progress
                     # reaches 100%, so the signer can briefly return no URL.
                     saw_unusable_point_cloud = True
+                    retry_delay = min(
+                        _POINT_CLOUD_ANNOUNCEMENT_RETRY_MAX_SECONDS,
+                        max(poll_interval, 0.5)
+                        * (2 ** min(attempts, 4)),
+                    )
                 else:
                     return DreameLawnMowerPointCloudDownload(
                         map_index=map_index,
@@ -855,7 +864,7 @@ class _DreameLawnMowerClientMapsMixin:
 
                 remaining = deadline - time.monotonic()
                 if remaining > 0:
-                    time.sleep(min(poll_interval, remaining))
+                    time.sleep(min(retry_delay, remaining))
                 continue
 
             remaining = deadline - time.monotonic()
@@ -1051,24 +1060,27 @@ class _DreameLawnMowerClientMapsMixin:
                 or isinstance(updated_at, bool)
                 or not isinstance(updated_at, int | float | str)
             ):
-                continue
+                return True, None, None
             try:
                 updated_at_ms = int(updated_at)
             except (TypeError, ValueError):
-                continue
+                return True, None, None
             extension = _app_object_extension(object_name)
             if (
                 extension is None
                 or extension.casefold()
                 not in _POINT_CLOUD_ANNOUNCEMENT_EXTENSIONS
             ):
-                continue
+                return True, None, None
             normalized_name = object_name.strip()
             observed = (normalized_name, updated_at_ms)
             fresh = (
                 (
-                    normalized_name != baseline[0]
-                    or updated_at_ms > baseline[1]
+                    (
+                        normalized_name != baseline[0]
+                        or updated_at_ms > baseline[1]
+                    )
+                    and updated_at_ms >= requested_after_ms
                 )
                 if baseline is not None
                 else (

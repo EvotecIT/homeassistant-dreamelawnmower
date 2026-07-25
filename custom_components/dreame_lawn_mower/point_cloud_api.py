@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NoReturn
 
@@ -243,17 +243,7 @@ class DreameLawnMowerPointCloudAPI:
                     ),
                     retry_after_seconds=2,
                 )
-            allow_stored = (
-                active_map_index(
-                    getattr(coordinator, "app_maps", None),
-                    selected_map_index=getattr(
-                        coordinator,
-                        "selected_map_index",
-                        None,
-                    ),
-                )
-                == key[1]
-            )
+            allow_stored = _single_active_map_index(coordinator) == key[1]
             if cycle is not None:
                 download = await cycle.measure(
                     "generate_download_validate",
@@ -439,6 +429,41 @@ class DreameLawnMowerPointCloudAPI:
         handle = self._cache_expiry_handles.pop(key, None)
         if handle is not None:
             handle.cancel()
+
+
+def _single_active_map_index(
+    coordinator: DreameLawnMowerCoordinator,
+) -> int | None:
+    """Return the active map only when stored-object identity is unambiguous."""
+    app_maps = getattr(coordinator, "app_maps", None)
+    if not isinstance(app_maps, Mapping):
+        return None
+    maps = app_maps.get("maps")
+    if not isinstance(maps, Sequence) or isinstance(
+        maps,
+        str | bytes | bytearray,
+    ):
+        return None
+    indices = {
+        entry.get("idx")
+        for entry in maps
+        if isinstance(entry, Mapping)
+        and isinstance(entry.get("idx"), int)
+        and not isinstance(entry.get("idx"), bool)
+        and entry["idx"] >= 0
+    }
+    if len(indices) != 1:
+        return None
+    only_index = next(iter(indices))
+    active_index = active_map_index(
+        app_maps,
+        selected_map_index=getattr(
+            coordinator,
+            "selected_map_index",
+            None,
+        ),
+    )
+    return only_index if active_index == only_index else None
 
 
 class DreameLawnMowerPointCloudView(HomeAssistantView):

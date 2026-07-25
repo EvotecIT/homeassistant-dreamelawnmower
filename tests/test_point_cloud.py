@@ -304,7 +304,8 @@ def test_download_point_cloud_uses_fresh_lidar_announcement(
         return next(responses)
 
     property_options: list[dict[str, Any]] = []
-    update_dates = iter([1_000, 2_000])
+    now_ms = int(time.time() * 1000)
+    update_dates = iter([now_ms - 1_000, now_ms + 1_000])
 
     def get_properties(key: str, **kwargs: Any) -> list[dict[str, Any]]:
         property_options.append(kwargs)
@@ -402,7 +403,8 @@ def test_download_point_cloud_regenerates_when_stored_object_is_invalid(
         actions.append(payload)
         return next(responses)
 
-    update_dates = iter([1_000, 1_000, 2_000])
+    now_ms = int(time.time() * 1000)
+    update_dates = iter([now_ms - 1_000, now_ms - 1_000, now_ms + 1_000])
 
     def get_properties(key: str, **options: Any) -> list[dict[str, Any]]:
         updated_at = next(update_dates)
@@ -411,7 +413,7 @@ def test_download_point_cloud_regenerates_when_stored_object_is_invalid(
                 "key": key,
                 "value": (
                     "private/stored-map.bin"
-                    if updated_at == 1_000
+                    if updated_at < now_ms
                     else "private/fresh-map.bin"
                 ),
                 "updateDate": updated_at,
@@ -459,16 +461,20 @@ def test_download_point_cloud_retries_announced_object_until_signable(
     signed_urls = iter(
         [
             None,
+            None,
+            None,
+            None,
             "https://downloads.example.invalid/object",
         ]
     )
-    update_dates = iter([1_000, 2_000])
+    now_ms = int(time.time() * 1000)
+    update_dates = iter([now_ms - 1_000, now_ms + 1_000])
     cloud = SimpleNamespace(
         get_properties=lambda key, **options: [
             {
                 "key": key,
                 "value": "private/generated-map.bin",
-                "updateDate": next(update_dates, 2_000),
+                "updateDate": next(update_dates, now_ms + 1_000),
             }
         ],
         get_interim_file_url=lambda name, **options: next(signed_urls),
@@ -575,7 +581,7 @@ def test_download_point_cloud_caps_optional_announcement_probe(
 
     assert len(property_options) == 1
     assert property_options[0]["retry_count"] == 0
-    assert property_options[0]["timeout"] == 8.0
+    assert 1.9 < property_options[0]["timeout"] <= 2.0
     assert property_options[0]["deadline"] > time.monotonic()
     assert calls == [
         {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
@@ -593,8 +599,8 @@ def test_download_point_cloud_caps_optional_announcement_probe(
         "expected_probe_deadline",
     ),
     [
-        (145.0, 15.0, 8.0, 108.0),
-        (105.0, 2.5, 2.5, 102.5),
+        (145.0, 15.0, 2.0, 102.0),
+        (105.0, 2.5, 2.0, 102.0),
     ],
 )
 def test_announcement_probe_uses_reserved_absolute_sub_deadline(
@@ -630,18 +636,121 @@ def test_announcement_probe_uses_reserved_absolute_sub_deadline(
     ]
 
 
+def test_announcement_probe_preserves_support_when_value_is_empty() -> None:
+    client = _client()
+
+    result = client._sync_get_announced_point_cloud_object(
+        SimpleNamespace(
+            get_properties=lambda key, **kwargs: [
+                {
+                    "key": key,
+                    "value": None,
+                    "updateDate": None,
+                }
+            ]
+        ),
+        requested_after_ms=0,
+        deadline=time.monotonic() + 1,
+    )
+
+    assert result == (True, None, None)
+
+
+def test_announcement_probe_rejects_changed_object_from_before_request() -> None:
+    client = _client()
+
+    result = client._sync_get_announced_point_cloud_object(
+        SimpleNamespace(
+            get_properties=lambda key, **kwargs: [
+                {
+                    "key": key,
+                    "value": "private/other-map.bin",
+                    "updateDate": 2_000,
+                }
+            ]
+        ),
+        requested_after_ms=3_000,
+        baseline=("private/baseline-map.bin", 1_000),
+        deadline=time.monotonic() + 1,
+    )
+
+    assert result == (
+        True,
+        None,
+        ("private/other-map.bin", 2_000),
+    )
+
+
+def test_download_point_cloud_follows_initially_empty_announcement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    actions: list[dict[str, Any]] = []
+    now_ms = int(time.time() * 1000)
+    property_values = iter(
+        [
+            (None, None),
+            ("private/fresh-map.bin", now_ms + 1_000),
+        ]
+    )
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        actions.append(payload)
+        return {"r": 0}
+
+    def get_properties(key: str, **kwargs: Any) -> list[dict[str, Any]]:
+        value, updated_at = next(property_values)
+        return [
+            {
+                "key": key,
+                "value": value,
+                "updateDate": updated_at,
+            }
+        ]
+
+    cloud = SimpleNamespace(
+        get_properties=get_properties,
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(
+        0,
+        5,
+        0.1,
+        10,
+        1024,
+    )
+
+    assert actions == [{"m": "a", "p": 0, "o": 10, "d": {"idx": 0}}]
+    assert result.content == content
+
+
 def test_download_point_cloud_bounds_invalid_announced_object_downloads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _client()
     client._sync_call_app_action = lambda payload, **kwargs: {"r": 0}
-    update_dates = iter([1_000, 2_000])
+    now_ms = int(time.time() * 1000)
+    update_dates = iter([now_ms - 1_000, now_ms + 1_000])
     cloud = SimpleNamespace(
         get_properties=lambda key, **options: [
             {
                 "key": key,
                 "value": "private/generated-map.bin",
-                "updateDate": next(update_dates, 2_000),
+                "updateDate": next(update_dates, now_ms + 1_000),
             }
         ],
         get_interim_file_url=lambda name, **options: (
@@ -661,7 +770,6 @@ def test_download_point_cloud_bounds_invalid_announced_object_downloads(
         download_count += 1
         return _FakeResponse(b"not a pcd", request.full_url)
 
-    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
     monkeypatch.setattr(
         _internal_client_module,
         "_open_point_cloud_response",
@@ -678,7 +786,7 @@ def test_download_point_cloud_bounds_invalid_announced_object_downloads(
         )
 
     assert captured.value.code == "point_cloud_download_invalid"
-    assert download_count == 3
+    assert download_count == 1
 
 
 def test_download_point_cloud_waits_for_changed_mova_fixed_object(

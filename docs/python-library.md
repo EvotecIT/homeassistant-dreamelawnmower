@@ -125,7 +125,7 @@ from pathlib import Path
 
 download = await client.async_download_app_map_point_cloud(
     map_index=0,
-    allow_stored=True,  # Only when map 0 is known to be the active map.
+    allow_stored=True,  # Only when map 0 is the mower's sole known map.
 )
 print(download.metadata.as_dict())
 
@@ -135,13 +135,13 @@ Path("garden-map.pcd").write_bytes(download.content)
 
 With `allow_stored=True`, the method first validates the object currently
 announced through cloud property `99.20`. Callers should enable this only when
-the requested index is known to be the mower's active map, because the
-announcement does not identify its map. If that object is absent, expired, or
-invalid, the client triggers app action `o:10`, captures the fresh LiDAR object,
-and resolves its short-lived download immediately. Firmware without that
-announcement continues through the transient `OBJ` 3D-map fallback. Every path
-enforces HTTPS, time, and size limits and validates PCD 0.7 before returning.
-The result deliberately does not expose the vendor filename or cloud-signed URL.
+the requested index is the mower's sole known map, because the announcement
+does not identify its map. If that object is absent, expired, or invalid, the
+client triggers app action `o:10`, captures the fresh LiDAR object, and resolves
+its short-lived download immediately. Firmware without that announcement
+continues through the transient `OBJ` 3D-map fallback. Every path enforces
+HTTPS, time, and size limits and validates PCD 0.7 before returning. The result
+deliberately does not expose the vendor filename or cloud-signed URL.
 
 Use `python examples/point_cloud_probe.py` to print coordinate-free metadata.
 Add `--out garden-map.pcd` only when you intentionally want to persist private

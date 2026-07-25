@@ -466,13 +466,14 @@ need source, counts, and parser evidence.
 
 The map camera also advertises a local `point_cloud_api_path` attribute. A
 Home Assistant administrator can sign that path for a short-lived download.
-For the verified active map, the integration first tries the mower's stored
-LiDAR object so an existing 3D map can display without another upload. If that
-object is absent, expired, or invalid, it asks the mower to upload the selected
-app map, immediately captures the new announcement, and validates the returned
-PCD file. Other map indices always use fresh generation, and firmware without
-the announcement retains the older transient-object lookup as a fallback.
-Responses use `private, no-store` caching.
+When the mower has exactly one verified map, the integration first tries its
+stored LiDAR object so an existing 3D map can display without another upload.
+If that object is absent, expired, or invalid, it asks the mower to upload the
+selected app map, immediately captures the new announcement, and validates the
+returned PCD file. Multi-map requests always use fresh generation because the
+stored announcement does not identify its map. Firmware without the
+announcement retains the older transient-object lookup as a fallback. Responses
+use `private, no-store` caching.
 Vendor filenames, cloud-signed URLs, and point coordinates are never written to
 entity state or logs.
 
@@ -482,7 +483,7 @@ this attribute and offers an on-demand 3D viewer. It does not generate or
 download garden geometry during an ordinary dashboard render. Select the Hero
 layout's **3D** tab or press **Load 3D map** in another layout when you want to
 fetch it. Point-cloud access is currently restricted to Home Assistant admins.
-A stored active-map file normally avoids mower generation; otherwise the mower
+A stored single-map file normally avoids mower generation; otherwise the mower
 has up to 45 seconds to publish a fresh file. A failed request returns a
 privacy-safe problem code and stage instead of exposing the vendor object name
 or signed download URL.
@@ -503,7 +504,7 @@ Current map support now includes:
 - services for switching the active mower map and starting explicit zone, spot,
   or edge jobs
 - runtime live-track telemetry surfaced through sensors and map-camera attributes
-- an admin-only, transient PCD point-cloud download for the selected app map
+- an admin-only, stored-or-fresh PCD point-cloud download for the selected app map
 - circular and rotated rectangular forbidden areas rendered from their compact
   mower map representation
 
