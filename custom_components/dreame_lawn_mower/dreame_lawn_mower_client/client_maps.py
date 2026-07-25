@@ -102,6 +102,7 @@ _POINT_CLOUD_ANNOUNCEMENT_PROPERTY_KEY = "99.20"
 _POINT_CLOUD_ANNOUNCEMENT_CLOCK_SKEW_MS = 5_000
 _POINT_CLOUD_ANNOUNCEMENT_PROBE_TIMEOUT_SECONDS = 8.0
 _POINT_CLOUD_ANNOUNCEMENT_MAX_DOWNLOAD_ATTEMPTS = 3
+_POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS = 5.0
 
 
 class _DreameLawnMowerClientMapsMixin:
@@ -655,6 +656,7 @@ class _DreameLawnMowerClientMapsMixin:
         download_timeout: float,
         max_bytes: int,
         deadline: float | None = None,
+        allow_stored: bool = False,
     ) -> DreameLawnMowerPointCloudDownload:
         map_index = _validate_point_cloud_map_index(map_index)
         timeout = _validate_positive_number(timeout, "generation timeout")
@@ -702,7 +704,7 @@ class _DreameLawnMowerClientMapsMixin:
                 ),
             )
 
-        announcement_supported, _, announcement_baseline = (
+        announcement_supported, stored_name, announcement_baseline = (
             self._sync_get_announced_point_cloud_object(
                 cloud,
                 requested_after_ms=0,
@@ -711,6 +713,37 @@ class _DreameLawnMowerClientMapsMixin:
             )
         )
         use_announcement_path = announcement_supported
+        if allow_stored and stored_name is not None:
+            stored_deadline = min(
+                deadline,
+                time.monotonic()
+                + _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
+            )
+            try:
+                content, content_type, _ = self._sync_download_point_cloud_object(
+                    cloud,
+                    stored_name,
+                    deadline=stored_deadline,
+                    download_timeout=min(
+                        download_timeout,
+                        _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
+                    ),
+                    max_bytes=max_bytes,
+                )
+                metadata = parse_pcd_metadata(
+                    content,
+                    max_bytes=max_bytes,
+                    deadline=stored_deadline,
+                )
+            except (DeviceException, DreameLawnMowerPointCloudError):
+                pass
+            else:
+                return DreameLawnMowerPointCloudDownload(
+                    map_index=map_index,
+                    content=content,
+                    metadata=metadata,
+                    content_type=content_type,
+                )
         baseline_name = None
         if not use_announcement_path:
             baseline_result = self._sync_call_point_cloud_action(

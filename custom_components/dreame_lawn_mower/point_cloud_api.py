@@ -16,7 +16,7 @@ from homeassistant.components.http.decorators import require_admin
 from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
-from .control_options import current_map_index
+from .control_options import active_map_index, current_map_index
 from .diagnostic_events import record_diagnostic_event
 from .dreame_lawn_mower_client import (
     DreameLawnMowerPointCloudDownload,
@@ -243,17 +243,30 @@ class DreameLawnMowerPointCloudAPI:
                     ),
                     retry_after_seconds=2,
                 )
+            allow_stored = (
+                active_map_index(
+                    getattr(coordinator, "app_maps", None),
+                    selected_map_index=getattr(
+                        coordinator,
+                        "selected_map_index",
+                        None,
+                    ),
+                )
+                == key[1]
+            )
             if cycle is not None:
                 download = await cycle.measure(
                     "generate_download_validate",
                     lambda: coordinator.client.async_download_app_map_point_cloud(
-                        map_index=key[1]
+                        map_index=key[1],
+                        allow_stored=allow_stored,
                     ),
                 )
             else:
                 download = (
                     await coordinator.client.async_download_app_map_point_cloud(
-                        map_index=key[1]
+                        map_index=key[1],
+                        allow_stored=allow_stored,
                     )
                 )
             if self._entry_epochs.get(key[0], 0) != epoch:

@@ -350,6 +350,12 @@ The successful map path is the app action bridge described above. On
   `/dreame-user-iot/iotfile/getDownloadUrl`; the returned HTTPS URL needs no
   custom download headers. `OBJ type=3dmap` remains a compatibility fallback
   but can miss the object's short publication window.
+- Property `99.20` can keep the last generated object signable after the upload.
+  A read-only A2 check on 2026-07-25 resolved that stored object in 0.03 seconds
+  and downloaded and validated the 2,437,272-byte PCD in another 0.38 seconds.
+  Home Assistant uses this stored path only for its verified active map because
+  the property does not carry a map index; absent, expired, invalid, and
+  non-active-map requests retain fresh generation.
 - The generated file was a standard PCD 0.7 binary with fields `x y z rgb`,
   152,318 finite points, 991 observed colors, and 2,437,272 total bytes.
   Repeating the flow through the new public client returned the same validated

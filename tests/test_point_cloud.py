@@ -347,6 +347,109 @@ def test_download_point_cloud_uses_fresh_lidar_announcement(
     assert result.metadata.points == 1
 
 
+def test_download_point_cloud_uses_stored_active_map_when_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    actions: list[dict[str, Any]] = []
+    client._sync_call_app_action = lambda payload, **kwargs: actions.append(payload)
+    cloud = SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {
+                "key": key,
+                "value": "private/stored-map.bin",
+                "updateDate": 1_000,
+            }
+        ],
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/stored"
+        ),
+    )
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(
+        0,
+        5,
+        0.1,
+        10,
+        1024,
+        allow_stored=True,
+    )
+
+    assert actions == []
+    assert result.map_index == 0
+    assert result.content == content
+    assert result.metadata.points == 1
+
+
+def test_download_point_cloud_regenerates_when_stored_object_is_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    actions: list[dict[str, Any]] = []
+    responses = iter([{"r": 0}])
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        actions.append(payload)
+        return next(responses)
+
+    update_dates = iter([1_000, 1_000, 2_000])
+
+    def get_properties(key: str, **options: Any) -> list[dict[str, Any]]:
+        updated_at = next(update_dates)
+        return [
+            {
+                "key": key,
+                "value": (
+                    "private/stored-map.bin"
+                    if updated_at == 1_000
+                    else "private/fresh-map.bin"
+                ),
+                "updateDate": updated_at,
+            }
+        ]
+
+    cloud = SimpleNamespace(
+        get_properties=get_properties,
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    fresh_content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    downloads = iter([b"not a pcd", fresh_content])
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            next(downloads),
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(
+        0,
+        5,
+        0.1,
+        10,
+        1024,
+        allow_stored=True,
+    )
+
+    assert actions == [{"m": "a", "p": 0, "o": 10, "d": {"idx": 0}}]
+    assert result.content == fresh_content
+
+
 def test_download_point_cloud_retries_announced_object_until_signable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

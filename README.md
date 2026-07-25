@@ -125,8 +125,8 @@ region/account details are especially helpful for moving a device from
   coordinated light/dark themes, line and marker scaling, and per-map rotation
 - optional custom mower marker loaded only from Home Assistant's `config/www`
   folder, with path, type, size, and image-dimension limits
-- on-demand PCD point-cloud generation through an authenticated, admin-only
-  Home Assistant download endpoint
+- on-demand stored-or-fresh PCD point-cloud download through an authenticated,
+  admin-only Home Assistant endpoint
 - disabled-by-default all-maps and map-diagnostics cameras
 - live video camera with a managed XP2P runtime on Linux x86_64 and aarch64 hosts
 - runtime telemetry sensors for mission progress, mission area, mower pose, and live-track length
@@ -466,10 +466,13 @@ need source, counts, and parser evidence.
 
 The map camera also advertises a local `point_cloud_api_path` attribute. A
 Home Assistant administrator can sign that path for a short-lived download.
-The integration asks the mower to upload the selected app map, immediately
-captures its LiDAR object announcement, validates the returned PCD file, and
-serves it with `private, no-store` caching. It retains the older transient-object
-lookup as a fallback for firmware that does not publish the announcement.
+For the verified active map, the integration first tries the mower's stored
+LiDAR object so an existing 3D map can display without another upload. If that
+object is absent, expired, or invalid, it asks the mower to upload the selected
+app map, immediately captures the new announcement, and validates the returned
+PCD file. Other map indices always use fresh generation, and firmware without
+the announcement retains the older transient-object lookup as a fallback.
+Responses use `private, no-store` caching.
 Vendor filenames, cloud-signed URLs, and point coordinates are never written to
 entity state or logs.
 
@@ -479,8 +482,9 @@ this attribute and offers an on-demand 3D viewer. It does not generate or
 download garden geometry during an ordinary dashboard render. Select the Hero
 layout's **3D** tab or press **Load 3D map** in another layout when you want to
 fetch it. Point-cloud access is currently restricted to Home Assistant admins.
-The mower has up to 45 seconds to publish a fresh file. A failed request returns
-a privacy-safe problem code and stage instead of exposing the vendor object name
+A stored active-map file normally avoids mower generation; otherwise the mower
+has up to 45 seconds to publish a fresh file. A failed request returns a
+privacy-safe problem code and stage instead of exposing the vendor object name
 or signed download URL.
 
 Current map support now includes:

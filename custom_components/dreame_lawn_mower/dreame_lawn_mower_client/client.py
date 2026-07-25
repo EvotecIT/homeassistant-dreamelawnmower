@@ -1036,12 +1036,13 @@ class DreameLawnMowerClient(
         self,
         *,
         map_index: int = 0,
+        allow_stored: bool = False,
         timeout: float = 45.0,
         poll_interval: float = 2.0,
         download_timeout: float = 60.0,
         max_bytes: int = DEFAULT_POINT_CLOUD_MAX_BYTES,
     ) -> DreameLawnMowerPointCloudDownload:
-        """Generate, download, and validate a mower app-map point cloud."""
+        """Download a stored or freshly generated mower app-map point cloud."""
         timeout = _validate_positive_number(timeout, "generation timeout")
         deadline = time.monotonic() + timeout
         try:
@@ -1054,6 +1055,7 @@ class DreameLawnMowerClient(
                     download_timeout,
                     max_bytes,
                     deadline,
+                    allow_stored,
                 )
         except TimeoutError as err:
             raise DreameLawnMowerPointCloudError(

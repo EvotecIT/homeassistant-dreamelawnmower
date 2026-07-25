@@ -60,16 +60,20 @@ def _download(map_index: int = 0) -> DreameLawnMowerPointCloudDownload:
 
 def test_point_cloud_api_caches_recent_downloads() -> None:
     calls = 0
+    options: list[dict[str, Any]] = []
 
     async def download(**kwargs: Any) -> DreameLawnMowerPointCloudDownload:
         nonlocal calls
         calls += 1
+        options.append(kwargs)
         return _download(kwargs["map_index"])
 
     hass = SimpleNamespace(
         data={
             DOMAIN: {
                 "entry-1": SimpleNamespace(
+                    app_maps={"current_map_index": 0},
+                    selected_map_index=0,
                     client=SimpleNamespace(
                         async_download_app_map_point_cloud=download,
                     )
@@ -87,6 +91,34 @@ def test_point_cloud_api_caches_recent_downloads() -> None:
     asyncio.run(run())
 
     assert calls == 1
+    assert options == [{"map_index": 0, "allow_stored": True}]
+
+
+def test_point_cloud_api_does_not_use_stored_object_for_inactive_map() -> None:
+    options: list[dict[str, Any]] = []
+
+    async def download(**kwargs: Any) -> DreameLawnMowerPointCloudDownload:
+        options.append(kwargs)
+        return _download(kwargs["map_index"])
+
+    hass = SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry-1": SimpleNamespace(
+                    app_maps={"current_map_index": 0},
+                    selected_map_index=0,
+                    client=SimpleNamespace(
+                        async_download_app_map_point_cloud=download,
+                    ),
+                )
+            }
+        }
+    )
+    api = DreameLawnMowerPointCloudAPI(hass)
+
+    asyncio.run(api.async_get("entry-1", 1))
+
+    assert options == [{"map_index": 1, "allow_stored": False}]
 
 
 def test_point_cloud_api_evicts_downloads_when_ttl_expires() -> None:
