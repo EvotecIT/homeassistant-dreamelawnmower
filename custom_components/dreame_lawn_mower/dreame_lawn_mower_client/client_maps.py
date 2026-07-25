@@ -97,6 +97,11 @@ if TYPE_CHECKING:
 # MOVA reports the fixed 3dmap object as "*.bin" even though the payload is PCD.
 _POINT_CLOUD_OBJECT_EXTENSIONS = frozenset({"pcd"})
 _MOVA_POINT_CLOUD_OBJECT_EXTENSIONS = frozenset({"pcd", "bin"})
+_POINT_CLOUD_ANNOUNCEMENT_EXTENSIONS = frozenset({"pcd", "bin"})
+_POINT_CLOUD_ANNOUNCEMENT_PROPERTY_KEY = "99.20"
+_POINT_CLOUD_ANNOUNCEMENT_CLOCK_SKEW_MS = 5_000
+_POINT_CLOUD_ANNOUNCEMENT_PROBE_TIMEOUT_SECONDS = 8.0
+_POINT_CLOUD_ANNOUNCEMENT_MAX_DOWNLOAD_ATTEMPTS = 3
 
 
 class _DreameLawnMowerClientMapsMixin:
@@ -684,17 +689,6 @@ class _DreameLawnMowerClientMapsMixin:
                 timeout_seconds=timeout,
                 retry_after_seconds=10,
             )
-        baseline_result = self._sync_call_point_cloud_action(
-            {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
-            operation="read the existing point-cloud object state",
-            deadline=deadline,
-            require_data=True,
-        )
-        baseline_name = _point_cloud_object_name(
-            baseline_result,
-            map_index,
-        )
-
         cloud = self._sync_get_cloud_protocol(deadline=deadline)
         if not hasattr(cloud, "get_interim_file_url"):
             raise DreameLawnMowerPointCloudError(
@@ -706,6 +700,28 @@ class _DreameLawnMowerClientMapsMixin:
                     "This Home Assistant connection cannot download the mower's "
                     "generated 3D map."
                 ),
+            )
+
+        announcement_supported, _, announcement_baseline = (
+            self._sync_get_announced_point_cloud_object(
+                cloud,
+                requested_after_ms=0,
+                fallback_reserve_seconds=min(15.0, timeout / 2),
+                deadline=deadline,
+            )
+        )
+        use_announcement_path = announcement_supported
+        baseline_name = None
+        if not use_announcement_path:
+            baseline_result = self._sync_call_point_cloud_action(
+                {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+                operation="read the existing point-cloud object state",
+                deadline=deadline,
+                require_data=True,
+            )
+            baseline_name = _point_cloud_object_name(
+                baseline_result,
+                map_index,
             )
 
         accepted_extensions = (
@@ -737,6 +753,7 @@ class _DreameLawnMowerClientMapsMixin:
             except (DeviceException, DreameLawnMowerPointCloudError):
                 baseline_identity = None
 
+        generation_requested_at_ms = int(time.time() * 1000)
         self._sync_call_point_cloud_action(
             {"m": "a", "p": 0, "o": 10, "d": {"idx": map_index}},
             operation="start point-cloud generation",
@@ -750,7 +767,74 @@ class _DreameLawnMowerClientMapsMixin:
         saw_unverified_fixed_object = False
         rejected_object_names: set[str] = set()
         object_download_attempts: dict[str, int] = {}
+        announcement_download_attempts: dict[tuple[str, int], int] = {}
         while time.monotonic() < deadline:
+            announced_name = None
+            announced_identity = None
+            if use_announcement_path:
+                _, announced_name, announced_identity = (
+                    self._sync_get_announced_point_cloud_object(
+                        cloud,
+                        requested_after_ms=generation_requested_at_ms,
+                        baseline=announcement_baseline,
+                        deadline=deadline,
+                    )
+                )
+            if announced_name is not None:
+                attempt_key = announced_identity or (announced_name, 0)
+                attempts = announcement_download_attempts.get(attempt_key, 0)
+                if (
+                    attempts
+                    >= _POINT_CLOUD_ANNOUNCEMENT_MAX_DOWNLOAD_ATTEMPTS
+                ):
+                    saw_unusable_point_cloud = True
+                    remaining = deadline - time.monotonic()
+                    if remaining > 0:
+                        time.sleep(min(poll_interval, remaining))
+                    continue
+                announcement_download_attempts[attempt_key] = attempts + 1
+                try:
+                    content, content_type, _ = (
+                        self._sync_download_point_cloud_object(
+                            cloud,
+                            announced_name,
+                            deadline=deadline,
+                            download_timeout=download_timeout,
+                            max_bytes=max_bytes,
+                        )
+                    )
+                    metadata = parse_pcd_metadata(
+                        content,
+                        max_bytes=max_bytes,
+                        deadline=deadline,
+                    )
+                except (DeviceException, DreameLawnMowerPointCloudError):
+                    # The mower announces the object before upload progress
+                    # reaches 100%, so the signer can briefly return no URL.
+                    saw_unusable_point_cloud = True
+                else:
+                    return DreameLawnMowerPointCloudDownload(
+                        map_index=map_index,
+                        content=content,
+                        metadata=metadata,
+                        content_type=content_type,
+                    )
+
+                remaining = deadline - time.monotonic()
+                if remaining > 0:
+                    time.sleep(min(poll_interval, remaining))
+                continue
+
+            remaining = deadline - time.monotonic()
+            if use_announcement_path:
+                # A2-class firmware can take a few seconds to upload the LiDAR
+                # object after accepting o:10. Avoid slow routed OBJ reads while
+                # its dedicated announcement channel is active. Do not accept
+                # an unverified legacy OBJ as fresh when no OBJ baseline exists.
+                if remaining > 0:
+                    time.sleep(min(poll_interval, remaining))
+                continue
+
             object_result = self._sync_call_point_cloud_action(
                 {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
                 operation="read the generated point-cloud object state",
@@ -887,6 +971,81 @@ class _DreameLawnMowerClientMapsMixin:
             timeout_seconds=timeout,
             retry_after_seconds=10,
         )
+
+    def _sync_get_announced_point_cloud_object(
+        self,
+        cloud: Any,
+        *,
+        requested_after_ms: int,
+        baseline: tuple[str, int] | None = None,
+        fallback_reserve_seconds: float = 0,
+        deadline: float,
+    ) -> tuple[bool, str | None, tuple[str, int] | None]:
+        """Return support state and a fresh cloud-property 99.20 LiDAR object."""
+        remaining = deadline - time.monotonic()
+        probe_budget = remaining - max(0.0, fallback_reserve_seconds)
+        if probe_budget <= 0:
+            return False, None, None
+        get_properties = getattr(cloud, "get_properties", None)
+        if not callable(get_properties):
+            return False, None, None
+        probe_timeout = min(
+            probe_budget,
+            _POINT_CLOUD_ANNOUNCEMENT_PROBE_TIMEOUT_SECONDS,
+        )
+        probe_deadline = min(
+            deadline,
+            time.monotonic() + probe_timeout,
+        )
+        try:
+            payload = get_properties(
+                _POINT_CLOUD_ANNOUNCEMENT_PROPERTY_KEY,
+                retry_count=0,
+                timeout=probe_timeout,
+                deadline=probe_deadline,
+            )
+        except DeviceException:
+            return False, None, None
+
+        for entry in self._normalize_cloud_property_entries(payload):
+            if entry.get("key") != _POINT_CLOUD_ANNOUNCEMENT_PROPERTY_KEY:
+                continue
+            object_name = entry.get("value")
+            updated_at = entry.get("updateDate")
+            if (
+                not isinstance(object_name, str)
+                or not object_name.strip()
+                or isinstance(updated_at, bool)
+                or not isinstance(updated_at, int | float | str)
+            ):
+                continue
+            try:
+                updated_at_ms = int(updated_at)
+            except (TypeError, ValueError):
+                continue
+            extension = _app_object_extension(object_name)
+            if (
+                extension is None
+                or extension.casefold()
+                not in _POINT_CLOUD_ANNOUNCEMENT_EXTENSIONS
+            ):
+                continue
+            normalized_name = object_name.strip()
+            observed = (normalized_name, updated_at_ms)
+            fresh = (
+                (
+                    normalized_name != baseline[0]
+                    or updated_at_ms > baseline[1]
+                )
+                if baseline is not None
+                else (
+                    updated_at_ms
+                    >= requested_after_ms
+                    - _POINT_CLOUD_ANNOUNCEMENT_CLOCK_SKEW_MS
+                )
+            )
+            return True, normalized_name if fresh else None, observed
+        return False, None, None
 
     def _sync_download_point_cloud_object(
         self,

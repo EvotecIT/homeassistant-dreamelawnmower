@@ -130,10 +130,12 @@ print(download.metadata.as_dict())
 Path("garden-map.pcd").write_bytes(download.content)
 ```
 
-The method triggers app action `o:10`, polls the transient `OBJ` 3D-map slot,
-resolves its short-lived cloud download immediately, enforces HTTPS, time, and
-size limits, and validates PCD 0.7 before returning. The result deliberately
-does not expose the vendor filename or cloud-signed URL.
+The method triggers app action `o:10`, captures the fresh LiDAR object announced
+through cloud property `99.20`, and resolves its short-lived download
+immediately. Firmware without that announcement continues through the
+transient `OBJ` 3D-map fallback. Both paths enforce HTTPS, time, and size limits
+and validate PCD 0.7 before returning. The result deliberately does not expose
+the vendor filename or cloud-signed URL.
 
 Use `python examples/point_cloud_probe.py` to print coordinate-free metadata.
 Add `--out garden-map.pcd` only when you intentionally want to persist private

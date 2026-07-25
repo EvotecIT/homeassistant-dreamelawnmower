@@ -466,10 +466,12 @@ need source, counts, and parser evidence.
 
 The map camera also advertises a local `point_cloud_api_path` attribute. A
 Home Assistant administrator can sign that path for a short-lived download.
-The integration asks the mower to generate the selected app map, immediately
-captures the transient object, validates the returned PCD file, and serves it
-with `private, no-store` caching. Vendor filenames, cloud-signed URLs, and point
-coordinates are never written to entity state or logs.
+The integration asks the mower to upload the selected app map, immediately
+captures its LiDAR object announcement, validates the returned PCD file, and
+serves it with `private, no-store` caching. It retains the older transient-object
+lookup as a fallback for firmware that does not publish the announcement.
+Vendor filenames, cloud-signed URLs, and point coordinates are never written to
+entity state or logs.
 
 The companion
 [Lawn Mower Card](https://github.com/EvotecIT/lovelace-lawn-mower-card) detects

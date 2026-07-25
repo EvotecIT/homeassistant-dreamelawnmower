@@ -29,6 +29,8 @@ _TX_VIDEO_API_PATH = "/dreame-third-video/tx/"
 _REDACTED_TX_VIDEO_PAYLOAD = "<redacted TX video payload>"
 _INTERIM_FILE_API_PATH = "/dreame-user-iot/iotfile/getDownloadUrl"
 _REDACTED_INTERIM_FILE_PAYLOAD = "<redacted interim file payload>"
+_CLOUD_PROPERTIES_API_PATH = "/dreame-user-iot/iotstatus/props"
+_REDACTED_CLOUD_PROPERTIES_PAYLOAD = "<redacted cloud properties payload>"
 _REDACTED_APP_ACTION_RESPONSE = "<redacted app action response>"
 _DEADLINE_RESPONSE_CHUNK_BYTES = 8 * 1024
 _MAX_DEADLINE_RESPONSE_BYTES = 1024 * 1024
@@ -41,6 +43,8 @@ def _cloud_request_log_value(url: str, value: Any) -> Any:
         return _REDACTED_TX_VIDEO_PAYLOAD
     if _INTERIM_FILE_API_PATH in url and value is not None:
         return _REDACTED_INTERIM_FILE_PAYLOAD
+    if _CLOUD_PROPERTIES_API_PATH in url and value is not None:
+        return _REDACTED_CLOUD_PROPERTIES_PAYLOAD
     return value
 def _app_action_response_log_value(value: Any, *, redact: bool) -> Any:
     """Hide private point-cloud object names from app-action response logs."""
@@ -996,10 +1000,22 @@ class DreameMowerDreameHomeCloudProtocol:
 
         return api_response["data"]
 
-    def get_properties(self, keys):
+    def get_properties(
+        self,
+        keys,
+        retry_count: int = 2,
+        timeout: float = 20,
+        *,
+        deadline: float | None = None,
+    ):
         params = {"did": str(self._did), "keys": keys}
         api_response = self._api_call(
-            f"{self._strings[23]}/{self._strings[25]}/{self._strings[41]}", params)
+            f"{self._strings[23]}/{self._strings[25]}/{self._strings[41]}",
+            params,
+            retry_count=retry_count,
+            timeout=timeout,
+            deadline=deadline,
+        )
         if api_response is None or "data" not in api_response:
             return None
 
