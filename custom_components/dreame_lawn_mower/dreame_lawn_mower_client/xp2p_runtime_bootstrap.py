@@ -22,6 +22,7 @@ from typing import Protocol
 
 import requests
 
+from .android_build_artifact import read_android_build_zip_entries
 from .video_runtime import DreameLawnMowerVideoRuntimeError
 from .xp2p_host_probe import probe_xp2p_host_worker
 from .xp2p_host_runtime import DreameLawnMowerXp2pHostAssets
@@ -32,7 +33,7 @@ from .xp2p_host_worker_blob import (
 )
 
 RUNTIME_LAYOUT_VERSION = "1"
-LARGE_PAGE_RUNTIME_LAYOUT_VERSION = "2"
+LARGE_PAGE_RUNTIME_LAYOUT_VERSION = "3"
 TENCENT_XP2P_VERSION = "2.4.50"
 TENCENT_XP2P_AAR_URL = (
     "https://repo.maven.apache.org/maven2/com/tencent/iot/thirdparty/android/"
@@ -103,6 +104,63 @@ AOSP_VNDK_FILES = {
     ),
 }
 
+LARGE_PAGE_ANDROID_BUILD_ID = "15885347"
+LARGE_PAGE_ANDROID_BUILD_TARGET = "aosp_cf_arm64_only_phone-userdebug"
+LARGE_PAGE_ANDROID_BUILD_ARTIFACT = (
+    "aosp_cf_arm64_only_phone-target_files-15885347.zip"
+)
+LARGE_PAGE_ANDROID_BUILD_ARTIFACT_SIZE = 2_223_019_107
+LARGE_PAGE_ANDROID_BUILD_ARTIFACT_URL = (
+    "https://androidbuildinternal.googleapis.com/android/internal/build/v3/"
+    f"builds/{LARGE_PAGE_ANDROID_BUILD_ID}/"
+    f"{LARGE_PAGE_ANDROID_BUILD_TARGET}/attempts/latest/artifacts/"
+    f"{LARGE_PAGE_ANDROID_BUILD_ARTIFACT}/url"
+)
+LARGE_PAGE_ANDROID_RUNTIME_APEX = "SYSTEM/apex/com.android.runtime.apex"
+LARGE_PAGE_ANDROID_RUNTIME_APEX_SHA256 = (
+    "6e320d2a2537a66dfb24812b84d5ecd3be536df91e534a6a472cfbc20ba8a8f9"
+)
+LARGE_PAGE_AOSP_RUNTIME_FILES = {
+    "bin/linker64": (
+        "bin/linker64",
+        "fdf3b18b361fbe341785694d2f3fea9319990fc4094da3b0c18ad8d9f093015a",
+        0o755,
+    ),
+    "lib64/bionic/libc.so": (
+        "lib/bionic/libc.so",
+        "ca50882f8f3dd01821378d529740096f177f272f68bcb701759c727d50bcdae6",
+        0o644,
+    ),
+    "lib64/bionic/libm.so": (
+        "lib/bionic/libm.so",
+        "fdc7c200502aed34a521437c6d47034f3e472262de6435e554ce5c52c034dc7d",
+        0o644,
+    ),
+    "lib64/bionic/libdl.so": (
+        "lib/bionic/libdl.so",
+        "ce8156bace0ce59e220f69666bd1d6bb4ba275d66ec8052f04c674a415eb99fc",
+        0o644,
+    ),
+}
+LARGE_PAGE_AOSP_SYSTEM_FILES = {
+    "SYSTEM/lib64/ld-android.so": (
+        "lib/ld-android.so",
+        "5dbbe8389b417d3abea5f022cf630cf79bc6909b8404a8765c271978c7bd655e",
+    ),
+    "SYSTEM/lib64/libc++.so": (
+        "lib/libstdc++.so",
+        "cb118e98c74d3454858921123b9b51ba13df9cad7dfa141dd892c453661a4d78",
+    ),
+    "SYSTEM/lib64/liblog.so": (
+        "lib/liblog.so",
+        "a3833794cd68202018930e130e238b206cd5a0c322050ccb8af8fe4e58f3e4b3",
+    ),
+    "SYSTEM/lib64/libz.so": (
+        "lib/libz.so",
+        "0d85c66c4db2364393205cdb8adaed01ade4d89443347ea867c8a91c32d30270",
+    ),
+}
+
 QEMU_VERSION = "7.2.0-1"
 QEMU_X86_64_URL = (
     "https://github.com/multiarch/qemu-user-static/releases/download/"
@@ -113,17 +171,6 @@ QEMU_X86_64_ARCHIVE_SHA256 = (
 )
 QEMU_X86_64_BINARY_SHA256 = (
     "dce64b2dc6b005485c7aa735a7ea39cb0006bf7e5badc28b324b2cd0c73d883f"
-)
-QEMU_AARCH64_VERSION = "10.0.0-r1"
-QEMU_AARCH64_APK_URL = (
-    "https://dl-cdn.alpinelinux.org/alpine/v3.22/community/aarch64/"
-    "qemu-aarch64-10.0.0-r1.apk"
-)
-QEMU_AARCH64_APK_SHA256 = (
-    "59cdf1518f501c87f0397324bf97c807adac45fe70a50f5468fcb55280573758"
-)
-QEMU_AARCH64_BINARY_SHA256 = (
-    "4d1b11f85b7617ee9209d4e9224378ad8d96f757dc30ee7939f8097c1b65b13a"
 )
 
 _TENCENT_AAR_LIBRARY = "jni/arm64-v8a/libiot_video_demo.so"
@@ -158,12 +205,10 @@ def ensure_xp2p_host_runtime(
             f"this host reports {machine or platform.machine()!r}."
         )
     host_page_size = _host_page_size() if page_size is None else page_size
-    use_aarch64_self_qemu = (
-        architecture == "aarch64" and host_page_size > 4096
-    )
+    use_large_page_runtime = architecture == "aarch64" and host_page_size > 4096
     layout_version = (
         LARGE_PAGE_RUNTIME_LAYOUT_VERSION
-        if use_aarch64_self_qemu
+        if use_large_page_runtime
         else RUNTIME_LAYOUT_VERSION
     )
     root_path = Path(root)
@@ -173,7 +218,7 @@ def ensure_xp2p_host_runtime(
             runtime_path,
             architecture,
             layout_version=layout_version,
-            include_aarch64_qemu=use_aarch64_self_qemu,
+            use_large_page_runtime=use_large_page_runtime,
         )
         if assets is None:
             root_path.mkdir(parents=True, exist_ok=True)
@@ -188,7 +233,7 @@ def ensure_xp2p_host_runtime(
                     staging,
                     architecture,
                     layout_version=layout_version,
-                    include_aarch64_qemu=use_aarch64_self_qemu,
+                    use_large_page_runtime=use_large_page_runtime,
                     http_client=http_client or requests,
                     timeout=timeout,
                 )
@@ -196,7 +241,7 @@ def ensure_xp2p_host_runtime(
                     staging,
                     architecture,
                     layout_version=layout_version,
-                    include_aarch64_qemu=use_aarch64_self_qemu,
+                    use_large_page_runtime=use_large_page_runtime,
                 )
                 if installed is None:
                     raise DreameLawnMowerVideoRuntimeError(
@@ -212,7 +257,7 @@ def ensure_xp2p_host_runtime(
                 runtime_path,
                 architecture,
                 layout_version=layout_version,
-                include_aarch64_qemu=use_aarch64_self_qemu,
+                use_large_page_runtime=use_large_page_runtime,
             )
             if assets is None:
                 raise DreameLawnMowerVideoRuntimeError(
@@ -247,7 +292,7 @@ def _install_runtime(
     architecture: str,
     *,
     layout_version: str = RUNTIME_LAYOUT_VERSION,
-    include_aarch64_qemu: bool = False,
+    use_large_page_runtime: bool = False,
     http_client: _HttpClient,
     timeout: float,
 ) -> None:
@@ -281,51 +326,18 @@ def _install_runtime(
         TENCENT_XP2P_LIBRARY_SHA256,
     )
 
-    apex_encoded = _download_verified(
-        http_client,
-        AOSP_RUNTIME_APEX_URL,
-        None,
-        timeout=timeout,
-        label="AOSP Bionic runtime",
-    )
-    try:
-        apex = _decode_gitiles(apex_encoded)
-    except ValueError as err:
-        raise DreameLawnMowerVideoRuntimeError(
-            "AOSP Bionic runtime download was not valid Gitiles base64."
-        ) from err
-    _require_hash(apex, AOSP_RUNTIME_APEX_SHA256, "AOSP Bionic runtime")
-    try:
-        with zipfile.ZipFile(io.BytesIO(apex)) as archive:
-            filesystem_image = archive.read("apex_payload.img")
-    except (KeyError, zipfile.BadZipFile) as err:
-        raise DreameLawnMowerVideoRuntimeError(
-            "AOSP Bionic APEX did not contain apex_payload.img."
-        ) from err
-    filesystem = _ExtFilesystem(filesystem_image)
-    for source, (relative_target, expected_hash, mode) in AOSP_RUNTIME_FILES.items():
-        _write_verified(
-            target / relative_target,
-            filesystem.read_file(source),
-            expected_hash,
-            mode=mode,
-        )
-
-    for relative_target, (url, expected_hash) in AOSP_VNDK_FILES.items():
-        encoded = _download_verified(
-            http_client,
-            url,
-            None,
+    if use_large_page_runtime:
+        _install_large_page_aosp_runtime(
+            target,
+            http_client=http_client,
             timeout=timeout,
-            label=Path(relative_target).name,
         )
-        try:
-            content = _decode_gitiles(encoded)
-        except ValueError as err:
-            raise DreameLawnMowerVideoRuntimeError(
-                f"AOSP {Path(relative_target).name} was not valid Gitiles base64."
-            ) from err
-        _write_verified(target / relative_target, content, expected_hash)
+    else:
+        _install_legacy_aosp_runtime(
+            target,
+            http_client=http_client,
+            timeout=timeout,
+        )
 
     if architecture == "x86_64":
         qemu_archive = _download_verified(
@@ -350,48 +362,22 @@ def _install_runtime(
             QEMU_X86_64_BINARY_SHA256,
             mode=0o755,
         )
-    elif include_aarch64_qemu:
-        qemu_apk = _download_verified(
-            http_client,
-            QEMU_AARCH64_APK_URL,
-            QEMU_AARCH64_APK_SHA256,
-            timeout=timeout,
-            label="Alpine qemu-aarch64",
-        )
-        try:
-            with tarfile.open(
-                fileobj=io.BytesIO(qemu_apk),
-                mode="r:gz",
-            ) as archive:
-                stream = archive.extractfile("usr/bin/qemu-aarch64")
-                qemu = stream.read() if stream is not None else b""
-        except (KeyError, tarfile.TarError) as err:
-            raise DreameLawnMowerVideoRuntimeError(
-                "Alpine qemu-aarch64 package was malformed."
-            ) from err
-        _write_verified(
-            target / "bin/qemu-aarch64-static",
-            qemu,
-            QEMU_AARCH64_BINARY_SHA256,
-            mode=0o755,
-        )
 
     manifest = {
         "layout_version": layout_version,
         "architecture": architecture,
         "tencent_xp2p_version": TENCENT_XP2P_VERSION,
-        "aosp_runtime_commit": AOSP_RUNTIME_COMMIT,
-        "aosp_vndk_commit": AOSP_VNDK_COMMIT,
-        "qemu_version": (
-            QEMU_VERSION
-            if architecture == "x86_64"
-            else QEMU_AARCH64_VERSION
-            if include_aarch64_qemu
-            else None
+        "aosp_runtime_commit": (
+            None if use_large_page_runtime else AOSP_RUNTIME_COMMIT
         ),
+        "aosp_vndk_commit": None if use_large_page_runtime else AOSP_VNDK_COMMIT,
+        "android_build_id": (
+            LARGE_PAGE_ANDROID_BUILD_ID if use_large_page_runtime else None
+        ),
+        "qemu_version": QEMU_VERSION if architecture == "x86_64" else None,
         "files": _expected_installed_hashes(
             architecture,
-            include_aarch64_qemu=include_aarch64_qemu,
+            use_large_page_runtime=use_large_page_runtime,
         ),
     }
     manifest_path = target / _MANIFEST_NAME
@@ -401,12 +387,103 @@ def _install_runtime(
     )
 
 
+def _install_legacy_aosp_runtime(
+    target: Path,
+    *,
+    http_client: _HttpClient,
+    timeout: float,
+) -> None:
+    apex_encoded = _download_verified(
+        http_client,
+        AOSP_RUNTIME_APEX_URL,
+        None,
+        timeout=timeout,
+        label="AOSP Bionic runtime",
+    )
+    try:
+        apex = _decode_gitiles(apex_encoded)
+    except ValueError as err:
+        raise DreameLawnMowerVideoRuntimeError(
+            "AOSP Bionic runtime download was not valid Gitiles base64."
+        ) from err
+    _require_hash(apex, AOSP_RUNTIME_APEX_SHA256, "AOSP Bionic runtime")
+    _install_apex_files(target, apex, AOSP_RUNTIME_FILES)
+
+    for relative_target, (url, expected_hash) in AOSP_VNDK_FILES.items():
+        encoded = _download_verified(
+            http_client,
+            url,
+            None,
+            timeout=timeout,
+            label=Path(relative_target).name,
+        )
+        try:
+            content = _decode_gitiles(encoded)
+        except ValueError as err:
+            raise DreameLawnMowerVideoRuntimeError(
+                f"AOSP {Path(relative_target).name} was not valid Gitiles base64."
+            ) from err
+        _write_verified(target / relative_target, content, expected_hash)
+
+
+def _install_large_page_aosp_runtime(
+    target: Path,
+    *,
+    http_client: _HttpClient,
+    timeout: float,
+) -> None:
+    entry_names = (
+        LARGE_PAGE_ANDROID_RUNTIME_APEX,
+        *LARGE_PAGE_AOSP_SYSTEM_FILES,
+    )
+    entries = read_android_build_zip_entries(
+        LARGE_PAGE_ANDROID_BUILD_ARTIFACT_URL,
+        entry_names,
+        expected_size=LARGE_PAGE_ANDROID_BUILD_ARTIFACT_SIZE,
+        http_client=http_client,
+        timeout=timeout,
+    )
+    apex = entries[LARGE_PAGE_ANDROID_RUNTIME_APEX]
+    _require_hash(
+        apex,
+        LARGE_PAGE_ANDROID_RUNTIME_APEX_SHA256,
+        "large-page AOSP Bionic runtime",
+    )
+    _install_apex_files(target, apex, LARGE_PAGE_AOSP_RUNTIME_FILES)
+    for source, (relative_target, expected_hash) in (
+        LARGE_PAGE_AOSP_SYSTEM_FILES.items()
+    ):
+        _write_verified(target / relative_target, entries[source], expected_hash)
+
+
+def _install_apex_files(
+    target: Path,
+    apex: bytes,
+    files: Mapping[str, tuple[str, str, int]],
+) -> None:
+    try:
+        with zipfile.ZipFile(io.BytesIO(apex)) as archive:
+            filesystem_image = archive.read("apex_payload.img")
+    except (KeyError, zipfile.BadZipFile) as err:
+        raise DreameLawnMowerVideoRuntimeError(
+            "AOSP Bionic APEX did not contain apex_payload.img."
+        ) from err
+    filesystem = _ExtFilesystem(filesystem_image)
+    for source, (relative_target, expected_hash, mode) in files.items():
+        _write_verified(
+            target / relative_target,
+            filesystem.read_file(source),
+            expected_hash,
+            mode=mode,
+        )
+
+
 def _validated_assets(
     runtime_path: Path,
     architecture: str,
     *,
     layout_version: str = RUNTIME_LAYOUT_VERSION,
-    include_aarch64_qemu: bool = False,
+    use_large_page_runtime: bool = False,
 ) -> DreameLawnMowerXp2pHostAssets | None:
     manifest_path = runtime_path / _MANIFEST_NAME
     try:
@@ -421,7 +498,7 @@ def _validated_assets(
         return None
     expected = _expected_installed_hashes(
         architecture,
-        include_aarch64_qemu=include_aarch64_qemu,
+        use_large_page_runtime=use_large_page_runtime,
     )
     if manifest.get("files") != expected:
         return None
@@ -440,9 +517,7 @@ def _validated_assets(
         library_path=library / "libiot_video_demo.so",
         library_search_paths=(library, library / "bionic"),
         qemu_path=(
-            binary / "qemu-aarch64-static"
-            if architecture == "x86_64" or include_aarch64_qemu
-            else None
+            binary / "qemu-aarch64-static" if architecture == "x86_64" else None
         ),
     )
     try:
@@ -455,24 +530,37 @@ def _validated_assets(
 def _expected_installed_hashes(
     architecture: str,
     *,
-    include_aarch64_qemu: bool = False,
+    use_large_page_runtime: bool = False,
 ) -> dict[str, str]:
+    runtime_files = (
+        LARGE_PAGE_AOSP_RUNTIME_FILES
+        if use_large_page_runtime
+        else AOSP_RUNTIME_FILES
+    )
+    system_hashes = (
+        {
+            relative_target: expected_hash
+            for relative_target, expected_hash in (
+                LARGE_PAGE_AOSP_SYSTEM_FILES.values()
+            )
+        }
+        if use_large_page_runtime
+        else {
+            relative_target: expected_hash
+            for relative_target, (_url, expected_hash) in AOSP_VNDK_FILES.items()
+        }
+    )
     files = {
         "bin/dreame-xp2p-host-runner": WORKER_SHA256,
         "lib/libiot_video_demo.so": TENCENT_XP2P_LIBRARY_SHA256,
         **{
             relative_target: expected_hash
-            for relative_target, expected_hash, _mode in AOSP_RUNTIME_FILES.values()
+            for relative_target, expected_hash, _mode in runtime_files.values()
         },
-        **{
-            relative_target: expected_hash
-            for relative_target, (_url, expected_hash) in AOSP_VNDK_FILES.items()
-        },
+        **system_hashes,
     }
     if architecture == "x86_64":
         files["bin/qemu-aarch64-static"] = QEMU_X86_64_BINARY_SHA256
-    elif include_aarch64_qemu:
-        files["bin/qemu-aarch64-static"] = QEMU_AARCH64_BINARY_SHA256
     return dict(sorted(files.items()))
 
 

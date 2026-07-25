@@ -455,6 +455,50 @@ def test_download_point_cloud_uses_stored_active_map_when_allowed(
     assert result.source == "stored"
 
 
+def test_download_point_cloud_uses_legacy_stored_bin_after_property_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    actions: list[dict[str, Any]] = []
+    client._sync_call_app_action = lambda payload, **kwargs: (
+        actions.append(payload)
+        or {"r": 0, "d": {"name": ["private/fixed-map.bin", ""]}}
+    )
+    signed_names: list[str] = []
+
+    def get_interim_file_url(name: str, **options: Any) -> str:
+        signed_names.append(name)
+        return "https://downloads.example.invalid/stored"
+
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_properties=lambda key, **options: None,
+        get_interim_file_url=get_interim_file_url,
+    )
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(
+        0,
+        45,
+        1,
+        10,
+        1024,
+        allow_stored=True,
+    )
+
+    assert actions == [{"m": "g", "t": "OBJ", "d": {"type": "3dmap"}}]
+    assert signed_names == ["private/fixed-map.bin"]
+    assert result.content == content
+    assert result.source == "stored"
+
+
 def test_download_point_cloud_regenerates_when_stored_object_is_invalid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1518,37 +1562,56 @@ def test_download_point_cloud_retries_mova_fixed_object_until_valid_refresh(
     assert result.metadata.points == 1
 
 
-def test_download_point_cloud_does_not_accept_bin_extension_for_dreame(
+def test_download_point_cloud_accepts_dreame_bin_when_announcement_is_unavailable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _client()
     action_count = 0
     download_url_calls = 0
+    property_calls = 0
+    baseline_content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    refreshed_content = _binary_pcd((4.0, 5.0, 6.0, 0x654321))
 
     def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         nonlocal action_count
         action_count += 1
         if action_count == 1:
-            return {"r": 0, "d": {"name": ["private/existing-map.pcd"]}}
+            return {"r": 0, "d": {"name": ["private/fixed-map.bin"]}}
         if action_count == 2:
             return {"r": 0}
-        return {"r": 0, "d": {"name": ["private/generated-map.bin"]}}
+        return {"r": 0, "d": {"name": ["private/fixed-map.bin"]}}
 
     def get_interim_file_url(name: str, **kwargs: Any) -> str:
         nonlocal download_url_calls
         download_url_calls += 1
         return "https://downloads.example.invalid/object"
 
+    def get_properties(*args: Any, **kwargs: Any) -> None:
+        nonlocal property_calls
+        property_calls += 1
+
     client._sync_call_app_action = call_app_action
     client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
         get_interim_file_url=get_interim_file_url,
+        get_properties=get_properties,
     )
     monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+    downloads = iter((baseline_content, refreshed_content))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            next(downloads),
+            request.full_url,
+        ),
+    )
 
-    with pytest.raises(DreameLawnMowerPointCloudError):
-        client._sync_download_app_map_point_cloud(0, 0.01, 0.001, 10, 1024)
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
 
-    assert download_url_calls == 0
+    assert result.content == refreshed_content
+    assert result.metadata.points == 1
+    assert property_calls == 2
+    assert download_url_calls == 2
 
 
 def test_download_point_cloud_error_does_not_expose_signed_url(

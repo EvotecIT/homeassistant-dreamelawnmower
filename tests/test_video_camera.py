@@ -266,7 +266,7 @@ def test_managed_runtime_environment_reports_large_page_compatibility(
 
     environment = video_helpers_module.managed_runtime_environment()
 
-    assert environment["execution_mode"] == "qemu_aarch64_self"
+    assert environment["execution_mode"] == "native_aarch64_large_page"
     assert environment["page_size"] == 16384
     assert environment["supported"] is True
 

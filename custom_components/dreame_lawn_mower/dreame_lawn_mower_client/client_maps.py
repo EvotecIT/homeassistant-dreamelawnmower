@@ -94,10 +94,8 @@ from .vector_map import (
 if TYPE_CHECKING:
     from .map_visuals import MapRenderStyle
 
-# MOVA reports the fixed 3dmap object as "*.bin" even though the payload is PCD.
-_POINT_CLOUD_OBJECT_EXTENSIONS = frozenset({"pcd"})
-_MOVA_POINT_CLOUD_OBJECT_EXTENSIONS = frozenset({"pcd", "bin"})
-_POINT_CLOUD_ANNOUNCEMENT_EXTENSIONS = frozenset({"pcd", "bin"})
+# Dreame and MOVA can report 3D-map PCD payloads with a "*.bin" object name.
+_POINT_CLOUD_OBJECT_EXTENSIONS = frozenset({"pcd", "bin"})
 _POINT_CLOUD_ANNOUNCEMENT_PROPERTY_KEY = "99.20"
 _POINT_CLOUD_ANNOUNCEMENT_CLOCK_SKEW_MS = 5_000
 _POINT_CLOUD_ANNOUNCEMENT_PROBE_TIMEOUT_SECONDS = 2.0
@@ -735,37 +733,16 @@ class _DreameLawnMowerClientMapsMixin:
         use_announcement_path = announcement_capability is True
         announcement_probe_pending = announcement_capability is None
         if allow_stored and stored_name is not None:
-            stored_deadline = min(
-                deadline,
-                time.monotonic()
-                + _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
+            stored = self._sync_try_download_stored_point_cloud(
+                cloud,
+                stored_name,
+                map_index=map_index,
+                deadline=deadline,
+                download_timeout=download_timeout,
+                max_bytes=max_bytes,
             )
-            try:
-                content, content_type, _ = self._sync_download_point_cloud_object(
-                    cloud,
-                    stored_name,
-                    deadline=stored_deadline,
-                    download_timeout=min(
-                        download_timeout,
-                        _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
-                    ),
-                    max_bytes=max_bytes,
-                )
-                metadata = parse_pcd_metadata(
-                    content,
-                    max_bytes=max_bytes,
-                    deadline=stored_deadline,
-                )
-            except (DeviceException, DreameLawnMowerPointCloudError):
-                pass
-            else:
-                return DreameLawnMowerPointCloudDownload(
-                    map_index=map_index,
-                    content=content,
-                    metadata=metadata,
-                    content_type=content_type,
-                    source="stored",
-                )
+            if stored is not None:
+                return stored
         if allow_stored:
             deadline = min(deadline, time.monotonic() + timeout)
         baseline_name = None
@@ -802,25 +779,31 @@ class _DreameLawnMowerClientMapsMixin:
                 baseline_result,
                 map_index,
             )
+            if allow_stored and baseline_name is not None:
+                stored = self._sync_try_download_stored_point_cloud(
+                    cloud,
+                    baseline_name,
+                    map_index=map_index,
+                    deadline=deadline,
+                    download_timeout=download_timeout,
+                    max_bytes=max_bytes,
+                )
+                if stored is not None:
+                    return stored
 
-        accepted_extensions = (
-            _MOVA_POINT_CLOUD_OBJECT_EXTENSIONS
-            if self._account_type == "mova"
-            else _POINT_CLOUD_OBJECT_EXTENSIONS
-        )
+        accepted_extensions = _POINT_CLOUD_OBJECT_EXTENSIONS
         baseline_identity = None
         baseline_extension = (
             _app_object_extension(baseline_name)
             if baseline_name is not None
             else None
         )
-        fixed_mova_baseline = (
-            self._account_type == "mova"
-            and baseline_name is not None
+        fixed_object_baseline = (
+            baseline_name is not None
             and baseline_extension is not None
-            and baseline_extension.casefold() in accepted_extensions
+            and baseline_extension.casefold() == "bin"
         )
-        if fixed_mova_baseline:
+        if fixed_object_baseline:
             try:
                 _, _, baseline_identity = self._sync_download_point_cloud_object(
                     cloud,
@@ -1006,18 +989,19 @@ class _DreameLawnMowerClientMapsMixin:
             object_extension = (
                 _app_object_extension(object_name) if object_name is not None else None
             )
-            fixed_mova_object = (
-                self._account_type == "mova"
-                and object_name is not None
+            fixed_object = (
+                object_name is not None
                 and object_name == baseline_name
                 and not observed_clear
+                and object_extension is not None
+                and object_extension.casefold() == "bin"
             )
             object_ready = (
                 object_name != baseline_name
                 or observed_clear
-                or fixed_mova_object
+                or fixed_object
             )
-            attempt_allowed = fixed_mova_object or (
+            attempt_allowed = fixed_object or (
                 object_name not in rejected_object_names
                 and object_download_attempts.get(object_name, 0) < 2
             )
@@ -1028,7 +1012,7 @@ class _DreameLawnMowerClientMapsMixin:
                 and object_ready
                 and attempt_allowed
             ):
-                if not fixed_mova_object:
+                if not fixed_object:
                     object_download_attempts[object_name] = (
                         object_download_attempts.get(object_name, 0) + 1
                     )
@@ -1045,10 +1029,10 @@ class _DreameLawnMowerClientMapsMixin:
                 except (DeviceException, DreameLawnMowerPointCloudError):
                     saw_unusable_point_cloud = True
                 else:
-                    if fixed_mova_object and baseline_identity is None:
+                    if fixed_object and baseline_identity is None:
                         saw_unverified_fixed_object = True
                     elif (
-                        fixed_mova_object
+                        fixed_object
                         and not object_identity.differs_from(baseline_identity)
                     ):
                         saw_stale_point_cloud = True
@@ -1061,7 +1045,7 @@ class _DreameLawnMowerClientMapsMixin:
                             )
                         except DreameLawnMowerPointCloudError:
                             saw_unusable_point_cloud = True
-                            if not fixed_mova_object:
+                            if not fixed_object:
                                 rejected_object_names.add(object_name)
                         else:
                             return DreameLawnMowerPointCloudDownload(
@@ -1077,7 +1061,7 @@ class _DreameLawnMowerClientMapsMixin:
 
         if saw_unverified_fixed_object:
             raise DreameLawnMowerPointCloudError(
-                "The MOVA fixed point-cloud object could not be compared with "
+                "The fixed point-cloud object could not be compared with "
                 "its pre-generation version before the timeout.",
                 code="point_cloud_download_invalid",
                 stage="download_validation",
@@ -1126,6 +1110,53 @@ class _DreameLawnMowerClientMapsMixin:
             ),
             timeout_seconds=timeout,
             retry_after_seconds=10,
+        )
+
+    def _sync_try_download_stored_point_cloud(
+        self,
+        cloud: Any,
+        object_name: str,
+        *,
+        map_index: int,
+        deadline: float,
+        download_timeout: float,
+        max_bytes: int,
+    ) -> DreameLawnMowerPointCloudDownload | None:
+        """Return one valid stored PCD from either object-discovery route."""
+        extension = _app_object_extension(object_name)
+        if (
+            extension is None
+            or extension.casefold() not in _POINT_CLOUD_OBJECT_EXTENSIONS
+        ):
+            return None
+        stored_deadline = min(
+            deadline,
+            time.monotonic() + _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
+        )
+        try:
+            content, content_type, _ = self._sync_download_point_cloud_object(
+                cloud,
+                object_name,
+                deadline=stored_deadline,
+                download_timeout=min(
+                    download_timeout,
+                    _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
+                ),
+                max_bytes=max_bytes,
+            )
+            metadata = parse_pcd_metadata(
+                content,
+                max_bytes=max_bytes,
+                deadline=stored_deadline,
+            )
+        except (DeviceException, DreameLawnMowerPointCloudError):
+            return None
+        return DreameLawnMowerPointCloudDownload(
+            map_index=map_index,
+            content=content,
+            metadata=metadata,
+            content_type=content_type,
+            source="stored",
         )
 
     def _sync_get_announced_point_cloud_object(
@@ -1190,7 +1221,7 @@ class _DreameLawnMowerClientMapsMixin:
             if (
                 extension is None
                 or extension.casefold()
-                not in _POINT_CLOUD_ANNOUNCEMENT_EXTENSIONS
+                not in _POINT_CLOUD_OBJECT_EXTENSIONS
             ):
                 return True, None, None
             normalized_name = object_name.strip()

@@ -213,8 +213,8 @@ def test_real_managed_worker_accepts_request_on_native_host(tmp_path) -> None:
         machine=platform.machine(),
         page_size=16384,
     )
-    assert assets.qemu_path is not None
-    assert assets.command()[0] == str(assets.qemu_path)
+    assert assets.qemu_path is None
+    assert assets.command()[0] == str(assets.linker_path)
     assert assets.startup_probe is not None
     assert assets.startup_probe["ready"] is True
     assert assets.startup_probe["stage"] == "response_decode"
@@ -242,35 +242,42 @@ def test_real_managed_worker_accepts_request_on_native_host(tmp_path) -> None:
     assert runtime.last_failure.get("returncode") != -11
 
 
-def test_runtime_bootstrap_adds_qemu_only_to_large_page_aarch64_layout() -> None:
+def test_runtime_bootstrap_uses_native_large_page_aarch64_layout() -> None:
     native = xp2p_runtime_bootstrap._expected_installed_hashes("aarch64")
-    compatible = xp2p_runtime_bootstrap._expected_installed_hashes(
+    large_page = xp2p_runtime_bootstrap._expected_installed_hashes(
         "aarch64",
-        include_aarch64_qemu=True,
+        use_large_page_runtime=True,
     )
 
     assert "bin/qemu-aarch64-static" not in native
+    assert "bin/qemu-aarch64-static" not in large_page
     assert (
-        compatible["bin/qemu-aarch64-static"]
-        == xp2p_runtime_bootstrap.QEMU_AARCH64_BINARY_SHA256
+        native["lib/liblog.so"]
+        == xp2p_runtime_bootstrap.AOSP_VNDK_FILES["lib/liblog.so"][1]
     )
+    assert not any(path.startswith("http") for path in native)
+    assert (
+        large_page["bin/linker64"]
+        == xp2p_runtime_bootstrap.LARGE_PAGE_AOSP_RUNTIME_FILES["bin/linker64"][1]
+    )
+    assert large_page["bin/linker64"] != native["bin/linker64"]
 
 
 @pytest.mark.parametrize(
-    ("machine", "page_size", "expected_name", "include_aarch64_qemu"),
+    ("machine", "page_size", "expected_name", "use_large_page_runtime"),
     [
         ("x86_64", 4096, "runtime-v1-x86_64", False),
         ("aarch64", 4096, "runtime-v1-aarch64", False),
-        ("aarch64", 16384, "runtime-v2-aarch64", True),
+        ("aarch64", 16384, "runtime-v3-aarch64", True),
     ],
 )
-def test_runtime_bootstrap_preserves_existing_layouts_until_qemu_is_needed(
+def test_runtime_bootstrap_preserves_existing_layouts_until_large_pages_need_it(
     monkeypatch,
     tmp_path,
     machine,
     page_size,
     expected_name,
-    include_aarch64_qemu,
+    use_large_page_runtime,
 ) -> None:
     calls = []
 
@@ -283,7 +290,7 @@ def test_runtime_bootstrap_preserves_existing_layouts_until_qemu_is_needed(
             library_search_paths=(path / "lib",),
             qemu_path=(
                 path / "bin" / "qemu-aarch64-static"
-                if machine == "x86_64" or include_aarch64_qemu
+                if machine == "x86_64"
                 else None
             ),
         )
@@ -305,7 +312,7 @@ def test_runtime_bootstrap_preserves_existing_layouts_until_qemu_is_needed(
     assert len(calls) == 1
     assert calls[0][2] == {
         "layout_version": expected_name.split("-")[1][1:],
-        "include_aarch64_qemu": include_aarch64_qemu,
+        "use_large_page_runtime": use_large_page_runtime,
     }
 
 
