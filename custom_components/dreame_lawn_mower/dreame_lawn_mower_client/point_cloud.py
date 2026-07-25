@@ -7,7 +7,7 @@ import struct
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 DEFAULT_POINT_CLOUD_MAX_BYTES = 64 * 1024 * 1024
 MAX_POINT_CLOUD_HEADER_BYTES = 64 * 1024
@@ -96,6 +96,7 @@ class DreameLawnMowerPointCloudDownload:
     metadata: DreameLawnMowerPointCloudMetadata
     content_type: str = "application/octet-stream"
     file_extension: str = "pcd"
+    source: Literal["generated", "stored"] = "generated"
 
 
 def parse_pcd_metadata(

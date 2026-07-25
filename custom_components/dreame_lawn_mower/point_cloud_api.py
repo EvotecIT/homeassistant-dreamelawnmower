@@ -138,7 +138,12 @@ class DreameLawnMowerPointCloudAPI:
         if inflight is not None:
             if inflight.epoch == epoch:
                 if refresh and inflight.allow_stored:
-                    await self._async_wait_for_stored_generation(key, inflight)
+                    completed = await self._async_wait_for_stored_generation(
+                        key,
+                        inflight,
+                    )
+                    if completed is not None and completed.source == "generated":
+                        return completed
                     return await self.async_get(
                         entry_id,
                         map_index,
@@ -218,14 +223,15 @@ class DreameLawnMowerPointCloudAPI:
         self,
         key: tuple[str, int],
         inflight: _InflightGeneration,
-    ) -> None:
+    ) -> DreameLawnMowerPointCloudDownload | None:
         """Wait for stored-capable work before starting a forced refresh."""
         try:
-            await asyncio.shield(inflight.task)
+            return await asyncio.shield(inflight.task)
         except Exception:  # noqa: BLE001 - the refresh starts independently.
-            pass
-        if self._inflight.get(key) is inflight:
-            self._inflight.pop(key, None)
+            return None
+        finally:
+            if self._inflight.get(key) is inflight:
+                self._inflight.pop(key, None)
 
     async def _async_discard_stale_generation(
         self,

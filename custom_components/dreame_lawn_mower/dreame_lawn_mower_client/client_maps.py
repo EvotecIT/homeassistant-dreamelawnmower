@@ -764,6 +764,7 @@ class _DreameLawnMowerClientMapsMixin:
                     content=content,
                     metadata=metadata,
                     content_type=content_type,
+                    source="stored",
                 )
         if allow_stored:
             deadline = min(deadline, time.monotonic() + timeout)
@@ -831,13 +832,13 @@ class _DreameLawnMowerClientMapsMixin:
             except (DeviceException, DreameLawnMowerPointCloudError):
                 baseline_identity = None
 
-        generation_requested_at_ms = int(time.time() * 1000)
         self._sync_call_point_cloud_action(
             {"m": "a", "p": 0, "o": 10, "d": {"idx": map_index}},
             operation="start point-cloud generation",
             deadline=deadline,
             require_data=False,
         )
+        generation_requested_at_ms = int(time.time() * 1000)
 
         observed_clear = baseline_known and baseline_name is None
         saw_unusable_point_cloud = False
@@ -1189,7 +1190,7 @@ class _DreameLawnMowerClientMapsMixin:
                         normalized_name != baseline[0]
                         or updated_at_ms > baseline[1]
                     )
-                    and updated_at_ms >= requested_after_ms
+                    and updated_at_ms > requested_after_ms
                 )
                 if baseline is not None
                 else (

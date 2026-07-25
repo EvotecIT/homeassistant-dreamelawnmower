@@ -349,6 +349,65 @@ def test_download_point_cloud_uses_fresh_lidar_announcement(
     assert result.metadata.points == 1
 
 
+def test_download_point_cloud_rejects_announcement_from_during_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [1.0]
+    actions: list[dict[str, Any]] = []
+    announced_names = iter(
+        [
+            ("private/baseline-map.bin", 500),
+            ("private/other-upload.bin", 1_500),
+            ("private/generated-map.bin", 2_500),
+        ]
+    )
+    signed_names: list[str] = []
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        actions.append(payload)
+        clock[0] = 2.0
+        return {"r": 0}
+
+    def get_properties(key: str, **kwargs: Any) -> list[dict[str, Any]]:
+        name, updated_at = next(announced_names)
+        return [
+            {
+                "key": key,
+                "value": name,
+                "updateDate": updated_at,
+            }
+        ]
+
+    def get_interim_file_url(name: str, **kwargs: Any) -> str:
+        signed_names.append(name)
+        return "https://downloads.example.invalid/object"
+
+    cloud = SimpleNamespace(
+        get_properties=get_properties,
+        get_interim_file_url=get_interim_file_url,
+    )
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(client_module.time, "time", lambda: clock[0])
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert actions == [{"m": "a", "p": 0, "o": 10, "d": {"idx": 0}}]
+    assert signed_names == ["private/generated-map.bin"]
+    assert result.source == "generated"
+
+
 def test_download_point_cloud_uses_stored_active_map_when_allowed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -391,6 +450,7 @@ def test_download_point_cloud_uses_stored_active_map_when_allowed(
     assert result.map_index == 0
     assert result.content == content
     assert result.metadata.points == 1
+    assert result.source == "stored"
 
 
 def test_download_point_cloud_regenerates_when_stored_object_is_invalid(

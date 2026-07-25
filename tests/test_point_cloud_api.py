@@ -35,7 +35,11 @@ from dreame_lawn_mower_client import (
 )
 
 
-def _download(map_index: int = 0) -> DreameLawnMowerPointCloudDownload:
+def _download(
+    map_index: int = 0,
+    *,
+    source: str = "generated",
+) -> DreameLawnMowerPointCloudDownload:
     content = b"private-pcd"
     return DreameLawnMowerPointCloudDownload(
         map_index=map_index,
@@ -55,6 +59,7 @@ def _download(map_index: int = 0) -> DreameLawnMowerPointCloudDownload:
             payload_bytes=12,
             total_bytes=112,
         ),
+        source=source,
     )
 
 
@@ -319,7 +324,8 @@ def test_point_cloud_api_refresh_does_not_join_stored_capable_request() -> None:
         if len(options) == 1:
             first_started.set()
             await release_first.wait()
-        return _download(len(options) - 1)
+            return _download(0, source="stored")
+        return _download(1)
 
     hass = SimpleNamespace(
         data={
@@ -358,6 +364,53 @@ def test_point_cloud_api_refresh_does_not_join_stored_capable_request() -> None:
         {"map_index": 0, "allow_stored": True},
         {"map_index": 0, "allow_stored": False},
     ]
+
+
+def test_point_cloud_api_refresh_joins_stored_fallback_generation() -> None:
+    options: list[dict[str, Any]] = []
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+
+    async def download(**kwargs: Any) -> DreameLawnMowerPointCloudDownload:
+        options.append(kwargs)
+        first_started.set()
+        await release_first.wait()
+        return _download(0, source="generated")
+
+    hass = SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry-1": SimpleNamespace(
+                    app_maps={
+                        "current_map_index": 0,
+                        "maps": [{"idx": 0, "created": True}],
+                    },
+                    selected_map_index=0,
+                    client=SimpleNamespace(
+                        async_download_app_map_point_cloud=download,
+                    ),
+                )
+            }
+        }
+    )
+    api = DreameLawnMowerPointCloudAPI(hass)
+
+    async def run() -> None:
+        first = asyncio.create_task(api.async_get("entry-1", 0))
+        await first_started.wait()
+        refreshed = asyncio.create_task(
+            api.async_get("entry-1", 0, refresh=True)
+        )
+        await asyncio.sleep(0)
+        assert len(options) == 1
+        release_first.set()
+        first_result, refresh_result = await asyncio.gather(first, refreshed)
+        assert refresh_result is first_result
+        assert refresh_result.source == "generated"
+
+    asyncio.run(run())
+
+    assert options == [{"map_index": 0, "allow_stored": True}]
 
 
 def test_point_cloud_api_keeps_generation_alive_after_waiter_cancellation() -> None:
