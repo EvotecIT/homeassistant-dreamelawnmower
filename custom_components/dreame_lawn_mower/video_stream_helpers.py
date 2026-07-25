@@ -105,18 +105,20 @@ def managed_runtime_environment() -> dict[str, str | bool | int]:
     else:
         normalized_machine = machine
     supported = system == "linux" and normalized_machine in {"x86_64", "aarch64"}
+    try:
+        page_size = int(os.sysconf("SC_PAGE_SIZE"))
+    except (AttributeError, OSError, ValueError):
+        page_size = 0
     execution_mode = (
         "qemu_aarch64"
         if supported and normalized_machine == "x86_64"
+        else "qemu_aarch64_self"
+        if supported and normalized_machine == "aarch64" and page_size > 4096
         else "native_aarch64"
         if supported
         else "unsupported"
     )
     libc_name, libc_version = platform.libc_ver()
-    try:
-        page_size = int(os.sysconf("SC_PAGE_SIZE"))
-    except (AttributeError, OSError, ValueError):
-        page_size = 0
     return {
         "system": system,
         "machine": normalized_machine,
