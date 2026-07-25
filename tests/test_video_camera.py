@@ -238,6 +238,39 @@ def test_managed_runtime_environment_is_privacy_safe(
     }
 
 
+def test_managed_runtime_environment_reports_large_page_compatibility(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(video_helpers_module.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        video_helpers_module.platform,
+        "machine",
+        lambda: "aarch64",
+    )
+    monkeypatch.setattr(
+        video_helpers_module.platform,
+        "release",
+        lambda: "6.12-test",
+    )
+    monkeypatch.setattr(
+        video_helpers_module.platform,
+        "libc_ver",
+        lambda: ("musl", "1"),
+    )
+    monkeypatch.setattr(
+        video_helpers_module.os,
+        "sysconf",
+        lambda _name: 16384,
+        raising=False,
+    )
+
+    environment = video_helpers_module.managed_runtime_environment()
+
+    assert environment["execution_mode"] == "qemu_aarch64_self"
+    assert environment["page_size"] == 16384
+    assert environment["supported"] is True
+
+
 def test_video_camera_facade_preserves_split_method_surface() -> None:
     """Keep reflection and direct module imports stable after decomposition."""
     split_methods = {

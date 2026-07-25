@@ -211,7 +211,10 @@ def test_real_managed_worker_accepts_request_on_native_host(tmp_path) -> None:
     assets = xp2p_runtime_bootstrap.ensure_xp2p_host_runtime(
         tmp_path,
         machine=platform.machine(),
+        page_size=16384,
     )
+    assert assets.qemu_path is not None
+    assert assets.command()[0] == str(assets.qemu_path)
     assert assets.startup_probe is not None
     assert assets.startup_probe["ready"] is True
     assert assets.startup_probe["stage"] == "response_decode"
@@ -237,6 +240,73 @@ def test_real_managed_worker_accepts_request_on_native_host(tmp_path) -> None:
     assert runtime.last_failure is not None
     assert isinstance(runtime.last_failure.get("worker_status"), int)
     assert runtime.last_failure.get("returncode") != -11
+
+
+def test_runtime_bootstrap_adds_qemu_only_to_large_page_aarch64_layout() -> None:
+    native = xp2p_runtime_bootstrap._expected_installed_hashes("aarch64")
+    compatible = xp2p_runtime_bootstrap._expected_installed_hashes(
+        "aarch64",
+        include_aarch64_qemu=True,
+    )
+
+    assert "bin/qemu-aarch64-static" not in native
+    assert (
+        compatible["bin/qemu-aarch64-static"]
+        == xp2p_runtime_bootstrap.QEMU_AARCH64_BINARY_SHA256
+    )
+
+
+@pytest.mark.parametrize(
+    ("machine", "page_size", "expected_name", "include_aarch64_qemu"),
+    [
+        ("x86_64", 4096, "runtime-v1-x86_64", False),
+        ("aarch64", 4096, "runtime-v1-aarch64", False),
+        ("aarch64", 16384, "runtime-v2-aarch64", True),
+    ],
+)
+def test_runtime_bootstrap_preserves_existing_layouts_until_qemu_is_needed(
+    monkeypatch,
+    tmp_path,
+    machine,
+    page_size,
+    expected_name,
+    include_aarch64_qemu,
+) -> None:
+    calls = []
+
+    def validated(path, architecture, **options):
+        calls.append((path, architecture, options))
+        return DreameLawnMowerXp2pHostAssets(
+            worker_path=path / "bin" / "dreame-xp2p-host-runner",
+            linker_path=path / "bin" / "linker64",
+            library_path=path / "lib" / "libiot_video_demo.so",
+            library_search_paths=(path / "lib",),
+            qemu_path=(
+                path / "bin" / "qemu-aarch64-static"
+                if machine == "x86_64" or include_aarch64_qemu
+                else None
+            ),
+        )
+
+    monkeypatch.setattr(xp2p_runtime_bootstrap, "_validated_assets", validated)
+    monkeypatch.setattr(
+        xp2p_runtime_bootstrap,
+        "_with_startup_probe",
+        lambda assets: assets,
+    )
+
+    assets = xp2p_runtime_bootstrap.ensure_xp2p_host_runtime(
+        tmp_path,
+        machine=machine,
+        page_size=page_size,
+    )
+
+    assert assets.worker_path.parent.parent.name == expected_name
+    assert len(calls) == 1
+    assert calls[0][2] == {
+        "layout_version": expected_name.split("-")[1][1:],
+        "include_aarch64_qemu": include_aarch64_qemu,
+    }
 
 
 def test_host_probe_reports_signal_without_exposing_paths(
@@ -718,7 +788,7 @@ def test_runtime_bootstrap_repairs_file_shaped_cache(
             qemu_path=path / "bin" / "qemu-aarch64-static",
         )
 
-    def _validated(path, _architecture):
+    def _validated(path, _architecture, **_kwargs):
         if path == runtime_path and path.is_file():
             return None
         return _assets(path)

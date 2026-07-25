@@ -7,6 +7,7 @@ import gzip
 import hashlib
 import io
 import json
+import os
 import platform
 import shutil
 import struct
@@ -31,6 +32,7 @@ from .xp2p_host_worker_blob import (
 )
 
 RUNTIME_LAYOUT_VERSION = "1"
+LARGE_PAGE_RUNTIME_LAYOUT_VERSION = "2"
 TENCENT_XP2P_VERSION = "2.4.50"
 TENCENT_XP2P_AAR_URL = (
     "https://repo.maven.apache.org/maven2/com/tencent/iot/thirdparty/android/"
@@ -112,6 +114,17 @@ QEMU_X86_64_ARCHIVE_SHA256 = (
 QEMU_X86_64_BINARY_SHA256 = (
     "dce64b2dc6b005485c7aa735a7ea39cb0006bf7e5badc28b324b2cd0c73d883f"
 )
+QEMU_AARCH64_VERSION = "10.0.0-r1"
+QEMU_AARCH64_APK_URL = (
+    "https://dl-cdn.alpinelinux.org/alpine/v3.22/community/aarch64/"
+    "qemu-aarch64-10.0.0-r1.apk"
+)
+QEMU_AARCH64_APK_SHA256 = (
+    "59cdf1518f501c87f0397324bf97c807adac45fe70a50f5468fcb55280573758"
+)
+QEMU_AARCH64_BINARY_SHA256 = (
+    "4d1b11f85b7617ee9209d4e9224378ad8d96f757dc30ee7939f8097c1b65b13a"
+)
 
 _TENCENT_AAR_LIBRARY = "jni/arm64-v8a/libiot_video_demo.so"
 _MANIFEST_NAME = "runtime-manifest.json"
@@ -133,6 +146,7 @@ def ensure_xp2p_host_runtime(
     root: str | Path,
     *,
     machine: str | None = None,
+    page_size: int | None = None,
     http_client: _HttpClient | None = None,
     timeout: float = 60.0,
 ) -> DreameLawnMowerXp2pHostAssets:
@@ -143,10 +157,24 @@ def ensure_xp2p_host_runtime(
             "Managed XP2P video supports Linux aarch64 and x86_64 hosts; "
             f"this host reports {machine or platform.machine()!r}."
         )
+    host_page_size = _host_page_size() if page_size is None else page_size
+    use_aarch64_self_qemu = (
+        architecture == "aarch64" and host_page_size > 4096
+    )
+    layout_version = (
+        LARGE_PAGE_RUNTIME_LAYOUT_VERSION
+        if use_aarch64_self_qemu
+        else RUNTIME_LAYOUT_VERSION
+    )
     root_path = Path(root)
-    runtime_path = root_path / f"runtime-v{RUNTIME_LAYOUT_VERSION}-{architecture}"
+    runtime_path = root_path / f"runtime-v{layout_version}-{architecture}"
     with _INSTALL_LOCK:
-        assets = _validated_assets(runtime_path, architecture)
+        assets = _validated_assets(
+            runtime_path,
+            architecture,
+            layout_version=layout_version,
+            include_aarch64_qemu=use_aarch64_self_qemu,
+        )
         if assets is None:
             root_path.mkdir(parents=True, exist_ok=True)
             staging = Path(
@@ -159,10 +187,17 @@ def ensure_xp2p_host_runtime(
                 _install_runtime(
                     staging,
                     architecture,
+                    layout_version=layout_version,
+                    include_aarch64_qemu=use_aarch64_self_qemu,
                     http_client=http_client or requests,
                     timeout=timeout,
                 )
-                installed = _validated_assets(staging, architecture)
+                installed = _validated_assets(
+                    staging,
+                    architecture,
+                    layout_version=layout_version,
+                    include_aarch64_qemu=use_aarch64_self_qemu,
+                )
                 if installed is None:
                     raise DreameLawnMowerVideoRuntimeError(
                         "Installed XP2P host runtime failed integrity validation."
@@ -173,12 +208,25 @@ def ensure_xp2p_host_runtime(
             except Exception:
                 _remove_runtime_path(staging, root_path)
                 raise
-            assets = _validated_assets(runtime_path, architecture)
+            assets = _validated_assets(
+                runtime_path,
+                architecture,
+                layout_version=layout_version,
+                include_aarch64_qemu=use_aarch64_self_qemu,
+            )
             if assets is None:
                 raise DreameLawnMowerVideoRuntimeError(
                     "XP2P host runtime disappeared after installation."
                 )
     return _with_startup_probe(assets)
+
+
+def _host_page_size() -> int:
+    """Return the Linux host page size, or zero when it cannot be read."""
+    try:
+        return int(os.sysconf("SC_PAGE_SIZE"))
+    except (AttributeError, OSError, ValueError):
+        return 0
 
 
 def _with_startup_probe(
@@ -198,6 +246,8 @@ def _install_runtime(
     target: Path,
     architecture: str,
     *,
+    layout_version: str = RUNTIME_LAYOUT_VERSION,
+    include_aarch64_qemu: bool = False,
     http_client: _HttpClient,
     timeout: float,
 ) -> None:
@@ -300,15 +350,49 @@ def _install_runtime(
             QEMU_X86_64_BINARY_SHA256,
             mode=0o755,
         )
+    elif include_aarch64_qemu:
+        qemu_apk = _download_verified(
+            http_client,
+            QEMU_AARCH64_APK_URL,
+            QEMU_AARCH64_APK_SHA256,
+            timeout=timeout,
+            label="Alpine qemu-aarch64",
+        )
+        try:
+            with tarfile.open(
+                fileobj=io.BytesIO(qemu_apk),
+                mode="r:gz",
+            ) as archive:
+                stream = archive.extractfile("usr/bin/qemu-aarch64")
+                qemu = stream.read() if stream is not None else b""
+        except (KeyError, tarfile.TarError) as err:
+            raise DreameLawnMowerVideoRuntimeError(
+                "Alpine qemu-aarch64 package was malformed."
+            ) from err
+        _write_verified(
+            target / "bin/qemu-aarch64-static",
+            qemu,
+            QEMU_AARCH64_BINARY_SHA256,
+            mode=0o755,
+        )
 
     manifest = {
-        "layout_version": RUNTIME_LAYOUT_VERSION,
+        "layout_version": layout_version,
         "architecture": architecture,
         "tencent_xp2p_version": TENCENT_XP2P_VERSION,
         "aosp_runtime_commit": AOSP_RUNTIME_COMMIT,
         "aosp_vndk_commit": AOSP_VNDK_COMMIT,
-        "qemu_version": QEMU_VERSION if architecture == "x86_64" else None,
-        "files": _expected_installed_hashes(architecture),
+        "qemu_version": (
+            QEMU_VERSION
+            if architecture == "x86_64"
+            else QEMU_AARCH64_VERSION
+            if include_aarch64_qemu
+            else None
+        ),
+        "files": _expected_installed_hashes(
+            architecture,
+            include_aarch64_qemu=include_aarch64_qemu,
+        ),
     }
     manifest_path = target / _MANIFEST_NAME
     manifest_path.write_text(
@@ -320,6 +404,9 @@ def _install_runtime(
 def _validated_assets(
     runtime_path: Path,
     architecture: str,
+    *,
+    layout_version: str = RUNTIME_LAYOUT_VERSION,
+    include_aarch64_qemu: bool = False,
 ) -> DreameLawnMowerXp2pHostAssets | None:
     manifest_path = runtime_path / _MANIFEST_NAME
     try:
@@ -328,11 +415,14 @@ def _validated_assets(
         return None
     if not isinstance(manifest, Mapping):
         return None
-    if manifest.get("layout_version") != RUNTIME_LAYOUT_VERSION:
+    if manifest.get("layout_version") != layout_version:
         return None
     if manifest.get("architecture") != architecture:
         return None
-    expected = _expected_installed_hashes(architecture)
+    expected = _expected_installed_hashes(
+        architecture,
+        include_aarch64_qemu=include_aarch64_qemu,
+    )
     if manifest.get("files") != expected:
         return None
     for relative, expected_hash in expected.items():
@@ -350,7 +440,9 @@ def _validated_assets(
         library_path=library / "libiot_video_demo.so",
         library_search_paths=(library, library / "bionic"),
         qemu_path=(
-            binary / "qemu-aarch64-static" if architecture == "x86_64" else None
+            binary / "qemu-aarch64-static"
+            if architecture == "x86_64" or include_aarch64_qemu
+            else None
         ),
     )
     try:
@@ -360,7 +452,11 @@ def _validated_assets(
     return assets
 
 
-def _expected_installed_hashes(architecture: str) -> dict[str, str]:
+def _expected_installed_hashes(
+    architecture: str,
+    *,
+    include_aarch64_qemu: bool = False,
+) -> dict[str, str]:
     files = {
         "bin/dreame-xp2p-host-runner": WORKER_SHA256,
         "lib/libiot_video_demo.so": TENCENT_XP2P_LIBRARY_SHA256,
@@ -375,6 +471,8 @@ def _expected_installed_hashes(architecture: str) -> dict[str, str]:
     }
     if architecture == "x86_64":
         files["bin/qemu-aarch64-static"] = QEMU_X86_64_BINARY_SHA256
+    elif include_aarch64_qemu:
+        files["bin/qemu-aarch64-static"] = QEMU_AARCH64_BINARY_SHA256
     return dict(sorted(files.items()))
 
 
