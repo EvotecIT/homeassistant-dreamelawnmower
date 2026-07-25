@@ -198,6 +198,11 @@ class DreameLawnMowerMapCamera(
             image_cached=self._map_cache.last_image is not None,
             refreshed_at=self._map_cache.last_refresh_at,
             last_error=self._map_cache.last_error,
+            runtime_status_blob=getattr(
+                self.coordinator,
+                "runtime_status_blob",
+                None,
+            ),
         )
         attributes["point_cloud_api_path"] = current_point_cloud_api_path(
             self.coordinator.entry.entry_id,

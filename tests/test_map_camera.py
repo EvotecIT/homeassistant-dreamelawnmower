@@ -275,6 +275,50 @@ def test_map_camera_attributes_include_live_path_metadata() -> None:
     }
 
 
+def test_map_camera_attributes_overlay_latest_realtime_pose() -> None:
+    """Camera position attributes must not wait for a map-view refresh."""
+    view = DreameLawnMowerMapView(
+        source="batch_vector_map",
+        details={
+            "runtime_pose_x": -2240,
+            "runtime_pose_y": -140,
+            "runtime_heading_deg": 207.53,
+            "runtime_region_id": 7,
+            "runtime_position_updated_at": "2026-07-16T09:45:12+00:00",
+            "runtime_position_valid": True,
+        },
+    )
+    realtime_blob = SimpleNamespace(
+        candidate_runtime_pose_x=-1800,
+        candidate_runtime_pose_y=250,
+        candidate_runtime_heading_deg=91.25,
+        candidate_runtime_region_id=8,
+        received_at="2026-07-25T11:58:00+00:00",
+    )
+
+    attributes = map_camera_attributes(
+        view,
+        image_cached=True,
+        refreshed_at=None,
+        last_error=None,
+        runtime_status_blob=realtime_blob,
+    )
+
+    assert attributes["runtime_pose_x"] == -1800
+    assert attributes["runtime_pose_y"] == 250
+    assert attributes["runtime_heading_deg"] == 91.25
+    assert attributes["runtime_region_id"] == 8
+    assert attributes["runtime_position_updated_at"] == (
+        "2026-07-25T11:58:00+00:00"
+    )
+    assert attributes["position_x"] == -1800
+    assert attributes["position_y"] == 250
+    assert attributes["position_heading"] == 91.25
+    assert attributes["position_segment"] == 8
+    assert attributes["position_updated_at"] == "2026-07-25T11:58:00+00:00"
+    assert attributes["runtime_position_valid"] is None
+
+
 def test_map_camera_attributes_include_app_trajectory_details() -> None:
     """App-map trajectory metadata is promoted into camera attributes."""
     view = DreameLawnMowerMapView(
