@@ -112,7 +112,7 @@ def managed_runtime_environment() -> dict[str, str | bool | int]:
     execution_mode = (
         "qemu_aarch64"
         if supported and normalized_machine == "x86_64"
-        else "qemu_aarch64_self"
+        else "native_aarch64_large_page"
         if supported and normalized_machine == "aarch64" and page_size > 4096
         else "native_aarch64"
         if supported
