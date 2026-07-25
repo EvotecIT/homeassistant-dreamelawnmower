@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NoReturn
 
@@ -16,7 +16,7 @@ from homeassistant.components.http.decorators import require_admin
 from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
-from .control_options import current_map_index
+from .control_options import active_map_index, current_map_index
 from .diagnostic_events import record_diagnostic_event
 from .dreame_lawn_mower_client import (
     DreameLawnMowerPointCloudDownload,
@@ -94,6 +94,7 @@ class _InflightGeneration:
     """Track one generation and the config-entry lifetime that started it."""
 
     epoch: int
+    allow_stored: bool
     task: asyncio.Task[DreameLawnMowerPointCloudDownload]
 
 
@@ -136,6 +137,18 @@ class DreameLawnMowerPointCloudAPI:
         inflight = self._inflight.get(key)
         if inflight is not None:
             if inflight.epoch == epoch:
+                if refresh and inflight.allow_stored:
+                    completed = await self._async_wait_for_stored_generation(
+                        key,
+                        inflight,
+                    )
+                    if completed is not None and completed.source == "generated":
+                        return completed
+                    return await self.async_get(
+                        entry_id,
+                        map_index,
+                        refresh=True,
+                    )
                 return await asyncio.shield(inflight.task)
             await self._async_discard_stale_generation(key, inflight)
             return await self.async_get(entry_id, map_index, refresh=refresh)
@@ -167,10 +180,15 @@ class DreameLawnMowerPointCloudAPI:
                 ),
             )
 
+        allow_stored = (
+            not refresh
+            and _single_active_map_index(coordinator) == map_index
+        )
         generation = self._async_generate(
             key,
             coordinator,
             epoch=epoch,
+            allow_stored=allow_stored,
         )
         create_task = getattr(self._hass, "async_create_task", None)
         if callable(create_task):
@@ -183,7 +201,11 @@ class DreameLawnMowerPointCloudAPI:
                 generation,
                 name=f"{DOMAIN} point cloud {entry_id}:{map_index}",
             )
-        inflight = _InflightGeneration(epoch=epoch, task=task)
+        inflight = _InflightGeneration(
+            epoch=epoch,
+            allow_stored=allow_stored,
+            task=task,
+        )
         self._inflight[key] = inflight
         task.add_done_callback(
             lambda completed, *, inflight_key=key: self._generation_done(
@@ -196,6 +218,23 @@ class DreameLawnMowerPointCloudAPI:
         # Shield the shared generation so another request joins it instead of
         # launching a second mower-side job.
         return await asyncio.shield(task)
+
+    async def _async_wait_for_stored_generation(
+        self,
+        key: tuple[str, int],
+        inflight: _InflightGeneration,
+    ) -> DreameLawnMowerPointCloudDownload | None:
+        """Wait for stored-capable work before starting a forced refresh."""
+        try:
+            return await asyncio.shield(inflight.task)
+        except Exception:  # noqa: BLE001 - the refresh starts independently.
+            return None
+        finally:
+            if (
+                inflight.task.done()
+                and self._inflight.get(key) is inflight
+            ):
+                self._inflight.pop(key, None)
 
     async def _async_discard_stale_generation(
         self,
@@ -223,6 +262,7 @@ class DreameLawnMowerPointCloudAPI:
         coordinator: DreameLawnMowerCoordinator,
         *,
         epoch: int,
+        allow_stored: bool,
     ) -> DreameLawnMowerPointCloudDownload:
         """Run and cache one generation independently of HTTP waiters."""
         performance = getattr(coordinator, "performance", None)
@@ -247,13 +287,15 @@ class DreameLawnMowerPointCloudAPI:
                 download = await cycle.measure(
                     "generate_download_validate",
                     lambda: coordinator.client.async_download_app_map_point_cloud(
-                        map_index=key[1]
+                        map_index=key[1],
+                        allow_stored=allow_stored,
                     ),
                 )
             else:
                 download = (
                     await coordinator.client.async_download_app_map_point_cloud(
-                        map_index=key[1]
+                        map_index=key[1],
+                        allow_stored=allow_stored,
                     )
                 )
             if self._entry_epochs.get(key[0], 0) != epoch:
@@ -426,6 +468,42 @@ class DreameLawnMowerPointCloudAPI:
         handle = self._cache_expiry_handles.pop(key, None)
         if handle is not None:
             handle.cancel()
+
+
+def _single_active_map_index(
+    coordinator: DreameLawnMowerCoordinator,
+) -> int | None:
+    """Return the active map only when stored-object identity is unambiguous."""
+    app_maps = getattr(coordinator, "app_maps", None)
+    if not isinstance(app_maps, Mapping):
+        return None
+    maps = app_maps.get("maps")
+    if not isinstance(maps, Sequence) or isinstance(
+        maps,
+        str | bytes | bytearray,
+    ):
+        return None
+    indices = {
+        entry.get("idx")
+        for entry in maps
+        if isinstance(entry, Mapping)
+        and isinstance(entry.get("idx"), int)
+        and not isinstance(entry.get("idx"), bool)
+        and entry["idx"] >= 0
+        and entry.get("created") is not False
+    }
+    if len(indices) != 1:
+        return None
+    only_index = next(iter(indices))
+    active_index = active_map_index(
+        app_maps,
+        selected_map_index=getattr(
+            coordinator,
+            "selected_map_index",
+            None,
+        ),
+    )
+    return only_index if active_index == only_index else None
 
 
 class DreameLawnMowerPointCloudView(HomeAssistantView):

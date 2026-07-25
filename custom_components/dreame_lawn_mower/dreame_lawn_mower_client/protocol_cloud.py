@@ -9,6 +9,7 @@ import hmac
 import requests
 import zlib
 import queue
+from collections.abc import Callable
 from threading import RLock, Thread, Timer
 from time import sleep
 import time
@@ -29,6 +30,8 @@ _TX_VIDEO_API_PATH = "/dreame-third-video/tx/"
 _REDACTED_TX_VIDEO_PAYLOAD = "<redacted TX video payload>"
 _INTERIM_FILE_API_PATH = "/dreame-user-iot/iotfile/getDownloadUrl"
 _REDACTED_INTERIM_FILE_PAYLOAD = "<redacted interim file payload>"
+_CLOUD_PROPERTIES_API_PATH = "/dreame-user-iot/iotstatus/props"
+_REDACTED_CLOUD_PROPERTIES_PAYLOAD = "<redacted cloud properties payload>"
 _REDACTED_APP_ACTION_RESPONSE = "<redacted app action response>"
 _DEADLINE_RESPONSE_CHUNK_BYTES = 8 * 1024
 _MAX_DEADLINE_RESPONSE_BYTES = 1024 * 1024
@@ -41,6 +44,8 @@ def _cloud_request_log_value(url: str, value: Any) -> Any:
         return _REDACTED_TX_VIDEO_PAYLOAD
     if _INTERIM_FILE_API_PATH in url and value is not None:
         return _REDACTED_INTERIM_FILE_PAYLOAD
+    if _CLOUD_PROPERTIES_API_PATH in url and value is not None:
+        return _REDACTED_CLOUD_PROPERTIES_PAYLOAD
     return value
 def _app_action_response_log_value(value: Any, *, redact: bool) -> Any:
     """Hide private point-cloud object names from app-action response logs."""
@@ -113,13 +118,19 @@ def _post_cloud_response(
     request_options: dict[str, Any],
     *,
     deadline: float | None,
+    on_dispatch: Callable[[], None] | None = None,
 ) -> Any:
     """Post while bounding the response-header phase by an absolute deadline."""
-    if deadline is None:
+    def post() -> Any:
+        if on_dispatch is not None:
+            on_dispatch()
         return session.post(url, **request_options)
+
+    if deadline is None:
+        return post()
     try:
         return run_with_deadline(
-            lambda: session.post(url, **request_options),
+            post,
             deadline=deadline,
         )
     except DeadlineExceededError as err:
@@ -197,6 +208,7 @@ class DreameMowerDreameHomeCloudProtocol:
         *,
         deadline: float | None = None,
         redact_response: bool = False,
+        on_dispatch: Callable[[], None] | None = None,
     ):
         return self.request(
             f"{self.get_api_url()}/{url}",
@@ -206,6 +218,7 @@ class DreameMowerDreameHomeCloudProtocol:
             timeout,
             deadline=deadline,
             redact_response=redact_response,
+            on_dispatch=on_dispatch,
         )
 
     def get_api_url(self) -> str:
@@ -826,6 +839,7 @@ class DreameMowerDreameHomeCloudProtocol:
         *,
         deadline: float | None = None,
         redact_response: bool = False,
+        on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
         with self._operation_lock():
             return self._send_unlocked(
@@ -835,6 +849,7 @@ class DreameMowerDreameHomeCloudProtocol:
                 timeout,
                 deadline=deadline,
                 redact_response=redact_response,
+                on_dispatch=on_dispatch,
             )
 
     def _send_unlocked(
@@ -846,6 +861,7 @@ class DreameMowerDreameHomeCloudProtocol:
         *,
         deadline: float | None = None,
         redact_response: bool = False,
+        on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
         host = ""
         if self._host and len(self._host):
@@ -867,6 +883,7 @@ class DreameMowerDreameHomeCloudProtocol:
             timeout,
             deadline=deadline,
             redact_response=redact_response,
+            on_dispatch=on_dispatch,
         )
         logged_response = _app_action_response_log_value(
             api_response,
@@ -924,6 +941,7 @@ class DreameMowerDreameHomeCloudProtocol:
         *,
         deadline: float | None = None,
         redact_response: bool = False,
+        on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
         """Call the mobile-app action bridge used by mower plugin commands."""
         return self.send(
@@ -938,6 +956,7 @@ class DreameMowerDreameHomeCloudProtocol:
             timeout=timeout,
             deadline=deadline,
             redact_response=redact_response,
+            on_dispatch=on_dispatch,
         )
 
     def get_file(self, url: str, retry_count: int = 4) -> Any:
@@ -996,10 +1015,22 @@ class DreameMowerDreameHomeCloudProtocol:
 
         return api_response["data"]
 
-    def get_properties(self, keys):
+    def get_properties(
+        self,
+        keys,
+        retry_count: int = 2,
+        timeout: float = 20,
+        *,
+        deadline: float | None = None,
+    ):
         params = {"did": str(self._did), "keys": keys}
         api_response = self._api_call(
-            f"{self._strings[23]}/{self._strings[25]}/{self._strings[41]}", params)
+            f"{self._strings[23]}/{self._strings[25]}/{self._strings[41]}",
+            params,
+            retry_count=retry_count,
+            timeout=timeout,
+            deadline=deadline,
+        )
         if api_response is None or "data" not in api_response:
             return None
 
@@ -1063,6 +1094,7 @@ class DreameMowerDreameHomeCloudProtocol:
         *,
         deadline: float | None = None,
         redact_response: bool = False,
+        on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
         with self._operation_lock():
             return self._request_unlocked(
@@ -1072,6 +1104,7 @@ class DreameMowerDreameHomeCloudProtocol:
                 timeout,
                 deadline=deadline,
                 redact_response=redact_response,
+                on_dispatch=on_dispatch,
             )
 
     def _request_unlocked(
@@ -1083,6 +1116,7 @@ class DreameMowerDreameHomeCloudProtocol:
         *,
         deadline: float | None = None,
         redact_response: bool = False,
+        on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
         _LOGGER.debug(
             "DreameMowerDreameHomeCloudProtocol.request %s %s",
@@ -1141,11 +1175,14 @@ class DreameMowerDreameHomeCloudProtocol:
                         )
                     request_options["timeout"] = min(timeout, remaining)
                     request_options["stream"] = True
+                post_options: dict[str, Any] = {"deadline": deadline}
+                if on_dispatch is not None:
+                    post_options["on_dispatch"] = on_dispatch
                 response = _post_cloud_response(
                     self._session,
                     url,
                     request_options,
-                    deadline=deadline,
+                    **post_options,
                 )
                 if deadline is not None:
                     try:

@@ -145,13 +145,18 @@ Last updated: 2026-04-21
   camera still renders the current map image, but its attributes expose compact
   all-map metadata (`app_map_count`, `app_current_map_index`, `app_maps`, etc.).
 - The generated 3D-map path is now solved on the live A2. App action
-  `{"m":"a","p":0,"o":10,"d":{"idx":0}}` requests map generation; polling
-  `OBJ type=3dmap` then exposes a short-lived object name that must be resolved
-  immediately through `getDownloadUrl`.
+  `{"m":"a","p":0,"o":10,"d":{"idx":0}}` requests the upload. The mower
+  announces the short-lived object through cloud property `99.20`; it must be
+  resolved immediately through `getDownloadUrl`. Polling `OBJ type=3dmap`
+  remains the fallback for firmware without that announcement.
 - A 2026-07-23 A2 run returned a standard binary PCD 0.7 file with
   `x y z rgb`, 152,318 points, and 2,437,272 bytes. The public
   `async_download_app_map_point_cloud()` API reproduced the same result while
   the mower remained docked at `charging_completed`.
+- A 2026-07-25 A2 run reproduced the old 45-second timeout while the mower was
+  mowing. Capturing fresh property `99.20` instead of waiting on `OBJ` returned
+  the same validated 2,437,272-byte PCD through the public API in 12.5 seconds,
+  without pausing or docking the mower.
 - `examples/point_cloud_probe.py` prints coordinate-free PCD metadata and writes
   geometry only when `--out` is explicitly supplied. The older
   `app_map_probe.py --probe-object-downloads` path remains useful only for

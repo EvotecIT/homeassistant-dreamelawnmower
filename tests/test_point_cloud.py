@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import struct
 import threading
 import time
@@ -290,6 +291,1051 @@ def test_download_point_cloud_uses_a2_generation_flow(
     assert result.metadata.points == 1
     assert not hasattr(result, "url")
     assert not hasattr(result, "object_name")
+
+
+def test_download_point_cloud_uses_fresh_lidar_announcement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    calls: list[dict[str, Any]] = []
+    responses = iter([{"r": 0}])
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        calls.append(payload)
+        return next(responses)
+
+    property_options: list[dict[str, Any]] = []
+    now_ms = int(time.time() * 1000)
+    update_dates = iter([now_ms - 1_000, now_ms + 1_000])
+
+    def get_properties(key: str, **kwargs: Any) -> list[dict[str, Any]]:
+        property_options.append(kwargs)
+        return [
+            {
+                "key": key,
+                "value": "private/generated-map.bin",
+                "updateDate": next(update_dates, 2_000),
+            }
+        ]
+
+    cloud = SimpleNamespace(
+        get_properties=get_properties,
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert calls == [
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+    ]
+    assert property_options
+    assert property_options[0]["retry_count"] == 0
+    assert 0 < property_options[0]["timeout"] <= 5
+    assert property_options[0]["deadline"] > time.monotonic()
+    assert result.content == content
+    assert result.metadata.points == 1
+
+
+def test_download_point_cloud_uses_action_dispatch_as_freshness_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [1.0]
+    actions: list[dict[str, Any]] = []
+    announced_names = iter(
+        [
+            ("private/baseline-map.bin", 500),
+            ("private/other-upload.bin", 1_500),
+            ("private/generated-map.bin", 2_500),
+        ]
+    )
+    signed_names: list[str] = []
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        actions.append(payload)
+        clock[0] = 2.0
+        kwargs["on_dispatch"]()
+        clock[0] = 3.0
+        return {"r": 0}
+
+    def get_properties(key: str, **kwargs: Any) -> list[dict[str, Any]]:
+        name, updated_at = next(announced_names)
+        return [
+            {
+                "key": key,
+                "value": name,
+                "updateDate": updated_at,
+            }
+        ]
+
+    def get_interim_file_url(name: str, **kwargs: Any) -> str:
+        signed_names.append(name)
+        return "https://downloads.example.invalid/object"
+
+    cloud = SimpleNamespace(
+        get_properties=get_properties,
+        get_interim_file_url=get_interim_file_url,
+    )
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(client_module.time, "time", lambda: clock[0])
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert actions == [{"m": "a", "p": 0, "o": 10, "d": {"idx": 0}}]
+    assert signed_names == ["private/generated-map.bin"]
+    assert result.source == "generated"
+
+
+def test_download_point_cloud_uses_stored_active_map_when_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    actions: list[dict[str, Any]] = []
+    client._sync_call_app_action = lambda payload, **kwargs: actions.append(payload)
+    cloud = SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {
+                "key": key,
+                "value": "private/stored-map.bin",
+                "updateDate": 1_000,
+            }
+        ],
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/stored"
+        ),
+    )
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(
+        0,
+        5,
+        0.1,
+        10,
+        1024,
+        allow_stored=True,
+    )
+
+    assert actions == []
+    assert result.map_index == 0
+    assert result.content == content
+    assert result.metadata.points == 1
+    assert result.source == "stored"
+
+
+def test_download_point_cloud_regenerates_when_stored_object_is_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    actions: list[dict[str, Any]] = []
+    responses = iter([{"r": 0}])
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        actions.append(payload)
+        return next(responses)
+
+    now_ms = int(time.time() * 1000)
+    update_dates = iter([now_ms - 1_000, now_ms - 1_000, now_ms + 1_000])
+
+    def get_properties(key: str, **options: Any) -> list[dict[str, Any]]:
+        updated_at = next(update_dates)
+        return [
+            {
+                "key": key,
+                "value": (
+                    "private/stored-map.bin"
+                    if updated_at < now_ms
+                    else "private/fresh-map.bin"
+                ),
+                "updateDate": updated_at,
+            }
+        ]
+
+    cloud = SimpleNamespace(
+        get_properties=get_properties,
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    fresh_content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    downloads = iter([b"not a pcd", fresh_content])
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            next(downloads),
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(
+        0,
+        5,
+        0.1,
+        10,
+        1024,
+        allow_stored=True,
+    )
+
+    assert actions == [{"m": "a", "p": 0, "o": 10, "d": {"idx": 0}}]
+    assert result.content == fresh_content
+
+
+def test_download_point_cloud_retries_announced_object_until_signable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    responses = iter([{"r": 0}])
+    client._sync_call_app_action = lambda payload, **kwargs: next(responses)
+    signed_urls = iter(
+        [
+            None,
+            None,
+            None,
+            None,
+            "https://downloads.example.invalid/object",
+        ]
+    )
+    now_ms = int(time.time() * 1000)
+    update_dates = iter([now_ms - 1_000, now_ms + 1_000])
+    cloud = SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {
+                "key": key,
+                "value": "private/generated-map.bin",
+                "updateDate": next(update_dates, now_ms + 1_000),
+            }
+        ],
+        get_interim_file_url=lambda name, **options: next(signed_urls),
+    )
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert result.content == content
+    assert result.metadata.points == 1
+
+
+def test_download_point_cloud_retries_malformed_signer_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    client._sync_call_app_action = lambda payload, **kwargs: {"r": 0}
+    now_ms = int(time.time() * 1000)
+    update_dates = iter([now_ms - 1_000, now_ms + 1_000])
+    signer_results: Any = iter(
+        [
+            json.JSONDecodeError("Expecting value", "", 0),
+            "https://downloads.example.invalid/object",
+        ]
+    )
+
+    def get_interim_file_url(name: str, **options: Any) -> str:
+        result = next(signer_results)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    cloud = SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {
+                "key": key,
+                "value": "private/generated-map.bin",
+                "updateDate": next(update_dates, now_ms + 1_000),
+            }
+        ],
+        get_interim_file_url=get_interim_file_url,
+    )
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert result.content == content
+    assert result.metadata.points == 1
+
+
+def test_download_point_cloud_does_not_fallback_from_stale_announcement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    calls: list[dict[str, Any]] = []
+    responses = iter([{"r": 0}])
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        calls.append(payload)
+        return next(responses)
+
+    cloud = SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {
+                "key": key,
+                "value": "private/stale-map.bin",
+                "updateDate": 1,
+            }
+        ],
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    with pytest.raises(DreameLawnMowerPointCloudError):
+        client._sync_download_app_map_point_cloud(
+            0,
+            0.05,
+            0.001,
+            10,
+            1024,
+        )
+
+    assert calls == [
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+    ]
+
+
+def test_download_point_cloud_caps_optional_announcement_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    calls: list[dict[str, Any]] = []
+    responses = iter(
+        [
+            {"r": 0, "d": {"name": ["private/previous-map.pcd"]}},
+            {"r": 0},
+            {"r": 0, "d": {"name": ["private/generated-map.pcd"]}},
+        ]
+    )
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        calls.append(payload)
+        return next(responses)
+
+    property_options: list[dict[str, Any]] = []
+
+    def get_properties(key: str, **options: Any) -> None:
+        property_options.append(options)
+        return None
+
+    cloud = SimpleNamespace(
+        get_properties=get_properties,
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 45, 0.1, 10, 1024)
+
+    assert len(property_options) == 2
+    assert property_options[0]["retry_count"] == 0
+    assert 1.9 < property_options[0]["timeout"] <= 2.0
+    assert property_options[0]["deadline"] > time.monotonic()
+    assert property_options[1]["retry_count"] == 0
+    assert 0 < property_options[1]["timeout"] <= 0.5
+    assert calls == [
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+    ]
+    assert result.content == content
+
+
+def test_download_point_cloud_recovers_from_transient_announcement_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    actions: list[dict[str, Any]] = []
+    client._sync_call_app_action = lambda payload, **kwargs: (
+        actions.append(payload)
+        or (
+            {"r": 0, "d": {"name": ["private/stale-map.pcd"]}}
+            if payload.get("m") == "g"
+            else {"r": 0}
+        )
+    )
+    now_ms = int(time.time() * 1000)
+    property_results = iter(
+        [
+            None,
+            [
+                {
+                    "key": "99.20",
+                    "value": "private/generated-map.bin",
+                    "updateDate": now_ms + 1_000,
+                }
+            ],
+        ]
+    )
+    cloud = SimpleNamespace(
+        get_properties=lambda key, **options: next(property_results),
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert actions == [
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+    ]
+    assert result.content == content
+    assert result.metadata.points == 1
+
+
+def test_download_point_cloud_preserves_time_for_later_announcement_reprobe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+    property_calls = 0
+    legacy_poll_deadlines: list[float] = []
+    action_calls: list[dict[str, Any]] = []
+
+    def get_properties(key: str, **options: Any) -> Any:
+        nonlocal property_calls
+        property_calls += 1
+        if property_calls < 3:
+            return None
+        return [
+            {
+                "key": key,
+                "value": "private/generated-map.bin",
+                "updateDate": 101_000,
+            }
+        ]
+
+    def call_point_cloud_action(
+        payload: dict[str, Any],
+        *,
+        operation: str,
+        deadline: float,
+        require_data: bool,
+        on_dispatch: Any = None,
+    ) -> Any:
+        action_calls.append(payload)
+        if payload.get("m") == "a":
+            on_dispatch()
+            return None
+        if len(action_calls) == 1:
+            return {"name": ["private/stale-map.pcd"]}
+        legacy_poll_deadlines.append(deadline)
+        clock[0] = deadline
+        raise DreameLawnMowerPointCloudError(
+            "bounded legacy poll timed out",
+            code="point_cloud_timeout",
+        )
+
+    cloud = SimpleNamespace(
+        get_properties=get_properties,
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    client._sync_call_point_cloud_action = call_point_cloud_action
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(client_module.time, "time", lambda: 100.0)
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(
+        0,
+        10,
+        0.1,
+        10,
+        1024,
+        deadline=110.0,
+    )
+
+    assert property_calls == 3
+    assert legacy_poll_deadlines == [102.0]
+    assert action_calls == [
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+    ]
+    assert result.content == content
+
+
+def test_download_point_cloud_eventually_allows_slow_legacy_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+    action_calls: list[dict[str, Any]] = []
+    legacy_poll_deadlines: list[float] = []
+
+    def call_point_cloud_action(
+        payload: dict[str, Any],
+        *,
+        operation: str,
+        deadline: float,
+        require_data: bool,
+        on_dispatch: Any = None,
+    ) -> Any:
+        action_calls.append(payload)
+        if payload.get("m") == "a":
+            on_dispatch()
+            return None
+        if len(action_calls) == 1:
+            return {"name": ["private/stale-map.pcd"]}
+        legacy_poll_deadlines.append(deadline)
+        if len(legacy_poll_deadlines) < 3:
+            clock[0] = deadline
+            raise DreameLawnMowerPointCloudError(
+                "bounded legacy poll timed out",
+                code="point_cloud_timeout",
+            )
+        return {"name": ["private/generated-map.pcd"]}
+
+    cloud = SimpleNamespace(
+        get_properties=lambda key, **options: None,
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    client._sync_call_point_cloud_action = call_point_cloud_action
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(client_module.time, "time", lambda: 100.0)
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(
+        0,
+        15,
+        0.1,
+        10,
+        1024,
+        deadline=115.0,
+    )
+
+    assert legacy_poll_deadlines == [102.0, 104.0, 115.0]
+    assert action_calls == [
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+    ]
+    assert result.content == content
+
+
+def test_download_point_cloud_bounds_inconclusive_legacy_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+    action_calls: list[dict[str, Any]] = []
+    baseline_deadlines: list[float] = []
+    property_calls = 0
+
+    def get_properties(key: str, **options: Any) -> Any:
+        nonlocal property_calls
+        property_calls += 1
+        if property_calls == 1:
+            return None
+        return [
+            {
+                "key": key,
+                "value": "private/generated-map.bin",
+                "updateDate": 103_000,
+            }
+        ]
+
+    def call_point_cloud_action(
+        payload: dict[str, Any],
+        *,
+        operation: str,
+        deadline: float,
+        require_data: bool,
+        on_dispatch: Any = None,
+    ) -> Any:
+        action_calls.append(payload)
+        if payload.get("m") == "g":
+            baseline_deadlines.append(deadline)
+            clock[0] = deadline
+            raise DreameLawnMowerPointCloudError(
+                "bounded baseline timed out",
+                code="point_cloud_timeout",
+            )
+        on_dispatch()
+        return None
+
+    cloud = SimpleNamespace(
+        get_properties=get_properties,
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    client._sync_call_point_cloud_action = call_point_cloud_action
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(client_module.time, "time", lambda: 100.0)
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(
+        0,
+        15,
+        0.1,
+        10,
+        1024,
+        deadline=115.0,
+    )
+
+    assert baseline_deadlines == [102.0]
+    assert action_calls == [
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+    ]
+    assert result.content == content
+
+
+def test_download_point_cloud_does_not_treat_timed_out_baseline_as_clear(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+    legacy_results = iter(
+        [
+            DreameLawnMowerPointCloudError(
+                "baseline timed out",
+                code="point_cloud_timeout",
+            ),
+            DreameLawnMowerPointCloudError(
+                "bounded poll timed out",
+                code="point_cloud_timeout",
+            ),
+            DreameLawnMowerPointCloudError(
+                "bounded poll timed out",
+                code="point_cloud_timeout",
+            ),
+            {"name": ["private/stale-map.pcd"]},
+            {"name": ["private/generated-map.pcd"]},
+        ]
+    )
+    returned_names: list[str] = []
+
+    def call_point_cloud_action(
+        payload: dict[str, Any],
+        *,
+        operation: str,
+        deadline: float,
+        require_data: bool,
+        on_dispatch: Any = None,
+    ) -> Any:
+        if payload.get("m") == "a":
+            on_dispatch()
+            return None
+        result = next(legacy_results)
+        if isinstance(result, DreameLawnMowerPointCloudError):
+            clock[0] = deadline
+            raise result
+        returned_names.extend(result["name"])
+        return result
+
+    cloud = SimpleNamespace(
+        get_properties=lambda key, **options: None,
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    client._sync_call_point_cloud_action = call_point_cloud_action
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(client_module.time, "time", lambda: 100.0)
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(
+        0,
+        15,
+        0.1,
+        10,
+        1024,
+        deadline=115.0,
+    )
+
+    assert returned_names == [
+        "private/stale-map.pcd",
+        "private/generated-map.pcd",
+    ]
+    assert result.content == content
+
+
+@pytest.mark.parametrize(
+    (
+        "deadline",
+        "fallback_reserve_seconds",
+        "expected_timeout",
+        "expected_probe_deadline",
+    ),
+    [
+        (145.0, 15.0, 2.0, 102.0),
+        (105.0, 2.5, 2.0, 102.0),
+    ],
+)
+def test_announcement_probe_uses_reserved_absolute_sub_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+    deadline: float,
+    fallback_reserve_seconds: float,
+    expected_timeout: float,
+    expected_probe_deadline: float,
+) -> None:
+    client = _client()
+    options: list[dict[str, Any]] = []
+
+    def get_properties(key: str, **kwargs: Any) -> None:
+        options.append(kwargs)
+        return None
+
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: 100.0)
+
+    result = client._sync_get_announced_point_cloud_object(
+        SimpleNamespace(get_properties=get_properties),
+        requested_after_ms=0,
+        fallback_reserve_seconds=fallback_reserve_seconds,
+        deadline=deadline,
+    )
+
+    assert result == (None, None, None)
+    assert options == [
+        {
+            "retry_count": 0,
+            "timeout": expected_timeout,
+            "deadline": expected_probe_deadline,
+        }
+    ]
+
+
+def test_announcement_probe_preserves_support_when_value_is_empty() -> None:
+    client = _client()
+
+    result = client._sync_get_announced_point_cloud_object(
+        SimpleNamespace(
+            get_properties=lambda key, **kwargs: [
+                {
+                    "key": key,
+                    "value": None,
+                    "updateDate": None,
+                }
+            ]
+        ),
+        requested_after_ms=0,
+        deadline=time.monotonic() + 1,
+    )
+
+    assert result == (True, None, None)
+
+
+def test_announcement_probe_treats_malformed_json_as_inconclusive() -> None:
+    client = _client()
+
+    def get_properties(key: str, **kwargs: Any) -> None:
+        raise json.JSONDecodeError("Expecting value", "", 0)
+
+    result = client._sync_get_announced_point_cloud_object(
+        SimpleNamespace(get_properties=get_properties),
+        requested_after_ms=0,
+        deadline=time.monotonic() + 1,
+    )
+
+    assert result == (None, None, None)
+
+
+def test_announcement_probe_treats_absent_property_as_unsupported() -> None:
+    client = _client()
+
+    result = client._sync_get_announced_point_cloud_object(
+        SimpleNamespace(get_properties=lambda key, **kwargs: []),
+        requested_after_ms=0,
+        deadline=time.monotonic() + 1,
+    )
+
+    assert result == (False, None, None)
+
+
+def test_announcement_probe_rejects_changed_object_from_before_request() -> None:
+    client = _client()
+
+    result = client._sync_get_announced_point_cloud_object(
+        SimpleNamespace(
+            get_properties=lambda key, **kwargs: [
+                {
+                    "key": key,
+                    "value": "private/other-map.bin",
+                    "updateDate": 2_000,
+                }
+            ]
+        ),
+        requested_after_ms=3_000,
+        baseline=("private/baseline-map.bin", 1_000),
+        deadline=time.monotonic() + 1,
+    )
+
+    assert result == (
+        True,
+        None,
+        ("private/other-map.bin", 2_000),
+    )
+
+
+def test_announcement_probe_requires_post_request_time_without_baseline() -> None:
+    client = _client()
+
+    result = client._sync_get_announced_point_cloud_object(
+        SimpleNamespace(
+            get_properties=lambda key, **kwargs: [
+                {
+                    "key": key,
+                    "value": "private/recent-other-map.bin",
+                    "updateDate": 3_000,
+                }
+            ]
+        ),
+        requested_after_ms=3_000,
+        require_post_request=True,
+        deadline=time.monotonic() + 1,
+    )
+
+    assert result == (
+        True,
+        None,
+        ("private/recent-other-map.bin", 3_000),
+    )
+
+
+def test_announcement_probe_treats_overflowing_timestamp_as_unusable() -> None:
+    client = _client()
+
+    result = client._sync_get_announced_point_cloud_object(
+        SimpleNamespace(
+            get_properties=lambda key, **kwargs: [
+                {
+                    "key": key,
+                    "value": "private/generated-map.bin",
+                    "updateDate": float("inf"),
+                }
+            ]
+        ),
+        requested_after_ms=3_000,
+        require_post_request=True,
+        deadline=time.monotonic() + 1,
+    )
+
+    assert result == (True, None, None)
+
+
+def test_download_point_cloud_follows_initially_empty_announcement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    actions: list[dict[str, Any]] = []
+    now_ms = int(time.time() * 1000)
+    property_values = iter(
+        [
+            (None, None),
+            ("private/fresh-map.bin", now_ms + 1_000),
+        ]
+    )
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        actions.append(payload)
+        return {"r": 0}
+
+    def get_properties(key: str, **kwargs: Any) -> list[dict[str, Any]]:
+        value, updated_at = next(property_values)
+        return [
+            {
+                "key": key,
+                "value": value,
+                "updateDate": updated_at,
+            }
+        ]
+
+    cloud = SimpleNamespace(
+        get_properties=get_properties,
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(
+        0,
+        5,
+        0.1,
+        10,
+        1024,
+    )
+
+    assert actions == [{"m": "a", "p": 0, "o": 10, "d": {"idx": 0}}]
+    assert result.content == content
+
+
+def test_download_point_cloud_bounds_invalid_announced_object_downloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    client._sync_call_app_action = lambda payload, **kwargs: {"r": 0}
+    now_ms = int(time.time() * 1000)
+    update_dates = iter([now_ms - 1_000, now_ms + 1_000])
+    cloud = SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {
+                "key": key,
+                "value": "private/generated-map.bin",
+                "updateDate": next(update_dates, now_ms + 1_000),
+            }
+        ],
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    download_count = 0
+
+    def open_invalid_response(
+        request: Any,
+        *,
+        timeout: float,
+        deadline: float,
+    ) -> _FakeResponse:
+        nonlocal download_count
+        download_count += 1
+        return _FakeResponse(b"not a pcd", request.full_url)
+
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        open_invalid_response,
+    )
+
+    with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+        client._sync_download_app_map_point_cloud(
+            0,
+            0.02,
+            0.001,
+            10,
+            1024,
+        )
+
+    assert captured.value.code == "point_cloud_download_invalid"
+    assert download_count == 1
 
 
 def test_download_point_cloud_waits_for_changed_mova_fixed_object(
@@ -632,6 +1678,26 @@ def test_interim_file_cloud_logs_redact_request_and_response() -> None:
     )
 
 
+def test_cloud_property_logs_redact_request_and_response() -> None:
+    url = "https://eu.example.invalid/dreame-user-iot/iotstatus/props"
+    private_name = "ali_dreame/private-device/generated-map.bin"
+
+    assert (
+        _internal_protocol_module._cloud_request_log_value(
+            url,
+            '{"did":"private-device","keys":"99.20"}',
+        )
+        == "<redacted cloud properties payload>"
+    )
+    assert (
+        _internal_protocol_module._cloud_request_log_value(
+            url,
+            f'{{"data":[{{"key":"99.20","value":"{private_name}"}}]}}',
+        )
+        == "<redacted cloud properties payload>"
+    )
+
+
 def test_download_point_cloud_enforces_overall_deadline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -738,6 +1804,92 @@ def test_point_cloud_action_response_enforces_overall_deadline(
         )
 
     assert applied_timeouts == pytest.approx([0.8])
+
+
+def test_point_cloud_action_marks_dispatch_before_waiting_for_response(
+) -> None:
+    protocol_type = _internal_protocol_module.DreameMowerDreameHomeCloudProtocol
+    cloud = object.__new__(protocol_type)
+    cloud._request_lock = threading.RLock()
+    cloud._strings = [f"value-{index}" for index in range(57)]
+    cloud._country = "eu"
+    cloud._host = "host.example.invalid"
+    cloud._did = "device-1"
+    cloud._id = 1
+    cloud._key_expire = None
+    cloud._secondary_key = None
+    cloud._connected = True
+    cloud._fail_count = 0
+    cloud._ti = ""
+    cloud._key = "key"
+    events: list[str] = []
+    response = SimpleNamespace(
+        status_code=200,
+        text=(
+            '{"code":0,"data":{"result":{"out":'
+            '[{"value":{"r":0}}]}}}'
+        ),
+    )
+
+    cloud._session = SimpleNamespace(
+        post=lambda url, **request_options: events.append("post") or response,
+    )
+
+    result = cloud.call_app_action(
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+        retry_count=0,
+        on_dispatch=lambda: events.append("dispatch"),
+    )
+
+    assert events == ["dispatch", "post"]
+    assert result == {"out": [{"value": {"r": 0}}]}
+
+
+def test_point_cloud_dispatch_waits_for_network_worker_slot() -> None:
+    operation_slots = _internal_deadline_module._operation_slots
+    acquired_slots = 0
+    caller_started = threading.Event()
+    events: list[str] = []
+    result: list[Any] = []
+    response = SimpleNamespace(status_code=200)
+    session = SimpleNamespace(
+        post=lambda url, **request_options: events.append("post") or response,
+    )
+    def post_with_deadline() -> None:
+        caller_started.set()
+        result.append(
+            _internal_protocol_module._post_cloud_response(
+                session,
+                "https://cloud.example.invalid/action",
+                {"timeout": 1, "stream": True},
+                deadline=time.monotonic() + 1,
+                on_dispatch=lambda: events.append("dispatch"),
+            )
+        )
+
+    caller = threading.Thread(
+        target=post_with_deadline,
+    )
+
+    try:
+        for _ in range(_internal_deadline_module._MAX_ABANDONED_OPERATIONS):
+            assert operation_slots.acquire(timeout=1)
+            acquired_slots += 1
+        caller.start()
+        assert caller_started.wait(timeout=1)
+        time.sleep(0.05)
+        assert events == []
+
+        operation_slots.release()
+        acquired_slots -= 1
+        caller.join(timeout=1)
+    finally:
+        for _ in range(acquired_slots):
+            operation_slots.release()
+
+    assert not caller.is_alive()
+    assert events == ["dispatch", "post"]
+    assert result == [response]
 
 
 def test_point_cloud_401_reauthentication_uses_remaining_deadline(
@@ -1152,6 +2304,73 @@ def test_point_cloud_generation_deadline_includes_executor_queue_time(
     asyncio.run(run())
 
 
+def test_stored_point_cloud_preflight_has_a_separate_time_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    captured: dict[str, Any] = {}
+
+    async def capture_to_thread(function: Any, *args: Any) -> Any:
+        captured["function"] = function
+        captured["args"] = args
+        return SimpleNamespace(content=b"pcd")
+
+    monkeypatch.setattr(
+        _internal_client_facade_module.asyncio,
+        "to_thread",
+        capture_to_thread,
+    )
+
+    async def run() -> None:
+        result = await client.async_download_app_map_point_cloud(
+            timeout=5,
+            allow_stored=True,
+        )
+        assert result.content
+
+    started = time.monotonic()
+    asyncio.run(run())
+
+    assert captured["function"] == client._sync_download_app_map_point_cloud
+    assert captured["args"][-1] is True
+    assert captured["args"][-2] - started == pytest.approx(12, abs=0.25)
+
+
+def test_stored_point_cloud_fallback_receives_full_generation_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+    captured_deadlines: list[float] = []
+    cloud = SimpleNamespace(get_interim_file_url=lambda name: None)
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+
+    def probe(*args: Any, **kwargs: Any) -> tuple[bool, None, None]:
+        clock[0] = 106.0
+        return False, None, None
+
+    def stop_at_baseline(payload: dict[str, Any], **kwargs: Any) -> Any:
+        captured_deadlines.append(kwargs["deadline"])
+        raise RuntimeError("stop after deadline capture")
+
+    client._sync_get_announced_point_cloud_object = probe
+    client._sync_call_point_cloud_action = stop_at_baseline
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
+
+    with pytest.raises(RuntimeError, match="deadline capture"):
+        client._sync_download_app_map_point_cloud(
+            0,
+            5,
+            0.1,
+            10,
+            1024,
+            deadline=112.0,
+            allow_stored=True,
+        )
+
+    assert captured_deadlines == [111.0]
+
+
 def test_point_cloud_url_lookup_uses_and_enforces_remaining_deadline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1220,6 +2439,40 @@ def test_interim_file_protocol_forwards_absolute_deadline() -> None:
         )
         == "https://downloads.example.invalid/object"
     )
+    assert options == [
+        {
+            "retry_count": 0,
+            "timeout": 0.8,
+            "deadline": 101.0,
+        }
+    ]
+
+
+def test_cloud_property_lookup_forwards_absolute_deadline() -> None:
+    protocol_type = _internal_protocol_module.DreameMowerDreameHomeCloudProtocol
+    cloud = object.__new__(protocol_type)
+    strings = [""] * 42
+    strings[23] = "iot"
+    strings[25] = "status"
+    strings[41] = "props"
+    cloud._strings = strings
+    cloud._did = "device-1"
+    options: list[dict[str, Any]] = []
+
+    def api_call(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        options.append(kwargs)
+        return {"data": [{"key": "99.20", "value": "private/map.bin"}]}
+
+    cloud._api_call = api_call
+
+    result = cloud.get_properties(
+        "99.20",
+        retry_count=0,
+        timeout=0.8,
+        deadline=101.0,
+    )
+
+    assert result == [{"key": "99.20", "value": "private/map.bin"}]
     assert options == [
         {
             "retry_count": 0,

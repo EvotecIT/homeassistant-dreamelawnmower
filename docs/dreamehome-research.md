@@ -343,17 +343,29 @@ The successful map path is the app action bridge described above. On
   switching the rendered camera frame.
 - Historical `OBJ type=3dmap` reads returned stale `.bin` metadata whose signed
   URLs failed with `403`/`404`. Those objects are not the generated PCD flow.
-- A live A2 run on 2026-07-23 confirmed the complete sequence:
-  `{"m":"a","p":0,"o":10,"d":{"idx":0}}` requests generation, then
-  `{"m":"g","t":"OBJ","d":{"type":"3dmap"}}` briefly publishes the generated
-  object name. The client must resolve that name immediately through
+- Live A2 runs confirmed that
+  `{"m":"a","p":0,"o":10,"d":{"idx":0}}` requests the upload. The reliable
+  completion signal is cloud property `99.20`, which carries the short-lived
+  LiDAR object name. The client must resolve it immediately through
   `/dreame-user-iot/iotfile/getDownloadUrl`; the returned HTTPS URL needs no
-  custom download headers.
+  custom download headers. `OBJ type=3dmap` remains a compatibility fallback
+  but can miss the object's short publication window.
+- Property `99.20` can keep the last generated object signable after the upload.
+  A read-only A2 check on 2026-07-25 resolved that stored object in 0.03 seconds
+  and downloaded and validated the 2,437,272-byte PCD in another 0.38 seconds.
+  Home Assistant uses this stored path only when the mower has exactly one
+  verified map because the property does not carry a map index; absent, expired,
+  invalid, and multi-map requests retain fresh generation.
 - The generated file was a standard PCD 0.7 binary with fields `x y z rgb`,
   152,318 finite points, 991 observed colors, and 2,437,272 total bytes.
   Repeating the flow through the new public client returned the same validated
   format and counts while the mower remained docked at
   `charging_completed`.
+- On 2026-07-25, the `OBJ`-only flow timed out at 45 and 120 seconds while the
+  A2 was mowing even though property `99.20` and upload progress `2.54` had
+  updated. Capturing the fresh announcement directly returned the same
+  2,437,272-byte PCD through the public API in 12.5 seconds without changing
+  the mower's activity.
 - `async_download_app_map_point_cloud()` now owns the generation, transient
   object capture, bounded HTTPS download, and PCD validation. It returns bytes
   plus coordinate-free metadata and deliberately omits the vendor filename and
