@@ -5,6 +5,8 @@ from __future__ import annotations
 from threading import RLock
 from types import SimpleNamespace
 
+import pytest
+
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device import (
     DreameMowerDevice,
 )
@@ -174,6 +176,94 @@ def test_message_callback_tracks_realtime_properties_and_unmapped_pairs() -> Non
             for entry in device.realtime_properties.values()
         }
     ) == 1
+
+
+@pytest.mark.parametrize("piid", [4, 53])
+def test_message_callback_publishes_external_realtime_property_changes(
+    piid: int,
+) -> None:
+    device, updates = _device_stub()
+
+    DreameMowerDevice._message_callback(
+        device,
+        {
+            "method": "properties_changed",
+            "params": [{"siid": 1, "piid": piid, "value": [206, 1, 206]}],
+        },
+    )
+    DreameMowerDevice._message_callback(
+        device,
+        {
+            "method": "properties_changed",
+            "params": [{"siid": 1, "piid": piid, "value": [206, 2, 206]}],
+        },
+    )
+    DreameMowerDevice._message_callback(
+        device,
+        {
+            "method": "properties_changed",
+            "params": [{"siid": 1, "piid": piid, "value": [206, 2, 206]}],
+        },
+    )
+
+    assert updates == ["changed", "changed"]
+
+
+def test_message_callback_does_not_publish_raw_heartbeat_as_pose() -> None:
+    device, updates = _device_stub()
+
+    DreameMowerDevice._message_callback(
+        device,
+        {
+            "method": "properties_changed",
+            "params": [
+                {
+                    "siid": 1,
+                    "piid": 1,
+                    "value": [
+                        206,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        202,
+                        69,
+                        36,
+                        0,
+                        4,
+                        128,
+                        167,
+                        126,
+                        0,
+                        128,
+                        206,
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert updates == []
+
+
+def test_message_callback_does_not_publish_unmapped_diagnostic_changes() -> None:
+    device, updates = _device_stub()
+
+    DreameMowerDevice._message_callback(
+        device,
+        {
+            "method": "properties_changed",
+            "params": [{"siid": 9, "piid": 4, "value": {"blob": 123}}],
+        },
+    )
+
+    assert updates == []
 
 
 def test_message_callback_applies_known_and_realtime_state_under_one_lock() -> None:

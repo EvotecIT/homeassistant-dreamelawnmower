@@ -266,6 +266,45 @@ def test_status_blob_decoder_accepts_a3_awd_pro_22_byte_frame() -> None:
     assert decoded.candidate_runtime_pose_y == 0
 
 
+def test_status_blob_decoder_does_not_treat_heartbeat_bytes_as_pose() -> None:
+    decoded = decode_mower_status_blob(
+        [
+            206,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            202,
+            69,
+            36,
+            0,
+            4,
+            128,
+            167,
+            126,
+            0,
+            128,
+            206,
+        ]
+    )
+
+    assert decoded is not None
+    assert decoded.candidate_battery_level == 74
+    assert decoded.candidate_runtime_pose_x == 0
+    assert decoded.candidate_runtime_pose_y == 0
+    assert decoded.candidate_runtime_heading_deg == 0.0
+    assert decoded.main_state is None
+    assert decoded.sub_state is None
+    assert decoded.task_status is None
+    assert decoded.mowing_session_active is None
+
+
 def test_status_blob_decoder_exposes_paused_resumable_session_at_dock() -> None:
     decoded = decode_mower_status_blob(
         [206, 0, 0, 0, 0, 0, 0, 0, 128, 0, 128, 100, 21, 36, 0, 0, 128, 211, 196, 206]

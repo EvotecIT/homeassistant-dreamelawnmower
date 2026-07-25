@@ -14,7 +14,11 @@ from random import randrange
 from threading import RLock, Timer
 from typing import Any, Optional
 
-from .app_protocol import mower_realtime_property_name
+from .app_protocol import (
+    MOWER_BLUETOOTH_PROPERTY_KEY,
+    MOWER_RUNTIME_STATUS_PROPERTY_KEY,
+    mower_realtime_property_name,
+)
 from .device_code_semantics import (
     MowerDeviceCodeTier,
     mower_device_code_definition,
@@ -146,6 +150,14 @@ from .map_decoder import DreameMowerMapDecoder
 
 _LOGGER = logging.getLogger(__name__)
 
+_EXTERNAL_REALTIME_UPDATE_KEYS = frozenset(
+    {
+        MOWER_RUNTIME_STATUS_PROPERTY_KEY,
+        MOWER_BLUETOOTH_PROPERTY_KEY,
+    }
+)
+
+
 class _DreameMowerDeviceStateMixin:
     def _connected_callback(self):
         if not self._ready:
@@ -166,6 +178,7 @@ class _DreameMowerDeviceStateMixin:
                 if message["method"] == "properties_changed" and "params" in message:
                     params = []
                     map_params = []
+                    external_realtime_changed = False
                     for param in message["params"]:
                         matched_property = None
                         properties = [prop for prop in DreameMowerProperty]
@@ -191,11 +204,19 @@ class _DreameMowerDeviceStateMixin:
                                     ):
                                         map_params.append(param)
                                     break
-                        self._remember_realtime_property(param, matched_property)
+                        external_realtime_changed = (
+                            self._remember_realtime_property(
+                                param,
+                                matched_property,
+                            )
+                            or external_realtime_changed
+                        )
                     if len(map_params) and self._map_manager:
                         self._map_manager.handle_properties(map_params)
 
-                    self._handle_properties(params)
+                    known_property_changed = self._handle_properties(params)
+                    if external_realtime_changed and not known_property_changed:
+                        self._property_changed()
 
     def _handle_properties(self, properties) -> bool:
         if not isinstance(properties, list | tuple):
@@ -387,14 +408,21 @@ class _DreameMowerDeviceStateMixin:
         self,
         payload: dict[str, Any],
         property_enum: DreameMowerProperty | None,
-    ) -> None:
-        """Store realtime MQTT property payloads, even when not yet decoded."""
+    ) -> bool:
+        """Store an MQTT property and report relevant external state changes."""
         siid = payload.get("siid")
         piid = payload.get("piid")
         if siid is None or piid is None:
-            return
+            return False
 
         key = f"{siid}.{piid}"
+        previous_entry = self.realtime_properties.get(key)
+        previous_value = (
+            previous_entry.get("value")
+            if isinstance(previous_entry, dict)
+            else None
+        )
+        value = copy.deepcopy(payload.get("value"))
         property_name = (
             property_enum.name
             if property_enum is not None
@@ -410,7 +438,7 @@ class _DreameMowerDeviceStateMixin:
             "piid": piid,
             "did": payload.get("did"),
             "code": payload.get("code"),
-            "value": copy.deepcopy(payload.get("value")),
+            "value": value,
             "property_name": property_name,
             "last_seen": (
                 received_at
@@ -418,6 +446,7 @@ class _DreameMowerDeviceStateMixin:
                 else time.time()
             ),
         }
+        return key in _EXTERNAL_REALTIME_UPDATE_KEYS and previous_value != value
 
     def _request_properties(self, properties: list[DreameMowerProperty] = None) -> bool:
         """Request properties from the device."""
