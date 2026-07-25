@@ -75,7 +75,10 @@ from .client_core_helpers import (
 from .client_core_helpers import (
     _FIRMWARE_DESCRIPTION_PREFERRED_KEYS as _FIRMWARE_DESCRIPTION_PREFERRED_KEYS,
 )
-from .client_maps import _DreameLawnMowerClientMapsMixin
+from .client_maps import (
+    _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS,
+    _DreameLawnMowerClientMapsMixin,
+)
 from .client_settings import _DreameLawnMowerClientSettingsMixin
 from .deadline import DeadlineExceededError as DeadlineExceededError
 from .deadline import run_with_deadline as run_with_deadline
@@ -1044,9 +1047,14 @@ class DreameLawnMowerClient(
     ) -> DreameLawnMowerPointCloudDownload:
         """Download a stored or freshly generated mower app-map point cloud."""
         timeout = _validate_positive_number(timeout, "generation timeout")
-        deadline = time.monotonic() + timeout
+        operation_timeout = timeout + (
+            _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS
+            if allow_stored
+            else 0.0
+        )
+        deadline = time.monotonic() + operation_timeout
         try:
-            async with asyncio.timeout(timeout):
+            async with asyncio.timeout(operation_timeout):
                 return await asyncio.to_thread(
                     self._sync_download_app_map_point_cloud,
                     map_index,

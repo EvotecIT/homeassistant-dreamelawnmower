@@ -94,6 +94,7 @@ class _InflightGeneration:
     """Track one generation and the config-entry lifetime that started it."""
 
     epoch: int
+    allow_stored: bool
     task: asyncio.Task[DreameLawnMowerPointCloudDownload]
 
 
@@ -136,6 +137,13 @@ class DreameLawnMowerPointCloudAPI:
         inflight = self._inflight.get(key)
         if inflight is not None:
             if inflight.epoch == epoch:
+                if refresh and inflight.allow_stored:
+                    await self._async_wait_for_stored_generation(key, inflight)
+                    return await self.async_get(
+                        entry_id,
+                        map_index,
+                        refresh=True,
+                    )
                 return await asyncio.shield(inflight.task)
             await self._async_discard_stale_generation(key, inflight)
             return await self.async_get(entry_id, map_index, refresh=refresh)
@@ -167,11 +175,15 @@ class DreameLawnMowerPointCloudAPI:
                 ),
             )
 
+        allow_stored = (
+            not refresh
+            and _single_active_map_index(coordinator) == map_index
+        )
         generation = self._async_generate(
             key,
             coordinator,
             epoch=epoch,
-            refresh=refresh,
+            allow_stored=allow_stored,
         )
         create_task = getattr(self._hass, "async_create_task", None)
         if callable(create_task):
@@ -184,7 +196,11 @@ class DreameLawnMowerPointCloudAPI:
                 generation,
                 name=f"{DOMAIN} point cloud {entry_id}:{map_index}",
             )
-        inflight = _InflightGeneration(epoch=epoch, task=task)
+        inflight = _InflightGeneration(
+            epoch=epoch,
+            allow_stored=allow_stored,
+            task=task,
+        )
         self._inflight[key] = inflight
         task.add_done_callback(
             lambda completed, *, inflight_key=key: self._generation_done(
@@ -197,6 +213,19 @@ class DreameLawnMowerPointCloudAPI:
         # Shield the shared generation so another request joins it instead of
         # launching a second mower-side job.
         return await asyncio.shield(task)
+
+    async def _async_wait_for_stored_generation(
+        self,
+        key: tuple[str, int],
+        inflight: _InflightGeneration,
+    ) -> None:
+        """Wait for stored-capable work before starting a forced refresh."""
+        try:
+            await asyncio.shield(inflight.task)
+        except Exception:  # noqa: BLE001 - the refresh starts independently.
+            pass
+        if self._inflight.get(key) is inflight:
+            self._inflight.pop(key, None)
 
     async def _async_discard_stale_generation(
         self,
@@ -224,7 +253,7 @@ class DreameLawnMowerPointCloudAPI:
         coordinator: DreameLawnMowerCoordinator,
         *,
         epoch: int,
-        refresh: bool,
+        allow_stored: bool,
     ) -> DreameLawnMowerPointCloudDownload:
         """Run and cache one generation independently of HTTP waiters."""
         performance = getattr(coordinator, "performance", None)
@@ -245,10 +274,6 @@ class DreameLawnMowerPointCloudAPI:
                     ),
                     retry_after_seconds=2,
                 )
-            allow_stored = (
-                not refresh
-                and _single_active_map_index(coordinator) == key[1]
-            )
             if cycle is not None:
                 download = await cycle.measure(
                     "generate_download_validate",
@@ -456,10 +481,7 @@ def _single_active_map_index(
         and isinstance(entry.get("idx"), int)
         and not isinstance(entry.get("idx"), bool)
         and entry["idx"] >= 0
-        and not (
-            entry.get("created") is False
-            and entry.get("available") is False
-        )
+        and entry.get("created") is not False
     }
     if len(indices) != 1:
         return None

@@ -1685,6 +1685,73 @@ def test_point_cloud_generation_deadline_includes_executor_queue_time(
     asyncio.run(run())
 
 
+def test_stored_point_cloud_preflight_has_a_separate_time_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    captured: dict[str, Any] = {}
+
+    async def capture_to_thread(function: Any, *args: Any) -> Any:
+        captured["function"] = function
+        captured["args"] = args
+        return SimpleNamespace(content=b"pcd")
+
+    monkeypatch.setattr(
+        _internal_client_facade_module.asyncio,
+        "to_thread",
+        capture_to_thread,
+    )
+
+    async def run() -> None:
+        result = await client.async_download_app_map_point_cloud(
+            timeout=5,
+            allow_stored=True,
+        )
+        assert result.content
+
+    started = time.monotonic()
+    asyncio.run(run())
+
+    assert captured["function"] == client._sync_download_app_map_point_cloud
+    assert captured["args"][-1] is True
+    assert captured["args"][-2] - started == pytest.approx(12, abs=0.25)
+
+
+def test_stored_point_cloud_fallback_receives_full_generation_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+    captured_deadlines: list[float] = []
+    cloud = SimpleNamespace(get_interim_file_url=lambda name: None)
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+
+    def probe(*args: Any, **kwargs: Any) -> tuple[bool, None, None]:
+        clock[0] = 106.0
+        return False, None, None
+
+    def stop_at_baseline(payload: dict[str, Any], **kwargs: Any) -> Any:
+        captured_deadlines.append(kwargs["deadline"])
+        raise RuntimeError("stop after deadline capture")
+
+    client._sync_get_announced_point_cloud_object = probe
+    client._sync_call_point_cloud_action = stop_at_baseline
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
+
+    with pytest.raises(RuntimeError, match="deadline capture"):
+        client._sync_download_app_map_point_cloud(
+            0,
+            5,
+            0.1,
+            10,
+            1024,
+            deadline=112.0,
+            allow_stored=True,
+        )
+
+    assert captured_deadlines == [111.0]
+
+
 def test_point_cloud_url_lookup_uses_and_enforces_remaining_deadline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

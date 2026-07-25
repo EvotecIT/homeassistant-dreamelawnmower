@@ -184,7 +184,6 @@ def test_point_cloud_api_ignores_empty_trailing_map_slots() -> None:
                                 "idx": 1,
                                 "current": False,
                                 "created": False,
-                                "available": False,
                             },
                         ],
                     },
@@ -308,6 +307,57 @@ def test_point_cloud_api_deduplicates_concurrent_refreshes() -> None:
     asyncio.run(run())
 
     assert calls == 1
+
+
+def test_point_cloud_api_refresh_does_not_join_stored_capable_request() -> None:
+    options: list[dict[str, Any]] = []
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+
+    async def download(**kwargs: Any) -> DreameLawnMowerPointCloudDownload:
+        options.append(kwargs)
+        if len(options) == 1:
+            first_started.set()
+            await release_first.wait()
+        return _download(len(options) - 1)
+
+    hass = SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry-1": SimpleNamespace(
+                    app_maps={
+                        "current_map_index": 0,
+                        "maps": [{"idx": 0, "created": True}],
+                    },
+                    selected_map_index=0,
+                    client=SimpleNamespace(
+                        async_download_app_map_point_cloud=download,
+                    ),
+                )
+            }
+        }
+    )
+    api = DreameLawnMowerPointCloudAPI(hass)
+
+    async def run() -> None:
+        stored = asyncio.create_task(api.async_get("entry-1", 0))
+        await first_started.wait()
+        refreshed = asyncio.create_task(
+            api.async_get("entry-1", 0, refresh=True)
+        )
+        await asyncio.sleep(0)
+        assert len(options) == 1
+        release_first.set()
+        stored_result, refresh_result = await asyncio.gather(stored, refreshed)
+        assert stored_result.map_index == 0
+        assert refresh_result.map_index == 1
+
+    asyncio.run(run())
+
+    assert options == [
+        {"map_index": 0, "allow_stored": True},
+        {"map_index": 0, "allow_stored": False},
+    ]
 
 
 def test_point_cloud_api_keeps_generation_alive_after_waiter_cancellation() -> None:

@@ -104,6 +104,10 @@ _POINT_CLOUD_ANNOUNCEMENT_PROBE_TIMEOUT_SECONDS = 2.0
 _POINT_CLOUD_ANNOUNCEMENT_INITIAL_BUDGET_FRACTION = 0.05
 _POINT_CLOUD_ANNOUNCEMENT_RETRY_MAX_SECONDS = 8.0
 _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS = 5.0
+_POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS = (
+    _POINT_CLOUD_ANNOUNCEMENT_PROBE_TIMEOUT_SECONDS
+    + _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS
+)
 
 
 class _DreameLawnMowerClientMapsMixin:
@@ -757,6 +761,8 @@ class _DreameLawnMowerClientMapsMixin:
                     metadata=metadata,
                     content_type=content_type,
                 )
+        if allow_stored:
+            deadline = min(deadline, time.monotonic() + timeout)
         baseline_name = None
         if not use_announcement_path:
             baseline_result = self._sync_call_point_cloud_action(
