@@ -77,9 +77,14 @@ struct xp2p_app_config {
     bool cross;
 };
 
-/* Tencent 2.4.50, used by Dreame's working A2 path, exposes the fourth
- * startService argument as the integer XP2P protocol mode. */
-typedef int (*start_service_fn)(const char *, const char *, const char *, int);
+/* The pinned Tencent XP2P 2.4.50 startService takes the integer protocol mode.
+ * The large-page 2.4.71 runtime takes p2p_info plus an app_config pointer.
+ * setCrossStunTurn distinguishes those two pinned ABIs at runtime. */
+typedef int (*start_service_legacy_fn)(const char *, const char *, const char *,
+                                       int);
+typedef int (*start_service_config_fn)(const char *, const char *, const char *,
+                                       const char *,
+                                       const struct xp2p_app_config *);
 typedef int (*start_lan_service_fn)(const char *, const char *, const char *,
                                     const char *, const char *);
 typedef int (*set_device_info_fn)(const char *, const char *);
@@ -300,12 +305,17 @@ static int read_request(struct request *request) {
         return -1;
     }
     if (request->fields[FIELD_LIBRARY_PATH][0] == 0 ||
-        request->fields[FIELD_SERVICE_ID][0] == 0 ||
+        request->fields[FIELD_TRANSPORT][0] == 0) {
+        return -1;
+    }
+    if (strcmp(request->fields[FIELD_TRANSPORT], "probe") == 0) {
+        return 0;
+    }
+    if (request->fields[FIELD_SERVICE_ID][0] == 0 ||
         request->fields[FIELD_DELEGATE_ID][0] == 0 ||
         request->fields[FIELD_PRODUCT_ID][0] == 0 ||
         request->fields[FIELD_DEVICE_NAME][0] == 0 ||
-        request->fields[FIELD_FLV_PATH][0] == 0 ||
-        request->fields[FIELD_TRANSPORT][0] == 0) {
+        request->fields[FIELD_FLV_PATH][0] == 0) {
         return -1;
     }
     if (strcmp(request->fields[FIELD_TRANSPORT], "lan") == 0) {
@@ -457,7 +467,7 @@ static int run(void) {
     char *stream_url = NULL;
     uint32_t response_status = RESPONSE_OK;
     const char *response_payload = NULL;
-    start_service_fn start_service;
+    void *start_service;
     set_device_info_fn set_device_info;
     post_command_fn post_command;
     start_av_recv_fn start_av_recv;
@@ -472,6 +482,7 @@ static int run(void) {
     int last_command_result = 0;
     int last_device_status = -1;
     bool lan_transport;
+    bool probe_transport;
     start_lan_service_fn start_lan_service;
     get_lan_url_fn get_lan_url;
     get_lan_proxy_port_fn get_lan_proxy_port;
@@ -503,18 +514,24 @@ static int run(void) {
     app_config.cross =
         parse_unsigned(request.fields[FIELD_CONFIG_CROSS], 0U) == 1U;
     lan_transport = strcmp(request.fields[FIELD_TRANSPORT], "lan") == 0;
+    probe_transport = strcmp(request.fields[FIELD_TRANSPORT], "probe") == 0;
     last_xp2p_event = 0;
 
     trace("xp2p-worker: request accepted");
     library = dlopen(request.fields[FIELD_LIBRARY_PATH], RTLD_NOW | RTLD_GLOBAL);
     if (library == NULL) {
+        const char *loader_error = dlerror();
+
+        if (loader_error != NULL) {
+            trace(loader_error);
+        }
         response_status = RESPONSE_LOAD_FAILED;
         response_payload = "Could not load the XP2P runtime.";
         goto finish;
     }
     trace("xp2p-worker: runtime loaded");
 
-    start_service = (start_service_fn)dlsym(library, "startService");
+    start_service = dlsym(library, "startService");
     start_lan_service =
         (start_lan_service_fn)dlsym(library, "startLanService");
     set_device_info = (set_device_info_fn)dlsym(library, "setDeviceXp2pInfo");
@@ -527,10 +544,10 @@ static int run(void) {
         (get_lan_proxy_port_fn)dlsym(library, "getLanProxyPort");
     get_stream_link_mode =
         (get_stream_link_mode_fn)dlsym(library, "getStreamLinkMode");
-    if ((!lan_transport &&
+    if (((!lan_transport || probe_transport) &&
          (start_service == NULL || set_device_info == NULL ||
           post_command == NULL || delegate_http_flv == NULL)) ||
-        (lan_transport &&
+        (lan_transport && !probe_transport &&
          (start_lan_service == NULL || get_lan_url == NULL ||
           get_lan_proxy_port == NULL))) {
         response_status = RESPONSE_SYMBOL_MISSING;
@@ -550,6 +567,11 @@ static int run(void) {
     if (set_user_callback == NULL) {
         response_status = RESPONSE_SYMBOL_MISSING;
         response_payload = "The XP2P runtime is missing callback support.";
+        goto finish;
+    }
+    if (probe_transport) {
+        trace("xp2p-worker: runtime probe ready");
+        response_payload = "XP2P runtime probe ready.";
         goto finish;
     }
     set_user_callback(receive_callback, message_callback, device_data_callback);
@@ -579,9 +601,18 @@ static int run(void) {
             request.fields[FIELD_DEVICE_NAME],
             request.fields[FIELD_LAN_ADDRESS], request.fields[FIELD_LAN_PORT]);
     } else {
-        last_command_result = start_service(
-            request.fields[FIELD_SERVICE_ID], request.fields[FIELD_PRODUCT_ID],
-            request.fields[FIELD_DEVICE_NAME], app_config.type);
+        if (set_cross_stun_turn != NULL) {
+            last_command_result = ((start_service_config_fn)start_service)(
+                request.fields[FIELD_SERVICE_ID],
+                request.fields[FIELD_PRODUCT_ID],
+                request.fields[FIELD_DEVICE_NAME],
+                request.fields[FIELD_P2P_INFO], &app_config);
+        } else {
+            last_command_result = ((start_service_legacy_fn)start_service)(
+                request.fields[FIELD_SERVICE_ID],
+                request.fields[FIELD_PRODUCT_ID],
+                request.fields[FIELD_DEVICE_NAME], app_config.type);
+        }
     }
     if (last_command_result != 0) {
         response_status = RESPONSE_START_FAILED;

@@ -488,6 +488,11 @@ has up to 45 seconds to publish a fresh file. A failed request returns a
 privacy-safe problem code and stage instead of exposing the vendor object name
 or signed download URL.
 
+This Dreame A2 view uses a real stored PCD from the integration, rendered by
+Lawn Mower Card:
+
+![Dreame A2 3D point-cloud view in Lawn Mower Card](assets/dreame-a2-3d-point-cloud.png)
+
 Current map support now includes:
 
 - a read-only `Map` camera for the active map

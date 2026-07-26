@@ -6,11 +6,13 @@ import base64
 import gzip
 import hashlib
 import io
+import json
 import os
 import platform
 import struct
 import subprocess
 import threading
+import zipfile
 from dataclasses import replace
 
 import pytest
@@ -163,9 +165,7 @@ def test_host_runtime_uses_fetched_regional_stun_endpoints() -> None:
 
 
 def test_host_runtime_keeps_known_stun_fallback_without_fetched_endpoint() -> None:
-    assert _stun_servers(DreameLawnMowerXp2pDeviceConfig()) == (
-        "43.158.113.38:20002",
-    )
+    assert _stun_servers(DreameLawnMowerXp2pDeviceConfig()) == ("43.158.113.38:20002",)
     assert _stun_servers(
         DreameLawnMowerXp2pDeviceConfig(server="stun.example.test", port=0)
     ) == ("stun.example.test:20002",)
@@ -174,14 +174,17 @@ def test_host_runtime_keeps_known_stun_fallback_without_fetched_endpoint() -> No
 def test_host_runtime_timeout_covers_worker_retry_budgets() -> None:
     assert _startup_response_timeout() == 545.0
     assert xp2p_host_runtime.DEFAULT_XP2P_HOST_STARTUP_TIMEOUT == 545.0
-    assert _startup_response_timeout(
-        command_timeout_us=1_000_000,
-        device_status_attempts=2,
-        device_status_retry_interval=0.5,
-        delegate_attempts=3,
-        delegate_retry_interval=0.25,
-        minimum=0,
-    ) == 9.75
+    assert (
+        _startup_response_timeout(
+            command_timeout_us=1_000_000,
+            device_status_attempts=2,
+            device_status_retry_interval=0.5,
+            delegate_attempts=3,
+            delegate_retry_interval=0.25,
+            minimum=0,
+        )
+        == 9.75
+    )
     assert (
         _startup_response_timeout(
             include_device_status=False,
@@ -217,10 +220,11 @@ def test_real_managed_worker_accepts_request_on_native_host(tmp_path) -> None:
     assert assets.command()[0] == str(assets.linker_path)
     assert assets.startup_probe is not None
     assert assets.startup_probe["ready"] is True
+    assert assets.startup_probe["scope"] == "library"
     assert assets.startup_probe["stage"] == "response_decode"
-    assert assets.startup_probe["returncode"] == 1
-    assert assets.startup_probe["exit"] == "exit_code=1"
-    assert assets.startup_probe["response_status"] == 1
+    assert assets.startup_probe["returncode"] == 0
+    assert assets.startup_probe["exit"] == "exit_code=0"
+    assert assets.startup_probe["response_status"] == 0
 
     runtime = xp2p_host_runtime.DreameLawnMowerXp2pHostRuntime(
         assets,
@@ -261,6 +265,17 @@ def test_runtime_bootstrap_uses_native_large_page_aarch64_layout() -> None:
         == xp2p_runtime_bootstrap.LARGE_PAGE_AOSP_RUNTIME_FILES["bin/linker64"][1]
     )
     assert large_page["bin/linker64"] != native["bin/linker64"]
+    assert (
+        large_page["lib/libiot_video_demo.so"]
+        == xp2p_runtime_bootstrap.LARGE_PAGE_TENCENT_XP2P_LIBRARY_SHA256
+    )
+    assert large_page["lib/libiot_video_demo.so"] != native["lib/libiot_video_demo.so"]
+    assert (
+        large_page["lib/libc++_shared.so"]
+        == xp2p_runtime_bootstrap.LARGE_PAGE_TENCENT_CXX_LIBRARY_SHA256
+    )
+    assert "lib/libc++.so" in large_page
+    assert "lib/libstdc++.so" not in large_page
 
 
 @pytest.mark.parametrize(
@@ -268,7 +283,7 @@ def test_runtime_bootstrap_uses_native_large_page_aarch64_layout() -> None:
     [
         ("x86_64", 4096, "runtime-v1-x86_64", False),
         ("aarch64", 4096, "runtime-v1-aarch64", False),
-        ("aarch64", 16384, "runtime-v3-aarch64", True),
+        ("aarch64", 16384, "runtime-v4-aarch64", True),
     ],
 )
 def test_runtime_bootstrap_preserves_existing_layouts_until_large_pages_need_it(
@@ -289,9 +304,7 @@ def test_runtime_bootstrap_preserves_existing_layouts_until_large_pages_need_it(
             library_path=path / "lib" / "libiot_video_demo.so",
             library_search_paths=(path / "lib",),
             qemu_path=(
-                path / "bin" / "qemu-aarch64-static"
-                if machine == "x86_64"
-                else None
+                path / "bin" / "qemu-aarch64-static" if machine == "x86_64" else None
             ),
         )
 
@@ -316,6 +329,66 @@ def test_runtime_bootstrap_preserves_existing_layouts_until_large_pages_need_it(
     }
 
 
+def test_large_page_runtime_installs_the_16k_tencent_sdk(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    aar_buffer = io.BytesIO()
+    with zipfile.ZipFile(aar_buffer, "w") as archive:
+        archive.writestr(
+            xp2p_runtime_bootstrap._TENCENT_AAR_LIBRARY,
+            b"16k-xp2p",
+        )
+        archive.writestr(
+            xp2p_runtime_bootstrap._TENCENT_AAR_CXX_LIBRARY,
+            b"16k-cxx",
+        )
+    downloads = []
+    writes = {}
+
+    def download(_client, url, expected_hash, *, timeout, label):
+        downloads.append((url, expected_hash, timeout, label))
+        return aar_buffer.getvalue()
+
+    def write(path, content, _expected_hash, *, mode=0o644):
+        writes[path.relative_to(tmp_path).as_posix()] = (content, mode)
+
+    monkeypatch.setattr(xp2p_runtime_bootstrap, "_download_verified", download)
+    monkeypatch.setattr(xp2p_runtime_bootstrap, "_write_verified", write)
+    monkeypatch.setattr(
+        xp2p_runtime_bootstrap,
+        "_install_large_page_aosp_runtime",
+        lambda *_args, **_kwargs: None,
+    )
+
+    xp2p_runtime_bootstrap._install_runtime(
+        tmp_path,
+        "aarch64",
+        layout_version=xp2p_runtime_bootstrap.LARGE_PAGE_RUNTIME_LAYOUT_VERSION,
+        use_large_page_runtime=True,
+        http_client=object(),
+        timeout=12,
+    )
+
+    assert downloads == [
+        (
+            xp2p_runtime_bootstrap.LARGE_PAGE_TENCENT_XP2P_AAR_URL,
+            xp2p_runtime_bootstrap.LARGE_PAGE_TENCENT_XP2P_AAR_SHA256,
+            12,
+            "Tencent XP2P SDK",
+        )
+    ]
+    assert writes["lib/libiot_video_demo.so"][0] == b"16k-xp2p"
+    assert writes["lib/libc++_shared.so"][0] == b"16k-cxx"
+    manifest = json.loads(
+        (tmp_path / "runtime-manifest.json").read_text(encoding="utf-8")
+    )
+    assert (
+        manifest["tencent_xp2p_version"]
+        == xp2p_runtime_bootstrap.LARGE_PAGE_TENCENT_XP2P_VERSION
+    )
+
+
 def test_host_probe_reports_signal_without_exposing_paths(
     monkeypatch,
 ) -> None:
@@ -332,10 +405,55 @@ def test_host_probe_reports_signal_without_exposing_paths(
 
     assert xp2p_host_probe.probe_xp2p_host_worker(("worker",), {}) == {
         "ready": False,
+        "scope": "worker",
         "stage": "response_wait",
         "returncode": -11,
         "exit": "signal=11",
         "native_trace": "[redacted-path] crashed",
+    }
+
+
+def test_host_probe_loads_the_requested_library_without_credentials(
+    monkeypatch,
+) -> None:
+    captured = {}
+
+    def run(*_args, **kwargs):
+        captured["request"] = kwargs["input"]
+        return subprocess.CompletedProcess(
+            args=(),
+            returncode=0,
+            stdout=b"DXR1" + struct.pack("!II", 0, 0),
+            stderr=b"xp2p-worker: runtime probe ready",
+        )
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+    diagnostics = xp2p_host_probe.probe_xp2p_host_worker(
+        ("worker",),
+        {},
+        library_path="/runtime/lib/libiot_video_demo.so",
+    )
+
+    request = io.BytesIO(captured["request"])
+    assert request.read(4) == b"DXP1"
+    assert struct.unpack("!I", request.read(4))[0] == 20
+    fields = []
+    for _ in range(20):
+        size = struct.unpack("!I", request.read(4))[0]
+        fields.append(request.read(size).decode())
+    assert fields[0] == "/runtime/lib/libiot_video_demo.so"
+    assert fields[17] == "probe"
+    assert all(not field for field in fields[1:17])
+    assert all(not field for field in fields[18:])
+    assert diagnostics == {
+        "ready": True,
+        "scope": "library",
+        "stage": "response_decode",
+        "returncode": 0,
+        "exit": "exit_code=0",
+        "response_status": 0,
+        "native_trace": "xp2p-worker: runtime probe ready",
     }
 
 
