@@ -18,7 +18,15 @@ from custom_components.dreame_lawn_mower.select import (
 
 def _coordinator(*, activity: str = "idle") -> SimpleNamespace:
     return SimpleNamespace(
-        data=SimpleNamespace(activity=activity),
+        data=SimpleNamespace(
+            activity=activity,
+            battery_level=80,
+            docked=activity == "docked",
+            mowing=activity == "mowing",
+            raw_attributes={},
+            returning=False,
+            state="charging" if activity == "docked" else "idle",
+        ),
         app_maps={"current_map_index": 0, "maps": [{"idx": 0, "current": True}]},
         batch_device_data={},
         vector_map_details={
@@ -48,6 +56,42 @@ def _coordinator(*, activity: str = "idle") -> SimpleNamespace:
         async_refresh_app_maps=AsyncMock(),
         async_refresh_vector_map_details=AsyncMock(),
     )
+
+
+def _a2_app_map_coordinator(*, activity: str = "idle") -> SimpleNamespace:
+    coordinator = _coordinator(activity=activity)
+    coordinator.app_maps = {
+        "current_map_index": 0,
+        "maps": [
+            {
+                "idx": 0,
+                "current": True,
+                "summary": {
+                    "point_count": 2,
+                    "maintenance_point_ids": [401, 402],
+                    "point_type_codes": [1],
+                },
+            },
+            {
+                "idx": 1,
+                "current": False,
+                "summary": {
+                    "point_count": 1,
+                    "maintenance_point_ids": [999],
+                    "point_type_codes": [1],
+                },
+            },
+        ],
+    }
+    coordinator.vector_map_details = {
+        "maps": [
+            {
+                "map_index": 0,
+                "clean_points": [],
+            }
+        ]
+    }
+    return coordinator
 
 
 def _complete_fresh_map_refresh(coordinator: SimpleNamespace) -> None:
@@ -84,6 +128,41 @@ def test_maintenance_point_select_uses_map_point_ids() -> None:
     assert entity.current_option == "Maintenance Point #302"
 
 
+def test_maintenance_point_select_falls_back_to_current_a2_app_map_ids() -> None:
+    coordinator = _a2_app_map_coordinator()
+    entity = object.__new__(DreameLawnMowerMaintenancePointSelect)
+    entity.coordinator = coordinator
+
+    assert entity.available is True
+    assert entity.options == [
+        "Maintenance Point #401",
+        "Maintenance Point #402",
+    ]
+    assert "Maintenance Point #999" not in entity.options
+
+    asyncio.run(entity.async_select_option("Maintenance Point #402"))
+
+    assert coordinator.selected_maintenance_point_id == 402
+    coordinator.async_update_listeners.assert_called_once()
+
+
+def test_vector_point_ids_remain_authoritative_over_app_map_fallback() -> None:
+    coordinator = _coordinator()
+    coordinator.app_maps["maps"][0]["summary"] = {
+        "point_count": 1,
+        "maintenance_point_ids": [999],
+        "point_type_codes": [1],
+    }
+    entity = object.__new__(DreameLawnMowerMaintenancePointSelect)
+    entity.coordinator = coordinator
+
+    assert entity.options == [
+        "Maintenance Point #301",
+        "Maintenance Point #302",
+    ]
+    assert "Maintenance Point #999" not in entity.options
+
+
 def test_go_to_maintenance_point_uses_selected_configured_id() -> None:
     coordinator = _coordinator(activity="docked")
     _complete_fresh_map_refresh(coordinator)
@@ -96,7 +175,86 @@ def test_go_to_maintenance_point_uses_selected_configured_id() -> None:
     asyncio.run(entity.async_press())
 
     coordinator.client.async_go_to_maintenance_point.assert_awaited_once_with(302)
+    assert coordinator.async_request_refresh.await_count == 3
+
+
+def test_go_to_maintenance_point_uses_fresh_a2_app_map_id() -> None:
+    coordinator = _a2_app_map_coordinator(activity="docked")
+    _complete_fresh_map_refresh(coordinator)
+    coordinator.selected_maintenance_point_id = 402
+    entity = object.__new__(DreameLawnMowerGoToMaintenancePointButton)
+    entity.coordinator = coordinator
+
+    assert entity.available is True
+
+    asyncio.run(entity.async_press())
+
+    coordinator.client.async_go_to_maintenance_point.assert_awaited_once_with(402)
+    assert coordinator.async_request_refresh.await_count == 3
+
+
+@pytest.mark.parametrize(
+    ("data_change", "message"),
+    [
+        ({"battery_level": 10}, "battery is low"),
+        ({"raw_attributes": {"mapping": True}}, "while mapping"),
+    ],
+)
+def test_go_to_maintenance_point_applies_shared_movement_safety_gate(
+    data_change: dict[str, object],
+    message: str,
+) -> None:
+    coordinator = _a2_app_map_coordinator(activity="docked")
+    for name, value in data_change.items():
+        setattr(coordinator.data, name, value)
+    entity = object.__new__(DreameLawnMowerGoToMaintenancePointButton)
+    entity.coordinator = coordinator
+
+    assert entity.available is False
+    with pytest.raises(ValueError, match=message):
+        asyncio.run(entity.async_press())
+
+    coordinator.async_refresh_app_maps.assert_not_awaited()
+    coordinator.client.async_go_to_maintenance_point.assert_not_awaited()
+
+
+def test_go_to_maintenance_point_revalidates_safety_after_map_refresh() -> None:
+    coordinator = _a2_app_map_coordinator(activity="docked")
+    _complete_fresh_map_refresh(coordinator)
+
+    original_vector_refresh = coordinator.async_refresh_vector_map_details.side_effect
+
+    async def refresh_vector_and_lower_battery(**kwargs):
+        result = await original_vector_refresh(**kwargs)
+        coordinator.data.battery_level = 10
+        return result
+
+    coordinator.async_refresh_vector_map_details.side_effect = (
+        refresh_vector_and_lower_battery
+    )
+    entity = object.__new__(DreameLawnMowerGoToMaintenancePointButton)
+    entity.coordinator = coordinator
+
+    with pytest.raises(ValueError, match="battery is low"):
+        asyncio.run(entity.async_press())
+
     assert coordinator.async_request_refresh.await_count == 2
+    coordinator.client.async_go_to_maintenance_point.assert_not_awaited()
+
+
+def test_app_map_fallback_rejects_unidentified_point_records() -> None:
+    coordinator = _a2_app_map_coordinator()
+    coordinator.app_maps["maps"][0]["summary"]["maintenance_point_ids"] = [
+        True,
+        0,
+        -1,
+        "403",
+    ]
+    entity = object.__new__(DreameLawnMowerMaintenancePointSelect)
+    entity.coordinator = coordinator
+
+    assert entity.available is False
+    assert entity.options == []
 
 
 def test_go_to_maintenance_point_is_blocked_during_mowing() -> None:
@@ -106,7 +264,7 @@ def test_go_to_maintenance_point_is_blocked_during_mowing() -> None:
     entity.coordinator = coordinator
 
     assert entity.available is False
-    with pytest.raises(ValueError, match="idle or docked"):
+    with pytest.raises(ValueError, match="mower is active"):
         asyncio.run(entity.async_press())
 
     coordinator.client.async_go_to_maintenance_point.assert_not_awaited()

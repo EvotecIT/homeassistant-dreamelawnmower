@@ -141,10 +141,16 @@ def build_maintenance_point_diagnostics(
     current_app_point_count = (
         current_app_entry.get("point_count") if current_app_entry else None
     )
+    current_app_point_ids = (
+        current_app_entry.get("maintenance_point_ids")
+        if current_app_entry
+        else []
+    )
     current_vector_point_ids = (
         current_vector_entry.get("point_ids") if current_vector_entry else []
     )
     mismatch = bool(current_app_point_count) and not current_vector_point_ids
+    control_point_ids = current_vector_point_ids or current_app_point_ids
 
     result = {
         "source": source,
@@ -152,7 +158,14 @@ def build_maintenance_point_diagnostics(
         "selected_point_id": _positive_int(
             getattr(coordinator, "selected_maintenance_point_id", None)
         ),
-        "control_ready": bool(current_vector_point_ids),
+        "control_ready": bool(control_point_ids),
+        "control_point_source": (
+            "vector_map"
+            if current_vector_point_ids
+            else "app_map"
+            if current_app_point_ids
+            else None
+        ),
         "app_points_without_vector_ids": mismatch,
         "app_maps": app_map_entries,
         "vector_maps": vector_map_entries,
@@ -179,6 +192,8 @@ def _maintenance_app_map_entries(value: object) -> list[dict[str, Any]]:
             summary = {}
         payload_keys = item.get("payload_keys")
         point_shapes = summary.get("point_entry_shapes")
+        point_ids = summary.get("maintenance_point_ids")
+        point_type_codes = summary.get("point_type_codes")
         result.append(
             {
                 "map_index": _map_index(item.get("idx")),
@@ -195,6 +210,30 @@ def _maintenance_app_map_entries(value: object) -> list[dict[str, Any]]:
                     list(point_shapes)
                     if isinstance(point_shapes, Sequence)
                     and not isinstance(point_shapes, str | bytes | bytearray)
+                    else []
+                ),
+                "maintenance_point_ids": (
+                    [
+                        point_id
+                        for point_id in point_ids
+                        if _positive_int(point_id) is not None
+                    ]
+                    if isinstance(point_ids, Sequence)
+                    and not isinstance(point_ids, str | bytes | bytearray)
+                    else []
+                ),
+                "point_type_codes": (
+                    [
+                        point_type
+                        for point_type in point_type_codes
+                        if isinstance(point_type, int)
+                        and not isinstance(point_type, bool)
+                    ]
+                    if isinstance(point_type_codes, Sequence)
+                    and not isinstance(
+                        point_type_codes,
+                        str | bytes | bytearray,
+                    )
                     else []
                 ),
             }

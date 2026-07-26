@@ -165,7 +165,31 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
             "total_area": 12.5,
             "map": [{"area": 12.5, "data": [[1, 2], [3, 4], [5, 6]]}],
             "spot": [{"id": 1}],
-            "point": [[7, 8]],
+            "point": [
+                {
+                    "id": 301,
+                    "param": 0,
+                    "point": [7, 8],
+                    "time": 0,
+                    "type": 1,
+                },
+                {
+                    "id": 302,
+                    "param": 0,
+                    "point": [9, 10],
+                    "time": 0,
+                    "type": 2,
+                },
+                {"id": 303, "type": "obstacle"},
+                {
+                    "id": 304,
+                    "param": 0,
+                    "point": [13, 14],
+                    "time": 0,
+                    "type": "BackGarden",
+                },
+                [11, 12],
+            ],
             "semantic": [
                 {"data": [[9, 9], [10, 9], [10, 10]], "type": "unknown"},
                 {"type": "unknown", "label": "future"},
@@ -196,15 +220,27 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
         "boundary_point_count": 3,
         "spot_count": 1,
         "spot_boundary_point_count": 0,
-        "point_count": 1,
+        "point_count": 5,
         "point_entry_shapes": [
             {
                 "kind": "array",
                 "count": 1,
                 "length": 2,
                 "item_types": ["number"],
-            }
+            },
+            {
+                "kind": "object",
+                "count": 3,
+                "keys": ["id", "param", "point", "time", "type"],
+            },
+            {
+                "kind": "object",
+                "count": 1,
+                "keys": ["id", "type"],
+            },
         ],
+        "maintenance_point_ids": [301, 302],
+        "point_type_codes": [1, 2],
         "semantic_count": 2,
         "semantic_boundary_point_count": 3,
         "semantic_key_counts": {"data": 1, "label": 1, "type": 2},

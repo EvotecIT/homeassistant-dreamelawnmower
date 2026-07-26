@@ -308,13 +308,31 @@ def current_maintenance_point_entries(
     selected_map_index: int | None = None,
 ) -> list[dict[str, Any]]:
     """Return configured maintenance points for the selected map."""
-    if not isinstance(vector_map_details, Mapping):
-        return []
     current_idx = current_map_index(
         app_maps,
         batch_device_data,
         selected_map_index=selected_map_index,
     )
+    vector_entries = _current_vector_maintenance_point_entries(
+        vector_map_details,
+        current_idx,
+    )
+    if vector_entries:
+        return vector_entries
+    return _current_app_maintenance_point_entries(
+        app_maps,
+        batch_device_data,
+        current_idx,
+    )
+
+
+def _current_vector_maintenance_point_entries(
+    vector_map_details: Mapping[str, Any] | None,
+    map_index: int,
+) -> list[dict[str, Any]]:
+    """Return identified vector-map maintenance points for one map."""
+    if not isinstance(vector_map_details, Mapping):
+        return []
     maps = vector_map_details.get("maps")
     candidates = (
         maps
@@ -325,7 +343,7 @@ def current_maintenance_point_entries(
     for map_entry in candidates:
         if (
             not isinstance(map_entry, Mapping)
-            or map_entry.get("map_index") != current_idx
+            or map_entry.get("map_index") != map_index
         ):
             continue
         points = map_entry.get("clean_points")
@@ -341,14 +359,57 @@ def current_maintenance_point_entries(
                     point.get("label")
                     or f"Maintenance Point #{point['point_id']}"
                 ),
-                "map_index": current_idx,
+                "map_index": map_index,
             }
             for point in points
             if isinstance(point, Mapping)
             and isinstance(point.get("point_id"), int)
+            and not isinstance(point.get("point_id"), bool)
             and point["point_id"] > 0
         ]
     return []
+
+
+def _current_app_maintenance_point_entries(
+    app_maps: Mapping[str, Any] | None,
+    batch_device_data: Mapping[str, Any] | None,
+    map_index: int,
+) -> list[dict[str, Any]]:
+    """Return identified app-map point records when vector points are absent."""
+    map_entry = current_app_map_entry(
+        app_maps,
+        batch_device_data,
+        selected_map_index=map_index,
+    )
+    if not isinstance(map_entry, Mapping):
+        return []
+    summary = map_entry.get("summary")
+    if not isinstance(summary, Mapping):
+        return []
+    point_ids = summary.get("maintenance_point_ids")
+    if not isinstance(point_ids, Sequence) or isinstance(
+        point_ids,
+        str | bytes | bytearray,
+    ):
+        return []
+
+    result: list[dict[str, Any]] = []
+    for point_id in point_ids:
+        if (
+            not isinstance(point_id, int)
+            or isinstance(point_id, bool)
+            or point_id <= 0
+            or any(entry["point_id"] == point_id for entry in result)
+        ):
+            continue
+        result.append(
+            {
+                "point_id": point_id,
+                "label": f"Maintenance Point #{point_id}",
+                "map_index": map_index,
+            }
+        )
+    return result
 
 
 def find_spot_center(
