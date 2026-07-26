@@ -18,6 +18,7 @@ mkdir -p "${OUTPUT_DIR}"
 
 "${AARCH64_LD}" \
   -pie --hash-style=both --allow-shlib-undefined \
+  -z max-page-size=65536 -z common-page-size=65536 \
   --dynamic-linker /system/bin/linker64 -e _start \
   -o "${OUTPUT_DIR}/dreame-xp2p-host-runner" \
   "${OUTPUT_DIR}/dreame-xp2p-host-runner.o" \

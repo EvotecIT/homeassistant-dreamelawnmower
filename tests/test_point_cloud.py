@@ -499,6 +499,64 @@ def test_download_point_cloud_uses_legacy_stored_bin_after_property_timeout(
     assert result.source == "stored"
 
 
+def test_download_point_cloud_reuses_privately_cached_metadata_object(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    actions: list[dict[str, Any]] = []
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        actions.append(payload)
+        if len(actions) == 1:
+            return {
+                "r": 0,
+                "d": {"name": ["private/fixed-map.bin", ""]},
+            }
+        raise AssertionError("Stored metadata should avoid another mower action")
+
+    client._sync_call_app_action = call_app_action
+    metadata = client._sync_get_app_map_objects(include_urls=False)
+    signed_names: list[str] = []
+
+    def get_interim_file_url(name: str, **options: Any) -> str:
+        signed_names.append(name)
+        return "https://downloads.example.invalid/stored"
+
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_interim_file_url=get_interim_file_url,
+        get_properties=lambda *args, **kwargs: pytest.fail(
+            "Cached metadata should avoid the announcement preflight"
+        ),
+    )
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(
+        0,
+        45,
+        1,
+        10,
+        1024,
+        allow_stored=True,
+    )
+
+    assert metadata["objects"] == [
+        {"extension": "bin", "url_present": False},
+        {"extension": None, "url_present": False},
+    ]
+    assert actions == [{"m": "g", "t": "OBJ", "d": {"type": "3dmap"}}]
+    assert signed_names == ["private/fixed-map.bin"]
+    assert result.content == content
+    assert result.source == "stored"
+
+
 def test_download_point_cloud_regenerates_when_stored_object_is_invalid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1869,8 +1927,7 @@ def test_point_cloud_action_response_enforces_overall_deadline(
     assert applied_timeouts == pytest.approx([0.8])
 
 
-def test_point_cloud_action_marks_dispatch_before_waiting_for_response(
-) -> None:
+def test_point_cloud_action_marks_dispatch_before_waiting_for_response() -> None:
     protocol_type = _internal_protocol_module.DreameMowerDreameHomeCloudProtocol
     cloud = object.__new__(protocol_type)
     cloud._request_lock = threading.RLock()
@@ -1888,10 +1945,7 @@ def test_point_cloud_action_marks_dispatch_before_waiting_for_response(
     events: list[str] = []
     response = SimpleNamespace(
         status_code=200,
-        text=(
-            '{"code":0,"data":{"result":{"out":'
-            '[{"value":{"r":0}}]}}}'
-        ),
+        text=('{"code":0,"data":{"result":{"out":[{"value":{"r":0}}]}}}'),
     )
 
     cloud._session = SimpleNamespace(
@@ -1918,6 +1972,7 @@ def test_point_cloud_dispatch_waits_for_network_worker_slot() -> None:
     session = SimpleNamespace(
         post=lambda url, **request_options: events.append("post") or response,
     )
+
     def post_with_deadline() -> None:
         caller_started.set()
         result.append(

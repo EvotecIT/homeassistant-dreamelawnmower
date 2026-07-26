@@ -33,7 +33,7 @@ from .xp2p_host_worker_blob import (
 )
 
 RUNTIME_LAYOUT_VERSION = "1"
-LARGE_PAGE_RUNTIME_LAYOUT_VERSION = "3"
+LARGE_PAGE_RUNTIME_LAYOUT_VERSION = "4"
 TENCENT_XP2P_VERSION = "2.4.50"
 TENCENT_XP2P_AAR_URL = (
     "https://repo.maven.apache.org/maven2/com/tencent/iot/thirdparty/android/"
@@ -44,6 +44,20 @@ TENCENT_XP2P_AAR_SHA256 = (
 )
 TENCENT_XP2P_LIBRARY_SHA256 = (
     "30fafc9f7b15a29a64622200817248c636133e06affc40479084ca3d8d188649"
+)
+LARGE_PAGE_TENCENT_XP2P_VERSION = "2.4.71"
+LARGE_PAGE_TENCENT_XP2P_AAR_URL = (
+    "https://repo.maven.apache.org/maven2/com/tencent/iot/thirdparty/android/"
+    "xp2p-sdk/2.4.71/xp2p-sdk-2.4.71.aar"
+)
+LARGE_PAGE_TENCENT_XP2P_AAR_SHA256 = (
+    "d454b9e3d702aac6def6b2013f24c25ed632fa6b49bbaf4ad2b7e30af1330a3b"
+)
+LARGE_PAGE_TENCENT_XP2P_LIBRARY_SHA256 = (
+    "dd2e4aac077c5defd4cefcb4c1c094bb0f07b6ccb1cc28be0bb0c93b36121997"
+)
+LARGE_PAGE_TENCENT_CXX_LIBRARY_SHA256 = (
+    "f4e1e97c1943e60311e47e8b024d78f5b3b7229b3ccc65feb33af83d6025a670"
 )
 
 AOSP_RUNTIME_COMMIT = "070571b455076f77a01c7b07154a15e545d2b428"
@@ -106,9 +120,7 @@ AOSP_VNDK_FILES = {
 
 LARGE_PAGE_ANDROID_BUILD_ID = "15885347"
 LARGE_PAGE_ANDROID_BUILD_TARGET = "aosp_cf_arm64_only_phone-userdebug"
-LARGE_PAGE_ANDROID_BUILD_ARTIFACT = (
-    "aosp_cf_arm64_only_phone-target_files-15885347.zip"
-)
+LARGE_PAGE_ANDROID_BUILD_ARTIFACT = "aosp_cf_arm64_only_phone-target_files-15885347.zip"
 LARGE_PAGE_ANDROID_BUILD_ARTIFACT_SIZE = 2_223_019_107
 LARGE_PAGE_ANDROID_BUILD_ARTIFACT_URL = (
     "https://androidbuildinternal.googleapis.com/android/internal/build/v3/"
@@ -148,7 +160,7 @@ LARGE_PAGE_AOSP_SYSTEM_FILES = {
         "5dbbe8389b417d3abea5f022cf630cf79bc6909b8404a8765c271978c7bd655e",
     ),
     "SYSTEM/lib64/libc++.so": (
-        "lib/libstdc++.so",
+        "lib/libc++.so",
         "cb118e98c74d3454858921123b9b51ba13df9cad7dfa141dd892c453661a4d78",
     ),
     "SYSTEM/lib64/liblog.so": (
@@ -174,6 +186,7 @@ QEMU_X86_64_BINARY_SHA256 = (
 )
 
 _TENCENT_AAR_LIBRARY = "jni/arm64-v8a/libiot_video_demo.so"
+_TENCENT_AAR_CXX_LIBRARY = "jni/arm64-v8a/libc++_shared.so"
 _MANIFEST_NAME = "runtime-manifest.json"
 _INSTALL_LOCK = threading.Lock()
 _EXT4_EXTENTS_FLAG = 0x00080000
@@ -283,6 +296,7 @@ def _with_startup_probe(
         startup_probe=probe_xp2p_host_worker(
             assets.command(),
             assets.environment(),
+            library_path=str(assets.library_path),
         ),
     )
 
@@ -306,25 +320,56 @@ def _install_runtime(
         mode=0o755,
     )
 
+    tencent_version = (
+        LARGE_PAGE_TENCENT_XP2P_VERSION
+        if use_large_page_runtime
+        else TENCENT_XP2P_VERSION
+    )
     aar = _download_verified(
         http_client,
-        TENCENT_XP2P_AAR_URL,
-        TENCENT_XP2P_AAR_SHA256,
+        (
+            LARGE_PAGE_TENCENT_XP2P_AAR_URL
+            if use_large_page_runtime
+            else TENCENT_XP2P_AAR_URL
+        ),
+        (
+            LARGE_PAGE_TENCENT_XP2P_AAR_SHA256
+            if use_large_page_runtime
+            else TENCENT_XP2P_AAR_SHA256
+        ),
         timeout=timeout,
         label="Tencent XP2P SDK",
     )
+    aar_libraries = {
+        _TENCENT_AAR_LIBRARY: (
+            "lib/libiot_video_demo.so",
+            (
+                LARGE_PAGE_TENCENT_XP2P_LIBRARY_SHA256
+                if use_large_page_runtime
+                else TENCENT_XP2P_LIBRARY_SHA256
+            ),
+        ),
+    }
+    if use_large_page_runtime:
+        aar_libraries[_TENCENT_AAR_CXX_LIBRARY] = (
+            "lib/libc++_shared.so",
+            LARGE_PAGE_TENCENT_CXX_LIBRARY_SHA256,
+        )
     try:
         with zipfile.ZipFile(io.BytesIO(aar)) as archive:
-            xp2p_library = archive.read(_TENCENT_AAR_LIBRARY)
+            extracted_libraries = {
+                relative_target: (
+                    archive.read(source),
+                    expected_hash,
+                )
+                for source, (relative_target, expected_hash) in (aar_libraries.items())
+            }
     except (KeyError, zipfile.BadZipFile) as err:
         raise DreameLawnMowerVideoRuntimeError(
-            "Tencent XP2P SDK archive did not contain its aarch64 library."
+            "Tencent XP2P SDK archive did not contain its aarch64 libraries."
         ) from err
-    _write_verified(
-        target / "lib/libiot_video_demo.so",
-        xp2p_library,
-        TENCENT_XP2P_LIBRARY_SHA256,
-    )
+    for relative_target, (content, expected_hash) in extracted_libraries.items():
+        _write_verified(target / relative_target, content, expected_hash)
 
     if use_large_page_runtime:
         _install_large_page_aosp_runtime(
@@ -366,7 +411,7 @@ def _install_runtime(
     manifest = {
         "layout_version": layout_version,
         "architecture": architecture,
-        "tencent_xp2p_version": TENCENT_XP2P_VERSION,
+        "tencent_xp2p_version": tencent_version,
         "aosp_runtime_commit": (
             None if use_large_page_runtime else AOSP_RUNTIME_COMMIT
         ),
@@ -450,9 +495,10 @@ def _install_large_page_aosp_runtime(
         "large-page AOSP Bionic runtime",
     )
     _install_apex_files(target, apex, LARGE_PAGE_AOSP_RUNTIME_FILES)
-    for source, (relative_target, expected_hash) in (
-        LARGE_PAGE_AOSP_SYSTEM_FILES.items()
-    ):
+    for source, (
+        relative_target,
+        expected_hash,
+    ) in LARGE_PAGE_AOSP_SYSTEM_FILES.items():
         _write_verified(target / relative_target, entries[source], expected_hash)
 
 
@@ -533,9 +579,7 @@ def _expected_installed_hashes(
     use_large_page_runtime: bool = False,
 ) -> dict[str, str]:
     runtime_files = (
-        LARGE_PAGE_AOSP_RUNTIME_FILES
-        if use_large_page_runtime
-        else AOSP_RUNTIME_FILES
+        LARGE_PAGE_AOSP_RUNTIME_FILES if use_large_page_runtime else AOSP_RUNTIME_FILES
     )
     system_hashes = (
         {
@@ -552,13 +596,19 @@ def _expected_installed_hashes(
     )
     files = {
         "bin/dreame-xp2p-host-runner": WORKER_SHA256,
-        "lib/libiot_video_demo.so": TENCENT_XP2P_LIBRARY_SHA256,
+        "lib/libiot_video_demo.so": (
+            LARGE_PAGE_TENCENT_XP2P_LIBRARY_SHA256
+            if use_large_page_runtime
+            else TENCENT_XP2P_LIBRARY_SHA256
+        ),
         **{
             relative_target: expected_hash
             for relative_target, expected_hash, _mode in runtime_files.values()
         },
         **system_hashes,
     }
+    if use_large_page_runtime:
+        files["lib/libc++_shared.so"] = LARGE_PAGE_TENCENT_CXX_LIBRARY_SHA256
     if architecture == "x86_64":
         files["bin/qemu-aarch64-static"] = QEMU_X86_64_BINARY_SHA256
     return dict(sorted(files.items()))

@@ -15,8 +15,13 @@ and the target Python module to refresh the checked-in blob and both hashes.
 The Python bootstrap downloads third-party binaries from their original
 publishers and verifies fixed SHA-256 hashes:
 
-- Tencent XP2P SDK 2.4.50 from Maven Central (Tencent binary license)
+- Tencent XP2P SDK 2.4.50, plus 2.4.71 on 16 KB ARM64 hosts, from Maven
+  Central (Tencent binary license)
 - AOSP Bionic runtime and VNDK libraries (Apache 2.0)
 - qemu-user-static 7.2.0-1 on x86_64 hosts (GPL 2.0 or later)
 
 Those third-party binaries are not committed to this repository.
+
+The linker flags intentionally give the worker 64 KB load alignment so the
+same embedded executable is valid on Linux hosts using 4 KB, 16 KB, or 64 KB
+pages.

@@ -339,6 +339,7 @@ class DreameLawnMowerClient(
         self._latest_cloud_device_info: Mapping[str, Any] | None = None
         self._cloud_device_info_refreshed_at = 0.0
         self._last_camera_stream_diagnostics: Mapping[str, Any] = {}
+        self._latest_app_map_object_names: tuple[str | None, ...] = ()
 
     @property
     def descriptor(self) -> DreameLawnMowerDescriptor:
@@ -1048,9 +1049,7 @@ class DreameLawnMowerClient(
         """Download a stored or freshly generated mower app-map point cloud."""
         timeout = _validate_positive_number(timeout, "generation timeout")
         operation_timeout = timeout + (
-            _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS
-            if allow_stored
-            else 0.0
+            _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS if allow_stored else 0.0
         )
         deadline = time.monotonic() + operation_timeout
         try:
