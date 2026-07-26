@@ -504,6 +504,16 @@ def test_download_point_cloud_reuses_privately_cached_metadata_object(
 ) -> None:
     client = _client()
     actions: list[dict[str, Any]] = []
+    client._sync_update_app_map_inventory_identity(
+        [
+            {
+                "idx": 0,
+                "current": True,
+                "created": True,
+                "info": {"hash": "map-hash-1", "size": 123},
+            }
+        ]
+    )
 
     def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         actions.append(payload)
@@ -555,6 +565,41 @@ def test_download_point_cloud_reuses_privately_cached_metadata_object(
     assert signed_names == ["private/fixed-map.bin"]
     assert result.content == content
     assert result.source == "stored"
+
+
+def test_cached_point_cloud_names_are_invalidated_when_map_identity_changes() -> None:
+    client = _client()
+    old_map = [
+        {
+            "idx": 0,
+            "current": True,
+            "created": True,
+            "info": {"hash": "old-map-hash", "size": 123},
+        }
+    ]
+    new_map = [
+        {
+            "idx": 0,
+            "current": True,
+            "created": True,
+            "info": {"hash": "new-map-hash", "size": 456},
+        }
+    ]
+    client._sync_update_app_map_inventory_identity(old_map)
+    client._sync_call_app_action = lambda payload, **kwargs: {
+        "r": 0,
+        "d": {"name": ["private/old-map.bin"]},
+    }
+
+    client._sync_get_app_map_objects(include_urls=False)
+
+    assert client._latest_app_map_object_names == ("private/old-map.bin",)
+    assert client._latest_app_map_object_inventory_identity is not None
+
+    client._sync_update_app_map_inventory_identity(new_map)
+
+    assert client._latest_app_map_object_names == ()
+    assert client._latest_app_map_object_inventory_identity is None
 
 
 def test_download_point_cloud_regenerates_when_stored_object_is_invalid(
@@ -2451,7 +2496,7 @@ def test_stored_point_cloud_preflight_has_a_separate_time_budget(
 
     assert captured["function"] == client._sync_download_app_map_point_cloud
     assert captured["args"][-1] is True
-    assert captured["args"][-2] - started == pytest.approx(12, abs=0.25)
+    assert captured["args"][-2] - started == pytest.approx(17, abs=0.25)
 
 
 def test_stored_point_cloud_fallback_receives_full_generation_window(
@@ -2487,6 +2532,60 @@ def test_stored_point_cloud_fallback_receives_full_generation_window(
         )
 
     assert captured_deadlines == [111.0]
+
+
+def test_failed_cached_point_cloud_preserves_full_generation_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+    captured_deadlines: list[float] = []
+    cloud = SimpleNamespace(get_interim_file_url=lambda name: None)
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    client._sync_update_app_map_inventory_identity(
+        [
+            {
+                "idx": 0,
+                "current": True,
+                "created": True,
+                "info": {"hash": "map-hash-1", "size": 123},
+            }
+        ]
+    )
+    client._latest_app_map_object_names = ("private/stale-map.bin",)
+    client._latest_app_map_object_inventory_identity = (
+        client._latest_app_map_inventory_identity
+    )
+
+    def fail_cached_download(*args: Any, **kwargs: Any) -> None:
+        clock[0] = 105.0
+        return None
+
+    def probe(*args: Any, **kwargs: Any) -> tuple[bool, None, None]:
+        clock[0] = 107.0
+        return False, None, None
+
+    def stop_at_baseline(payload: dict[str, Any], **kwargs: Any) -> Any:
+        captured_deadlines.append(kwargs["deadline"])
+        raise RuntimeError("stop after deadline capture")
+
+    client._sync_try_download_stored_point_cloud = fail_cached_download
+    client._sync_get_announced_point_cloud_object = probe
+    client._sync_call_point_cloud_action = stop_at_baseline
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
+
+    with pytest.raises(RuntimeError, match="deadline capture"):
+        client._sync_download_app_map_point_cloud(
+            0,
+            5,
+            0.1,
+            10,
+            1024,
+            deadline=117.0,
+            allow_stored=True,
+        )
+
+    assert captured_deadlines == [112.0]
 
 
 def test_point_cloud_url_lookup_uses_and_enforces_remaining_deadline(

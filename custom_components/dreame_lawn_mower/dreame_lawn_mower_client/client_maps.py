@@ -107,8 +107,45 @@ _POINT_CLOUD_LEGACY_POLL_TIMEOUT_SECONDS = 2.0
 _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS = 5.0
 _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS = (
     _POINT_CLOUD_ANNOUNCEMENT_PROBE_TIMEOUT_SECONDS
-    + _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS
+    + (2 * _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS)
 )
+
+
+def _app_map_inventory_identity(
+    maps: Sequence[Mapping[str, Any]],
+) -> str | None:
+    """Return a stable identity only when every created map has MAPI data."""
+    if not maps:
+        return None
+    inventory: list[dict[str, Any]] = []
+    for item in maps:
+        created = bool(item.get("created"))
+        info = item.get("info")
+        map_hash = info.get("hash") if isinstance(info, Mapping) else None
+        map_size = info.get("size") if isinstance(info, Mapping) else None
+        if created and (
+            not isinstance(map_hash, str)
+            or not map_hash
+            or isinstance(map_size, bool)
+            or not isinstance(map_size, int)
+            or map_size <= 0
+        ):
+            return None
+        inventory.append(
+            {
+                "idx": _json_safe(item.get("idx"), max_depth=1),
+                "current": bool(item.get("current")),
+                "created": created,
+                "hash": map_hash if created else None,
+                "size": map_size if created else None,
+            }
+        )
+    return json.dumps(
+        inventory,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
 
 
 class _DreameLawnMowerClientMapsMixin:
@@ -526,14 +563,6 @@ class _DreameLawnMowerClientMapsMixin:
             "maps": [],
             "errors": [],
         }
-        if include_objects:
-            try:
-                result["objects"] = self._sync_get_app_map_objects(
-                    include_urls=include_object_urls,
-                )
-            except Exception as err:  # noqa: BLE001 - object metadata is diagnostic
-                result["objects"] = {"error": str(err)}
-
         for entry in map_entries:
             if entry.get("current"):
                 result["current_map_index"] = entry["idx"]
@@ -604,12 +633,34 @@ class _DreameLawnMowerClientMapsMixin:
             isinstance(item, Mapping) and bool(item.get("available"))
             for item in result["maps"]
         )
+        self._sync_update_app_map_inventory_identity(result["maps"])
+        if include_objects:
+            try:
+                result["objects"] = self._sync_get_app_map_objects(
+                    include_urls=include_object_urls,
+                )
+            except Exception as err:  # noqa: BLE001 - object metadata is diagnostic
+                result["objects"] = {"error": str(err)}
         return result
+
+    def _sync_update_app_map_inventory_identity(
+        self,
+        maps: Sequence[Mapping[str, Any]],
+    ) -> None:
+        """Invalidate private object names when the owning map changes."""
+        identity = _app_map_inventory_identity(maps)
+        with self._app_map_object_cache_lock:
+            if identity != self._latest_app_map_inventory_identity:
+                self._latest_app_map_object_names = ()
+                self._latest_app_map_object_inventory_identity = None
+            self._latest_app_map_inventory_identity = identity
 
     def _sync_get_app_map_objects(
         self,
         include_urls: bool = False,
     ) -> dict[str, Any]:
+        with self._app_map_object_cache_lock:
+            inventory_identity = self._latest_app_map_inventory_identity
         object_result = self._sync_call_app_action(
             {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
             redact_response=True,
@@ -621,10 +672,17 @@ class _DreameLawnMowerClientMapsMixin:
             str | bytes | bytearray,
         ):
             names = []
-        self._latest_app_map_object_names = tuple(
+        normalized_names = tuple(
             raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else None
             for raw_name in names
         )
+        with self._app_map_object_cache_lock:
+            if (
+                inventory_identity is not None
+                and inventory_identity == self._latest_app_map_inventory_identity
+            ):
+                self._latest_app_map_object_names = normalized_names
+                self._latest_app_map_object_inventory_identity = inventory_identity
 
         objects: list[dict[str, Any]] = []
         cloud = self._sync_get_cloud_protocol() if include_urls else None
@@ -714,10 +772,15 @@ class _DreameLawnMowerClientMapsMixin:
                 ),
             )
 
-        cached_name = _point_cloud_object_name(
-            {"name": self._latest_app_map_object_names},
-            map_index,
-        )
+        with self._app_map_object_cache_lock:
+            cached_names = (
+                self._latest_app_map_object_names
+                if self._latest_app_map_object_inventory_identity is not None
+                and self._latest_app_map_object_inventory_identity
+                == self._latest_app_map_inventory_identity
+                else ()
+            )
+        cached_name = _point_cloud_object_name({"name": cached_names}, map_index)
         if allow_stored and cached_name is not None:
             stored = self._sync_try_download_stored_point_cloud(
                 cloud,
@@ -752,7 +815,11 @@ class _DreameLawnMowerClientMapsMixin:
         )
         use_announcement_path = announcement_capability is True
         announcement_probe_pending = announcement_capability is None
-        if allow_stored and stored_name is not None:
+        if (
+            allow_stored
+            and stored_name is not None
+            and stored_name != cached_name
+        ):
             stored = self._sync_try_download_stored_point_cloud(
                 cloud,
                 stored_name,
@@ -798,7 +865,11 @@ class _DreameLawnMowerClientMapsMixin:
                 baseline_result,
                 map_index,
             )
-            if allow_stored and baseline_name is not None:
+            if (
+                allow_stored
+                and baseline_name is not None
+                and baseline_name != cached_name
+            ):
                 stored = self._sync_try_download_stored_point_cloud(
                     cloud,
                     baseline_name,

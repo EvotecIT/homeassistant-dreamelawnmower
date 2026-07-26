@@ -206,7 +206,10 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
     }
     assert result["maps"][0]["payload"]["name"] == "Garden"
     assert result["maps"][1]["created"] is False
-    assert [call["t"] for call in cloud.calls][:4] == ["MAPL", "OBJ", "MAPI", "MAPD"]
+    call_types = [call["t"] for call in cloud.calls]
+    assert call_types[:2] == ["MAPL", "MAPI"]
+    assert set(call_types[2:-1]) == {"MAPD"}
+    assert call_types[-1] == "OBJ"
     mapd_calls = [call for call in cloud.calls if call["t"] == "MAPD"]
     payload_size = len(cloud.payload_text.encode("utf-8"))
     expected_starts = list(range(0, payload_size, 40))

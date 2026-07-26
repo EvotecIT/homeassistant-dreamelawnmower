@@ -8,6 +8,7 @@ import html as html
 import json as json
 import math as math
 import re as re
+import threading as _threading
 import time
 import typing as _typing
 import urllib as urllib
@@ -339,6 +340,9 @@ class DreameLawnMowerClient(
         self._latest_cloud_device_info: Mapping[str, Any] | None = None
         self._cloud_device_info_refreshed_at = 0.0
         self._last_camera_stream_diagnostics: Mapping[str, Any] = {}
+        self._app_map_object_cache_lock = _threading.Lock()
+        self._latest_app_map_inventory_identity: str | None = None
+        self._latest_app_map_object_inventory_identity: str | None = None
         self._latest_app_map_object_names: tuple[str | None, ...] = ()
 
     @property
