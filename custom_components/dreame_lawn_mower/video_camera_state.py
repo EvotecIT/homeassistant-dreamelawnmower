@@ -88,8 +88,6 @@ class DreameLawnMowerVideoStateMixin:
         if not self._runtime_configured:
             return False
         snapshot = self.coordinator.data
-        if camera_stream_block_reason(snapshot) is not None:
-            return False
         if snapshot is not None and not getattr(snapshot, "available", True):
             return False
         cached_lan_ready = (

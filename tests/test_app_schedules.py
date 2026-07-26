@@ -19,6 +19,7 @@ class _FakeAppScheduleCloud:
 
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
+        self.request_options: list[dict[str, object]] = []
         self._pending_uploads: dict[int, dict[str, object]] = {}
         self.payloads = {
             -1: {"version": 31345, "text": '{"d":[[0,1,"","EODBJwAAADDgwScAAAA="]]}'},
@@ -38,10 +39,21 @@ class _FakeAppScheduleCloud:
         *,
         siid: int = 2,
         aiid: int = 50,
+        retry_count: int | None = None,
+        timeout: float | None = None,
+        deadline: float | None = None,
     ) -> dict[str, object]:
         assert siid == 2
         assert aiid == 50
         self.calls.append(payload)
+        self.request_options.append(
+            {
+                "command": payload.get("t"),
+                "retry_count": retry_count,
+                "timeout": timeout,
+                "deadline": deadline,
+            }
+        )
         command = payload.get("t")
         if command == "MAPL":
             return {
@@ -138,7 +150,7 @@ def _client() -> DreameLawnMowerClient:
 def test_app_schedules_decode_plans_and_current_task() -> None:
     client = _client()
     cloud = _FakeAppScheduleCloud()
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
 
     result = client._sync_get_app_schedules(chunk_size=40)
 
@@ -177,12 +189,23 @@ def test_app_schedules_decode_plans_and_current_task() -> None:
     }
     assert "raw_text" not in map_0
     assert [call["t"] for call in cloud.calls[:3]] == ["SCHDT", "MAPL", "SCHDIV2"]
+    assert cloud.request_options[0]["command"] == "SCHDT"
+    assert cloud.request_options[0]["retry_count"] == 0
+    assert 0 < cloud.request_options[0]["timeout"] <= 5.0
+    assert isinstance(cloud.request_options[0]["deadline"], float)
+    assert cloud.request_options[0]["deadline"] > 0
+    assert cloud.request_options[1] == {
+        "command": "MAPL",
+        "retry_count": None,
+        "timeout": None,
+        "deadline": None,
+    }
 
 
 def test_app_schedules_can_include_raw_payload_text() -> None:
     client = _client()
     cloud = _FakeAppScheduleCloud()
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
 
     result = client._sync_get_app_schedules(
         include_raw=True,
@@ -244,7 +267,7 @@ def test_schedule_upload_requests_do_not_split_utf8_characters() -> None:
 def test_set_app_schedule_plan_enabled_builds_dry_run_request() -> None:
     client = _client()
     cloud = _FakeAppScheduleCloud()
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
 
     result = client._sync_set_app_schedule_plan_enabled(
         map_index=0,
@@ -287,7 +310,7 @@ def test_set_app_schedule_plan_enabled_builds_dry_run_request() -> None:
 def test_set_app_schedule_plan_enabled_requires_confirmation_to_execute() -> None:
     client = _client()
     cloud = _FakeAppScheduleCloud()
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
 
     with pytest.raises(ValueError, match="confirm_write=True"):
         client._sync_set_app_schedule_plan_enabled(
@@ -301,7 +324,7 @@ def test_set_app_schedule_plan_enabled_requires_confirmation_to_execute() -> Non
 def test_set_app_schedule_plan_enabled_can_execute_when_confirmed() -> None:
     client = _client()
     cloud = _FakeAppScheduleCloud()
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
 
     result = client._sync_set_app_schedule_plan_enabled(
         map_index=0,
@@ -327,7 +350,7 @@ def test_set_app_schedule_plan_enabled_can_execute_when_confirmed() -> None:
 def test_set_app_schedule_plan_enabled_rejects_failed_write_response() -> None:
     client = _client()
     cloud = _FakeAppScheduleCloud()
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
 
     def failing_call(payload: dict[str, object]) -> dict[str, object]:
         if payload["t"] == "SCHDSV2":
@@ -349,7 +372,7 @@ def test_set_app_schedule_plan_enabled_rejects_failed_write_response() -> None:
 def test_plan_app_schedule_upload_builds_dry_run_sequence() -> None:
     client = _client()
     cloud = _FakeAppScheduleCloud()
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
 
     result = client._sync_plan_app_schedule_upload(
         map_index=0,
@@ -417,7 +440,7 @@ def test_plan_app_schedule_upload_builds_dry_run_sequence() -> None:
 def test_plan_app_schedule_upload_requires_confirmation_to_execute() -> None:
     client = _client()
     cloud = _FakeAppScheduleCloud()
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
 
     with pytest.raises(ValueError, match="confirm_write=True"):
         client._sync_plan_app_schedule_upload(
@@ -430,7 +453,7 @@ def test_plan_app_schedule_upload_requires_confirmation_to_execute() -> None:
 def test_plan_app_schedule_upload_can_execute_when_confirmed() -> None:
     client = _client()
     cloud = _FakeAppScheduleCloud()
-    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
 
     result = client._sync_plan_app_schedule_upload(
         map_index=0,

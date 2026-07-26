@@ -140,7 +140,7 @@ def _app_map_count(result: dict[str, Any] | None) -> int | None:
     summary = _app_maps_summary(result)
     if not isinstance(summary, dict):
         return None
-    value = summary.get("map_count")
+    value = summary.get("created_map_count")
     return value if isinstance(value, int) else None
 
 
@@ -742,6 +742,9 @@ def _app_maps_summary(
         "source": value.get("source"),
         "available": value.get("available"),
         "map_count": len(maps),
+        "created_map_count": sum(
+            1 for entry in maps if entry.get("created") is not False
+        ),
         "current_map_index": selected_current_map_index(value, batch_device_data),
         "maps": maps,
     }

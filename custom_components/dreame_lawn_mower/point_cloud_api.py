@@ -43,6 +43,7 @@ _POINT_CLOUD_PROBLEM_STATUS = {
     "point_cloud_download_invalid": 504,
     "point_cloud_entry_reloaded": 503,
     "point_cloud_download_unsupported": 503,
+    "point_cloud_mower_request_rejected": 502,
 }
 _POINT_CLOUD_PROBLEM_TITLE = {
     "point_cloud_generation_in_progress": "3D map generation already in progress",
@@ -53,6 +54,7 @@ _POINT_CLOUD_PROBLEM_TITLE = {
     "point_cloud_entry_reloaded": "The mower integration was reloaded",
     "point_cloud_download_unsupported": "3D map download is unavailable",
     "point_cloud_mower_request_failed": "The mower rejected the 3D map request",
+    "point_cloud_mower_request_rejected": "The cloud rejected the 3D map request",
     "point_cloud_mower_response_invalid": "The mower returned an invalid response",
     "point_cloud_failed": "3D map unavailable",
 }
@@ -271,6 +273,7 @@ class DreameLawnMowerPointCloudAPI:
             if hasattr(performance, "start")
             else None
         )
+        sample = None
         try:
             if self._entry_epochs.get(key[0], 0) != epoch:
                 raise DreameLawnMowerPointCloudError(
@@ -311,7 +314,13 @@ class DreameLawnMowerPointCloudAPI:
                 )
         except DreameLawnMowerPointCloudError as err:
             sample = cycle.finish(outcome=err.code) if cycle is not None else None
-            self._record_generation_failure(coordinator, err, sample)
+            self._record_generation_failure(
+                coordinator,
+                err,
+                sample,
+                map_index=key[1],
+                allow_stored=allow_stored,
+            )
             raise
         except Exception as err:
             public_error = DreameLawnMowerPointCloudError(
@@ -326,7 +335,13 @@ class DreameLawnMowerPointCloudAPI:
                 if cycle is not None
                 else None
             )
-            self._record_generation_failure(coordinator, public_error, sample)
+            self._record_generation_failure(
+                coordinator,
+                public_error,
+                sample,
+                map_index=key[1],
+                allow_stored=allow_stored,
+            )
             raise public_error from err
         else:
             if cycle is not None:
@@ -338,6 +353,11 @@ class DreameLawnMowerPointCloudAPI:
                     total,
                     phases,
                 )
+            self._record_generation_success(
+                coordinator,
+                download,
+                sample,
+            )
 
         created_at = time.monotonic()
         self._remove_cache_entry(key)
@@ -356,6 +376,31 @@ class DreameLawnMowerPointCloudAPI:
             oldest_key = next(iter(self._cache))
             self._remove_cache_entry(oldest_key)
         return download
+
+    def _record_generation_success(
+        self,
+        coordinator: DreameLawnMowerCoordinator,
+        download: DreameLawnMowerPointCloudDownload,
+        sample: Any,
+    ) -> None:
+        """Keep coordinate-free evidence that 3D generation recovered."""
+        context: dict[str, Any] = {
+            "map_index": download.map_index,
+            "source": download.source,
+            "point_count": download.metadata.points,
+            "total_bytes": download.metadata.total_bytes,
+            "data_encoding": download.metadata.data_encoding,
+        }
+        if sample is not None:
+            context["duration_ms"] = round(sample.total_seconds * 1000, 1)
+        record_diagnostic_event(
+            coordinator,
+            code="point_cloud_completed",
+            source="point_cloud_api",
+            severity="info",
+            message="The mower 3D map request completed successfully.",
+            context=context,
+        )
 
     def _reject_request(
         self,
@@ -387,6 +432,9 @@ class DreameLawnMowerPointCloudAPI:
         coordinator: DreameLawnMowerCoordinator,
         error: DreameLawnMowerPointCloudError,
         sample: Any,
+        *,
+        map_index: int,
+        allow_stored: bool,
     ) -> None:
         """Keep one privacy-safe failure event and benchmark sample."""
         context: dict[str, Any] = {
@@ -394,6 +442,9 @@ class DreameLawnMowerPointCloudAPI:
             "retryable": error.retryable,
             "retry_after_seconds": error.retry_after_seconds,
             "timeout_seconds": error.timeout_seconds,
+            "vendor_error_code": error.vendor_error_code,
+            "map_index": map_index,
+            "allow_stored": allow_stored,
         }
         if sample is not None:
             context["duration_ms"] = round(sample.total_seconds * 1000, 1)

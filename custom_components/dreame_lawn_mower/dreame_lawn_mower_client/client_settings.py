@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -84,6 +85,8 @@ from .schedule import (
     schedule_task_summary,
 )
 
+SCHEDULE_CURRENT_TASK_TIMEOUT_SECONDS = 5.0
+
 
 class _DreameLawnMowerClientSettingsMixin:
     def _sync_get_app_schedules(
@@ -105,8 +108,14 @@ class _DreameLawnMowerClientSettingsMixin:
         }
 
         try:
+            current_task_deadline = (
+                time.monotonic() + SCHEDULE_CURRENT_TASK_TIMEOUT_SECONDS
+            )
             task_result = self._sync_call_app_action(
-                {"m": "g", "t": "SCHDT", "d": {"t": 0}}
+                {"m": "g", "t": "SCHDT", "d": {"t": 0}},
+                retry_count=0,
+                timeout=SCHEDULE_CURRENT_TASK_TIMEOUT_SECONDS,
+                deadline=current_task_deadline,
             )
             result["raw_current_task"] = _json_safe(task_result, max_depth=4)
             task_data = _app_action_data(task_result)

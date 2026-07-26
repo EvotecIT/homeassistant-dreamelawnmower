@@ -730,7 +730,15 @@ def test_video_camera_restores_support_from_healthy_cache_after_docked_reload() 
 
 
 def test_video_camera_dock_transition_recovers_from_stale_raw_returning() -> None:
-    async def _run() -> tuple[int, int, bool, bool, list[str], str | None]:
+    async def _run() -> tuple[
+        int,
+        int,
+        bool,
+        str | None,
+        bool,
+        list[str],
+        str | None,
+    ]:
         snapshot = SimpleNamespace(
             available=True,
             state="mowing",
@@ -799,7 +807,10 @@ def test_video_camera_dock_transition_recovers_from_stale_raw_returning() -> Non
             assert cleanup_task is not None
             await cleanup_task
 
-            unavailable_while_docked = not entity.available
+            available_while_docked = entity.available
+            docked_block_reason = entity.extra_state_attributes[
+                "video_block_reason"
+            ]
             entity.coordinator.data = SimpleNamespace(
                 available=True,
                 state="mowing",
@@ -821,7 +832,8 @@ def test_video_camera_dock_transition_recovers_from_stale_raw_returning() -> Non
         return (
             runtime_stops,
             camera_disables,
-            unavailable_while_docked,
+            available_while_docked,
+            docked_block_reason,
             entity.available,
             [event["code"] for event in events],
             entity._last_stream_cleanup_error_stage,
@@ -831,6 +843,11 @@ def test_video_camera_dock_transition_recovers_from_stale_raw_returning() -> Non
         1,
         1,
         True,
+        (
+            "Camera stream handshake probe is blocked while the mower is "
+            "docked. The Dreame app requires moving the mower out of the "
+            "station before remote video monitoring can start."
+        ),
         True,
         [
             "video_state_gate_cleanup",

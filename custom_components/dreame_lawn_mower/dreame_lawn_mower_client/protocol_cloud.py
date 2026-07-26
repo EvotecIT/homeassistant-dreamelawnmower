@@ -20,7 +20,7 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 from Crypto.Cipher import ARC4
 from miio.miioprotocol import MiIOProtocol
 
-from .exceptions import DeviceException
+from .exceptions import DeviceException, DreameLawnMowerCloudAPIError
 from .const import DREAME_STRINGS, MOVA_STRINGS
 from .deadline import DeadlineExceededError, run_with_deadline
 from .mqtt_tls import create_cloud_mqtt_ssl_context
@@ -840,6 +840,7 @@ class DreameMowerDreameHomeCloudProtocol:
         deadline: float | None = None,
         redact_response: bool = False,
         on_dispatch: Callable[[], None] | None = None,
+        raise_on_api_error: bool = False,
     ) -> Any:
         with self._operation_lock():
             return self._send_unlocked(
@@ -850,6 +851,7 @@ class DreameMowerDreameHomeCloudProtocol:
                 deadline=deadline,
                 redact_response=redact_response,
                 on_dispatch=on_dispatch,
+                raise_on_api_error=raise_on_api_error,
             )
 
     def _send_unlocked(
@@ -862,6 +864,7 @@ class DreameMowerDreameHomeCloudProtocol:
         deadline: float | None = None,
         redact_response: bool = False,
         on_dispatch: Callable[[], None] | None = None,
+        raise_on_api_error: bool = False,
     ) -> Any:
         host = ""
         if self._host and len(self._host):
@@ -894,6 +897,16 @@ class DreameMowerDreameHomeCloudProtocol:
             logged_response,
         )
         self._id = self._id + 1
+        response_code = (
+            api_response.get("code") if isinstance(api_response, Mapping) else None
+        )
+        if (
+            raise_on_api_error
+            and isinstance(response_code, int)
+            and not isinstance(response_code, bool)
+            and response_code != 0
+        ):
+            raise DreameLawnMowerCloudAPIError(response_code)
         if isinstance(api_response, Mapping) and api_response.get("code") == 80001:
             # Seems to be a valid error message from the server which translates to:
             #   "The device may be offline and the command sending timed out."
@@ -942,6 +955,7 @@ class DreameMowerDreameHomeCloudProtocol:
         deadline: float | None = None,
         redact_response: bool = False,
         on_dispatch: Callable[[], None] | None = None,
+        raise_on_api_error: bool = False,
     ) -> Any:
         """Call the mobile-app action bridge used by mower plugin commands."""
         return self.send(
@@ -957,6 +971,7 @@ class DreameMowerDreameHomeCloudProtocol:
             deadline=deadline,
             redact_response=redact_response,
             on_dispatch=on_dispatch,
+            raise_on_api_error=raise_on_api_error,
         )
 
     def get_file(self, url: str, retry_count: int = 4) -> Any:

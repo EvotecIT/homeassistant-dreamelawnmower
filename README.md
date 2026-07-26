@@ -222,6 +222,12 @@ external runner is required. The integration prepares the runtime during entity
 setup, starts it when Home Assistant requests the camera, verifies the local FLV
 source, and stops it when the camera is turned off or unloaded.
 
+The camera entity remains available while the mower is docked, returning, or in
+another state where Dreame blocks video. Its `video_block_reason` attribute
+explains what must change before a stream can start. Stream requests still fail
+closed until the mower reaches a permitted state; keeping the entity available
+only makes that state gate visible in Home Assistant and downloaded diagnostics.
+
 The first setup needs internet access. The integration downloads fixed versions
 of Tencent XP2P, the required AOSP Bionic libraries, and qemu-user-static on
 x86_64 hosts. Every file is pinned and SHA-256 verified before use, then cached
@@ -573,8 +579,10 @@ The report is sanitized by the integration and includes:
 - privacy-safe setup, foreground-refresh, and background-metadata timings,
   including bounded recent samples plus the latest and aggregate duration for
   each operation
-- on-demand `point_cloud_generation` timings and a stable failure code, stage,
-  retryability flag, and timeout when a 3D map request fails
+- on-demand `point_cloud_generation` timings plus coordinate-free completion or
+  failure events, including the source, point count, payload size, selected map,
+  stored-object eligibility, stable error code, safe numeric Dreame cloud error,
+  stage, retryability flag, and timeout when relevant
 - current state and diagnostic attributes for every entity belonging to the
   config entry, including the Live Video camera's last failure stage and a
   bounded, privacy-safe summary of each TX video cloud stage
@@ -604,9 +612,14 @@ slow without requiring broad protocol debug logging.
 
 For a 3D map report, retry once and download diagnostics before restarting Home
 Assistant. Include the visible `point_cloud_*` reference from the card. The
-matching recent event explains whether the mower failed to publish a fresh
-object, the object could not be downloaded and validated, another generation
-was already running, or the integration reloaded during the request.
+matching recent event shows whether a later request completed or the mower
+failed to publish a fresh object, the object could not be downloaded and
+validated, another generation was already running, or the integration reloaded
+during the request.
+
+`App Map Count` reports maps the mower has actually created; reserved cloud
+slots with `created: false` are excluded. Raw slot count remains available as
+the mower entity's `app_map_slot_count` diagnostic attribute.
 
 The staged cloud summaries retain field names, value types, safe status codes,
 required-field presence, and sanitized error messages. They do not retain raw
