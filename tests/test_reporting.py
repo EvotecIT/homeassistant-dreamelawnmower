@@ -113,6 +113,7 @@ def test_coordinator_diagnostics_sanitize_last_failure() -> None:
             "current_map_index": None,
             "selected_point_id": None,
             "control_ready": False,
+            "control_point_source": None,
             "app_points_without_vector_ids": False,
             "app_maps": [],
             "vector_maps": [],
@@ -188,16 +189,37 @@ def test_maintenance_point_diagnostics_explain_app_vector_mismatch_privately() -
                         "payload_keys": ["map", "point"],
                         "summary": {
                             "point_count": 1,
-                            "point_entry_shapes": [
-                                {
-                                    "kind": "array",
-                                    "count": 1,
-                                    "length": 2,
-                                    "item_types": ["number"],
-                                }
+                            "maintenance_point_ids": [301],
+                            "point_type_codes": [
+                                1,
+                                "BackGarden",
+                                True,
                             ],
-                        },
-                        "payload": {"point": [[5910, 12400]]},
+                                "point_entry_shapes": [
+                                    {
+                                        "kind": "object",
+                                        "count": 1,
+                                        "keys": [
+                                            "id",
+                                            "param",
+                                            "point",
+                                            "time",
+                                            "type",
+                                        ],
+                                    }
+                                ],
+                            },
+                            "payload": {
+                                "point": [
+                                    {
+                                        "id": 301,
+                                        "param": 0,
+                                        "point": [5910, 12400],
+                                        "time": 0,
+                                        "type": 1,
+                                    }
+                                ]
+                            },
                     }
                 ],
             },
@@ -217,7 +239,8 @@ def test_maintenance_point_diagnostics_explain_app_vector_mismatch_privately() -
         "source": "coordinator_cache",
         "current_map_index": 0,
         "selected_point_id": None,
-        "control_ready": False,
+        "control_ready": True,
+        "control_point_source": "app_map",
         "app_points_without_vector_ids": True,
         "app_maps": [
             {
@@ -226,14 +249,15 @@ def test_maintenance_point_diagnostics_explain_app_vector_mismatch_privately() -
                 "available": True,
                 "point_payload_present": True,
                 "point_count": 1,
-                "point_entry_shapes": [
-                    {
-                        "kind": "array",
-                        "count": 1,
-                        "length": 2,
-                        "item_types": ["number"],
-                    }
-                ],
+                "maintenance_point_ids": [301],
+                "point_type_codes": [1],
+                    "point_entry_shapes": [
+                        {
+                            "kind": "object",
+                            "count": 1,
+                            "keys": ["id", "param", "point", "time", "type"],
+                        }
+                    ],
             }
         ],
         "vector_maps": [
