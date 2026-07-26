@@ -53,6 +53,7 @@ from .client_shared_helpers import (
 )
 from .exceptions import (
     DeviceException,
+    DreameLawnMowerCloudAPIError,
     DreameLawnMowerConnectionError,
 )
 from .exceptions import (
@@ -558,6 +559,9 @@ class _DreameLawnMowerClientMapsMixin:
             "source": "app_action_map",
             "available": False,
             "map_count": len(map_entries),
+            "created_map_count": sum(
+                1 for entry in map_entries if entry.get("created") is not False
+            ),
             "current_map_index": None,
             "raw_map_list": _json_safe(map_list_result, max_depth=5),
             "maps": [],
@@ -1391,10 +1395,20 @@ class _DreameLawnMowerClientMapsMixin:
                 "timeout": remaining,
                 "deadline": deadline,
                 "redact_response": True,
+                "raise_on_api_error": True,
             }
             if on_dispatch is not None:
                 action_options["on_dispatch"] = on_dispatch
             response = self._sync_call_app_action(payload, **action_options)
+        except DreameLawnMowerCloudAPIError as err:
+            raise DreameLawnMowerPointCloudError(
+                f"The Dreame cloud rejected the {operation} request.",
+                code="point_cloud_mower_request_rejected",
+                stage="mower_request",
+                public_message="The Dreame cloud rejected the mower 3D map request.",
+                retry_after_seconds=10,
+                vendor_error_code=err.code,
+            ) from err
         except DreameLawnMowerConnectionError as err:
             if time.monotonic() >= deadline:
                 raise DreameLawnMowerPointCloudError(
@@ -1516,6 +1530,7 @@ class _DreameLawnMowerClientMapsMixin:
         deadline: float | None = None,
         redact_response: bool = False,
         on_dispatch: Callable[[], None] | None = None,
+        raise_on_api_error: bool = False,
     ) -> Any:
         cloud = (
             self._sync_get_cloud_protocol(deadline=deadline)
@@ -1562,6 +1577,8 @@ class _DreameLawnMowerClientMapsMixin:
                 request_options["redact_response"] = True
             if on_dispatch is not None:
                 request_options["on_dispatch"] = on_dispatch
+            if raise_on_api_error:
+                request_options["raise_on_api_error"] = True
             if hasattr(cloud, "call_app_action"):
                 response = cloud.call_app_action(
                     payload,
@@ -1580,6 +1597,8 @@ class _DreameLawnMowerClientMapsMixin:
                     },
                     **request_options,
                 )
+        except DreameLawnMowerCloudAPIError:
+            raise
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
 

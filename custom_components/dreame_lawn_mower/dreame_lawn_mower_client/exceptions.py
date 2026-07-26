@@ -26,6 +26,14 @@ class DreameLawnMowerConnectionError(DreameLawnMowerError):
     """Connection or update failure."""
 
 
+class DreameLawnMowerCloudAPIError(DeviceException):
+    """A privacy-safe numeric error returned by the Dreame cloud API."""
+
+    def __init__(self, code: int) -> None:
+        super().__init__(f"Dreame cloud API request failed with code {code}.")
+        self.code = code
+
+
 class DreameLawnMowerTwoFactorRequiredError(DreameLawnMowerAuthError):
     """Two-factor authentication is required."""
 

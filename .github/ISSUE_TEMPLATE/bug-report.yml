@@ -7,9 +7,15 @@ body:
   - type: markdown
     attributes:
       value: |
-        Reproduce the problem once, then download diagnostics before reloading Home Assistant. The report includes sanitized version, host, coordinator, entity, and recent failure information.
+        Update to the latest HACS release, restart Home Assistant, reproduce the problem once, then download diagnostics before reloading. The report includes sanitized version, host, coordinator, entity, and recent failure information.
 
-        Do not paste credentials, tokens, serial numbers, exact coordinates, or broad raw debug logs.
+        Drag the downloaded diagnostics JSON file into the form. Do not paste credentials, tokens, serial numbers, exact coordinates, or broad raw debug logs.
+  - type: input
+    id: related_issue
+    attributes:
+      label: Related or previous issue
+      description: Link an earlier report if this is a retest or the same symptom returned. Otherwise leave this blank.
+      placeholder: "#102 or https://github.com/EvotecIT/homeassistant-dreamelawnmower/issues/102"
   - type: input
     id: integration_version
     attributes:
@@ -97,6 +103,10 @@ body:
     attributes:
       label: Safety and privacy checks
       options:
+        - label: I updated to the latest HACS release and restarted Home Assistant before reproducing.
+          required: true
+        - label: I searched existing issues and linked any earlier report above instead of opening a disconnected duplicate.
+          required: true
         - label: I reproduced the problem immediately before downloading diagnostics.
           required: true
         - label: I removed credentials, tokens, serial numbers, exact coordinates, and other private data from anything added manually.

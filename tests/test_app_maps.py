@@ -180,6 +180,7 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
 
     assert result["available"] is True
     assert result["map_count"] == 2
+    assert result["created_map_count"] == 1
     assert result["current_map_index"] == 0
     assert result["objects"]["object_count"] == 1
     assert result["objects"]["urls_included"] is False

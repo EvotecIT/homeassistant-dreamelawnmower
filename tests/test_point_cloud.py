@@ -28,6 +28,7 @@ from dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
 _internal_client_module = load_internal_module("client_map_helpers")
 _internal_client_facade_module = load_internal_module("client")
 _internal_deadline_module = load_internal_module("deadline")
+_internal_exceptions_module = load_internal_module("exceptions")
 _internal_point_cloud_module = load_internal_module("point_cloud")
 _internal_protocol_module = load_internal_module("protocol_cloud")
 
@@ -1936,10 +1937,11 @@ def test_point_cloud_app_action_uses_and_enforces_remaining_deadline(
         {
             "retry_count": 0,
             "timeout": pytest.approx(0.8),
-            "deadline": 101.0,
-            "redact_response": True,
-        }
-    ]
+                "deadline": 101.0,
+                "redact_response": True,
+                "raise_on_api_error": True,
+            }
+        ]
 
 
 def test_point_cloud_action_response_enforces_overall_deadline(
@@ -2005,6 +2007,55 @@ def test_point_cloud_action_marks_dispatch_before_waiting_for_response() -> None
 
     assert events == ["dispatch", "post"]
     assert result == {"out": [{"value": {"r": 0}}]}
+
+
+def test_point_cloud_action_can_raise_safe_cloud_api_code() -> None:
+    protocol_type = _internal_protocol_module.DreameMowerDreameHomeCloudProtocol
+    cloud = object.__new__(protocol_type)
+    cloud._request_lock = threading.RLock()
+    cloud._strings = [f"value-{index}" for index in range(57)]
+    cloud._host = "host.example.invalid"
+    cloud._did = "device-1"
+    cloud._id = 1
+    cloud._api_call = lambda *args, **kwargs: {
+        "code": 80001,
+        "success": False,
+        "data": None,
+    }
+
+    with pytest.raises(
+        _internal_exceptions_module.DreameLawnMowerCloudAPIError
+    ) as captured:
+        cloud.call_app_action(
+            {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+            retry_count=0,
+            redact_response=True,
+            raise_on_api_error=True,
+        )
+
+    assert captured.value.code == 80001
+    assert "80001" in str(captured.value)
+
+
+def test_point_cloud_wraps_safe_cloud_api_rejection() -> None:
+    client = _client()
+
+    def rejected(*args: Any, **kwargs: Any) -> None:
+        raise _internal_exceptions_module.DreameLawnMowerCloudAPIError(80001)
+
+    client._sync_call_app_action = rejected
+
+    with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+        client._sync_call_point_cloud_action(
+            {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+            operation="start point-cloud generation",
+            deadline=time.monotonic() + 5,
+            require_data=False,
+        )
+
+    assert captured.value.code == "point_cloud_mower_request_rejected"
+    assert captured.value.stage == "mower_request"
+    assert captured.value.vendor_error_code == 80001
 
 
 def test_point_cloud_dispatch_waits_for_network_worker_slot() -> None:

@@ -351,6 +351,11 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
                 active_app_map_index,
             ),
             "app_map_count": (
+                self.coordinator.app_maps.get("created_map_count")
+                if isinstance(self.coordinator.app_maps, dict)
+                else None
+            ),
+            "app_map_slot_count": (
                 self.coordinator.app_maps.get("map_count")
                 if isinstance(self.coordinator.app_maps, dict)
                 else None

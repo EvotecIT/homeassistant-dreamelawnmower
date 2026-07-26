@@ -33,6 +33,7 @@ class DreameLawnMowerPointCloudError(ValueError):
         public_message: str = "The mower point cloud is temporarily unavailable.",
         timeout_seconds: float | None = None,
         retry_after_seconds: int | None = None,
+        vendor_error_code: int | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -41,6 +42,7 @@ class DreameLawnMowerPointCloudError(ValueError):
         self.public_message = public_message
         self.timeout_seconds = timeout_seconds
         self.retry_after_seconds = retry_after_seconds
+        self.vendor_error_code = vendor_error_code
 
 
 @dataclass(frozen=True, slots=True)

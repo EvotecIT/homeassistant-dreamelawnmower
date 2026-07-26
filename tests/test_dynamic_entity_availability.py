@@ -1251,8 +1251,8 @@ def test_app_map_count_sensor_uses_cached_app_map_state() -> None:
                 {
                     "idx": 1,
                     "current": False,
-                    "available": True,
-                    "created": True,
+                    "available": False,
+                    "created": False,
                     "summary": {
                         "total_area": 550,
                         "map_area_total": 550.0,
@@ -1269,13 +1269,14 @@ def test_app_map_count_sensor_uses_cached_app_map_state() -> None:
     )
 
     assert entity.available is True
-    assert entity.native_value == 2
+    assert entity.native_value == 1
     assert entity.extra_state_attributes == {
         "source": "app_maps_auto",
         "app_maps": {
             "source": "app_maps_auto",
             "available": True,
             "map_count": 2,
+            "created_map_count": 1,
             "current_map_index": 0,
             "maps": [
                 {
@@ -1296,8 +1297,8 @@ def test_app_map_count_sensor_uses_cached_app_map_state() -> None:
                 {
                     "idx": 1,
                     "current": False,
-                    "available": True,
-                    "created": True,
+                    "available": False,
+                    "created": False,
                     "total_area": 550,
                     "map_area_total": 550.0,
                     "map_area_count": 2,

@@ -73,19 +73,21 @@ def test_point_cloud_api_caches_recent_downloads() -> None:
         options.append(kwargs)
         return _download(kwargs["map_index"])
 
+    coordinator = SimpleNamespace(
+        app_maps={
+            "current_map_index": 0,
+            "maps": [{"idx": 0}],
+        },
+        selected_map_index=0,
+        client=SimpleNamespace(
+            async_download_app_map_point_cloud=download,
+        ),
+        diagnostic_events=DreameLawnMowerDiagnosticEventStore(),
+    )
     hass = SimpleNamespace(
         data={
             DOMAIN: {
-                "entry-1": SimpleNamespace(
-                    app_maps={
-                        "current_map_index": 0,
-                        "maps": [{"idx": 0}],
-                    },
-                    selected_map_index=0,
-                    client=SimpleNamespace(
-                        async_download_app_map_point_cloud=download,
-                    )
-                )
+                "entry-1": coordinator
             }
         }
     )
@@ -100,6 +102,16 @@ def test_point_cloud_api_caches_recent_downloads() -> None:
 
     assert calls == 1
     assert options == [{"map_index": 0, "allow_stored": True}]
+    event = coordinator.diagnostic_events.as_list()[0]
+    assert event["code"] == "point_cloud_completed"
+    assert event["severity"] == "info"
+    assert event["context"] == {
+        "map_index": 0,
+        "source": "generated",
+        "point_count": 1,
+        "total_bytes": 112,
+        "data_encoding": "binary",
+    }
 
 
 def test_point_cloud_api_does_not_use_stored_object_for_inactive_map() -> None:
@@ -685,6 +697,9 @@ def test_point_cloud_api_records_safe_failure_and_timing() -> None:
     assert event["source"] == "point_cloud_api"
     assert event["context"]["stage"] == "generation"
     assert event["context"]["timeout_seconds"] == 45
+    assert event["context"]["map_index"] == 0
+    assert event["context"]["allow_stored"] is False
+    assert event["context"]["vendor_error_code"] is None
     assert private_detail not in repr(event)
     performance = coordinator.performance.as_dict()
     assert performance["summary"]["point_cloud_generation"]["outcomes"] == {
