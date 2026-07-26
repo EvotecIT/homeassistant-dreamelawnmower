@@ -79,10 +79,9 @@ def build_coordinator_diagnostics(coordinator: object) -> dict[str, Any]:
         "performance": (
             performance.as_dict() if hasattr(performance, "as_dict") else None
         ),
-        "maintenance_points": (
-            dict(last_map_probe)
-            if isinstance(last_map_probe, Mapping)
-            else build_maintenance_point_diagnostics(coordinator)
+        "maintenance_points": build_maintenance_point_diagnostics(coordinator),
+        "last_maintenance_point_probe": (
+            dict(last_map_probe) if isinstance(last_map_probe, Mapping) else None
         ),
     }
 
@@ -91,6 +90,7 @@ def build_maintenance_point_diagnostics(
     coordinator: object,
     *,
     map_probe_payload: Mapping[str, Any] | None = None,
+    captured_at: str | None = None,
 ) -> dict[str, Any]:
     """Return point availability evidence without map coordinates or payloads."""
     app_maps = getattr(coordinator, "app_maps", None)
@@ -110,11 +110,17 @@ def build_maintenance_point_diagnostics(
 
     app_map_entries = _maintenance_app_map_entries(app_maps)
     vector_map_entries = _maintenance_vector_map_entries(vector_details)
-    current_map_index = _map_index(
-        getattr(coordinator, "selected_map_index", None)
-    )
+    current_map_index = None
+    if isinstance(map_probe_payload, Mapping) and isinstance(app_maps, Mapping):
+        current_map_index = _map_index(app_maps.get("current_map_index"))
+    if current_map_index is None:
+        current_map_index = _map_index(
+            getattr(coordinator, "selected_map_index", None)
+        )
     if current_map_index is None and isinstance(app_maps, Mapping):
         current_map_index = _map_index(app_maps.get("current_map_index"))
+    if current_map_index is None and isinstance(vector_details, Mapping):
+        current_map_index = _map_index(vector_details.get("map_index"))
 
     current_app_entry = next(
         (
@@ -140,7 +146,7 @@ def build_maintenance_point_diagnostics(
     )
     mismatch = bool(current_app_point_count) and not current_vector_point_ids
 
-    return {
+    result = {
         "source": source,
         "current_map_index": current_map_index,
         "selected_point_id": _positive_int(
@@ -151,6 +157,9 @@ def build_maintenance_point_diagnostics(
         "app_maps": app_map_entries,
         "vector_maps": vector_map_entries,
     }
+    if source == "map_probe":
+        result["captured_at"] = captured_at
+    return result
 
 
 def _maintenance_app_map_entries(value: object) -> list[dict[str, Any]]:

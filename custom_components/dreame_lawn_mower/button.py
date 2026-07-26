@@ -261,6 +261,7 @@ class DreameLawnMowerCaptureMapProbeButton(
         self.coordinator.last_map_probe_result = build_maintenance_point_diagnostics(
             self.coordinator,
             map_probe_payload=payload,
+            captured_at=datetime.now(UTC).isoformat(),
         )
         _LOGGER.info(
             "Captured Dreame lawn mower map probe for %s: %s",
