@@ -400,8 +400,10 @@ preference write only when both `execute: true` and
 `confirm_preference_write: true` are provided.
 
 The guarded preference fields include per-zone safe edge mowing through
-`edge_mowing_safe`. Use the dry-run result to inspect the candidate payload
-before confirming a live write.
+`edge_mowing_safe`, EdgeMaster through `edge_cutting_attachment`, and mowing
+direction through `mowing_direction_mode` plus `mowing_direction_degrees`. Use
+the dry-run result to inspect the candidate payload before confirming a live
+write.
 
 For normal dashboard and automation use, the integration also exposes:
 
@@ -411,19 +413,24 @@ For normal dashboard and automation use, the integration also exposes:
   `Global` preferences
 - **Selected Zone Mowing Height**, available while the selected map uses
   `Custom` preferences
-- selects for mowing efficiency, obstacle height and distance, and edge-cutting
-  style
-- switches for automatic and safe edge cutting, edge obstacle avoidance, lidar
-  obstacle recognition, and the people, animal, and object recognition classes
+- selects for mowing efficiency, mowing direction mode, obstacle height and
+  distance, and turning method
+- a 0-180 degree mowing-direction slider
+- switches for automatic and safe edge cutting, EdgeMaster, edge obstacle
+  avoidance, lidar obstacle recognition, and the people, animal, and object
+  recognition classes
 
 The cutting-height controls use 0.5 cm steps. A2 and other standard mower
 families expose 3-7 cm; verified AWD families expose 3-10 cm. Every other
 preference control follows the current `Global` record or the zone chosen by
-the normal map and zone selectors, so a dashboard never presents a zone value
-as if it were a whole-lawn setting. These standard entities work with Home
-Assistant dashboards, automations, voice assistants, and the companion Lawn
-Mower Card. The guarded service remains available when you need to inspect the
-complete candidate preference payload before sending it.
+the normal map and zone selectors. `Global` means area `0` on the selected map,
+not one device-wide setting shared by every map. `Custom` edits the selected
+zone on that map. This prevents a dashboard from presenting a zone value as if
+it were a whole-lawn setting. These standard entities work with Home Assistant
+dashboards, automations, and voice assistants. The companion Lawn Mower Card
+can use them when explicitly configured; automatic discovery support is tracked
+in the card project. The guarded service remains available when you need to
+inspect the complete candidate preference payload before sending it.
 
 ## Maps
 

@@ -19,6 +19,12 @@ MOWING_DIRECTION_MODE_NAMES = {
     2: "checkerboard",
 }
 
+MOWING_DIRECTION_METHOD_NAMES = {
+    0: "none",
+    1: "mow_at_angle",
+    2: "checkerboard",
+}
+
 MOWING_EFFICIENCY_MODE_NAMES = {
     0: "standard",
     1: "efficient",
@@ -27,6 +33,11 @@ MOWING_EFFICIENCY_MODE_NAMES = {
 EDGE_MOWING_WALK_MODE_NAMES = {
     0: "line",
     1: "side",
+}
+
+TURNING_METHOD_NAMES = {
+    0: "lawn_care",
+    1: "efficient",
 }
 
 CUTTER_POSITION_NAMES = {
@@ -94,11 +105,19 @@ def decode_mowing_preference_payload(payload: Sequence[Any]) -> dict[str, Any]:
             MOWING_DIRECTION_MODE_NAMES,
             _int_at(values, 5),
         ),
+        "mowing_direction_method_name": _label(
+            MOWING_DIRECTION_METHOD_NAMES,
+            _int_at(values, 5),
+        ),
         "mowing_direction_degrees": _mowing_direction_at(values, 6),
         "edge_mowing_auto": _bool_at(values, 7),
         "edge_mowing_walk_mode": _int_at(values, 8),
         "edge_mowing_walk_mode_name": _label(
             EDGE_MOWING_WALK_MODE_NAMES,
+            _int_at(values, 8),
+        ),
+        "turning_method_name": _label(
+            TURNING_METHOD_NAMES,
             _int_at(values, 8),
         ),
         "edge_mowing_obstacle_avoidance": _bool_at(values, 9),
@@ -290,6 +309,10 @@ def _normalize_preference_change(field: str, value: Any) -> tuple[str, Any]:
         return field, _normalize_height_cm(value)
     if field == "mowing_direction_degrees":
         return field, _normalize_direction_degrees(value)
+    if field == "mowing_direction_mode":
+        return field, _normalize_choice(field, value, maximum=2)
+    if field == "edge_mowing_walk_mode":
+        return field, _normalize_choice(field, value, maximum=1)
     if field in {
         "edge_mowing_auto",
         "edge_mowing_obstacle_avoidance",
@@ -318,8 +341,16 @@ def _refresh_preference_labels(preference: dict[str, Any]) -> None:
         MOWING_DIRECTION_MODE_NAMES,
         _to_int(preference.get("mowing_direction_mode")),
     )
+    preference["mowing_direction_method_name"] = _label(
+        MOWING_DIRECTION_METHOD_NAMES,
+        _to_int(preference.get("mowing_direction_mode")),
+    )
     preference["edge_mowing_walk_mode_name"] = _label(
         EDGE_MOWING_WALK_MODE_NAMES,
+        _to_int(preference.get("edge_mowing_walk_mode")),
+    )
+    preference["turning_method_name"] = _label(
+        TURNING_METHOD_NAMES,
         _to_int(preference.get("edge_mowing_walk_mode")),
     )
     preference["cutter_position_name"] = _label(
@@ -342,7 +373,7 @@ def _mowing_direction_at(values: Sequence[Any], index: int) -> int | None:
     value = _to_int(values[index]) if len(values) > index else None
     if value is None:
         return None
-    return 180 - value
+    return value
 
 
 def _normalize_height_cm(value: Any) -> float:
@@ -368,6 +399,13 @@ def _normalize_bool(field: str, value: Any) -> bool:
     raise ValueError(f"{field} must be a boolean.")
 
 
+def _normalize_choice(field: str, value: Any, *, maximum: int) -> int:
+    converted = _normalize_int(field, value)
+    if converted < 0 or converted > maximum:
+        raise ValueError(f"{field} must be between 0 and {maximum}.")
+    return converted
+
+
 def _normalize_int(field: str, value: Any) -> int:
     if isinstance(value, bool):
         raise ValueError(f"{field} must be an integer.")
@@ -389,7 +427,7 @@ def _encode_height_cm(value: Any) -> int:
 
 
 def _encode_mowing_direction(value: Any) -> int:
-    return 180 - _normalize_direction_degrees(value)
+    return _normalize_direction_degrees(value)
 
 
 def _int_at(values: Sequence[Any], index: int) -> int | None:

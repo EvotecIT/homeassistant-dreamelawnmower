@@ -34,6 +34,12 @@ PREFERENCE_SELECTS = (
         options=(("Standard", 0), ("Efficient", 1)),
     ),
     PreferenceSelectDescription(
+        key="mowing_direction_mode",
+        name="Selected Mowing Direction Mode",
+        icon="mdi:compass-rose",
+        options=(("None", 0), ("Mow at angle", 1), ("Checkerboard", 2)),
+    ),
+    PreferenceSelectDescription(
         key="obstacle_avoidance_height_cm",
         name="Selected Obstacle Height",
         icon="mdi:arrow-expand-vertical",
@@ -47,9 +53,9 @@ PREFERENCE_SELECTS = (
     ),
     PreferenceSelectDescription(
         key="edge_mowing_walk_mode",
-        name="Selected Edge Cutting Style",
-        icon="mdi:vector-polyline-edit",
-        options=(("Along line", 0), ("Side cutting", 1)),
+        name="Selected Turning Method",
+        icon="mdi:turnstile-outline",
+        options=(("Lawn care", 0), ("Efficient", 1)),
     ),
 )
 

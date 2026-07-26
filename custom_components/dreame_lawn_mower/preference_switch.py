@@ -38,6 +38,11 @@ PREFERENCE_SWITCHES = (
         icon="mdi:shield-check-outline",
     ),
     PreferenceSwitchDescription(
+        key="edge_cutting_attachment",
+        name="Selected EdgeMaster",
+        icon="mdi:content-cut",
+    ),
+    PreferenceSwitchDescription(
         key="edge_mowing_obstacle_avoidance",
         name="Selected Edge Obstacle Avoidance",
         icon="mdi:shield-tree-outline",

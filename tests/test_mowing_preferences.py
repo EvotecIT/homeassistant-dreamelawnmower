@@ -101,7 +101,7 @@ def _client() -> DreameLawnMowerClient:
 
 def test_decode_mowing_preference_payload_names_known_fields() -> None:
     decoded = decode_mowing_preference_payload(
-        [8, 0, 11, 1, 40, 2, 90, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1]
+        [8, 0, 11, 1, 40, 2, 35, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1]
     )
 
     assert decoded == {
@@ -113,10 +113,12 @@ def test_decode_mowing_preference_payload_names_known_fields() -> None:
         "mowing_height_cm": 4.0,
         "mowing_direction_mode": 2,
         "mowing_direction_mode_name": "checkerboard",
-        "mowing_direction_degrees": 90,
+        "mowing_direction_method_name": "checkerboard",
+        "mowing_direction_degrees": 35,
         "edge_mowing_auto": True,
         "edge_mowing_walk_mode": 0,
         "edge_mowing_walk_mode_name": "line",
+        "turning_method_name": "lawn_care",
         "edge_mowing_obstacle_avoidance": True,
         "cutter_position": 1,
         "cutter_position_name": "left",
@@ -138,7 +140,7 @@ def test_decode_mowing_preference_payload_names_known_fields() -> None:
             1,
             40,
             2,
-            90,
+            35,
             1,
             0,
             1,
@@ -213,7 +215,7 @@ def test_get_mowing_preferences_can_limit_maps_and_include_raw() -> None:
 
 def test_encode_mowing_preference_payload_round_trips_decoded_values() -> None:
     decoded = decode_mowing_preference_payload(
-        [8, 0, 11, 1, 40, 2, 90, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1]
+        [8, 0, 11, 1, 40, 2, 35, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1]
     )
     decoded["reported_version"] = 8
 
@@ -224,7 +226,7 @@ def test_encode_mowing_preference_payload_round_trips_decoded_values() -> None:
         1,
         40,
         2,
-        90,
+        35,
         1,
         0,
         1,
@@ -307,6 +309,26 @@ def test_apply_mowing_preference_changes_updates_labels_and_ai_classes() -> None
     assert updated["efficient_mode_name"] == "standard"
     assert updated["obstacle_avoidance_ai"] == 2
     assert updated["obstacle_avoidance_ai_classes"] == ["animals"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "maximum"),
+    [
+        ("mowing_direction_mode", 3, 2),
+        ("edge_mowing_walk_mode", 2, 1),
+    ],
+)
+def test_apply_mowing_preference_changes_rejects_unknown_modes(
+    field: str,
+    value: int,
+    maximum: int,
+) -> None:
+    current = decode_mowing_preference_payload(
+        [8, 0, 11, 1, 40, 1, 35, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1]
+    )
+
+    with pytest.raises(ValueError, match=rf"{field} must be between 0 and {maximum}"):
+        apply_mowing_preference_changes(current, {field: value})
 
 
 def test_plan_app_mowing_preference_update_builds_candidate_request() -> None:
@@ -547,7 +569,7 @@ def test_plan_app_mowing_preference_update_can_execute_mode_and_settings_sequenc
             {
                 "m": "s",
                 "t": "PRE",
-                "d": [10, 1, 5, 1, 40, 1, 170, 1, 0, 1, 0, 1, 1, 5, 10, 7, 1],
+                "d": [10, 1, 5, 1, 40, 1, 10, 1, 0, 1, 0, 1, 1, 5, 10, 7, 1],
             },
         ]
     }
@@ -556,7 +578,7 @@ def test_plan_app_mowing_preference_update_can_execute_mode_and_settings_sequenc
         {
             "m": "s",
             "t": "PRE",
-            "d": [10, 1, 5, 1, 40, 1, 170, 1, 0, 1, 0, 1, 1, 5, 10, 7, 1],
+            "d": [10, 1, 5, 1, 40, 1, 10, 1, 0, 1, 0, 1, 1, 5, 10, 7, 1],
         },
     ]
     assert result["response_data"] == [{"r": 0, "ok": True}, {"r": 0, "ok": True}]

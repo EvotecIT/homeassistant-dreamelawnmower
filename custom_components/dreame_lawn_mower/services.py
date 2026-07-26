@@ -36,6 +36,7 @@ ATTR_CONFIRM_PREFERENCE_WRITE = "confirm_preference_write"
 ATTR_CONFIRM_MAINTENANCE_RESET = "confirm_maintenance_reset"
 ATTR_CONFIRM_SCHEDULE_WRITE = "confirm_schedule_write"
 ATTR_CUTTER_POSITION = "cutter_position"
+ATTR_EDGE_CUTTING_ATTACHMENT = "edge_cutting_attachment"
 ATTR_EDGE_MOWING_AUTO = "edge_mowing_auto"
 ATTR_EDGE_MOWING_NUM = "edge_mowing_num"
 ATTR_EDGE_MOWING_OBSTACLE_AVOIDANCE = "edge_mowing_obstacle_avoidance"
@@ -89,8 +90,13 @@ def _bounded_int(*, name: str, limit: int) -> Any:
     return validator
 
 
-def _int_range(*, name: str, minimum: int | None = None) -> Any:
-    """Return a voluptuous validator for an integer with an optional minimum."""
+def _int_range(
+    *,
+    name: str,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> Any:
+    """Return a voluptuous validator for an integer with optional bounds."""
 
     def validator(value: Any) -> int:
         if isinstance(value, bool):
@@ -101,6 +107,8 @@ def _int_range(*, name: str, minimum: int | None = None) -> Any:
             raise vol.Invalid(f"{name} must be an integer") from err
         if minimum is not None and converted < minimum:
             raise vol.Invalid(f"{name} must be at least {minimum}")
+        if maximum is not None and converted > maximum:
+            raise vol.Invalid(f"{name} must be at most {maximum}")
         return converted
 
     return validator
@@ -197,15 +205,18 @@ MOWING_PREFERENCE_CHANGE_FIELDS = {
     vol.Optional(ATTR_MOWING_DIRECTION_MODE): _int_range(
         name=ATTR_MOWING_DIRECTION_MODE,
         minimum=0,
+        maximum=2,
     ),
     vol.Optional(ATTR_MOWING_DIRECTION_DEGREES): _int_range(
         name=ATTR_MOWING_DIRECTION_DEGREES,
         minimum=0,
+        maximum=180,
     ),
     vol.Optional(ATTR_EDGE_MOWING_AUTO): cv.boolean,
     vol.Optional(ATTR_EDGE_MOWING_WALK_MODE): _int_range(
         name=ATTR_EDGE_MOWING_WALK_MODE,
         minimum=0,
+        maximum=1,
     ),
     vol.Optional(ATTR_EDGE_MOWING_OBSTACLE_AVOIDANCE): cv.boolean,
     vol.Optional(ATTR_CUTTER_POSITION): _int_range(
@@ -230,6 +241,7 @@ MOWING_PREFERENCE_CHANGE_FIELDS = {
         [vol.In(["people", "animals", "objects"])],
     ),
     vol.Optional(ATTR_EDGE_MOWING_SAFE): cv.boolean,
+    vol.Optional(ATTR_EDGE_CUTTING_ATTACHMENT): cv.boolean,
 }
 
 PLAN_MOWING_PREFERENCE_UPDATE_SCHEMA = vol.Schema(
@@ -489,6 +501,7 @@ def preference_change_request(data: dict[str, Any]) -> dict[str, Any]:
         ATTR_OBSTACLE_AVOIDANCE_DISTANCE_CM,
         ATTR_OBSTACLE_AVOIDANCE_AI_CLASSES,
         ATTR_EDGE_MOWING_SAFE,
+        ATTR_EDGE_CUTTING_ATTACHMENT,
     )
     changes = {key: data[key] for key in supported_fields if key in data}
     if not changes:

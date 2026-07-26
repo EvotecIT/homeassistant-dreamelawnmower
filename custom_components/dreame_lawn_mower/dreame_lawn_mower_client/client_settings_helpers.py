@@ -153,10 +153,14 @@ def _mowing_preference_overview(preference: Mapping[str, Any]) -> dict[str, Any]
         "mowing_height_cm": preference.get("mowing_height_cm"),
         "mowing_direction_mode": preference.get("mowing_direction_mode"),
         "mowing_direction_mode_name": preference.get("mowing_direction_mode_name"),
+        "mowing_direction_method_name": preference.get(
+            "mowing_direction_method_name"
+        ),
         "mowing_direction_degrees": preference.get("mowing_direction_degrees"),
         "edge_mowing_auto": preference.get("edge_mowing_auto"),
         "edge_mowing_walk_mode": preference.get("edge_mowing_walk_mode"),
         "edge_mowing_walk_mode_name": preference.get("edge_mowing_walk_mode_name"),
+        "turning_method_name": preference.get("turning_method_name"),
         "edge_mowing_obstacle_avoidance": preference.get(
             "edge_mowing_obstacle_avoidance"
         ),
@@ -173,6 +177,7 @@ def _mowing_preference_overview(preference: Mapping[str, Any]) -> dict[str, Any]
             "obstacle_avoidance_ai_classes"
         ),
         "edge_mowing_safe": preference.get("edge_mowing_safe"),
+        "edge_cutting_attachment": preference.get("edge_cutting_attachment"),
     }
 
 
