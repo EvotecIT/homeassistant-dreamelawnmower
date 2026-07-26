@@ -508,9 +508,14 @@ def _preference_entry_summary(preference: dict[str, Any]) -> dict[str, Any]:
             "mowing_direction_mode_name": preference.get(
                 "mowing_direction_mode_name"
             ),
+            "mowing_direction_method_name": preference.get(
+                "mowing_direction_method_name"
+            ),
             "mowing_direction_degrees": preference.get("mowing_direction_degrees"),
             "edge_mowing_auto": preference.get("edge_mowing_auto"),
             "edge_mowing_safe": preference.get("edge_mowing_safe"),
+            "edge_cutting_attachment": preference.get("edge_cutting_attachment"),
+            "turning_method_name": preference.get("turning_method_name"),
             "obstacle_avoidance_enabled": preference.get(
                 "obstacle_avoidance_enabled"
             ),

@@ -200,6 +200,13 @@ to the app-action preference protocol:
   height, mowing direction mode/direction, automatic and safe edge mowing,
   EdgeMaster/cutter position, edge obstacle avoidance, LiDAR obstacle
   avoidance, avoidance height/distance, and AI obstacle class bitmask.
+- A live A2 comparison confirmed that mowing-direction degrees are stored
+  directly, while `edgeMowingWalkMode` is the app's turning method (`0` lawn
+  care, `1` efficient).
+- Existing `mowing_direction_mode_name` and `edge_mowing_walk_mode_name`
+  values remain compatibility labels. New `mowing_direction_method_name` and
+  `turning_method_name` aliases expose the app terminology without breaking
+  consumers of `rotation`, `line`, or `side`.
 - The app logs `prop.2.52 mowing preference update`, so cloud property `2.52`
   is a useful read-only hint during future live captures.
 
@@ -219,7 +226,7 @@ validated the commands:
 - no probe errors
 
 Notable live decoded values included efficient/default area preferences,
-cutting heights from `3.5` to `6.0` cm, rotation/none direction modes,
+cutting heights from `3.5` to `6.0` cm, mow-at-angle/none direction modes,
 obstacle avoidance enabled, obstacle avoidance heights from `5` to `20` cm,
 distances from `10` to `20` cm, and all three AI classes enabled.
 

@@ -182,11 +182,11 @@ plan_zone_mowing_preference_update:
           mode: box
     mowing_direction_mode:
       name: Mowing direction mode
-      description: Integer mode value, for example 0 none, 1 rotation, 2 checkerboard.
+      description: Integer mode value, with 0 none, 1 mow at angle, or 2 checkerboard.
       selector:
         number:
           min: 0
-          max: 10
+          max: 2
           step: 1
           mode: box
     mowing_direction_degrees:
@@ -203,12 +203,12 @@ plan_zone_mowing_preference_update:
       selector:
         boolean: {}
     edge_mowing_walk_mode:
-      name: Edge mowing walk mode
-      description: Integer mode value, typically 0 line or 1 side.
+      name: Turning method
+      description: Integer mode value, with 0 lawn care or 1 efficient.
       selector:
         number:
           min: 0
-          max: 10
+          max: 1
           step: 1
           mode: box
     edge_mowing_obstacle_avoidance:
@@ -264,6 +264,11 @@ plan_zone_mowing_preference_update:
             - objects
     edge_mowing_safe:
       name: Safe edge mowing
+      selector:
+        boolean: {}
+    edge_cutting_attachment:
+      name: EdgeMaster
+      description: Enable or disable the mower's EdgeMaster edge-cutting attachment.
       selector:
         boolean: {}
 
@@ -532,11 +537,11 @@ plan_mowing_preference_update:
           mode: box
     mowing_direction_mode:
       name: Mowing direction mode
-      description: Integer mode value, for example 0 none, 1 rotation, 2 checkerboard.
+      description: Integer mode value, with 0 none, 1 mow at angle, or 2 checkerboard.
       selector:
         number:
           min: 0
-          max: 10
+          max: 2
           step: 1
           mode: box
     mowing_direction_degrees:
@@ -553,12 +558,12 @@ plan_mowing_preference_update:
       selector:
         boolean: {}
     edge_mowing_walk_mode:
-      name: Edge mowing walk mode
-      description: Integer mode value, typically 0 line or 1 side.
+      name: Turning method
+      description: Integer mode value, with 0 lawn care or 1 efficient.
       selector:
         number:
           min: 0
-          max: 10
+          max: 1
           step: 1
           mode: box
     edge_mowing_obstacle_avoidance:
@@ -614,5 +619,10 @@ plan_mowing_preference_update:
             - objects
     edge_mowing_safe:
       name: Safe edge mowing
+      selector:
+        boolean: {}
+    edge_cutting_attachment:
+      name: EdgeMaster
+      description: Enable or disable the mower's EdgeMaster edge-cutting attachment.
       selector:
         boolean: {}

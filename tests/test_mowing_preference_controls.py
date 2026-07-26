@@ -14,6 +14,7 @@ from custom_components.dreame_lawn_mower.mowing_preference_control import (
 )
 from custom_components.dreame_lawn_mower.number import (
     DreameLawnMowerSelectedMapMowingHeightNumber,
+    DreameLawnMowerSelectedMowingDirectionNumber,
     DreameLawnMowerSelectedZoneMowingHeightNumber,
 )
 from custom_components.dreame_lawn_mower.preference_select import (
@@ -67,8 +68,13 @@ def _coordinator(*, mode_name: str = "custom") -> SimpleNamespace:
                                 "area_id": 0,
                                 "mowing_height_cm": 5.0,
                                 "efficient_mode": 1,
+                                "mowing_direction_mode": 1,
+                                "mowing_direction_mode_name": "rotation",
+                                "mowing_direction_method_name": "mow_at_angle",
+                                "mowing_direction_degrees": 5,
                                 "edge_mowing_auto": True,
                                 "edge_mowing_safe": True,
+                                "edge_cutting_attachment": False,
                                 "edge_mowing_obstacle_avoidance": True,
                                 "obstacle_avoidance_enabled": True,
                                 "obstacle_avoidance_height_cm": 5,
@@ -85,8 +91,12 @@ def _coordinator(*, mode_name: str = "custom") -> SimpleNamespace:
                                 "mowing_height_cm": 4.0,
                                 "efficient_mode": 0,
                                 "efficient_mode_name": "standard",
+                                "mowing_direction_mode": 2,
+                                "mowing_direction_mode_name": "checkerboard",
+                                "mowing_direction_degrees": 35,
                                 "edge_mowing_auto": False,
                                 "edge_mowing_safe": True,
+                                "edge_cutting_attachment": True,
                                 "edge_mowing_obstacle_avoidance": True,
                                 "obstacle_avoidance_enabled": True,
                                 "obstacle_avoidance_height_cm": 10,
@@ -285,6 +295,72 @@ def test_active_preference_select_reads_and_writes_custom_zone() -> None:
     )
 
 
+def test_direction_mode_select_reads_and_writes_custom_zone() -> None:
+    coordinator = _coordinator()
+    description = next(
+        item for item in PREFERENCE_SELECTS if item.key == "mowing_direction_mode"
+    )
+    entity = object.__new__(DreameLawnMowerPreferenceSelect)
+    entity.coordinator = coordinator
+    entity._preference_description = description
+    entity._attr_name = description.name
+
+    assert entity.options == ["None", "Mow at angle", "Checkerboard"]
+    assert entity.current_option == "Checkerboard"
+
+    asyncio.run(entity.async_select_option("Mow at angle"))
+
+    coordinator.client.async_plan_app_mowing_preference_update.assert_awaited_once_with(
+        map_index=1,
+        area_id=5,
+        changes={"mowing_direction_mode": 1},
+        execute=True,
+        confirm_write=True,
+    )
+
+
+def test_direction_number_reads_and_writes_global_scope() -> None:
+    coordinator = _coordinator(mode_name="global")
+    entity = object.__new__(DreameLawnMowerSelectedMowingDirectionNumber)
+    entity.coordinator = coordinator
+
+    assert entity.available is True
+    assert entity.native_value == 5.0
+    assert entity.extra_state_attributes == {
+        "preference_scope": "global",
+        "selected_map_index": 1,
+        "selected_map_label": "Back garden (#2)",
+        "mowing_direction_mode": 1,
+        "mowing_direction_mode_name": "rotation",
+        "mowing_direction_method_name": "mow_at_angle",
+    }
+
+    asyncio.run(entity.async_set_native_value(15))
+
+    coordinator.client.async_plan_app_mowing_preference_update.assert_awaited_once_with(
+        map_index=1,
+        area_id=0,
+        changes={"mowing_direction_degrees": 15},
+        execute=True,
+        confirm_write=True,
+    )
+
+
+def test_turning_method_select_uses_app_labels() -> None:
+    coordinator = _coordinator(mode_name="global")
+    description = next(
+        item for item in PREFERENCE_SELECTS if item.key == "edge_mowing_walk_mode"
+    )
+    entity = object.__new__(DreameLawnMowerPreferenceSelect)
+    entity.coordinator = coordinator
+    entity._preference_description = description
+    entity._attr_name = description.name
+
+    assert description.name == "Selected Turning Method"
+    assert entity.options == ["Lawn care", "Efficient"]
+    assert entity.current_option == "Efficient"
+
+
 def test_active_preference_switch_writes_global_scope() -> None:
     coordinator = _coordinator(mode_name="global")
     description = next(
@@ -304,6 +380,29 @@ def test_active_preference_switch_writes_global_scope() -> None:
         map_index=1,
         area_id=0,
         changes={"edge_mowing_auto": False},
+        execute=True,
+        confirm_write=True,
+    )
+
+
+def test_edgemaster_switch_uses_optional_attachment_field() -> None:
+    coordinator = _coordinator()
+    description = next(
+        item for item in PREFERENCE_SWITCHES if item.key == "edge_cutting_attachment"
+    )
+    entity = object.__new__(DreameLawnMowerPreferenceSwitch)
+    entity.coordinator = coordinator
+    entity._preference_description = description
+
+    assert entity.available is True
+    assert entity.is_on is True
+
+    asyncio.run(entity.async_turn_off())
+
+    coordinator.client.async_plan_app_mowing_preference_update.assert_awaited_once_with(
+        map_index=1,
+        area_id=5,
+        changes={"edge_cutting_attachment": False},
         execute=True,
         confirm_write=True,
     )

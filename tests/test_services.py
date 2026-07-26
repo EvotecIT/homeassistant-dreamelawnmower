@@ -123,6 +123,32 @@ def test_plan_mowing_preference_update_schema_parses_numeric_values() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("mowing_direction_mode", 3, "mowing_direction_mode must be at most 2"),
+        (
+            "mowing_direction_degrees",
+            181,
+            "mowing_direction_degrees must be at most 180",
+        ),
+        ("edge_mowing_walk_mode", 2, "edge_mowing_walk_mode must be at most 1"),
+    ],
+)
+def test_plan_mowing_preference_update_schema_rejects_unknown_modes(
+    field: str,
+    value: int,
+    message: str,
+) -> None:
+    with pytest.raises(vol.Invalid, match=message):
+        PLAN_MOWING_PREFERENCE_UPDATE_SCHEMA(
+            {
+                "map_index": 0,
+                field: value,
+            }
+        )
+
+
 def test_plan_mowing_preference_update_schema_accepts_mode_only_request() -> None:
     parsed = PLAN_MOWING_PREFERENCE_UPDATE_SCHEMA(
         {
@@ -311,13 +337,17 @@ def test_preference_change_request_extracts_supported_fields() -> None:
             "map_index": 0,
             "area_id": 11,
             "mowing_height_cm": 5.0,
+            "mowing_direction_degrees": 35,
             "edge_mowing_auto": False,
+            "edge_cutting_attachment": True,
         }
     )
 
     assert _preference_change_request(call) == {
         "mowing_height_cm": 5.0,
+        "mowing_direction_degrees": 35,
         "edge_mowing_auto": False,
+        "edge_cutting_attachment": True,
     }
 
 

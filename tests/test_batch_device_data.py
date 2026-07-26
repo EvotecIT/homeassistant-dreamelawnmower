@@ -44,6 +44,7 @@ def _settings_text() -> str:
                         "obstacleAvoidanceDistance": 15,
                         "obstacleAvoidanceAi": 7,
                         "edgeMowingSafe": 1,
+                        "edgeCuttingAttachment": 0,
                     },
                     "1": {
                         "version": 10,
@@ -181,6 +182,21 @@ def test_decode_batch_mowing_preferences_decodes_map_settings() -> None:
     assert result["maps"][0]["area_count"] == 2
     assert result["maps"][0]["preferences"][0]["efficient_mode_name"] == "efficient"
     assert result["maps"][0]["preferences"][0]["mowing_height_cm"] == 4.0
+    assert (
+        result["maps"][0]["preferences"][0]["mowing_direction_mode_name"]
+        == "rotation"
+    )
+    assert (
+        result["maps"][0]["preferences"][0]["mowing_direction_method_name"]
+        == "mow_at_angle"
+    )
+    assert result["maps"][0]["preferences"][0]["mowing_direction_degrees"] == 40
+    assert (
+        result["maps"][0]["preferences"][0]["edge_mowing_walk_mode_name"]
+        == "side"
+    )
+    assert result["maps"][0]["preferences"][0]["turning_method_name"] == "efficient"
+    assert result["maps"][0]["preferences"][0]["edge_cutting_attachment"] is False
     assert result["maps"][0]["preferences"][0]["obstacle_avoidance_ai_classes"] == [
         "people",
         "animals",

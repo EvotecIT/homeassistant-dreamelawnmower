@@ -9,10 +9,12 @@ from typing import Any
 from .mowing_preferences import (
     CUTTER_POSITION_NAMES,
     EDGE_MOWING_WALK_MODE_NAMES,
+    MOWING_DIRECTION_METHOD_NAMES,
     MOWING_DIRECTION_MODE_NAMES,
     MOWING_EFFICIENCY_MODE_NAMES,
     MOWING_PREFERENCE_MODE_NAMES,
     OBSTACLE_AI_CLASSES,
+    TURNING_METHOD_NAMES,
 )
 from .schedule import EMPTY_SCHEDULE_VERSION, decode_schedule_payload_text
 
@@ -312,6 +314,10 @@ def _decode_batch_preference_map_entry(
                     MOWING_DIRECTION_MODE_NAMES,
                     _to_int(raw_preference.get("mowingDirectionMode")),
                 ),
+                "mowing_direction_method_name": _label(
+                    MOWING_DIRECTION_METHOD_NAMES,
+                    _to_int(raw_preference.get("mowingDirectionMode")),
+                ),
                 "mowing_direction_degrees": _to_int(
                     raw_preference.get("mowingDirection")
                 ),
@@ -321,6 +327,10 @@ def _decode_batch_preference_map_entry(
                 ),
                 "edge_mowing_walk_mode_name": _label(
                     EDGE_MOWING_WALK_MODE_NAMES,
+                    _to_int(raw_preference.get("edgeMowingWalkMode")),
+                ),
+                "turning_method_name": _label(
+                    TURNING_METHOD_NAMES,
                     _to_int(raw_preference.get("edgeMowingWalkMode")),
                 ),
                 "edge_mowing_obstacle_avoidance": _bool_or_none(

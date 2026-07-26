@@ -20,8 +20,10 @@ from .mowing_preference_control import (
     MOWING_HEIGHT_STEP_CM,
     PREFERENCE_MODE_CUSTOM,
     PREFERENCE_MODE_GLOBAL,
+    async_update_selected_active_preference,
     async_update_selected_mowing_preference,
     mowing_height_limits,
+    selected_active_preference_attributes,
     selected_map_global_preference_attributes,
     selected_map_mowing_height,
     selected_map_preference_mode,
@@ -42,6 +44,7 @@ async def async_setup_entry(
             DreameLawnMowerVoiceVolumeNumber(coordinator),
             DreameLawnMowerSelectedMapMowingHeightNumber(coordinator),
             DreameLawnMowerSelectedZoneMowingHeightNumber(coordinator),
+            DreameLawnMowerSelectedMowingDirectionNumber(coordinator),
         ]
     )
 
@@ -236,6 +239,67 @@ class DreameLawnMowerSelectedZoneMowingHeightNumber(
         await async_update_selected_mowing_preference(
             self.coordinator,
             changes={"mowing_height_cm": self._validate_height(value)},
+        )
+
+
+class DreameLawnMowerSelectedMowingDirectionNumber(
+    DreameLawnMowerEntity,
+    NumberEntity,
+):
+    """Control the mowing direction for the active preference scope."""
+
+    _attr_name = "Selected Mowing Direction"
+    _attr_icon = "mdi:angle-acute"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_native_min_value = 0
+    _attr_native_max_value = 180
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = "°"
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = (
+            f"{self._descriptor.unique_id}_selected_mowing_direction_degrees"
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return whether the active preference includes a direction."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the active mowing direction in degrees."""
+        value = selected_active_preference_attributes(self.coordinator).get(
+            "mowing_direction_degrees"
+        )
+        return float(value) if isinstance(value, int | float) else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Describe which map preference record this control edits."""
+        attributes = selected_active_preference_attributes(self.coordinator)
+        return {
+            key: attributes[key]
+            for key in (
+                "preference_scope",
+                "selected_map_index",
+                "selected_map_label",
+                "selected_zone_id",
+                "selected_zone_label",
+                "mowing_direction_mode",
+                "mowing_direction_mode_name",
+                "mowing_direction_method_name",
+            )
+            if key in attributes
+        }
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Persist the active mowing direction through the guarded write path."""
+        await async_update_selected_active_preference(
+            self.coordinator,
+            changes={"mowing_direction_degrees": round(value)},
         )
 
 

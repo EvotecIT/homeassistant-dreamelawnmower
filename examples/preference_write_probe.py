@@ -50,7 +50,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mowing-direction-mode",
         type=int,
-        help="Direction mode integer, typically 0 none, 1 rotation, 2 checkerboard.",
+        help="Direction mode integer: 0 none, 1 mow at angle, 2 checkerboard.",
     )
     parser.add_argument(
         "--mowing-direction-degrees",
@@ -66,7 +66,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--edge-mowing-walk-mode",
         type=int,
-        help="Edge walk mode integer, typically 0 line or 1 side.",
+        help="Turning method integer: 0 lawn care or 1 efficient.",
     )
     parser.add_argument(
         "--edge-mowing-obstacle-avoidance",
@@ -117,6 +117,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Enable or disable safe edge mowing.",
     )
     parser.add_argument(
+        "--edge-cutting-attachment",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable or disable EdgeMaster.",
+    )
+    parser.add_argument(
         "--device-index",
         type=int,
         default=0,
@@ -157,6 +163,7 @@ def _changes_from_args(args: argparse.Namespace) -> dict[str, object]:
         "obstacle_avoidance_distance_cm": args.obstacle_avoidance_distance_cm,
         "obstacle_avoidance_ai_classes": args.obstacle_ai_classes,
         "edge_mowing_safe": args.edge_mowing_safe,
+        "edge_cutting_attachment": args.edge_cutting_attachment,
     }
     result = {
         key: value
