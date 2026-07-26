@@ -9,6 +9,7 @@ from custom_components.dreame_lawn_mower.performance import (
 from custom_components.dreame_lawn_mower.reporting import (
     build_coordinator_diagnostics,
     build_entity_diagnostics,
+    build_maintenance_point_diagnostics,
     build_report_context,
 )
 
@@ -107,6 +108,16 @@ def test_coordinator_diagnostics_sanitize_last_failure() -> None:
         "last_exception": "refresh failed token=**REDACTED**",
         "update_interval_seconds": 30.0,
         "performance": None,
+        "maintenance_points": {
+            "source": "coordinator_cache",
+            "current_map_index": None,
+            "selected_point_id": None,
+            "control_ready": False,
+            "app_points_without_vector_ids": False,
+            "app_maps": [],
+            "vector_maps": [],
+        },
+        "last_maintenance_point_probe": None,
     }
 
 
@@ -134,6 +145,172 @@ def test_coordinator_diagnostics_include_privacy_safe_performance_history() -> N
         "outcomes": {"completed": 1},
     }
     assert diagnostics["performance"]["samples"][0]["phases_ms"] == {}
+
+
+def test_coordinator_diagnostics_keep_current_and_captured_probe_evidence() -> None:
+    captured = {
+        "source": "map_probe",
+        "captured_at": "2026-07-26T14:30:00+00:00",
+        "current_map_index": 1,
+        "selected_point_id": None,
+        "control_ready": False,
+        "app_points_without_vector_ids": True,
+        "app_maps": [],
+        "vector_maps": [],
+    }
+
+    diagnostics = build_coordinator_diagnostics(
+        SimpleNamespace(
+            last_update_success=True,
+            last_exception=None,
+            update_interval=timedelta(seconds=30),
+            last_map_probe_result=captured,
+        )
+    )
+
+    assert diagnostics["maintenance_points"]["source"] == "coordinator_cache"
+    assert diagnostics["last_maintenance_point_probe"] == captured
+    assert diagnostics["last_maintenance_point_probe"] is not captured
+
+
+def test_maintenance_point_diagnostics_explain_app_vector_mismatch_privately() -> None:
+    diagnostics = build_maintenance_point_diagnostics(
+        SimpleNamespace(
+            selected_map_index=0,
+            selected_maintenance_point_id=None,
+            app_maps={
+                "current_map_index": 0,
+                "maps": [
+                    {
+                        "idx": 0,
+                        "current": True,
+                        "available": True,
+                        "payload_keys": ["map", "point"],
+                        "summary": {
+                            "point_count": 1,
+                            "point_entry_shapes": [
+                                {
+                                    "kind": "array",
+                                    "count": 1,
+                                    "length": 2,
+                                    "item_types": ["number"],
+                                }
+                            ],
+                        },
+                        "payload": {"point": [[5910, 12400]]},
+                    }
+                ],
+            },
+            vector_map_details={
+                "maps": [
+                    {
+                        "map_index": 0,
+                        "clean_point_count": 0,
+                        "clean_point_ids": [],
+                    }
+                ]
+            },
+        )
+    )
+
+    assert diagnostics == {
+        "source": "coordinator_cache",
+        "current_map_index": 0,
+        "selected_point_id": None,
+        "control_ready": False,
+        "app_points_without_vector_ids": True,
+        "app_maps": [
+            {
+                "map_index": 0,
+                "current": True,
+                "available": True,
+                "point_payload_present": True,
+                "point_count": 1,
+                "point_entry_shapes": [
+                    {
+                        "kind": "array",
+                        "count": 1,
+                        "length": 2,
+                        "item_types": ["number"],
+                    }
+                ],
+            }
+        ],
+        "vector_maps": [
+            {
+                "map_index": 0,
+                "point_count": 0,
+                "point_ids": [],
+            }
+        ],
+    }
+    assert "5910" not in repr(diagnostics)
+    assert "12400" not in repr(diagnostics)
+
+
+def test_map_probe_uses_probed_current_map_over_stale_coordinator_selection() -> None:
+    diagnostics = build_maintenance_point_diagnostics(
+        SimpleNamespace(
+            selected_map_index=0,
+            selected_maintenance_point_id=None,
+            app_maps=None,
+            vector_map_details=None,
+        ),
+        map_probe_payload={
+            "app_maps": {
+                "current_map_index": 1,
+                "maps": [
+                    {
+                        "idx": 0,
+                        "current": False,
+                        "available": True,
+                        "payload_keys": ["point"],
+                        "summary": {"point_count": 0},
+                    },
+                    {
+                        "idx": 1,
+                        "current": True,
+                        "available": True,
+                        "payload_keys": ["point"],
+                        "summary": {
+                            "point_count": 1,
+                            "point_entry_shapes": [
+                                {
+                                    "kind": "array",
+                                    "count": 1,
+                                    "length": 2,
+                                    "item_types": ["number"],
+                                }
+                            ],
+                        },
+                    },
+                ],
+            },
+            "batch_vector_map": {
+                "details": {
+                    "maps": [
+                        {
+                            "map_index": 0,
+                            "clean_point_count": 1,
+                            "clean_point_ids": [301],
+                        },
+                        {
+                            "map_index": 1,
+                            "clean_point_count": 0,
+                            "clean_point_ids": [],
+                        },
+                    ]
+                }
+            },
+        },
+        captured_at="2026-07-26T14:30:00+00:00",
+    )
+
+    assert diagnostics["source"] == "map_probe"
+    assert diagnostics["captured_at"] == "2026-07-26T14:30:00+00:00"
+    assert diagnostics["current_map_index"] == 1
+    assert diagnostics["control_ready"] is False
+    assert diagnostics["app_points_without_vector_ids"] is True
 
 
 def test_entity_diagnostics_redact_runtime_map_coordinates() -> None:

@@ -123,6 +123,7 @@ class DreameLawnMowerCoordinator(
         self.diagnostic_events = DreameLawnMowerDiagnosticEventStore()
         self.performance = DreameLawnMowerPerformanceTracker()
         self.last_batch_device_data_probe_result: dict[str, Any] | None = None
+        self.last_map_probe_result: dict[str, Any] | None = None
         self.last_preference_probe_result: dict[str, Any] | None = None
         self.last_preference_write_result: dict[str, Any] | None = None
         self.last_schedule_probe_result: dict[str, Any] | None = None

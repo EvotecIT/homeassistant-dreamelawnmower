@@ -196,6 +196,14 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
         "spot_count": 1,
         "spot_boundary_point_count": 0,
         "point_count": 1,
+        "point_entry_shapes": [
+            {
+                "kind": "array",
+                "count": 1,
+                "length": 2,
+                "item_types": ["number"],
+            }
+        ],
         "semantic_count": 2,
         "semantic_boundary_point_count": 3,
         "semantic_key_counts": {"data": 1, "label": 1, "type": 2},
@@ -383,6 +391,14 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
                 "boundary_point_count": 4,
                 "spot_count": 1,
                 "point_count": 1,
+                "point_entry_shapes": [
+                    {
+                        "kind": "array",
+                        "count": 1,
+                        "length": 2,
+                        "item_types": ["number"],
+                    }
+                ],
                 "trajectory_count": 1,
                 "trajectory_point_count": 3,
                 "trajectory_length_m": 1.41,

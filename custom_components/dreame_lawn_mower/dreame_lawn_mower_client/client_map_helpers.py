@@ -472,6 +472,7 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
         "spot_count": len(spots),
         "spot_boundary_point_count": spot_boundary_point_count,
         "point_count": len(point_entries),
+        "point_entry_shapes": _app_map_point_entry_shapes(point_entries),
         "semantic_count": len(semantic),
         "semantic_boundary_point_count": semantic_boundary_point_count,
         "semantic_key_counts": dict(sorted(semantic_key_counts.items())),
@@ -480,6 +481,40 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
         "trajectory_length_m": round(trajectory_length_m, 2),
         "cut_relation_count": len(cut_relation),
     }
+
+
+def _app_map_point_entry_shapes(entries: Sequence[Any]) -> list[dict[str, Any]]:
+    """Describe maintenance-point records without exposing coordinates."""
+    grouped: dict[tuple[Any, ...], int] = {}
+    for entry in entries:
+        if isinstance(entry, Mapping):
+            shape: tuple[Any, ...] = (
+                "object",
+                tuple(sorted(str(key) for key in entry)),
+            )
+        elif isinstance(entry, Sequence) and not isinstance(
+            entry,
+            str | bytes | bytearray,
+        ):
+            shape = (
+                "array",
+                len(entry),
+                tuple(sorted({_operation_value_type(item) for item in entry})),
+            )
+        else:
+            shape = (_operation_value_type(entry),)
+        grouped[shape] = grouped.get(shape, 0) + 1
+
+    result: list[dict[str, Any]] = []
+    for shape, count in sorted(grouped.items(), key=lambda item: repr(item[0])):
+        entry: dict[str, Any] = {"kind": shape[0], "count": count}
+        if shape[0] == "object":
+            entry["keys"] = list(shape[1])
+        elif shape[0] == "array":
+            entry["length"] = shape[1]
+            entry["item_types"] = list(shape[2])
+        result.append(entry)
+    return result
 
 
 def _select_app_map_payload(app_maps: Mapping[str, Any]) -> Mapping[str, Any] | None:
@@ -578,6 +613,7 @@ def _app_map_entry_view_metadata(entry: Mapping[str, Any]) -> dict[str, Any]:
         "boundary_point_count": summary.get("boundary_point_count"),
         "spot_count": summary.get("spot_count"),
         "point_count": summary.get("point_count"),
+        "point_entry_shapes": summary.get("point_entry_shapes"),
         "trajectory_count": summary.get("trajectory_count"),
         "trajectory_point_count": summary.get("trajectory_point_count"),
         "trajectory_length_m": summary.get("trajectory_length_m"),

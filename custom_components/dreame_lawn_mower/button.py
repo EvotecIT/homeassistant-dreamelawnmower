@@ -20,6 +20,7 @@ from .coordinator import DreameLawnMowerCoordinator
 from .debug import build_debug_payload, sanitize_debug_data
 from .dreame_lawn_mower_client.maintenance import MAINTENANCE_ITEMS, MaintenanceItem
 from .entity import DreameLawnMowerEntity
+from .reporting import build_maintenance_point_diagnostics
 from .task_status_probe import TASK_STATUS_PROBE_KEYS, task_status_probe_payload
 
 _LOGGER = logging.getLogger(__name__)
@@ -257,6 +258,11 @@ class DreameLawnMowerCaptureMapProbeButton(
         """Probe known read-only map sources and log the structured result."""
         await self.coordinator.async_request_refresh()
         payload = await self.coordinator.client.async_probe_map_sources()
+        self.coordinator.last_map_probe_result = build_maintenance_point_diagnostics(
+            self.coordinator,
+            map_probe_payload=payload,
+            captured_at=datetime.now(UTC).isoformat(),
+        )
         _LOGGER.info(
             "Captured Dreame lawn mower map probe for %s: %s",
             self.coordinator.client.descriptor.title,
@@ -265,8 +271,9 @@ class DreameLawnMowerCaptureMapProbeButton(
         persistent_notification.async_create(
             self.coordinator.hass,
             (
-                "Captured a Dreame lawn mower map probe. Enable info logging "
-                "for this integration to view the JSON payload."
+                "Captured a Dreame lawn mower map probe. Privacy-safe "
+                "maintenance-point evidence is now included in downloaded "
+                "diagnostics; enable info logging for the full JSON payload."
             ),
             title="Dreame Lawn Mower Map Probe",
             notification_id=(
