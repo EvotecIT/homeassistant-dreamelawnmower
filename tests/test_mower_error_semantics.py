@@ -176,6 +176,89 @@ def test_mower_operating_conditions_are_not_hard_errors(
     assert snapshot.realtime_error_code == code
 
 
+@pytest.mark.parametrize(
+    ("status_code", "realtime_code", "expected_source"),
+    [
+        (27, None, "status"),
+        (27, 27, "status"),
+        (None, 27, "realtime_property_2.2"),
+    ],
+)
+def test_human_detection_is_a_notice_while_q2501a_keeps_mowing(
+    status_code: int | None,
+    realtime_code: int | None,
+    expected_source: str,
+) -> None:
+    snapshot = _snapshot(
+        status_code,
+        "infrared_shielding",
+        realtime_error_code=realtime_code,
+        state="MOWING",
+        model="dreame.mower.q2501a",
+    )
+
+    assert snapshot.state == "mowing"
+    assert snapshot.activity == "mowing"
+    assert snapshot.error_code is None
+    assert snapshot.error_name is None
+    assert snapshot.error_display is None
+    assert snapshot.error_source is None
+    assert snapshot.status_notice_code == 27
+    assert snapshot.status_notice_name == "human_detected"
+    assert snapshot.status_notice_display == "Human detected"
+    assert snapshot.status_notice_tier == "attention"
+    assert snapshot.status_notice_source == expected_source
+    assert snapshot.raw_error_code == status_code
+    assert snapshot.realtime_error_code == realtime_code
+
+
+@pytest.mark.parametrize("state", ["PAUSED", "ERROR"])
+def test_human_detection_remains_a_fault_when_q2501a_is_halted(
+    state: str,
+) -> None:
+    snapshot = _snapshot(
+        27,
+        "infrared_shielding",
+        realtime_error_code=27,
+        state=state,
+        model="dreame.mower.q2501a",
+    )
+
+    assert snapshot.activity == "error"
+    assert snapshot.error_code == 27
+    assert snapshot.error_name == "human_detected"
+    assert snapshot.error_display == "Human detected"
+    assert snapshot.error_source == "status"
+    assert snapshot.status_notice_code is None
+    assert snapshot.raw_error_code == 27
+    assert snapshot.realtime_error_code == 27
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "dreame.mower.p2255",
+        "dreame.mower.x1234",
+    ],
+)
+def test_human_detection_while_mowing_remains_a_fault_on_other_models(
+    model: str,
+) -> None:
+    snapshot = _snapshot(
+        27,
+        "infrared_shielding",
+        realtime_error_code=27,
+        state="MOWING",
+        model=model,
+    )
+
+    assert snapshot.activity == "error"
+    assert snapshot.error_code == 27
+    assert snapshot.error_name == "human_detected"
+    assert snapshot.error_display == "Human detected"
+    assert snapshot.status_notice_code is None
+
+
 def test_mower_native_name_replaces_vacuum_name() -> None:
     snapshot = _snapshot(1, "drop")
 

@@ -12,7 +12,6 @@ from .device_code_semantics import (
     mower_device_code_tier,
     mower_fault_code,
     mower_status_notice_code,
-    mower_status_notice_name,
 )
 from .video_provisioning_status import classify_xp2p_provisioning_issue
 
@@ -22,6 +21,9 @@ MIN_REMOTE_CONTROL_BATTERY_LEVEL = 20
 REMOTE_CONTROL_STATES = {"remote_control"}
 REALTIME_STATE_PROPERTY_KEY = "2.1"
 REALTIME_ERROR_PROPERTY_KEY = "2.2"
+OPERATIONAL_HUMAN_DETECTION_NOTICE_MODELS = frozenset(
+    {"dreame.mower.q2501a", "q2501a"}
+)
 
 MODEL_NAME_MAP = {
     "dreame.mower.p2255": "A1",
@@ -145,9 +147,55 @@ def _active_error_code_from_raw(
     value: Any,
     *,
     model: str | None = None,
+    state: str | None = None,
 ) -> int | None:
     """Return a numeric active error code from raw app/status values."""
-    return mower_fault_code(value, model=model)
+    code = mower_fault_code(value, model=model)
+    if _is_operational_human_detection_notice(
+        code,
+        model=model,
+        state=state,
+    ):
+        # Newer camera-equipped mowers retain HUMAN_DETECTED while actively
+        # avoiding a person and continuing the mission. The same code remains
+        # a hard fault when the mower is no longer mowing.
+        return None
+    return code
+
+
+def _is_operational_human_detection_notice(
+    code: int | None,
+    *,
+    model: str | None,
+    state: str | None,
+) -> bool:
+    """Return whether q2501a is mowing through a human-detection notice."""
+    return bool(
+        code == 27
+        and state == "mowing"
+        and str(model or "").strip().casefold()
+        in OPERATIONAL_HUMAN_DETECTION_NOTICE_MODELS
+    )
+
+
+def _status_notice_code_from_raw(
+    value: Any,
+    *,
+    model: str | None = None,
+    state: str | None = None,
+) -> int | None:
+    """Return a non-fault device code, including operational human detection."""
+    code = mower_status_notice_code(value, model=model)
+    if code is not None:
+        return code
+    raw_code = _error_code_from_raw(value)
+    if _is_operational_human_detection_notice(
+        raw_code,
+        model=model,
+        state=state,
+    ):
+        return raw_code
+    return None
 
 
 def _realtime_error_code_from_device(device: Any) -> int | None:
@@ -174,6 +222,7 @@ def _realtime_property_last_seen(device: Any, key: str) -> float | None:
 def _fault_recovery_confirmed(
     previous_snapshot: DreameLawnMowerSnapshot | None,
     *,
+    current_state: str,
     current_state_is_operational: bool,
     error_code: int | None,
     realtime_error_code: int | None,
@@ -187,6 +236,7 @@ def _fault_recovery_confirmed(
     realtime_fault_code = _active_error_code_from_raw(
         realtime_error_code,
         model=model,
+        state=current_state,
     )
     error_last_seen = _realtime_property_last_seen(
         device,
@@ -1024,11 +1074,13 @@ def snapshot_from_device(
     raw_fault_code = _active_error_code_from_raw(
         raw_error_code,
         model=descriptor.model,
+        state=state,
     )
     error_code = raw_fault_code
-    status_notice_code = mower_status_notice_code(
+    status_notice_code = _status_notice_code_from_raw(
         raw_error_code,
         model=descriptor.model,
+        state=state,
     )
     status_notice_source = "status" if status_notice_code is not None else None
     status_has_error = bool(getattr(device.status, "has_error", False))
@@ -1079,6 +1131,7 @@ def snapshot_from_device(
         realtime_fault_code = _active_error_code_from_raw(
             realtime_error_code,
             model=descriptor.model,
+            state=state,
         )
         if realtime_fault_code is not None:
             error_code = realtime_fault_code
@@ -1090,14 +1143,17 @@ def snapshot_from_device(
             has_error = True
             error_source = f"realtime_property_{REALTIME_ERROR_PROPERTY_KEY}"
         elif status_notice_code is None:
-            status_notice_code = mower_status_notice_code(
+            status_notice_code = _status_notice_code_from_raw(
                 realtime_error_code,
                 model=descriptor.model,
+                state=state,
             )
             if status_notice_code is not None:
                 status_notice_source = (
                     f"realtime_property_{REALTIME_ERROR_PROPERTY_KEY}"
                 )
+                error_name = None
+                error_text = None
     capability_list = status_attributes.get("capabilities") or getattr(
         getattr(device, "capability", None),
         "list",
@@ -1147,6 +1203,7 @@ def snapshot_from_device(
     error_suppression_active = False
     if has_error and _fault_recovery_confirmed(
         previous_snapshot,
+        current_state=state,
         current_state_is_operational=(
             state in mowing_states
             or state in returning_states
@@ -1166,6 +1223,7 @@ def snapshot_from_device(
             _active_error_code_from_raw(
                 realtime_error_code,
                 model=descriptor.model,
+                state=state,
             )
             == suppressed_error_code
         ):
@@ -1270,26 +1328,34 @@ def snapshot_from_device(
         ),
         error_source=error_source,
         status_notice_code=status_notice_code,
-        status_notice_name=mower_status_notice_name(
+        status_notice_name=mower_device_code_name(
             status_notice_code,
             model=descriptor.model,
         ),
         status_notice_display=_friendly_error_name(
-            mower_status_notice_name(
+            mower_device_code_name(
                 status_notice_code,
                 model=descriptor.model,
             )
         ),
         status_notice_tier=(
-            tier.value
-            if (
-                tier := mower_device_code_tier(
-                    status_notice_code,
-                    model=descriptor.model,
-                )
+            "attention"
+            if _is_operational_human_detection_notice(
+                status_notice_code,
+                model=descriptor.model,
+                state=state,
             )
-            is not None
-            else ("unknown" if status_notice_code is not None else None)
+            else (
+                tier.value
+                if (
+                    tier := mower_device_code_tier(
+                        status_notice_code,
+                        model=descriptor.model,
+                    )
+                )
+                is not None
+                else ("unknown" if status_notice_code is not None else None)
+            )
         ),
         status_notice_source=status_notice_source,
         raw_error_code=raw_error_code,
