@@ -166,7 +166,7 @@ def test_downloaded_diagnostics_combines_report_entities_and_recent_events(
         diagnostics_module.async_get_config_entry_diagnostics(hass, entry)
     )
 
-    assert payload["diagnostic_schema_version"] == 7
+    assert payload["diagnostic_schema_version"] == 8
     assert payload["report_context"]["integration_version"] == "0.3.0"
     assert payload["report_context"]["home_assistant"]["arch"] == "aarch64"
     assert "user" not in payload["report_context"]["home_assistant"]

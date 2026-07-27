@@ -23,6 +23,11 @@ from .deadline import DeadlineExceededError, run_with_deadline
 from .exceptions import (
     DreameLawnMowerError as DreameLawnMowerError,
 )
+from .maintenance_point_records import (
+    app_map_maintenance_point_ids,
+    app_map_point_record_diagnostics,
+    app_map_point_type_codes,
+)
 from .map_visuals import (
     MapRenderStyle,
     line_width,
@@ -473,8 +478,9 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
         "spot_boundary_point_count": spot_boundary_point_count,
         "point_count": len(point_entries),
         "point_entry_shapes": _app_map_point_entry_shapes(point_entries),
-        "maintenance_point_ids": _app_map_maintenance_point_ids(point_entries),
-        "point_type_codes": _app_map_point_type_codes(point_entries),
+        "maintenance_point_ids": app_map_maintenance_point_ids(point_entries),
+        "point_type_codes": app_map_point_type_codes(point_entries),
+        "point_record_validation": app_map_point_record_diagnostics(point_entries),
         "semantic_count": len(semantic),
         "semantic_boundary_point_count": semantic_boundary_point_count,
         "semantic_key_counts": dict(sorted(semantic_key_counts.items())),
@@ -517,68 +523,6 @@ def _app_map_point_entry_shapes(entries: Sequence[Any]) -> list[dict[str, Any]]:
             entry["item_types"] = list(shape[2])
         result.append(entry)
     return result
-
-
-def _app_map_maintenance_point_ids(entries: Sequence[Any]) -> list[int]:
-    """Return ids from the observed A2 maintenance-point record shape."""
-    result: list[int] = []
-    for entry in entries:
-        if not _is_app_map_maintenance_point_record(entry):
-            continue
-        point_id = entry.get("id")
-        if (
-            not isinstance(point_id, int)
-            or isinstance(point_id, bool)
-            or point_id <= 0
-            or point_id in result
-        ):
-            continue
-        result.append(point_id)
-    return result
-
-
-def _app_map_point_type_codes(entries: Sequence[Any]) -> list[int]:
-    """Return numeric vendor type codes from identified point records."""
-    result: list[int] = []
-    for entry in entries:
-        if not _is_app_map_maintenance_point_record(entry):
-            continue
-        point_type = entry.get("type")
-        if (
-            isinstance(point_type, int)
-            and not isinstance(point_type, bool)
-            and point_type not in result
-        ):
-            result.append(point_type)
-    return sorted(result)
-
-
-def _is_app_map_maintenance_point_record(value: object) -> bool:
-    """Recognize only the exact point-record structure observed on an A2 3000."""
-    if not isinstance(value, Mapping) or set(value) != {
-        "id",
-        "param",
-        "point",
-        "time",
-        "type",
-    }:
-        return False
-    point_type = value.get("type")
-    if not isinstance(point_type, int) or isinstance(point_type, bool):
-        return False
-    coordinates = value.get("point")
-    if (
-        not isinstance(coordinates, Sequence)
-        or isinstance(coordinates, str | bytes | bytearray)
-        or len(coordinates) != 2
-    ):
-        return False
-    return all(
-        isinstance(coordinate, int | float)
-        and not isinstance(coordinate, bool)
-        and math.isfinite(float(coordinate))
-        for coordinate in coordinates
-    )
 
 
 def _select_app_map_payload(app_maps: Mapping[str, Any]) -> Mapping[str, Any] | None:
@@ -680,6 +624,7 @@ def _app_map_entry_view_metadata(entry: Mapping[str, Any]) -> dict[str, Any]:
         "point_entry_shapes": summary.get("point_entry_shapes"),
         "maintenance_point_ids": summary.get("maintenance_point_ids"),
         "point_type_codes": summary.get("point_type_codes"),
+        "point_record_validation": summary.get("point_record_validation"),
         "trajectory_count": summary.get("trajectory_count"),
         "trajectory_point_count": summary.get("trajectory_point_count"),
         "trajectory_length_m": summary.get("trajectory_length_m"),

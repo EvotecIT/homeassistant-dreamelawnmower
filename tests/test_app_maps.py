@@ -241,6 +241,39 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
         ],
         "maintenance_point_ids": [301, 302],
         "point_type_codes": [1, 2],
+        "point_record_validation": {
+            "total_count": 5,
+            "exact_shape_count": 3,
+            "parser_accepted_count": 2,
+            "identified_count": 2,
+            "rejection_reason_counts": [
+                {"reason": "not_object", "count": 1},
+                {"reason": "type_not_integer", "count": 1},
+                {"reason": "unexpected_keys", "count": 1},
+            ],
+            "value_type_shapes": [
+                {
+                    "count": 2,
+                    "id_type": "number",
+                    "param_type": "number",
+                    "point_type": "array",
+                    "time_type": "number",
+                    "type_type": "number",
+                    "point_length": 2,
+                    "point_item_types": ["number"],
+                },
+                {
+                    "count": 1,
+                    "id_type": "number",
+                    "param_type": "number",
+                    "point_type": "array",
+                    "time_type": "number",
+                    "type_type": "string",
+                    "point_length": 2,
+                    "point_item_types": ["number"],
+                },
+            ],
+        },
         "semantic_count": 2,
         "semantic_boundary_point_count": 3,
         "semantic_key_counts": {"data": 1, "label": 1, "type": 2},
@@ -261,6 +294,72 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
     expected_sizes = [min(40, payload_size - start) for start in expected_starts]
     assert [call["d"]["start"] for call in mapd_calls] == expected_starts
     assert [call["d"]["size"] for call in mapd_calls] == expected_sizes
+
+
+def test_app_maps_explain_rejected_point_values_without_exposing_them() -> None:
+    client = _client()
+    cloud = _FakeAppMapCloud(
+        {
+            "point": [
+                {
+                    "id": 401,
+                    "param": {},
+                    "point": {"x": 5910, "y": 12400},
+                    "time": "created",
+                    "type": "maintenance",
+                },
+                {
+                    "id": "402",
+                    "param": 0,
+                    "point": ["7100", "8300"],
+                    "time": 0,
+                    "type": 1,
+                },
+            ]
+        }
+    )
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_get_app_maps(include_payload=False)
+
+    validation = result["maps"][0]["summary"]["point_record_validation"]
+    assert validation == {
+        "total_count": 2,
+        "exact_shape_count": 2,
+        "parser_accepted_count": 0,
+        "identified_count": 0,
+        "rejection_reason_counts": [
+            {"reason": "id_not_positive_integer", "count": 1},
+            {"reason": "point_coordinates_not_finite_numbers", "count": 1},
+            {"reason": "point_not_coordinate_pair", "count": 1},
+            {"reason": "type_not_integer", "count": 1},
+        ],
+        "value_type_shapes": [
+            {
+                "count": 1,
+                "id_type": "number",
+                "param_type": "object",
+                "point_type": "object",
+                "time_type": "string",
+                "type_type": "string",
+            },
+            {
+                "count": 1,
+                "id_type": "string",
+                "param_type": "number",
+                "point_type": "array",
+                "time_type": "number",
+                "type_type": "number",
+                "point_length": 2,
+                "point_item_types": ["string"],
+            },
+        ],
+    }
+    assert "401" not in repr(validation)
+    assert "402" not in repr(validation)
+    assert "5910" not in repr(validation)
+    assert "12400" not in repr(validation)
+    assert "maintenance" not in repr(validation)
 
 
 def test_app_maps_reject_hash_mismatched_payload() -> None:
@@ -402,12 +501,12 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
         "available_map_count": 1,
         "created_map_count": 1,
         "object_count": 1,
-            "object_error": None,
-            "objects": [
-                {
-                    "extension": "bin",
-                    "url_present": False,
-                }
+        "object_error": None,
+        "objects": [
+            {
+                "extension": "bin",
+                "url_present": False,
+            }
         ],
         "maps": [
             {
@@ -436,6 +535,14 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
                         "item_types": ["number"],
                     }
                 ],
+                "point_record_validation": {
+                    "total_count": 1,
+                    "exact_shape_count": 0,
+                    "parser_accepted_count": 0,
+                    "identified_count": 0,
+                    "rejection_reason_counts": [{"reason": "not_object", "count": 1}],
+                    "value_type_shapes": [],
+                },
                 "trajectory_count": 1,
                 "trajectory_point_count": 3,
                 "trajectory_length_m": 1.41,
