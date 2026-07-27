@@ -362,6 +362,80 @@ def test_app_maps_explain_rejected_point_values_without_exposing_them() -> None:
     assert "maintenance" not in repr(validation)
 
 
+def test_app_maps_accept_three_value_maintenance_point_vectors() -> None:
+    client = _client()
+    cloud = _FakeAppMapCloud(
+        {
+            "point": [
+                {
+                    "id": 501,
+                    "param": {},
+                    "point": [5910, 12400, 270],
+                    "time": 1,
+                    "type": 9,
+                },
+                {
+                    "id": 502,
+                    "param": {},
+                    "point": [7100, 8300, 90],
+                    "time": 2,
+                    "type": 9,
+                },
+                {
+                    "id": 503,
+                    "param": {},
+                    "point": [1, 2, 3, 4],
+                    "time": 3,
+                    "type": 9,
+                },
+            ]
+        }
+    )
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_get_app_maps(include_payload=False)
+
+    summary = result["maps"][0]["summary"]
+    assert summary["maintenance_point_ids"] == [501, 502]
+    assert summary["point_type_codes"] == [9]
+    assert summary["point_record_validation"] == {
+        "total_count": 3,
+        "exact_shape_count": 3,
+        "parser_accepted_count": 2,
+        "identified_count": 2,
+        "rejection_reason_counts": [
+            {"reason": "point_not_coordinate_pair", "count": 1},
+        ],
+        "value_type_shapes": [
+            {
+                "count": 2,
+                "id_type": "number",
+                "param_type": "object",
+                "point_type": "array",
+                "time_type": "number",
+                "type_type": "number",
+                "point_length": 3,
+                "point_item_types": ["number"],
+            },
+            {
+                "count": 1,
+                "id_type": "number",
+                "param_type": "object",
+                "point_type": "array",
+                "time_type": "number",
+                "type_type": "number",
+                "point_length": 4,
+                "point_item_types": ["number"],
+            },
+        ],
+    }
+    validation = repr(summary["point_record_validation"])
+    assert "5910" not in validation
+    assert "12400" not in validation
+    assert "7100" not in validation
+    assert "8300" not in validation
+
+
 def test_app_maps_reject_hash_mismatched_payload() -> None:
     client = _client()
     payload = {"map": [{"area": 1, "data": [[1, 2], [3, 4], [5, 6]]}]}
