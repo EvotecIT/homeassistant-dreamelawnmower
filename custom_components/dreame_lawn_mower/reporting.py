@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
 from .debug import sanitize_debug_data, sanitize_diagnostic_text
+from .manual_control import maintenance_point_movement_block_reason
 
 _SYSTEM_INFO_KEYS = (
     "installation_type",
@@ -165,14 +166,30 @@ def build_maintenance_point_diagnostics(
     )
     mismatch = bool(current_app_point_count) and not current_vector_point_ids
     control_point_ids = current_vector_point_ids or current_app_point_ids
+    selected_point_id = _positive_int(
+        getattr(coordinator, "selected_maintenance_point_id", None)
+    )
+    selected_point_ready = (
+        bool(control_point_ids)
+        and (selected_point_id is None or selected_point_id in control_point_ids)
+    )
+    button_block_reason = (
+        None
+        if selected_point_ready
+        else "No maintenance point is configured on the selected mower map."
+    )
+    if button_block_reason is None:
+        button_block_reason = maintenance_point_movement_block_reason(
+            getattr(coordinator, "data", None)
+        )
 
     result = {
         "source": source,
         "current_map_index": current_map_index,
-        "selected_point_id": _positive_int(
-            getattr(coordinator, "selected_maintenance_point_id", None)
-        ),
+        "selected_point_id": selected_point_id,
         "control_ready": bool(control_point_ids),
+        "button_ready": button_block_reason is None,
+        "button_block_reason": button_block_reason,
         "control_point_source": (
             "vector_map"
             if current_vector_point_ids

@@ -20,7 +20,7 @@ from .coordinator import DreameLawnMowerCoordinator
 from .debug import build_debug_payload, sanitize_debug_data
 from .dreame_lawn_mower_client.maintenance import MAINTENANCE_ITEMS, MaintenanceItem
 from .entity import DreameLawnMowerEntity
-from .manual_control import remote_control_block_reason
+from .manual_control import maintenance_point_movement_block_reason
 from .reporting import build_maintenance_point_diagnostics
 from .task_status_probe import TASK_STATUS_PROBE_KEYS, task_status_probe_payload
 
@@ -107,17 +107,22 @@ class DreameLawnMowerGoToMaintenancePointButton(
 
     def _movement_block_reason(self) -> str | None:
         """Return why maintenance-point movement is unsafe right now."""
-        snapshot = self.coordinator.data
-        block_reason = remote_control_block_reason(snapshot)
-        if block_reason is not None:
-            return block_reason
-        activity = str(getattr(snapshot, "activity", "") or "").casefold()
-        if activity not in {"idle", "docked"}:
-            return (
-                "The mower must be idle or docked before going to a "
+        return maintenance_point_movement_block_reason(self.coordinator.data)
+
+    async def _async_refresh_movement_state(self) -> None:
+        """Require a successful fresh snapshot before physical movement."""
+        try:
+            await self.coordinator.async_refresh()
+        except Exception as err:
+            raise ValueError(
+                "Fresh mower state is required before moving to a "
+                "maintenance point."
+            ) from err
+        if not self.coordinator.last_update_success:
+            raise ValueError(
+                "Fresh mower state is required before moving to a "
                 "maintenance point."
             )
-        return None
 
     @property
     def available(self) -> bool:
@@ -128,7 +133,7 @@ class DreameLawnMowerGoToMaintenancePointButton(
 
     async def async_press(self) -> None:
         """Drive to the selected mower-configured maintenance point."""
-        await self.coordinator.async_request_refresh()
+        await self._async_refresh_movement_state()
         block_reason = self._movement_block_reason()
         if block_reason is not None:
             raise ValueError(block_reason)
@@ -155,7 +160,7 @@ class DreameLawnMowerGoToMaintenancePointButton(
             raise ValueError(
                 "No maintenance point is configured on the selected mower map."
             )
-        await self.coordinator.async_request_refresh()
+        await self._async_refresh_movement_state()
         block_reason = self._movement_block_reason()
         if block_reason is not None:
             raise ValueError(block_reason)

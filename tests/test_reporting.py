@@ -113,6 +113,10 @@ def test_coordinator_diagnostics_sanitize_last_failure() -> None:
             "current_map_index": None,
             "selected_point_id": None,
             "control_ready": False,
+            "button_ready": False,
+            "button_block_reason": (
+                "No maintenance point is configured on the selected mower map."
+            ),
             "control_point_source": None,
             "app_points_without_vector_ids": False,
             "app_maps": [],
@@ -179,6 +183,18 @@ def test_maintenance_point_diagnostics_explain_app_vector_mismatch_privately() -
         SimpleNamespace(
             selected_map_index=0,
             selected_maintenance_point_id=None,
+            data=SimpleNamespace(
+                activity="paused",
+                available=True,
+                battery_level=94,
+                docked=False,
+                mowing=False,
+                mowing_session_active=False,
+                raw_attributes={},
+                returning=False,
+                state="paused",
+                task_status="idle",
+            ),
             app_maps={
                 "current_map_index": 0,
                 "maps": [
@@ -272,6 +288,8 @@ def test_maintenance_point_diagnostics_explain_app_vector_mismatch_privately() -
         "current_map_index": 0,
         "selected_point_id": None,
         "control_ready": True,
+        "button_ready": True,
+        "button_block_reason": None,
         "control_point_source": "app_map",
         "app_points_without_vector_ids": True,
         "app_maps": [
