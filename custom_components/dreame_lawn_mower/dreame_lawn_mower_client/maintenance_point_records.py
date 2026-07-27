@@ -9,6 +9,7 @@ from typing import Any
 from .client_shared_helpers import _operation_value_type
 
 _REQUIRED_KEYS = frozenset({"id", "param", "point", "time", "type"})
+_SUPPORTED_POINT_VECTOR_LENGTHS = frozenset({2, 3})
 
 
 def app_map_maintenance_point_ids(entries: Sequence[Any]) -> list[int]:
@@ -113,18 +114,14 @@ def app_map_point_record_diagnostics(
 
 
 def is_app_map_maintenance_point_record(value: object) -> bool:
-    """Recognize only the exact point-record structure observed on an A2 3000."""
+    """Recognize exact A2-family point records without interpreting geometry."""
     if not isinstance(value, Mapping) or set(value) != _REQUIRED_KEYS:
         return False
     point_type = value.get("type")
     if not isinstance(point_type, int) or isinstance(point_type, bool):
         return False
     coordinates = value.get("point")
-    if (
-        not isinstance(coordinates, Sequence)
-        or isinstance(coordinates, str | bytes | bytearray)
-        or len(coordinates) != 2
-    ):
+    if not _is_supported_point_vector(coordinates):
         return False
     return all(
         isinstance(coordinate, int | float)
@@ -150,11 +147,7 @@ def _maintenance_point_rejection_reasons(value: object) -> list[str]:
         reasons.append("type_not_integer")
 
     coordinates = value.get("point")
-    if (
-        not isinstance(coordinates, Sequence)
-        or isinstance(coordinates, str | bytes | bytearray)
-        or len(coordinates) != 2
-    ):
+    if not _is_supported_point_vector(coordinates):
         reasons.append("point_not_coordinate_pair")
     elif not all(
         isinstance(coordinate, int | float)
@@ -164,6 +157,15 @@ def _maintenance_point_rejection_reasons(value: object) -> list[str]:
     ):
         reasons.append("point_coordinates_not_finite_numbers")
     return reasons
+
+
+def _is_supported_point_vector(value: object) -> bool:
+    """Accept observed XY and opaque three-value mower point vectors."""
+    return (
+        isinstance(value, Sequence)
+        and not isinstance(value, str | bytes | bytearray)
+        and len(value) in _SUPPORTED_POINT_VECTOR_LENGTHS
+    )
 
 
 def _maintenance_point_value_shape(value: Mapping[str, Any]) -> tuple[Any, ...]:
