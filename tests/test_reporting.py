@@ -195,31 +195,63 @@ def test_maintenance_point_diagnostics_explain_app_vector_mismatch_privately() -
                                 "BackGarden",
                                 True,
                             ],
-                                "point_entry_shapes": [
+                            "point_record_validation": {
+                                "total_count": 1,
+                                "exact_shape_count": 1,
+                                "parser_accepted_count": 1,
+                                "identified_count": 1,
+                                "rejection_reason_counts": [
                                     {
-                                        "kind": "object",
+                                        "reason": "type_not_integer",
                                         "count": 1,
-                                        "keys": [
-                                            "id",
-                                            "param",
-                                            "point",
-                                            "time",
-                                            "type",
+                                    },
+                                    {
+                                        "reason": "BackGarden",
+                                        "count": 1,
+                                    },
+                                ],
+                                "value_type_shapes": [
+                                    {
+                                        "count": 1,
+                                        "id_type": "number",
+                                        "param_type": "number",
+                                        "point_type": "array",
+                                        "time_type": "number",
+                                        "type_type": "number",
+                                        "point_length": 2,
+                                        "point_item_types": [
+                                            "number",
+                                            "BackGarden",
                                         ],
+                                        "raw_id": 301,
                                     }
                                 ],
                             },
-                            "payload": {
-                                "point": [
-                                    {
-                                        "id": 301,
-                                        "param": 0,
-                                        "point": [5910, 12400],
-                                        "time": 0,
-                                        "type": 1,
-                                    }
-                                ]
-                            },
+                            "point_entry_shapes": [
+                                {
+                                    "kind": "object",
+                                    "count": 1,
+                                    "keys": [
+                                        "id",
+                                        "param",
+                                        "point",
+                                        "time",
+                                        "type",
+                                    ],
+                                }
+                            ],
+                        },
+                        "payload": {
+                            "point": [
+                                {
+                                    "id": 301,
+                                    "param": 0,
+                                    "point": [5910, 12400],
+                                    "time": 0,
+                                    "type": 1,
+                                }
+                            ]
+                        },
                     }
                 ],
             },
@@ -251,13 +283,37 @@ def test_maintenance_point_diagnostics_explain_app_vector_mismatch_privately() -
                 "point_count": 1,
                 "maintenance_point_ids": [301],
                 "point_type_codes": [1],
-                    "point_entry_shapes": [
+                "point_record_validation": {
+                    "total_count": 1,
+                    "exact_shape_count": 1,
+                    "parser_accepted_count": 1,
+                    "identified_count": 1,
+                    "rejection_reason_counts": [
                         {
-                            "kind": "object",
+                            "reason": "type_not_integer",
                             "count": 1,
-                            "keys": ["id", "param", "point", "time", "type"],
                         }
                     ],
+                    "value_type_shapes": [
+                        {
+                            "count": 1,
+                            "id_type": "number",
+                            "param_type": "number",
+                            "point_type": "array",
+                            "time_type": "number",
+                            "type_type": "number",
+                            "point_length": 2,
+                            "point_item_types": ["number"],
+                        }
+                    ],
+                },
+                "point_entry_shapes": [
+                    {
+                        "kind": "object",
+                        "count": 1,
+                        "keys": ["id", "param", "point", "time", "type"],
+                    }
+                ],
             }
         ],
         "vector_maps": [
@@ -270,6 +326,7 @@ def test_maintenance_point_diagnostics_explain_app_vector_mismatch_privately() -
     }
     assert "5910" not in repr(diagnostics)
     assert "12400" not in repr(diagnostics)
+    assert "BackGarden" not in repr(diagnostics)
 
 
 def test_map_probe_uses_probed_current_map_over_stale_coordinator_selection() -> None:

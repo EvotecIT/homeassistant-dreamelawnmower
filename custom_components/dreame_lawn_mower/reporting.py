@@ -33,6 +33,20 @@ _SENSITIVE_ENTITY_STATE_NAMES = frozenset(
     }
 )
 
+_MAINTENANCE_POINT_REJECTION_REASONS = frozenset(
+    {
+        "id_not_positive_integer",
+        "not_object",
+        "point_coordinates_not_finite_numbers",
+        "point_not_coordinate_pair",
+        "type_not_integer",
+        "unexpected_keys",
+    }
+)
+_MAINTENANCE_POINT_VALUE_TYPES = frozenset(
+    {"array", "bool", "null", "number", "object", "string"}
+)
+
 
 def build_report_context(
     *,
@@ -194,50 +208,141 @@ def _maintenance_app_map_entries(value: object) -> list[dict[str, Any]]:
         point_shapes = summary.get("point_entry_shapes")
         point_ids = summary.get("maintenance_point_ids")
         point_type_codes = summary.get("point_type_codes")
-        result.append(
+        record_validation = _maintenance_point_record_validation(
+            summary.get("point_record_validation")
+        )
+        entry = {
+            "map_index": _map_index(item.get("idx")),
+            "current": bool(item.get("current")),
+            "available": bool(item.get("available")),
+            "point_payload_present": (
+                "point" in payload_keys
+                if isinstance(payload_keys, Sequence)
+                and not isinstance(payload_keys, str | bytes | bytearray)
+                else None
+            ),
+            "point_count": _non_negative_int(summary.get("point_count")),
+            "point_entry_shapes": (
+                list(point_shapes)
+                if isinstance(point_shapes, Sequence)
+                and not isinstance(point_shapes, str | bytes | bytearray)
+                else []
+            ),
+            "maintenance_point_ids": (
+                [
+                    point_id
+                    for point_id in point_ids
+                    if _positive_int(point_id) is not None
+                ]
+                if isinstance(point_ids, Sequence)
+                and not isinstance(point_ids, str | bytes | bytearray)
+                else []
+            ),
+            "point_type_codes": (
+                [
+                    point_type
+                    for point_type in point_type_codes
+                    if isinstance(point_type, int)
+                    and not isinstance(point_type, bool)
+                ]
+                if isinstance(point_type_codes, Sequence)
+                and not isinstance(
+                    point_type_codes,
+                    str | bytes | bytearray,
+                )
+                else []
+            ),
+        }
+        if record_validation is not None:
+            entry["point_record_validation"] = record_validation
+        result.append(entry)
+    return result
+
+
+def _maintenance_point_record_validation(
+    value: object,
+) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+
+    result: dict[str, Any] = {
+        key: _non_negative_int(value.get(key))
+        for key in (
+            "total_count",
+            "exact_shape_count",
+            "parser_accepted_count",
+            "identified_count",
+        )
+    }
+    reasons = value.get("rejection_reason_counts")
+    result["rejection_reason_counts"] = (
+        [
             {
-                "map_index": _map_index(item.get("idx")),
-                "current": bool(item.get("current")),
-                "available": bool(item.get("available")),
-                "point_payload_present": (
-                    "point" in payload_keys
-                    if isinstance(payload_keys, Sequence)
-                    and not isinstance(payload_keys, str | bytes | bytearray)
-                    else None
-                ),
-                "point_count": _non_negative_int(summary.get("point_count")),
-                "point_entry_shapes": (
-                    list(point_shapes)
-                    if isinstance(point_shapes, Sequence)
-                    and not isinstance(point_shapes, str | bytes | bytearray)
-                    else []
-                ),
-                "maintenance_point_ids": (
-                    [
-                        point_id
-                        for point_id in point_ids
-                        if _positive_int(point_id) is not None
-                    ]
-                    if isinstance(point_ids, Sequence)
-                    and not isinstance(point_ids, str | bytes | bytearray)
-                    else []
-                ),
-                "point_type_codes": (
-                    [
-                        point_type
-                        for point_type in point_type_codes
-                        if isinstance(point_type, int)
-                        and not isinstance(point_type, bool)
-                    ]
-                    if isinstance(point_type_codes, Sequence)
+                "reason": reason,
+                "count": count,
+            }
+            for item in reasons
+            if isinstance(item, Mapping)
+            and isinstance((reason := item.get("reason")), str)
+            and reason in _MAINTENANCE_POINT_REJECTION_REASONS
+            and (count := _positive_int(item.get("count"))) is not None
+        ]
+        if isinstance(reasons, Sequence)
+        and not isinstance(
+            reasons,
+            str | bytes | bytearray,
+        )
+        else []
+    )
+
+    shapes = value.get("value_type_shapes")
+    safe_shapes: list[dict[str, Any]] = []
+    if isinstance(shapes, Sequence) and not isinstance(
+        shapes,
+        str | bytes | bytearray,
+    ):
+        for shape in shapes:
+            if not isinstance(shape, Mapping):
+                continue
+            count = _positive_int(shape.get("count"))
+            if count is None:
+                continue
+            safe_shape: dict[str, Any] = {"count": count}
+            for key in (
+                "id_type",
+                "param_type",
+                "point_type",
+                "time_type",
+                "type_type",
+            ):
+                value_type = shape.get(key)
+                if (
+                    isinstance(value_type, str)
+                    and value_type in _MAINTENANCE_POINT_VALUE_TYPES
+                ):
+                    safe_shape[key] = value_type
+            point_length = _non_negative_int(shape.get("point_length"))
+            if point_length is not None:
+                safe_shape["point_length"] = point_length
+                point_item_types = shape.get("point_item_types")
+                safe_shape["point_item_types"] = (
+                    sorted(
+                        {
+                            item_type
+                            for item_type in point_item_types
+                            if isinstance(item_type, str)
+                            and item_type in _MAINTENANCE_POINT_VALUE_TYPES
+                        }
+                    )
+                    if isinstance(point_item_types, Sequence)
                     and not isinstance(
-                        point_type_codes,
+                        point_item_types,
                         str | bytes | bytearray,
                     )
                     else []
-                ),
-            }
-        )
+                )
+            safe_shapes.append(safe_shape)
+    result["value_type_shapes"] = safe_shapes
     return result
 
 
