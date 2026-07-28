@@ -203,7 +203,8 @@ class _Subscriber:
 class _FlvBootstrap:
     """Parse FLV tags and retain the minimum safe late-subscriber bootstrap."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, retain_bootstrap: bool = True) -> None:
+        self._retain_bootstrap = retain_bootstrap
         self._buffer = bytearray()
         self.header: bytes | None = None
         self.metadata: bytes | None = None
@@ -258,8 +259,9 @@ class _FlvBootstrap:
                 break
             tag = bytes(self._buffer[:total])
             del self._buffer[:total]
-            self._observe_tag(tag, data_size)
-            self.stream_bytes += len(tag)
+            if self._retain_bootstrap:
+                self._observe_tag(tag, data_size)
+                self.stream_bytes += len(tag)
             records.append(tag)
         return records
 
@@ -423,6 +425,7 @@ class DreameLawnMowerFlvRelay:
         self._idle_ready = asyncio.Event()
         self._idle_ready.set()
         self._closed = False
+        self._record_parser = _FlvBootstrap(retain_bootstrap=False)
         self._parser = _FlvBootstrap()
         self._media_callback_sent = False
         self._started_at: float | None = None
@@ -659,7 +662,7 @@ class DreameLawnMowerFlvRelay:
                 response.raise_for_status()
                 async with asyncio.timeout(_MEDIA_READY_TIMEOUT) as media_deadline:
                     async for chunk in response.content.iter_chunked(64 * 1024):
-                        for record in self._parser.feed(chunk):
+                        for record in self._record_parser.feed(chunk):
                             await self._async_broadcast(record)
                         if (
                             self._parser.media_ready
@@ -753,6 +756,11 @@ class DreameLawnMowerFlvRelay:
                     subscriber.closed = True
                     self._subscribers.discard(subscriber)
                     self._finish_subscriber(subscriber)
+            # Commit decoder bootstrap state under the same relay lock as the
+            # fan-out. A viewer that joins after this lock receives the record
+            # in its bootstrap; existing viewers received it from their queue.
+            # No viewer can observe a future record and then receive it again.
+            self._parser.feed(record)
             self._schedule_idle_if_empty_locked()
 
     def _schedule_idle_if_empty_locked(self) -> None:
@@ -780,6 +788,7 @@ class DreameLawnMowerFlvRelay:
 
     def _reset_observation(self) -> None:
         """Discard decoder bootstrap and per-session timing."""
+        self._record_parser = _FlvBootstrap(retain_bootstrap=False)
         self._parser = _FlvBootstrap()
         self._media_callback_sent = False
         self._started_at = None

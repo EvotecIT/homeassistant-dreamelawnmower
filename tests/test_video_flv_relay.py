@@ -339,6 +339,103 @@ def test_relay_reconnect_uses_fresh_bootstrap_on_the_stable_url() -> None:
     )
 
 
+def test_relay_late_subscriber_does_not_duplicate_future_chunk_records() -> None:
+    async def _run() -> bytes:
+        pytest_socket.enable_socket()
+        pause_after_sequence = asyncio.Event()
+        resume_broadcast = asyncio.Event()
+        close_source = asyncio.Event()
+        sequence = _tag(9, 0, b"\x17\x00\x00\x00\x00\x01\x64\x00\x1f")
+        keyframe = _tag(9, 0, b"\x17\x01\x00\x00\x00\x00\x00\x00\x01")
+        interframe = _tag(9, 40, b"\x27\x01\x00\x00\x00\x00\x00\x00\x02")
+        content = FLV_HEADER + sequence + keyframe + interframe
+
+        async def _source(request: web.Request) -> web.StreamResponse:
+            response = web.StreamResponse(headers={"Content-Type": "video/x-flv"})
+            await response.prepare(request)
+            await response.write(content)
+            await close_source.wait()
+            return response
+
+        application = web.Application()
+        application.router.add_get("/source.flv", _source)
+        runner = web.AppRunner(application)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        server = site._server  # noqa: SLF001
+        assert server is not None
+        port = int(server.sockets[0].getsockname()[1])
+        client = ClientSession(
+            connector=TCPConnector(resolver=ThreadedResolver()),
+        )
+        relay = DreameLawnMowerFlvRelay(
+            SimpleNamespace(async_create_task=asyncio.create_task),
+            source_factory=lambda: asyncio.sleep(
+                0,
+                result=f"http://127.0.0.1:{port}/source.flv",
+            ),
+            media_ready=lambda _diagnostics: asyncio.sleep(0),
+            failed=lambda _error: asyncio.sleep(0),
+            idle=lambda: asyncio.sleep(0),
+        )
+        original_broadcast = relay._async_broadcast  # noqa: SLF001
+        broadcast_count = 0
+
+        async def _broadcast_with_pause(record: bytes) -> None:
+            nonlocal broadcast_count
+            broadcast_count += 1
+            await original_broadcast(record)
+            if broadcast_count == 2:
+                pause_after_sequence.set()
+                await resume_broadcast.wait()
+
+        relay._async_broadcast = _broadcast_with_pause  # type: ignore[method-assign]  # noqa: SLF001
+        first_response = second_response = None
+        try:
+            with patch(
+                "custom_components.dreame_lawn_mower.video_flv_relay."
+                "async_get_clientsession",
+                return_value=client,
+            ):
+                relay_url = await relay.async_start()
+                first_response = await client.get(relay_url)
+                await asyncio.wait_for(pause_after_sequence.wait(), timeout=1)
+                assert (
+                    await first_response.content.readexactly(
+                        len(FLV_HEADER + sequence)
+                    )
+                    == FLV_HEADER + sequence
+                )
+
+                second_response = await client.get(relay_url)
+                late_bootstrap = await second_response.content.readexactly(
+                    len(FLV_HEADER + sequence)
+                )
+                resume_broadcast.set()
+                late_tail = await second_response.content.readexactly(
+                    len(keyframe + interframe)
+                )
+                return late_bootstrap + late_tail
+        finally:
+            resume_broadcast.set()
+            close_source.set()
+            if first_response is not None:
+                first_response.close()
+            if second_response is not None:
+                second_response.close()
+            await relay.async_close()
+            await client.close()
+            await runner.cleanup()
+
+    assert asyncio.run(_run()) == (
+        FLV_HEADER
+        + _tag(9, 0, b"\x17\x00\x00\x00\x00\x01\x64\x00\x1f")
+        + _tag(9, 0, b"\x17\x01\x00\x00\x00\x00\x00\x00\x01")
+        + _tag(9, 40, b"\x27\x01\x00\x00\x00\x00\x00\x00\x02")
+    )
+
+
 def test_relay_keeps_one_upstream_through_a_brief_wifi_stall() -> None:
     async def _run() -> tuple[int, list[str], bytes]:
         pytest_socket.enable_socket()
