@@ -83,8 +83,8 @@ def test_newer_video_safety_snapshot_wins_over_slow_foreground_publication() -> 
         DataUpdateCoordinator,
         "async_set_updated_data",
     ) as publish:
-        coordinator.async_set_updated_data(video_snapshot)
         coordinator.async_set_updated_data(foreground_snapshot)
+        coordinator.async_set_updated_data(video_snapshot)
 
     publish.assert_called_once_with(video_snapshot)
     assert coordinator._published_device_snapshot_generation == 2

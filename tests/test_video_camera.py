@@ -54,6 +54,9 @@ from custom_components.dreame_lawn_mower.diagnostic_events import (
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     DreameLawnMowerXp2pHostAssets,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    xp2p_host_runtime as xp2p_host_runtime_module,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
 )
@@ -3044,6 +3047,13 @@ def test_video_camera_relay_upstream_start_has_bounded_deadline() -> None:
         return source, entity._last_error_stage
 
     assert asyncio.run(_run()) == (None, "upstream_start_timeout")
+
+
+def test_video_camera_relay_deadline_covers_managed_runtime_budget() -> None:
+    assert (
+        video_camera_module._VIDEO_UPSTREAM_START_TIMEOUT
+        == xp2p_host_runtime_module.DEFAULT_XP2P_HOST_STARTUP_TIMEOUT
+    )
 
 
 def test_video_camera_auto_refresh_blocks_cached_start_after_mower_docks() -> None:

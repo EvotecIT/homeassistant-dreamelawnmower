@@ -244,19 +244,21 @@ class DreameLawnMowerCoordinator(
         super().async_set_updated_data(data)
 
     def _device_snapshot_is_stale(self, snapshot: DreameLawnMowerSnapshot) -> bool:
-        """Return whether a newer fetched snapshot was already published."""
+        """Return whether a newer device snapshot has already been fetched."""
         generations = getattr(self, "_device_snapshot_generations", None)
         recorded = generations.get(id(snapshot)) if generations else None
         if recorded is None or recorded[0] is not snapshot:
             return False
         generation = recorded[1]
+        newest_fetched = getattr(self, "_device_snapshot_generation", 0)
         published = getattr(self, "_published_device_snapshot_generation", 0)
-        if generation >= published:
+        newest_generation = max(newest_fetched, published)
+        if generation >= newest_generation:
             return False
         _LOGGER.debug(
-            "Ignoring stale mower snapshot generation %s after %s",
+            "Ignoring stale mower snapshot generation %s after generation %s",
             generation,
-            published,
+            newest_generation,
         )
         return True
 

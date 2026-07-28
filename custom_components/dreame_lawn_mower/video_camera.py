@@ -84,7 +84,7 @@ from .video_provisioning_cache import DreameLawnMowerVideoProvisioningCache
 from .video_session_lifecycle import DreameLawnMowerHaStreamIdleMonitor
 
 _LOGGER = logging.getLogger(__name__)
-_VIDEO_UPSTREAM_START_TIMEOUT = min(DEFAULT_XP2P_HOST_STARTUP_TIMEOUT, 90.0)
+_VIDEO_UPSTREAM_START_TIMEOUT = DEFAULT_XP2P_HOST_STARTUP_TIMEOUT
 _SNAPSHOT_STREAM_START_TIMEOUT = 15.0
 _SNAPSHOT_IMAGE_TIMEOUT = 15.0
 _HA_STREAM_STOP_TIMEOUT = 10.0
