@@ -50,6 +50,25 @@ def test_flv_parser_retains_decoder_bootstrap_and_current_keyframe_group() -> No
     assert parser.diagnostics()["video_observed_frames"] == 2
 
 
+def test_flv_parser_bounds_late_subscriber_bootstrap_by_bytes() -> None:
+    parser = _FlvBootstrap()
+    parser.header = b"header"
+    parser.metadata = b"metadata"
+    parser.audio_sequence = b"audio"
+    parser.video_sequence = b"sequence"
+    parser.gop = [b"keyframe"]
+    parser.gop_bytes = len(parser.gop[0])
+
+    with patch(
+        "custom_components.dreame_lawn_mower.video_flv_relay."
+        "_MAX_SUBSCRIBER_QUEUE_BYTES",
+        len(parser.header) + len(parser.video_sequence) + parser.gop_bytes,
+    ):
+        bootstrap = parser.bootstrap()
+
+    assert bootstrap == parser.header + parser.video_sequence + parser.gop[0]
+
+
 def test_flv_parser_rejects_non_flv_upstream_before_fanout() -> None:
     parser = _FlvBootstrap()
 

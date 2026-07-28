@@ -307,7 +307,19 @@ class _FlvBootstrap:
     def _append_gop(self, tag: bytes) -> None:
         self.gop.append(tag)
         self.gop_bytes += len(tag)
-        if self.gop_bytes > _MAX_GOP_BYTES:
+        required_header_bytes = sum(
+            len(part)
+            for part in (self.header, self.video_sequence)
+            if part is not None
+        )
+        retained_gop_limit = min(
+            _MAX_GOP_BYTES,
+            max(
+                0,
+                _MAX_SUBSCRIBER_QUEUE_BYTES - required_header_bytes,
+            ),
+        )
+        if self.gop_bytes > retained_gop_limit:
             # A partial GOP cannot initialize a late decoder safely. Wait for
             # the next keyframe instead of retaining dependent frames.
             self.gop = []
@@ -315,14 +327,29 @@ class _FlvBootstrap:
 
     def bootstrap(self) -> bytes:
         """Return decoder headers plus the current keyframe group."""
-        parts = [
-            self.header,
-            self.metadata,
-            self.audio_sequence,
-            self.video_sequence,
-            *self.gop,
+        required_parts = [
+            part
+            for part in (self.header, self.video_sequence, *self.gop)
+            if part is not None
         ]
-        return b"".join(part for part in parts if part)
+        required_bytes = sum(len(part) for part in required_parts)
+        if required_bytes > _MAX_SUBSCRIBER_QUEUE_BYTES:
+            return b""
+
+        optional_parts: list[bytes] = []
+        remaining = _MAX_SUBSCRIBER_QUEUE_BYTES - required_bytes
+        for part in (self.metadata, self.audio_sequence):
+            if part is not None and len(part) <= remaining:
+                optional_parts.append(part)
+                remaining -= len(part)
+        return b"".join(
+            (
+                *((self.header,) if self.header is not None else ()),
+                *optional_parts,
+                *((self.video_sequence,) if self.video_sequence is not None else ()),
+                *self.gop,
+            )
+        )
 
     def diagnostics(self) -> dict[str, object]:
         """Return non-sensitive stream metadata observed by the relay."""
@@ -546,7 +573,10 @@ class DreameLawnMowerFlvRelay:
                 if idle_task is not None and not idle_task.done():
                     idle_task.cancel()
                 bootstrap = self._parser.bootstrap()
-                if bootstrap:
+                if (
+                    bootstrap
+                    and len(bootstrap) <= _MAX_SUBSCRIBER_QUEUE_BYTES
+                ):
                     subscriber.queue.put_nowait(bootstrap)
                     subscriber.queued_bytes = len(bootstrap)
                 self._subscribers.add(subscriber)

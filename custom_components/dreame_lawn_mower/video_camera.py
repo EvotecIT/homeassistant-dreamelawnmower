@@ -193,6 +193,7 @@ class DreameLawnMowerVideoCamera(
         self._stream_lock = asyncio.Lock()
         self._snapshot_lock = asyncio.Lock()
         self._snapshot_requests = 0
+        self._snapshot_owned_stream: Any | None = None
         self._stream_idle_monitor = DreameLawnMowerHaStreamIdleMonitor(
             coordinator.hass,
             stream_lock=self._stream_lock,
@@ -451,7 +452,13 @@ class DreameLawnMowerVideoCamera(
         if not getattr(self, "_create_stream_lock", None):
             self._create_stream_lock = asyncio.Lock()
         async with self._create_stream_lock:
-            return await self._async_create_stream_locked()
+            ha_stream = await self._async_create_stream_locked()
+            if (
+                ha_stream is not None
+                and getattr(self, "_snapshot_owned_stream", None) is ha_stream
+            ):
+                self._snapshot_owned_stream = None
+            return ha_stream
 
     async def _async_create_stream_locked(self) -> Any | None:
         """Create or reuse HA's HLS stream over the local fan-out relay."""
@@ -526,10 +533,7 @@ class DreameLawnMowerVideoCamera(
         async with self._snapshot_lock:
             self._snapshot_requests = getattr(self, "_snapshot_requests", 0) + 1
             try:
-                if not getattr(self, "_create_stream_lock", None):
-                    self._create_stream_lock = asyncio.Lock()
-                async with self._create_stream_lock:
-                    return await self._async_camera_image_locked(width, height)
+                return await self._async_camera_image_locked(width, height)
             finally:
                 self._snapshot_requests = max(0, self._snapshot_requests - 1)
 
@@ -539,19 +543,26 @@ class DreameLawnMowerVideoCamera(
         height: int | None,
     ) -> bytes | None:
         """Return one JPEG from Home Assistant's single FLV consumer."""
-        previous_stream = getattr(self, "stream", None)
-        try:
-            async with asyncio.timeout(_SNAPSHOT_STREAM_START_TIMEOUT):
-                ha_stream = await self._async_create_stream_locked()
-        except TimeoutError:
-            _LOGGER.debug("Timed out starting Dreame mower video for a still image")
-            return self._last_image
-        except Exception as err:  # noqa: BLE001 - snapshots may be transient.
-            _LOGGER.debug(
-                "Failed to start Dreame mower video for a still image: %s",
-                sanitize_diagnostic_text(err),
-            )
-            return self._last_image
+        if not getattr(self, "_create_stream_lock", None):
+            self._create_stream_lock = asyncio.Lock()
+        async with self._create_stream_lock:
+            previous_stream = getattr(self, "stream", None)
+            try:
+                async with asyncio.timeout(_SNAPSHOT_STREAM_START_TIMEOUT):
+                    ha_stream = await self._async_create_stream_locked()
+            except TimeoutError:
+                _LOGGER.debug(
+                    "Timed out starting Dreame mower video for a still image"
+                )
+                return self._last_image
+            except Exception as err:  # noqa: BLE001 - snapshots may be transient.
+                _LOGGER.debug(
+                    "Failed to start Dreame mower video for a still image: %s",
+                    sanitize_diagnostic_text(err),
+                )
+                return self._last_image
+            if ha_stream is not None and ha_stream is not previous_stream:
+                self._snapshot_owned_stream = ha_stream
         if ha_stream is None:
             return self._last_image
         snapshot_only_stream = ha_stream is not previous_stream
@@ -591,8 +602,18 @@ class DreameLawnMowerVideoCamera(
     async def _async_stop_owned_stream(self, ha_stream: Any) -> None:
         """Stop a one-shot HA decoder without interrupting another relay viewer."""
         async with self._stream_lock:
+            snapshot_owned_stream = getattr(
+                self,
+                "_snapshot_owned_stream",
+                None,
+            )
             if self.stream is not ha_stream:
+                if snapshot_owned_stream is ha_stream:
+                    self._snapshot_owned_stream = None
                 return
+            if snapshot_owned_stream is not ha_stream:
+                return
+            self._snapshot_owned_stream = None
             await self._stream_idle_monitor.async_cancel()
             self.stream = None
             try:
@@ -678,6 +699,7 @@ class DreameLawnMowerVideoCamera(
             await self._stream_idle_monitor.async_cancel()
             ha_stream = getattr(self, "stream", None)
             self.stream = None
+            self._snapshot_owned_stream = None
             runtime = self._runtime
             session = self._session
             self._runtime = None

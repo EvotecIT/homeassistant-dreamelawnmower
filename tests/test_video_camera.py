@@ -174,6 +174,7 @@ def _uninitialized_entity(*, snapshot: object | None = None):
     entity._stream_lock = asyncio.Lock()
     entity._snapshot_lock = asyncio.Lock()
     entity._snapshot_requests = 0
+    entity._snapshot_owned_stream = None
     entity._lan_cache = SimpleNamespace(inputs=None, endpoint=None)
     entity._provisioning_cache = _ProvisioningCache()
     entity._provisioning_cache_error = None
@@ -1778,8 +1779,8 @@ def test_video_camera_stops_stream_created_only_for_snapshot() -> None:
     assert asyncio.run(_run()) == (b"\xff\xd8snapshot-jpeg\xff\xd9", 1)
 
 
-def test_video_camera_serializes_snapshot_cleanup_before_viewer_start() -> None:
-    async def _run() -> tuple[bytes | None, bool, bool, int, int]:
+def test_video_camera_viewer_adopts_stream_while_snapshot_waits() -> None:
+    async def _run() -> tuple[bytes | None, bool, int, int]:
         entity = _uninitialized_entity()
         entity._last_image = None
         entity._create_stream_lock = None
@@ -1799,32 +1800,30 @@ def test_video_camera_serializes_snapshot_cleanup_before_viewer_start() -> None:
                 stops += 1
 
         snapshot_stream = _SnapshotStream()
-        viewer_stream = object()
 
         async def _create_stream() -> object:
             nonlocal creates
+            existing = getattr(entity, "stream", None)
+            if existing is not None:
+                return existing
             creates += 1
-            stream = snapshot_stream if creates == 1 else viewer_stream
-            entity.stream = stream
-            return stream
+            entity.stream = snapshot_stream
+            return snapshot_stream
 
         entity._async_create_stream_locked = _create_stream
         snapshot_task = asyncio.create_task(entity.async_camera_image())
         await image_started.wait()
         viewer_task = asyncio.create_task(entity.async_create_stream())
-        await asyncio.sleep(0)
-        viewer_waited = not viewer_task.done()
+        viewer = await asyncio.wait_for(viewer_task, timeout=1)
         release_image.set()
-        image = await snapshot_task
-        viewer = await viewer_task
-        return image, viewer_waited, viewer is viewer_stream, stops, creates
+        image = await asyncio.wait_for(snapshot_task, timeout=1)
+        return image, viewer is snapshot_stream, stops, creates
 
     assert asyncio.run(_run()) == (
         b"\xff\xd8snapshot-jpeg\xff\xd9",
         True,
-        True,
+        0,
         1,
-        2,
     )
 
 
