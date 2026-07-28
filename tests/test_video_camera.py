@@ -2146,9 +2146,11 @@ def test_video_camera_unload_is_bounded_when_every_cleanup_stage_hangs() -> None
 
 
 def test_video_camera_unload_closes_relay_before_waiting_for_startup_lock() -> None:
-    async def _run() -> tuple[bool, bool]:
+    async def _run() -> tuple[bool, bool, bool]:
         entity = _uninitialized_entity()
         startup_entered = asyncio.Event()
+        state_gate_started = asyncio.Event()
+        state_gate_finished = asyncio.Event()
         relay_closed = False
         base_remove_called = False
 
@@ -2159,6 +2161,15 @@ def test_video_camera_unload_closes_relay_before_waiting_for_startup_lock() -> N
 
         startup_task = asyncio.create_task(_cold_start())
         await asyncio.wait_for(startup_entered.wait(), timeout=1)
+
+        async def _state_gate_cleanup() -> None:
+            state_gate_started.set()
+            async with entity._stream_lock:
+                state_gate_finished.set()
+
+        state_gate_task = asyncio.create_task(_state_gate_cleanup())
+        entity._state_gate_cleanup_task = state_gate_task
+        await asyncio.wait_for(state_gate_started.wait(), timeout=1)
 
         class _Relay:
             async def async_close(self) -> None:
@@ -2185,9 +2196,13 @@ def test_video_camera_unload_closes_relay_before_waiting_for_startup_lock() -> N
                 startup_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await startup_task
-        return relay_closed, base_remove_called
+            if not state_gate_task.done():
+                state_gate_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await state_gate_task
+        return relay_closed, state_gate_finished.is_set(), base_remove_called
 
-    assert asyncio.run(_run()) == (True, True)
+    assert asyncio.run(_run()) == (True, True, True)
 
 
 def test_video_camera_fences_restart_until_timed_out_runtime_stop_finishes() -> None:
