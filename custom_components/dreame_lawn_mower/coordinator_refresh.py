@@ -68,6 +68,13 @@ class DreameLawnMowerRefreshMixin:
                         "snapshot",
                         self.client.async_refresh,
                     )
+                    if not snapshot.available:
+                        retained = self._record_connectivity_failure(
+                            "Mower is temporarily offline."
+                        )
+                        if retained is not None:
+                            outcome = "degraded"
+                            return retained
                     record_snapshot = getattr(
                         self,
                         "_record_device_snapshot",
@@ -78,6 +85,10 @@ class DreameLawnMowerRefreshMixin:
             except DreameLawnMowerConnectionError as err:
                 outcome = type(err).__name__
                 safe_error = sanitize_diagnostic_text(err)
+                retained = self._record_connectivity_failure(err)
+                if retained is not None:
+                    outcome = "degraded"
+                    return retained
                 record_diagnostic_event(
                     self,
                     code="coordinator_update_failed",
@@ -96,6 +107,8 @@ class DreameLawnMowerRefreshMixin:
                 self._runtime_map_identity_verified = False
                 self.client.update_runtime_live_tracking(None, active=False)
                 return snapshot
+
+            self._record_connectivity_success(snapshot)
 
             runtime_active = runtime_tracking_active(snapshot)
             if runtime_active:

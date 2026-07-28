@@ -54,6 +54,7 @@ from .client_shared_helpers import (
 from .exceptions import (
     DeviceException,
     DreameLawnMowerCloudAPIError,
+    DreameLawnMowerCommandRejectedError,
     DreameLawnMowerConnectionError,
 )
 from .exceptions import (
@@ -164,8 +165,15 @@ class _DreameLawnMowerClientMapsMixin:
                 }
             )
             return ensure_mowing_task_succeeded(response, task_name="map switch")
-        except (DeviceException, MowingTaskResponseError) as err:
+        except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
+        except MowingTaskResponseError as err:
+            error_type = (
+                DreameLawnMowerCommandRejectedError
+                if isinstance(response, Mapping)
+                else DreameLawnMowerConnectionError
+            )
+            raise error_type(str(err)) from err
 
     def _sync_get_vector_map_details(self) -> dict[str, Any]:
         """Return parsed batch vector-map details without rendering an image."""
@@ -946,13 +954,24 @@ class _DreameLawnMowerClientMapsMixin:
             if generation_requested_at_ms is None:
                 generation_requested_at_ms = int(time.time() * 1000)
 
-        self._sync_call_point_cloud_action(
-            {"m": "a", "p": 0, "o": 10, "d": {"idx": map_index}},
-            operation="start point-cloud generation",
-            deadline=deadline,
-            require_data=False,
-            on_dispatch=mark_generation_dispatched,
-        )
+        try:
+            self._sync_call_point_cloud_action(
+                {"m": "a", "p": 0, "o": 10, "d": {"idx": map_index}},
+                operation="start point-cloud generation",
+                deadline=deadline,
+                require_data=False,
+                on_dispatch=mark_generation_dispatched,
+            )
+        except DreameLawnMowerPointCloudError as err:
+            if generation_requested_at_ms is None or err.code not in {
+                "point_cloud_timeout",
+                "point_cloud_mower_request_failed",
+                "point_cloud_mower_response_invalid",
+            }:
+                raise
+            # The transport lost the reply after dispatch. Never resend the
+            # generation mutation: the mower may already be uploading. Rejoin
+            # the same announcement/object polling flow instead.
         if generation_requested_at_ms is None:
             # Preserve compatibility with alternate/mock cloud transports that
             # do not expose the dispatch hook.
@@ -1081,10 +1100,13 @@ class _DreameLawnMowerClientMapsMixin:
                     require_data=True,
                 )
             except DreameLawnMowerPointCloudError as err:
-                if announcement_probe_pending and err.code in {
+                if err.code in {
                     "point_cloud_timeout",
                     "point_cloud_mower_request_failed",
                 }:
+                    remaining = deadline - time.monotonic()
+                    if remaining > 0:
+                        time.sleep(min(poll_interval, remaining))
                     continue
                 raise
             object_name = _point_cloud_object_name(
@@ -1619,6 +1641,10 @@ class _DreameLawnMowerClientMapsMixin:
                     **request_options,
                 )
             else:
+                request_options.setdefault(
+                    "retry_count",
+                    2 if payload.get("m") == "g" else 0,
+                )
                 response = cloud.send(
                     "action",
                     {

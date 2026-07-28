@@ -987,6 +987,67 @@ def test_download_point_cloud_recovers_from_transient_announcement_probe(
     assert result.metadata.points == 1
 
 
+def test_download_point_cloud_rejoins_after_generation_reply_is_lost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    actions: list[dict[str, Any]] = []
+
+    def call_point_cloud_action(
+        payload: dict[str, Any],
+        *,
+        operation: str,
+        deadline: float,
+        require_data: bool,
+        on_dispatch: Any = None,
+    ) -> Any:
+        actions.append(payload)
+        if payload.get("m") == "a":
+            on_dispatch()
+            raise DreameLawnMowerPointCloudError(
+                "generation reply lost",
+                code="point_cloud_mower_response_invalid",
+            )
+        return {"name": ["private/stale-map.pcd"]}
+
+    now_ms = int(time.time() * 1000)
+    property_results = iter(
+        [
+            None,
+            [
+                {
+                    "key": "99.20",
+                    "value": "private/generated-map.bin",
+                    "updateDate": now_ms + 1_000,
+                }
+            ],
+        ]
+    )
+    client._sync_call_point_cloud_action = call_point_cloud_action
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_properties=lambda key, **options: next(property_results),
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert actions.count(
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}}
+    ) == 1
+    assert result.content == content
+
+
 def test_download_point_cloud_preserves_time_for_later_announcement_reprobe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

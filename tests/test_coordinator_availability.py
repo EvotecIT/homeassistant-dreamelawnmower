@@ -13,6 +13,9 @@ from custom_components.dreame_lawn_mower.coordinator import (
     DreameLawnMowerCoordinator,
     _runtime_tracking_active,
 )
+from custom_components.dreame_lawn_mower.coordinator_connectivity import (
+    CONNECTIVITY_STALE_GRACE_SECONDS,
+)
 
 
 def test_offline_snapshot_returns_normally_so_entities_remain_loaded() -> None:
@@ -33,6 +36,51 @@ def test_offline_snapshot_returns_normally_so_entities_remain_loaded() -> None:
     assert result is offline_snapshot
     assert coordinator.runtime_status_blob is None
     assert tracking_updates == [(None, False)]
+
+
+def test_short_offline_snapshot_retains_last_good_state() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    good_snapshot = SimpleNamespace(available=True, state="mowing")
+    offline_snapshot = SimpleNamespace(available=False, state="offline")
+    coordinator._record_connectivity_success(good_snapshot)
+    coordinator.runtime_status_blob = {"status": "current"}
+    coordinator.client = SimpleNamespace(
+        async_refresh=AsyncMock(return_value=offline_snapshot),
+        update_runtime_live_tracking=Mock(),
+    )
+
+    result = asyncio.run(coordinator._async_update_data())
+
+    assert result is good_snapshot
+    assert coordinator.runtime_status_blob == {"status": "current"}
+    coordinator.client.update_runtime_live_tracking.assert_not_called()
+    assert coordinator.connection_degraded is True
+    assert coordinator.connection_failure_count == 1
+    assert coordinator.connection_retry_after_seconds == 1.0
+
+
+def test_offline_snapshot_expires_retained_state_after_grace() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    good_snapshot = SimpleNamespace(available=True, state="mowing")
+    offline_snapshot = SimpleNamespace(available=False, state="offline")
+    coordinator._record_connectivity_success(good_snapshot)
+    coordinator._connectivity_last_success_monotonic -= (
+        CONNECTIVITY_STALE_GRACE_SECONDS + 1
+    )
+    coordinator.runtime_status_blob = {"status": "stale"}
+    coordinator.client = SimpleNamespace(
+        async_refresh=AsyncMock(return_value=offline_snapshot),
+        update_runtime_live_tracking=Mock(),
+    )
+
+    result = asyncio.run(coordinator._async_update_data())
+
+    assert result is offline_snapshot
+    assert coordinator.runtime_status_blob is None
+    coordinator.client.update_runtime_live_tracking.assert_called_once_with(
+        None,
+        active=False,
+    )
 
 
 async def _offline_snapshot(snapshot: SimpleNamespace) -> SimpleNamespace:

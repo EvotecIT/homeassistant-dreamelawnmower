@@ -369,6 +369,32 @@ def test_set_app_schedule_plan_enabled_rejects_failed_write_response() -> None:
         )
 
 
+def test_set_app_schedule_plan_enabled_rejects_lost_acknowledgement() -> None:
+    client = _client()
+    cloud = _FakeAppScheduleCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+    normal_call = client._sync_call_app_action
+
+    def lost_ack(payload: dict[str, object]) -> object:
+        if payload["t"] == "SCHDSV2":
+            return None
+        return normal_call(payload)
+
+    client._sync_call_app_action = lost_ack
+
+    with pytest.raises(
+        DreameLawnMowerConnectionError,
+        match="did not acknowledge",
+    ):
+        client._sync_set_app_schedule_plan_enabled(
+            map_index=0,
+            plan_id=1,
+            enabled=True,
+            execute=True,
+            confirm_write=True,
+        )
+
+
 def test_plan_app_schedule_upload_builds_dry_run_sequence() -> None:
     client = _client()
     cloud = _FakeAppScheduleCloud()

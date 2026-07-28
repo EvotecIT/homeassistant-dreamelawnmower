@@ -65,6 +65,20 @@ def _app_action_data(value: Any) -> Any:
     return value.get("d")
 
 
+def _ensure_app_write_succeeded(value: Any, *, operation: str) -> Any:
+    """Require an explicit mower acknowledgement for a state-changing request."""
+    if not isinstance(value, Mapping) or value.get("r") != 0 or "d" not in value:
+        raise DreameLawnMowerConnectionError(
+            f"{operation} failed: the mower did not acknowledge the request."
+        )
+    data = value.get("d")
+    if isinstance(data, Mapping) and data.get("r") not in (None, 0):
+        raise DreameLawnMowerConnectionError(
+            f"{operation} failed: the mower rejected the request: {value}"
+        )
+    return data
+
+
 def _operation_value_type(value: Any) -> str:
     if value is None:
         return "null"

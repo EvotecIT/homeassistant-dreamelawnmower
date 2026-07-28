@@ -136,6 +136,7 @@ from .const import (
     ATTR_CAPABILITIES,
 )
 from .exceptions import (
+    DeviceCommandRejectedException,
     DeviceUpdateFailedException,
     InvalidActionException,
     InvalidValueException,
@@ -527,7 +528,9 @@ class _DreameMowerDeviceCommandMixin:
         except Exception as ex:
             _LOGGER.error("Send action failed %s: %s", action.name, ex)
             self.schedule_update(1, True)
-            return
+            raise DeviceUpdateFailedException(
+                f"Send action failed {action.name}: {ex}"
+            ) from ex
 
         # Schedule update for retrieving new properties after action sent
         self.schedule_update(6, bool(not map_action and self._protocol.dreame_cloud))
@@ -538,6 +541,14 @@ class _DreameMowerDeviceCommandMixin:
                 self._last_settings_request = 0
         else:
             _LOGGER.error("Send action failed %s (%s): %s", action.name, parameters, result)
+            error_type = (
+                DeviceCommandRejectedException
+                if result is not None
+                else DeviceUpdateFailedException
+            )
+            raise error_type(
+                f"The mower did not acknowledge action {action.name}."
+            )
 
         return result
 
@@ -549,10 +560,15 @@ class _DreameMowerDeviceCommandMixin:
             raise InvalidActionException(f"Invalid Command: ({command}).")
 
         self.schedule_update(10, True)
-        response = self._protocol.send(command, parameters, 3)
+        response = self._protocol.send(command, parameters, 0)
         if response:
             _LOGGER.info("Send command response: %s", response)
+        else:
+            raise DeviceUpdateFailedException(
+                f"The mower did not acknowledge command {command}."
+            )
         self.schedule_update(2, True)
+        return response
 
     def set_cleaning_mode(self, cleaning_mode: int) -> bool:
         """Set cleaning mode."""

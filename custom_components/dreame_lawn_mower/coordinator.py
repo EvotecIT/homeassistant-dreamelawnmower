@@ -34,6 +34,7 @@ from .const import (
     DOMAIN,
 )
 from .control_options import active_map_index
+from .coordinator_connectivity import DreameLawnMowerConnectivityMixin
 from .coordinator_refresh import (
     METADATA_REFRESH_CONCURRENCY,
     DreameLawnMowerRefreshMixin,
@@ -65,6 +66,7 @@ _runtime_tracking_active = runtime_tracking_active
 
 
 class DreameLawnMowerCoordinator(
+    DreameLawnMowerConnectivityMixin,
     DreameLawnMowerRefreshMixin,
     DataUpdateCoordinator[DreameLawnMowerSnapshot],
 ):
@@ -153,6 +155,7 @@ class DreameLawnMowerCoordinator(
         self._foreground_refresh_count = 0
         self._metadata_refresh_count = 0
         self._shutting_down = False
+        self._initialize_connectivity_recovery()
 
         super().__init__(
             hass,
@@ -177,10 +180,18 @@ class DreameLawnMowerCoordinator(
         """
         for _attempt in range(2):
             async with self._device_refresh_lock:
-                snapshot = await self.client.async_refresh()
+                try:
+                    snapshot = await self.client.async_refresh()
+                except Exception as err:
+                    self._record_connectivity_failure(err)
+                    raise
+                if not getattr(snapshot, "available", True):
+                    self._record_connectivity_failure("Mower is temporarily offline.")
+                    return snapshot
                 self._record_device_snapshot(snapshot)
                 if self._device_snapshot_is_stale(snapshot):
                     continue
+                self._record_connectivity_success(snapshot)
                 self.async_set_updated_data(snapshot)
                 return snapshot
         raise RuntimeError("Mower state changed during video safety refresh.")
@@ -295,6 +306,13 @@ class DreameLawnMowerCoordinator(
                 self._device_refresh_lock = asyncio.Lock()
             async with self._device_refresh_lock:
                 snapshot = await self.client.async_get_cached_snapshot()
+                if not snapshot.available:
+                    retained = self._record_connectivity_failure(
+                        "Realtime mower connection was interrupted."
+                    )
+                    if retained is not None:
+                        self.async_update_listeners()
+                        return
                 self._record_device_snapshot(snapshot, retain=True)
             if self._device_snapshot_is_stale(snapshot):
                 return
@@ -303,6 +321,7 @@ class DreameLawnMowerCoordinator(
                 self.client.update_runtime_live_tracking(None, active=False)
                 self.async_set_updated_data(snapshot)
                 return
+            self._record_connectivity_success(snapshot)
 
             runtime_active = runtime_tracking_active(snapshot)
             runtime_map_index = (
@@ -937,6 +956,7 @@ class DreameLawnMowerCoordinator(
     async def async_shutdown(self) -> None:
         """Disconnect client resources."""
         self._shutting_down = True
+        await self._async_shutdown_connectivity_recovery()
         self._client_update_pending = False
         self.client.set_update_callback(None)
         task = self._client_update_task

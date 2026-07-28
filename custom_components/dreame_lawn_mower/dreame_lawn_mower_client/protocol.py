@@ -145,7 +145,7 @@ class DreameMowerProtocol:
             self.device_cloud.disconnect()
         self._connected = False
 
-    def send_async(self, callback, method, parameters: Any = None, retry_count: int = 2):
+    def send_async(self, callback, method, parameters: Any = None, retry_count: int = 0):
         if not self.device_cloud:
             raise DeviceException("Cloud connection missing") from None
 
@@ -174,7 +174,7 @@ class DreameMowerProtocol:
         self.device_cloud.send_async(
             cloud_callback, method, parameters=parameters, retry_count=retry_count)
 
-    def send(self, method, parameters: Any = None, retry_count: int = 2) -> Any:
+    def send(self, method, parameters: Any = None, retry_count: int = 0) -> Any:
         if not self.device_cloud:
             raise DeviceException("Cloud connection missing") from None
 
@@ -203,7 +203,7 @@ class DreameMowerProtocol:
     def get_properties(self, parameters: Any = None, retry_count: int = 1) -> Any:
         return self.send("get_properties", parameters=parameters, retry_count=retry_count)
 
-    def set_property(self, siid: int, piid: int, value: Any = None, retry_count: int = 2) -> Any:
+    def set_property(self, siid: int, piid: int, value: Any = None, retry_count: int = 0) -> Any:
         return self.set_properties(
             [
                 {
@@ -216,10 +216,10 @@ class DreameMowerProtocol:
             retry_count=retry_count,
         )
 
-    def set_properties(self, parameters: Any = None, retry_count: int = 2) -> Any:
+    def set_properties(self, parameters: Any = None, retry_count: int = 0) -> Any:
         return self.send("set_properties", parameters=parameters, retry_count=retry_count)
 
-    def action_async(self, callback, siid: int, aiid: int, parameters=[], retry_count: int = 2):
+    def action_async(self, callback, siid: int, aiid: int, parameters=[], retry_count: int = 0):
         if parameters is None:
             parameters = []
 
@@ -236,7 +236,7 @@ class DreameMowerProtocol:
             retry_count=retry_count,
         )
 
-    def action(self, siid: int, aiid: int, parameters=[], retry_count: int = 2) -> Any:
+    def action(self, siid: int, aiid: int, parameters=[], retry_count: int = 0) -> Any:
         if parameters is None:
             parameters = []
 

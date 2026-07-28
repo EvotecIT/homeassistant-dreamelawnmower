@@ -95,6 +95,9 @@ from .exceptions import (
     DreameLawnMowerAuthError as DreameLawnMowerAuthError,
 )
 from .exceptions import (
+    DreameLawnMowerCommandRejectedError as _DreameLawnMowerCommandRejectedError,
+)
+from .exceptions import (
     DreameLawnMowerConnectionError as DreameLawnMowerConnectionError,
 )
 from .exceptions import DreameLawnMowerError as DreameLawnMowerError
@@ -497,7 +500,20 @@ class DreameLawnMowerClient(
         except DreameLawnMowerConnectionError:
             status_blob = None
         if status_blob is not None and status_blob.task_resumable:
-            await asyncio.to_thread(self._sync_resume_mowing)
+            try:
+                await asyncio.to_thread(self._sync_resume_mowing)
+            except _DreameLawnMowerCommandRejectedError:
+                raise
+            except DreameLawnMowerConnectionError as err:
+                await self._async_reconcile_ambiguous_mutation(
+                    "resume mowing",
+                    err,
+                    lambda snapshot: bool(
+                        snapshot.started
+                        or snapshot.mowing
+                        or snapshot.mowing_session_active is True
+                    ),
+                )
             return
         await self._async_call_device_method("start_mowing")
 
@@ -530,21 +546,66 @@ class DreameLawnMowerClient(
 
     async def async_start_zone_mowing(self, zone_ids: Sequence[int]) -> Any:
         """Start mower-native zone mowing for explicit map area ids."""
-        return await asyncio.to_thread(self._sync_start_zone_mowing, list(zone_ids))
+        try:
+            return await asyncio.to_thread(
+                self._sync_start_zone_mowing,
+                list(zone_ids),
+            )
+        except _DreameLawnMowerCommandRejectedError:
+            raise
+        except DreameLawnMowerConnectionError as err:
+            return await self._async_reconcile_ambiguous_mutation(
+                "start zone mowing",
+                err,
+                lambda snapshot: bool(
+                    snapshot.started
+                    or snapshot.mowing
+                    or snapshot.mowing_session_active is True
+                ),
+            )
 
     async def async_start_edge_mowing(
         self,
         contour_ids: Sequence[Sequence[int]],
     ) -> Any:
         """Start edge mowing for one or more contour id pairs."""
-        return await asyncio.to_thread(
-            self._sync_start_edge_mowing,
-            [list(contour_id) for contour_id in contour_ids],
-        )
+        try:
+            return await asyncio.to_thread(
+                self._sync_start_edge_mowing,
+                [list(contour_id) for contour_id in contour_ids],
+            )
+        except _DreameLawnMowerCommandRejectedError:
+            raise
+        except DreameLawnMowerConnectionError as err:
+            return await self._async_reconcile_ambiguous_mutation(
+                "start edge mowing",
+                err,
+                lambda snapshot: bool(
+                    snapshot.started
+                    or snapshot.mowing
+                    or snapshot.mowing_session_active is True
+                ),
+            )
 
     async def async_start_spot_mowing(self, spot_ids: Sequence[int]) -> Any:
         """Start mower-native spot mowing for explicit saved spot area ids."""
-        return await asyncio.to_thread(self._sync_start_spot_mowing, list(spot_ids))
+        try:
+            return await asyncio.to_thread(
+                self._sync_start_spot_mowing,
+                list(spot_ids),
+            )
+        except _DreameLawnMowerCommandRejectedError:
+            raise
+        except DreameLawnMowerConnectionError as err:
+            return await self._async_reconcile_ambiguous_mutation(
+                "start spot mowing",
+                err,
+                lambda snapshot: bool(
+                    snapshot.started
+                    or snapshot.mowing
+                    or snapshot.mowing_session_active is True
+                ),
+            )
 
     async def async_go_to_maintenance_point(self, point_id: int) -> Any:
         """Drive to one configured map maintenance point."""
@@ -555,7 +616,28 @@ class DreameLawnMowerClient(
 
     async def async_switch_current_map(self, map_index: int) -> Any:
         """Switch the active mower map through the app task path."""
-        return await asyncio.to_thread(self._sync_switch_current_map, int(map_index))
+        map_index = int(map_index)
+        try:
+            return await asyncio.to_thread(self._sync_switch_current_map, map_index)
+        except _DreameLawnMowerCommandRejectedError:
+            raise
+        except DreameLawnMowerConnectionError as err:
+            for delay in (0.5, 1.5, 3.0):
+                await asyncio.sleep(delay)
+                try:
+                    maps = await self.async_get_app_maps(
+                        include_payload=False,
+                        include_objects=False,
+                    )
+                except DreameLawnMowerConnectionError:
+                    continue
+                if maps.get("current_map_index") == map_index:
+                    return None
+            raise DreameLawnMowerConnectionError(
+                "The mower may have received the map switch request, but the "
+                "active map could not be confirmed after the connection was "
+                "interrupted. Refresh the map state before trying again."
+            ) from err
 
     async def async_get_vector_map_details(self) -> dict[str, Any]:
         """Return JSON-safe parsed batch vector-map details."""
