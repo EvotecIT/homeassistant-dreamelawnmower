@@ -90,6 +90,32 @@ def test_newer_video_safety_snapshot_wins_over_slow_foreground_publication() -> 
     assert coordinator._published_device_snapshot_generation == 2
 
 
+def test_video_safety_refresh_retries_snapshot_that_is_already_stale() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        stale_snapshot = SimpleNamespace(state="docked")
+        current_snapshot = SimpleNamespace(state="idle")
+        coordinator._device_refresh_lock = asyncio.Lock()
+        coordinator._device_snapshot_generation = 0
+        coordinator._published_device_snapshot_generation = 0
+        coordinator._device_snapshot_generations = {}
+        coordinator.client = SimpleNamespace(
+            async_refresh=AsyncMock(
+                side_effect=(stale_snapshot, current_snapshot)
+            )
+        )
+        coordinator._device_snapshot_is_stale = Mock(side_effect=(True, False))
+        coordinator.async_set_updated_data = Mock()
+
+        result = await coordinator.async_refresh_video_safety_state()
+
+        assert result is current_snapshot
+        assert coordinator.client.async_refresh.await_count == 2
+        coordinator.async_set_updated_data.assert_called_once_with(current_snapshot)
+
+    asyncio.run(scenario())
+
+
 def test_newer_video_safety_snapshot_blocks_foreground_runtime_side_effects() -> None:
     async def scenario() -> None:
         coordinator = object.__new__(DreameLawnMowerCoordinator)

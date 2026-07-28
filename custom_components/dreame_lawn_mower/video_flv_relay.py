@@ -414,6 +414,7 @@ class DreameLawnMowerFlvRelay:
         self._idle_stopping = False
         self._idle_ready = asyncio.Event()
         self._idle_ready.set()
+        self._closed = False
         self._parser = _FlvBootstrap()
         self._media_callback_sent = False
         self._started_at: float | None = None
@@ -460,6 +461,8 @@ class DreameLawnMowerFlvRelay:
     async def async_start(self) -> str:
         """Bind the dormant relay to an ephemeral loopback port."""
         async with self._listener_lock:
+            if self._closed:
+                raise RuntimeError("The local mower video relay is closed.")
             if self._url is not None:
                 return self._url
             application = web.Application()
@@ -501,6 +504,10 @@ class DreameLawnMowerFlvRelay:
 
     async def async_close(self) -> None:
         """Close subscribers, upstream playback, and the loopback listener."""
+        self._closed = True
+        # Wake handlers parked behind an in-progress idle shutdown so they can
+        # observe the terminal close instead of reviving the upstream pump.
+        self._idle_ready.set()
         await self.async_stop_upstream()
         async with self._listener_lock:
             runner = self._runner
@@ -566,6 +573,10 @@ class DreameLawnMowerFlvRelay:
         while True:
             await self._idle_ready.wait()
             async with self._lock:
+                if self._closed:
+                    raise web.HTTPServiceUnavailable(
+                        text="The local mower video relay is closed."
+                    )
                 if self._idle_stopping:
                     continue
                 idle_task = self._idle_task

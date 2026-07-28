@@ -666,14 +666,17 @@ class DreameLawnMowerVideoCamera(
             except Exception as err:  # noqa: BLE001 - unload must still finish.
                 self._record_stream_cleanup_error("state_gate", err)
         self._state_gate_cleanup_task = None
+        relay = getattr(self, "_flv_relay", None)
+        if relay is not None:
+            # A cold source factory owns _stream_lock while XP2P starts. Close
+            # the relay first so its pump cancellation unwinds that startup
+            # instead of making entity unload wait for the full retry budget.
+            await relay.async_close()
         async with self._stream_lock:
             if self._session is not None or getattr(self, "stream", None) is not None:
                 await self._async_stop_active_session(reason="entity_unload")
             else:
                 await self._stream_idle_monitor.async_cancel()
-        relay = getattr(self, "_flv_relay", None)
-        if relay is not None:
-            await relay.async_close()
         await super().async_will_remove_from_hass()
 
     async def _async_stop_active_session(

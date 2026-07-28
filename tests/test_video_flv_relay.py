@@ -405,6 +405,51 @@ def test_old_pump_teardown_preserves_replacement_pump_and_subscribers() -> None:
     assert asyncio.run(_run()) == (True, True, True)
 
 
+def test_relay_close_rejects_waiting_subscriber_without_restarting_pump() -> None:
+    async def _run() -> tuple[int, int, bool]:
+        source_starts = 0
+
+        async def _source_factory() -> str:
+            nonlocal source_starts
+            source_starts += 1
+            return "http://127.0.0.1/source.flv"
+
+        async def _callback(*_args: object) -> None:
+            return None
+
+        relay = DreameLawnMowerFlvRelay(
+            SimpleNamespace(async_create_task=asyncio.create_task),
+            source_factory=_source_factory,
+            media_ready=_callback,
+            failed=_callback,
+            idle=_callback,
+        )
+        await relay._lock.acquire()  # noqa: SLF001 - force the close/GET race.
+        handler = asyncio.create_task(
+            relay._async_handle_request(  # noqa: SLF001 - lifecycle contract.
+                SimpleNamespace(),
+                ha_stream_owned=False,
+            )
+        )
+        try:
+            await asyncio.sleep(0)
+            closing = asyncio.create_task(relay.async_close())
+            await asyncio.sleep(0)
+            assert relay._closed is True  # noqa: SLF001 - terminal fence.
+        finally:
+            relay._lock.release()  # noqa: SLF001
+
+        with pytest.raises(web.HTTPServiceUnavailable) as closed:
+            await asyncio.wait_for(handler, timeout=1)
+        assert closed.value.text == "The local mower video relay is closed."
+        await asyncio.wait_for(closing, timeout=1)
+        with pytest.raises(RuntimeError, match="relay is closed"):
+            await relay.async_start()
+        return source_starts, relay.subscriber_count, relay._pump_task is None  # noqa: SLF001
+
+    assert asyncio.run(_run()) == (0, 0, True)
+
+
 def test_relay_removes_subscriber_when_response_preparation_fails() -> None:
     async def _run() -> tuple[int, bool]:
         release_source = asyncio.Event()

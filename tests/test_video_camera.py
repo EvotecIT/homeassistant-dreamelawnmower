@@ -2076,6 +2076,51 @@ def test_video_camera_unload_is_bounded_when_every_cleanup_stage_hangs() -> None
     )
 
 
+def test_video_camera_unload_closes_relay_before_waiting_for_startup_lock() -> None:
+    async def _run() -> tuple[bool, bool]:
+        entity = _uninitialized_entity()
+        startup_entered = asyncio.Event()
+        relay_closed = False
+        base_remove_called = False
+
+        async def _cold_start() -> None:
+            async with entity._stream_lock:
+                startup_entered.set()
+                await asyncio.get_running_loop().create_future()
+
+        startup_task = asyncio.create_task(_cold_start())
+        await asyncio.wait_for(startup_entered.wait(), timeout=1)
+
+        class _Relay:
+            async def async_close(self) -> None:
+                nonlocal relay_closed
+                relay_closed = True
+                startup_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await startup_task
+
+        async def _base_remove(_entity: object) -> None:
+            nonlocal base_remove_called
+            base_remove_called = True
+
+        entity._flv_relay = _Relay()
+        try:
+            with patch.object(
+                video_camera_module.CoordinatorEntity,
+                "async_will_remove_from_hass",
+                new=_base_remove,
+            ):
+                await asyncio.wait_for(entity.async_will_remove_from_hass(), timeout=1)
+        finally:
+            if not startup_task.done():
+                startup_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await startup_task
+        return relay_closed, base_remove_called
+
+    assert asyncio.run(_run()) == (True, True)
+
+
 def test_video_camera_fences_restart_until_timed_out_runtime_stop_finishes() -> None:
     async def _run() -> tuple[bool, str | None, bool]:
         shared_did = "shared-timeout-device"

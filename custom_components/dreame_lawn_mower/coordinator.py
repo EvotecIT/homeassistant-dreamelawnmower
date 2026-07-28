@@ -175,11 +175,15 @@ class DreameLawnMowerCoordinator(
         background metadata.  The shared lock still serializes the underlying
         cloud owner with the normal coordinator refresh.
         """
-        async with self._device_refresh_lock:
-            snapshot = await self.client.async_refresh()
-            self._record_device_snapshot(snapshot)
-        self.async_set_updated_data(snapshot)
-        return snapshot
+        for _attempt in range(2):
+            async with self._device_refresh_lock:
+                snapshot = await self.client.async_refresh()
+                self._record_device_snapshot(snapshot)
+                if self._device_snapshot_is_stale(snapshot):
+                    continue
+                self.async_set_updated_data(snapshot)
+                return snapshot
+        raise RuntimeError("Mower state changed during video safety refresh.")
 
     def _record_device_snapshot(
         self,
