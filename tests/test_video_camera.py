@@ -1438,8 +1438,8 @@ def test_video_camera_creates_home_assistant_stream_from_live_source() -> None:
         entity.async_write_ha_state = lambda: None
         class _Relay:
             @staticmethod
-            async def async_start() -> str:
-                return "http://127.0.0.1:12345/private.flv"
+            async def async_start_ha_stream() -> str:
+                return "http://127.0.0.1:12345/ha-owned.flv"
 
         entity._flv_relay = _Relay()
 
@@ -1465,7 +1465,7 @@ def test_video_camera_creates_home_assistant_stream_from_live_source() -> None:
     result, call = asyncio.run(_run())
 
     assert result is not None
-    assert call.args[1] == "http://127.0.0.1:12345/private.flv"
+    assert call.args[1] == "http://127.0.0.1:12345/ha-owned.flv"
     assert call.kwargs["stream_label"] == "camera.dreame_live_video"
 
 
@@ -1647,7 +1647,7 @@ def test_video_camera_does_not_cache_stream_after_turn_off_race() -> None:
                 await release_preferences.wait()
                 return object()
 
-        entity._flv_relay = SimpleNamespace(async_start=_source)
+        entity._flv_relay = SimpleNamespace(async_start_ha_stream=_source)
         entity._async_stop_active_session = _stop
         entity.hass = SimpleNamespace(
             data={video_camera_module.DATA_CAMERA_PREFS: _Preferences()}
@@ -1694,7 +1694,7 @@ def test_video_camera_cancellation_before_consumer_never_starts_session() -> Non
                 preferences_started.set()
                 await asyncio.Future()
 
-        entity._flv_relay = SimpleNamespace(async_start=_source)
+        entity._flv_relay = SimpleNamespace(async_start_ha_stream=_source)
         entity._async_stop_active_session = _stop
         entity.hass = SimpleNamespace(
             data={video_camera_module.DATA_CAMERA_PREFS: _Preferences()}
@@ -2303,7 +2303,7 @@ def test_video_camera_stream_reuses_inflight_runtime_preparation() -> None:
     assert asyncio.run(_run()) == (True, True)
 
 
-def test_video_camera_idle_monitor_stops_owned_session_after_grace() -> None:
+def test_video_camera_idle_monitor_ignores_ha_owned_relay_subscriber() -> None:
     async def _run() -> int:
         entity = _uninitialized_entity()
         session = SimpleNamespace(service_id="product-1/device-1")
@@ -2317,6 +2317,10 @@ def test_video_camera_idle_monitor_stops_owned_session_after_grace() -> None:
                 return {"hls": object()} if outputs_calls == 1 else {}
 
         stream = _Stream()
+        relay = SimpleNamespace(
+            subscriber_count=1,
+            direct_subscriber_count=0,
+        )
         entity.stream = stream
         entity._session = session
 
@@ -2334,6 +2338,7 @@ def test_video_camera_idle_monitor_stops_owned_session_after_grace() -> None:
                 entity.stream is actual_stream and entity._session is actual_session
             ),
             stop_active=entity._async_stop_active_session,
+            has_external_consumers=lambda: relay.direct_subscriber_count > 0,
             idle_grace=0,
             poll_interval=0,
         )

@@ -187,6 +187,7 @@ class _Subscriber:
     """One local relay consumer."""
 
     queue: asyncio.Queue[bytes | None]
+    ha_stream_owned: bool = False
     closed: bool = False
     queued_bytes: int = 0
 
@@ -373,9 +374,11 @@ class DreameLawnMowerFlvRelay:
         self._idle_callback = idle
         self._idle_grace = idle_grace
         self._token = secrets.token_urlsafe(32)
+        self._ha_stream_token = secrets.token_urlsafe(32)
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
         self._url: str | None = None
+        self._ha_stream_url: str | None = None
         self._subscribers: set[_Subscriber] = set()
         self._listener_lock = asyncio.Lock()
         self._lock = asyncio.Lock()
@@ -401,12 +404,20 @@ class DreameLawnMowerFlvRelay:
         return len(self._subscribers)
 
     @property
+    def direct_subscriber_count(self) -> int:
+        """Return consumers that are not HA Stream's owned source connection."""
+        return sum(
+            not subscriber.ha_stream_owned for subscriber in self._subscribers
+        )
+
+    @property
     def diagnostics(self) -> dict[str, object]:
         """Return startup and fan-out telemetry safe for entity attributes."""
         now = asyncio.get_running_loop().time()
         return {
             "relay_ready": self._url is not None,
             "relay_consumers": self.subscriber_count,
+            "relay_direct_consumers": self.direct_subscriber_count,
             "relay_upstream_active": self._pump_task is not None
             and not self._pump_task.done(),
             "relay_startup_elapsed_ms": (
@@ -430,6 +441,11 @@ class DreameLawnMowerFlvRelay:
                 self._async_handle,
                 allow_head=False,
             )
+            application.router.add_get(
+                f"/{self._ha_stream_token}.flv",
+                self._async_handle_ha_stream,
+                allow_head=False,
+            )
             runner = web.AppRunner(application, access_log=None)
             await runner.setup()
             site = web.TCPSite(runner, "127.0.0.1", 0)
@@ -444,7 +460,17 @@ class DreameLawnMowerFlvRelay:
             self._runner = runner
             self._site = site
             self._url = f"http://127.0.0.1:{port}/{self._token}.flv"
+            self._ha_stream_url = (
+                f"http://127.0.0.1:{port}/{self._ha_stream_token}.flv"
+            )
             return self._url
+
+    async def async_start_ha_stream(self) -> str:
+        """Return the dedicated source URL owned by Home Assistant Stream."""
+        await self.async_start()
+        if self._ha_stream_url is None:
+            raise RuntimeError("The local mower HA stream relay is unavailable.")
+        return self._ha_stream_url
 
     async def async_close(self) -> None:
         """Close subscribers, upstream playback, and the loopback listener."""
@@ -454,6 +480,7 @@ class DreameLawnMowerFlvRelay:
             self._runner = None
             self._site = None
             self._url = None
+            self._ha_stream_url = None
         if runner is not None:
             await runner.cleanup()
 
@@ -484,7 +511,31 @@ class DreameLawnMowerFlvRelay:
         self._reset_observation()
 
     async def _async_handle(self, _request: web.Request) -> web.StreamResponse:
-        subscriber = _Subscriber(asyncio.Queue(maxsize=_QUEUE_DEPTH))
+        return await self._async_handle_request(
+            _request,
+            ha_stream_owned=False,
+        )
+
+    async def _async_handle_ha_stream(
+        self,
+        _request: web.Request,
+    ) -> web.StreamResponse:
+        """Serve HA Stream's owned source connection on its dedicated URL."""
+        return await self._async_handle_request(
+            _request,
+            ha_stream_owned=True,
+        )
+
+    async def _async_handle_request(
+        self,
+        _request: web.Request,
+        *,
+        ha_stream_owned: bool,
+    ) -> web.StreamResponse:
+        subscriber = _Subscriber(
+            asyncio.Queue(maxsize=_QUEUE_DEPTH),
+            ha_stream_owned=ha_stream_owned,
+        )
         while True:
             await self._idle_ready.wait()
             async with self._lock:
@@ -577,11 +628,11 @@ class DreameLawnMowerFlvRelay:
             async with self._lock:
                 if self._pump_task is asyncio.current_task():
                     self._pump_task = None
-                subscribers = tuple(self._subscribers)
-                self._subscribers.clear()
-                for subscriber in subscribers:
-                    subscriber.closed = True
-                    self._finish_subscriber(subscriber)
+                    subscribers = tuple(self._subscribers)
+                    self._subscribers.clear()
+                    for subscriber in subscribers:
+                        subscriber.closed = True
+                        self._finish_subscriber(subscriber)
 
     async def _async_stop_when_idle(self) -> None:
         """Retire WebRTC or HLS playback after the last local viewer leaves."""

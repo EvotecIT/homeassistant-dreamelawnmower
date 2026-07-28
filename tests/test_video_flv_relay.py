@@ -161,6 +161,8 @@ async def _relay_fans_out_one_upstream_and_retires_after_last_viewer() -> None:
             )
             assert len(set(relay_urls)) == 1
             relay_url = relay_urls[0]
+            ha_stream_url = await relay.async_start_ha_stream()
+            assert ha_stream_url != relay_url
 
             head = await client.head(relay_url)
             assert head.status == 405
@@ -170,12 +172,20 @@ async def _relay_fans_out_one_upstream_and_retires_after_last_viewer() -> None:
             assert await first.content.readexactly(len(initial_media)) == initial_media
             await asyncio.wait_for(media_ready.wait(), timeout=1)
 
-            second = await client.get(relay_url)
+            second = await client.get(ha_stream_url)
             second_bootstrap = await second.content.readexactly(len(initial_media))
             assert second_bootstrap == initial_media
             assert upstream_connections == 1
+            assert relay.subscriber_count == 2
+            assert relay.direct_subscriber_count == 1
 
             first.close()
+            for _attempt in range(100):
+                if relay.direct_subscriber_count == 0:
+                    break
+                await asyncio.sleep(0.01)
+            assert relay.subscriber_count == 1
+            assert relay.direct_subscriber_count == 0
             second.close()
             await asyncio.wait_for(relay_idle.wait(), timeout=1)
 
@@ -322,6 +332,58 @@ def test_relay_retires_upstream_when_backpressure_evicts_last_subscriber() -> No
             await relay.async_close()
 
     assert asyncio.run(_run()) == (True, True)
+
+
+def test_old_pump_teardown_preserves_replacement_pump_and_subscribers() -> None:
+    async def _run() -> tuple[bool, bool, bool]:
+        cleanup_started = asyncio.Event()
+        release_cleanup = asyncio.Event()
+        release_replacement = asyncio.Event()
+        relay: DreameLawnMowerFlvRelay
+
+        async def _failed(_error: str) -> None:
+            await relay.async_stop_upstream()
+            cleanup_started.set()
+            await release_cleanup.wait()
+
+        relay = DreameLawnMowerFlvRelay(
+            SimpleNamespace(async_create_task=asyncio.create_task),
+            source_factory=lambda: asyncio.sleep(0, result=None),
+            media_ready=lambda _diagnostics: asyncio.sleep(0),
+            failed=_failed,
+            idle=lambda: asyncio.sleep(0),
+        )
+
+        async def _replacement_pump() -> None:
+            await release_replacement.wait()
+
+        with patch(
+            "custom_components.dreame_lawn_mower.video_flv_relay."
+            "async_get_clientsession",
+            return_value=object(),
+        ):
+            old_pump = asyncio.create_task(relay._async_pump())
+            relay._pump_task = old_pump
+            try:
+                await asyncio.wait_for(cleanup_started.wait(), timeout=1)
+                replacement = asyncio.create_task(_replacement_pump())
+                subscriber = _Subscriber(asyncio.Queue(maxsize=1))
+                relay._pump_task = replacement
+                relay._subscribers.add(subscriber)
+
+                release_cleanup.set()
+                await old_pump
+                return (
+                    relay._pump_task is replacement,
+                    subscriber in relay._subscribers,
+                    not subscriber.closed,
+                )
+            finally:
+                release_cleanup.set()
+                release_replacement.set()
+                await relay.async_stop_upstream()
+
+    assert asyncio.run(_run()) == (True, True, True)
 
 
 def test_relay_removes_subscriber_when_response_preparation_fails() -> None:

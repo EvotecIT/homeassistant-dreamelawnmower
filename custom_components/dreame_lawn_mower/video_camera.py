@@ -199,7 +199,9 @@ class DreameLawnMowerVideoCamera(
                 self.stream is stream and owner is self._flv_relay
             ),
             stop_active=self._async_stop_active_session,
-            has_external_consumers=lambda: self._flv_relay.subscriber_count > 0,
+            has_external_consumers=lambda: (
+                self._flv_relay.direct_subscriber_count > 0
+            ),
         )
         self._flv_relay = self._create_flv_relay()
         self._video_start_requested_at: float | None = None
@@ -460,8 +462,13 @@ class DreameLawnMowerVideoCamera(
                 self._set_stream_error(reason, stage="mower_state_gate")
                 return None
 
-        source = await self.stream_source()
-        if not source:
+        try:
+            source = await self._ensure_flv_relay().async_start_ha_stream()
+        except Exception as err:  # noqa: BLE001 - expose a clean source miss.
+            self._set_stream_error(
+                f"Could not expose the local mower video relay: {err}",
+                stage="relay_setup",
+            )
             return None
         dynamic_settings = await self.hass.data[
             DATA_CAMERA_PREFS
