@@ -202,6 +202,13 @@ def _uninitialized_entity(*, snapshot: object | None = None):
     entity._video_capability_observed = video_camera_module.snapshot_advertises_video(
         snapshot
     )
+    entity._video_recovery_failure_count = 0
+    entity._video_recovery_success_count = 0
+    entity._video_recovery_consecutive_failures = 0
+    entity._video_recovery_pending = False
+    entity._video_retry_not_before = 0.0
+    entity._last_stream_recovered_at = None
+    entity._video_first_media_at = None
     entity._last_stream_cleanup_reason = None
     entity._last_stream_cleanup_error = None
     entity._last_stream_cleanup_error_stage = None
@@ -1546,23 +1553,20 @@ def test_video_camera_relay_failure_retires_active_session() -> None:
     assert asyncio.run(_run()) == (["relay_failure"], "relay_playback")
 
 
-def test_video_camera_cancelled_relay_callback_finishes_session_cleanup() -> None:
+def test_video_camera_cancelled_relay_callback_finishes_runtime_cleanup() -> None:
     async def _run() -> tuple[int, int, bool, bool]:
         entity = _uninitialized_entity()
-        stream_stop_started = asyncio.Event()
-        release_stream_stop = asyncio.Event()
+        cleanup_started = asyncio.Event()
+        release_cleanup = asyncio.Event()
         runtime_stops = 0
         video_disables = 0
 
         class _Stream:
-            async def stop(self) -> None:
-                stream_stop_started.set()
-                await release_stream_stop.wait()
+            @staticmethod
+            def outputs() -> dict[str, object]:
+                return {"hls": object()}
 
-        class _Runtime:
-            def stop_live_stream(self, _session: object) -> None:
-                nonlocal runtime_stops
-                runtime_stops += 1
+        runtime = object()
 
         class _Client:
             async def async_set_camera_stream_enabled(self, enabled: bool) -> None:
@@ -1570,37 +1574,34 @@ def test_video_camera_cancelled_relay_callback_finishes_session_cleanup() -> Non
                 assert enabled is False
                 video_disables += 1
 
-        async def _executor(function, *args):
-            return function(*args)
-
-        async def _stop_relay() -> None:
-            return None
+        async def _stop_session(
+            actual_runtime: object,
+            _session: object,
+        ) -> bool:
+            nonlocal runtime_stops
+            assert actual_runtime is runtime
+            cleanup_started.set()
+            await release_cleanup.wait()
+            runtime_stops += 1
+            return True
 
         stream = _Stream()
         entity.stream = stream
-        entity._runtime = _Runtime()
+        entity._runtime = runtime
         entity._session = SimpleNamespace(
             transport=VIDEO_TRANSPORT_CLOUD,
             camera_toggle_managed=True,
         )
         entity._attr_is_streaming = True
-        entity._flv_relay = SimpleNamespace(async_stop_upstream=_stop_relay)
         entity.coordinator.client = _Client()
-        entity.hass = SimpleNamespace(
-            async_add_executor_job=_executor,
-            data={
-                video_camera_module.STREAM_DOMAIN: {
-                    video_camera_module.ATTR_STREAMS: [stream],
-                }
-            },
-        )
+        entity._async_stop_session = _stop_session
         entity.async_write_ha_state = lambda: None
 
         callback = asyncio.create_task(entity._async_relay_failed("source failed"))
-        await asyncio.wait_for(stream_stop_started.wait(), timeout=1)
+        await asyncio.wait_for(cleanup_started.wait(), timeout=1)
         callback.cancel()
         await asyncio.sleep(0)
-        release_stream_stop.set()
+        release_cleanup.set()
         with suppress(asyncio.CancelledError):
             await asyncio.wait_for(callback, timeout=1)
         return (
@@ -1609,18 +1610,19 @@ def test_video_camera_cancelled_relay_callback_finishes_session_cleanup() -> Non
             callback.cancelled(),
             entity._runtime is None
             and entity._session is None
-            and entity.stream is None,
+            and entity.stream is stream,
         )
 
     assert asyncio.run(_run()) == (1, 1, True, True)
 
 
-def test_video_camera_relay_failure_discards_stale_ha_stream_without_session() -> None:
-    async def _run() -> list[str]:
+def test_video_camera_relay_failure_preserves_ha_stream_without_session() -> None:
+    async def _run() -> tuple[list[str], bool, bool]:
         entity = _uninitialized_entity()
         entity.async_write_ha_state = lambda: None
         entity._session = None
-        entity.stream = object()
+        stream = object()
+        entity.stream = stream
         reasons: list[str] = []
 
         async def _stop(*, reason: str = "session_stop") -> None:
@@ -1629,9 +1631,53 @@ def test_video_camera_relay_failure_discards_stale_ha_stream_without_session() -
 
         entity._async_stop_active_session = _stop
         await entity._async_relay_failed("source unavailable")
-        return reasons
+        return reasons, entity.stream is stream, entity._video_recovery_pending
 
-    assert asyncio.run(_run()) == ["relay_failure"]
+    assert asyncio.run(_run()) == ([], True, True)
+
+
+def test_video_camera_recovery_backoff_is_bounded_and_resets_after_stability() -> None:
+    async def _run() -> tuple[list[float], int, int, bool, str | None]:
+        entity = _uninitialized_entity()
+        entity.async_write_ha_state = lambda: None
+        retry_deadlines: list[float] = []
+
+        for now in (100.0, 101.0, 103.0, 107.0, 115.0, 131.0, 161.0, 191.0):
+            with patch.object(video_camera_module, "monotonic", return_value=now):
+                await entity._async_relay_failed("network dropped")
+            retry_deadlines.append(entity._video_retry_not_before - now)
+
+        with patch.object(video_camera_module, "monotonic", return_value=200.0):
+            await entity._async_relay_media_ready({})
+        entity._video_first_media_at = 200.0
+        with patch.object(video_camera_module, "monotonic", return_value=261.0):
+            await entity._async_relay_failed("network dropped after stable media")
+        retry_deadlines.append(entity._video_retry_not_before - 261.0)
+        return (
+            retry_deadlines,
+            entity._video_recovery_failure_count,
+            entity._video_recovery_success_count,
+            entity._video_recovery_pending,
+            entity._last_error,
+        )
+
+    deadlines, failures, successes, pending, last_error = asyncio.run(_run())
+
+    assert deadlines == [1.0, 2.0, 4.0, 8.0, 16.0, 30.0, 30.0, 30.0, 1.0]
+    assert failures == 9
+    assert successes == 1
+    assert pending is True
+    assert last_error == (
+        "The mower video connection was interrupted: "
+        "network dropped after stable media"
+    )
+
+
+def test_video_camera_stays_available_during_active_stream_connectivity_loss() -> None:
+    entity = _uninitialized_entity(snapshot=SimpleNamespace(available=False))
+    entity.stream = object()
+
+    assert entity.available is True
 
 
 def test_video_camera_relay_failure_bypasses_stale_cached_xp2p() -> None:

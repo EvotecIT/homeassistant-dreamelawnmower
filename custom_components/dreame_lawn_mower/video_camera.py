@@ -90,6 +90,9 @@ _SNAPSHOT_IMAGE_TIMEOUT = 15.0
 _HA_STREAM_STOP_TIMEOUT = 10.0
 _RUNTIME_SESSION_STOP_TIMEOUT = 20.0
 _CAMERA_STREAM_DISABLE_TIMEOUT = 10.0
+_VIDEO_RETRY_BASE_DELAY = 1.0
+_VIDEO_RETRY_MAX_DELAY = 30.0
+_VIDEO_RETRY_STABLE_RESET = 60.0
 _PENDING_RUNTIME_STOPS: dict[str, set[asyncio.Future[Any]]] = {}
 
 
@@ -209,6 +212,12 @@ class DreameLawnMowerVideoCamera(
         self._flv_relay = self._create_flv_relay()
         self._video_start_requested_at: float | None = None
         self._video_first_media_at: float | None = None
+        self._video_recovery_failure_count = 0
+        self._video_recovery_success_count = 0
+        self._video_recovery_consecutive_failures = 0
+        self._video_recovery_pending = False
+        self._video_retry_not_before = 0.0
+        self._last_stream_recovered_at: str | None = None
         self._last_error: str | None = None
         self._last_error_at: str | None = None
         self._last_error_code: str | None = None
@@ -353,6 +362,9 @@ class DreameLawnMowerVideoCamera(
 
     async def _async_start_relay_upstream(self) -> str | None:
         """Start the one mower-owned source after a real local consumer arrives."""
+        retry_delay = max(0.0, self._video_retry_not_before - monotonic())
+        if retry_delay:
+            await asyncio.sleep(retry_delay)
         self._video_start_requested_at = monotonic()
         self._video_first_media_at = None
         self.async_write_ha_state()
@@ -377,6 +389,11 @@ class DreameLawnMowerVideoCamera(
     ) -> None:
         """Commit a session only after the relay observes decodable FLV media."""
         self._video_first_media_at = monotonic()
+        if self._video_recovery_pending:
+            self._video_recovery_success_count += 1
+            self._last_stream_recovered_at = datetime.now(UTC).isoformat()
+        self._video_recovery_pending = False
+        self._video_retry_not_before = 0.0
         provisioning_inputs: DreameLawnMowerCameraStreamRuntimeInputs | None = None
         async with self._stream_lock:
             self._unverified_playback_session = None
@@ -390,6 +407,8 @@ class DreameLawnMowerVideoCamera(
                     "available": True,
                     "verification_source": "local_flv_relay",
                     "playback_session_verified": True,
+                    "recovery_pending": False,
+                    "retry_after_seconds": 0.0,
                 }
             )
         if provisioning_inputs is not None:
@@ -402,6 +421,40 @@ class DreameLawnMowerVideoCamera(
 
     async def _async_relay_failed(self, error: str) -> None:
         """Retire a failed upstream while leaving the relay URL reusable."""
+        now = monotonic()
+        stable_for = (
+            now - self._video_first_media_at
+            if self._video_first_media_at is not None
+            else 0.0
+        )
+        if stable_for >= _VIDEO_RETRY_STABLE_RESET:
+            self._video_recovery_consecutive_failures = 1
+        else:
+            self._video_recovery_consecutive_failures += 1
+        retry_delay = min(
+            _VIDEO_RETRY_MAX_DELAY,
+            _VIDEO_RETRY_BASE_DELAY
+            * (
+                2
+                ** min(
+                    self._video_recovery_consecutive_failures - 1,
+                    5,
+                )
+            ),
+        )
+        self._video_recovery_failure_count += 1
+        self._video_recovery_pending = True
+        self._video_retry_not_before = now + retry_delay
+        if self._last_stream_health is None:
+            self._last_stream_health = {}
+        self._last_stream_health.update(
+            {
+                "available": False,
+                "playback_session_verified": False,
+                "recovery_pending": True,
+                "retry_after_seconds": retry_delay,
+            }
+        )
         unverified_playback_failed = (
             getattr(self, "_unverified_playback_session", None) is not None
         )
@@ -417,17 +470,68 @@ class DreameLawnMowerVideoCamera(
             self._bypass_cached_xp2p = True
         if lan_playback_failed:
             self._bypass_lan = True
-        self._set_stream_error(
-            f"The local mower video relay stopped before playback completed: {error}",
-            stage="relay_playback",
+        failure_context = (
+            "The mower video connection was interrupted"
+            if self._video_first_media_at is not None
+            else "The local mower video relay stopped before playback completed"
         )
+        self._set_stream_error(f"{failure_context}: {error}", stage="relay_playback")
         async with self._stream_lock:
-            if self._session is not None or getattr(self, "stream", None) is not None:
+            if getattr(self, "stream", None) is not None:
+                # Home Assistant Stream already owns discontinuity handling and
+                # increasing reconnect delays. Preserve that stable local
+                # stream and retire only the broken mower runtime session so
+                # its worker can reopen the relay URL after spotty Wi-Fi.
+                await self._async_retire_failed_runtime_session()
+            elif self._session is not None:
                 await self._async_stop_active_session(reason="relay_failure")
             await self._async_clear_failed_playback_caches(
                 cached_xp2p=cached_playback_failed,
                 lan=lan_playback_failed,
             )
+
+    async def _async_retire_failed_runtime_session(self) -> None:
+        """Retire one failed mower session while HA Stream stays reconnectable."""
+        self._last_stream_cleanup_reason = "relay_failure"
+        self._last_stream_cleanup_error = None
+        self._last_stream_cleanup_error_stage = None
+        runtime = self._runtime
+        session = self._session
+        self._runtime = None
+        self._session = None
+        self._unverified_playback_session = None
+        self._pending_provisioning_inputs = None
+        self._attr_is_streaming = False
+        try:
+            if runtime is None or session is None:
+                return
+            cleanup_task = asyncio.create_task(
+                self._async_finish_failed_runtime_cleanup(runtime, session)
+            )
+            try:
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError:
+                await cleanup_task
+                raise
+        finally:
+            self._last_stream_cleanup_at = datetime.now(UTC).isoformat()
+            self.async_write_ha_state()
+
+    async def _async_finish_failed_runtime_cleanup(
+        self,
+        runtime: _DreameVideoRuntime,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+    ) -> None:
+        """Finish bounded native cleanup without stopping the HA decoder."""
+        await self._async_stop_session(runtime, session)
+        camera_toggle_managed = getattr(
+            session,
+            "camera_toggle_managed",
+            getattr(session, "transport", VIDEO_TRANSPORT_CLOUD)
+            != VIDEO_TRANSPORT_LAN,
+        )
+        if camera_toggle_managed:
+            await self._async_disable_camera_stream()
 
     async def _async_clear_failed_playback_caches(
         self,

@@ -676,6 +676,21 @@ class DreameLawnMowerFlvRelay:
             safe_error = _safe_relay_failure(err)
             self._last_failure = safe_error
             _LOGGER.debug("Dreame mower FLV relay stopped: %s", safe_error)
+            # Detach the failed pump before cleanup may await native runtime
+            # teardown. A reconnecting HA Stream or WebRTC provider can then
+            # subscribe to the same stable relay URL without receiving stale
+            # decoder bootstrap data or being erased by the old pump's finally
+            # block. Its replacement source factory remains serialized by the
+            # camera's stream lock until the failed runtime is fully retired.
+            async with self._lock:
+                if self._pump_task is asyncio.current_task():
+                    self._pump_task = None
+                    subscribers = tuple(self._subscribers)
+                    self._subscribers.clear()
+                    for subscriber in subscribers:
+                        subscriber.closed = True
+                        self._finish_subscriber(subscriber)
+                    self._reset_observation()
             await self._failure_callback(safe_error)
         finally:
             async with self._lock:
@@ -686,6 +701,7 @@ class DreameLawnMowerFlvRelay:
                     for subscriber in subscribers:
                         subscriber.closed = True
                         self._finish_subscriber(subscriber)
+                    self._reset_observation()
 
     async def _async_stop_when_idle(self) -> None:
         """Retire WebRTC or HLS playback after the last local viewer leaves."""

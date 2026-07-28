@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from time import monotonic
 from typing import Any
 
 from . import video_stream_helpers as _video_helpers
@@ -87,6 +88,12 @@ class DreameLawnMowerVideoStateMixin:
         """Return whether live video can be requested from Home Assistant."""
         if not self._runtime_configured:
             return False
+        # Do not make an already-open camera disappear during a brief mower
+        # connectivity loss. Existing HA Stream/WebRTC consumers need the
+        # entity to remain addressable while their bounded reconnect path
+        # refreshes safety state and waits for Wi-Fi to recover.
+        if self._session is not None or getattr(self, "stream", None) is not None:
+            return True
         snapshot = self.coordinator.data
         if snapshot is not None and not getattr(snapshot, "available", True):
             return False
@@ -156,6 +163,17 @@ class DreameLawnMowerVideoStateMixin:
             ),
             "video_runtime_preparation_error": self._runtime_preparation_error,
             "stream_session_active": self._session is not None,
+            "video_recovery_pending": self._video_recovery_pending,
+            "video_recovery_failure_count": self._video_recovery_failure_count,
+            "video_recovery_success_count": self._video_recovery_success_count,
+            "video_recovery_consecutive_failures": (
+                self._video_recovery_consecutive_failures
+            ),
+            "video_recovery_retry_after_seconds": max(
+                0.0,
+                round(self._video_retry_not_before - monotonic(), 3),
+            ),
+            "last_stream_recovered_at": self._last_stream_recovered_at,
             "video_delivery": {
                 "preferred": "webrtc",
                 "fallback": "hls",
