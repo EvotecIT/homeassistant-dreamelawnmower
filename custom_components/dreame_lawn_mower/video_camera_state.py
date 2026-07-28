@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import video_stream_helpers as _video_helpers
-from .const import DOMAIN, VIDEO_TRANSPORT_AUTO
+from .const import DOMAIN
 from .dreame_lawn_mower_client.models import (
     camera_stream_block_reason as _camera_stream_block_reason,
 )
@@ -97,9 +97,11 @@ class DreameLawnMowerVideoStateMixin:
             self._provisioning_cache.inputs is not None
             and self._provisioning_cache.device_config is not None
         )
-        if self._video_transport == VIDEO_TRANSPORT_AUTO and (
-            cached_lan_ready or cached_xp2p_ready
-        ):
+        # A complete persisted route is durable capability evidence even when
+        # the selected transport policy is cloud-only. Some mower records omit
+        # videoStatus after restart, but a previously provisioned route still
+        # proves that this device has a camera.
+        if cached_lan_ready or cached_xp2p_ready:
             return True
         if not super().available:
             return False

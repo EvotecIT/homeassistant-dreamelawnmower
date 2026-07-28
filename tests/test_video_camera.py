@@ -621,6 +621,21 @@ def test_cached_auto_video_remains_available_when_coordinator_polling_fails() ->
     assert entity.available is True
 
 
+def test_cached_cloud_video_remains_available_without_capability_metadata() -> None:
+    entity = _uninitialized_entity(
+        snapshot=SimpleNamespace(
+            available=True,
+            capabilities=(),
+            raw_info={"deviceInfo": {}, "videoStatus": None},
+        )
+    )
+    entity._entry.options[CONF_VIDEO_TRANSPORT] = VIDEO_TRANSPORT_CLOUD
+    entity._provisioning_cache.inputs = object()
+    entity._provisioning_cache.device_config = object()
+
+    assert entity.available is True
+
+
 def test_cached_auto_video_is_unavailable_for_confirmed_offline_snapshot() -> None:
     payload = load_json_fixture("a2_paused_diagnostics.json")
     snapshot = SimpleNamespace(

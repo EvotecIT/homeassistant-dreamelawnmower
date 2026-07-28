@@ -511,6 +511,69 @@ def test_download_point_cloud_uses_legacy_stored_bin_after_property_timeout(
     assert result.source == "stored"
 
 
+def test_download_point_cloud_uses_legacy_stored_bin_after_stale_announcement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    actions: list[dict[str, Any]] = []
+
+    def call_app_action(
+        payload: dict[str, Any],
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        actions.append(payload)
+        return {
+            "r": 0,
+            "d": {"name": ["private/stale-announcement.bin", ""]},
+        }
+
+    client._sync_call_app_action = call_app_action
+    signed_names: list[str] = []
+
+    def get_interim_file_url(name: str, **options: Any) -> str | None:
+        signed_names.append(name)
+        if len(signed_names) == 1:
+            return None
+        return "https://downloads.example.invalid/stored"
+
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {
+                "key": key,
+                "value": "private/stale-announcement.bin",
+                "updateDate": 1_000,
+            }
+        ],
+        get_interim_file_url=get_interim_file_url,
+    )
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(
+        0,
+        45,
+        1,
+        10,
+        1024,
+        allow_stored=True,
+    )
+
+    assert actions == [{"m": "g", "t": "OBJ", "d": {"type": "3dmap"}}]
+    assert signed_names == [
+        "private/stale-announcement.bin",
+        "private/stale-announcement.bin",
+    ]
+    assert result.content == content
+    assert result.source == "stored"
+
+
 def test_download_point_cloud_reuses_privately_cached_metadata_object(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -619,7 +682,12 @@ def test_download_point_cloud_regenerates_when_stored_object_is_invalid(
 ) -> None:
     client = _client()
     actions: list[dict[str, Any]] = []
-    responses = iter([{"r": 0}])
+    responses = iter(
+        [
+            {"r": 0, "d": {"name": ["private/stored-map.bin"]}},
+            {"r": 0},
+        ]
+    )
 
     def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         actions.append(payload)
@@ -651,7 +719,7 @@ def test_download_point_cloud_regenerates_when_stored_object_is_invalid(
     client._sync_call_app_action = call_app_action
     client._sync_get_cloud_protocol = lambda **kwargs: cloud
     fresh_content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
-    downloads = iter([b"not a pcd", fresh_content])
+    downloads = iter([b"not a pcd", b"still not a pcd", fresh_content])
     monkeypatch.setattr(
         _internal_client_module,
         "_open_point_cloud_response",
@@ -670,7 +738,10 @@ def test_download_point_cloud_regenerates_when_stored_object_is_invalid(
         allow_stored=True,
     )
 
-    assert actions == [{"m": "a", "p": 0, "o": 10, "d": {"idx": 0}}]
+    assert actions == [
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+    ]
     assert result.content == fresh_content
 
 

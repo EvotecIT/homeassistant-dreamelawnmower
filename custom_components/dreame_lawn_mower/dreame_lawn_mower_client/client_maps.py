@@ -834,6 +834,38 @@ class _DreameLawnMowerClientMapsMixin:
             )
             if stored is not None:
                 return stored
+        if allow_stored and use_announcement_path:
+            # Some A2 firmware retains an expired 99.20 announcement while
+            # OBJ still exposes a signable, indexed PCD. A supported but stale
+            # announcement must not suppress that safe stored-map fallback.
+            legacy_deadline = min(
+                deadline,
+                time.monotonic() + _POINT_CLOUD_LEGACY_POLL_TIMEOUT_SECONDS,
+            )
+            try:
+                legacy_result = self._sync_call_point_cloud_action(
+                    {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+                    operation="read the stored point-cloud object state",
+                    deadline=legacy_deadline,
+                    require_data=True,
+                )
+            except DreameLawnMowerPointCloudError:
+                legacy_result = None
+            legacy_name = _point_cloud_object_name(
+                legacy_result,
+                map_index,
+            )
+            if legacy_name is not None:
+                stored = self._sync_try_download_stored_point_cloud(
+                    cloud,
+                    legacy_name,
+                    map_index=map_index,
+                    deadline=deadline,
+                    download_timeout=download_timeout,
+                    max_bytes=max_bytes,
+                )
+                if stored is not None:
+                    return stored
         if allow_stored:
             deadline = min(deadline, time.monotonic() + timeout)
         baseline_name = None
