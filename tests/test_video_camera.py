@@ -1829,6 +1829,9 @@ def test_video_camera_snapshot_image_timeout_returns_last_image() -> None:
     async def _run() -> tuple[bytes | None, bool, int]:
         entity = _uninitialized_entity()
         entity._last_image = b"\xff\xd8cached-jpeg\xff\xd9"
+        entity._flv_relay = SimpleNamespace(
+            diagnostics={"relay_first_media_ready": True}
+        )
         cancelled = False
         stops = 0
 
@@ -1857,6 +1860,38 @@ def test_video_camera_snapshot_image_timeout_returns_last_image() -> None:
         return image, cancelled, stops
 
     assert asyncio.run(_run()) == (b"\xff\xd8cached-jpeg\xff\xd9", True, 1)
+
+
+def test_video_camera_cold_snapshot_includes_upstream_startup_budget() -> None:
+    async def _run() -> bytes | None:
+        entity = _uninitialized_entity()
+        entity._last_image = None
+        entity._flv_relay = SimpleNamespace(
+            diagnostics={"relay_first_media_ready": False}
+        )
+
+        class _Stream:
+            async def async_get_image(self, **_kwargs) -> bytes:
+                await asyncio.sleep(0.02)
+                return b"\xff\xd8cold-snapshot\xff\xd9"
+
+            async def stop(self) -> None:
+                return None
+
+        stream = _Stream()
+
+        async def _create_stream() -> _Stream:
+            entity.stream = stream
+            return stream
+
+        entity._async_create_stream_locked = _create_stream
+        with (
+            patch.object(video_camera_module, "_SNAPSHOT_IMAGE_TIMEOUT", 0.01),
+            patch.object(video_camera_module, "_VIDEO_UPSTREAM_START_TIMEOUT", 0.03),
+        ):
+            return await entity.async_camera_image()
+
+    assert asyncio.run(_run()) == b"\xff\xd8cold-snapshot\xff\xd9"
 
 
 def test_video_camera_stop_unregisters_cached_home_assistant_stream() -> None:

@@ -287,3 +287,112 @@ def test_relay_disconnects_subscriber_before_byte_queue_grows_unbounded() -> Non
         return subscriber.closed, subscriber.queued_bytes, terminal is None
 
     assert asyncio.run(_run()) == (True, 0, True)
+
+
+def test_relay_removes_subscriber_when_response_preparation_fails() -> None:
+    async def _run() -> tuple[int, bool]:
+        release_source = asyncio.Event()
+        idle = asyncio.Event()
+
+        async def _source() -> None:
+            await release_source.wait()
+            return None
+
+        relay = DreameLawnMowerFlvRelay(
+            SimpleNamespace(async_create_task=asyncio.create_task),
+            source_factory=_source,
+            media_ready=lambda _diagnostics: asyncio.sleep(0),
+            failed=lambda _error: asyncio.sleep(0),
+            idle=lambda: asyncio.sleep(0, result=idle.set()),
+            idle_grace=0.01,
+        )
+        try:
+            with patch.object(
+                web.StreamResponse,
+                "prepare",
+                side_effect=ConnectionResetError("client disconnected"),
+            ):
+                await relay._async_handle(SimpleNamespace())
+            await asyncio.wait_for(idle.wait(), timeout=1)
+            return relay.subscriber_count, relay.diagnostics[
+                "relay_upstream_active"
+            ]
+        finally:
+            release_source.set()
+            await relay.async_close()
+
+    assert asyncio.run(_run()) == (0, False)
+
+
+def test_relay_cancels_media_deadline_before_ready_callback() -> None:
+    async def _run() -> tuple[list[str], bool]:
+        pytest_socket.enable_socket()
+        release = asyncio.Event()
+        callback_finished = asyncio.Event()
+        sequence = _tag(9, 0, b"\x17\x00\x00\x00\x00\x01\x64\x00\x1f")
+        keyframe = _tag(9, 0, b"\x17\x01\x00\x00\x00\x00\x00\x00\x01")
+
+        async def _source(request: web.Request) -> web.StreamResponse:
+            response = web.StreamResponse(headers={"Content-Type": "video/x-flv"})
+            await response.prepare(request)
+            await response.write(FLV_HEADER + sequence + keyframe)
+            await release.wait()
+            return response
+
+        application = web.Application()
+        application.router.add_get("/source.flv", _source)
+        runner = web.AppRunner(application)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        server = site._server  # noqa: SLF001
+        assert server is not None
+        port = int(server.sockets[0].getsockname()[1])
+        client = ClientSession(
+            connector=TCPConnector(resolver=ThreadedResolver()),
+        )
+        failures: list[str] = []
+
+        async def _ready(_diagnostics: dict[str, object]) -> None:
+            await asyncio.sleep(0.04)
+            callback_finished.set()
+
+        relay = DreameLawnMowerFlvRelay(
+            SimpleNamespace(async_create_task=asyncio.create_task),
+            source_factory=lambda: asyncio.sleep(
+                0,
+                result=f"http://127.0.0.1:{port}/source.flv",
+            ),
+            media_ready=_ready,
+            failed=lambda error: asyncio.sleep(0, result=failures.append(error)),
+            idle=lambda: asyncio.sleep(0),
+        )
+        response: object | None = None
+        try:
+            with (
+                patch(
+                    "custom_components.dreame_lawn_mower.video_flv_relay."
+                    "async_get_clientsession",
+                    return_value=client,
+                ),
+                patch(
+                    "custom_components.dreame_lawn_mower.video_flv_relay."
+                    "_MEDIA_READY_TIMEOUT",
+                    0.01,
+                ),
+            ):
+                response = await client.get(await relay.async_start())
+                await response.content.readexactly(
+                    len(FLV_HEADER + sequence + keyframe)
+                )
+                await asyncio.wait_for(callback_finished.wait(), timeout=1)
+                return failures, relay.diagnostics["relay_first_media_ready"]
+        finally:
+            release.set()
+            if response is not None:
+                response.close()
+            await relay.async_close()
+            await client.close()
+            await runner.cleanup()
+
+    assert asyncio.run(_run()) == ([], True)

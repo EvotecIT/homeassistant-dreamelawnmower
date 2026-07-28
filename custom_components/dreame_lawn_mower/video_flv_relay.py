@@ -515,8 +515,8 @@ class DreameLawnMowerFlvRelay:
                 "X-Content-Type-Options": "nosniff",
             },
         )
-        await response.prepare(_request)
         try:
+            await response.prepare(_request)
             while True:
                 chunk = await subscriber.queue.get()
                 if chunk is None:
@@ -543,8 +543,9 @@ class DreameLawnMowerFlvRelay:
                     self._idle_task = self._hass.async_create_task(
                         self._async_stop_when_idle()
                     )
-        with suppress(ConnectionError, RuntimeError):
-            await response.write_eof()
+        if response.prepared:
+            with suppress(ConnectionError, RuntimeError):
+                await response.write_eof()
         return response
 
     async def _async_pump(self) -> None:
@@ -570,8 +571,8 @@ class DreameLawnMowerFlvRelay:
                         ):
                             self._media_callback_sent = True
                             self._first_media_at = asyncio.get_running_loop().time()
-                            await self._media_ready_callback(self.diagnostics)
                             media_deadline.reschedule(None)
+                            await self._media_ready_callback(self.diagnostics)
                 raise RuntimeError("The mower video source ended.")
         except asyncio.CancelledError:
             raise

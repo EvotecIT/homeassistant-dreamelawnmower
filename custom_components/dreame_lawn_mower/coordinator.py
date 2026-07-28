@@ -205,6 +205,8 @@ class DreameLawnMowerCoordinator(
 
     def async_set_updated_data(self, data: DreameLawnMowerSnapshot) -> None:
         """Publish fetched snapshots only while they remain the newest."""
+        if self._device_snapshot_is_stale(data):
+            return
         generations = getattr(self, "_device_snapshot_generations", None)
         recorded = generations.get(id(data)) if generations else None
         generation = (
@@ -213,16 +215,25 @@ class DreameLawnMowerCoordinator(
             else None
         )
         if generation is not None:
-            published = getattr(self, "_published_device_snapshot_generation", 0)
-            if generation < published:
-                _LOGGER.debug(
-                    "Ignoring stale mower snapshot generation %s after %s",
-                    generation,
-                    published,
-                )
-                return
             self._published_device_snapshot_generation = generation
         super().async_set_updated_data(data)
+
+    def _device_snapshot_is_stale(self, snapshot: DreameLawnMowerSnapshot) -> bool:
+        """Return whether a newer fetched snapshot was already published."""
+        generations = getattr(self, "_device_snapshot_generations", None)
+        recorded = generations.get(id(snapshot)) if generations else None
+        if recorded is None or recorded[0] is not snapshot:
+            return False
+        generation = recorded[1]
+        published = getattr(self, "_published_device_snapshot_generation", 0)
+        if generation >= published:
+            return False
+        _LOGGER.debug(
+            "Ignoring stale mower snapshot generation %s after %s",
+            generation,
+            published,
+        )
+        return True
 
     def _handle_client_update(self) -> None:
         """Bridge device-thread MQTT updates onto the Home Assistant loop."""
@@ -253,6 +264,8 @@ class DreameLawnMowerCoordinator(
             async with self._device_refresh_lock:
                 snapshot = await self.client.async_get_cached_snapshot()
                 self._record_device_snapshot(snapshot)
+            if self._device_snapshot_is_stale(snapshot):
+                return
             if not snapshot.available:
                 self.runtime_status_blob = None
                 self.client.update_runtime_live_tracking(None, active=False)
@@ -267,12 +280,13 @@ class DreameLawnMowerCoordinator(
                 else None
             )
             try:
-                self.runtime_status_blob = (
-                    await self.client.async_get_runtime_status_blob(
-                        refresh=False,
-                        include_cloud=False,
-                    )
+                runtime_status_blob = await self.client.async_get_runtime_status_blob(
+                    refresh=False,
+                    include_cloud=False,
                 )
+                if self._device_snapshot_is_stale(snapshot):
+                    return
+                self.runtime_status_blob = runtime_status_blob
                 self.runtime_telemetry_cache.update(
                     self.runtime_status_blob,
                     allow_zero=runtime_active,
@@ -284,6 +298,8 @@ class DreameLawnMowerCoordinator(
                     map_index=runtime_map_index,
                 )
             except Exception as err:  # noqa: BLE001 - best-effort MQTT metadata
+                if self._device_snapshot_is_stale(snapshot):
+                    return
                 _LOGGER.debug("Failed to process realtime status blob: %s", err)
                 self.runtime_status_blob = None
                 self.client.update_runtime_live_tracking(
@@ -293,12 +309,13 @@ class DreameLawnMowerCoordinator(
                 )
 
             try:
-                self.bluetooth_connected = (
-                    await self.client.async_get_bluetooth_connected(
-                        refresh=False,
-                        include_cloud=False,
-                    )
+                bluetooth_connected = await self.client.async_get_bluetooth_connected(
+                    refresh=False,
+                    include_cloud=False,
                 )
+                if self._device_snapshot_is_stale(snapshot):
+                    return
+                self.bluetooth_connected = bluetooth_connected
             except Exception as err:  # noqa: BLE001 - best-effort MQTT metadata
                 _LOGGER.debug(
                     "Failed to process realtime Bluetooth state: %s",

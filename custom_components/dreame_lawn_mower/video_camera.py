@@ -541,8 +541,18 @@ class DreameLawnMowerVideoCamera(
         if ha_stream is None:
             return self._last_image
         snapshot_only_stream = ha_stream is not previous_stream
+        relay = getattr(self, "_flv_relay", None)
+        relay_media_ready = bool(
+            relay is not None
+            and relay.diagnostics.get("relay_first_media_ready")
+        )
+        image_timeout = (
+            _SNAPSHOT_IMAGE_TIMEOUT
+            if relay_media_ready
+            else _VIDEO_UPSTREAM_START_TIMEOUT + _SNAPSHOT_IMAGE_TIMEOUT
+        )
         try:
-            async with asyncio.timeout(_SNAPSHOT_IMAGE_TIMEOUT):
+            async with asyncio.timeout(image_timeout):
                 image = await ha_stream.async_get_image(
                     width=width,
                     height=height,

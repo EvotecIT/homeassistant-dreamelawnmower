@@ -268,6 +268,11 @@ def test_newer_video_safety_state_wins_over_delayed_cached_mqtt_update() -> None
 
         assert result is video_snapshot
         publish.assert_called_once_with(video_snapshot)
+        assert coordinator.runtime_status_blob is None
+        coordinator.runtime_telemetry_cache.update.assert_not_called()
+        coordinator.client.update_runtime_live_tracking.assert_not_called()
+        coordinator.client.async_get_bluetooth_connected.assert_not_awaited()
+        assert coordinator.bluetooth_connected is None
 
     asyncio.run(scenario())
 
