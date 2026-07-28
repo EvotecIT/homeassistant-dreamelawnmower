@@ -199,6 +199,7 @@ class DreameLawnMowerVideoCamera(
                 self.stream is stream and owner is self._flv_relay
             ),
             stop_active=self._async_stop_active_session,
+            has_external_consumers=lambda: self._flv_relay.subscriber_count > 0,
         )
         self._flv_relay = self._create_flv_relay()
         self._video_start_requested_at: float | None = None

@@ -506,6 +506,31 @@ def test_video_camera_cloud_start_surfaces_unprovisioned_device_triple() -> None
     assert issue == "device_triple_missing"
 
 
+def test_video_camera_first_relay_start_does_not_stop_its_own_stream() -> None:
+    async def _run() -> tuple[str | None, int]:
+        entity = _uninitialized_entity()
+        entity.stream = object()
+        stops = 0
+
+        async def _stop() -> None:
+            nonlocal stops
+            stops += 1
+
+        async def _runtime() -> object:
+            raise RuntimeError("runtime unavailable")
+
+        entity._async_stop_active_session = _stop
+        entity._async_get_runtime = _runtime
+        entity.async_write_ha_state = lambda: None
+
+        return await entity._async_start_stream(), stops
+
+    source, stops = asyncio.run(_run())
+
+    assert source is None
+    assert stops == 0
+
+
 def test_video_camera_auto_policy_prefers_direct_capable_sdk_negotiation() -> None:
     entity = _uninitialized_entity()
     entity._entry.options[CONF_VIDEO_TRANSPORT] = VIDEO_TRANSPORT_AUTO
@@ -2316,6 +2341,54 @@ def test_video_camera_idle_monitor_stops_owned_session_after_grace() -> None:
         monitor.schedule(stream, session)
         while stops == 0:
             await asyncio.sleep(0)
+        return stops
+
+    assert asyncio.run(_run()) == 1
+
+
+def test_video_camera_idle_monitor_keeps_direct_relay_viewer_alive() -> None:
+    async def _run() -> int:
+        entity = _uninitialized_entity()
+        session = SimpleNamespace(service_id="product-1/device-1")
+        direct_viewer = True
+        stops = 0
+
+        class _Stream:
+            @staticmethod
+            def outputs() -> dict[str, object]:
+                return {}
+
+        stream = _Stream()
+        entity.stream = stream
+        entity._session = session
+
+        async def _stop() -> None:
+            nonlocal stops
+            stops += 1
+            entity.stream = None
+            entity._session = None
+
+        monitor = DreameLawnMowerHaStreamIdleMonitor(
+            SimpleNamespace(async_create_task=asyncio.create_task),
+            stream_lock=entity._stream_lock,
+            is_current=lambda actual_stream, actual_session: (
+                entity.stream is actual_stream and entity._session is actual_session
+            ),
+            stop_active=_stop,
+            has_external_consumers=lambda: direct_viewer,
+            provider_grace=0,
+            idle_grace=0,
+            poll_interval=0,
+        )
+        monitor.schedule(stream, session)
+        for _attempt in range(10):
+            await asyncio.sleep(0)
+        assert stops == 0
+
+        direct_viewer = False
+        while stops == 0:
+            await asyncio.sleep(0)
+        await monitor.async_cancel()
         return stops
 
     assert asyncio.run(_run()) == 1

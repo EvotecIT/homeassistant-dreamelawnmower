@@ -137,7 +137,11 @@ class DreameLawnMowerVideoStartupMixin:
         ):
             return None
 
-        await self._async_stop_active_session()
+        # A relay pump calls this while its first local viewer is already
+        # subscribed. Preserve that relay/HA stream until an older runtime
+        # session actually exists to retire.
+        if self._session is not None:
+            await self._async_stop_active_session()
         try:
             runtime = await self._async_get_runtime()
             self._runtime_preparation_error = None

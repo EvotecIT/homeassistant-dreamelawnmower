@@ -534,15 +534,7 @@ class DreameLawnMowerFlvRelay:
             async with self._lock:
                 subscriber.closed = True
                 self._subscribers.discard(subscriber)
-                if (
-                    not self._subscribers
-                    and self._pump_task is not None
-                    and not self._pump_task.done()
-                    and self._idle_task is None
-                ):
-                    self._idle_task = self._hass.async_create_task(
-                        self._async_stop_when_idle()
-                    )
+                self._schedule_idle_if_empty_locked()
         if response.prepared:
             with suppress(ConnectionError, RuntimeError):
                 await response.write_eof()
@@ -641,6 +633,19 @@ class DreameLawnMowerFlvRelay:
                     subscriber.closed = True
                     self._subscribers.discard(subscriber)
                     self._finish_subscriber(subscriber)
+            self._schedule_idle_if_empty_locked()
+
+    def _schedule_idle_if_empty_locked(self) -> None:
+        """Start upstream retirement when no relay subscriber remains."""
+        if (
+            not self._subscribers
+            and self._pump_task is not None
+            and not self._pump_task.done()
+            and self._idle_task is None
+        ):
+            self._idle_task = self._hass.async_create_task(
+                self._async_stop_when_idle()
+            )
 
     @staticmethod
     def _finish_subscriber(subscriber: _Subscriber) -> None:

@@ -289,6 +289,41 @@ def test_relay_disconnects_subscriber_before_byte_queue_grows_unbounded() -> Non
     assert asyncio.run(_run()) == (True, 0, True)
 
 
+def test_relay_retires_upstream_when_backpressure_evicts_last_subscriber() -> None:
+    async def _run() -> tuple[bool, bool]:
+        idle = asyncio.Event()
+        release_pump = asyncio.Event()
+        relay = DreameLawnMowerFlvRelay(
+            SimpleNamespace(async_create_task=asyncio.create_task),
+            source_factory=lambda: asyncio.sleep(0, result=None),
+            media_ready=lambda _diagnostics: asyncio.sleep(0),
+            failed=lambda _error: asyncio.sleep(0),
+            idle=lambda: asyncio.sleep(0, result=idle.set()),
+            idle_grace=0,
+        )
+        subscriber = _Subscriber(asyncio.Queue(maxsize=1))
+
+        async def _pump() -> None:
+            await release_pump.wait()
+
+        relay._subscribers.add(subscriber)
+        relay._pump_task = asyncio.create_task(_pump())
+        try:
+            with patch(
+                "custom_components.dreame_lawn_mower.video_flv_relay."
+                "_MAX_SUBSCRIBER_QUEUE_BYTES",
+                1,
+            ):
+                await relay._async_broadcast(b"too-large")
+            await asyncio.wait_for(idle.wait(), timeout=1)
+            return subscriber.closed, relay._pump_task is None
+        finally:
+            release_pump.set()
+            await relay.async_close()
+
+    assert asyncio.run(_run()) == (True, True)
+
+
 def test_relay_removes_subscriber_when_response_preparation_fails() -> None:
     async def _run() -> tuple[int, bool]:
         release_source = asyncio.Event()

@@ -655,6 +655,7 @@ class DreameLawnMowerPointCloudView(HomeAssistantView):
                 headers={
                     "Cache-Control": cache_control,
                     "ETag": etag,
+                    "Vary": "Authorization",
                     "X-Content-Type-Options": "nosniff",
                     "X-Dreame-Operation-Elapsed-Ms": str(elapsed_ms),
                     "Server-Timing": f"dreame-point-cloud;dur={elapsed_ms}",
@@ -666,6 +667,7 @@ class DreameLawnMowerPointCloudView(HomeAssistantView):
             headers={
                 "Cache-Control": cache_control,
                 "ETag": etag,
+                "Vary": "Authorization",
                 "Content-Disposition": (
                     f'attachment; filename="dreame-map-{normalized_index}.pcd"'
                 ),

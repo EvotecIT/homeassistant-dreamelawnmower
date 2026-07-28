@@ -788,6 +788,7 @@ def test_point_cloud_view_returns_private_attachment_to_admin() -> None:
     assert response.body == b"private-pcd"
     assert response.headers["Cache-Control"] == "private, no-store"
     assert response.headers["ETag"].startswith('"sha256-')
+    assert response.headers["Vary"] == "Authorization"
     assert response.headers["Content-Disposition"] == (
         'attachment; filename="dreame-map-2.pcd"'
     )
@@ -817,6 +818,7 @@ def test_point_cloud_view_returns_not_modified_for_matching_private_etag() -> No
     assert response.status == 304
     assert response.body is None
     assert response.headers["ETag"] == f'"sha256-{download.content_sha256}"'
+    assert response.headers["Vary"] == "Authorization"
 
 
 def test_point_cloud_view_requires_admin() -> None:
