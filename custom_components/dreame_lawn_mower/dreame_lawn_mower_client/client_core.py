@@ -138,7 +138,7 @@ class _DreameLawnMowerClientCoreMixin:
         for delay in _MUTATION_CONFIRMATION_DELAYS_SECONDS:
             await asyncio.sleep(delay)
             try:
-                snapshot = await self.async_refresh()
+                snapshot = await self._async_refresh_authoritative_snapshot()
             except DreameLawnMowerConnectionError:
                 continue
             if confirmed(snapshot):
@@ -149,10 +149,20 @@ class _DreameLawnMowerClientCoreMixin:
             "Refresh the mower state before trying again."
         ) from original_error
 
-    def _sync_update_device(self):
+    async def _async_refresh_authoritative_snapshot(
+        self,
+    ) -> DreameLawnMowerSnapshot:
+        """Force a device-property read before confirming an ambiguous write."""
+        device = await asyncio.to_thread(self._sync_update_device, True)
+        return await asyncio.to_thread(self._snapshot_from_device, device)
+
+    def _sync_update_device(self, force_request_properties: bool = False):
         device = self._ensure_device()
         try:
-            device.update()
+            if force_request_properties:
+                device.update(force_request_properties=True)
+            else:
+                device.update()
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
         return device

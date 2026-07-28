@@ -302,6 +302,54 @@ camera_metadata_advertises_video = _client_camera.camera_metadata_advertises_vid
 camera_stream_block_reason = _client_camera.camera_stream_block_reason
 derive_tx_video_app_credentials = _client_camera.derive_tx_video_app_credentials
 
+_ZONE_TASK_CONFIRMATION_STATUSES = frozenset(
+    {"zone_cleaning", "segment_cleaning"}
+)
+_EDGE_TASK_CONFIRMATION_STATUSES = frozenset(
+    {"segment_cleaning", "zone_cleaning"}
+)
+_SPOT_TASK_CONFIRMATION_STATUSES = frozenset({"spot_cleaning"})
+
+
+def _task_confirmation_key(snapshot: DreameLawnMowerSnapshot) -> tuple[Any, ...]:
+    """Return state that must change when a new targeted task is accepted."""
+    return (
+        getattr(snapshot, "task_status", None),
+        getattr(snapshot, "state", None),
+        getattr(snapshot, "current_zone_id", None),
+        getattr(snapshot, "active_segment_count", None),
+        getattr(snapshot, "mowing_session_active", None),
+    )
+
+
+def _targeted_task_confirmed(
+    snapshot: DreameLawnMowerSnapshot,
+    baseline: DreameLawnMowerSnapshot | None,
+    expected_statuses: frozenset[str],
+    *,
+    requested_zone_ids: frozenset[int] | None = None,
+) -> bool:
+    """Require requested task evidence and a transition from pre-command state."""
+    if baseline is None:
+        return False
+    task_status = str(getattr(snapshot, "task_status", "") or "").lower()
+    if task_status not in expected_statuses:
+        return False
+    if not (
+        getattr(snapshot, "mowing_session_active", None) is True
+        or getattr(snapshot, "started", False)
+        or getattr(snapshot, "mowing", False)
+    ):
+        return False
+    current_zone_id = getattr(snapshot, "current_zone_id", None)
+    if (
+        requested_zone_ids
+        and current_zone_id is not None
+        and int(current_zone_id) not in requested_zone_ids
+    ):
+        return False
+    return _task_confirmation_key(snapshot) != _task_confirmation_key(baseline)
+
 
 class DreameLawnMowerClient(
     _DreameLawnMowerCameraMixin,
@@ -545,10 +593,12 @@ class DreameLawnMowerClient(
 
     async def async_start_zone_mowing(self, zone_ids: Sequence[int]) -> Any:
         """Start mower-native zone mowing for explicit map area ids."""
+        normalized_zone_ids = [int(zone_id) for zone_id in zone_ids]
+        baseline = await self.async_get_cached_snapshot()
         try:
             return await asyncio.to_thread(
                 self._sync_start_zone_mowing,
-                list(zone_ids),
+                normalized_zone_ids,
             )
         except _DreameLawnMowerCommandRejectedError:
             raise
@@ -556,10 +606,11 @@ class DreameLawnMowerClient(
             return await self._async_reconcile_ambiguous_mutation(
                 "start zone mowing",
                 err,
-                lambda snapshot: bool(
-                    snapshot.started
-                    or snapshot.mowing
-                    or snapshot.mowing_session_active is True
+                lambda snapshot: _targeted_task_confirmed(
+                    snapshot,
+                    baseline,
+                    _ZONE_TASK_CONFIRMATION_STATUSES,
+                    requested_zone_ids=frozenset(normalized_zone_ids),
                 ),
             )
 
@@ -568,10 +619,15 @@ class DreameLawnMowerClient(
         contour_ids: Sequence[Sequence[int]],
     ) -> Any:
         """Start edge mowing for one or more contour id pairs."""
+        normalized_contour_ids = [
+            [int(value) for value in contour_id[:2]]
+            for contour_id in contour_ids
+        ]
+        baseline = await self.async_get_cached_snapshot()
         try:
             return await asyncio.to_thread(
                 self._sync_start_edge_mowing,
-                [list(contour_id) for contour_id in contour_ids],
+                normalized_contour_ids,
             )
         except _DreameLawnMowerCommandRejectedError:
             raise
@@ -579,19 +635,21 @@ class DreameLawnMowerClient(
             return await self._async_reconcile_ambiguous_mutation(
                 "start edge mowing",
                 err,
-                lambda snapshot: bool(
-                    snapshot.started
-                    or snapshot.mowing
-                    or snapshot.mowing_session_active is True
+                lambda snapshot: _targeted_task_confirmed(
+                    snapshot,
+                    baseline,
+                    _EDGE_TASK_CONFIRMATION_STATUSES,
                 ),
             )
 
     async def async_start_spot_mowing(self, spot_ids: Sequence[int]) -> Any:
         """Start mower-native spot mowing for explicit saved spot area ids."""
+        normalized_spot_ids = [int(spot_id) for spot_id in spot_ids]
+        baseline = await self.async_get_cached_snapshot()
         try:
             return await asyncio.to_thread(
                 self._sync_start_spot_mowing,
-                list(spot_ids),
+                normalized_spot_ids,
             )
         except _DreameLawnMowerCommandRejectedError:
             raise
@@ -599,10 +657,10 @@ class DreameLawnMowerClient(
             return await self._async_reconcile_ambiguous_mutation(
                 "start spot mowing",
                 err,
-                lambda snapshot: bool(
-                    snapshot.started
-                    or snapshot.mowing
-                    or snapshot.mowing_session_active is True
+                lambda snapshot: _targeted_task_confirmed(
+                    snapshot,
+                    baseline,
+                    _SPOT_TASK_CONFIRMATION_STATUSES,
                 ),
             )
 
