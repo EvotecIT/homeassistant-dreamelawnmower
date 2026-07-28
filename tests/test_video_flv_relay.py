@@ -12,8 +12,11 @@ from aiohttp import ClientSession, TCPConnector, web
 from aiohttp.resolver import ThreadedResolver
 
 from custom_components.dreame_lawn_mower.video_flv_relay import (
+    _MAX_SPS_BYTES,
     DreameLawnMowerFlvRelay,
+    _BitReader,
     _FlvBootstrap,
+    _h264_sps_dimensions,
     _safe_relay_failure,
     _Subscriber,
 )
@@ -67,6 +70,14 @@ def test_flv_parser_bounds_late_subscriber_bootstrap_by_bytes() -> None:
         bootstrap = parser.bootstrap()
 
     assert bootstrap == parser.header + parser.video_sequence + parser.gop[0]
+
+
+def test_h264_sps_parser_bounds_payload_and_bit_operations() -> None:
+    assert _h264_sps_dimensions(b"\x67" + bytes(_MAX_SPS_BYTES)) is None
+
+    reader = _BitReader(bytes(_MAX_SPS_BYTES))
+    with pytest.raises(ValueError, match="parsing budget"):
+        reader.ue()
 
 
 def test_flv_parser_rejects_non_flv_upstream_before_fanout() -> None:

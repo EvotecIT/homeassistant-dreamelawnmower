@@ -1523,6 +1523,75 @@ def test_video_camera_relay_failure_retires_active_session() -> None:
     assert asyncio.run(_run()) == (["relay_failure"], "relay_playback")
 
 
+def test_video_camera_cancelled_relay_callback_finishes_session_cleanup() -> None:
+    async def _run() -> tuple[int, int, bool, bool]:
+        entity = _uninitialized_entity()
+        stream_stop_started = asyncio.Event()
+        release_stream_stop = asyncio.Event()
+        runtime_stops = 0
+        video_disables = 0
+
+        class _Stream:
+            async def stop(self) -> None:
+                stream_stop_started.set()
+                await release_stream_stop.wait()
+
+        class _Runtime:
+            def stop_live_stream(self, _session: object) -> None:
+                nonlocal runtime_stops
+                runtime_stops += 1
+
+        class _Client:
+            async def async_set_camera_stream_enabled(self, enabled: bool) -> None:
+                nonlocal video_disables
+                assert enabled is False
+                video_disables += 1
+
+        async def _executor(function, *args):
+            return function(*args)
+
+        async def _stop_relay() -> None:
+            return None
+
+        stream = _Stream()
+        entity.stream = stream
+        entity._runtime = _Runtime()
+        entity._session = SimpleNamespace(
+            transport=VIDEO_TRANSPORT_CLOUD,
+            camera_toggle_managed=True,
+        )
+        entity._attr_is_streaming = True
+        entity._flv_relay = SimpleNamespace(async_stop_upstream=_stop_relay)
+        entity.coordinator.client = _Client()
+        entity.hass = SimpleNamespace(
+            async_add_executor_job=_executor,
+            data={
+                video_camera_module.STREAM_DOMAIN: {
+                    video_camera_module.ATTR_STREAMS: [stream],
+                }
+            },
+        )
+        entity.async_write_ha_state = lambda: None
+
+        callback = asyncio.create_task(entity._async_relay_failed("source failed"))
+        await asyncio.wait_for(stream_stop_started.wait(), timeout=1)
+        callback.cancel()
+        await asyncio.sleep(0)
+        release_stream_stop.set()
+        with suppress(asyncio.CancelledError):
+            await asyncio.wait_for(callback, timeout=1)
+        return (
+            runtime_stops,
+            video_disables,
+            callback.cancelled(),
+            entity._runtime is None
+            and entity._session is None
+            and entity.stream is None,
+        )
+
+    assert asyncio.run(_run()) == (1, 1, True, True)
+
+
 def test_video_camera_relay_failure_discards_stale_ha_stream_without_session() -> None:
     async def _run() -> list[str]:
         entity = _uninitialized_entity()

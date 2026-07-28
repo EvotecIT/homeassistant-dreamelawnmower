@@ -26,6 +26,8 @@ _MAX_SUBSCRIBER_QUEUE_BYTES: Final = 12 * 1024 * 1024
 _MAX_GOP_BYTES: Final = 8 * 1024 * 1024
 _MAX_HEADER_BYTES: Final = 1024
 _MAX_TAG_BYTES: Final = 4 * 1024 * 1024
+_MAX_SPS_BYTES: Final = 4 * 1024
+_MAX_SPS_BIT_OPERATIONS: Final = 32 * 1024
 _UPSTREAM_READ_TIMEOUT: Final = 30.0
 _MEDIA_READY_TIMEOUT: Final = 15.0
 _IDLE_GRACE: Final = 15.0
@@ -65,6 +67,12 @@ class _BitReader:
         self._offset = 0
 
     def bits(self, count: int) -> int:
+        if (
+            count < 0
+            or self._offset + count > len(self._payload) * 8
+            or self._offset + count > _MAX_SPS_BIT_OPERATIONS
+        ):
+            raise ValueError("The mower video SPS exceeded its parsing budget.")
         value = 0
         for _ in range(count):
             byte = self._payload[self._offset // 8]
@@ -97,7 +105,7 @@ def _skip_scaling_list(reader: _BitReader, size: int) -> None:
 def _h264_sps_dimensions(sps: bytes) -> tuple[int, int] | None:
     """Decode coded width/height from one SPS NAL without a video decoder."""
     try:
-        if not sps:
+        if not sps or len(sps) > _MAX_SPS_BYTES:
             return None
         rbsp = bytearray()
         zero_count = 0

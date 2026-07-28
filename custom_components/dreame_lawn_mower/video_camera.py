@@ -700,52 +700,66 @@ class DreameLawnMowerVideoCamera(
             )
         try:
             await self._stream_idle_monitor.async_cancel()
-            ha_stream = getattr(self, "stream", None)
-            self.stream = None
-            self._snapshot_owned_stream = None
-            runtime = self._runtime
-            session = self._session
-            self._runtime = None
-            self._session = None
-            self._unverified_playback_session = None
-            self._pending_provisioning_inputs = None
-            self._attr_is_streaming = False
-            if ha_stream is not None:
-                try:
-                    async with asyncio.timeout(_HA_STREAM_STOP_TIMEOUT):
-                        await ha_stream.stop()
-                except TimeoutError:
-                    self._record_stream_cleanup_error(
-                        "home_assistant_stream_stop",
-                        (
-                            "Home Assistant camera stream cleanup timed out after "
-                            f"{_HA_STREAM_STOP_TIMEOUT:g}s."
-                        ),
-                    )
-                except Exception as err:  # noqa: BLE001 - continue XP2P cleanup.
-                    self._record_stream_cleanup_error(
-                        "home_assistant_stream_stop",
-                        err,
-                    )
-                finally:
-                    self._unregister_ha_stream(ha_stream)
             relay = getattr(self, "_flv_relay", None)
             if relay is not None:
                 await relay.async_stop_upstream()
-            if runtime is None or session is None:
-                return
-            await self._async_stop_session(runtime, session)
-            camera_toggle_managed = getattr(
-                session,
-                "camera_toggle_managed",
-                getattr(session, "transport", VIDEO_TRANSPORT_CLOUD)
-                != VIDEO_TRANSPORT_LAN,
+            cleanup_task = asyncio.create_task(
+                self._async_finish_active_session_cleanup()
             )
-            if camera_toggle_managed:
-                await self._async_disable_camera_stream()
+            try:
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError:
+                # Relay close may cancel its pump or idle callback while this
+                # entity owns the only runtime/session references. Finish the
+                # bounded resource cleanup before allowing cancellation out.
+                await cleanup_task
+                raise
         finally:
             self._last_stream_cleanup_at = datetime.now(UTC).isoformat()
             self.async_write_ha_state()
+
+    async def _async_finish_active_session_cleanup(self) -> None:
+        """Finish resource cleanup independently of a cancelled relay callback."""
+        ha_stream = getattr(self, "stream", None)
+        self.stream = None
+        self._snapshot_owned_stream = None
+        runtime = self._runtime
+        session = self._session
+        self._runtime = None
+        self._session = None
+        self._unverified_playback_session = None
+        self._pending_provisioning_inputs = None
+        self._attr_is_streaming = False
+        if ha_stream is not None:
+            try:
+                async with asyncio.timeout(_HA_STREAM_STOP_TIMEOUT):
+                    await ha_stream.stop()
+            except TimeoutError:
+                self._record_stream_cleanup_error(
+                    "home_assistant_stream_stop",
+                    (
+                        "Home Assistant camera stream cleanup timed out after "
+                        f"{_HA_STREAM_STOP_TIMEOUT:g}s."
+                    ),
+                )
+            except Exception as err:  # noqa: BLE001 - continue XP2P cleanup.
+                self._record_stream_cleanup_error(
+                    "home_assistant_stream_stop",
+                    err,
+                )
+            finally:
+                self._unregister_ha_stream(ha_stream)
+        if runtime is None or session is None:
+            return
+        await self._async_stop_session(runtime, session)
+        camera_toggle_managed = getattr(
+            session,
+            "camera_toggle_managed",
+            getattr(session, "transport", VIDEO_TRANSPORT_CLOUD)
+            != VIDEO_TRANSPORT_LAN,
+        )
+        if camera_toggle_managed:
+            await self._async_disable_camera_stream()
 
     def _unregister_ha_stream(self, ha_stream: Any) -> None:
         """Remove a discarded HA Stream from the integration registry."""
