@@ -90,8 +90,7 @@ def test_flv_parser_waits_for_sequence_header_and_keyframe_before_ready() -> Non
     assert parser.media_ready is True
 
 
-@pytest.mark.asyncio
-async def test_relay_fans_out_one_upstream_and_retires_after_last_viewer() -> None:
+async def _relay_fans_out_one_upstream_and_retires_after_last_viewer() -> None:
     pytest_socket.enable_socket()
     upstream_connections = 0
     release_upstream = asyncio.Event()
@@ -178,3 +177,7 @@ async def test_relay_fans_out_one_upstream_and_retires_after_last_viewer() -> No
         await relay.async_close()
         await client.close()
         await source_runner.cleanup()
+
+
+def test_relay_fans_out_one_upstream_and_retires_after_last_viewer() -> None:
+    asyncio.run(_relay_fans_out_one_upstream_and_retires_after_last_viewer())
