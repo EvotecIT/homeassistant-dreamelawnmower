@@ -484,7 +484,11 @@ class DreameLawnMowerFlvRelay:
                 self._async_handle_ha_stream,
                 allow_head=False,
             )
-            runner = web.AppRunner(application, access_log=None)
+            runner = web.AppRunner(
+                application,
+                access_log=None,
+                handler_cancellation=True,
+            )
             await runner.setup()
             site = web.TCPSite(runner, "127.0.0.1", 0)
             await site.start()

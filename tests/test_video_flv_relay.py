@@ -233,6 +233,52 @@ def test_relay_fans_out_one_upstream_and_retires_after_last_viewer() -> None:
     asyncio.run(_relay_fans_out_one_upstream_and_retires_after_last_viewer())
 
 
+def test_relay_retires_cold_start_when_waiting_viewer_disconnects() -> None:
+    async def _run() -> tuple[int, bool]:
+        pytest_socket.enable_socket()
+        source_started = asyncio.Event()
+        idle = asyncio.Event()
+
+        async def _source_factory() -> str:
+            source_started.set()
+            await asyncio.Future()
+            raise AssertionError("The cancelled source factory must not return.")
+
+        relay = DreameLawnMowerFlvRelay(
+            SimpleNamespace(async_create_task=asyncio.create_task),
+            source_factory=_source_factory,
+            media_ready=lambda _diagnostics: asyncio.sleep(0),
+            failed=lambda _error: asyncio.sleep(0),
+            idle=lambda: asyncio.sleep(0, result=idle.set()),
+            idle_grace=0.01,
+        )
+        client = ClientSession(
+            connector=TCPConnector(resolver=ThreadedResolver()),
+        )
+        try:
+            with patch(
+                "custom_components.dreame_lawn_mower.video_flv_relay."
+                "async_get_clientsession",
+                return_value=client,
+            ):
+                relay_url = await relay.async_start()
+                response = await client.get(relay_url)
+                await asyncio.wait_for(source_started.wait(), timeout=1)
+                assert relay.subscriber_count == 1
+
+                response.close()
+                await asyncio.wait_for(idle.wait(), timeout=1)
+
+            return relay.subscriber_count, relay.diagnostics[
+                "relay_upstream_active"
+            ]
+        finally:
+            await relay.async_close()
+            await client.close()
+
+    assert asyncio.run(_run()) == (0, False)
+
+
 def test_relay_fails_stream_that_never_reaches_decoder_ready_media() -> None:
     async def _run() -> tuple[list[str], bool]:
         pytest_socket.enable_socket()
