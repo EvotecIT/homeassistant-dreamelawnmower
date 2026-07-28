@@ -245,6 +245,7 @@ class DreameLawnMowerVideoCamera(
             )
         self._provisioning_cache_error: str | None = None
         self._last_cached_xp2p_error: str | None = None
+        self._bypass_cached_xp2p = False
         self._last_video_transport: str | None = None
         self._last_video_transport_attempted: str | None = None
         self._video_capability_observed = snapshot_advertises_video(coordinator.data)
@@ -350,6 +351,10 @@ class DreameLawnMowerVideoCamera(
         self.async_write_ha_state()
         try:
             async with asyncio.timeout(_VIDEO_UPSTREAM_START_TIMEOUT):
+                if getattr(self, "_bypass_cached_xp2p", False):
+                    return await self._async_start_raw_source(
+                        skip_cached_xp2p=True
+                    )
                 return await self._async_start_raw_source()
         except TimeoutError:
             self._set_stream_error(
@@ -382,10 +387,18 @@ class DreameLawnMowerVideoCamera(
             )
         if provisioning_inputs is not None:
             await self._async_cache_healthy_provisioning(provisioning_inputs)
+        if self._last_video_transport != "cached_xp2p":
+            self._bypass_cached_xp2p = False
         self.async_write_ha_state()
 
     async def _async_relay_failed(self, error: str) -> None:
         """Retire a failed upstream while leaving the relay URL reusable."""
+        cached_playback_failed = (
+            self._last_video_transport == "cached_xp2p"
+            and self._unverified_playback_session is not None
+        )
+        if cached_playback_failed:
+            self._bypass_cached_xp2p = True
         self._set_stream_error(
             f"The local mower video relay stopped before playback completed: {error}",
             stage="relay_playback",
@@ -393,6 +406,16 @@ class DreameLawnMowerVideoCamera(
         async with self._stream_lock:
             if self._session is not None or getattr(self, "stream", None) is not None:
                 await self._async_stop_active_session(reason="relay_failure")
+        if cached_playback_failed:
+            try:
+                await self._provisioning_cache.async_clear()
+                self._provisioning_cache_error = None
+            except Exception as err:  # noqa: BLE001 - bypass remains authoritative.
+                self._provisioning_cache_error = sanitize_diagnostic_text(err)
+                _LOGGER.warning(
+                    "Failed to clear stale Dreame video provisioning cache: %s",
+                    self._provisioning_cache_error,
+                )
 
     async def _async_relay_idle(self) -> None:
         """Release mower video after the last local WebRTC/HLS viewer leaves."""

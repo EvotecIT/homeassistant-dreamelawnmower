@@ -1512,6 +1512,42 @@ def test_video_camera_relay_failure_discards_stale_ha_stream_without_session() -
     assert asyncio.run(_run()) == ["relay_failure"]
 
 
+def test_video_camera_relay_failure_bypasses_stale_cached_xp2p() -> None:
+    async def _run() -> tuple[int, list[bool], bool]:
+        entity = _uninitialized_entity()
+        entity.async_write_ha_state = lambda: None
+        entity._last_video_transport = "cached_xp2p"
+        entity._unverified_playback_session = object()
+        entity._session = entity._unverified_playback_session
+        entity.stream = None
+        clears = 0
+        skip_values: list[bool] = []
+
+        class _ProvisioningCache:
+            async def async_clear(self) -> None:
+                nonlocal clears
+                clears += 1
+
+        async def _stop(*, reason: str = "session_stop") -> None:
+            assert reason == "relay_failure"
+            entity._session = None
+            entity._unverified_playback_session = None
+
+        async def _start(*, skip_cached_xp2p: bool = False) -> str:
+            skip_values.append(skip_cached_xp2p)
+            return "http://127.0.0.1/fresh.flv"
+
+        entity._provisioning_cache = _ProvisioningCache()
+        entity._async_stop_active_session = _stop
+        entity._async_start_raw_source = _start
+
+        await entity._async_relay_failed("cached media was invalid")
+        await entity._async_start_relay_upstream()
+        return clears, skip_values, entity._bypass_cached_xp2p
+
+    assert asyncio.run(_run()) == (1, [True], True)
+
+
 def test_video_camera_preserves_ha_stream_across_upstream_worker_exit() -> None:
     async def _run() -> tuple[object, int]:
         entity = _uninitialized_entity()

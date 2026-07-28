@@ -87,6 +87,13 @@ class DreameLawnMowerVideoProvisioningCache:
         self.inputs = cached
         self.device_config = device_config
 
+    async def async_clear(self) -> None:
+        """Discard persisted and in-memory provisioning after failed playback."""
+        await self._store.async_remove()
+        self.inputs = None
+        self.device_config = None
+        self._runtime_input_config = None
+
     def resolve_device_config(
         self,
         inputs: DreameLawnMowerCameraStreamRuntimeInputs,

@@ -15,6 +15,7 @@ from custom_components.dreame_lawn_mower.video_flv_relay import (
     DreameLawnMowerFlvRelay,
     _FlvBootstrap,
     _safe_relay_failure,
+    _Subscriber,
 )
 
 FLV_HEADER = b"FLV\x01\x01\x00\x00\x00\x09\x00\x00\x00\x00"
@@ -155,7 +156,16 @@ async def _relay_fans_out_one_upstream_and_retires_after_last_viewer() -> None:
             "async_get_clientsession",
             return_value=client,
         ):
-            relay_url = await relay.async_start()
+            relay_urls = await asyncio.gather(
+                *(relay.async_start() for _index in range(5))
+            )
+            assert len(set(relay_urls)) == 1
+            relay_url = relay_urls[0]
+
+            head = await client.head(relay_url)
+            assert head.status == 405
+            assert upstream_connections == 0
+
             first = await client.get(relay_url)
             assert await first.content.readexactly(len(initial_media)) == initial_media
             await asyncio.wait_for(media_ready.wait(), timeout=1)
@@ -181,3 +191,99 @@ async def _relay_fans_out_one_upstream_and_retires_after_last_viewer() -> None:
 
 def test_relay_fans_out_one_upstream_and_retires_after_last_viewer() -> None:
     asyncio.run(_relay_fans_out_one_upstream_and_retires_after_last_viewer())
+
+
+def test_relay_fails_stream_that_never_reaches_decoder_ready_media() -> None:
+    async def _run() -> tuple[list[str], bool]:
+        pytest_socket.enable_socket()
+        release = asyncio.Event()
+
+        async def _source(request: web.Request) -> web.StreamResponse:
+            response = web.StreamResponse(headers={"Content-Type": "video/x-flv"})
+            await response.prepare(request)
+            await response.write(FLV_HEADER)
+            await release.wait()
+            return response
+
+        application = web.Application()
+        application.router.add_get("/source.flv", _source)
+        runner = web.AppRunner(application)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        server = site._server  # noqa: SLF001
+        assert server is not None
+        port = int(server.sockets[0].getsockname()[1])
+        client = ClientSession(
+            connector=TCPConnector(resolver=ThreadedResolver()),
+        )
+        failures: list[str] = []
+        relay = DreameLawnMowerFlvRelay(
+            SimpleNamespace(async_create_task=asyncio.create_task),
+            source_factory=lambda: asyncio.sleep(
+                0,
+                result=f"http://127.0.0.1:{port}/source.flv",
+            ),
+            media_ready=lambda _diagnostics: asyncio.sleep(0),
+            failed=lambda error: asyncio.sleep(0, result=failures.append(error)),
+            idle=lambda: asyncio.sleep(0),
+        )
+        response: object | None = None
+        try:
+            with (
+                patch(
+                    "custom_components.dreame_lawn_mower.video_flv_relay."
+                    "async_get_clientsession",
+                    return_value=client,
+                ),
+                patch(
+                    "custom_components.dreame_lawn_mower.video_flv_relay."
+                    "_MEDIA_READY_TIMEOUT",
+                    0.02,
+                ),
+            ):
+                response = await client.get(await relay.async_start())
+                assert await response.content.readexactly(len(FLV_HEADER)) == FLV_HEADER
+                for _attempt in range(100):
+                    if failures:
+                        break
+                    await asyncio.sleep(0.01)
+            return failures, relay.diagnostics["relay_first_media_ready"]
+        finally:
+            release.set()
+            if response is not None:
+                response.close()
+            await relay.async_close()
+            await client.close()
+            await runner.cleanup()
+
+    failures, media_ready = asyncio.run(_run())
+
+    assert failures == ["The mower video source timed out."]
+    assert media_ready is False
+
+
+def test_relay_disconnects_subscriber_before_byte_queue_grows_unbounded() -> None:
+    async def _run() -> tuple[bool, int, int]:
+        hass = SimpleNamespace(async_create_task=asyncio.create_task)
+        relay = DreameLawnMowerFlvRelay(
+            hass,
+            source_factory=lambda: asyncio.sleep(0, result=None),
+            media_ready=lambda _diagnostics: asyncio.sleep(0),
+            failed=lambda _error: asyncio.sleep(0),
+            idle=lambda: asyncio.sleep(0),
+        )
+        subscriber = _Subscriber(asyncio.Queue(maxsize=96))
+        relay._subscribers.add(subscriber)
+        with patch(
+            "custom_components.dreame_lawn_mower.video_flv_relay."
+            "_MAX_SUBSCRIBER_QUEUE_BYTES",
+            10,
+        ):
+            await relay._async_broadcast(b"123456")
+            assert subscriber.queued_bytes == 6
+            await relay._async_broadcast(b"abcdef")
+        terminal = await subscriber.queue.get()
+        return subscriber.closed, subscriber.queued_bytes, terminal is None
+
+    assert asyncio.run(_run()) == (True, 0, True)

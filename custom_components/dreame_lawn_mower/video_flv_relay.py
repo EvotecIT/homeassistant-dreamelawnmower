@@ -22,10 +22,12 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 _LOGGER = logging.getLogger(__name__)
 
 _QUEUE_DEPTH: Final = 96
+_MAX_SUBSCRIBER_QUEUE_BYTES: Final = 12 * 1024 * 1024
 _MAX_GOP_BYTES: Final = 8 * 1024 * 1024
 _MAX_HEADER_BYTES: Final = 1024
 _MAX_TAG_BYTES: Final = 4 * 1024 * 1024
 _UPSTREAM_READ_TIMEOUT: Final = 30.0
+_MEDIA_READY_TIMEOUT: Final = 15.0
 _IDLE_GRACE: Final = 15.0
 
 SourceFactory = Callable[[], Awaitable[str | None]]
@@ -186,6 +188,7 @@ class _Subscriber:
 
     queue: asyncio.Queue[bytes | None]
     closed: bool = False
+    queued_bytes: int = 0
 
 
 class _FlvBootstrap:
@@ -374,6 +377,7 @@ class DreameLawnMowerFlvRelay:
         self._site: web.TCPSite | None = None
         self._url: str | None = None
         self._subscribers: set[_Subscriber] = set()
+        self._listener_lock = asyncio.Lock()
         self._lock = asyncio.Lock()
         self._pump_task: asyncio.Task[None] | None = None
         self._idle_task: asyncio.Task[None] | None = None
@@ -417,31 +421,39 @@ class DreameLawnMowerFlvRelay:
 
     async def async_start(self) -> str:
         """Bind the dormant relay to an ephemeral loopback port."""
-        if self._url is not None:
+        async with self._listener_lock:
+            if self._url is not None:
+                return self._url
+            application = web.Application()
+            application.router.add_get(
+                f"/{self._token}.flv",
+                self._async_handle,
+                allow_head=False,
+            )
+            runner = web.AppRunner(application, access_log=None)
+            await runner.setup()
+            site = web.TCPSite(runner, "127.0.0.1", 0)
+            await site.start()
+            server = site._server  # noqa: SLF001 - no public bound-port API.
+            if server is None or not server.sockets:
+                await runner.cleanup()
+                raise RuntimeError(
+                    "The local mower video relay did not bind a socket."
+                )
+            port = int(server.sockets[0].getsockname()[1])
+            self._runner = runner
+            self._site = site
+            self._url = f"http://127.0.0.1:{port}/{self._token}.flv"
             return self._url
-        application = web.Application()
-        application.router.add_get(f"/{self._token}.flv", self._async_handle)
-        runner = web.AppRunner(application, access_log=None)
-        await runner.setup()
-        site = web.TCPSite(runner, "127.0.0.1", 0)
-        await site.start()
-        server = site._server  # noqa: SLF001 - aiohttp has no public bound-port API.
-        if server is None or not server.sockets:
-            await runner.cleanup()
-            raise RuntimeError("The local mower video relay did not bind a socket.")
-        port = int(server.sockets[0].getsockname()[1])
-        self._runner = runner
-        self._site = site
-        self._url = f"http://127.0.0.1:{port}/{self._token}.flv"
-        return self._url
 
     async def async_close(self) -> None:
         """Close subscribers, upstream playback, and the loopback listener."""
         await self.async_stop_upstream()
-        runner = self._runner
-        self._runner = None
-        self._site = None
-        self._url = None
+        async with self._listener_lock:
+            runner = self._runner
+            self._runner = None
+            self._site = None
+            self._url = None
         if runner is not None:
             await runner.cleanup()
 
@@ -485,6 +497,7 @@ class DreameLawnMowerFlvRelay:
                 bootstrap = self._parser.bootstrap()
                 if bootstrap:
                     subscriber.queue.put_nowait(bootstrap)
+                    subscriber.queued_bytes = len(bootstrap)
                 self._subscribers.add(subscriber)
                 if self._pump_task is None or self._pump_task.done():
                     self._last_failure = None
@@ -508,6 +521,10 @@ class DreameLawnMowerFlvRelay:
                 chunk = await subscriber.queue.get()
                 if chunk is None:
                     break
+                subscriber.queued_bytes = max(
+                    0,
+                    subscriber.queued_bytes - len(chunk),
+                )
                 await response.write(chunk)
         except asyncio.CancelledError:
             raise
@@ -543,13 +560,18 @@ class DreameLawnMowerFlvRelay:
             )
             async with session.get(source, timeout=timeout) as response:
                 response.raise_for_status()
-                async for chunk in response.content.iter_chunked(64 * 1024):
-                    for record in self._parser.feed(chunk):
-                        await self._async_broadcast(record)
-                    if self._parser.media_ready and not self._media_callback_sent:
-                        self._media_callback_sent = True
-                        self._first_media_at = asyncio.get_running_loop().time()
-                        await self._media_ready_callback(self.diagnostics)
+                async with asyncio.timeout(_MEDIA_READY_TIMEOUT) as media_deadline:
+                    async for chunk in response.content.iter_chunked(64 * 1024):
+                        for record in self._parser.feed(chunk):
+                            await self._async_broadcast(record)
+                        if (
+                            self._parser.media_ready
+                            and not self._media_callback_sent
+                        ):
+                            self._media_callback_sent = True
+                            self._first_media_at = asyncio.get_running_loop().time()
+                            await self._media_ready_callback(self.diagnostics)
+                            media_deadline.reschedule(None)
                 raise RuntimeError("The mower video source ended.")
         except asyncio.CancelledError:
             raise
@@ -602,8 +624,18 @@ class DreameLawnMowerFlvRelay:
                 if subscriber.closed:
                     self._subscribers.discard(subscriber)
                     continue
+                if (
+                    len(record) > _MAX_SUBSCRIBER_QUEUE_BYTES
+                    or subscriber.queued_bytes + len(record)
+                    > _MAX_SUBSCRIBER_QUEUE_BYTES
+                ):
+                    subscriber.closed = True
+                    self._subscribers.discard(subscriber)
+                    self._finish_subscriber(subscriber)
+                    continue
                 try:
                     subscriber.queue.put_nowait(record)
+                    subscriber.queued_bytes += len(record)
                 except asyncio.QueueFull:
                     subscriber.closed = True
                     self._subscribers.discard(subscriber)
@@ -616,6 +648,7 @@ class DreameLawnMowerFlvRelay:
                 subscriber.queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
+        subscriber.queued_bytes = 0
         with suppress(asyncio.QueueFull):
             subscriber.queue.put_nowait(None)
 

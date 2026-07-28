@@ -639,8 +639,12 @@ class DreameLawnMowerPointCloudView(HomeAssistantView):
         etag = f'"sha256-{download.content_sha256}"'
         if_none_match = getattr(request, "headers", {}).get("If-None-Match", "")
         cache_control = (
-            f"private, max-age={int(POINT_CLOUD_CACHE_TTL_SECONDS)}, "
-            "must-revalidate"
+            "private, no-store"
+            if refresh
+            else (
+                f"private, max-age={int(POINT_CLOUD_CACHE_TTL_SECONDS)}, "
+                "must-revalidate"
+            )
         )
         if not refresh and any(
             candidate.strip() in {etag, "*"}

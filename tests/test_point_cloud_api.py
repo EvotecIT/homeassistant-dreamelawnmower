@@ -786,9 +786,7 @@ def test_point_cloud_view_returns_private_attachment_to_admin() -> None:
 
     assert calls == [("entry-1", 2, True)]
     assert response.body == b"private-pcd"
-    assert response.headers["Cache-Control"] == (
-        "private, max-age=300, must-revalidate"
-    )
+    assert response.headers["Cache-Control"] == "private, no-store"
     assert response.headers["ETag"].startswith('"sha256-')
     assert response.headers["Content-Disposition"] == (
         'attachment; filename="dreame-map-2.pcd"'
