@@ -192,6 +192,7 @@ class DreameLawnMowerVideoCamera(
         ) = None
         self._stream_lock = asyncio.Lock()
         self._snapshot_lock = asyncio.Lock()
+        self._snapshot_requests = 0
         self._stream_idle_monitor = DreameLawnMowerHaStreamIdleMonitor(
             coordinator.hass,
             stream_lock=self._stream_lock,
@@ -201,6 +202,7 @@ class DreameLawnMowerVideoCamera(
             stop_active=self._async_stop_active_session,
             has_external_consumers=lambda: (
                 self._flv_relay.direct_subscriber_count > 0
+                or self._snapshot_requests > 0
             ),
         )
         self._flv_relay = self._create_flv_relay()
@@ -522,10 +524,14 @@ class DreameLawnMowerVideoCamera(
         if not getattr(self, "_attr_is_on", True):
             return None
         async with self._snapshot_lock:
-            if not getattr(self, "_create_stream_lock", None):
-                self._create_stream_lock = asyncio.Lock()
-            async with self._create_stream_lock:
-                return await self._async_camera_image_locked(width, height)
+            self._snapshot_requests = getattr(self, "_snapshot_requests", 0) + 1
+            try:
+                if not getattr(self, "_create_stream_lock", None):
+                    self._create_stream_lock = asyncio.Lock()
+                async with self._create_stream_lock:
+                    return await self._async_camera_image_locked(width, height)
+            finally:
+                self._snapshot_requests = max(0, self._snapshot_requests - 1)
 
     async def _async_camera_image_locked(
         self,

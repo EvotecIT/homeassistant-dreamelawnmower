@@ -23,6 +23,7 @@ from custom_components.dreame_lawn_mower.const import (
     DOMAIN,
 )
 from custom_components.dreame_lawn_mower.coordinator import (
+    DEVICE_SNAPSHOT_GENERATION_HISTORY,
     METADATA_REFRESH_CONCURRENCY,
     DreameLawnMowerCoordinator,
 )
@@ -97,12 +98,15 @@ def test_newer_video_safety_snapshot_blocks_foreground_runtime_side_effects() ->
             mowing_session_active=True,
             activity="mowing",
         )
-        video_snapshot = SimpleNamespace(
-            available=True,
-            mowing_session_active=False,
-            activity="idle",
-        )
-        snapshots = iter((foreground_snapshot, video_snapshot))
+        video_snapshots = [
+            SimpleNamespace(
+                available=True,
+                mowing_session_active=False,
+                activity="idle",
+            )
+            for _ in range(DEVICE_SNAPSHOT_GENERATION_HISTORY + 2)
+        ]
+        snapshots = iter((foreground_snapshot, *video_snapshots))
         runtime_started = asyncio.Event()
         release_runtime = asyncio.Event()
         retained_runtime = SimpleNamespace(source="newer-state")
@@ -129,6 +133,7 @@ def test_newer_video_safety_snapshot_blocks_foreground_runtime_side_effects() ->
         coordinator._device_snapshot_generation = 0
         coordinator._published_device_snapshot_generation = 0
         coordinator._device_snapshot_generations = {}
+        coordinator._retained_device_snapshot_ids = set()
         coordinator._runtime_map_identity_verified = False
         coordinator.app_maps = {"current_map_index": 2}
         coordinator.app_maps_refreshed_at = object()
@@ -151,13 +156,17 @@ def test_newer_video_safety_snapshot_blocks_foreground_runtime_side_effects() ->
         ) as publish:
             foreground_task = asyncio.create_task(coordinator._async_update_data())
             await asyncio.wait_for(runtime_started.wait(), timeout=1)
-            current = await coordinator.async_refresh_video_safety_state()
+            current = None
+            for video_snapshot in video_snapshots:
+                current = await coordinator.async_refresh_video_safety_state()
+                assert current is video_snapshot
             release_runtime.set()
             foreground_result = await foreground_task
 
-        assert current is video_snapshot
+        assert current is video_snapshots[-1]
         assert foreground_result is foreground_snapshot
-        publish.assert_called_once_with(video_snapshot)
+        assert publish.call_count == len(video_snapshots)
+        publish.assert_called_with(video_snapshots[-1])
         assert coordinator.runtime_status_blob is retained_runtime
         assert coordinator._runtime_map_identity_verified is False
         coordinator.runtime_telemetry_cache.update.assert_not_called()

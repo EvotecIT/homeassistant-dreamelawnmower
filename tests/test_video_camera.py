@@ -170,6 +170,7 @@ def _uninitialized_entity(*, snapshot: object | None = None):
     entity._attr_is_on = True
     entity._stream_lock = asyncio.Lock()
     entity._snapshot_lock = asyncio.Lock()
+    entity._snapshot_requests = 0
     entity._lan_cache = SimpleNamespace(inputs=None, endpoint=None)
     entity._provisioning_cache = _ProvisioningCache()
     entity._provisioning_cache_error = None
@@ -2397,6 +2398,79 @@ def test_video_camera_idle_monitor_keeps_direct_relay_viewer_alive() -> None:
         return stops
 
     assert asyncio.run(_run()) == 1
+
+
+def test_video_camera_idle_monitor_keeps_snapshot_request_alive() -> None:
+    async def _run() -> int:
+        entity = _uninitialized_entity()
+        session = SimpleNamespace(service_id="product-1/device-1")
+        entity._snapshot_requests = 1
+        stops = 0
+
+        class _Stream:
+            @staticmethod
+            def outputs() -> dict[str, object]:
+                return {}
+
+        stream = _Stream()
+        entity.stream = stream
+        entity._session = session
+
+        async def _stop() -> None:
+            nonlocal stops
+            stops += 1
+            entity.stream = None
+            entity._session = None
+
+        monitor = DreameLawnMowerHaStreamIdleMonitor(
+            SimpleNamespace(async_create_task=asyncio.create_task),
+            stream_lock=entity._stream_lock,
+            is_current=lambda actual_stream, actual_session: (
+                entity.stream is actual_stream and entity._session is actual_session
+            ),
+            stop_active=_stop,
+            has_external_consumers=lambda: entity._snapshot_requests > 0,
+            provider_grace=0,
+            idle_grace=0,
+            poll_interval=0,
+        )
+        monitor.schedule(stream, session)
+        for _attempt in range(10):
+            await asyncio.sleep(0)
+        assert stops == 0
+
+        entity._snapshot_requests = 0
+        while stops == 0:
+            await asyncio.sleep(0)
+        await monitor.async_cancel()
+        return stops
+
+    assert asyncio.run(_run()) == 1
+
+
+def test_video_camera_tracks_snapshot_request_for_entire_image_wait() -> None:
+    async def _run() -> tuple[int, bytes | None, int]:
+        entity = _uninitialized_entity()
+        image_started = asyncio.Event()
+        release_image = asyncio.Event()
+
+        async def _camera_image(
+            _width: int | None,
+            _height: int | None,
+        ) -> bytes:
+            image_started.set()
+            await release_image.wait()
+            return b"snapshot"
+
+        entity._async_camera_image_locked = _camera_image
+        image_task = asyncio.create_task(entity.async_camera_image())
+        await asyncio.wait_for(image_started.wait(), timeout=1)
+        active_requests = entity._snapshot_requests
+        release_image.set()
+        image = await image_task
+        return active_requests, image, entity._snapshot_requests
+
+    assert asyncio.run(_run()) == (1, b"snapshot", 0)
 
 
 def test_video_camera_auto_refreshes_after_stale_cached_lan_endpoint() -> None:

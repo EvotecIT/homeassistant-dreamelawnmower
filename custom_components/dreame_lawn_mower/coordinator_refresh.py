@@ -60,6 +60,7 @@ class DreameLawnMowerRefreshMixin:
             self._device_refresh_lock = asyncio.Lock()
         cycle = self.performance.start("foreground_refresh")
         outcome = "completed"
+        snapshot: DreameLawnMowerSnapshot | None = None
         try:
             try:
                 async with self._device_refresh_lock:
@@ -73,7 +74,7 @@ class DreameLawnMowerRefreshMixin:
                         None,
                     )
                     if callable(record_snapshot):
-                        record_snapshot(snapshot)
+                        record_snapshot(snapshot, retain=True)
             except DreameLawnMowerConnectionError as err:
                 outcome = type(err).__name__
                 safe_error = sanitize_diagnostic_text(err)
@@ -115,6 +116,13 @@ class DreameLawnMowerRefreshMixin:
             outcome = type(err).__name__
             raise
         finally:
+            release_snapshot = getattr(
+                self,
+                "_release_device_snapshot",
+                None,
+            )
+            if snapshot is not None and callable(release_snapshot):
+                release_snapshot(snapshot)
             self._foreground_refresh_count = (
                 getattr(self, "_foreground_refresh_count", 0) + 1
             )

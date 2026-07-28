@@ -119,6 +119,7 @@ class DreameLawnMowerCoordinator(
             int,
             tuple[DreameLawnMowerSnapshot, int],
         ] = {}
+        self._retained_device_snapshot_ids: set[int] = set()
         self.selected_mowing_action = "all_area"
         self.selected_map_index: int | None = None
         self.selected_contour_id: tuple[int, int] | None = None
@@ -180,28 +181,52 @@ class DreameLawnMowerCoordinator(
         self.async_set_updated_data(snapshot)
         return snapshot
 
-    def _record_device_snapshot(self, snapshot: DreameLawnMowerSnapshot) -> None:
+    def _record_device_snapshot(
+        self,
+        snapshot: DreameLawnMowerSnapshot,
+        *,
+        retain: bool = False,
+    ) -> None:
         """Assign fetch order so slow hydration cannot publish stale state."""
         self._device_snapshot_generation = (
             getattr(self, "_device_snapshot_generation", 0) + 1
         )
         if not hasattr(self, "_device_snapshot_generations"):
             self._device_snapshot_generations = {}
-        self._device_snapshot_generations[id(snapshot)] = (
+        snapshot_id = id(snapshot)
+        self._device_snapshot_generations[snapshot_id] = (
             snapshot,
             self._device_snapshot_generation,
         )
+        if not hasattr(self, "_retained_device_snapshot_ids"):
+            self._retained_device_snapshot_ids = set()
+        if retain:
+            self._retained_device_snapshot_ids.add(snapshot_id)
         while (
             len(self._device_snapshot_generations)
             > DEVICE_SNAPSHOT_GENERATION_HISTORY
         ):
+            evictable = (
+                snapshot_id
+                for snapshot_id in self._device_snapshot_generations
+                if snapshot_id not in self._retained_device_snapshot_ids
+            )
             oldest = min(
-                self._device_snapshot_generations,
+                evictable,
                 key=lambda snapshot_id: self._device_snapshot_generations[
                     snapshot_id
                 ][1],
+                default=None,
             )
+            if oldest is None:
+                break
             self._device_snapshot_generations.pop(oldest)
+
+    def _release_device_snapshot(self, snapshot: DreameLawnMowerSnapshot) -> None:
+        """Allow a hydrated snapshot record to be evicted by a later fetch."""
+        retained = getattr(self, "_retained_device_snapshot_ids", None)
+        if retained is not None:
+            retained.discard(id(snapshot))
 
     def async_set_updated_data(self, data: DreameLawnMowerSnapshot) -> None:
         """Publish fetched snapshots only while they remain the newest."""
@@ -256,6 +281,7 @@ class DreameLawnMowerCoordinator(
 
     async def _async_process_client_update(self) -> None:
         """Publish cached MQTT state without waiting for the polling interval."""
+        snapshot: DreameLawnMowerSnapshot | None = None
         try:
             # Collapse a burst of property callbacks into the newest device state.
             await asyncio.sleep(0)
@@ -263,7 +289,7 @@ class DreameLawnMowerCoordinator(
                 self._device_refresh_lock = asyncio.Lock()
             async with self._device_refresh_lock:
                 snapshot = await self.client.async_get_cached_snapshot()
-                self._record_device_snapshot(snapshot)
+                self._record_device_snapshot(snapshot, retain=True)
             if self._device_snapshot_is_stale(snapshot):
                 return
             if not snapshot.available:
@@ -325,6 +351,8 @@ class DreameLawnMowerCoordinator(
         except Exception as err:  # noqa: BLE001 - callback must not escape HA task
             _LOGGER.debug("Failed to process cached mower update: %s", err)
         finally:
+            if snapshot is not None:
+                self._release_device_snapshot(snapshot)
             self._client_update_task = None
             if (
                 getattr(self, "_client_update_pending", False)
