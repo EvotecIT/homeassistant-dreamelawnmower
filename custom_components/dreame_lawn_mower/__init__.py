@@ -12,6 +12,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import (
     CONF_VIDEO_TRANSPORT,
+    DEFAULT_VIDEO_TRANSPORT,
     DOMAIN,
     PLATFORMS,
     VIDEO_TRANSPORT_AUTO,
@@ -152,7 +153,10 @@ def _cached_video_only_available(
     provisioning_cache: DreameLawnMowerVideoProvisioningCache,
 ) -> bool:
     """Return whether setup may safely expose only a cached camera."""
-    transport = entry.options.get(CONF_VIDEO_TRANSPORT)
+    transport = entry.options.get(
+        CONF_VIDEO_TRANSPORT,
+        DEFAULT_VIDEO_TRANSPORT,
+    )
     if transport == VIDEO_TRANSPORT_AUTO:
         return (
             (lan_cache.inputs is not None and lan_cache.endpoint is not None)

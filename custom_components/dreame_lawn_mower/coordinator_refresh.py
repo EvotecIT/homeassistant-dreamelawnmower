@@ -51,11 +51,24 @@ class DreameLawnMowerRefreshMixin:
         """Fetch essential state and hydrate optional metadata in the background."""
         if not hasattr(self, "performance"):
             self.performance = DreameLawnMowerPerformanceTracker()
+        if not hasattr(self, "_device_refresh_lock"):
+            self._device_refresh_lock = asyncio.Lock()
         cycle = self.performance.start("foreground_refresh")
         outcome = "completed"
         try:
             try:
-                snapshot = await cycle.measure("snapshot", self.client.async_refresh)
+                async with self._device_refresh_lock:
+                    snapshot = await cycle.measure(
+                        "snapshot",
+                        self.client.async_refresh,
+                    )
+                    record_snapshot = getattr(
+                        self,
+                        "_record_device_snapshot",
+                        None,
+                    )
+                    if callable(record_snapshot):
+                        record_snapshot(snapshot)
             except DreameLawnMowerConnectionError as err:
                 outcome = type(err).__name__
                 safe_error = sanitize_diagnostic_text(err)

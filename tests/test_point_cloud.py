@@ -66,6 +66,17 @@ def _ascii_pcd(point_count: int) -> bytes:
     return header + (b"1 2 3\n" * point_count)
 
 
+def test_point_cloud_validation_rejects_browser_unsafe_point_counts() -> None:
+    with pytest.raises(
+        DreameLawnMowerPointCloudError,
+        match="point count exceeds",
+    ) as failure:
+        parse_pcd_metadata(_ascii_pcd(3), max_points=2)
+
+    assert failure.value.code == "point_cloud_download_invalid"
+    assert failure.value.stage == "download_validation"
+
+
 def _client() -> DreameLawnMowerClient:
     return DreameLawnMowerClient(
         username="user@example.invalid",

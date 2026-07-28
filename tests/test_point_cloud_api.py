@@ -750,9 +750,16 @@ def test_current_point_cloud_path_follows_selected_map_before_cache_refresh() ->
 
 
 class _FakeRequest(dict[str, Any]):
-    def __init__(self, *, is_admin: bool, query: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        is_admin: bool,
+        query: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         super().__init__(hass_user=SimpleNamespace(is_admin=is_admin))
         self.query = query or {}
+        self.headers = headers or {}
 
 
 def test_point_cloud_view_returns_private_attachment_to_admin() -> None:
@@ -779,11 +786,39 @@ def test_point_cloud_view_returns_private_attachment_to_admin() -> None:
 
     assert calls == [("entry-1", 2, True)]
     assert response.body == b"private-pcd"
-    assert response.headers["Cache-Control"] == "private, no-store"
+    assert response.headers["Cache-Control"] == (
+        "private, max-age=300, must-revalidate"
+    )
+    assert response.headers["ETag"].startswith('"sha256-')
     assert response.headers["Content-Disposition"] == (
         'attachment; filename="dreame-map-2.pcd"'
     )
     assert response.headers["X-Content-Type-Options"] == "nosniff"
+
+
+def test_point_cloud_view_returns_not_modified_for_matching_private_etag() -> None:
+    download = _download(2)
+
+    async def get(*_args: Any, **_kwargs: Any) -> DreameLawnMowerPointCloudDownload:
+        return download
+
+    view = DreameLawnMowerPointCloudView(SimpleNamespace(async_get=get))
+    response = asyncio.run(
+        view.get(
+            _FakeRequest(
+                is_admin=True,
+                headers={
+                    "If-None-Match": f'"sha256-{download.content_sha256}"',
+                },
+            ),
+            "entry-1",
+            "2",
+        )
+    )
+
+    assert response.status == 304
+    assert response.body is None
+    assert response.headers["ETag"] == f'"sha256-{download.content_sha256}"'
 
 
 def test_point_cloud_view_requires_admin() -> None:

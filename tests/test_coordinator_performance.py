@@ -67,6 +67,28 @@ def test_coordinator_registers_its_config_entry_with_home_assistant() -> None:
     )
 
 
+def test_newer_video_safety_snapshot_wins_over_slow_foreground_publication() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._device_snapshot_generation = 0
+    coordinator._published_device_snapshot_generation = 0
+    coordinator._device_snapshot_generations = {}
+    foreground_snapshot = SimpleNamespace(state="docked")
+    video_snapshot = SimpleNamespace(state="idle")
+
+    coordinator._record_device_snapshot(foreground_snapshot)
+    coordinator._record_device_snapshot(video_snapshot)
+
+    with patch.object(
+        DataUpdateCoordinator,
+        "async_set_updated_data",
+    ) as publish:
+        coordinator.async_set_updated_data(video_snapshot)
+        coordinator.async_set_updated_data(foreground_snapshot)
+
+    publish.assert_called_once_with(video_snapshot)
+    assert coordinator._published_device_snapshot_generation == 2
+
+
 def test_first_refresh_does_not_wait_for_optional_metadata() -> None:
     async def scenario() -> None:
         coordinator = object.__new__(DreameLawnMowerCoordinator)

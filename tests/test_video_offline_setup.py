@@ -16,6 +16,14 @@ def test_auto_setup_allows_complete_cached_xp2p_provisioning() -> None:
     )
 
 
+def test_missing_transport_option_uses_auto_for_cached_video_setup() -> None:
+    assert _cached_video_only_available(
+        SimpleNamespace(options={}),
+        lan_cache=SimpleNamespace(inputs=None, endpoint=None),
+        provisioning_cache=SimpleNamespace(inputs=object(), device_config=object()),
+    )
+
+
 def test_auto_setup_allows_proven_cached_lan_endpoint() -> None:
     assert _cached_video_only_available(
         SimpleNamespace(options={CONF_VIDEO_TRANSPORT: VIDEO_TRANSPORT_AUTO}),

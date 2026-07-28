@@ -71,6 +71,8 @@ exclude = [
   "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/map_renderer.py",
   "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/protocol.py",
   "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/protocol_cloud.py",
+  # Generated modules contain large single-line encoded assets.
+  "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/resource_data/",
   "custom_components/dreame_lawn_mower/dreame_lawn_mower_client/resources.py",
 ]
 

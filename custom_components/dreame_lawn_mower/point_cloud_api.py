@@ -31,7 +31,7 @@ _LOGGER = logging.getLogger(__name__)
 
 POINT_CLOUD_API_DATA_KEY = "point_cloud_api"
 POINT_CLOUD_API_PATH = f"/api/{DOMAIN}/point-cloud"
-POINT_CLOUD_CACHE_TTL_SECONDS = 60.0
+POINT_CLOUD_CACHE_TTL_SECONDS = 300.0
 POINT_CLOUD_CACHE_MAX_ENTRIES = 4
 POINT_CLOUD_PROBLEM_SCHEMA_VERSION = 1
 
@@ -636,11 +636,32 @@ class DreameLawnMowerPointCloudView(HomeAssistantView):
             )
 
         elapsed_ms = round((time.monotonic() - started_at) * 1000, 1)
+        etag = f'"sha256-{download.content_sha256}"'
+        if_none_match = getattr(request, "headers", {}).get("If-None-Match", "")
+        cache_control = (
+            f"private, max-age={int(POINT_CLOUD_CACHE_TTL_SECONDS)}, "
+            "must-revalidate"
+        )
+        if not refresh and any(
+            candidate.strip() in {etag, "*"}
+            for candidate in if_none_match.split(",")
+        ):
+            return web.Response(
+                status=304,
+                headers={
+                    "Cache-Control": cache_control,
+                    "ETag": etag,
+                    "X-Content-Type-Options": "nosniff",
+                    "X-Dreame-Operation-Elapsed-Ms": str(elapsed_ms),
+                    "Server-Timing": f"dreame-point-cloud;dur={elapsed_ms}",
+                },
+            )
         return web.Response(
             body=download.content,
             content_type="application/octet-stream",
             headers={
-                "Cache-Control": "private, no-store",
+                "Cache-Control": cache_control,
+                "ETag": etag,
                 "Content-Disposition": (
                     f'attachment; filename="dreame-map-{normalized_index}.pcd"'
                 ),

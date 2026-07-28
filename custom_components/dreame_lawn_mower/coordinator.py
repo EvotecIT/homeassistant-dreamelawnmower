@@ -58,6 +58,7 @@ MAINTENANCE_REFRESH_INTERVAL = timedelta(minutes=5)
 VOICE_SETTINGS_REFRESH_INTERVAL = timedelta(minutes=5)
 SCHEDULE_REFRESH_INTERVAL = timedelta(minutes=5)
 FIRMWARE_UPDATE_REFRESH_INTERVAL = timedelta(minutes=15)
+DEVICE_SNAPSHOT_GENERATION_HISTORY = 32
 
 
 _runtime_tracking_active = runtime_tracking_active
@@ -111,6 +112,13 @@ class DreameLawnMowerCoordinator(
         self.schedules_refreshed_at: datetime | None = None
         self._schedule_write_lock = asyncio.Lock()
         self._preference_write_lock = asyncio.Lock()
+        self._device_refresh_lock = asyncio.Lock()
+        self._device_snapshot_generation = 0
+        self._published_device_snapshot_generation = 0
+        self._device_snapshot_generations: dict[
+            int,
+            tuple[DreameLawnMowerSnapshot, int],
+        ] = {}
         self.selected_mowing_action = "all_area"
         self.selected_map_index: int | None = None
         self.selected_contour_id: tuple[int, int] | None = None
@@ -159,6 +167,63 @@ class DreameLawnMowerCoordinator(
         )
         self.client.set_update_callback(self._handle_client_update)
 
+    async def async_refresh_video_safety_state(self) -> DreameLawnMowerSnapshot:
+        """Refresh only authoritative mower state before enabling live video.
+
+        Video startup must not wait for maps, schedules, runtime tracks, or
+        background metadata.  The shared lock still serializes the underlying
+        cloud owner with the normal coordinator refresh.
+        """
+        async with self._device_refresh_lock:
+            snapshot = await self.client.async_refresh()
+            self._record_device_snapshot(snapshot)
+        self.async_set_updated_data(snapshot)
+        return snapshot
+
+    def _record_device_snapshot(self, snapshot: DreameLawnMowerSnapshot) -> None:
+        """Assign fetch order so slow hydration cannot publish stale state."""
+        self._device_snapshot_generation = (
+            getattr(self, "_device_snapshot_generation", 0) + 1
+        )
+        if not hasattr(self, "_device_snapshot_generations"):
+            self._device_snapshot_generations = {}
+        self._device_snapshot_generations[id(snapshot)] = (
+            snapshot,
+            self._device_snapshot_generation,
+        )
+        while (
+            len(self._device_snapshot_generations)
+            > DEVICE_SNAPSHOT_GENERATION_HISTORY
+        ):
+            oldest = min(
+                self._device_snapshot_generations,
+                key=lambda snapshot_id: self._device_snapshot_generations[
+                    snapshot_id
+                ][1],
+            )
+            self._device_snapshot_generations.pop(oldest)
+
+    def async_set_updated_data(self, data: DreameLawnMowerSnapshot) -> None:
+        """Publish fetched snapshots only while they remain the newest."""
+        generations = getattr(self, "_device_snapshot_generations", None)
+        recorded = generations.get(id(data)) if generations else None
+        generation = (
+            recorded[1]
+            if recorded is not None and recorded[0] is data
+            else None
+        )
+        if generation is not None:
+            published = getattr(self, "_published_device_snapshot_generation", 0)
+            if generation < published:
+                _LOGGER.debug(
+                    "Ignoring stale mower snapshot generation %s after %s",
+                    generation,
+                    published,
+                )
+                return
+            self._published_device_snapshot_generation = generation
+        super().async_set_updated_data(data)
+
     def _handle_client_update(self) -> None:
         """Bridge device-thread MQTT updates onto the Home Assistant loop."""
         if self._shutting_down:
@@ -183,7 +248,11 @@ class DreameLawnMowerCoordinator(
         try:
             # Collapse a burst of property callbacks into the newest device state.
             await asyncio.sleep(0)
-            snapshot = await self.client.async_get_cached_snapshot()
+            if not hasattr(self, "_device_refresh_lock"):
+                self._device_refresh_lock = asyncio.Lock()
+            async with self._device_refresh_lock:
+                snapshot = await self.client.async_get_cached_snapshot()
+                self._record_device_snapshot(snapshot)
             if not snapshot.available:
                 self.runtime_status_blob = None
                 self.client.update_runtime_live_tracking(None, active=False)

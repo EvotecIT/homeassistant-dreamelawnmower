@@ -154,6 +154,16 @@ class DreameLawnMowerVideoStateMixin:
             ),
             "video_runtime_preparation_error": self._runtime_preparation_error,
             "stream_session_active": self._session is not None,
+            "video_delivery": {
+                "preferred": "webrtc",
+                "fallback": "hls",
+                "source": "loopback_flv_relay",
+                **(
+                    self._flv_relay.diagnostics
+                    if getattr(self, "_flv_relay", None) is not None
+                    else {}
+                ),
+            },
             "last_stream_error": self._last_error,
             "last_stream_error_at": getattr(self, "_last_error_at", None),
             "last_stream_error_code": getattr(self, "_last_error_code", None),

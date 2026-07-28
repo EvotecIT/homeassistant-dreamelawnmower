@@ -10,6 +10,7 @@ from typing import Any, Protocol
 from homeassistant.core import HomeAssistant
 
 _DEFAULT_PROVIDER_GRACE = 30.0
+_DEFAULT_IDLE_GRACE = 15.0
 _DEFAULT_IDLE_POLL_INTERVAL = 1.0
 
 
@@ -31,6 +32,7 @@ class DreameLawnMowerHaStreamIdleMonitor:
         is_current: Callable[[_HaStream, object], bool],
         stop_active: Callable[[], Awaitable[None]],
         provider_grace: float = _DEFAULT_PROVIDER_GRACE,
+        idle_grace: float = _DEFAULT_IDLE_GRACE,
         poll_interval: float = _DEFAULT_IDLE_POLL_INTERVAL,
     ) -> None:
         self._hass = hass
@@ -38,6 +40,7 @@ class DreameLawnMowerHaStreamIdleMonitor:
         self._is_current = is_current
         self._stop_active = stop_active
         self._provider_grace = provider_grace
+        self._idle_grace = idle_grace
         self._poll_interval = poll_interval
         self._task: asyncio.Task[None] | None = None
 
@@ -61,13 +64,21 @@ class DreameLawnMowerHaStreamIdleMonitor:
     async def _async_watch(self, ha_stream: _HaStream, session: object) -> None:
         current_task = asyncio.current_task()
         provider_seen = False
-        deadline = asyncio.get_running_loop().time() + self._provider_grace
+        provider_deadline = asyncio.get_running_loop().time() + self._provider_grace
+        idle_deadline: float | None = None
         try:
             while self._is_current(ha_stream, session):
                 if ha_stream.outputs():
                     provider_seen = True
-                elif provider_seen or asyncio.get_running_loop().time() >= deadline:
-                    break
+                    idle_deadline = None
+                else:
+                    now = asyncio.get_running_loop().time()
+                    if provider_seen:
+                        idle_deadline = idle_deadline or now + self._idle_grace
+                        if now >= idle_deadline:
+                            break
+                    elif now >= provider_deadline:
+                        break
                 await asyncio.sleep(self._poll_interval)
 
             async with self._stream_lock:

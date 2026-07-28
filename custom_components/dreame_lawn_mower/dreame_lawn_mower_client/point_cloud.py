@@ -6,10 +6,12 @@ import math
 import struct
 import time
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from hashlib import sha256
 from typing import Any, Literal
 
-DEFAULT_POINT_CLOUD_MAX_BYTES = 64 * 1024 * 1024
+DEFAULT_POINT_CLOUD_MAX_BYTES = 32 * 1024 * 1024
+DEFAULT_POINT_CLOUD_MAX_POINTS = 2_000_000
 MAX_POINT_CLOUD_HEADER_BYTES = 64 * 1024
 _SUPPORTED_DATA_ENCODINGS = frozenset({"ascii", "binary"})
 _SUPPORTED_FIELD_TYPES = frozenset({"F", "I", "U"})
@@ -99,18 +101,32 @@ class DreameLawnMowerPointCloudDownload:
     content_type: str = "application/octet-stream"
     file_extension: str = "pcd"
     source: Literal["generated", "stored"] = "generated"
+    content_sha256: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        """Hash validated content once for private conditional delivery."""
+        object.__setattr__(self, "content_sha256", sha256(self.content).hexdigest())
 
 
 def parse_pcd_metadata(
     content: bytes,
     *,
     max_bytes: int = DEFAULT_POINT_CLOUD_MAX_BYTES,
+    max_points: int = DEFAULT_POINT_CLOUD_MAX_POINTS,
     deadline: float | None = None,
 ) -> DreameLawnMowerPointCloudMetadata:
     """Validate a PCD payload and return coordinate-free metadata."""
     if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes <= 0:
         raise DreameLawnMowerPointCloudError(
             "Point-cloud maximum size must be a positive integer."
+        )
+    if (
+        isinstance(max_points, bool)
+        or not isinstance(max_points, int)
+        or max_points <= 0
+    ):
+        raise DreameLawnMowerPointCloudError(
+            "Point-cloud maximum point count must be a positive integer."
         )
     if not isinstance(content, bytes | bytearray | memoryview):
         raise DreameLawnMowerPointCloudError("Point-cloud content must be bytes.")
@@ -173,6 +189,15 @@ def parse_pcd_metadata(
     if width * height != points:
         raise DreameLawnMowerPointCloudError(
             "PCD WIDTH and HEIGHT do not match the declared point count."
+        )
+    if points > max_points:
+        raise DreameLawnMowerPointCloudError(
+            "Point-cloud point count exceeds the supported rendering limit.",
+            code="point_cloud_download_invalid",
+            stage="download_validation",
+            public_message=(
+                "The generated 3D map is too large to render safely in a browser."
+            ),
         )
     if data_encoding not in _SUPPORTED_DATA_ENCODINGS:
         raise DreameLawnMowerPointCloudError(
@@ -420,8 +445,8 @@ def _validate_binary_coordinates(
     """Reject non-finite binary coordinates before a frontend parses them."""
     field_offsets: dict[str, tuple[int, int]] = {}
     offset = 0
-    for field, size, count in zip(fields, sizes, counts, strict=True):
-        field_offsets[field] = (offset, size)
+    for field_name, size, count in zip(fields, sizes, counts, strict=True):
+        field_offsets[field_name] = (offset, size)
         offset += size * count
 
     coordinates = tuple(field_offsets[field] for field in ("x", "y", "z"))
