@@ -189,6 +189,72 @@ def test_start_resumes_heartbeat_confirmed_paused_session() -> None:
     client._async_call_device_method.assert_not_awaited()
 
 
+def test_lost_resume_acknowledgement_requires_transition_out_of_paused() -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    client.async_get_status_blob = AsyncMock(
+        return_value=SimpleNamespace(task_resumable=True)
+    )
+    client._sync_resume_mowing = Mock(
+        side_effect=DreameLawnMowerConnectionError("resume reply lost")
+    )
+    client.async_refresh = AsyncMock(
+        return_value=SimpleNamespace(
+            state="paused",
+            task_status="paused",
+            task_resumable=True,
+            started=True,
+            mowing=False,
+            mowing_session_active=True,
+        )
+    )
+
+    with (
+        patch(
+            "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+            "client_core.asyncio.sleep",
+            AsyncMock(),
+        ),
+        pytest.raises(
+            DreameLawnMowerConnectionError,
+            match="could not be confirmed",
+        ),
+    ):
+        asyncio.run(client.async_start_mowing())
+
+    client._sync_resume_mowing.assert_called_once_with()
+    assert client.async_refresh.await_count == 3
+
+
+def test_lost_resume_acknowledgement_accepts_active_mowing_transition() -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    client.async_get_status_blob = AsyncMock(
+        return_value=SimpleNamespace(task_resumable=True)
+    )
+    client._sync_resume_mowing = Mock(
+        side_effect=DreameLawnMowerConnectionError("resume reply lost")
+    )
+    client.async_refresh = AsyncMock(
+        return_value=SimpleNamespace(
+            state="mowing",
+            task_status="mowing",
+            task_resumable=False,
+            started=True,
+            mowing=True,
+            mowing_session_active=True,
+        )
+    )
+
+    with patch(
+        "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+        "client_core.asyncio.sleep",
+        AsyncMock(),
+    ):
+        asyncio.run(client.async_start_mowing())
+
+    client._sync_resume_mowing.assert_called_once_with()
+    client.async_refresh.assert_awaited_once_with()
+
+
 def test_start_uses_fresh_action_without_resumable_session() -> None:
     client = object.__new__(DreameLawnMowerClient)
     client.async_get_status_blob = AsyncMock(

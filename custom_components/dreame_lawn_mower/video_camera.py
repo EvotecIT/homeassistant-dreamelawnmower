@@ -127,8 +127,8 @@ class DreameLawnMowerVideoCamera(
     _async_start_stream = DreameLawnMowerVideoStartupMixin.__dict__[
         "_async_start_stream"
     ]
-    _async_refresh_auto_start_state = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_refresh_auto_start_state"
+    _async_refresh_video_start_state = DreameLawnMowerVideoStartupMixin.__dict__[
+        "_async_refresh_video_start_state"
     ]
     _video_start_is_blocked = DreameLawnMowerVideoStartupMixin.__dict__[
         "_video_start_is_blocked"

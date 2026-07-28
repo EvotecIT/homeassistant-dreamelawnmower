@@ -509,9 +509,8 @@ class DreameLawnMowerClient(
                     "resume mowing",
                     err,
                     lambda snapshot: bool(
-                        snapshot.started
-                        or snapshot.mowing
-                        or snapshot.mowing_session_active is True
+                        snapshot_session_control_state(snapshot) == "mowing"
+                        and not getattr(snapshot, "task_resumable", False)
                     ),
                 )
             return

@@ -132,8 +132,8 @@ class DreameLawnMowerVideoStartupMixin:
         if self._video_start_is_blocked():
             return None
         if (
-            self._video_transport == VIDEO_TRANSPORT_AUTO
-            and not await self._async_refresh_auto_start_state()
+            self._video_transport in {VIDEO_TRANSPORT_AUTO, VIDEO_TRANSPORT_LAN}
+            and not await self._async_refresh_video_start_state()
         ):
             return None
 
@@ -334,17 +334,17 @@ class DreameLawnMowerVideoStartupMixin:
             provisioning_inputs=cloud_inputs,
         )
 
-    async def _async_refresh_auto_start_state(self) -> bool:
-        """Require a fresh safe mower snapshot before a cached Auto start."""
+    async def _async_refresh_video_start_state(self) -> bool:
+        """Require a fresh safe mower snapshot before Auto or LAN startup."""
         try:
             snapshot = await self.coordinator.async_refresh_video_safety_state()
         except Exception as err:  # noqa: BLE001 - fail closed before video startup.
             _LOGGER.debug(
-                "Failed to refresh mower state before Auto video: %s",
+                "Failed to refresh mower state before Auto/LAN video: %s",
                 sanitize_diagnostic_text(err),
             )
             self._set_stream_error(
-                "Could not refresh mower state before starting Auto video.",
+                "Could not refresh mower state before starting Auto/LAN video.",
                 stage="state_refresh",
             )
             return False

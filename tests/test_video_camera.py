@@ -300,7 +300,7 @@ def test_video_camera_facade_preserves_split_method_surface() -> None:
         ),
         video_camera_startup_module.DreameLawnMowerVideoStartupMixin: (
             "_async_start_stream",
-            "_async_refresh_auto_start_state",
+            "_async_refresh_video_start_state",
             "_video_start_is_blocked",
             "_async_try_lan_stream",
             "_async_try_cached_xp2p_stream",
@@ -1854,7 +1854,7 @@ def test_video_camera_relay_failure_bypasses_stale_lan_for_auto() -> None:
         entity._async_get_runtime_inputs = _get_inputs
         entity._async_start_runtime_session = _start_cloud
         entity._async_adopt_stream_session = _adopt
-        entity._async_refresh_auto_start_state = lambda: asyncio.sleep(
+        entity._async_refresh_video_start_state = lambda: asyncio.sleep(
             0,
             result=True,
         )
@@ -3485,7 +3485,13 @@ def test_video_camera_relay_deadline_covers_managed_runtime_budget() -> None:
     )
 
 
-def test_video_camera_auto_refresh_blocks_cached_start_after_mower_docks() -> None:
+@pytest.mark.parametrize(
+    "transport",
+    [VIDEO_TRANSPORT_AUTO, VIDEO_TRANSPORT_LAN],
+)
+def test_video_camera_safety_refresh_blocks_cached_start_after_mower_docks(
+    transport: str,
+) -> None:
     async def _run() -> tuple[str | None, int, list[str]]:
         entity = _uninitialized_entity(
             snapshot=SimpleNamespace(
@@ -3498,7 +3504,7 @@ def test_video_camera_auto_refresh_blocks_cached_start_after_mower_docks() -> No
                 raw_attributes={},
             )
         )
-        entity._entry.options[CONF_VIDEO_TRANSPORT] = VIDEO_TRANSPORT_AUTO
+        entity._entry.options[CONF_VIDEO_TRANSPORT] = transport
         entity._provisioning_cache.inputs = DreameLawnMowerCameraStreamRuntimeInputs(
             source="video_provisioning_cache",
             did="did-1",
