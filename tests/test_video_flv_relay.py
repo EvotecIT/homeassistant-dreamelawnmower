@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -103,6 +104,24 @@ def test_relay_failure_sanitizes_value_error_with_private_source_url() -> None:
 
     assert failure == "The mower video source failed (ValueError)."
     assert "private-token" not in failure
+
+
+def test_failed_pump_cleanup_preserves_a_replacement_pump() -> None:
+    async def _run() -> tuple[bool, bool]:
+        relay = object.__new__(DreameLawnMowerFlvRelay)
+        relay._lock = asyncio.Lock()
+        replacement = asyncio.create_task(asyncio.Event().wait())
+        relay._pump_task = replacement
+        failed_pump = asyncio.current_task()
+        try:
+            await relay.async_stop_upstream(expected_task=failed_pump)
+            return relay._pump_task is replacement, replacement.cancelled()
+        finally:
+            replacement.cancel()
+            with suppress(asyncio.CancelledError):
+                await replacement
+
+    assert asyncio.run(_run()) == (True, False)
 
 
 def test_flv_parser_waits_for_sequence_header_and_keyframe_before_ready() -> None:

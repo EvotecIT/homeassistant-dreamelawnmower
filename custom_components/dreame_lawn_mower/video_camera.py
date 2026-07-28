@@ -484,7 +484,10 @@ class DreameLawnMowerVideoCamera(
                 # its worker can reopen the relay URL after spotty Wi-Fi.
                 await self._async_retire_failed_runtime_session()
             elif self._session is not None:
-                await self._async_stop_active_session(reason="relay_failure")
+                await self._async_stop_active_session(
+                    reason="relay_failure",
+                    failed_pump_task=asyncio.current_task(),
+                )
             await self._async_clear_failed_playback_caches(
                 cached_xp2p=cached_playback_failed,
                 lan=lan_playback_failed,
@@ -822,6 +825,7 @@ class DreameLawnMowerVideoCamera(
         *,
         reason: str = "session_stop",
         trigger: str | None = None,
+        failed_pump_task: asyncio.Task[Any] | None = None,
     ) -> None:
         """Stop the current runtime session if one is active."""
         self._last_stream_cleanup_reason = reason
@@ -840,7 +844,12 @@ class DreameLawnMowerVideoCamera(
             await self._stream_idle_monitor.async_cancel()
             relay = getattr(self, "_flv_relay", None)
             if relay is not None:
-                await relay.async_stop_upstream()
+                if failed_pump_task is None:
+                    await relay.async_stop_upstream()
+                else:
+                    await relay.async_stop_upstream(
+                        expected_task=failed_pump_task,
+                    )
             cleanup_task = asyncio.create_task(
                 self._async_finish_active_session_cleanup()
             )

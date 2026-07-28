@@ -533,10 +533,20 @@ class DreameLawnMowerFlvRelay:
         if runner is not None:
             await runner.cleanup()
 
-    async def async_stop_upstream(self) -> None:
-        """Stop relay IO without destroying the stable loopback endpoint."""
+    async def async_stop_upstream(
+        self,
+        *,
+        expected_task: asyncio.Task[None] | None = None,
+    ) -> None:
+        """Stop owned relay IO without destroying the stable loopback endpoint."""
         async with self._lock:
             task = self._pump_task
+            if (
+                expected_task is not None
+                and task is not None
+                and task is not expected_task
+            ):
+                return
             self._pump_task = None
             idle_task = self._idle_task
             self._idle_task = None

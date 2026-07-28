@@ -1542,7 +1542,7 @@ def test_video_camera_relay_failure_retires_active_session() -> None:
         entity._session = object()
         reasons: list[str] = []
 
-        async def _stop(*, reason: str = "session_stop") -> None:
+        async def _stop(*, reason: str = "session_stop", **_kwargs: object) -> None:
             reasons.append(reason)
             entity._session = None
 
@@ -1625,7 +1625,7 @@ def test_video_camera_relay_failure_preserves_ha_stream_without_session() -> Non
         entity.stream = stream
         reasons: list[str] = []
 
-        async def _stop(*, reason: str = "session_stop") -> None:
+        async def _stop(*, reason: str = "session_stop", **_kwargs: object) -> None:
             reasons.append(reason)
             entity.stream = None
 
@@ -1696,7 +1696,7 @@ def test_video_camera_relay_failure_bypasses_stale_cached_xp2p() -> None:
                 nonlocal clears
                 clears += 1
 
-        async def _stop(*, reason: str = "session_stop") -> None:
+        async def _stop(*, reason: str = "session_stop", **_kwargs: object) -> None:
             assert reason == "relay_failure"
             entity._session = None
             entity._unverified_playback_session = None
@@ -1735,7 +1735,7 @@ def test_video_camera_relay_failure_clears_cache_before_reconnect_start() -> Non
                 await release_clear.wait()
                 order.append("clear_finished")
 
-        async def _stop(*, reason: str = "session_stop") -> None:
+        async def _stop(*, reason: str = "session_stop", **_kwargs: object) -> None:
             assert reason == "relay_failure"
             entity._session = None
             entity._unverified_playback_session = None
@@ -1793,7 +1793,7 @@ def test_video_camera_relay_failure_bypasses_stale_lan_for_auto() -> None:
                 self.clears += 1
                 self.endpoint = None
 
-        async def _stop(*, reason: str = "session_stop") -> None:
+        async def _stop(*, reason: str = "session_stop", **_kwargs: object) -> None:
             assert reason == "relay_failure"
             entity._session = None
             entity._unverified_playback_session = None
@@ -2221,6 +2221,75 @@ def test_video_camera_cold_snapshot_includes_upstream_startup_budget() -> None:
             return await entity.async_camera_image()
 
     assert asyncio.run(_run()) == b"\xff\xd8cold-snapshot\xff\xd9"
+
+
+def test_failed_relay_cleanup_preserves_replacement_during_snapshot_stop() -> None:
+    async def _run() -> tuple[bool, bool, bool]:
+        entity = _uninitialized_entity()
+        stop_entered = asyncio.Event()
+        release_stop = asyncio.Event()
+        replacement_release = asyncio.Event()
+
+        class _Stream:
+            async def stop(self) -> None:
+                stop_entered.set()
+                await release_stop.wait()
+
+        class _Relay:
+            def __init__(self) -> None:
+                self._pump_task: asyncio.Task[None] | None = None
+                self.preserved_replacement = False
+
+            async def async_stop_upstream(
+                self,
+                *,
+                expected_task: asyncio.Task[None] | None = None,
+            ) -> None:
+                if (
+                    expected_task is not None
+                    and self._pump_task is not None
+                    and self._pump_task is not expected_task
+                ):
+                    self.preserved_replacement = True
+                    return
+                raise AssertionError("Old cleanup must not stop the replacement pump")
+
+        stream = _Stream()
+        relay = _Relay()
+        entity.stream = stream
+        entity._snapshot_owned_stream = stream
+        entity._flv_relay = relay
+        entity._runtime = object()
+        entity._session = SimpleNamespace(transport=VIDEO_TRANSPORT_LAN)
+        entity._last_stream_health = {}
+        entity.hass = SimpleNamespace(
+            data={
+                video_camera_module.STREAM_DOMAIN: {
+                    video_camera_module.ATTR_STREAMS: [stream],
+                }
+            }
+        )
+        entity.async_write_ha_state = lambda: None
+        entity._async_stop_session = lambda *_args: asyncio.sleep(0)
+        entity._async_clear_failed_playback_caches = (
+            lambda **_kwargs: asyncio.sleep(0)
+        )
+
+        snapshot_stop = asyncio.create_task(entity._async_stop_owned_stream(stream))
+        await asyncio.wait_for(stop_entered.wait(), timeout=1)
+        failed_cleanup = asyncio.create_task(entity._async_relay_failed("link lost"))
+        await asyncio.sleep(0)
+        replacement = asyncio.create_task(replacement_release.wait())
+        relay._pump_task = replacement
+        release_stop.set()
+        await snapshot_stop
+        await failed_cleanup
+        preserved = relay.preserved_replacement and not replacement.done()
+        replacement_release.set()
+        await replacement
+        return preserved, entity._runtime is None, entity._session is None
+
+    assert asyncio.run(_run()) == (True, True, True)
 
 
 def test_video_camera_stop_unregisters_cached_home_assistant_stream() -> None:
