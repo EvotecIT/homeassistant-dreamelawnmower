@@ -252,6 +252,7 @@ class DreameLawnMowerVideoCamera(
         self._provisioning_cache_error: str | None = None
         self._last_cached_xp2p_error: str | None = None
         self._bypass_cached_xp2p = False
+        self._bypass_lan = False
         self._last_video_transport: str | None = None
         self._last_video_transport_attempted: str | None = None
         self._video_capability_observed = snapshot_advertises_video(coordinator.data)
@@ -395,16 +396,27 @@ class DreameLawnMowerVideoCamera(
             await self._async_cache_healthy_provisioning(provisioning_inputs)
         if self._last_video_transport != "cached_xp2p":
             self._bypass_cached_xp2p = False
+        if self._last_video_transport == VIDEO_TRANSPORT_LAN:
+            self._bypass_lan = False
         self.async_write_ha_state()
 
     async def _async_relay_failed(self, error: str) -> None:
         """Retire a failed upstream while leaving the relay URL reusable."""
+        unverified_playback_failed = (
+            getattr(self, "_unverified_playback_session", None) is not None
+        )
         cached_playback_failed = (
             self._last_video_transport == "cached_xp2p"
-            and self._unverified_playback_session is not None
+            and unverified_playback_failed
+        )
+        lan_playback_failed = (
+            self._last_video_transport == VIDEO_TRANSPORT_LAN
+            and unverified_playback_failed
         )
         if cached_playback_failed:
             self._bypass_cached_xp2p = True
+        if lan_playback_failed:
+            self._bypass_lan = True
         self._set_stream_error(
             f"The local mower video relay stopped before playback completed: {error}",
             stage="relay_playback",
@@ -412,7 +424,19 @@ class DreameLawnMowerVideoCamera(
         async with self._stream_lock:
             if self._session is not None or getattr(self, "stream", None) is not None:
                 await self._async_stop_active_session(reason="relay_failure")
-        if cached_playback_failed:
+            await self._async_clear_failed_playback_caches(
+                cached_xp2p=cached_playback_failed,
+                lan=lan_playback_failed,
+            )
+
+    async def _async_clear_failed_playback_caches(
+        self,
+        *,
+        cached_xp2p: bool,
+        lan: bool,
+    ) -> None:
+        """Clear failed routes while replacement startup remains serialized."""
+        if cached_xp2p:
             try:
                 await self._provisioning_cache.async_clear()
                 self._provisioning_cache_error = None
@@ -421,6 +445,16 @@ class DreameLawnMowerVideoCamera(
                 _LOGGER.warning(
                     "Failed to clear stale Dreame video provisioning cache: %s",
                     self._provisioning_cache_error,
+                )
+        if lan:
+            try:
+                await self._lan_cache.async_clear_endpoint()
+                self._lan_cache_error = None
+            except Exception as err:  # noqa: BLE001 - bypass remains authoritative.
+                self._lan_cache_error = sanitize_diagnostic_text(err)
+                _LOGGER.warning(
+                    "Failed to clear stale Dreame LAN video endpoint: %s",
+                    self._lan_cache_error,
                 )
 
     async def _async_relay_idle(self) -> None:

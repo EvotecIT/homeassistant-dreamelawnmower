@@ -173,7 +173,11 @@ class DreameLawnMowerVideoStartupMixin:
 
         cloud_inputs: DreameLawnMowerCameraStreamRuntimeInputs | None = None
         cloud_inputs_error: Exception | None = None
-        if self._video_transport != VIDEO_TRANSPORT_CLOUD:
+        bypass_lan = (
+            self._video_transport == VIDEO_TRANSPORT_AUTO
+            and getattr(self, "_bypass_lan", False)
+        )
+        if self._video_transport != VIDEO_TRANSPORT_CLOUD and not bypass_lan:
             lan_inputs = self._lan_cache.inputs
             cached_endpoint = self._lan_cache.endpoint
             if (
@@ -258,6 +262,10 @@ class DreameLawnMowerVideoStartupMixin:
                     "No cached LAN video identity is available. Use Auto or Cloud "
                     "once while the video cloud is reachable to provision it."
                 )
+        elif bypass_lan:
+            self._last_lan_error = (
+                "Same-LAN playback is bypassed after a decoder-level failure."
+            )
 
         if self._video_start_is_blocked():
             return None
