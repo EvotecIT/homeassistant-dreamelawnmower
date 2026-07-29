@@ -433,6 +433,7 @@ class DreameLawnMowerCoordinator(
             map_index_hint = known_map_indices[0]
         if (
             not force
+            and len(known_map_indices) == 1
             and map_index_hint is not None
             and self._has_complete_schedule_cache(known_map_indices)
         ):
