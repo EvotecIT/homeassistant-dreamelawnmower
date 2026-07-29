@@ -499,7 +499,8 @@ def test_video_camera_cloud_start_surfaces_unprovisioned_device_triple() -> None
                 raise AssertionError("Unprovisioned video must not be enabled")
 
         entity = _uninitialized_entity()
-        entity.coordinator = SimpleNamespace(client=_Client(), data=object())
+        entity.coordinator.client = _Client()
+        entity.coordinator.data = object()
         entity._prepared_runtime = object()
         entity._async_stop_active_session = lambda: asyncio.sleep(0)
         entity.async_write_ha_state = lambda: None
@@ -3042,7 +3043,8 @@ def test_video_camera_disables_video_when_enable_attempt_raises() -> None:
                 if enabled:
                     raise RuntimeError("enable response was lost")
 
-        entity.coordinator = SimpleNamespace(client=_Client(), data=object())
+        entity.coordinator.client = _Client()
+        entity.coordinator.data = object()
         entity.stream = None
         entity._attr_is_streaming = False
         entity._runtime_preparation_error = None
@@ -3151,7 +3153,8 @@ def test_video_camera_caches_provisioning_only_after_relay_media_ready() -> None
         cache = _ProvisioningCache()
         entity._provisioning_cache = cache
         entity._lan_cache = _LanCache()
-        entity.coordinator = SimpleNamespace(client=_Client(), data=object())
+        entity.coordinator.client = _Client()
+        entity.coordinator.data = object()
         runtime = _Runtime()
         entity._prepared_runtime = runtime
         entity._runtime_preparation_error = None
@@ -3243,7 +3246,8 @@ def test_video_camera_cloud_start_cancellation_cleans_late_session() -> None:
                 stop_completed.set()
 
         runtime = _Runtime()
-        entity.coordinator = SimpleNamespace(client=_Client(), data=object())
+        entity.coordinator.client = _Client()
+        entity.coordinator.data = object()
         entity._prepared_runtime = runtime
         entity._runtime_preparation_error = None
         entity._last_stream_disable_error = None
@@ -3563,9 +3567,9 @@ def test_video_camera_relay_deadline_covers_managed_runtime_budget() -> None:
 
 @pytest.mark.parametrize(
     "transport",
-    [VIDEO_TRANSPORT_AUTO, VIDEO_TRANSPORT_LAN],
+    [VIDEO_TRANSPORT_AUTO, VIDEO_TRANSPORT_CLOUD, VIDEO_TRANSPORT_LAN],
 )
-def test_video_camera_safety_refresh_blocks_cached_start_after_mower_docks(
+def test_video_camera_safety_refresh_blocks_start_after_mower_docks(
     transport: str,
 ) -> None:
     async def _run() -> tuple[str | None, int, list[str]]:

@@ -133,7 +133,12 @@ class DreameLawnMowerVideoStartupMixin:
         if self._video_start_is_blocked():
             return None
         if (
-            self._video_transport in {VIDEO_TRANSPORT_AUTO, VIDEO_TRANSPORT_LAN}
+            self._video_transport
+            in {
+                VIDEO_TRANSPORT_AUTO,
+                VIDEO_TRANSPORT_CLOUD,
+                VIDEO_TRANSPORT_LAN,
+            }
             and not await self._async_refresh_video_start_state()
         ):
             return None
