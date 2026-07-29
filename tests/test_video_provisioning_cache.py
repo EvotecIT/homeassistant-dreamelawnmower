@@ -96,3 +96,29 @@ def test_provisioning_cache_save_omits_access_token_and_raw_cloud_payload() -> N
     assert "must-not-be-saved" not in rendered
     assert "not be saved" not in rendered
     assert "p2p-info-1" in rendered
+
+
+def test_provisioning_cache_clear_removes_persisted_and_runtime_state() -> None:
+    async def _run() -> tuple[int, object, object, object]:
+        removes = 0
+
+        class _Store:
+            async def async_remove(self) -> None:
+                nonlocal removes
+                removes += 1
+
+        cache = object.__new__(DreameLawnMowerVideoProvisioningCache)
+        cache._store = _Store()
+        cache.inputs = object()
+        cache.device_config = object()
+        cache._runtime_input_config = (object(), object())
+
+        await cache.async_clear()
+        return (
+            removes,
+            cache.inputs,
+            cache.device_config,
+            cache._runtime_input_config,
+        )
+
+    assert asyncio.run(_run()) == (1, None, None, None)

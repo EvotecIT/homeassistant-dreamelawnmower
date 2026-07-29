@@ -49,3 +49,30 @@ def test_cloud_request_lock_serializes_app_and_device_operations() -> None:
     assert not send_thread.is_alive()
     assert send_started.is_set()
     assert sorted(results) == ["request", "send"]
+
+
+def test_app_action_retries_reads_but_dispatches_mutations_once() -> None:
+    cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
+    cloud._did = "device-1"
+    calls: list[tuple[str, int]] = []
+
+    def send(
+        method: str,
+        parameters: object,
+        retry_count: int,
+        **_kwargs: object,
+    ) -> object:
+        calls.append((method, retry_count))
+        return {"r": 0}
+
+    cloud.send = send
+
+    cloud.call_app_action({"m": "g", "t": "MAPL"})
+    cloud.call_app_action({"m": "s", "t": "CFG", "d": {"value": 1}})
+    cloud.call_app_action({"m": "a", "o": 10, "d": {"idx": 0}})
+
+    assert calls == [
+        ("action", 2),
+        ("action", 0),
+        ("action", 0),
+    ]

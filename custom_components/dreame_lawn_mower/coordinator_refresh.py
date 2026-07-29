@@ -47,18 +47,74 @@ def runtime_tracking_active(snapshot: DreameLawnMowerSnapshot) -> bool:
 class DreameLawnMowerRefreshMixin:
     """Keep blocking state refreshes separate from optional metadata hydration."""
 
+    def _snapshot_is_stale(self, snapshot: DreameLawnMowerSnapshot) -> bool:
+        """Return whether a newer device snapshot already owns coordinator state."""
+        stale_check = getattr(self, "_device_snapshot_is_stale", None)
+        return bool(callable(stale_check) and stale_check(snapshot))
+
+    def _snapshot_for_publication(
+        self,
+        snapshot: DreameLawnMowerSnapshot,
+    ) -> DreameLawnMowerSnapshot:
+        """Return current coordinator data instead of an older hydrated snapshot."""
+        if not self._snapshot_is_stale(snapshot):
+            return snapshot
+        current = getattr(self, "data", None)
+        if current is not None and not self._snapshot_is_stale(current):
+            return current
+        generations = getattr(self, "_device_snapshot_generations", {})
+        published_generation = getattr(
+            self,
+            "_published_device_snapshot_generation",
+            0,
+        )
+        for candidate, generation in generations.values():
+            if (
+                generation == published_generation
+                and not self._snapshot_is_stale(candidate)
+            ):
+                return candidate
+        raise UpdateFailed(
+            "A newer mower state replaced this refresh before publication."
+        )
+
     async def _async_update_data(self) -> DreameLawnMowerSnapshot:
         """Fetch essential state and hydrate optional metadata in the background."""
         if not hasattr(self, "performance"):
             self.performance = DreameLawnMowerPerformanceTracker()
+        if not hasattr(self, "_device_refresh_lock"):
+            self._device_refresh_lock = asyncio.Lock()
         cycle = self.performance.start("foreground_refresh")
         outcome = "completed"
+        snapshot: DreameLawnMowerSnapshot | None = None
         try:
             try:
-                snapshot = await cycle.measure("snapshot", self.client.async_refresh)
+                async with self._device_refresh_lock:
+                    snapshot = await cycle.measure(
+                        "snapshot",
+                        self.client.async_refresh,
+                    )
+                    if not snapshot.available:
+                        retained = self._record_connectivity_failure(
+                            "Mower is temporarily offline."
+                        )
+                        if retained is not None:
+                            outcome = "degraded"
+                            return retained
+                    record_snapshot = getattr(
+                        self,
+                        "_record_device_snapshot",
+                        None,
+                    )
+                    if callable(record_snapshot):
+                        record_snapshot(snapshot, retain=True)
             except DreameLawnMowerConnectionError as err:
                 outcome = type(err).__name__
                 safe_error = sanitize_diagnostic_text(err)
+                retained = self._record_connectivity_failure(err)
+                if retained is not None:
+                    outcome = "degraded"
+                    return retained
                 record_diagnostic_event(
                     self,
                     code="coordinator_update_failed",
@@ -68,6 +124,9 @@ class DreameLawnMowerRefreshMixin:
                 )
                 raise UpdateFailed(safe_error) from err
 
+            if self._snapshot_is_stale(snapshot):
+                return self._snapshot_for_publication(snapshot)
+
             if not snapshot.available:
                 self._cancel_metadata_refresh()
                 self.runtime_status_blob = None
@@ -75,9 +134,12 @@ class DreameLawnMowerRefreshMixin:
                 self.client.update_runtime_live_tracking(None, active=False)
                 return snapshot
 
+            self._record_connectivity_success(snapshot)
+
             runtime_active = runtime_tracking_active(snapshot)
             if runtime_active:
-                await self._async_refresh_active_runtime(cycle, snapshot)
+                if not await self._async_refresh_active_runtime(cycle, snapshot):
+                    return self._snapshot_for_publication(snapshot)
             else:
                 self._runtime_map_identity_verified = False
                 self.client.update_runtime_live_tracking(None, active=False)
@@ -85,7 +147,7 @@ class DreameLawnMowerRefreshMixin:
             self._schedule_metadata_refresh(
                 refresh_map_and_runtime=not runtime_active,
             )
-            return snapshot
+            return self._snapshot_for_publication(snapshot)
         except asyncio.CancelledError:
             outcome = "cancelled"
             raise
@@ -93,6 +155,13 @@ class DreameLawnMowerRefreshMixin:
             outcome = type(err).__name__
             raise
         finally:
+            release_snapshot = getattr(
+                self,
+                "_release_device_snapshot",
+                None,
+            )
+            if snapshot is not None and callable(release_snapshot):
+                release_snapshot(snapshot)
             self._foreground_refresh_count = (
                 getattr(self, "_foreground_refresh_count", 0) + 1
             )
@@ -107,7 +176,7 @@ class DreameLawnMowerRefreshMixin:
         self,
         cycle: DreameLawnMowerPerformanceCycle,
         snapshot: DreameLawnMowerSnapshot,
-    ) -> None:
+    ) -> bool:
         """Refresh authoritative map identity before publishing active tracking."""
         force_map_identity = not getattr(
             self,
@@ -119,6 +188,8 @@ class DreameLawnMowerRefreshMixin:
             "active_app_maps",
             lambda: self.async_refresh_app_maps(force=force_map_identity),
         )
+        if self._snapshot_is_stale(snapshot):
+            return False
         map_identity_refreshed = bool(
             getattr(self, "app_maps_refresh_succeeded", False)
             and (
@@ -126,33 +197,39 @@ class DreameLawnMowerRefreshMixin:
                 or self.app_maps_refreshed_at is not previous_app_maps_refreshed_at
             )
         )
-        self._runtime_map_identity_verified = map_identity_refreshed
         runtime_map_index = (
             self._runtime_map_index() if map_identity_refreshed else None
         )
-        await cycle.measure(
+        runtime_current = await cycle.measure(
             "active_runtime_status",
             lambda: self._async_refresh_runtime_status(
                 snapshot,
                 runtime_map_index=runtime_map_index,
             ),
         )
+        if not runtime_current or self._snapshot_is_stale(snapshot):
+            return False
+        self._runtime_map_identity_verified = map_identity_refreshed
+        return True
 
     async def _async_refresh_runtime_status(
         self,
         snapshot: DreameLawnMowerSnapshot,
         *,
         runtime_map_index: int | None = None,
-    ) -> None:
+    ) -> bool:
         """Refresh optional runtime telemetry without failing the main snapshot."""
         runtime_active = runtime_tracking_active(snapshot)
         if runtime_map_index is None and not runtime_active:
             runtime_map_index = self._runtime_map_index()
         try:
-            self.runtime_status_blob = await self.client.async_get_runtime_status_blob(
+            runtime_status_blob = await self.client.async_get_runtime_status_blob(
                 refresh=False,
                 include_cloud=True,
             )
+            if self._snapshot_is_stale(snapshot):
+                return False
+            self.runtime_status_blob = runtime_status_blob
             self.runtime_telemetry_cache.update(
                 self.runtime_status_blob,
                 allow_zero=runtime_active,
@@ -163,7 +240,10 @@ class DreameLawnMowerRefreshMixin:
                 active=runtime_active,
                 map_index=runtime_map_index,
             )
+            return True
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
+            if self._snapshot_is_stale(snapshot):
+                return False
             _LOGGER.debug("Failed to refresh runtime status blob: %s", err)
             self.runtime_status_blob = None
             self.client.update_runtime_live_tracking(
@@ -171,6 +251,7 @@ class DreameLawnMowerRefreshMixin:
                 active=runtime_active,
                 map_index=runtime_map_index,
             )
+            return True
 
     async def _async_refresh_bluetooth_state(self) -> None:
         """Refresh optional Bluetooth connection state."""

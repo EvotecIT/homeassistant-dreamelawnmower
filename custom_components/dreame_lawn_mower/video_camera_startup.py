@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -132,12 +133,21 @@ class DreameLawnMowerVideoStartupMixin:
         if self._video_start_is_blocked():
             return None
         if (
-            self._video_transport == VIDEO_TRANSPORT_AUTO
-            and not await self._async_refresh_auto_start_state()
+            self._video_transport
+            in {
+                VIDEO_TRANSPORT_AUTO,
+                VIDEO_TRANSPORT_CLOUD,
+                VIDEO_TRANSPORT_LAN,
+            }
+            and not await self._async_refresh_video_start_state()
         ):
             return None
 
-        await self._async_stop_active_session()
+        # A relay pump calls this while its first local viewer is already
+        # subscribed. Preserve that relay/HA stream until an older runtime
+        # session actually exists to retire.
+        if self._session is not None:
+            await self._async_stop_active_session()
         try:
             runtime = await self._async_get_runtime()
             self._runtime_preparation_error = None
@@ -169,7 +179,11 @@ class DreameLawnMowerVideoStartupMixin:
 
         cloud_inputs: DreameLawnMowerCameraStreamRuntimeInputs | None = None
         cloud_inputs_error: Exception | None = None
-        if self._video_transport != VIDEO_TRANSPORT_CLOUD:
+        bypass_lan = (
+            self._video_transport == VIDEO_TRANSPORT_AUTO
+            and getattr(self, "_bypass_lan", False)
+        )
+        if self._video_transport != VIDEO_TRANSPORT_CLOUD and not bypass_lan:
             lan_inputs = self._lan_cache.inputs
             cached_endpoint = self._lan_cache.endpoint
             if (
@@ -254,6 +268,10 @@ class DreameLawnMowerVideoStartupMixin:
                     "No cached LAN video identity is available. Use Auto or Cloud "
                     "once while the video cloud is reachable to provision it."
                 )
+        elif bypass_lan:
+            self._last_lan_error = (
+                "Same-LAN playback is bypassed after a decoder-level failure."
+            )
 
         if self._video_start_is_blocked():
             return None
@@ -322,27 +340,20 @@ class DreameLawnMowerVideoStartupMixin:
             provisioning_inputs=cloud_inputs,
         )
 
-    async def _async_refresh_auto_start_state(self) -> bool:
-        """Require a fresh safe mower snapshot before a cached Auto start."""
+    async def _async_refresh_video_start_state(self) -> bool:
+        """Require a fresh authoritative snapshot before any video startup."""
         try:
-            await self.coordinator.async_refresh()
+            snapshot = await self.coordinator.async_refresh_video_safety_state()
         except Exception as err:  # noqa: BLE001 - fail closed before video startup.
             _LOGGER.debug(
-                "Failed to refresh mower state before Auto video: %s",
+                "Failed to refresh mower state before video startup: %s",
                 sanitize_diagnostic_text(err),
             )
             self._set_stream_error(
-                "Could not refresh mower state before starting Auto video.",
+                "Could not refresh mower state before starting video.",
                 stage="state_refresh",
             )
             return False
-        if not self.coordinator.last_update_success:
-            self._set_stream_error(
-                "Could not refresh mower state before starting Auto video.",
-                stage="state_refresh",
-            )
-            return False
-        snapshot = self.coordinator.data
         if snapshot is None or not getattr(snapshot, "available", True):
             self._set_stream_error(
                 "The mower is unavailable after refreshing video safety state.",
@@ -430,7 +441,7 @@ class DreameLawnMowerVideoStartupMixin:
         result = await async_start_cached_xp2p(
             runtime,
             inputs,
-            start_session=self._async_start_runtime_session,
+            start_session=self._async_start_cached_runtime_session,
         )
         if result.session is None:
             self._last_cached_xp2p_error = (
@@ -444,6 +455,28 @@ class DreameLawnMowerVideoStartupMixin:
             result.session,
             None,
             transport="cached_xp2p",
+        )
+
+    async def _async_start_cached_runtime_session(
+        self,
+        runtime: _DreameVideoRuntime,
+        inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+        *,
+        camera_toggle_managed: bool = False,
+    ) -> DreameLawnMowerXp2pLiveStreamSession:
+        """Use a bounded managed-host attempt for cached provisioning."""
+        start_cached = getattr(runtime, "start_cached_live_stream", None)
+        if not callable(start_cached):
+            return await self._async_start_runtime_session(
+                runtime,
+                inputs,
+                camera_toggle_managed=camera_toggle_managed,
+            )
+        return await self._async_start_runtime_session(
+            runtime,
+            inputs,
+            camera_toggle_managed=camera_toggle_managed,
+            start_callable=start_cached,
         )
 
     async def _async_get_runtime_inputs(
@@ -644,10 +677,15 @@ class DreameLawnMowerVideoStartupMixin:
         inputs: DreameLawnMowerCameraStreamRuntimeInputs,
         *,
         camera_toggle_managed: bool = True,
+        start_callable: Callable[
+            [DreameLawnMowerCameraStreamRuntimeInputs],
+            DreameLawnMowerXp2pLiveStreamSession,
+        ]
+        | None = None,
     ) -> DreameLawnMowerXp2pLiveStreamSession:
         """Finish or clean up native startup if the HA request is cancelled."""
         start_job = self.hass.async_add_executor_job(
-            runtime.start_live_stream,
+            start_callable or runtime.start_live_stream,
             inputs,
         )
         try:

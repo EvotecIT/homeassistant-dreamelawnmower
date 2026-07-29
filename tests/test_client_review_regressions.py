@@ -9,6 +9,8 @@ from importlib import import_module
 from importlib.resources import files
 from types import SimpleNamespace
 
+import pytest
+
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     mqtt_tls,
     protocol,
@@ -294,6 +296,25 @@ def test_get_voice_settings_requires_supported_keys() -> None:
     assert result["available"] is False
     assert result["present_config_keys"] == []
     assert "voice_prompts" not in result
+
+
+@pytest.mark.parametrize(
+    ("method_name", "argument"),
+    [
+        ("_sync_set_voice_language", 13),
+        ("_sync_set_voice_volume", 50),
+        ("_sync_set_voice_prompts", [1, 0, 1, 0]),
+    ],
+)
+def test_voice_writes_require_explicit_mower_acknowledgement(
+    method_name: str,
+    argument: object,
+) -> None:
+    client = _client()
+    client._sync_call_app_action = lambda payload: None  # type: ignore[method-assign]  # noqa: ARG005
+
+    with pytest.raises(DreameLawnMowerConnectionError, match="did not acknowledge"):
+        getattr(client, method_name)(argument)
 
 
 def test_get_firmware_update_support_skips_debug_catalog_by_default(

@@ -173,6 +173,10 @@ The following areas are intentionally cautious:
 - the managed video runtime currently supports Linux x86_64 and aarch64 Home
   Assistant hosts, and the mower must be active and away from its station before
   the vendor permits live video
+- the 16 KB-page aarch64 compatibility worker is exercised in native ARM64
+  Home Assistant container CI, including runtime selection, installation, startup,
+  and request handling; live mower playback after that fix has not yet been
+  confirmed on the original Raspberry Pi 5 reporter host
 - 3D point-cloud generation and PCD download are validated on the Dreame A2;
   other mower families still need field reports
 - manual driving must stay supervised and uses strict state and battery guards
@@ -219,8 +223,18 @@ credentials into repository files, fixtures, or issue attachments.
 On Linux x86_64 and aarch64 Home Assistant hosts, the `Live Video` camera uses
 the managed runtime by default. No Android phone, emulator, library path, or
 external runner is required. The integration prepares the runtime during entity
-setup, starts it when Home Assistant requests the camera, verifies the local FLV
-source, and stops it when the camera is turned off or unloaded.
+setup and exposes a dormant loopback FLV relay. Camera capability discovery is
+therefore local and does not enable the mower. The first real media consumer
+starts XP2P, and the relay commits cached provisioning only after it observes
+valid FLV video.
+
+The relay is the only consumer of the mower's private source. It fans that
+source out to Home Assistant's standard camera providers, so a configured
+WebRTC provider is preferred and HLS remains the compatibility fallback. A
+still-image request and a live viewer can share the same mower session instead
+of racing for its single-consumer endpoint. When the last local viewer leaves,
+the integration keeps a 15-second reconnect grace and then releases XP2P and
+the mower camera mode.
 
 The camera entity remains available while the mower is docked, returning, or in
 another state where Dreame blocks video. Its `video_block_reason` attribute
@@ -250,17 +264,17 @@ native-library and persistent-runner options remain available as advanced
 overrides for development or unsupported host platforms.
 
 On the field-tested A3 AWD 1000, XP2P negotiation takes about 30–40 seconds and
-the media source supports one consumer at a time. Opening a still-image request
-while the Home Assistant panel is already playing HLS can make that competing
-request fail. A vendor-timed session can also finish normally and leave the
-camera idle on its last frame; request **Stream** again to negotiate a new
-session. These timings and limits are model/firmware observations, not promises
-for every mower.
+the mower media source supports one consumer at a time. The local relay removes
+the extra HLS segment wait when Home Assistant can use WebRTC, but it cannot
+remove that vendor negotiation time. A vendor-timed session is retired when its
+source ends, so the next viewer negotiates a clean replacement. These timings
+and limits are model/firmware observations, not promises for every mower.
 
 The integration exposes two video transport policies. The default uses the
-proven cloud-provisioned XP2P path. `Auto` can restart from health-checked cached
-provisioning and lets Tencent negotiate the available network route. It also
-probes Tencent's separate same-LAN service when mower firmware advertises one.
+`Auto` policy, which can restart from health-checked cached provisioning and
+lets Tencent negotiate the available network route. The explicit cloud policy
+always refreshes Dreame/Tencent inputs first. `Auto` also probes Tencent's
+separate same-LAN service when mower firmware advertises one.
 The tested A2 production firmware does not advertise that service, so the
 integration does not offer a LAN-only policy. The camera's
 `last_stream_session` attribute reports `stream_route` as `direct` only when
@@ -268,13 +282,15 @@ the separate LAN service was selected; otherwise it stays `unknown`. Tencent's
 misleadingly named `getStreamLinkMode` API returns a network/NAT-type bitmask,
 exposed as `sdk_stream_network_type`, rather than a direct-versus-relay result.
 
-After a successful cloud-provisioned stream, `Auto` privately caches the minimum
+After valid FLV media reaches the relay, `Auto` privately caches the minimum
 XP2P identity, P2P material, QCloud/app credentials, and resolved device
 configuration under Home Assistant's `.storage`. The cache uses Home Assistant's
 private-store permissions and deliberately excludes the Dreame access token,
 LAN discovery token, and raw cloud responses. On a later restart, `Auto` tries
 that cache before any Dreame video-input or camera-toggle call and refreshes it
-through the normal path if the cached material has expired.
+through the normal path if the cached material has expired. Its safety refresh
+updates only the current mower snapshot; it does not wait for map hydration or
+runtime-metadata work before starting video.
 
 This proof is intentionally narrower than every camera feature in the vendor
 apps:
@@ -479,14 +495,16 @@ need source, counts, and parser evidence.
 
 The map camera also advertises a local `point_cloud_api_path` attribute. A
 Home Assistant administrator can sign that path for a short-lived download.
-When the mower has exactly one verified map, the integration first tries its
-stored LiDAR object so an existing 3D map can display without another upload.
-If that object is absent, expired, or invalid, it asks the mower to upload the
+When the mower has exactly one created map and that map is authoritative, the
+integration first tries its stored LiDAR object so an existing 3D map can
+display without another upload. The vendor's stored-object announcement does
+not identify which map it belongs to, so multi-map mowers always generate the
+requested map rather than risk showing a previous garden. If the stored object
+is absent, expired, or invalid, the integration asks the mower to upload the
 selected app map, immediately captures the new announcement, and validates the
-returned PCD file. Multi-map requests always use fresh generation because the
-stored announcement does not identify its map. Firmware without the
-announcement retains the older transient-object lookup as a fallback. Responses
-use `private, no-store` caching.
+returned PCD file. Firmware without the announcement retains the older
+transient-object lookup as a fallback. Responses use `private, no-store`
+caching.
 Vendor filenames, cloud-signed URLs, and point coordinates are never written to
 entity state or logs.
 

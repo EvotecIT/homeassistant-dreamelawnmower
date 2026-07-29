@@ -35,7 +35,6 @@ from io import BytesIO
 from typing import Optional, Tuple
 from functools import cmp_to_key
 from threading import Timer
-from .resources import *
 from .protocol import DreameMowerProtocol
 from .exceptions import DeviceUpdateFailedException
 from .map_decoder import DreameMowerMapDecoder

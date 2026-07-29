@@ -31,7 +31,7 @@ _LOGGER = logging.getLogger(__name__)
 
 POINT_CLOUD_API_DATA_KEY = "point_cloud_api"
 POINT_CLOUD_API_PATH = f"/api/{DOMAIN}/point-cloud"
-POINT_CLOUD_CACHE_TTL_SECONDS = 60.0
+POINT_CLOUD_CACHE_TTL_SECONDS = 300.0
 POINT_CLOUD_CACHE_MAX_ENTRIES = 4
 POINT_CLOUD_PROBLEM_SCHEMA_VERSION = 1
 
@@ -184,7 +184,7 @@ class DreameLawnMowerPointCloudAPI:
 
         allow_stored = (
             not refresh
-            and _single_active_map_index(coordinator) == map_index
+            and _stored_point_cloud_active_map_index(coordinator) == map_index
         )
         generation = self._async_generate(
             key,
@@ -521,10 +521,10 @@ class DreameLawnMowerPointCloudAPI:
             handle.cancel()
 
 
-def _single_active_map_index(
+def _stored_point_cloud_active_map_index(
     coordinator: DreameLawnMowerCoordinator,
 ) -> int | None:
-    """Return the active map only when stored-object identity is unambiguous."""
+    """Return the authoritative active map eligible for stored-object reuse."""
     app_maps = getattr(coordinator, "app_maps", None)
     if not isinstance(app_maps, Mapping):
         return None
@@ -543,9 +543,10 @@ def _single_active_map_index(
         and entry["idx"] >= 0
         and entry.get("created") is not False
     }
+    # The 99.20 stored-object announcement has no map identity. Reusing it is
+    # safe only when exactly one created map can own that object.
     if len(indices) != 1:
         return None
-    only_index = next(iter(indices))
     active_index = active_map_index(
         app_maps,
         selected_map_index=getattr(
@@ -554,7 +555,7 @@ def _single_active_map_index(
             None,
         ),
     )
-    return only_index if active_index == only_index else None
+    return active_index if active_index in indices else None
 
 
 class DreameLawnMowerPointCloudView(HomeAssistantView):
@@ -636,11 +637,38 @@ class DreameLawnMowerPointCloudView(HomeAssistantView):
             )
 
         elapsed_ms = round((time.monotonic() - started_at) * 1000, 1)
+        etag = f'"sha256-{download.content_sha256}"'
+        if_none_match = getattr(request, "headers", {}).get("If-None-Match", "")
+        cache_control = (
+            "private, no-store"
+            if refresh
+            else (
+                f"private, max-age={int(POINT_CLOUD_CACHE_TTL_SECONDS)}, "
+                "must-revalidate"
+            )
+        )
+        if not refresh and any(
+            candidate.strip() in {etag, "*"}
+            for candidate in if_none_match.split(",")
+        ):
+            return web.Response(
+                status=304,
+                headers={
+                    "Cache-Control": cache_control,
+                    "ETag": etag,
+                    "Vary": "Authorization",
+                    "X-Content-Type-Options": "nosniff",
+                    "X-Dreame-Operation-Elapsed-Ms": str(elapsed_ms),
+                    "Server-Timing": f"dreame-point-cloud;dur={elapsed_ms}",
+                },
+            )
         return web.Response(
             body=download.content,
             content_type="application/octet-stream",
             headers={
-                "Cache-Control": "private, no-store",
+                "Cache-Control": cache_control,
+                "ETag": etag,
+                "Vary": "Authorization",
                 "Content-Disposition": (
                     f'attachment; filename="dreame-map-{normalized_index}.pcd"'
                 ),

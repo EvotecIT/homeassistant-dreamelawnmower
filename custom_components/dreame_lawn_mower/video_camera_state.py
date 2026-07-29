@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from time import monotonic
 from typing import Any
 
 from . import video_stream_helpers as _video_helpers
-from .const import DOMAIN, VIDEO_TRANSPORT_AUTO
+from .const import DOMAIN
 from .dreame_lawn_mower_client.models import (
     camera_stream_block_reason as _camera_stream_block_reason,
 )
@@ -87,6 +88,12 @@ class DreameLawnMowerVideoStateMixin:
         """Return whether live video can be requested from Home Assistant."""
         if not self._runtime_configured:
             return False
+        # Do not make an already-open camera disappear during a brief mower
+        # connectivity loss. Existing HA Stream/WebRTC consumers need the
+        # entity to remain addressable while their bounded reconnect path
+        # refreshes safety state and waits for Wi-Fi to recover.
+        if self._session is not None or getattr(self, "stream", None) is not None:
+            return True
         snapshot = self.coordinator.data
         if snapshot is not None and not getattr(snapshot, "available", True):
             return False
@@ -97,9 +104,11 @@ class DreameLawnMowerVideoStateMixin:
             self._provisioning_cache.inputs is not None
             and self._provisioning_cache.device_config is not None
         )
-        if self._video_transport == VIDEO_TRANSPORT_AUTO and (
-            cached_lan_ready or cached_xp2p_ready
-        ):
+        # A complete persisted route is durable capability evidence even when
+        # the selected transport policy is cloud-only. Some mower records omit
+        # videoStatus after restart, but a previously provisioned route still
+        # proves that this device has a camera.
+        if cached_lan_ready or cached_xp2p_ready:
             return True
         if not super().available:
             return False
@@ -154,6 +163,27 @@ class DreameLawnMowerVideoStateMixin:
             ),
             "video_runtime_preparation_error": self._runtime_preparation_error,
             "stream_session_active": self._session is not None,
+            "video_recovery_pending": self._video_recovery_pending,
+            "video_recovery_failure_count": self._video_recovery_failure_count,
+            "video_recovery_success_count": self._video_recovery_success_count,
+            "video_recovery_consecutive_failures": (
+                self._video_recovery_consecutive_failures
+            ),
+            "video_recovery_retry_after_seconds": max(
+                0.0,
+                round(self._video_retry_not_before - monotonic(), 3),
+            ),
+            "last_stream_recovered_at": self._last_stream_recovered_at,
+            "video_delivery": {
+                "preferred": "webrtc",
+                "fallback": "hls",
+                "source": "loopback_flv_relay",
+                **(
+                    self._flv_relay.diagnostics
+                    if getattr(self, "_flv_relay", None) is not None
+                    else {}
+                ),
+            },
             "last_stream_error": self._last_error,
             "last_stream_error_at": getattr(self, "_last_error_at", None),
             "last_stream_error_code": getattr(self, "_last_error_code", None),

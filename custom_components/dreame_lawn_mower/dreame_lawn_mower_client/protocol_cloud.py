@@ -35,6 +35,7 @@ _REDACTED_CLOUD_PROPERTIES_PAYLOAD = "<redacted cloud properties payload>"
 _REDACTED_APP_ACTION_RESPONSE = "<redacted app action response>"
 _DEADLINE_RESPONSE_CHUNK_BYTES = 8 * 1024
 _MAX_DEADLINE_RESPONSE_BYTES = 1024 * 1024
+_READ_RETRY_DELAYS_SECONDS = (0.25, 1.0)
 
 
 
@@ -592,6 +593,7 @@ class DreameMowerDreameHomeCloudProtocol:
         return self.request(
             f"{self.get_api_url()}/dreame-user-iot/iotuserbind/manualFirmwareUpdate",
             json.dumps(params, separators=(",", ":")),
+            retry_count=0,
         )
 
     def get_device_otc_info(self, lang: str | None = None) -> Any:
@@ -658,6 +660,7 @@ class DreameMowerDreameHomeCloudProtocol:
         response = self.request(
             f"{self.get_api_url()}/dreame-third-video/tx/dev/pair",
             json.dumps(params, separators=(",", ":")),
+            retry_count=0,
         )
         if response and "data" in response and response["code"] == 0:
             return response["data"]
@@ -949,7 +952,7 @@ class DreameMowerDreameHomeCloudProtocol:
         payload: Mapping[str, Any],
         siid: int = 2,
         aiid: int = 50,
-        retry_count: int = 2,
+        retry_count: int | None = None,
         timeout: float = 20,
         *,
         deadline: float | None = None,
@@ -958,6 +961,8 @@ class DreameMowerDreameHomeCloudProtocol:
         raise_on_api_error: bool = False,
     ) -> Any:
         """Call the mobile-app action bridge used by mower plugin commands."""
+        if retry_count is None:
+            retry_count = 2 if payload.get("m") == "g" else 0
         return self.send(
             "action",
             {
@@ -1095,6 +1100,7 @@ class DreameMowerDreameHomeCloudProtocol:
         api_response = self._api_call(
             f"{self._strings[23]}/{self._strings[26]}/{self._strings[45]}",
             {"did": self._did, self._strings[35]: props},
+            retry_count=0,
         )
         if api_response is None or "result" not in api_response:
             return None
@@ -1219,12 +1225,22 @@ class DreameMowerDreameHomeCloudProtocol:
                         timeout,
                         _cloud_request_log_value(url, data),
                     )
+                self._sleep_before_request_retry(
+                    retries,
+                    retry_count,
+                    deadline=deadline,
+                )
             except Exception as ex:
                 retries = retries + 1
                 response = None
                 if self._connected:
                     _LOGGER.warning(
                         "Error while executing request: %s", str(ex))
+                self._sleep_before_request_retry(
+                    retries,
+                    retry_count,
+                    deadline=deadline,
+                )
 
         _LOGGER.debug(
             "DreameMowerDreameHomeCloudProtocol.request response: %s", response)
@@ -1265,6 +1281,26 @@ class DreameMowerDreameHomeCloudProtocol:
         else:
             self._fail_count = self._fail_count + 1
         return None
+
+    @staticmethod
+    def _sleep_before_request_retry(
+        retries: int,
+        retry_count: int,
+        *,
+        deadline: float | None,
+    ) -> None:
+        """Back off read-only retries without exceeding a shared deadline."""
+        if retries > retry_count:
+            return
+        delay = _READ_RETRY_DELAYS_SECONDS[
+            min(retries - 1, len(_READ_RETRY_DELAYS_SECONDS) - 1)
+        ]
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            delay = min(delay, remaining)
+        sleep(delay)
 
     def get(
         self,

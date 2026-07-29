@@ -144,7 +144,7 @@ def test_point_cloud_api_does_not_use_stored_object_for_inactive_map() -> None:
     assert options == [{"map_index": 1, "allow_stored": False}]
 
 
-def test_point_cloud_api_does_not_use_stored_object_with_multiple_maps() -> None:
+def test_point_cloud_api_does_not_reuse_ambiguous_stored_multi_map_object() -> None:
     options: list[dict[str, Any]] = []
 
     async def download(**kwargs: Any) -> DreameLawnMowerPointCloudDownload:
@@ -172,6 +172,36 @@ def test_point_cloud_api_does_not_use_stored_object_with_multiple_maps() -> None
     asyncio.run(api.async_get("entry-1", 0))
 
     assert options == [{"map_index": 0, "allow_stored": False}]
+
+
+def test_point_cloud_api_does_not_use_stored_object_for_selected_inactive_map() -> None:
+    options: list[dict[str, Any]] = []
+
+    async def download(**kwargs: Any) -> DreameLawnMowerPointCloudDownload:
+        options.append(kwargs)
+        return _download(kwargs["map_index"])
+
+    hass = SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry-1": SimpleNamespace(
+                    app_maps={
+                        "current_map_index": 0,
+                        "maps": [{"idx": 0}, {"idx": 1}],
+                    },
+                    selected_map_index=1,
+                    client=SimpleNamespace(
+                        async_download_app_map_point_cloud=download,
+                    ),
+                )
+            }
+        }
+    )
+    api = DreameLawnMowerPointCloudAPI(hass)
+
+    asyncio.run(api.async_get("entry-1", 1))
+
+    assert options == [{"map_index": 1, "allow_stored": False}]
 
 
 def test_point_cloud_api_ignores_empty_trailing_map_slots() -> None:
@@ -750,9 +780,16 @@ def test_current_point_cloud_path_follows_selected_map_before_cache_refresh() ->
 
 
 class _FakeRequest(dict[str, Any]):
-    def __init__(self, *, is_admin: bool, query: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        is_admin: bool,
+        query: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         super().__init__(hass_user=SimpleNamespace(is_admin=is_admin))
         self.query = query or {}
+        self.headers = headers or {}
 
 
 def test_point_cloud_view_returns_private_attachment_to_admin() -> None:
@@ -780,10 +817,38 @@ def test_point_cloud_view_returns_private_attachment_to_admin() -> None:
     assert calls == [("entry-1", 2, True)]
     assert response.body == b"private-pcd"
     assert response.headers["Cache-Control"] == "private, no-store"
+    assert response.headers["ETag"].startswith('"sha256-')
+    assert response.headers["Vary"] == "Authorization"
     assert response.headers["Content-Disposition"] == (
         'attachment; filename="dreame-map-2.pcd"'
     )
     assert response.headers["X-Content-Type-Options"] == "nosniff"
+
+
+def test_point_cloud_view_returns_not_modified_for_matching_private_etag() -> None:
+    download = _download(2)
+
+    async def get(*_args: Any, **_kwargs: Any) -> DreameLawnMowerPointCloudDownload:
+        return download
+
+    view = DreameLawnMowerPointCloudView(SimpleNamespace(async_get=get))
+    response = asyncio.run(
+        view.get(
+            _FakeRequest(
+                is_admin=True,
+                headers={
+                    "If-None-Match": f'"sha256-{download.content_sha256}"',
+                },
+            ),
+            "entry-1",
+            "2",
+        )
+    )
+
+    assert response.status == 304
+    assert response.body is None
+    assert response.headers["ETag"] == f'"sha256-{download.content_sha256}"'
+    assert response.headers["Vary"] == "Authorization"
 
 
 def test_point_cloud_view_requires_admin() -> None:

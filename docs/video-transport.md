@@ -11,19 +11,28 @@ The Home Assistant camera offers two policies:
 
 | Policy | Behavior |
 | --- | --- |
-| `XP2P (cloud provisioned)` | Fetches current Dreame/Tencent inputs and starts normal XP2P. This is the proven default. |
-| `Automatic XP2P with cached restart` | Reuses previously health-checked XP2P provisioning when possible, otherwise refreshes it. Tencent still chooses the media route. |
+| `Automatic XP2P with cached restart` | Default. Reuses previously health-checked XP2P provisioning when possible, otherwise refreshes it. Tencent still chooses the media route. |
+| `XP2P (cloud provisioned)` | Always fetches current Dreame/Tencent inputs before starting normal XP2P. |
 
 Both policies can use a direct peer route when Tencent negotiates one, but
 neither promises startup without internet connectivity. The tested A2
 production firmware does not advertise Tencent's separate LAN service, so the
 integration does not expose a LAN-only policy.
 
-Before trying a cached LAN or XP2P session, `Auto` refreshes the mower snapshot
-and applies the same docked, returning, mapping, and ambiguous-active-state
-guards as a cloud-provisioned start. If the current state cannot be refreshed,
-the camera fails closed. Cached provisioning avoids repeating video-specific
-configuration calls; it does not bypass live mower safety checks.
+Before trying a cached LAN or XP2P session, `Auto` performs a narrow mower
+snapshot refresh and applies the same docked, returning, mapping, and
+ambiguous-active-state guards as a cloud-provisioned start. It does not wait for
+map hydration or runtime-metadata work. If the current state cannot be
+refreshed, the camera fails closed. Cached provisioning avoids repeating
+video-specific configuration calls; it does not bypass live mower safety
+checks.
+
+The integration exposes a dormant loopback FLV relay to Home Assistant. The
+first actual media GET starts XP2P, while camera capability discovery remains
+local. The relay owns the mower's single-consumer source and fans it out to
+WebRTC, HLS, and still-image consumers. WebRTC is selected when Home Assistant
+has a compatible provider; HLS remains the fallback. A 15-second zero-viewer
+grace supports quick dashboard re-entry before the relay releases XP2P.
 
 ## Two different Tencent paths
 

@@ -42,6 +42,7 @@ from .client_settings_helpers import (
 )
 from .client_shared_helpers import (
     _app_action_data,
+    _ensure_app_write_succeeded,
     _positive_int,
 )
 from .debug_ota_catalog import (
@@ -257,14 +258,10 @@ class _DreameLawnMowerClientSettingsMixin:
         }
         if execute:
             response = self._sync_call_app_action(request)
-            response_data = _app_action_data(response)
-            if isinstance(response_data, Mapping) and response_data.get("r") not in (
-                None,
-                0,
-            ):
-                raise DreameLawnMowerConnectionError(
-                    f"Schedule write failed: {response}"
-                )
+            response_data = _ensure_app_write_succeeded(
+                response,
+                operation="Schedule write",
+            )
             result["executed"] = True
             result["response"] = _json_safe(response, max_depth=4)
             result["response_data"] = _json_safe(response_data, max_depth=4)
@@ -345,16 +342,10 @@ class _DreameLawnMowerClientSettingsMixin:
             response_data_items: list[Any] = []
             for request in requests:
                 response = self._sync_call_app_action(request)
-                response_data = _app_action_data(response)
-                if isinstance(response_data, Mapping) and response_data.get(
-                    "r"
-                ) not in (
-                    None,
-                    0,
-                ):
-                    raise DreameLawnMowerConnectionError(
-                        f"Schedule upload failed: {response}"
-                    )
+                response_data = _ensure_app_write_succeeded(
+                    response,
+                    operation="Schedule upload",
+                )
                 responses.append(_json_safe(response, max_depth=4))
                 response_data_items.append(_json_safe(response_data, max_depth=4))
             result["executed"] = True
@@ -544,16 +535,10 @@ class _DreameLawnMowerClientSettingsMixin:
             response_payloads: list[Any] = []
             for request in request_sequence:
                 response = self._sync_call_app_action(request)
-                response_data = _app_action_data(response)
-                if isinstance(response_data, Mapping) and response_data.get(
-                    "r"
-                ) not in (
-                    None,
-                    0,
-                ):
-                    raise DreameLawnMowerConnectionError(
-                        f"Preference write failed: {response}"
-                    )
+                response_data = _ensure_app_write_succeeded(
+                    response,
+                    operation="Preference write",
+                )
                 responses.append(_json_safe(response, max_depth=4))
                 response_payloads.append(_json_safe(response_data, max_depth=4))
             result["executed"] = True
@@ -879,7 +864,10 @@ class _DreameLawnMowerClientSettingsMixin:
             return result
 
         response = self._sync_call_app_action(request)
-        response_data = _app_action_data(response)
+        response_data = _ensure_app_write_succeeded(
+            response,
+            operation="Maintenance reset",
+        )
         result["dry_run"] = False
         result["executed"] = True
         result["response"] = _json_safe(response, max_depth=4)
@@ -1011,7 +999,10 @@ class _DreameLawnMowerClientSettingsMixin:
             },
         }
         response = self._sync_call_app_action(request)
-        data = _app_action_data(response)
+        data = _ensure_app_write_succeeded(
+            response,
+            operation="Voice language write",
+        )
         if not isinstance(data, Mapping):
             raise DreameLawnMowerConnectionError(
                 f"LANG voice write returned invalid data: {response}"
@@ -1045,7 +1036,10 @@ class _DreameLawnMowerClientSettingsMixin:
             },
         }
         response = self._sync_call_app_action(request)
-        data = _app_action_data(response)
+        data = _ensure_app_write_succeeded(
+            response,
+            operation="Voice volume write",
+        )
         if not isinstance(data, Mapping):
             raise DreameLawnMowerConnectionError(
                 f"VOL write returned invalid data: {response}"
@@ -1069,7 +1063,10 @@ class _DreameLawnMowerClientSettingsMixin:
             },
         }
         response = self._sync_call_app_action(request)
-        data = _app_action_data(response)
+        data = _ensure_app_write_succeeded(
+            response,
+            operation="Voice prompt write",
+        )
         if not isinstance(data, Mapping):
             raise DreameLawnMowerConnectionError(
                 f"VOICE write returned invalid data: {response}"

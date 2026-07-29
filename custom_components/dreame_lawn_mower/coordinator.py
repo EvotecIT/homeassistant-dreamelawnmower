@@ -34,6 +34,7 @@ from .const import (
     DOMAIN,
 )
 from .control_options import active_map_index
+from .coordinator_connectivity import DreameLawnMowerConnectivityMixin
 from .coordinator_refresh import (
     METADATA_REFRESH_CONCURRENCY,
     DreameLawnMowerRefreshMixin,
@@ -58,12 +59,14 @@ MAINTENANCE_REFRESH_INTERVAL = timedelta(minutes=5)
 VOICE_SETTINGS_REFRESH_INTERVAL = timedelta(minutes=5)
 SCHEDULE_REFRESH_INTERVAL = timedelta(minutes=5)
 FIRMWARE_UPDATE_REFRESH_INTERVAL = timedelta(minutes=15)
+DEVICE_SNAPSHOT_GENERATION_HISTORY = 32
 
 
 _runtime_tracking_active = runtime_tracking_active
 
 
 class DreameLawnMowerCoordinator(
+    DreameLawnMowerConnectivityMixin,
     DreameLawnMowerRefreshMixin,
     DataUpdateCoordinator[DreameLawnMowerSnapshot],
 ):
@@ -111,6 +114,14 @@ class DreameLawnMowerCoordinator(
         self.schedules_refreshed_at: datetime | None = None
         self._schedule_write_lock = asyncio.Lock()
         self._preference_write_lock = asyncio.Lock()
+        self._device_refresh_lock = asyncio.Lock()
+        self._device_snapshot_generation = 0
+        self._published_device_snapshot_generation = 0
+        self._device_snapshot_generations: dict[
+            int,
+            tuple[DreameLawnMowerSnapshot, int],
+        ] = {}
+        self._retained_device_snapshot_ids: set[int] = set()
         self.selected_mowing_action = "all_area"
         self.selected_map_index: int | None = None
         self.selected_contour_id: tuple[int, int] | None = None
@@ -144,6 +155,7 @@ class DreameLawnMowerCoordinator(
         self._foreground_refresh_count = 0
         self._metadata_refresh_count = 0
         self._shutting_down = False
+        self._initialize_connectivity_recovery()
 
         super().__init__(
             hass,
@@ -158,6 +170,114 @@ class DreameLawnMowerCoordinator(
             ),
         )
         self.client.set_update_callback(self._handle_client_update)
+
+    async def async_refresh_video_safety_state(self) -> DreameLawnMowerSnapshot:
+        """Refresh only authoritative mower state before enabling live video.
+
+        Video startup must not wait for maps, schedules, runtime tracks, or
+        background metadata.  The shared lock still serializes the underlying
+        cloud owner with the normal coordinator refresh.
+        """
+        for _attempt in range(2):
+            async with self._device_refresh_lock:
+                try:
+                    snapshot = (
+                        await self.client.async_refresh_authoritative_snapshot()
+                    )
+                except Exception as err:
+                    self._record_connectivity_failure(err)
+                    raise
+                if not getattr(snapshot, "available", True):
+                    self._record_connectivity_failure("Mower is temporarily offline.")
+                    return snapshot
+                self._record_device_snapshot(snapshot)
+                if self._device_snapshot_is_stale(snapshot):
+                    continue
+                self._record_connectivity_success(snapshot)
+                self.async_set_updated_data(snapshot)
+                return snapshot
+        raise RuntimeError("Mower state changed during video safety refresh.")
+
+    def _record_device_snapshot(
+        self,
+        snapshot: DreameLawnMowerSnapshot,
+        *,
+        retain: bool = False,
+    ) -> None:
+        """Assign fetch order so slow hydration cannot publish stale state."""
+        self._device_snapshot_generation = (
+            getattr(self, "_device_snapshot_generation", 0) + 1
+        )
+        if not hasattr(self, "_device_snapshot_generations"):
+            self._device_snapshot_generations = {}
+        snapshot_id = id(snapshot)
+        self._device_snapshot_generations[snapshot_id] = (
+            snapshot,
+            self._device_snapshot_generation,
+        )
+        if not hasattr(self, "_retained_device_snapshot_ids"):
+            self._retained_device_snapshot_ids = set()
+        if retain:
+            self._retained_device_snapshot_ids.add(snapshot_id)
+        while (
+            len(self._device_snapshot_generations)
+            > DEVICE_SNAPSHOT_GENERATION_HISTORY
+        ):
+            evictable = (
+                snapshot_id
+                for snapshot_id in self._device_snapshot_generations
+                if snapshot_id not in self._retained_device_snapshot_ids
+            )
+            oldest = min(
+                evictable,
+                key=lambda snapshot_id: self._device_snapshot_generations[
+                    snapshot_id
+                ][1],
+                default=None,
+            )
+            if oldest is None:
+                break
+            self._device_snapshot_generations.pop(oldest)
+
+    def _release_device_snapshot(self, snapshot: DreameLawnMowerSnapshot) -> None:
+        """Allow a hydrated snapshot record to be evicted by a later fetch."""
+        retained = getattr(self, "_retained_device_snapshot_ids", None)
+        if retained is not None:
+            retained.discard(id(snapshot))
+
+    def async_set_updated_data(self, data: DreameLawnMowerSnapshot) -> None:
+        """Publish fetched snapshots only while they remain the newest."""
+        if self._device_snapshot_is_stale(data):
+            return
+        generations = getattr(self, "_device_snapshot_generations", None)
+        recorded = generations.get(id(data)) if generations else None
+        generation = (
+            recorded[1]
+            if recorded is not None and recorded[0] is data
+            else None
+        )
+        if generation is not None:
+            self._published_device_snapshot_generation = generation
+        super().async_set_updated_data(data)
+
+    def _device_snapshot_is_stale(self, snapshot: DreameLawnMowerSnapshot) -> bool:
+        """Return whether a newer device snapshot has already been fetched."""
+        generations = getattr(self, "_device_snapshot_generations", None)
+        recorded = generations.get(id(snapshot)) if generations else None
+        if recorded is None or recorded[0] is not snapshot:
+            return False
+        generation = recorded[1]
+        newest_fetched = getattr(self, "_device_snapshot_generation", 0)
+        published = getattr(self, "_published_device_snapshot_generation", 0)
+        newest_generation = max(newest_fetched, published)
+        if generation >= newest_generation:
+            return False
+        _LOGGER.debug(
+            "Ignoring stale mower snapshot generation %s after generation %s",
+            generation,
+            newest_generation,
+        )
+        return True
 
     def _handle_client_update(self) -> None:
         """Bridge device-thread MQTT updates onto the Home Assistant loop."""
@@ -180,16 +300,29 @@ class DreameLawnMowerCoordinator(
 
     async def _async_process_client_update(self) -> None:
         """Publish cached MQTT state without waiting for the polling interval."""
+        snapshot: DreameLawnMowerSnapshot | None = None
         try:
             # Collapse a burst of property callbacks into the newest device state.
             await asyncio.sleep(0)
-            snapshot = await self.client.async_get_cached_snapshot()
+            if not hasattr(self, "_device_refresh_lock"):
+                self._device_refresh_lock = asyncio.Lock()
+            async with self._device_refresh_lock:
+                snapshot = await self.client.async_get_cached_snapshot()
+                if not snapshot.available:
+                    retained = self._record_connectivity_failure(
+                        "Realtime mower connection was interrupted."
+                    )
+                    if retained is not None:
+                        self.async_update_listeners()
+                        return
+                self._record_device_snapshot(snapshot, retain=True)
+            if self._device_snapshot_is_stale(snapshot):
+                return
             if not snapshot.available:
                 self.runtime_status_blob = None
                 self.client.update_runtime_live_tracking(None, active=False)
                 self.async_set_updated_data(snapshot)
                 return
-
             runtime_active = runtime_tracking_active(snapshot)
             runtime_map_index = (
                 self._runtime_map_index()
@@ -197,25 +330,52 @@ class DreameLawnMowerCoordinator(
                 or getattr(self, "_runtime_map_identity_verified", False)
                 else None
             )
+            runtime_status_blob: DreameLawnMowerStatusBlob | None = None
+            runtime_status_error: Exception | None = None
             try:
-                self.runtime_status_blob = (
-                    await self.client.async_get_runtime_status_blob(
-                        refresh=False,
-                        include_cloud=False,
-                    )
-                )
-                self.runtime_telemetry_cache.update(
-                    self.runtime_status_blob,
-                    allow_zero=runtime_active,
-                    active_session=runtime_active,
-                )
-                self.client.update_runtime_live_tracking(
-                    self.runtime_status_blob,
-                    active=runtime_active,
-                    map_index=runtime_map_index,
+                runtime_status_blob = await self.client.async_get_runtime_status_blob(
+                    refresh=False,
+                    include_cloud=False,
                 )
             except Exception as err:  # noqa: BLE001 - best-effort MQTT metadata
-                _LOGGER.debug("Failed to process realtime status blob: %s", err)
+                runtime_status_error = err
+
+            bluetooth_connected: bool | None = None
+            bluetooth_error: Exception | None = None
+            try:
+                bluetooth_connected = await self.client.async_get_bluetooth_connected(
+                    refresh=False,
+                    include_cloud=False,
+                )
+            except Exception as err:  # noqa: BLE001 - best-effort MQTT metadata
+                bluetooth_error = err
+
+            # Both optional reads can yield while a newer authoritative fetch
+            # publishes. Commit no runtime or Bluetooth side effects until the
+            # cached snapshot is still current after every await.
+            if self._device_snapshot_is_stale(snapshot):
+                return
+
+            if runtime_status_error is None:
+                try:
+                    self.runtime_status_blob = runtime_status_blob
+                    self.runtime_telemetry_cache.update(
+                        self.runtime_status_blob,
+                        allow_zero=runtime_active,
+                        active_session=runtime_active,
+                    )
+                    self.client.update_runtime_live_tracking(
+                        self.runtime_status_blob,
+                        active=runtime_active,
+                        map_index=runtime_map_index,
+                    )
+                except Exception as err:  # noqa: BLE001 - best-effort MQTT metadata
+                    runtime_status_error = err
+            if runtime_status_error is not None:
+                _LOGGER.debug(
+                    "Failed to process realtime status blob: %s",
+                    runtime_status_error,
+                )
                 self.runtime_status_blob = None
                 self.client.update_runtime_live_tracking(
                     None,
@@ -223,22 +383,19 @@ class DreameLawnMowerCoordinator(
                     map_index=runtime_map_index,
                 )
 
-            try:
-                self.bluetooth_connected = (
-                    await self.client.async_get_bluetooth_connected(
-                        refresh=False,
-                        include_cloud=False,
-                    )
-                )
-            except Exception as err:  # noqa: BLE001 - best-effort MQTT metadata
+            if bluetooth_error is None:
+                self.bluetooth_connected = bluetooth_connected
+            else:
                 _LOGGER.debug(
                     "Failed to process realtime Bluetooth state: %s",
-                    err,
+                    bluetooth_error,
                 )
             self.async_set_updated_data(snapshot)
         except Exception as err:  # noqa: BLE001 - callback must not escape HA task
             _LOGGER.debug("Failed to process cached mower update: %s", err)
         finally:
+            if snapshot is not None:
+                self._release_device_snapshot(snapshot)
             self._client_update_task = None
             if (
                 getattr(self, "_client_update_pending", False)
@@ -817,6 +974,7 @@ class DreameLawnMowerCoordinator(
     async def async_shutdown(self) -> None:
         """Disconnect client resources."""
         self._shutting_down = True
+        await self._async_shutdown_connectivity_recovery()
         self._client_update_pending = False
         self.client.set_update_callback(None)
         task = self._client_update_task

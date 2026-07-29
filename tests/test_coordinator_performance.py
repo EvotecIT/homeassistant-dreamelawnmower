@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 import custom_components.dreame_lawn_mower as integration_module
@@ -23,6 +24,7 @@ from custom_components.dreame_lawn_mower.const import (
     DOMAIN,
 )
 from custom_components.dreame_lawn_mower.coordinator import (
+    DEVICE_SNAPSHOT_GENERATION_HISTORY,
     METADATA_REFRESH_CONCURRENCY,
     DreameLawnMowerCoordinator,
 )
@@ -65,6 +67,151 @@ def test_coordinator_registers_its_config_entry_with_home_assistant() -> None:
     client.set_update_callback.assert_called_once_with(
         coordinator._handle_client_update
     )
+
+
+def test_newer_video_safety_snapshot_wins_over_slow_foreground_publication() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._device_snapshot_generation = 0
+    coordinator._published_device_snapshot_generation = 0
+    coordinator._device_snapshot_generations = {}
+    foreground_snapshot = SimpleNamespace(state="docked")
+    video_snapshot = SimpleNamespace(state="idle")
+
+    coordinator._record_device_snapshot(foreground_snapshot)
+    coordinator._record_device_snapshot(video_snapshot)
+
+    with patch.object(
+        DataUpdateCoordinator,
+        "async_set_updated_data",
+    ) as publish:
+        coordinator.async_set_updated_data(foreground_snapshot)
+        coordinator.async_set_updated_data(video_snapshot)
+
+    publish.assert_called_once_with(video_snapshot)
+    assert coordinator._published_device_snapshot_generation == 2
+
+
+def test_video_safety_refresh_retries_snapshot_that_is_already_stale() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        stale_snapshot = SimpleNamespace(state="docked")
+        current_snapshot = SimpleNamespace(state="idle")
+        coordinator._device_refresh_lock = asyncio.Lock()
+        coordinator._device_snapshot_generation = 0
+        coordinator._published_device_snapshot_generation = 0
+        coordinator._device_snapshot_generations = {}
+        coordinator.client = SimpleNamespace(
+            async_refresh=AsyncMock(
+                side_effect=AssertionError(
+                    "Video safety must not use the ordinary cached refresh."
+                )
+            ),
+            async_refresh_authoritative_snapshot=AsyncMock(
+                side_effect=(stale_snapshot, current_snapshot)
+            ),
+        )
+        coordinator._device_snapshot_is_stale = Mock(side_effect=(True, False))
+        coordinator.async_set_updated_data = Mock()
+
+        result = await coordinator.async_refresh_video_safety_state()
+
+        assert result is current_snapshot
+        assert (
+            coordinator.client.async_refresh_authoritative_snapshot.await_count
+            == 2
+        )
+        coordinator.client.async_refresh.assert_not_awaited()
+        coordinator.async_set_updated_data.assert_called_once_with(current_snapshot)
+
+    asyncio.run(scenario())
+
+
+def test_newer_video_safety_snapshot_blocks_foreground_runtime_side_effects() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        foreground_snapshot = SimpleNamespace(
+            available=True,
+            mowing_session_active=True,
+            activity="mowing",
+        )
+        video_snapshots = [
+            SimpleNamespace(
+                available=True,
+                mowing_session_active=False,
+                activity="idle",
+            )
+            for _ in range(DEVICE_SNAPSHOT_GENERATION_HISTORY + 2)
+        ]
+        snapshots = iter((foreground_snapshot, *video_snapshots))
+        runtime_started = asyncio.Event()
+        release_runtime = asyncio.Event()
+        retained_runtime = SimpleNamespace(source="newer-state")
+
+        async def refresh_snapshot() -> object:
+            return next(snapshots)
+
+        async def refresh_app_maps(*, force: bool) -> dict[str, object]:
+            assert force is True
+            coordinator.app_maps_refreshed_at = object()
+            coordinator.app_maps_refresh_succeeded = True
+            return coordinator.app_maps
+
+        async def refresh_runtime(*, refresh: bool, include_cloud: bool) -> object:
+            assert refresh is False
+            assert include_cloud is True
+            runtime_started.set()
+            await release_runtime.wait()
+            return SimpleNamespace(source="stale-foreground")
+
+        coordinator.performance = DreameLawnMowerPerformanceTracker()
+        coordinator._foreground_refresh_count = 0
+        coordinator._device_refresh_lock = asyncio.Lock()
+        coordinator._device_snapshot_generation = 0
+        coordinator._published_device_snapshot_generation = 0
+        coordinator._device_snapshot_generations = {}
+        coordinator._retained_device_snapshot_ids = set()
+        coordinator._runtime_map_identity_verified = False
+        coordinator.app_maps = {"current_map_index": 2}
+        coordinator.app_maps_refreshed_at = object()
+        coordinator.app_maps_refresh_succeeded = False
+        coordinator.selected_map_index = 2
+        coordinator.runtime_status_blob = retained_runtime
+        coordinator.runtime_telemetry_cache = SimpleNamespace(update=Mock())
+        coordinator.client = SimpleNamespace(
+            async_refresh=refresh_snapshot,
+            async_refresh_authoritative_snapshot=refresh_snapshot,
+            async_get_runtime_status_blob=refresh_runtime,
+            update_runtime_live_tracking=Mock(),
+        )
+        coordinator.async_refresh_app_maps = refresh_app_maps
+        coordinator._schedule_metadata_refresh = Mock()
+        coordinator._log_performance_sample = Mock()
+
+        with patch.object(
+            DataUpdateCoordinator,
+            "async_set_updated_data",
+            side_effect=lambda data: setattr(coordinator, "data", data),
+        ) as publish:
+            foreground_task = asyncio.create_task(coordinator._async_update_data())
+            await asyncio.wait_for(runtime_started.wait(), timeout=1)
+            current = None
+            for video_snapshot in video_snapshots:
+                current = await coordinator.async_refresh_video_safety_state()
+                assert current is video_snapshot
+            release_runtime.set()
+            foreground_result = await foreground_task
+
+        assert current is video_snapshots[-1]
+        assert foreground_result is video_snapshots[-1]
+        assert publish.call_count == len(video_snapshots)
+        publish.assert_called_with(video_snapshots[-1])
+        assert coordinator.runtime_status_blob is retained_runtime
+        assert coordinator._runtime_map_identity_verified is False
+        coordinator.runtime_telemetry_cache.update.assert_not_called()
+        coordinator.client.update_runtime_live_tracking.assert_not_called()
+        coordinator._schedule_metadata_refresh.assert_not_called()
+
+    asyncio.run(scenario())
 
 
 def test_first_refresh_does_not_wait_for_optional_metadata() -> None:
@@ -635,6 +782,62 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
         assert "entry-1" not in hass.data[DOMAIN]
         sample = performance.as_dict()["latest_by_operation"]["setup"]
         assert sample["outcome"] == "RuntimeError"
+
+    asyncio.run(scenario())
+
+
+def test_initial_connection_failure_keeps_complete_platform_setup_pending() -> None:
+    async def scenario() -> None:
+        performance = DreameLawnMowerPerformanceTracker()
+        coordinator = SimpleNamespace(
+            performance=performance,
+            client=SimpleNamespace(descriptor=SimpleNamespace(did="device-1")),
+            async_config_entry_first_refresh=AsyncMock(
+                side_effect=ConfigEntryNotReady("offline")
+            ),
+            async_shutdown=AsyncMock(),
+            _metadata_refresh_task=None,
+        )
+        cache = SimpleNamespace(
+            async_load=AsyncMock(),
+            inputs=object(),
+            endpoint=object(),
+            device_config=object(),
+        )
+        forward = AsyncMock()
+        hass = SimpleNamespace(
+            data={},
+            config_entries=SimpleNamespace(async_forward_entry_setups=forward),
+        )
+        entry = SimpleNamespace(entry_id="entry-1", options={})
+
+        with (
+            patch.object(
+                integration_module,
+                "DreameLawnMowerCoordinator",
+                return_value=coordinator,
+            ),
+            patch.object(
+                integration_module,
+                "DreameLawnMowerVideoLanCache",
+                return_value=cache,
+            ),
+            patch.object(
+                integration_module,
+                "DreameLawnMowerVideoProvisioningCache",
+                return_value=cache,
+            ),
+        ):
+            try:
+                await async_setup_entry(hass, entry)
+            except ConfigEntryNotReady:
+                pass
+            else:
+                raise AssertionError("initial connectivity failure was hidden")
+
+        forward.assert_not_awaited()
+        coordinator.async_shutdown.assert_awaited_once_with()
+        assert entry.entry_id not in hass.data.get(DOMAIN, {})
 
     asyncio.run(scenario())
 

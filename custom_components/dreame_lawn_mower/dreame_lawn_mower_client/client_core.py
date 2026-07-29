@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
@@ -29,7 +29,9 @@ from .client_shared_helpers import (
     _property_entry_received_at,
 )
 from .exceptions import (
+    DeviceCommandRejectedException,
     DeviceException,
+    DreameLawnMowerCommandRejectedError,
     DreameLawnMowerConnectionError,
     InvalidActionException,
 )
@@ -63,6 +65,8 @@ from .runtime_state import (
     RESUME_MOWING_REQUEST,
 )
 
+_MUTATION_CONFIRMATION_DELAYS_SECONDS = (0.5, 1.5, 3.0)
+
 
 class _DreameLawnMowerClientCoreMixin:
     async def async_get_cached_snapshot(self) -> DreameLawnMowerSnapshot:
@@ -75,13 +79,90 @@ class _DreameLawnMowerClientCoreMixin:
         method = getattr(device, method_name)
         try:
             return await asyncio.to_thread(method)
+        except DeviceCommandRejectedException as err:
+            raise DreameLawnMowerCommandRejectedError(str(err)) from err
         except DeviceException as err:
-            raise DreameLawnMowerConnectionError(str(err)) from err
+            connection_error = DreameLawnMowerConnectionError(str(err))
+            confirmation = {
+                "start_mowing": (
+                    "start mowing",
+                    lambda snapshot: bool(
+                        snapshot.started
+                        or snapshot.mowing
+                        or snapshot.mowing_session_active is True
+                    ),
+                ),
+                "pause": (
+                    "pause mowing",
+                    lambda snapshot: bool(
+                        snapshot.paused or snapshot.task_status == "paused"
+                    ),
+                ),
+                "dock": (
+                    "return to dock",
+                    lambda snapshot: bool(
+                        snapshot.returning
+                        or snapshot.docked
+                        or snapshot.state
+                        in {"returning", "charging", "charging_completed"}
+                    ),
+                ),
+                "stop": (
+                    "stop mowing",
+                    lambda snapshot: bool(
+                        snapshot.mowing_session_active is False
+                        or (
+                            not snapshot.started
+                            and not snapshot.mowing
+                            and not snapshot.paused
+                        )
+                    ),
+                ),
+            }.get(method_name)
+            if confirmation is None:
+                raise connection_error from err
+            label, predicate = confirmation
+            return await self._async_reconcile_ambiguous_mutation(
+                label,
+                connection_error,
+                predicate,
+            )
 
-    def _sync_update_device(self):
+    async def _async_reconcile_ambiguous_mutation(
+        self,
+        label: str,
+        original_error: DreameLawnMowerConnectionError,
+        confirmed: Callable[[DreameLawnMowerSnapshot], bool],
+    ) -> None:
+        """Confirm a once-dispatched mutation without risking a duplicate send."""
+        for delay in _MUTATION_CONFIRMATION_DELAYS_SECONDS:
+            await asyncio.sleep(delay)
+            try:
+                snapshot = await self._async_refresh_authoritative_snapshot()
+            except DreameLawnMowerConnectionError:
+                continue
+            if confirmed(snapshot):
+                return
+        raise DreameLawnMowerConnectionError(
+            f"The mower may have received the {label} request, but its state "
+            "could not be confirmed after the connection was interrupted. "
+            "Refresh the mower state before trying again."
+        ) from original_error
+
+    async def _async_refresh_authoritative_snapshot(
+        self,
+    ) -> DreameLawnMowerSnapshot:
+        """Force a device-property read before confirming an ambiguous write."""
+        device = await asyncio.to_thread(self._sync_update_device, True)
+        return await asyncio.to_thread(self._snapshot_from_device, device)
+
+    def _sync_update_device(self, force_request_properties: bool = False):
         device = self._ensure_device()
         try:
-            device.update()
+            if force_request_properties:
+                device.update(force_request_properties=True)
+            else:
+                device.update()
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
         return device
@@ -185,6 +266,10 @@ class _DreameLawnMowerClientCoreMixin:
         prompt: bool | None,
     ) -> Any:
         _validate_remote_control_step(rotation=rotation, velocity=velocity)
+        if rotation or velocity:
+            # Movement must never be authorized by a cached snapshot. A stop
+            # remains available even when the link or safety refresh fails.
+            self._sync_update_device(force_request_properties=True)
         support = self._sync_get_remote_control_support(refresh=False)
         if not support.supported:
             reason = support.reason or "Remote control is not supported."
@@ -460,8 +545,15 @@ class _DreameLawnMowerClientCoreMixin:
         try:
             response = self._sync_call_app_action(build_zone_mowing_request(zone_ids))
             return ensure_mowing_task_succeeded(response, task_name="zone mowing")
-        except (DeviceException, MowingTaskResponseError) as err:
+        except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
+        except MowingTaskResponseError as err:
+            error_type = (
+                DreameLawnMowerCommandRejectedError
+                if isinstance(response, Mapping)
+                else DreameLawnMowerConnectionError
+            )
+            raise error_type(str(err)) from err
 
     def _sync_start_edge_mowing(self, contour_ids: Sequence[Sequence[int]]) -> Any:
         """Start edge mowing for the provided contour id pairs."""
@@ -470,16 +562,30 @@ class _DreameLawnMowerClientCoreMixin:
                 build_edge_mowing_request(contour_ids)
             )
             return ensure_mowing_task_succeeded(response, task_name="edge mowing")
-        except (DeviceException, MowingTaskResponseError) as err:
+        except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
+        except MowingTaskResponseError as err:
+            error_type = (
+                DreameLawnMowerCommandRejectedError
+                if isinstance(response, Mapping)
+                else DreameLawnMowerConnectionError
+            )
+            raise error_type(str(err)) from err
 
     def _sync_start_spot_mowing(self, spot_ids: Sequence[int]) -> Any:
         """Start mower-native spot mowing for the provided saved area ids."""
         try:
             response = self._sync_call_app_action(build_spot_mowing_request(spot_ids))
             return ensure_mowing_task_succeeded(response, task_name="spot mowing")
-        except (DeviceException, MowingTaskResponseError) as err:
+        except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
+        except MowingTaskResponseError as err:
+            error_type = (
+                DreameLawnMowerCommandRejectedError
+                if isinstance(response, Mapping)
+                else DreameLawnMowerConnectionError
+            )
+            raise error_type(str(err)) from err
 
     def _sync_go_to_maintenance_point(self, point_id: int) -> Any:
         """Drive to one mower-configured maintenance point."""
@@ -491,8 +597,15 @@ class _DreameLawnMowerClientCoreMixin:
                 response,
                 task_name="maintenance point",
             )
-        except (DeviceException, MowingTaskResponseError) as err:
+        except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
+        except MowingTaskResponseError as err:
+            error_type = (
+                DreameLawnMowerCommandRejectedError
+                if isinstance(response, Mapping)
+                else DreameLawnMowerConnectionError
+            )
+            raise error_type(str(err)) from err
 
     def _sync_get_batch_device_data(
         self,
@@ -537,7 +650,21 @@ class _DreameLawnMowerClientCoreMixin:
 
     def _sync_resume_mowing(self) -> Any:
         """Resume a paused mower task through the app task-control protocol."""
-        return self._sync_call_app_action(RESUME_MOWING_REQUEST)
+        try:
+            response = self._sync_call_app_action(RESUME_MOWING_REQUEST)
+            return ensure_mowing_task_succeeded(
+                response,
+                task_name="resume mowing",
+            )
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+        except MowingTaskResponseError as err:
+            error_type = (
+                DreameLawnMowerCommandRejectedError
+                if isinstance(response, Mapping)
+                else DreameLawnMowerConnectionError
+            )
+            raise error_type(str(err)) from err
 
     @staticmethod
     def _with_fallback_app_maps(

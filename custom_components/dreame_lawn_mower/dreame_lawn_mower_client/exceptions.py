@@ -6,6 +6,10 @@ class DeviceUpdateFailedException(DeviceException):
     """ """
 
 
+class DeviceCommandRejectedException(DeviceUpdateFailedException):
+    """The mower explicitly rejected a state-changing device command."""
+
+
 class InvalidValueException(ValueError):
     """ """
 
@@ -24,6 +28,10 @@ class DreameLawnMowerAuthError(DreameLawnMowerError):
 
 class DreameLawnMowerConnectionError(DreameLawnMowerError):
     """Connection or update failure."""
+
+
+class DreameLawnMowerCommandRejectedError(DreameLawnMowerConnectionError):
+    """The mower explicitly rejected a state-changing app command."""
 
 
 class DreameLawnMowerCloudAPIError(DeviceException):

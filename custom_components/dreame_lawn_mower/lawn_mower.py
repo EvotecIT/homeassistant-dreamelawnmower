@@ -235,6 +235,56 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             vector_map_details
         )
         return {
+            "connection_degraded": getattr(
+                self.coordinator,
+                "connection_degraded",
+                False,
+            ),
+            "connection_failure_count": (
+                getattr(self.coordinator, "connection_failure_count", 0)
+            ),
+            "connection_last_success_at": (
+                self.coordinator.connection_last_success_at.isoformat()
+                if getattr(
+                    self.coordinator,
+                    "connection_last_success_at",
+                    None,
+                )
+                is not None
+                else None
+            ),
+            "connection_degraded_since": (
+                self.coordinator.connection_degraded_since.isoformat()
+                if getattr(
+                    self.coordinator,
+                    "connection_degraded_since",
+                    None,
+                )
+                is not None
+                else None
+            ),
+            "connection_recovered_at": (
+                self.coordinator.connection_recovered_at.isoformat()
+                if getattr(
+                    self.coordinator,
+                    "connection_recovered_at",
+                    None,
+                )
+                is not None
+                else None
+            ),
+            "connection_retry_after_seconds": (
+                getattr(
+                    self.coordinator,
+                    "connection_retry_after_seconds",
+                    None,
+                )
+            ),
+            "connection_last_error": getattr(
+                self.coordinator,
+                "connection_last_error",
+                None,
+            ),
             "state": snapshot.mower_state,
             "state_name": snapshot.mower_state_name,
             "task_status": snapshot.mowing_task_status,

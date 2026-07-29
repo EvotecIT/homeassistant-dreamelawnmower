@@ -591,6 +591,14 @@ def test_remote_control_guard_allows_existing_remote_control_session() -> None:
     )
 
 
+def test_remote_control_guard_blocks_retained_connectivity_state() -> None:
+    coordinator = _coordinator(_snapshot())
+    coordinator.connection_degraded = True
+
+    with pytest.raises(HomeAssistantError, match="connection is recovering"):
+        _guard_remote_control_step(coordinator)
+
+
 def test_remote_control_guard_blocks_mapping() -> None:
     with pytest.raises(HomeAssistantError, match="blocked while mapping"):
         _guard_remote_control_step(

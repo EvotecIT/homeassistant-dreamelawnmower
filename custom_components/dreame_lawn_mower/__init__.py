@@ -6,15 +6,11 @@ import asyncio
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import (
-    CONF_VIDEO_TRANSPORT,
     DOMAIN,
     PLATFORMS,
-    VIDEO_TRANSPORT_AUTO,
 )
 from .coordinator import DreameLawnMowerCoordinator
 from .performance import format_performance_sample
@@ -69,23 +65,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator.video_provisioning_cache = provisioning_cache
 
         platforms = tuple(PLATFORMS)
-        try:
-            await setup_cycle.measure(
-                "first_refresh",
-                coordinator.async_config_entry_first_refresh,
-            )
-        except ConfigEntryNotReady:
-            if not _cached_video_only_available(
-                entry,
-                lan_cache=lan_cache,
-                provisioning_cache=provisioning_cache,
-            ):
-                raise
-            _LOGGER.warning(
-                "Dreame cloud is unavailable; loading cached camera recovery mode. "
-                "Playback will wait for a fresh safe mower snapshot"
-            )
-            platforms = (Platform.CAMERA,)
+        await setup_cycle.measure(
+            "first_refresh",
+            coordinator.async_config_entry_first_refresh,
+        )
 
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
         async_setup_point_cloud_api(hass)
@@ -143,25 +126,6 @@ async def _async_cleanup_failed_setup(
             "Failed to fully close Dreame mower after setup error: %s",
             err,
         )
-
-
-def _cached_video_only_available(
-    entry: ConfigEntry,
-    *,
-    lan_cache: DreameLawnMowerVideoLanCache,
-    provisioning_cache: DreameLawnMowerVideoProvisioningCache,
-) -> bool:
-    """Return whether setup may safely expose only a cached camera."""
-    transport = entry.options.get(CONF_VIDEO_TRANSPORT)
-    if transport == VIDEO_TRANSPORT_AUTO:
-        return (
-            (lan_cache.inputs is not None and lan_cache.endpoint is not None)
-            or (
-                provisioning_cache.inputs is not None
-                and provisioning_cache.device_config is not None
-            )
-        )
-    return False
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

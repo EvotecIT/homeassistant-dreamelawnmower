@@ -6,15 +6,15 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
+from time import monotonic
 from typing import Any
-from urllib.parse import urljoin
 
 from homeassistant.components.camera import (
     DATA_CAMERA_PREFS,
     Camera,
     CameraEntityFeature,
 )
-from homeassistant.components.stream import HLS_PROVIDER, create_stream
+from homeassistant.components.stream import create_stream
 from homeassistant.components.stream.const import (
     ATTR_STREAMS,
 )
@@ -22,7 +22,6 @@ from homeassistant.components.stream.const import (
     DOMAIN as STREAM_DOMAIN,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.network import get_url
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import video_stream_helpers as video_helpers
@@ -79,18 +78,21 @@ from .video_camera_startup import (
 )
 from .video_camera_state import DreameLawnMowerVideoStateMixin
 from .video_camera_types import _DreameVideoRuntime as _DreameVideoRuntime
+from .video_flv_relay import DreameLawnMowerFlvRelay
 from .video_lan_cache import DreameLawnMowerVideoLanCache
 from .video_provisioning_cache import DreameLawnMowerVideoProvisioningCache
 from .video_session_lifecycle import DreameLawnMowerHaStreamIdleMonitor
 
 _LOGGER = logging.getLogger(__name__)
-_HA_STREAM_START_TIMEOUT = DEFAULT_XP2P_HOST_STARTUP_TIMEOUT + 30.0
-_HA_PLAYBACK_VERIFY_TIMEOUT = 15.0
+_VIDEO_UPSTREAM_START_TIMEOUT = DEFAULT_XP2P_HOST_STARTUP_TIMEOUT
 _SNAPSHOT_STREAM_START_TIMEOUT = 15.0
 _SNAPSHOT_IMAGE_TIMEOUT = 15.0
 _HA_STREAM_STOP_TIMEOUT = 10.0
 _RUNTIME_SESSION_STOP_TIMEOUT = 20.0
 _CAMERA_STREAM_DISABLE_TIMEOUT = 10.0
+_VIDEO_RETRY_BASE_DELAY = 1.0
+_VIDEO_RETRY_MAX_DELAY = 30.0
+_VIDEO_RETRY_STABLE_RESET = 60.0
 _PENDING_RUNTIME_STOPS: dict[str, set[asyncio.Future[Any]]] = {}
 
 
@@ -125,8 +127,8 @@ class DreameLawnMowerVideoCamera(
     _async_start_stream = DreameLawnMowerVideoStartupMixin.__dict__[
         "_async_start_stream"
     ]
-    _async_refresh_auto_start_state = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_refresh_auto_start_state"
+    _async_refresh_video_start_state = DreameLawnMowerVideoStartupMixin.__dict__[
+        "_async_refresh_video_start_state"
     ]
     _video_start_is_blocked = DreameLawnMowerVideoStartupMixin.__dict__[
         "_video_start_is_blocked"
@@ -193,14 +195,29 @@ class DreameLawnMowerVideoCamera(
         ) = None
         self._stream_lock = asyncio.Lock()
         self._snapshot_lock = asyncio.Lock()
+        self._snapshot_requests = 0
+        self._snapshot_owned_stream: Any | None = None
         self._stream_idle_monitor = DreameLawnMowerHaStreamIdleMonitor(
             coordinator.hass,
             stream_lock=self._stream_lock,
-            is_current=lambda stream, session: (
-                self.stream is stream and self._session is session
+            is_current=lambda stream, owner: (
+                self.stream is stream and owner is self._flv_relay
             ),
             stop_active=self._async_stop_active_session,
+            has_external_consumers=lambda: (
+                self._flv_relay.direct_subscriber_count > 0
+                or self._snapshot_requests > 0
+            ),
         )
+        self._flv_relay = self._create_flv_relay()
+        self._video_start_requested_at: float | None = None
+        self._video_first_media_at: float | None = None
+        self._video_recovery_failure_count = 0
+        self._video_recovery_success_count = 0
+        self._video_recovery_consecutive_failures = 0
+        self._video_recovery_pending = False
+        self._video_retry_not_before = 0.0
+        self._last_stream_recovered_at: str | None = None
         self._last_error: str | None = None
         self._last_error_at: str | None = None
         self._last_error_code: str | None = None
@@ -243,6 +260,8 @@ class DreameLawnMowerVideoCamera(
             )
         self._provisioning_cache_error: str | None = None
         self._last_cached_xp2p_error: str | None = None
+        self._bypass_cached_xp2p = False
+        self._bypass_lan = False
         self._last_video_transport: str | None = None
         self._last_video_transport_attempted: str | None = None
         self._video_capability_observed = snapshot_advertises_video(coordinator.data)
@@ -306,27 +325,273 @@ class DreameLawnMowerVideoCamera(
         return await self.hass.async_add_executor_job(self._create_runtime)
 
     async def stream_source(self) -> str | None:
-        """Return HA's verified HLS proxy instead of the single-consumer FLV URL."""
-        if not getattr(self, "_create_stream_lock", None):
-            self._create_stream_lock = asyncio.Lock()
-        async with self._create_stream_lock:
-            previous_stream = getattr(self, "stream", None)
-            ha_stream = await self._async_create_stream_locked()
-            if ha_stream is None:
-                return None
-            owns_stream = ha_stream is not previous_stream
-            try:
-                ha_stream.add_provider(HLS_PROVIDER)
-                endpoint = ha_stream.endpoint_url(HLS_PROVIDER)
-                return urljoin(f"{get_url(self.hass)}/", endpoint)
-            except Exception as err:  # noqa: BLE001 - expose a clean source miss.
-                self._set_stream_error(
-                    f"Home Assistant could not expose the verified video stream: {err}",
-                    stage="ha_proxy",
+        """Return a dormant local FLV source for HA HLS or WebRTC providers.
+
+        Capability discovery calls this method, so it must not contact or
+        enable the mower.  The relay starts XP2P only when a media consumer
+        performs the first HTTP GET.
+        """
+        if not getattr(self, "_attr_is_on", True):
+            return None
+        try:
+            return await self._ensure_flv_relay().async_start()
+        except Exception as err:  # noqa: BLE001 - expose a clean source miss.
+            self._set_stream_error(
+                f"Could not expose the local mower video relay: {err}",
+                stage="relay_setup",
+            )
+            return None
+
+    def _create_flv_relay(self) -> DreameLawnMowerFlvRelay:
+        """Create the local fan-out owner without opening its listener."""
+        return DreameLawnMowerFlvRelay(
+            self.coordinator.hass,
+            source_factory=self._async_start_relay_upstream,
+            media_ready=self._async_relay_media_ready,
+            failed=self._async_relay_failed,
+            idle=self._async_relay_idle,
+        )
+
+    def _ensure_flv_relay(self) -> DreameLawnMowerFlvRelay:
+        """Create the relay lazily for compatibility with restored entities."""
+        relay = getattr(self, "_flv_relay", None)
+        if relay is None:
+            relay = self._create_flv_relay()
+            self._flv_relay = relay
+        return relay
+
+    async def _async_start_relay_upstream(self) -> str | None:
+        """Start the one mower-owned source after a real local consumer arrives."""
+        retry_delay = max(0.0, self._video_retry_not_before - monotonic())
+        if retry_delay:
+            await asyncio.sleep(retry_delay)
+        self._video_start_requested_at = monotonic()
+        self._video_first_media_at = None
+        self.async_write_ha_state()
+        try:
+            async with asyncio.timeout(_VIDEO_UPSTREAM_START_TIMEOUT):
+                if getattr(self, "_bypass_cached_xp2p", False):
+                    return await self._async_start_raw_source(
+                        skip_cached_xp2p=True
+                    )
+                return await self._async_start_raw_source()
+        except TimeoutError:
+            self._set_stream_error(
+                "Mower video did not start within "
+                f"{_VIDEO_UPSTREAM_START_TIMEOUT:g} seconds.",
+                stage="upstream_start_timeout",
+            )
+            return None
+
+    async def _async_relay_media_ready(
+        self,
+        relay_diagnostics: dict[str, object],
+    ) -> None:
+        """Commit a session only after the relay observes decodable FLV media."""
+        self._video_first_media_at = monotonic()
+        if self._video_recovery_pending:
+            self._video_recovery_success_count += 1
+            self._last_stream_recovered_at = datetime.now(UTC).isoformat()
+        self._video_recovery_pending = False
+        self._video_retry_not_before = 0.0
+        provisioning_inputs: DreameLawnMowerCameraStreamRuntimeInputs | None = None
+        async with self._stream_lock:
+            self._unverified_playback_session = None
+            provisioning_inputs = self._pending_provisioning_inputs
+            self._pending_provisioning_inputs = None
+            if self._last_stream_health is None:
+                self._last_stream_health = {}
+            self._last_stream_health.update(relay_diagnostics)
+            self._last_stream_health.update(
+                {
+                    "available": True,
+                    "verification_source": "local_flv_relay",
+                    "playback_session_verified": True,
+                    "recovery_pending": False,
+                    "retry_after_seconds": 0.0,
+                }
+            )
+        if provisioning_inputs is not None:
+            await self._async_cache_healthy_provisioning(provisioning_inputs)
+        if self._last_video_transport != "cached_xp2p":
+            self._bypass_cached_xp2p = False
+        if self._last_video_transport == VIDEO_TRANSPORT_LAN:
+            self._bypass_lan = False
+        self.async_write_ha_state()
+
+    async def _async_relay_failed(self, error: str) -> None:
+        """Retire a failed upstream while leaving the relay URL reusable."""
+        now = monotonic()
+        if block_reason := camera_stream_block_reason(self.coordinator.data):
+            # A mower safety gate is not a transport outage. Leave the stable
+            # relay endpoint available, but do not accumulate Wi-Fi recovery
+            # backoff or ask consumers to remount until coordinator state says
+            # the mower can safely open video again.
+            self._video_recovery_pending = False
+            self._video_retry_not_before = 0.0
+            self._set_stream_error(block_reason, stage="mower_state_gate")
+            target_session = self._session
+            target_stream = getattr(self, "stream", None)
+            if target_session is not None or target_stream is not None:
+                async with self._stream_lock:
+                    if (
+                        self._session is target_session
+                        and getattr(self, "stream", None) is target_stream
+                    ):
+                        await self._async_stop_active_session(
+                            reason="state_gate",
+                            trigger=block_reason,
+                            failed_pump_task=asyncio.current_task(),
+                        )
+            self.async_write_ha_state()
+            return
+        stable_for = (
+            now - self._video_first_media_at
+            if self._video_first_media_at is not None
+            else 0.0
+        )
+        if stable_for >= _VIDEO_RETRY_STABLE_RESET:
+            self._video_recovery_consecutive_failures = 1
+        else:
+            self._video_recovery_consecutive_failures += 1
+        retry_delay = min(
+            _VIDEO_RETRY_MAX_DELAY,
+            _VIDEO_RETRY_BASE_DELAY
+            * (
+                2
+                ** min(
+                    self._video_recovery_consecutive_failures - 1,
+                    5,
                 )
-                if owns_stream:
-                    await self._async_stop_owned_stream(ha_stream)
-                return None
+            ),
+        )
+        self._video_recovery_failure_count += 1
+        self._video_recovery_pending = True
+        self._video_retry_not_before = now + retry_delay
+        if self._last_stream_health is None:
+            self._last_stream_health = {}
+        self._last_stream_health.update(
+            {
+                "available": False,
+                "playback_session_verified": False,
+                "recovery_pending": True,
+                "retry_after_seconds": retry_delay,
+            }
+        )
+        unverified_playback_failed = (
+            getattr(self, "_unverified_playback_session", None) is not None
+        )
+        cached_playback_failed = (
+            self._last_video_transport == "cached_xp2p"
+            and unverified_playback_failed
+        )
+        lan_playback_failed = (
+            self._last_video_transport == VIDEO_TRANSPORT_LAN
+            and unverified_playback_failed
+        )
+        if cached_playback_failed:
+            self._bypass_cached_xp2p = True
+        if lan_playback_failed:
+            self._bypass_lan = True
+        failure_context = (
+            "The mower video connection was interrupted"
+            if self._video_first_media_at is not None
+            else "The local mower video relay stopped before playback completed"
+        )
+        self._set_stream_error(f"{failure_context}: {error}", stage="relay_playback")
+        async with self._stream_lock:
+            if getattr(self, "stream", None) is not None:
+                # Home Assistant Stream already owns discontinuity handling and
+                # increasing reconnect delays. Preserve that stable local
+                # stream and retire only the broken mower runtime session so
+                # its worker can reopen the relay URL after spotty Wi-Fi.
+                await self._async_retire_failed_runtime_session()
+            elif self._session is not None:
+                await self._async_stop_active_session(
+                    reason="relay_failure",
+                    failed_pump_task=asyncio.current_task(),
+                )
+            await self._async_clear_failed_playback_caches(
+                cached_xp2p=cached_playback_failed,
+                lan=lan_playback_failed,
+            )
+
+    async def _async_retire_failed_runtime_session(self) -> None:
+        """Retire one failed mower session while HA Stream stays reconnectable."""
+        self._last_stream_cleanup_reason = "relay_failure"
+        self._last_stream_cleanup_error = None
+        self._last_stream_cleanup_error_stage = None
+        runtime = self._runtime
+        session = self._session
+        self._runtime = None
+        self._session = None
+        self._unverified_playback_session = None
+        self._pending_provisioning_inputs = None
+        self._attr_is_streaming = False
+        try:
+            if runtime is None or session is None:
+                return
+            cleanup_task = asyncio.create_task(
+                self._async_finish_failed_runtime_cleanup(runtime, session)
+            )
+            try:
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError:
+                await cleanup_task
+                raise
+        finally:
+            self._last_stream_cleanup_at = datetime.now(UTC).isoformat()
+            self.async_write_ha_state()
+
+    async def _async_finish_failed_runtime_cleanup(
+        self,
+        runtime: _DreameVideoRuntime,
+        session: DreameLawnMowerXp2pLiveStreamSession,
+    ) -> None:
+        """Finish bounded native cleanup without stopping the HA decoder."""
+        await self._async_stop_session(runtime, session)
+        camera_toggle_managed = getattr(
+            session,
+            "camera_toggle_managed",
+            getattr(session, "transport", VIDEO_TRANSPORT_CLOUD)
+            != VIDEO_TRANSPORT_LAN,
+        )
+        if camera_toggle_managed:
+            await self._async_disable_camera_stream()
+
+    async def _async_clear_failed_playback_caches(
+        self,
+        *,
+        cached_xp2p: bool,
+        lan: bool,
+    ) -> None:
+        """Clear failed routes while replacement startup remains serialized."""
+        if cached_xp2p:
+            try:
+                await self._provisioning_cache.async_clear()
+                self._provisioning_cache_error = None
+            except Exception as err:  # noqa: BLE001 - bypass remains authoritative.
+                self._provisioning_cache_error = sanitize_diagnostic_text(err)
+                _LOGGER.warning(
+                    "Failed to clear stale Dreame video provisioning cache: %s",
+                    self._provisioning_cache_error,
+                )
+        if lan:
+            try:
+                await self._lan_cache.async_clear_endpoint()
+                self._lan_cache_error = None
+            except Exception as err:  # noqa: BLE001 - bypass remains authoritative.
+                self._lan_cache_error = sanitize_diagnostic_text(err)
+                _LOGGER.warning(
+                    "Failed to clear stale Dreame LAN video endpoint: %s",
+                    self._lan_cache_error,
+                )
+
+    async def _async_relay_idle(self) -> None:
+        """Release mower video after the last local WebRTC/HLS viewer leaves."""
+        async with self._stream_lock:
+            if self._session is not None or getattr(self, "stream", None) is not None:
+                await self._async_stop_active_session(reason="relay_idle")
 
     async def _async_start_raw_source(
         self,
@@ -351,149 +616,56 @@ class DreameLawnMowerVideoCamera(
         if not getattr(self, "_create_stream_lock", None):
             self._create_stream_lock = asyncio.Lock()
         async with self._create_stream_lock:
-            return await self._async_create_stream_locked()
+            ha_stream = await self._async_create_stream_locked()
+            if (
+                ha_stream is not None
+                and getattr(self, "_snapshot_owned_stream", None) is ha_stream
+            ):
+                self._snapshot_owned_stream = None
+            return ha_stream
 
     async def _async_create_stream_locked(self) -> Any | None:
-        """Create or reuse one HA stream while the creation lock is held."""
+        """Create or reuse HA's HLS stream over the local fan-out relay."""
         async with self._stream_lock:
             if self.stream is not None:
-                if getattr(self, "_attr_is_on", True) and self._session_is_usable(
-                    self._session
-                ):
+                if getattr(self, "_attr_is_on", True):
                     return self.stream
                 await self._async_stop_active_session()
+            if reason := camera_stream_block_reason(self.coordinator.data):
+                self._set_stream_error(reason, stage="mower_state_gate")
+                return None
 
-        ha_stream, attempted_transport = await self._async_create_stream_attempt_locked(
-            skip_cached_xp2p=False
-        )
-        if ha_stream is not None:
-            return ha_stream
-        if (
-            attempted_transport == "cached_xp2p"
-            and self._video_transport == VIDEO_TRANSPORT_AUTO
-        ):
-            ha_stream, _ = await self._async_create_stream_attempt_locked(
-                skip_cached_xp2p=True
-            )
-        return ha_stream
-
-    async def _async_create_stream_attempt_locked(
-        self,
-        *,
-        skip_cached_xp2p: bool,
-    ) -> tuple[Any | None, str | None]:
-        """Create and verify one HA stream attempt while creation is serialized."""
-        previous_session = self._session
-        session: DreameLawnMowerXp2pLiveStreamSession | None = None
-        owns_session = False
         try:
-            async with asyncio.timeout(_HA_STREAM_START_TIMEOUT):
-                source = (
-                    await self._async_start_raw_source(skip_cached_xp2p=True)
-                    if skip_cached_xp2p
-                    else await self._async_start_raw_source()
-                )
-            if not source:
-                return None, None
-            session = self._session
-            attempted_transport = self._last_video_transport
-            owns_session = session is not None and session is not previous_session
-            dynamic_settings = await self.hass.data[
-                DATA_CAMERA_PREFS
-            ].get_dynamic_stream_settings(self.entity_id)
-
-            async with self._stream_lock:
-                if (
-                    not getattr(self, "_attr_is_on", True)
-                    or self._session is not session
-                    or not self._session_is_usable(session)
-                    or camera_stream_block_reason(self.coordinator.data) is not None
-                ):
-                    if self._session is session:
-                        await self._async_stop_active_session(
-                            reason="state_gate",
-                            trigger=camera_stream_block_reason(self.coordinator.data),
-                        )
-                    return None, attempted_transport
-                ha_stream = create_stream(
-                    self.hass,
-                    source,
-                    options=self.stream_options,
-                    dynamic_stream_settings=dynamic_settings,
-                    stream_label=self.entity_id,
-                )
-                ha_stream.set_update_callback(self.async_write_ha_state)
-                self.stream = ha_stream
-                self._stream_idle_monitor.schedule(ha_stream, session)
-
-            if getattr(self, "_unverified_playback_session", None) is session:
-                if not await self._async_verify_playback_stream(ha_stream, session):
-                    return None, attempted_transport
-            return ha_stream, attempted_transport
-        except BaseException:
-            if owns_session and session is not None:
-                await self._async_cleanup_failed_stream_setup(session)
-            raise
-
-    async def _async_verify_playback_stream(
-        self,
-        ha_stream: Any,
-        session: DreameLawnMowerXp2pLiveStreamSession,
-    ) -> bool:
-        """Verify the adopted session through HA's sole stream consumer."""
-        try:
-            async with asyncio.timeout(_HA_PLAYBACK_VERIFY_TIMEOUT):
-                hls_output = ha_stream.add_provider(HLS_PROVIDER)
-                await ha_stream.start()
-                while True:
-                    segment = hls_output.last_segment
-                    if (
-                        segment is not None
-                        and segment.complete
-                        and segment.init
-                        and segment.data_size > 0
-                    ):
-                        break
-                    if segment is None:
-                        if not await hls_output.recv():
-                            raise RuntimeError(
-                                "Home Assistant stream ended before producing "
-                                "HLS media"
-                            )
-                    else:
-                        await hls_output.part_recv(timeout=5.0)
-        except asyncio.CancelledError:
-            raise
-        except TimeoutError:
-            await self._async_cleanup_failed_stream_setup(session)
+            source = await self._ensure_flv_relay().async_start_ha_stream()
+        except Exception as err:  # noqa: BLE001 - expose a clean source miss.
             self._set_stream_error(
-                "Qualified XP2P video did not produce Home Assistant HLS media "
-                f"within {_HA_PLAYBACK_VERIFY_TIMEOUT:g} seconds.",
-                stage="playback_verification",
+                f"Could not expose the local mower video relay: {err}",
+                stage="relay_setup",
             )
-            return False
-        except Exception as err:  # noqa: BLE001 - expose a clean camera miss.
-            await self._async_cleanup_failed_stream_setup(session)
-            self._set_stream_error(
-                f"Qualified XP2P video could not verify its playback session: {err}",
-                stage="playback_verification",
-            )
-            return False
+            return None
+        dynamic_settings = await self.hass.data[
+            DATA_CAMERA_PREFS
+        ].get_dynamic_stream_settings(self.entity_id)
 
-        provisioning_inputs: DreameLawnMowerCameraStreamRuntimeInputs | None = None
         async with self._stream_lock:
-            if self.stream is not ha_stream or self._session is not session:
-                return False
-            self._unverified_playback_session = None
-            provisioning_inputs = self._pending_provisioning_inputs
-            self._pending_provisioning_inputs = None
-            if getattr(self, "_last_stream_health", None) is not None:
-                self._last_stream_health["available"] = True
-                self._last_stream_health["flv_header_present"] = True
-                self._last_stream_health["playback_session_verified"] = True
-        if provisioning_inputs is not None:
-            await self._async_cache_healthy_provisioning(provisioning_inputs)
-        return True
+            if not getattr(self, "_attr_is_on", True):
+                return None
+            if reason := camera_stream_block_reason(self.coordinator.data):
+                self._set_stream_error(reason, stage="mower_state_gate")
+                return None
+            if self.stream is not None:
+                return self.stream
+            ha_stream = create_stream(
+                self.hass,
+                source,
+                options=self.stream_options,
+                dynamic_stream_settings=dynamic_settings,
+                stream_label=self.entity_id,
+            )
+            ha_stream.set_update_callback(self.async_write_ha_state)
+            self.stream = ha_stream
+            self._stream_idle_monitor.schedule(ha_stream, self._flv_relay)
+            return ha_stream
 
     async def _async_cleanup_failed_stream_setup(
         self,
@@ -523,10 +695,11 @@ class DreameLawnMowerVideoCamera(
         if not getattr(self, "_attr_is_on", True):
             return None
         async with self._snapshot_lock:
-            if not getattr(self, "_create_stream_lock", None):
-                self._create_stream_lock = asyncio.Lock()
-            async with self._create_stream_lock:
+            self._snapshot_requests = getattr(self, "_snapshot_requests", 0) + 1
+            try:
                 return await self._async_camera_image_locked(width, height)
+            finally:
+                self._snapshot_requests = max(0, self._snapshot_requests - 1)
 
     async def _async_camera_image_locked(
         self,
@@ -534,24 +707,41 @@ class DreameLawnMowerVideoCamera(
         height: int | None,
     ) -> bytes | None:
         """Return one JPEG from Home Assistant's single FLV consumer."""
-        previous_stream = getattr(self, "stream", None)
-        try:
-            async with asyncio.timeout(_SNAPSHOT_STREAM_START_TIMEOUT):
-                ha_stream = await self._async_create_stream_locked()
-        except TimeoutError:
-            _LOGGER.debug("Timed out starting Dreame mower video for a still image")
-            return self._last_image
-        except Exception as err:  # noqa: BLE001 - snapshots may be transient.
-            _LOGGER.debug(
-                "Failed to start Dreame mower video for a still image: %s",
-                sanitize_diagnostic_text(err),
-            )
-            return self._last_image
+        if not getattr(self, "_create_stream_lock", None):
+            self._create_stream_lock = asyncio.Lock()
+        async with self._create_stream_lock:
+            previous_stream = getattr(self, "stream", None)
+            try:
+                async with asyncio.timeout(_SNAPSHOT_STREAM_START_TIMEOUT):
+                    ha_stream = await self._async_create_stream_locked()
+            except TimeoutError:
+                _LOGGER.debug(
+                    "Timed out starting Dreame mower video for a still image"
+                )
+                return self._last_image
+            except Exception as err:  # noqa: BLE001 - snapshots may be transient.
+                _LOGGER.debug(
+                    "Failed to start Dreame mower video for a still image: %s",
+                    sanitize_diagnostic_text(err),
+                )
+                return self._last_image
+            if ha_stream is not None and ha_stream is not previous_stream:
+                self._snapshot_owned_stream = ha_stream
         if ha_stream is None:
             return self._last_image
         snapshot_only_stream = ha_stream is not previous_stream
+        relay = getattr(self, "_flv_relay", None)
+        relay_media_ready = bool(
+            relay is not None
+            and relay.diagnostics.get("relay_first_media_ready")
+        )
+        image_timeout = (
+            _SNAPSHOT_IMAGE_TIMEOUT
+            if relay_media_ready
+            else _VIDEO_UPSTREAM_START_TIMEOUT + _SNAPSHOT_IMAGE_TIMEOUT
+        )
         try:
-            async with asyncio.timeout(_SNAPSHOT_IMAGE_TIMEOUT):
+            async with asyncio.timeout(image_timeout):
                 image = await ha_stream.async_get_image(
                     width=width,
                     height=height,
@@ -574,13 +764,39 @@ class DreameLawnMowerVideoCamera(
         return image or self._last_image
 
     async def _async_stop_owned_stream(self, ha_stream: Any) -> None:
-        """Stop an HA stream created only for the current one-shot operation."""
+        """Stop a one-shot HA decoder without interrupting another relay viewer."""
         async with self._stream_lock:
+            snapshot_owned_stream = getattr(
+                self,
+                "_snapshot_owned_stream",
+                None,
+            )
             if self.stream is not ha_stream:
+                if snapshot_owned_stream is ha_stream:
+                    self._snapshot_owned_stream = None
                 return
-            # The creation lock remains held across the image read and cleanup,
-            # so no live viewer can adopt this stream before it is stopped.
-            await self._async_stop_active_session()
+            if snapshot_owned_stream is not ha_stream:
+                return
+            self._snapshot_owned_stream = None
+            await self._stream_idle_monitor.async_cancel()
+            self.stream = None
+            try:
+                async with asyncio.timeout(_HA_STREAM_STOP_TIMEOUT):
+                    await ha_stream.stop()
+            except TimeoutError:
+                self._record_stream_cleanup_error(
+                    "snapshot_stream_stop",
+                    (
+                        "Home Assistant snapshot stream cleanup timed out after "
+                        f"{_HA_STREAM_STOP_TIMEOUT:g}s."
+                    ),
+                )
+            except Exception as err:  # noqa: BLE001 - relay lifecycle remains owned.
+                self._record_stream_cleanup_error("snapshot_stream_stop", err)
+            finally:
+                self._unregister_ha_stream(ha_stream)
+            # The relay owns the upstream session. Its idle grace stops XP2P
+            # only when no WebRTC or HLS consumer remains.
 
     async def async_turn_off(self) -> None:
         """Stop the current live video session."""
@@ -605,6 +821,12 @@ class DreameLawnMowerVideoCamera(
                 await prepare_task
             except asyncio.CancelledError:
                 pass
+        relay = getattr(self, "_flv_relay", None)
+        if relay is not None:
+            # A cold source factory owns _stream_lock while XP2P starts. Close
+            # the relay before any state-gate task that may be waiting for the
+            # same lock, so pump cancellation unwinds that startup promptly.
+            await relay.async_close()
         cleanup_task = self._state_gate_cleanup_task
         if cleanup_task is not None and cleanup_task is not asyncio.current_task():
             try:
@@ -626,6 +848,7 @@ class DreameLawnMowerVideoCamera(
         *,
         reason: str = "session_stop",
         trigger: str | None = None,
+        failed_pump_task: asyncio.Task[Any] | None = None,
     ) -> None:
         """Stop the current runtime session if one is active."""
         self._last_stream_cleanup_reason = reason
@@ -642,48 +865,71 @@ class DreameLawnMowerVideoCamera(
             )
         try:
             await self._stream_idle_monitor.async_cancel()
-            ha_stream = getattr(self, "stream", None)
-            self.stream = None
-            runtime = self._runtime
-            session = self._session
-            self._runtime = None
-            self._session = None
-            self._unverified_playback_session = None
-            self._pending_provisioning_inputs = None
-            self._attr_is_streaming = False
-            if ha_stream is not None:
-                try:
-                    async with asyncio.timeout(_HA_STREAM_STOP_TIMEOUT):
-                        await ha_stream.stop()
-                except TimeoutError:
-                    self._record_stream_cleanup_error(
-                        "home_assistant_stream_stop",
-                        (
-                            "Home Assistant camera stream cleanup timed out after "
-                            f"{_HA_STREAM_STOP_TIMEOUT:g}s."
-                        ),
+            relay = getattr(self, "_flv_relay", None)
+            if relay is not None:
+                if failed_pump_task is None:
+                    await relay.async_stop_upstream()
+                else:
+                    await relay.async_stop_upstream(
+                        expected_task=failed_pump_task,
                     )
-                except Exception as err:  # noqa: BLE001 - continue XP2P cleanup.
-                    self._record_stream_cleanup_error(
-                        "home_assistant_stream_stop",
-                        err,
-                    )
-                finally:
-                    self._unregister_ha_stream(ha_stream)
-            if runtime is None or session is None:
-                return
-            await self._async_stop_session(runtime, session)
-            camera_toggle_managed = getattr(
-                session,
-                "camera_toggle_managed",
-                getattr(session, "transport", VIDEO_TRANSPORT_CLOUD)
-                != VIDEO_TRANSPORT_LAN,
+            cleanup_task = asyncio.create_task(
+                self._async_finish_active_session_cleanup()
             )
-            if camera_toggle_managed:
-                await self._async_disable_camera_stream()
+            try:
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError:
+                # Relay close may cancel its pump or idle callback while this
+                # entity owns the only runtime/session references. Finish the
+                # bounded resource cleanup before allowing cancellation out.
+                await cleanup_task
+                raise
         finally:
             self._last_stream_cleanup_at = datetime.now(UTC).isoformat()
             self.async_write_ha_state()
+
+    async def _async_finish_active_session_cleanup(self) -> None:
+        """Finish resource cleanup independently of a cancelled relay callback."""
+        ha_stream = getattr(self, "stream", None)
+        self.stream = None
+        self._snapshot_owned_stream = None
+        runtime = self._runtime
+        session = self._session
+        self._runtime = None
+        self._session = None
+        self._unverified_playback_session = None
+        self._pending_provisioning_inputs = None
+        self._attr_is_streaming = False
+        if ha_stream is not None:
+            try:
+                async with asyncio.timeout(_HA_STREAM_STOP_TIMEOUT):
+                    await ha_stream.stop()
+            except TimeoutError:
+                self._record_stream_cleanup_error(
+                    "home_assistant_stream_stop",
+                    (
+                        "Home Assistant camera stream cleanup timed out after "
+                        f"{_HA_STREAM_STOP_TIMEOUT:g}s."
+                    ),
+                )
+            except Exception as err:  # noqa: BLE001 - continue XP2P cleanup.
+                self._record_stream_cleanup_error(
+                    "home_assistant_stream_stop",
+                    err,
+                )
+            finally:
+                self._unregister_ha_stream(ha_stream)
+        if runtime is None or session is None:
+            return
+        await self._async_stop_session(runtime, session)
+        camera_toggle_managed = getattr(
+            session,
+            "camera_toggle_managed",
+            getattr(session, "transport", VIDEO_TRANSPORT_CLOUD)
+            != VIDEO_TRANSPORT_LAN,
+        )
+        if camera_toggle_managed:
+            await self._async_disable_camera_stream()
 
     def _unregister_ha_stream(self, ha_stream: Any) -> None:
         """Remove a discarded HA Stream from the integration registry."""

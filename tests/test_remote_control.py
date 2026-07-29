@@ -84,8 +84,9 @@ class _FakeRemoteControlDevice:
         self.commands: list[dict[str, object]] = []
         self.update_count = 0
 
-    def update(self) -> None:
+    def update(self, force_request_properties: bool = False) -> None:
         self.update_count += 1
+        self.last_force_request_properties = force_request_properties
 
     def get_property(self, prop: object) -> object:
         return None
@@ -160,6 +161,7 @@ def test_remote_control_move_step_delegates_to_protocol_device() -> None:
     assert device.commands == [
         {"rotation": 120, "velocity": 240, "prompt": False}
     ]
+    assert device.last_force_request_properties is True
     assert client._sync_get_remote_control_support().active is True
 
 
@@ -220,6 +222,28 @@ def test_remote_control_move_step_blocks_unsafe_nonzero_commands() -> None:
     assert device.commands == []
 
 
+def test_remote_control_move_step_uses_authoritative_safety_state() -> None:
+    device = _FakeRemoteControlDevice()
+
+    def update(force_request_properties: bool = False) -> None:
+        assert force_request_properties is True
+        device.update_count += 1
+        device.status.battery_level = 10
+
+    device.update = update
+    client = _client_with_device(device)
+
+    with pytest.raises(DreameLawnMowerConnectionError, match="battery is low"):
+        client._sync_remote_control_move_step(
+            rotation=0,
+            velocity=120,
+            prompt=False,
+        )
+
+    assert device.update_count == 1
+    assert device.commands == []
+
+
 def test_remote_control_move_step_allows_stop_when_state_is_unsafe() -> None:
     device = _FakeRemoteControlDevice()
     device.status.battery_level = 19
@@ -235,6 +259,7 @@ def test_remote_control_move_step_allows_stop_when_state_is_unsafe() -> None:
         "code": 0,
         "command": {"rotation": 0, "velocity": 0, "prompt": False},
     }
+    assert device.update_count == 0
 
 
 def test_remote_control_move_step_rejects_missing_mapping() -> None:
