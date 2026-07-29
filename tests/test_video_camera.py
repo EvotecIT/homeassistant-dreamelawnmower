@@ -1636,6 +1636,35 @@ def test_video_camera_relay_failure_preserves_ha_stream_without_session() -> Non
     assert asyncio.run(_run()) == ([], True, True)
 
 
+def test_video_camera_safety_block_does_not_accumulate_recovery_backoff() -> None:
+    async def _run() -> tuple[bool, int, float, str | None]:
+        entity = _uninitialized_entity(
+            snapshot=SimpleNamespace(
+                available=True,
+                state="charging",
+                activity="charging",
+                docked=True,
+                raw_docked=True,
+                returning=False,
+                raw_attributes={},
+            )
+        )
+        entity._video_recovery_pending = True
+        entity._video_recovery_failure_count = 4
+        entity._video_retry_not_before = 999.0
+        entity.async_write_ha_state = lambda: None
+
+        await entity._async_relay_failed("The mower video source did not start.")
+        return (
+            entity._video_recovery_pending,
+            entity._video_recovery_failure_count,
+            entity._video_retry_not_before,
+            entity._last_error_stage,
+        )
+
+    assert asyncio.run(_run()) == (False, 4, 0.0, "mower_state_gate")
+
+
 def test_video_camera_recovery_backoff_is_bounded_and_resets_after_stability() -> None:
     async def _run() -> tuple[list[float], int, int, bool, str | None]:
         entity = _uninitialized_entity()

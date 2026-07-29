@@ -422,6 +422,16 @@ class DreameLawnMowerVideoCamera(
     async def _async_relay_failed(self, error: str) -> None:
         """Retire a failed upstream while leaving the relay URL reusable."""
         now = monotonic()
+        if block_reason := camera_stream_block_reason(self.coordinator.data):
+            # A mower safety gate is not a transport outage. Leave the stable
+            # relay endpoint available, but do not accumulate Wi-Fi recovery
+            # backoff or ask consumers to remount until coordinator state says
+            # the mower can safely open video again.
+            self._video_recovery_pending = False
+            self._video_retry_not_before = 0.0
+            self._set_stream_error(block_reason, stage="mower_state_gate")
+            self.async_write_ha_state()
+            return
         stable_for = (
             now - self._video_first_media_at
             if self._video_first_media_at is not None
