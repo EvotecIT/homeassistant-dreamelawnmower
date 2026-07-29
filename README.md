@@ -495,13 +495,14 @@ need source, counts, and parser evidence.
 
 The map camera also advertises a local `point_cloud_api_path` attribute. A
 Home Assistant administrator can sign that path for a short-lived download.
-When the requested map is the mower's authoritative active map, the integration
-first tries its stored LiDAR object so an existing 3D map can display without
-another upload. This also applies when the mower has multiple saved maps; an
-inactive or ambiguous map request cannot reuse the stored object. If the stored
-object is absent, expired, or invalid, the integration asks the mower to upload
-the selected app map, immediately captures the new announcement, and validates
-the returned PCD file. Firmware without the announcement retains the older
+When the mower has exactly one created map and that map is authoritative, the
+integration first tries its stored LiDAR object so an existing 3D map can
+display without another upload. The vendor's stored-object announcement does
+not identify which map it belongs to, so multi-map mowers always generate the
+requested map rather than risk showing a previous garden. If the stored object
+is absent, expired, or invalid, the integration asks the mower to upload the
+selected app map, immediately captures the new announcement, and validates the
+returned PCD file. Firmware without the announcement retains the older
 transient-object lookup as a fallback. Responses use `private, no-store`
 caching.
 Vendor filenames, cloud-signed URLs, and point coordinates are never written to

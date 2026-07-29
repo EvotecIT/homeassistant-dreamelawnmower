@@ -1666,6 +1666,51 @@ def test_video_camera_safety_block_does_not_accumulate_recovery_backoff() -> Non
     assert asyncio.run(_run()) == (False, 4, 0.0, "mower_state_gate")
 
 
+def test_video_camera_safety_block_retires_session_adopted_during_startup() -> None:
+    async def _run() -> tuple[list[tuple[str, str | None]], object | None, int]:
+        entity = _uninitialized_entity(
+            snapshot=SimpleNamespace(
+                available=True,
+                state="charging",
+                activity="charging",
+                docked=True,
+                raw_docked=True,
+                returning=False,
+                raw_attributes={},
+            )
+        )
+        entity._session = object()
+        cleanup_calls: list[tuple[str, str | None]] = []
+        state_writes = 0
+
+        async def _stop(
+            *,
+            reason: str = "session_stop",
+            trigger: str | None = None,
+            **_kwargs: object,
+        ) -> None:
+            cleanup_calls.append((reason, trigger))
+            entity._session = None
+
+        def _write_state() -> None:
+            nonlocal state_writes
+            state_writes += 1
+
+        entity._async_stop_active_session = _stop
+        entity.async_write_ha_state = _write_state
+
+        await entity._async_relay_failed("The mower video source did not start.")
+        return cleanup_calls, entity._session, state_writes
+
+    cleanup_calls, session, state_writes = asyncio.run(_run())
+
+    assert len(cleanup_calls) == 1
+    assert cleanup_calls[0][0] == "state_gate"
+    assert "docked" in (cleanup_calls[0][1] or "")
+    assert session is None
+    assert state_writes >= 1
+
+
 def test_video_camera_recovery_backoff_is_bounded_and_resets_after_stability() -> None:
     async def _run() -> tuple[list[float], int, int, bool, str | None]:
         entity = _uninitialized_entity()

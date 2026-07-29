@@ -543,6 +543,10 @@ def _stored_point_cloud_active_map_index(
         and entry["idx"] >= 0
         and entry.get("created") is not False
     }
+    # The 99.20 stored-object announcement has no map identity. Reusing it is
+    # safe only when exactly one created map can own that object.
+    if len(indices) != 1:
+        return None
     active_index = active_map_index(
         app_maps,
         selected_map_index=getattr(

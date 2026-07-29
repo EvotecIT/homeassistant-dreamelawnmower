@@ -144,7 +144,7 @@ def test_point_cloud_api_does_not_use_stored_object_for_inactive_map() -> None:
     assert options == [{"map_index": 1, "allow_stored": False}]
 
 
-def test_point_cloud_api_uses_stored_object_for_active_map_with_multiple_maps() -> None:
+def test_point_cloud_api_does_not_reuse_ambiguous_stored_multi_map_object() -> None:
     options: list[dict[str, Any]] = []
 
     async def download(**kwargs: Any) -> DreameLawnMowerPointCloudDownload:
@@ -171,7 +171,7 @@ def test_point_cloud_api_uses_stored_object_for_active_map_with_multiple_maps() 
 
     asyncio.run(api.async_get("entry-1", 0))
 
-    assert options == [{"map_index": 0, "allow_stored": True}]
+    assert options == [{"map_index": 0, "allow_stored": False}]
 
 
 def test_point_cloud_api_does_not_use_stored_object_for_selected_inactive_map() -> None:

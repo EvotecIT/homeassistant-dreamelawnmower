@@ -430,6 +430,19 @@ class DreameLawnMowerVideoCamera(
             self._video_recovery_pending = False
             self._video_retry_not_before = 0.0
             self._set_stream_error(block_reason, stage="mower_state_gate")
+            target_session = self._session
+            target_stream = getattr(self, "stream", None)
+            if target_session is not None or target_stream is not None:
+                async with self._stream_lock:
+                    if (
+                        self._session is target_session
+                        and getattr(self, "stream", None) is target_stream
+                    ):
+                        await self._async_stop_active_session(
+                            reason="state_gate",
+                            trigger=block_reason,
+                            failed_pump_task=asyncio.current_task(),
+                        )
             self.async_write_ha_state()
             return
         stable_for = (
