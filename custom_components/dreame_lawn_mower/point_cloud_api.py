@@ -184,7 +184,7 @@ class DreameLawnMowerPointCloudAPI:
 
         allow_stored = (
             not refresh
-            and _single_active_map_index(coordinator) == map_index
+            and _stored_point_cloud_active_map_index(coordinator) == map_index
         )
         generation = self._async_generate(
             key,
@@ -521,10 +521,10 @@ class DreameLawnMowerPointCloudAPI:
             handle.cancel()
 
 
-def _single_active_map_index(
+def _stored_point_cloud_active_map_index(
     coordinator: DreameLawnMowerCoordinator,
 ) -> int | None:
-    """Return the active map only when stored-object identity is unambiguous."""
+    """Return the authoritative active map eligible for stored-object reuse."""
     app_maps = getattr(coordinator, "app_maps", None)
     if not isinstance(app_maps, Mapping):
         return None
@@ -543,9 +543,6 @@ def _single_active_map_index(
         and entry["idx"] >= 0
         and entry.get("created") is not False
     }
-    if len(indices) != 1:
-        return None
-    only_index = next(iter(indices))
     active_index = active_map_index(
         app_maps,
         selected_map_index=getattr(
@@ -554,7 +551,7 @@ def _single_active_map_index(
             None,
         ),
     )
-    return only_index if active_index == only_index else None
+    return active_index if active_index in indices else None
 
 
 class DreameLawnMowerPointCloudView(HomeAssistantView):
