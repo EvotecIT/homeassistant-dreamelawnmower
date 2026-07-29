@@ -49,6 +49,7 @@ from .performance import DreameLawnMowerPerformanceTracker
 from .runtime_cache import DreameLawnMowerRuntimeTelemetryCache
 from .schedule_cache import (
     has_complete_schedule_cache,
+    invalidate_schedule_slot,
     merge_app_schedule_payload,
     merge_batch_schedule_payload,
     schedule_payload_has_usable_data,
@@ -608,6 +609,10 @@ class DreameLawnMowerCoordinator(
             )
             self.last_schedule_write_result = result
             # Never let a recently cached pre-upload payload hide the new plans.
+            self.schedules = invalidate_schedule_slot(
+                getattr(self, "schedules", None),
+                map_index,
+            )
             self.schedules_refreshed_at = None
             try:
                 await self.async_refresh_schedules(force=True)

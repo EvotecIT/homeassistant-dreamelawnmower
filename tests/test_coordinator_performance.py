@@ -889,6 +889,47 @@ def test_schedule_refresh_preserves_active_version_when_its_slot_fails() -> None
     assert [schedule["version"] for schedule in result["schedules"]] == [20, 11]
 
 
+def test_schedule_refresh_prunes_deleted_map_after_complete_read() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.schedules = {
+        "source": "app_action_schedule",
+        "schedules": [
+            {"idx": -1, "available": True, "version": 10, "plans": []},
+            {"idx": 0, "available": True, "version": 11, "plans": []},
+            {
+                "idx": 1,
+                "available": True,
+                "version": 12,
+                "plans": [{"plan_id": 7}],
+            },
+        ],
+        "errors": [],
+    }
+    coordinator.schedules_refreshed_at = None
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {
+        "current_map_index": 0,
+        "maps": [{"idx": 0, "created": True}],
+    }
+    incoming = {
+        "source": "app_action_schedule",
+        "schedules": [
+            {"idx": -1, "available": True, "version": 20, "plans": []},
+            {"idx": 0, "available": True, "version": 21, "plans": []},
+        ],
+        "errors": [],
+    }
+    coordinator.client = SimpleNamespace(
+        async_get_app_schedules=AsyncMock(return_value=incoming),
+        async_get_batch_schedules=AsyncMock(side_effect=TimeoutError),
+    )
+
+    result = asyncio.run(coordinator.async_refresh_schedules(force=True))
+
+    assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 0]
+    assert [schedule["version"] for schedule in result["schedules"]] == [20, 21]
+
+
 def test_schedule_refresh_does_not_mark_all_failed_reads_fresh() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator.schedules = None

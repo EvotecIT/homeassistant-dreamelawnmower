@@ -176,12 +176,54 @@ def test_schedule_upload_force_refreshes_shared_cache_after_execution() -> None:
     coordinator.client = SimpleNamespace(
         async_plan_app_schedule_upload=AsyncMock(
             return_value={"executed": True, "request_count": 2}
-        )
+        ),
+        async_get_app_schedules=AsyncMock(
+            return_value={
+                "source": "app_action_schedule",
+                "schedules": [
+                    {"idx": -1, "available": True, "version": 7, "plans": []},
+                    {"idx": 0, "available": False, "error": "timed out"},
+                    {"idx": 1, "available": True, "version": 10, "plans": []},
+                ],
+                "errors": [
+                    {"idx": 0, "stage": "schedule", "error": "timed out"}
+                ],
+            }
+        ),
+        async_get_batch_schedules=AsyncMock(side_effect=TimeoutError),
     )
-    coordinator.async_refresh_schedules = AsyncMock(return_value={"schedules": []})
     coordinator.async_update_listeners = Mock()
     coordinator.last_schedule_write_result = None
     coordinator.schedules_refreshed_at = object()
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {
+        "current_map_index": 0,
+        "maps": [
+            {"idx": 0, "created": True},
+            {"idx": 1, "created": True},
+        ],
+    }
+    coordinator.schedules = {
+        "active_schedule_version": 8,
+        "current_task": {"version": 8},
+        "schedules": [
+            {"idx": -1, "available": True, "version": 7, "plans": []},
+            {
+                "idx": 0,
+                "available": True,
+                "version": 8,
+                "plans": [{"plan_id": 9, "enabled": True}],
+            },
+            {
+                "idx": None,
+                "available": True,
+                "version": 8,
+                "plans": [{"plan_id": 9, "enabled": True}],
+                "writable": False,
+            },
+            {"idx": 1, "available": True, "version": 10, "plans": []},
+        ],
+    }
     plans = [{"plan_id": 1, "enabled": True, "weeks": []}]
 
     result = asyncio.run(
@@ -202,8 +244,25 @@ def test_schedule_upload_force_refreshes_shared_cache_after_execution() -> None:
         execute=True,
         confirm_write=True,
     )
-    assert coordinator.schedules_refreshed_at is None
-    coordinator.async_refresh_schedules.assert_awaited_once_with(force=True)
+    assert coordinator.schedules_refreshed_at is not None
+    assert [schedule["idx"] for schedule in coordinator.schedules["schedules"]] == [
+        -1,
+        1,
+        0,
+    ]
+    uploaded_slot = next(
+        schedule
+        for schedule in coordinator.schedules["schedules"]
+        if schedule["idx"] == 0
+    )
+    assert uploaded_slot["error"] == "timed out"
+    assert "plans" not in uploaded_slot
+    assert "active_schedule_version" not in coordinator.schedules
+    assert "current_task" not in coordinator.schedules
+    coordinator.client.async_get_app_schedules.assert_awaited_once_with(
+        include_current_task=False,
+        map_indices=[-1, 0, 1],
+    )
     coordinator.async_update_listeners.assert_called_once()
 
 

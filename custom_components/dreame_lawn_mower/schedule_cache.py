@@ -52,6 +52,66 @@ def has_complete_schedule_cache(
     )
 
 
+def invalidate_schedule_slot(
+    existing: Mapping[str, Any] | None,
+    map_index: int,
+) -> dict[str, Any] | None:
+    """Remove one confirmed-stale writable slot and its derived metadata."""
+    if not isinstance(existing, Mapping):
+        return None
+    schedules = existing.get("schedules")
+    if not isinstance(schedules, Sequence) or isinstance(
+        schedules,
+        str | bytes | bytearray,
+    ):
+        return dict(existing)
+
+    invalidated_versions = {
+        schedule.get("version")
+        for schedule in schedules
+        if isinstance(schedule, Mapping)
+        and schedule.get("idx") == map_index
+        and isinstance(schedule.get("version"), int)
+        and not isinstance(schedule.get("version"), bool)
+    }
+    retained = [
+        schedule
+        for schedule in schedules
+        if not (
+            isinstance(schedule, Mapping)
+            and (
+                schedule.get("idx") == map_index
+                or (
+                    schedule.get("idx") is None
+                    and isinstance(schedule.get("version"), int)
+                    and not isinstance(schedule.get("version"), bool)
+                    and schedule.get("version") in invalidated_versions
+                )
+            )
+        )
+    ]
+    normalized = dict(existing)
+    normalized["schedules"] = retained
+    cached_active_version = normalized.get("active_schedule_version")
+    if (
+        isinstance(cached_active_version, int)
+        and not isinstance(cached_active_version, bool)
+        and cached_active_version in invalidated_versions
+    ):
+        normalized.pop("active_schedule_version", None)
+        current_task = normalized.get("current_task")
+        if (
+            isinstance(current_task, Mapping)
+            and current_task.get("version") == cached_active_version
+        ):
+            normalized.pop("current_task", None)
+    normalized["available"] = any(
+        isinstance(schedule, Mapping) and bool(schedule.get("available"))
+        for schedule in retained
+    )
+    return normalized
+
+
 def merge_app_schedule_payload(
     existing: Mapping[str, Any] | None,
     incoming: Mapping[str, Any],
@@ -130,6 +190,18 @@ def merge_app_schedule_payload(
         and not isinstance(schedule.get("idx"), bool)
     }
     complete_refresh = set(expected_indices).issubset(usable_incoming_by_index)
+    if complete_refresh:
+        expected_index_set = set(expected_indices)
+        merged = [
+            schedule
+            for schedule in merged
+            if not (
+                isinstance(schedule, Mapping)
+                and isinstance(schedule.get("idx"), int)
+                and not isinstance(schedule.get("idx"), bool)
+                and schedule.get("idx") not in expected_index_set
+            )
+        ]
     active_version_invalidated = (
         isinstance(cached_active_version, int)
         and not isinstance(cached_active_version, bool)
