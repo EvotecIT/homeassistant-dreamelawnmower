@@ -1040,6 +1040,77 @@ def test_schedule_refresh_keeps_auto_discovered_maps_without_app_hints() -> None
     )
 
 
+def test_schedule_refresh_prunes_last_map_after_authoritative_empty_map_list() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.schedules = {
+        "source": "app_action_schedule",
+        "active_schedule_version": 11,
+        "schedules": [
+            {"idx": -1, "available": True, "version": 10, "plans": []},
+            {
+                "idx": 0,
+                "available": True,
+                "version": 11,
+                "plans": [{"plan_id": 1}],
+            },
+        ],
+        "errors": [],
+    }
+    coordinator.schedules_refreshed_at = None
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {"maps": []}
+    coordinator.app_maps_refresh_succeeded = True
+    incoming = {
+        "source": "app_action_schedule",
+        "schedules": [
+            {"idx": -1, "available": True, "version": 20, "plans": []},
+        ],
+        "errors": [],
+    }
+    coordinator.client = SimpleNamespace(
+        async_get_app_schedules=AsyncMock(return_value=incoming),
+        async_get_batch_schedules=AsyncMock(side_effect=TimeoutError),
+    )
+
+    result = asyncio.run(coordinator.async_refresh_schedules(force=True))
+
+    assert [schedule["idx"] for schedule in result["schedules"]] == [-1]
+    assert [schedule["version"] for schedule in result["schedules"]] == [20]
+    assert result["active_selection_available"] is False
+    coordinator.client.async_get_app_schedules.assert_awaited_once_with(
+        include_current_task=False,
+        map_indices=[-1],
+    )
+
+
+def test_schedule_refresh_marks_active_selection_unavailable_without_batch() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.schedules = None
+    coordinator.schedules_refreshed_at = None
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {
+        "current_map_index": 0,
+        "maps": [{"idx": 0, "created": True}],
+    }
+    incoming = {
+        "source": "app_action_schedule",
+        "schedules": [
+            {"idx": -1, "available": True, "version": 20, "plans": []},
+            {"idx": 0, "available": True, "version": 21, "plans": []},
+        ],
+        "errors": [],
+    }
+    coordinator.client = SimpleNamespace(
+        async_get_app_schedules=AsyncMock(return_value=incoming),
+        async_get_batch_schedules=AsyncMock(side_effect=TimeoutError),
+    )
+
+    result = asyncio.run(coordinator.async_refresh_schedules(force=True))
+
+    assert result["active_selection_available"] is False
+    assert coordinator.schedules_refreshed_at is not None
+
+
 def test_schedule_refresh_does_not_mark_all_failed_reads_fresh() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator.schedules = None

@@ -151,6 +151,46 @@ def test_schedule_calendar_events_prefer_current_task_version() -> None:
     assert [event.start.hour for event in all_events] == [8, 10, 10]
 
 
+def test_active_calendar_hides_slots_when_active_selection_is_unavailable() -> None:
+    payload = {
+        "active_selection_available": False,
+        "schedules": [
+            {
+                "idx": 0,
+                "version": 1,
+                "plans": [
+                    {
+                        "plan_id": 0,
+                        "enabled": True,
+                        "weeks": [
+                            {
+                                "week_day": 0,
+                                "tasks": [{"start": 8 * 60, "end": 9 * 60}],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    start = datetime(2026, 4, 19, 0, 0, tzinfo=UTC)
+    end = datetime(2026, 4, 20, 0, 0, tzinfo=UTC)
+
+    assert schedule_calendar_events(payload, start, end) == []
+    assert len(
+        schedule_calendar_events(
+            payload,
+            start,
+            end,
+            include_all_schedules=True,
+        )
+    ) == 1
+    selection = schedule_calendar_selection(payload)
+    assert selection["active_selection_available"] is False
+    assert selection["included_schedule_count"] == 0
+    assert selection["hidden_schedule_count"] == 1
+
+
 def test_all_schedules_calendar_is_diagnostic_disabled_by_default() -> None:
     assert DreameLawnMowerAllSchedulesCalendar._include_all_schedules is True
     assert (

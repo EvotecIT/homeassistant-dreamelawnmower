@@ -181,6 +181,11 @@ def schedule_calendar_events(
         return []
 
     events: list[CalendarEvent] = []
+    if (
+        not include_all_schedules
+        and payload.get("active_selection_available") is False
+    ):
+        return events
     active_version = (
         None if include_all_schedules else _active_schedule_version(payload)
     )
@@ -231,12 +236,18 @@ def schedule_calendar_selection(
     active_version = (
         None if include_all_schedules else _active_schedule_version(payload)
     )
+    active_selection_available = (
+        include_all_schedules
+        or payload.get("active_selection_available") is not False
+    )
     included_schedules: list[dict[str, Any]] = []
     hidden_schedules: list[dict[str, Any]] = []
 
     for schedule in schedules:
         target = included_schedules
-        if active_version is not None and schedule.get("version") != active_version:
+        if not active_selection_available or (
+            active_version is not None and schedule.get("version") != active_version
+        ):
             target = hidden_schedules
         target.append(_schedule_selection_entry(schedule))
 
@@ -244,13 +255,16 @@ def schedule_calendar_selection(
         "mode": "all_schedules" if include_all_schedules else "active_schedule",
         "active_version": active_version,
         "active_version_filter_applied": bool(
-            active_version is not None and not include_all_schedules
+            (active_version is not None or not active_selection_available)
+            and not include_all_schedules
         ),
         "included_schedule_count": len(included_schedules),
         "hidden_schedule_count": len(hidden_schedules),
         "included_schedules": included_schedules,
         "hidden_schedules": hidden_schedules,
     }
+    if not active_selection_available:
+        selection["active_selection_available"] = False
     current_task = payload.get("current_task")
     if isinstance(current_task, Mapping):
         selection["current_task"] = dict(current_task)

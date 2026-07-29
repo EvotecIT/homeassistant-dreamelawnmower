@@ -154,6 +154,101 @@ def test_schedule_write_keeps_confirmed_state_when_readback_fails() -> None:
     coordinator.async_update_listeners.assert_called_once()
 
 
+def test_schedule_write_reconciles_unknown_active_fallback_by_version() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._schedule_write_lock = asyncio.Lock()
+    coordinator.client = SimpleNamespace(
+        async_set_app_schedule_plan_enabled=AsyncMock(
+            return_value={
+                "executed": True,
+                "enabled": False,
+                "version": 8,
+            }
+        )
+    )
+    coordinator.async_refresh_schedules = AsyncMock(
+        side_effect=RuntimeError("readback unavailable")
+    )
+    coordinator.async_update_listeners = Mock()
+    coordinator.last_schedule_write_result = None
+    coordinator.schedules = {
+        "active_schedule_version": 8,
+        "schedules": [
+            {
+                "idx": None,
+                "version": 8,
+                "writable": False,
+                "plans": [{"plan_id": 2, "enabled": True}],
+            }
+        ],
+    }
+
+    with pytest.raises(RuntimeError, match="readback unavailable"):
+        asyncio.run(
+            coordinator.async_set_schedule_plan_enabled(
+                map_index=1,
+                plan_id=2,
+                enabled=False,
+            )
+        )
+
+    assert coordinator.schedules["schedules"][0]["plans"][0]["enabled"] is False
+    coordinator.async_update_listeners.assert_called_once()
+
+
+def test_schedule_upload_invalidates_unknown_active_fallback_by_version() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._schedule_write_lock = asyncio.Lock()
+    coordinator.client = SimpleNamespace(
+        async_plan_app_schedule_upload=AsyncMock(
+            return_value={
+                "executed": True,
+                "request_count": 2,
+                "version": 8,
+            }
+        )
+    )
+    coordinator.async_refresh_schedules = AsyncMock(
+        side_effect=RuntimeError("readback unavailable")
+    )
+    coordinator.async_update_listeners = Mock()
+    coordinator.last_schedule_write_result = None
+    coordinator.schedules_refreshed_at = object()
+    coordinator.schedules = {
+        "active_schedule_version": 8,
+        "current_task": {"version": 8},
+        "schedules": [
+            {"idx": -1, "available": True, "version": 7, "plans": []},
+            {
+                "idx": None,
+                "available": True,
+                "version": 8,
+                "writable": False,
+                "plans": [{"plan_id": 2, "enabled": True}],
+            },
+        ],
+    }
+
+    with pytest.raises(RuntimeError, match="readback unavailable"):
+        asyncio.run(
+            coordinator.async_plan_schedule_upload(
+                map_index=1,
+                plans=[{"plan_id": 2, "enabled": False, "weeks": []}],
+                chunk_size=100,
+                execute=True,
+                confirm_write=True,
+            )
+        )
+
+    assert [schedule["idx"] for schedule in coordinator.schedules["schedules"]] == [
+        -1
+    ]
+    assert "active_schedule_version" not in coordinator.schedules
+    assert "current_task" not in coordinator.schedules
+    assert coordinator.schedules_refreshed_at is None
+    coordinator.async_update_listeners.assert_called_once()
+
+
 def test_forced_schedule_readback_propagates_cloud_failure() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator.client = SimpleNamespace(

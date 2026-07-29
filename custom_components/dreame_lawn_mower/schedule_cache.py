@@ -60,6 +60,8 @@ def has_complete_schedule_cache(
 def invalidate_schedule_slot(
     existing: Mapping[str, Any] | None,
     map_index: int,
+    *,
+    schedule_version: int | None = None,
 ) -> dict[str, Any] | None:
     """Remove one confirmed-stale writable slot and its derived metadata."""
     if not isinstance(existing, Mapping):
@@ -79,6 +81,8 @@ def invalidate_schedule_slot(
         and isinstance(schedule.get("version"), int)
         and not isinstance(schedule.get("version"), bool)
     }
+    if isinstance(schedule_version, int) and not isinstance(schedule_version, bool):
+        invalidated_versions.add(schedule_version)
     retained = [
         schedule
         for schedule in schedules
@@ -248,6 +252,7 @@ def merge_app_schedule_payload(
     normalized["schedules"] = merged
     if incoming.get("current_task") is not None:
         normalized["current_task"] = incoming["current_task"]
+        normalized["active_selection_available"] = True
     normalized["available"] = any(
         isinstance(schedule, Mapping) and bool(schedule.get("available"))
         for schedule in merged
@@ -344,6 +349,7 @@ def merge_batch_schedule_payload(
         for schedule in normalized["schedules"]
     )
     normalized["active_schedule_version"] = batch_version
+    normalized["active_selection_available"] = True
     if incoming.get("current_task") is not None:
         normalized["current_task"] = incoming["current_task"]
     normalized["captured_at"] = captured_at.isoformat()

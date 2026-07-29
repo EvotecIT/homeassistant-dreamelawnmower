@@ -428,7 +428,16 @@ class DreameLawnMowerCoordinator(
         ):
             return self.schedules
 
-        known_map_indices = _app_map_index_hints(getattr(self, "app_maps", None))
+        app_maps = getattr(self, "app_maps", None)
+        known_map_indices = _app_map_index_hints(app_maps)
+        map_hints_authoritative = _app_map_hints_are_authoritative(
+            app_maps,
+            refresh_succeeded=getattr(
+                self,
+                "app_maps_refresh_succeeded",
+                False,
+            ),
+        )
         map_index_hint = getattr(self, "selected_map_index", None)
         if map_index_hint is None:
             map_index_hint = active_map_index(getattr(self, "app_maps", None))
@@ -457,7 +466,9 @@ class DreameLawnMowerCoordinator(
             payload = await self.client.async_get_app_schedules(
                 include_current_task=False,
                 map_indices=(
-                    [-1, *known_map_indices] if known_map_indices else None
+                    [-1, *known_map_indices]
+                    if known_map_indices or map_hints_authoritative
+                    else None
                 ),
             )
         except Exception as err:  # noqa: BLE001 - optional cloud capability
@@ -472,6 +483,7 @@ class DreameLawnMowerCoordinator(
             self.schedules,
             payload,
             known_map_indices,
+            map_hints_authoritative=map_hints_authoritative,
         )
         self.schedules = merge_app_schedule_payload(
             self.schedules,
@@ -496,6 +508,16 @@ class DreameLawnMowerCoordinator(
             )
         if not self._schedule_refresh_is_current(refresh_generation):
             return self.schedules
+        if (
+            action_read_succeeded
+            and not batch_read_succeeded
+            and not _schedule_payload_has_active_selection(self.schedules)
+            and isinstance(self.schedules, dict)
+        ):
+            # Without SCHDT or a batch version, the normal calendar cannot
+            # safely choose one slot. Keep the decoded schedules for the
+            # diagnostic all-schedules view without presenting them as active.
+            self.schedules["active_selection_available"] = False
         if action_read_succeeded or batch_read_succeeded:
             self.schedules_refreshed_at = now
         return self.schedules
@@ -568,6 +590,7 @@ class DreameLawnMowerCoordinator(
                 map_index=map_index,
                 plan_id=plan_id,
                 enabled=enabled,
+                schedule_version=_schedule_write_version(result),
             )
             try:
                 await self.async_refresh_schedules(force=True)
@@ -583,6 +606,7 @@ class DreameLawnMowerCoordinator(
         map_index: int,
         plan_id: int,
         enabled: bool,
+        schedule_version: int | None = None,
     ) -> None:
         """Apply a confirmed schedule write to the shared cache."""
         schedules = (
@@ -593,7 +617,14 @@ class DreameLawnMowerCoordinator(
         if not isinstance(schedules, list):
             return
         for schedule in schedules:
-            if not isinstance(schedule, dict) or schedule.get("idx") != map_index:
+            if not isinstance(schedule, dict) or not (
+                schedule.get("idx") == map_index
+                or (
+                    schedule_version is not None
+                    and schedule.get("idx") is None
+                    and schedule.get("version") == schedule_version
+                )
+            ):
                 continue
             plans = schedule.get("plans")
             if not isinstance(plans, list):
@@ -639,6 +670,7 @@ class DreameLawnMowerCoordinator(
             self.schedules = invalidate_schedule_slot(
                 getattr(self, "schedules", None),
                 map_index,
+                schedule_version=_schedule_write_version(result),
             )
             self.schedules_refreshed_at = None
             try:
@@ -1046,13 +1078,30 @@ def _app_map_index_hints(app_maps: Mapping[str, Any] | None) -> list[int]:
     return indices
 
 
+def _app_map_hints_are_authoritative(
+    app_maps: Mapping[str, Any] | None,
+    *,
+    refresh_succeeded: bool,
+) -> bool:
+    """Return whether an empty map list is a confirmed, current result."""
+    if not refresh_succeeded or not isinstance(app_maps, Mapping):
+        return False
+    maps = app_maps.get("maps")
+    return isinstance(maps, Sequence) and not isinstance(
+        maps,
+        str | bytes | bytearray,
+    )
+
+
 def _schedule_expected_indices(
     existing: Mapping[str, Any] | None,
     incoming: Mapping[str, Any],
     known_map_indices: Sequence[int],
+    *,
+    map_hints_authoritative: bool,
 ) -> list[int]:
     """Return authoritative or conservatively discovered schedule slot ids."""
-    if known_map_indices:
+    if known_map_indices or map_hints_authoritative:
         return [-1, *known_map_indices]
 
     indices = [-1]
@@ -1073,3 +1122,28 @@ def _schedule_expected_indices(
             ):
                 indices.append(index)
     return indices
+
+
+def _schedule_payload_has_active_selection(
+    payload: Mapping[str, Any] | None,
+) -> bool:
+    """Return whether the cache identifies the effective schedule version."""
+    if not isinstance(payload, Mapping):
+        return False
+    current_task = payload.get("current_task")
+    if isinstance(current_task, Mapping):
+        version = current_task.get("version")
+        if isinstance(version, int) and not isinstance(version, bool):
+            return True
+    version = payload.get("active_schedule_version")
+    return isinstance(version, int) and not isinstance(version, bool)
+
+
+def _schedule_write_version(result: Mapping[str, Any]) -> int | None:
+    """Return the writable version confirmed by a schedule write."""
+    version = result.get("version")
+    return (
+        version
+        if isinstance(version, int) and not isinstance(version, bool)
+        else None
+    )
