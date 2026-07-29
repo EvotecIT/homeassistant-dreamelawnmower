@@ -52,6 +52,7 @@ from .schedule_cache import (
     invalidate_schedule_slot,
     merge_app_schedule_payload,
     merge_batch_schedule_payload,
+    schedule_entry_has_usable_data,
     schedule_payload_has_usable_data,
 )
 
@@ -122,6 +123,10 @@ class DreameLawnMowerCoordinator(
         self._schedule_cache_generation = 0
         self._schedule_read_generation = 0
         self._published_schedule_read_generation = 0
+        self._pending_schedule_plan_states: dict[
+            tuple[int, int],
+            tuple[int | None, bool],
+        ] = {}
         self._schedule_write_lock = asyncio.Lock()
         self._preference_write_lock = asyncio.Lock()
         self._device_refresh_lock = asyncio.Lock()
@@ -447,6 +452,7 @@ class DreameLawnMowerCoordinator(
             map_index_hint = known_map_indices[0]
 
         try:
+            action_read_generation = self._begin_schedule_read()
             payload = await self.client.async_get_app_schedules(
                 include_current_task=False,
                 map_indices=(
@@ -463,6 +469,11 @@ class DreameLawnMowerCoordinator(
         if not self._schedule_refresh_is_current(refresh_generation):
             return self.schedules
         action_read_succeeded = schedule_payload_has_usable_data(payload)
+        if (
+            action_read_succeeded
+            and not self._schedule_read_can_publish(action_read_generation)
+        ):
+            return self.schedules
         expected_indices = _schedule_expected_indices(
             self.schedules,
             payload,
@@ -474,6 +485,11 @@ class DreameLawnMowerCoordinator(
             payload,
             expected_indices=expected_indices,
         )
+        if action_read_succeeded:
+            self._record_schedule_read_publication(action_read_generation)
+        self._acknowledge_pending_schedule_plan_states(payload)
+        self._apply_pending_schedule_plan_states()
+        action_read_indices = _usable_schedule_indices(payload)
         batch_read_succeeded = False
         try:
             batch_read_generation = self._begin_schedule_read()
@@ -491,6 +507,7 @@ class DreameLawnMowerCoordinator(
                 now=now,
                 allow_incomplete=True,
                 read_generation=batch_read_generation,
+                preserve_indices=action_read_indices,
             )
         if not self._schedule_refresh_is_current(refresh_generation):
             return self.schedules
@@ -515,12 +532,11 @@ class DreameLawnMowerCoordinator(
         now: datetime,
         allow_incomplete: bool = False,
         read_generation: int | None = None,
+        preserve_indices: Sequence[int] = (),
     ) -> bool:
         """Merge one fast effective-schedule read into the app schedule cache."""
-        if (
-            read_generation is not None
-            and read_generation
-            < getattr(self, "_published_schedule_read_generation", 0)
+        if read_generation is not None and not self._schedule_read_can_publish(
+            read_generation
         ):
             return False
         known_map_indices = _app_map_index_hints(getattr(self, "app_maps", None))
@@ -537,13 +553,15 @@ class DreameLawnMowerCoordinator(
             payload,
             captured_at=now,
             allow_unknown_slot=allow_incomplete,
+            preserve_indices=preserve_indices,
         )
         if normalized is None:
             return False
         self.schedules = normalized
         self.schedules_refreshed_at = now
         if read_generation is not None:
-            self._published_schedule_read_generation = read_generation
+            self._record_schedule_read_publication(read_generation)
+        self._apply_pending_schedule_plan_states()
         return True
 
     def _has_complete_schedule_cache(
@@ -558,10 +576,22 @@ class DreameLawnMowerCoordinator(
         return generation == getattr(self, "_schedule_cache_generation", 0)
 
     def _begin_schedule_read(self) -> int:
-        """Return an ordering token for one batch schedule request."""
+        """Return an ordering token for one schedule request."""
         generation = getattr(self, "_schedule_read_generation", 0) + 1
         self._schedule_read_generation = generation
         return generation
+
+    def _schedule_read_can_publish(self, generation: int) -> bool:
+        """Return whether no newer schedule request has published."""
+        return generation >= getattr(
+            self,
+            "_published_schedule_read_generation",
+            0,
+        )
+
+    def _record_schedule_read_publication(self, generation: int) -> None:
+        """Record the newest schedule request allowed to publish."""
+        self._published_schedule_read_generation = generation
 
     def _invalidate_inflight_schedule_refreshes(self) -> None:
         """Prevent reads started before a confirmed write from publishing."""
@@ -587,11 +617,20 @@ class DreameLawnMowerCoordinator(
             )
             self.last_schedule_write_result = result
             self._invalidate_inflight_schedule_refreshes()
+            schedule_version = _schedule_write_version(result)
+            pending_states = getattr(self, "_pending_schedule_plan_states", None)
+            if pending_states is None:
+                pending_states = {}
+                self._pending_schedule_plan_states = pending_states
+            pending_states[(map_index, plan_id)] = (
+                schedule_version,
+                bool(enabled),
+            )
             self._reconcile_cached_schedule_plan_enabled(
                 map_index=map_index,
                 plan_id=plan_id,
                 enabled=enabled,
-                schedule_version=_schedule_write_version(result),
+                schedule_version=schedule_version,
             )
             try:
                 await self.async_refresh_schedules(force=True)
@@ -634,6 +673,74 @@ class DreameLawnMowerCoordinator(
                 if isinstance(plan, dict) and plan.get("plan_id") == plan_id:
                     plan["enabled"] = enabled
                     return
+
+    def _acknowledge_pending_schedule_plan_states(
+        self,
+        payload: Mapping[str, Any],
+    ) -> None:
+        """Clear confirmed writes once an action read observes their result."""
+        pending_states = getattr(self, "_pending_schedule_plan_states", None)
+        schedules = payload.get("schedules")
+        if not pending_states or not isinstance(schedules, Sequence):
+            return
+        for key, (version, enabled) in tuple(pending_states.items()):
+            map_index, plan_id = key
+            schedule = next(
+                (
+                    entry
+                    for entry in schedules
+                    if isinstance(entry, Mapping)
+                    and entry.get("idx") == map_index
+                    and schedule_entry_has_usable_data(entry)
+                ),
+                None,
+            )
+            if schedule is None:
+                continue
+            if version is not None and schedule.get("version") != version:
+                pending_states.pop(key, None)
+                continue
+            plans = schedule.get("plans")
+            plan = next(
+                (
+                    entry
+                    for entry in plans
+                    if isinstance(entry, Mapping) and entry.get("plan_id") == plan_id
+                ),
+                None,
+            )
+            if plan is None or bool(plan.get("enabled")) == enabled:
+                pending_states.pop(key, None)
+
+    def _apply_pending_schedule_plan_states(self) -> None:
+        """Keep confirmed toggles visible while cloud readbacks lag."""
+        pending_states = getattr(self, "_pending_schedule_plan_states", None)
+        schedules = (
+            self.schedules.get("schedules")
+            if isinstance(self.schedules, Mapping)
+            else None
+        )
+        if not pending_states or not isinstance(schedules, Sequence):
+            return
+        for (map_index, plan_id), (version, enabled) in pending_states.items():
+            for schedule in schedules:
+                if not isinstance(schedule, dict) or not (
+                    schedule.get("idx") == map_index
+                    or (
+                        version is not None
+                        and schedule.get("idx") is None
+                        and schedule.get("version") == version
+                    )
+                ):
+                    continue
+                if version is not None and schedule.get("version") != version:
+                    continue
+                plans = schedule.get("plans")
+                if not isinstance(plans, Sequence):
+                    continue
+                for plan in plans:
+                    if isinstance(plan, dict) and plan.get("plan_id") == plan_id:
+                        plan["enabled"] = enabled
 
     async def async_plan_schedule_upload(
         self,
@@ -1135,6 +1242,21 @@ def _schedule_expected_indices(
             ):
                 indices.append(index)
     return indices
+
+
+def _usable_schedule_indices(payload: Mapping[str, Any]) -> list[int]:
+    """Return writable slots read authoritatively in one action payload."""
+    schedules = payload.get("schedules")
+    if not isinstance(schedules, Sequence):
+        return []
+    return [
+        index
+        for schedule in schedules
+        if isinstance(schedule, Mapping)
+        and schedule_entry_has_usable_data(schedule)
+        and isinstance((index := schedule.get("idx")), int)
+        and not isinstance(index, bool)
+    ]
 
 
 def _schedule_payload_has_active_selection(

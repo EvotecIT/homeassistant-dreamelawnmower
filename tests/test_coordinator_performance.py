@@ -1381,6 +1381,72 @@ def test_parallel_batch_metadata_cannot_replace_newer_schedule_read() -> None:
     asyncio.run(scenario())
 
 
+def test_older_app_action_refresh_cannot_replace_newer_schedule_read() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        coordinator.schedules = {
+            "source": "app_action_schedule",
+            "available": True,
+            "schedules": [
+                {"idx": -1, "available": True, "version": 10, "plans": []},
+                {"idx": 0, "available": True, "version": 11, "plans": []},
+            ],
+            "errors": [],
+        }
+        coordinator.schedules_refreshed_at = None
+        coordinator.selected_map_index = 0
+        coordinator.app_maps = {
+            "current_map_index": 0,
+            "maps": [{"idx": 0, "created": True}],
+        }
+        old_action_started = asyncio.Event()
+        release_old_action = asyncio.Event()
+        action_calls = 0
+
+        async def get_app_schedules(**_kwargs) -> dict[str, object]:
+            nonlocal action_calls
+            action_calls += 1
+            if action_calls == 1:
+                old_action_started.set()
+                await release_old_action.wait()
+                version = 11
+            else:
+                version = 12
+            return {
+                "source": "app_action_schedule",
+                "available": True,
+                "schedules": [
+                    {"idx": -1, "available": True, "version": 10, "plans": []},
+                    {
+                        "idx": 0,
+                        "available": True,
+                        "version": version,
+                        "plans": [{"plan_id": 1, "enabled": version == 12}],
+                    },
+                ],
+                "errors": [],
+            }
+
+        coordinator.client = SimpleNamespace(
+            async_get_app_schedules=get_app_schedules,
+            async_get_batch_schedules=AsyncMock(side_effect=TimeoutError),
+        )
+
+        old_refresh = asyncio.create_task(
+            coordinator.async_refresh_schedules(force=True)
+        )
+        await old_action_started.wait()
+        await coordinator.async_refresh_schedules(force=True)
+        release_old_action.set()
+        await old_refresh
+
+        current = coordinator.schedules["schedules"][1]
+        assert current["version"] == 12
+        assert current["plans"][0]["enabled"] is True
+
+    asyncio.run(scenario())
+
+
 def test_performance_tracker_keeps_phase_and_aggregate_timings() -> None:
     values = iter((0.0, 1.0, 3.0, 5.0))
     tracker = DreameLawnMowerPerformanceTracker(

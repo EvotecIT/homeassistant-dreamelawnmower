@@ -267,6 +267,7 @@ def merge_batch_schedule_payload(
     *,
     captured_at: datetime,
     allow_unknown_slot: bool,
+    preserve_indices: Sequence[int] = (),
 ) -> dict[str, Any] | None:
     """Merge one effective batch schedule without guessing its writable slot."""
     schedules = incoming.get("schedules")
@@ -317,10 +318,21 @@ def merge_batch_schedule_payload(
         batch_schedule["label"] = "active_schedule"
         batch_schedule["writable"] = False
 
+    preserved_indices = set(preserve_indices)
+    replacement_schedule = batch_schedule
+    if (
+        matching_schedule is not None
+        and matching_schedule.get("idx") in preserved_indices
+        and schedule_entry_has_usable_data(matching_schedule)
+    ):
+        # A successful action read from this refresh is the authoritative plan
+        # content; use batch data only to select the active version.
+        replacement_schedule = matching_schedule
+
     normalized = dict(existing)
     normalized["schedules"] = [
         (
-            batch_schedule
+            replacement_schedule
             if isinstance(schedule, Mapping) and schedule is matching_schedule
             else schedule
         )

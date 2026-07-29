@@ -130,10 +130,19 @@ class _DreameLawnMowerClientSettingsMixin:
                     {"stage": "current_task", "error": str(err)}
                 )
 
-        schedule_deadline = time.monotonic() + SCHEDULE_READ_DEADLINE_SECONDS
+        schedule_started_at = time.monotonic()
+        schedule_deadline = schedule_started_at + SCHEDULE_READ_DEADLINE_SECONDS
+        map_discovery_deadline = schedule_deadline
+        if map_indices is None:
+            # Treat MAPL as another fair-budget participant so a nonresponsive
+            # discovery probe cannot consume the schedule slots' whole window.
+            map_discovery_deadline = min(
+                schedule_deadline,
+                schedule_started_at + SCHEDULE_READ_DEADLINE_SECONDS / 4,
+            )
         schedule_indices = self._app_schedule_map_indices(
             map_indices,
-            deadline=schedule_deadline,
+            deadline=map_discovery_deadline,
         )
         for position, map_index in enumerate(schedule_indices):
             now = time.monotonic()

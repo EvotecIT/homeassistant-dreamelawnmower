@@ -197,16 +197,16 @@ def test_app_schedules_decode_plans_and_current_task() -> None:
     assert {
         key: value
         for key, value in cloud.request_options[1].items()
-        if key != "deadline"
+        if key not in {"deadline", "timeout"}
     } == {
         "command": "MAPL",
         "retry_count": 0,
-        "timeout": 5.0,
     }
+    assert 0 < cloud.request_options[1]["timeout"] <= 2.5
     assert isinstance(cloud.request_options[1]["deadline"], float)
     assert (
         cloud.request_options[1]["deadline"]
-        > cloud.request_options[2]["deadline"]
+        < cloud.request_options[2]["deadline"]
     )
     assert cloud.request_options[2]["retry_count"] == 0
     assert 0 < cloud.request_options[2]["timeout"] <= 5.0
@@ -268,6 +268,46 @@ def test_app_schedules_allocate_shared_deadline_fairly_across_slots() -> None:
     ]
     assert len(metadata_deadlines) == 3
     assert metadata_deadlines[0] < metadata_deadlines[1] < metadata_deadlines[2]
+
+
+def test_app_schedules_reserve_slot_time_when_map_discovery_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+
+    class _SlowMapCloud(_FakeAppScheduleCloud):
+        def call_app_action(
+            self,
+            payload: dict[str, object],
+            **kwargs: object,
+        ) -> dict[str, object]:
+            if payload.get("t") == "MAPL":
+                self.calls.append(payload)
+                self.request_options.append(
+                    {
+                        "command": "MAPL",
+                        "retry_count": kwargs.get("retry_count"),
+                        "timeout": kwargs.get("timeout"),
+                        "deadline": kwargs.get("deadline"),
+                    }
+                )
+                clock[0] = float(kwargs["deadline"])
+                raise TimeoutError("MAPL timed out")
+            return super().call_app_action(payload, **kwargs)
+
+    cloud = _SlowMapCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+    settings_time = client._sync_get_app_schedules.__func__.__globals__["time"]
+    monkeypatch.setattr(settings_time, "monotonic", lambda: clock[0])
+
+    result = client._sync_get_app_schedules(include_current_task=False)
+
+    assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 0, 1]
+    map_deadline = cloud.request_options[0]["deadline"]
+    first_schedule_deadline = cloud.request_options[1]["deadline"]
+    assert map_deadline == pytest.approx(102.5)
+    assert first_schedule_deadline == pytest.approx(105.0)
 
 
 @pytest.mark.parametrize(
