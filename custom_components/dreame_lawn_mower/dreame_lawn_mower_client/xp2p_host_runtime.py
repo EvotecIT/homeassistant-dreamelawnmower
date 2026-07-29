@@ -43,6 +43,10 @@ _REQUEST_FIELDS = 20
 _MAX_RESPONSE_LENGTH = 64 * 1024
 _DEFAULT_STATUS_ATTEMPTS = 60
 _DEFAULT_RETRY_INTERVAL = 0.5
+_CACHED_COMMAND_TIMEOUT_US = 2_000_000
+_CACHED_STATUS_ATTEMPTS = 3
+_CACHED_RETRY_INTERVAL = 0.25
+_CACHED_DELEGATE_ATTEMPTS = 8
 _DEFAULT_STUN_SERVER = "43.158.113.38:20002"
 _STARTUP_TIMEOUT_MARGIN = 5.0
 _WORKER_ERRORS = {
@@ -222,6 +226,37 @@ class DreameLawnMowerXp2pHostRuntime:
             delegate_retry_interval=delegate_retry_interval,
         )
 
+    def start_cached_live_stream(
+        self,
+        inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+    ) -> DreameLawnMowerXp2pLiveStreamSession:
+        """Try cached XP2P provisioning with an interactive fallback budget.
+
+        Cached provisioning is an optimization over a fresh cloud request. It
+        therefore gets only a short, worker-owned attempt: success can still be
+        immediate, while stale credentials or an unreachable mower release the
+        worker before Home Assistant continues with fresh cloud provisioning.
+        """
+        self.last_failure = None
+        self.assets.validate()
+        self.require_compatible_worker()
+        request = DreameLawnMowerXp2pLiveStreamRequest.from_runtime_inputs(inputs)
+        device_config = self.config_fetcher(inputs)
+        stun_file = _write_stun_file(_stun_servers(device_config))
+        return self._start_worker(
+            request,
+            transport="cloud",
+            endpoint=None,
+            stun_file=stun_file,
+            device_config=device_config,
+            command_timeout_us=_CACHED_COMMAND_TIMEOUT_US,
+            device_status_attempts=_CACHED_STATUS_ATTEMPTS,
+            device_status_retry_interval=_CACHED_RETRY_INTERVAL,
+            delegate_attempts=_CACHED_DELEGATE_ATTEMPTS,
+            delegate_retry_interval=_CACHED_RETRY_INTERVAL,
+            startup_timeout_minimum=0,
+        )
+
     def start_lan_stream(
         self,
         inputs: DreameLawnMowerCameraStreamRuntimeInputs,
@@ -280,6 +315,7 @@ class DreameLawnMowerXp2pHostRuntime:
         device_status_retry_interval: float,
         delegate_attempts: int,
         delegate_retry_interval: float,
+        startup_timeout_minimum: float | None = None,
     ) -> DreameLawnMowerXp2pLiveStreamSession:
         """Launch the isolated Bionic worker for cloud or direct-LAN transport."""
         command = self.assets.command()
@@ -345,7 +381,11 @@ class DreameLawnMowerXp2pHostRuntime:
                     device_status_retry_interval=device_status_retry_interval,
                     delegate_attempts=delegate_attempts,
                     delegate_retry_interval=delegate_retry_interval,
-                    minimum=self.startup_timeout,
+                    minimum=(
+                        self.startup_timeout
+                        if startup_timeout_minimum is None
+                        else startup_timeout_minimum
+                    ),
                     include_device_status=transport != "lan",
                 ),
             )

@@ -194,6 +194,48 @@ def test_host_runtime_timeout_covers_worker_retry_budgets() -> None:
     )
 
 
+def test_host_runtime_cached_start_uses_interactive_worker_budget(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    assets = DreameLawnMowerXp2pHostAssets(
+        worker_path=tmp_path / "bin" / "dreame-xp2p-host-runner",
+        linker_path=tmp_path / "bin" / "linker64",
+        library_path=tmp_path / "lib" / "libiot_video_demo.so",
+        library_search_paths=(tmp_path / "lib",),
+    )
+    runtime = xp2p_host_runtime.DreameLawnMowerXp2pHostRuntime(
+        assets,
+        config_fetcher=lambda _inputs: DreameLawnMowerXp2pDeviceConfig(),
+    )
+    observed: dict[str, object] = {}
+    expected = DreameLawnMowerXp2pLiveStreamSession(
+        service_id="product/device",
+        stream_url="http://127.0.0.1/cached.flv",
+    )
+
+    def _start_worker(*args, **kwargs):
+        observed.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(runtime, "_start_worker", _start_worker)
+    monkeypatch.setattr(
+        DreameLawnMowerXp2pHostAssets,
+        "validate",
+        lambda _self: None,
+    )
+    monkeypatch.setattr(runtime, "require_compatible_worker", lambda: None)
+    monkeypatch.setattr(xp2p_host_runtime, "_write_stun_file", lambda _servers: None)
+
+    assert runtime.start_cached_live_stream(_inputs()) is expected
+    assert observed["command_timeout_us"] == 2_000_000
+    assert observed["device_status_attempts"] == 3
+    assert observed["device_status_retry_interval"] == 0.25
+    assert observed["delegate_attempts"] == 8
+    assert observed["delegate_retry_interval"] == 0.25
+    assert observed["startup_timeout_minimum"] == 0
+
+
 def test_embedded_worker_matches_reproducible_hashes() -> None:
     compressed = base64.b64decode(WORKER_GZIP_BASE64, validate=True)
     worker = gzip.decompress(compressed)

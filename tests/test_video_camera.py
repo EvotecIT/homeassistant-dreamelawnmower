@@ -3486,6 +3486,53 @@ def test_video_camera_auto_uses_cached_xp2p_without_video_cloud_calls() -> None:
     )
 
 
+def test_video_camera_managed_host_uses_bounded_cached_start() -> None:
+    async def _run() -> tuple[int, int, bool]:
+        entity = _uninitialized_entity()
+        inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+            source="video_provisioning_cache",
+            did="did-1",
+            product_id="product-1",
+            device_name="device-1",
+            p2p_info="p2p-info-1",
+        )
+
+        class _Runtime:
+            def __init__(self) -> None:
+                self.cached_starts = 0
+                self.regular_starts = 0
+
+            def start_cached_live_stream(
+                self,
+                actual_inputs: object,
+            ) -> DreameLawnMowerXp2pLiveStreamSession:
+                assert actual_inputs is inputs
+                self.cached_starts += 1
+                return DreameLawnMowerXp2pLiveStreamSession(
+                    service_id="product-1/device-1",
+                    stream_url="http://127.0.0.1/cached.flv",
+                )
+
+            def start_live_stream(self, _inputs: object) -> object:
+                self.regular_starts += 1
+                raise AssertionError("Cached startup must use the bounded entrypoint")
+
+        runtime = _Runtime()
+
+        async def _executor(function, *args):
+            return function(*args)
+
+        entity.hass = SimpleNamespace(async_add_executor_job=_executor)
+        session = await entity._async_start_cached_runtime_session(runtime, inputs)
+        return (
+            runtime.cached_starts,
+            runtime.regular_starts,
+            session.camera_toggle_managed,
+        )
+
+    assert asyncio.run(_run()) == (1, 0, False)
+
+
 def test_video_camera_relay_upstream_start_has_bounded_deadline() -> None:
     async def _run() -> tuple[str | None, str | None]:
         entity = _uninitialized_entity()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -435,7 +436,7 @@ class DreameLawnMowerVideoStartupMixin:
         result = await async_start_cached_xp2p(
             runtime,
             inputs,
-            start_session=self._async_start_runtime_session,
+            start_session=self._async_start_cached_runtime_session,
         )
         if result.session is None:
             self._last_cached_xp2p_error = (
@@ -449,6 +450,28 @@ class DreameLawnMowerVideoStartupMixin:
             result.session,
             None,
             transport="cached_xp2p",
+        )
+
+    async def _async_start_cached_runtime_session(
+        self,
+        runtime: _DreameVideoRuntime,
+        inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+        *,
+        camera_toggle_managed: bool = False,
+    ) -> DreameLawnMowerXp2pLiveStreamSession:
+        """Use a bounded managed-host attempt for cached provisioning."""
+        start_cached = getattr(runtime, "start_cached_live_stream", None)
+        if not callable(start_cached):
+            return await self._async_start_runtime_session(
+                runtime,
+                inputs,
+                camera_toggle_managed=camera_toggle_managed,
+            )
+        return await self._async_start_runtime_session(
+            runtime,
+            inputs,
+            camera_toggle_managed=camera_toggle_managed,
+            start_callable=start_cached,
         )
 
     async def _async_get_runtime_inputs(
@@ -649,10 +672,15 @@ class DreameLawnMowerVideoStartupMixin:
         inputs: DreameLawnMowerCameraStreamRuntimeInputs,
         *,
         camera_toggle_managed: bool = True,
+        start_callable: Callable[
+            [DreameLawnMowerCameraStreamRuntimeInputs],
+            DreameLawnMowerXp2pLiveStreamSession,
+        ]
+        | None = None,
     ) -> DreameLawnMowerXp2pLiveStreamSession:
         """Finish or clean up native startup if the HA request is cancelled."""
         start_job = self.hass.async_add_executor_job(
-            runtime.start_live_stream,
+            start_callable or runtime.start_live_stream,
             inputs,
         )
         try:
