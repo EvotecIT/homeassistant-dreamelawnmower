@@ -443,24 +443,6 @@ class DreameLawnMowerCoordinator(
             map_index_hint = active_map_index(getattr(self, "app_maps", None))
         if map_index_hint is None and len(known_map_indices) == 1:
             map_index_hint = known_map_indices[0]
-        if (
-            not force
-            and len(known_map_indices) == 1
-            and map_index_hint is not None
-            and self._has_complete_schedule_cache(known_map_indices)
-        ):
-            try:
-                batch_payload = await self.client.async_get_batch_schedules(
-                    include_raw=False,
-                    map_index_hint=map_index_hint,
-                )
-            except Exception as err:  # noqa: BLE001 - optional cloud capability
-                _LOGGER.debug("Failed to refresh batch mower schedules: %s", err)
-            else:
-                if not self._schedule_refresh_is_current(refresh_generation):
-                    return self.schedules
-                if self._cache_batch_schedules(batch_payload, now=now):
-                    return self.schedules
 
         try:
             payload = await self.client.async_get_app_schedules(

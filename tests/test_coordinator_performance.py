@@ -414,13 +414,12 @@ def test_failed_due_map_refresh_does_not_stamp_runtime_with_stale_identity() -> 
     asyncio.run(scenario())
 
 
-def test_schedule_refresh_prefers_fast_batch_payload() -> None:
+def test_schedule_refresh_reads_inactive_default_slot_on_single_map_device() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
-    default_schedule = {"idx": -1, "available": True, "plans": []}
     coordinator.schedules = {
         "source": "app_action_schedule",
         "schedules": [
-            default_schedule,
+            {"idx": -1, "available": True, "version": 5, "plans": []},
             {"idx": 2, "available": True, "version": 6, "plans": []},
         ],
     }
@@ -430,6 +429,14 @@ def test_schedule_refresh_prefers_fast_batch_payload() -> None:
         "maps": [{"idx": 2, "created": True}],
     }
     coordinator.selected_map_index = 2
+    app_payload = {
+        "source": "app_action_schedule",
+        "schedules": [
+            {"idx": -1, "available": True, "version": 7, "plans": []},
+            {"idx": 2, "available": True, "version": 6, "plans": []},
+        ],
+        "errors": [],
+    }
     batch_payload = {
         "source": "batch_device_data_schedule",
         "available": True,
@@ -446,21 +453,24 @@ def test_schedule_refresh_prefers_fast_batch_payload() -> None:
     }
     coordinator.client = SimpleNamespace(
         async_get_batch_schedules=AsyncMock(return_value=batch_payload),
-        async_get_app_schedules=AsyncMock(),
+        async_get_app_schedules=AsyncMock(return_value=app_payload),
     )
 
     result = asyncio.run(coordinator.async_refresh_schedules())
 
     assert result is coordinator.schedules
     assert result["source"] == "app_action_schedule_with_batch_refresh"
-    assert result["schedules"][0] is default_schedule
+    assert result["schedules"][0]["version"] == 7
     assert result["schedules"][1]["version"] == 6
     assert result["active_schedule_version"] == 6
+    coordinator.client.async_get_app_schedules.assert_awaited_once_with(
+        include_current_task=False,
+        map_indices=[-1, 2],
+    )
     coordinator.client.async_get_batch_schedules.assert_awaited_once_with(
         include_raw=False,
         map_index_hint=2,
     )
-    coordinator.client.async_get_app_schedules.assert_not_awaited()
 
 
 def test_schedule_refresh_reads_inactive_maps_instead_of_batch_fast_path() -> None:
