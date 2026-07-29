@@ -1274,12 +1274,109 @@ def test_batch_metadata_reuses_fresh_schedule_fetch() -> None:
             async_get_batch_ota_info=AsyncMock(return_value={"available": True}),
         )
 
-        schedule, preferences, ota = await coordinator._async_fetch_batch_device_data()
+        schedule, preferences, ota, generation = (
+            await coordinator._async_fetch_batch_device_data()
+        )
 
         assert schedule is coordinator.schedules
         assert preferences == {"maps": []}
         assert ota == {"available": True}
+        assert generation == 0
         coordinator.client.async_get_batch_schedules.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
+def test_parallel_batch_metadata_cannot_replace_newer_schedule_read() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        coordinator.schedules = {
+            "source": "app_action_schedule",
+            "available": True,
+            "schedules": [
+                {"idx": -1, "available": True, "version": 10, "plans": []},
+                {"idx": 0, "available": True, "version": 11, "plans": []},
+            ],
+            "errors": [],
+        }
+        coordinator.schedules_refreshed_at = None
+        coordinator.batch_device_data = None
+        coordinator.batch_device_data_refreshed_at = None
+        coordinator.selected_map_index = 0
+        coordinator.app_maps = {
+            "current_map_index": 0,
+            "maps": [{"idx": 0, "created": True}],
+        }
+        old_batch_returned = asyncio.Event()
+        release_preferences = asyncio.Event()
+        batch_calls = 0
+
+        async def get_batch_schedules(**_kwargs) -> dict[str, object]:
+            nonlocal batch_calls
+            batch_calls += 1
+            version = 11 if batch_calls == 1 else 12
+            if batch_calls == 1:
+                old_batch_returned.set()
+            return {
+                "source": "batch_device_data_schedule",
+                "available": True,
+                "active_schedule_version": version,
+                "current_task": None,
+                "schedules": [
+                    {
+                        "idx": 0,
+                        "available": True,
+                        "version": version,
+                        "plans": [],
+                    }
+                ],
+                "errors": [],
+            }
+
+        async def get_preferences(**_kwargs) -> dict[str, object]:
+            await release_preferences.wait()
+            return {"maps": []}
+
+        coordinator.client = SimpleNamespace(
+            async_get_app_schedules=AsyncMock(
+                return_value={
+                    "source": "app_action_schedule",
+                    "available": True,
+                    "schedules": [
+                        {
+                            "idx": -1,
+                            "available": True,
+                            "version": 10,
+                            "plans": [],
+                        },
+                        {
+                            "idx": 0,
+                            "available": True,
+                            "version": 12,
+                            "plans": [],
+                        },
+                    ],
+                    "errors": [],
+                }
+            ),
+            async_get_batch_schedules=get_batch_schedules,
+            async_get_batch_mowing_preferences=get_preferences,
+            async_get_batch_ota_info=AsyncMock(return_value={"available": True}),
+        )
+
+        metadata_task = asyncio.create_task(
+            coordinator.async_refresh_batch_device_data(force=True)
+        )
+        await old_batch_returned.wait()
+        await coordinator.async_refresh_schedules(force=True)
+        release_preferences.set()
+        await metadata_task
+
+        assert coordinator.schedules["active_schedule_version"] == 12
+        assert coordinator.schedules["schedules"][1]["version"] == 12
+        assert coordinator.batch_device_data["batch_schedule"][
+            "active_schedule_version"
+        ] == 11
 
     asyncio.run(scenario())
 

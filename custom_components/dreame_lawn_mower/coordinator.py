@@ -120,6 +120,8 @@ class DreameLawnMowerCoordinator(
         self.schedules: dict[str, Any] | None = None
         self.schedules_refreshed_at: datetime | None = None
         self._schedule_cache_generation = 0
+        self._schedule_read_generation = 0
+        self._published_schedule_read_generation = 0
         self._schedule_write_lock = asyncio.Lock()
         self._preference_write_lock = asyncio.Lock()
         self._device_refresh_lock = asyncio.Lock()
@@ -474,6 +476,7 @@ class DreameLawnMowerCoordinator(
         )
         batch_read_succeeded = False
         try:
+            batch_read_generation = self._begin_schedule_read()
             batch_payload = await self.client.async_get_batch_schedules(
                 include_raw=False,
                 map_index_hint=map_index_hint,
@@ -487,6 +490,7 @@ class DreameLawnMowerCoordinator(
                 batch_payload,
                 now=now,
                 allow_incomplete=True,
+                read_generation=batch_read_generation,
             )
         if not self._schedule_refresh_is_current(refresh_generation):
             return self.schedules
@@ -510,8 +514,15 @@ class DreameLawnMowerCoordinator(
         *,
         now: datetime,
         allow_incomplete: bool = False,
+        read_generation: int | None = None,
     ) -> bool:
         """Merge one fast effective-schedule read into the app schedule cache."""
+        if (
+            read_generation is not None
+            and read_generation
+            < getattr(self, "_published_schedule_read_generation", 0)
+        ):
+            return False
         known_map_indices = _app_map_index_hints(getattr(self, "app_maps", None))
         if (
             not isinstance(self.schedules, Mapping)
@@ -531,6 +542,8 @@ class DreameLawnMowerCoordinator(
             return False
         self.schedules = normalized
         self.schedules_refreshed_at = now
+        if read_generation is not None:
+            self._published_schedule_read_generation = read_generation
         return True
 
     def _has_complete_schedule_cache(
@@ -543,6 +556,12 @@ class DreameLawnMowerCoordinator(
     def _schedule_refresh_is_current(self, generation: int) -> bool:
         """Return whether a schedule read predates no confirmed write."""
         return generation == getattr(self, "_schedule_cache_generation", 0)
+
+    def _begin_schedule_read(self) -> int:
+        """Return an ordering token for one batch schedule request."""
+        generation = getattr(self, "_schedule_read_generation", 0) + 1
+        self._schedule_read_generation = generation
+        return generation
 
     def _invalidate_inflight_schedule_refreshes(self) -> None:
         """Prevent reads started before a confirmed write from publishing."""
@@ -684,6 +703,7 @@ class DreameLawnMowerCoordinator(
                 batch_schedule,
                 batch_mowing_preferences,
                 batch_ota_info,
+                batch_schedule_generation,
             ) = await self._async_fetch_batch_device_data()
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh batch device data: %s", err)
@@ -699,7 +719,11 @@ class DreameLawnMowerCoordinator(
         self.batch_device_data = payload
         self.batch_device_data_refreshed_at = now
         if self._schedule_refresh_is_current(schedule_generation):
-            self._cache_batch_schedules(batch_schedule, now=now)
+            self._cache_batch_schedules(
+                batch_schedule,
+                now=now,
+                read_generation=batch_schedule_generation,
+            )
         return payload
 
     async def async_plan_mowing_preference_update(
@@ -737,11 +761,12 @@ class DreameLawnMowerCoordinator(
 
     async def _async_fetch_batch_device_data(
         self,
-    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], int]:
         """Fetch batch schedule, settings, and OTA payloads in parallel."""
         cached_schedule = self._fresh_batch_schedule()
         if cached_schedule is None:
-            return await asyncio.gather(
+            schedule_generation = self._begin_schedule_read()
+            schedule, preferences, ota = await asyncio.gather(
                 self.client.async_get_batch_schedules(include_raw=False),
                 self.client.async_get_batch_mowing_preferences(
                     include_raw=False,
@@ -749,6 +774,7 @@ class DreameLawnMowerCoordinator(
                 ),
                 self.client.async_get_batch_ota_info(include_raw=False),
             )
+            return schedule, preferences, ota, schedule_generation
 
         batch_mowing_preferences, batch_ota_info = await asyncio.gather(
             self.client.async_get_batch_mowing_preferences(
@@ -757,7 +783,12 @@ class DreameLawnMowerCoordinator(
             ),
             self.client.async_get_batch_ota_info(include_raw=False),
         )
-        return cached_schedule, batch_mowing_preferences, batch_ota_info
+        return (
+            cached_schedule,
+            batch_mowing_preferences,
+            batch_ota_info,
+            getattr(self, "_published_schedule_read_generation", 0),
+        )
 
     def _fresh_batch_schedule(self) -> dict[str, Any] | None:
         """Return the recent shared schedule cache when batch-sourced."""

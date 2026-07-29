@@ -108,6 +108,7 @@ def invalidate_schedule_slot(
         and cached_active_version in invalidated_versions
     ):
         normalized.pop("active_schedule_version", None)
+        normalized["active_selection_available"] = False
         current_task = normalized.get("current_task")
         if (
             isinstance(current_task, Mapping)
