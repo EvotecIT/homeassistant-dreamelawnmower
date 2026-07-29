@@ -194,16 +194,22 @@ def test_app_schedules_decode_plans_and_current_task() -> None:
     assert 0 < cloud.request_options[0]["timeout"] <= 5.0
     assert isinstance(cloud.request_options[0]["deadline"], float)
     assert cloud.request_options[0]["deadline"] > 0
-    assert cloud.request_options[1] == {
+    assert {
+        key: value
+        for key, value in cloud.request_options[1].items()
+        if key != "deadline"
+    } == {
         "command": "MAPL",
         "retry_count": 0,
         "timeout": 5.0,
-        "deadline": cloud.request_options[2]["deadline"],
     }
     assert isinstance(cloud.request_options[1]["deadline"], float)
-    assert cloud.request_options[1]["deadline"] > 0
+    assert (
+        cloud.request_options[1]["deadline"]
+        > cloud.request_options[2]["deadline"]
+    )
     assert cloud.request_options[2]["retry_count"] == 0
-    assert cloud.request_options[2]["timeout"] == 5.0
+    assert 0 < cloud.request_options[2]["timeout"] <= 5.0
 
 
 def test_app_schedules_can_include_raw_payload_text() -> None:
@@ -238,6 +244,30 @@ def test_app_schedules_can_skip_optional_current_task_and_bound_plan_reads() -> 
     assert all(option["retry_count"] == 0 for option in cloud.request_options)
     assert all(option["timeout"] == 5.0 for option in cloud.request_options)
     assert cloud.request_options[0]["deadline"] == cloud.request_options[1]["deadline"]
+
+
+def test_app_schedules_allocate_shared_deadline_fairly_across_slots() -> None:
+    client = _client()
+    cloud = _FakeAppScheduleCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+
+    result = client._sync_get_app_schedules(
+        map_indices=[-1, 0, 1],
+        include_current_task=False,
+    )
+
+    assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 0, 1]
+    metadata_deadlines = [
+        options["deadline"]
+        for call, options in zip(
+            cloud.calls,
+            cloud.request_options,
+            strict=True,
+        )
+        if call["t"] == "SCHDIV2"
+    ]
+    assert len(metadata_deadlines) == 3
+    assert metadata_deadlines[0] < metadata_deadlines[1] < metadata_deadlines[2]
 
 
 @pytest.mark.parametrize(

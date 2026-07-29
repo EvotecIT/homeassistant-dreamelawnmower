@@ -119,6 +119,7 @@ class DreameLawnMowerCoordinator(
         self.voice_settings_refreshed_at: datetime | None = None
         self.schedules: dict[str, Any] | None = None
         self.schedules_refreshed_at: datetime | None = None
+        self._schedule_cache_generation = 0
         self._schedule_write_lock = asyncio.Lock()
         self._preference_write_lock = asyncio.Lock()
         self._device_refresh_lock = asyncio.Lock()
@@ -418,6 +419,7 @@ class DreameLawnMowerCoordinator(
     ) -> dict[str, Any] | None:
         """Refresh schedules through the fast batch path with app fallback."""
         now = datetime.now(UTC)
+        refresh_generation = getattr(self, "_schedule_cache_generation", 0)
         if (
             not force
             and self.schedules is not None
@@ -446,6 +448,8 @@ class DreameLawnMowerCoordinator(
             except Exception as err:  # noqa: BLE001 - optional cloud capability
                 _LOGGER.debug("Failed to refresh batch mower schedules: %s", err)
             else:
+                if not self._schedule_refresh_is_current(refresh_generation):
+                    return self.schedules
                 if self._cache_batch_schedules(batch_payload, now=now):
                     return self.schedules
 
@@ -461,11 +465,18 @@ class DreameLawnMowerCoordinator(
             if force:
                 raise
             return self.schedules
+        if not self._schedule_refresh_is_current(refresh_generation):
+            return self.schedules
         action_read_succeeded = schedule_payload_has_usable_data(payload)
+        expected_indices = _schedule_expected_indices(
+            self.schedules,
+            payload,
+            known_map_indices,
+        )
         self.schedules = merge_app_schedule_payload(
             self.schedules,
             payload,
-            expected_indices=[-1, *known_map_indices],
+            expected_indices=expected_indices,
         )
         batch_read_succeeded = False
         try:
@@ -476,11 +487,15 @@ class DreameLawnMowerCoordinator(
         except Exception as err:  # noqa: BLE001 - optional cloud capability
             _LOGGER.debug("Failed to recover batch mower schedules: %s", err)
         else:
+            if not self._schedule_refresh_is_current(refresh_generation):
+                return self.schedules
             batch_read_succeeded = self._cache_batch_schedules(
                 batch_payload,
                 now=now,
                 allow_incomplete=True,
             )
+        if not self._schedule_refresh_is_current(refresh_generation):
+            return self.schedules
         if action_read_succeeded or batch_read_succeeded:
             self.schedules_refreshed_at = now
         return self.schedules
@@ -521,6 +536,16 @@ class DreameLawnMowerCoordinator(
         """Return whether default and every known physical map are represented."""
         return has_complete_schedule_cache(self.schedules, known_map_indices)
 
+    def _schedule_refresh_is_current(self, generation: int) -> bool:
+        """Return whether a schedule read predates no confirmed write."""
+        return generation == getattr(self, "_schedule_cache_generation", 0)
+
+    def _invalidate_inflight_schedule_refreshes(self) -> None:
+        """Prevent reads started before a confirmed write from publishing."""
+        self._schedule_cache_generation = (
+            getattr(self, "_schedule_cache_generation", 0) + 1
+        )
+
     async def async_set_schedule_plan_enabled(
         self,
         *,
@@ -538,6 +563,7 @@ class DreameLawnMowerCoordinator(
                 confirm_write=True,
             )
             self.last_schedule_write_result = result
+            self._invalidate_inflight_schedule_refreshes()
             self._reconcile_cached_schedule_plan_enabled(
                 map_index=map_index,
                 plan_id=plan_id,
@@ -608,6 +634,7 @@ class DreameLawnMowerCoordinator(
                 confirm_write=confirm_write,
             )
             self.last_schedule_write_result = result
+            self._invalidate_inflight_schedule_refreshes()
             # Never let a recently cached pre-upload payload hide the new plans.
             self.schedules = invalidate_schedule_slot(
                 getattr(self, "schedules", None),
@@ -637,6 +664,7 @@ class DreameLawnMowerCoordinator(
         ):
             return self.batch_device_data
 
+        schedule_generation = getattr(self, "_schedule_cache_generation", 0)
         try:
             (
                 batch_schedule,
@@ -656,7 +684,8 @@ class DreameLawnMowerCoordinator(
         }
         self.batch_device_data = payload
         self.batch_device_data_refreshed_at = now
-        self._cache_batch_schedules(batch_schedule, now=now)
+        if self._schedule_refresh_is_current(schedule_generation):
+            self._cache_batch_schedules(batch_schedule, now=now)
         return payload
 
     async def async_plan_mowing_preference_update(
@@ -1014,4 +1043,33 @@ def _app_map_index_hints(app_maps: Mapping[str, Any] | None) -> list[int]:
         if not isinstance(index, int) or index < 0 or index in indices:
             continue
         indices.append(index)
+    return indices
+
+
+def _schedule_expected_indices(
+    existing: Mapping[str, Any] | None,
+    incoming: Mapping[str, Any],
+    known_map_indices: Sequence[int],
+) -> list[int]:
+    """Return authoritative or conservatively discovered schedule slot ids."""
+    if known_map_indices:
+        return [-1, *known_map_indices]
+
+    indices = [-1]
+    for payload in (existing, incoming):
+        schedules = payload.get("schedules") if isinstance(payload, Mapping) else None
+        if not isinstance(schedules, Sequence) or isinstance(
+            schedules,
+            str | bytes | bytearray,
+        ):
+            continue
+        for schedule in schedules:
+            index = schedule.get("idx") if isinstance(schedule, Mapping) else None
+            if (
+                isinstance(index, int)
+                and not isinstance(index, bool)
+                and index >= 0
+                and index not in indices
+            ):
+                indices.append(index)
     return indices

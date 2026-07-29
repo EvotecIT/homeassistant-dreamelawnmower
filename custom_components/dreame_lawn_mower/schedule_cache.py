@@ -46,6 +46,11 @@ def has_complete_schedule_cache(
         for schedule in schedules
         if isinstance(schedule, Mapping)
     }
+    if any(
+        isinstance(schedule, Mapping) and schedule.get("idx") is None
+        for schedule in schedules
+    ):
+        return False
     return all(
         schedule_entry_has_usable_data(schedule_by_index.get(index))
         for index in {-1, *known_map_indices}

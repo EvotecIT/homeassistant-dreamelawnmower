@@ -131,10 +131,18 @@ class _DreameLawnMowerClientSettingsMixin:
                 )
 
         schedule_deadline = time.monotonic() + SCHEDULE_READ_DEADLINE_SECONDS
-        for map_index in self._app_schedule_map_indices(
+        schedule_indices = self._app_schedule_map_indices(
             map_indices,
             deadline=schedule_deadline,
-        ):
+        )
+        for position, map_index in enumerate(schedule_indices):
+            now = time.monotonic()
+            remaining = max(0.0, schedule_deadline - now)
+            remaining_slots = len(schedule_indices) - position
+            slot_deadline = min(
+                schedule_deadline,
+                now + remaining / remaining_slots,
+            )
             schedule_result: dict[str, Any] = {
                 "idx": map_index,
                 "label": "default" if map_index == -1 else f"map_{map_index}",
@@ -145,7 +153,7 @@ class _DreameLawnMowerClientSettingsMixin:
                     {"m": "g", "t": "SCHDIV2", "d": {"i": map_index}},
                     retry_count=0,
                     timeout=SCHEDULE_READ_TIMEOUT_SECONDS,
-                    deadline=schedule_deadline,
+                    deadline=slot_deadline,
                 )
                 schedule_result["raw_info"] = _json_safe(info_result, max_depth=4)
                 info = _app_action_data(info_result)
@@ -166,7 +174,7 @@ class _DreameLawnMowerClientSettingsMixin:
                     size=size,
                     version=version,
                     chunk_size=chunk_size,
-                    deadline=schedule_deadline,
+                    deadline=slot_deadline,
                 )
                 plans = decode_schedule_payload_text(payload_text)
                 schedule_result.update(

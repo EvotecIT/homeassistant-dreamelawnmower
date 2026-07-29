@@ -266,6 +266,106 @@ def test_schedule_upload_force_refreshes_shared_cache_after_execution() -> None:
     coordinator.async_update_listeners.assert_called_once()
 
 
+def test_schedule_upload_discards_refresh_started_before_confirmed_write() -> None:
+    async def exercise() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        coordinator._schedule_write_lock = asyncio.Lock()
+        coordinator._schedule_cache_generation = 0
+        coordinator.async_update_listeners = Mock()
+        coordinator.last_schedule_write_result = None
+        coordinator.schedules_refreshed_at = None
+        coordinator.selected_map_index = 0
+        coordinator.app_maps = {
+            "current_map_index": 0,
+            "maps": [
+                {"idx": 0, "created": True},
+                {"idx": 1, "created": True},
+            ],
+        }
+        coordinator.schedules = {
+            "source": "app_action_schedule",
+            "schedules": [
+                {"idx": -1, "available": True, "version": 7, "plans": []},
+                {
+                    "idx": 0,
+                    "available": True,
+                    "version": 8,
+                    "plans": [{"plan_id": 9}],
+                },
+                {"idx": 1, "available": True, "version": 10, "plans": []},
+            ],
+            "errors": [],
+        }
+        stale_read_started = asyncio.Event()
+        release_stale_read = asyncio.Event()
+        read_count = 0
+
+        async def read_schedules(**_kwargs: object) -> dict[str, object]:
+            nonlocal read_count
+            read_count += 1
+            if read_count == 1:
+                stale_read_started.set()
+                await release_stale_read.wait()
+                return {
+                    "source": "app_action_schedule",
+                    "schedules": [
+                        {"idx": -1, "available": True, "version": 7, "plans": []},
+                        {
+                            "idx": 0,
+                            "available": True,
+                            "version": 8,
+                            "plans": [{"plan_id": 9}],
+                        },
+                        {"idx": 1, "available": True, "version": 10, "plans": []},
+                    ],
+                    "errors": [],
+                }
+            return {
+                "source": "app_action_schedule",
+                "schedules": [
+                    {"idx": -1, "available": True, "version": 7, "plans": []},
+                    {"idx": 0, "available": False, "error": "timed out"},
+                    {"idx": 1, "available": True, "version": 10, "plans": []},
+                ],
+                "errors": [
+                    {"idx": 0, "stage": "schedule", "error": "timed out"}
+                ],
+            }
+
+        coordinator.client = SimpleNamespace(
+            async_plan_app_schedule_upload=AsyncMock(
+                return_value={"executed": True, "request_count": 2}
+            ),
+            async_get_app_schedules=read_schedules,
+            async_get_batch_schedules=AsyncMock(side_effect=TimeoutError),
+        )
+
+        stale_refresh = asyncio.create_task(
+            coordinator.async_refresh_schedules(force=True)
+        )
+        await stale_read_started.wait()
+        await coordinator.async_plan_schedule_upload(
+            map_index=0,
+            plans=[{"plan_id": 1, "enabled": True, "weeks": []}],
+            chunk_size=100,
+            execute=True,
+            confirm_write=True,
+        )
+        release_stale_read.set()
+        await stale_refresh
+
+        uploaded_slot = next(
+            schedule
+            for schedule in coordinator.schedules["schedules"]
+            if schedule["idx"] == 0
+        )
+        assert uploaded_slot["error"] == "timed out"
+        assert "plans" not in uploaded_slot
+        assert coordinator._schedule_cache_generation == 1
+
+    asyncio.run(exercise())
+
+
 def test_executed_schedule_upload_waits_for_shared_write_lock() -> None:
     async def exercise() -> None:
         coordinator = object.__new__(DreameLawnMowerCoordinator)
