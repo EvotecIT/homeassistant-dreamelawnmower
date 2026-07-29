@@ -52,6 +52,32 @@ class DreameLawnMowerRefreshMixin:
         stale_check = getattr(self, "_device_snapshot_is_stale", None)
         return bool(callable(stale_check) and stale_check(snapshot))
 
+    def _snapshot_for_publication(
+        self,
+        snapshot: DreameLawnMowerSnapshot,
+    ) -> DreameLawnMowerSnapshot:
+        """Return current coordinator data instead of an older hydrated snapshot."""
+        if not self._snapshot_is_stale(snapshot):
+            return snapshot
+        current = getattr(self, "data", None)
+        if current is not None and not self._snapshot_is_stale(current):
+            return current
+        generations = getattr(self, "_device_snapshot_generations", {})
+        published_generation = getattr(
+            self,
+            "_published_device_snapshot_generation",
+            0,
+        )
+        for candidate, generation in generations.values():
+            if (
+                generation == published_generation
+                and not self._snapshot_is_stale(candidate)
+            ):
+                return candidate
+        raise UpdateFailed(
+            "A newer mower state replaced this refresh before publication."
+        )
+
     async def _async_update_data(self) -> DreameLawnMowerSnapshot:
         """Fetch essential state and hydrate optional metadata in the background."""
         if not hasattr(self, "performance"):
@@ -99,7 +125,7 @@ class DreameLawnMowerRefreshMixin:
                 raise UpdateFailed(safe_error) from err
 
             if self._snapshot_is_stale(snapshot):
-                return snapshot
+                return self._snapshot_for_publication(snapshot)
 
             if not snapshot.available:
                 self._cancel_metadata_refresh()
@@ -113,7 +139,7 @@ class DreameLawnMowerRefreshMixin:
             runtime_active = runtime_tracking_active(snapshot)
             if runtime_active:
                 if not await self._async_refresh_active_runtime(cycle, snapshot):
-                    return snapshot
+                    return self._snapshot_for_publication(snapshot)
             else:
                 self._runtime_map_identity_verified = False
                 self.client.update_runtime_live_tracking(None, active=False)
@@ -121,7 +147,7 @@ class DreameLawnMowerRefreshMixin:
             self._schedule_metadata_refresh(
                 refresh_map_and_runtime=not runtime_active,
             )
-            return snapshot
+            return self._snapshot_for_publication(snapshot)
         except asyncio.CancelledError:
             outcome = "cancelled"
             raise

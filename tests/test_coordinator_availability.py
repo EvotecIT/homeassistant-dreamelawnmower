@@ -258,6 +258,43 @@ def test_cached_device_update_publishes_realtime_runtime_position() -> None:
     assert coordinator._client_update_task is None
 
 
+def test_cached_device_update_does_not_confirm_connectivity() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    confirmed = SimpleNamespace(
+        available=True,
+        mowing_session_active=False,
+        activity="idle",
+    )
+    optimistic = SimpleNamespace(
+        available=True,
+        mowing_session_active=True,
+        activity="mowing",
+    )
+    coordinator._record_connectivity_success(confirmed)
+    coordinator._record_connectivity_failure("action acknowledgement was lost")
+    coordinator._client_update_task = Mock()
+    coordinator._runtime_map_identity_verified = True
+    coordinator.app_maps = {"current_map_index": 2}
+    coordinator.selected_map_index = 2
+    coordinator.runtime_status_blob = None
+    coordinator.runtime_telemetry_cache = SimpleNamespace(update=Mock())
+    coordinator.bluetooth_connected = None
+    coordinator.client = SimpleNamespace(
+        async_get_cached_snapshot=AsyncMock(return_value=optimistic),
+        async_get_runtime_status_blob=AsyncMock(return_value=SimpleNamespace()),
+        async_get_bluetooth_connected=AsyncMock(return_value=True),
+        update_runtime_live_tracking=Mock(),
+    )
+    coordinator.async_set_updated_data = Mock()
+
+    asyncio.run(coordinator._async_process_client_update())
+
+    assert coordinator._connectivity_last_good_snapshot is confirmed
+    assert coordinator.connection_degraded is True
+    assert coordinator.connection_failure_count == 1
+    coordinator.async_set_updated_data.assert_called_once_with(optimistic)
+
+
 def test_newer_video_safety_state_wins_over_delayed_cached_mqtt_update() -> None:
     async def scenario() -> None:
         coordinator = object.__new__(DreameLawnMowerCoordinator)

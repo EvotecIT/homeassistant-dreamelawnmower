@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 import custom_components.dreame_lawn_mower as integration_module
@@ -179,6 +180,7 @@ def test_newer_video_safety_snapshot_blocks_foreground_runtime_side_effects() ->
         with patch.object(
             DataUpdateCoordinator,
             "async_set_updated_data",
+            side_effect=lambda data: setattr(coordinator, "data", data),
         ) as publish:
             foreground_task = asyncio.create_task(coordinator._async_update_data())
             await asyncio.wait_for(runtime_started.wait(), timeout=1)
@@ -190,7 +192,7 @@ def test_newer_video_safety_snapshot_blocks_foreground_runtime_side_effects() ->
             foreground_result = await foreground_task
 
         assert current is video_snapshots[-1]
-        assert foreground_result is foreground_snapshot
+        assert foreground_result is video_snapshots[-1]
         assert publish.call_count == len(video_snapshots)
         publish.assert_called_with(video_snapshots[-1])
         assert coordinator.runtime_status_blob is retained_runtime
@@ -770,6 +772,62 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
         assert "entry-1" not in hass.data[DOMAIN]
         sample = performance.as_dict()["latest_by_operation"]["setup"]
         assert sample["outcome"] == "RuntimeError"
+
+    asyncio.run(scenario())
+
+
+def test_initial_connection_failure_keeps_complete_platform_setup_pending() -> None:
+    async def scenario() -> None:
+        performance = DreameLawnMowerPerformanceTracker()
+        coordinator = SimpleNamespace(
+            performance=performance,
+            client=SimpleNamespace(descriptor=SimpleNamespace(did="device-1")),
+            async_config_entry_first_refresh=AsyncMock(
+                side_effect=ConfigEntryNotReady("offline")
+            ),
+            async_shutdown=AsyncMock(),
+            _metadata_refresh_task=None,
+        )
+        cache = SimpleNamespace(
+            async_load=AsyncMock(),
+            inputs=object(),
+            endpoint=object(),
+            device_config=object(),
+        )
+        forward = AsyncMock()
+        hass = SimpleNamespace(
+            data={},
+            config_entries=SimpleNamespace(async_forward_entry_setups=forward),
+        )
+        entry = SimpleNamespace(entry_id="entry-1", options={})
+
+        with (
+            patch.object(
+                integration_module,
+                "DreameLawnMowerCoordinator",
+                return_value=coordinator,
+            ),
+            patch.object(
+                integration_module,
+                "DreameLawnMowerVideoLanCache",
+                return_value=cache,
+            ),
+            patch.object(
+                integration_module,
+                "DreameLawnMowerVideoProvisioningCache",
+                return_value=cache,
+            ),
+        ):
+            try:
+                await async_setup_entry(hass, entry)
+            except ConfigEntryNotReady:
+                pass
+            else:
+                raise AssertionError("initial connectivity failure was hidden")
+
+        forward.assert_not_awaited()
+        coordinator.async_shutdown.assert_awaited_once_with()
+        assert entry.entry_id not in hass.data.get(DOMAIN, {})
 
     asyncio.run(scenario())
 

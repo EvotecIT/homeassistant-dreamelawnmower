@@ -321,8 +321,6 @@ class DreameLawnMowerCoordinator(
                 self.client.update_runtime_live_tracking(None, active=False)
                 self.async_set_updated_data(snapshot)
                 return
-            self._record_connectivity_success(snapshot)
-
             runtime_active = runtime_tracking_active(snapshot)
             runtime_map_index = (
                 self._runtime_map_index()
