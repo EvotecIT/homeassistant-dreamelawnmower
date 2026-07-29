@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
     batch_data_text,
@@ -280,6 +282,21 @@ def test_client_batch_helpers_use_batch_device_data_api() -> None:
     assert ota_result["ota_progress"] == 0
     assert ota_result["auto_upgrade_enabled"] is False
     assert len(cloud.calls) == 3
+
+
+def test_batch_schedule_recovery_can_skip_map_discovery() -> None:
+    client = _client()
+    cloud = _FakeBatchCloud()
+    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_current_app_map_index = lambda: pytest.fail(
+        "batch recovery must not probe MAPL"
+    )
+
+    result = client._sync_get_batch_schedules(discover_map_index=False)
+
+    assert result["schedules"][0]["idx"] is None
+    assert len(cloud.calls) == 1
+    assert "SCHEDULE.info" in cloud.calls[0]
 
 
 def test_vector_map_batch_fetch_requests_all_device_sized_path_chunks() -> None:

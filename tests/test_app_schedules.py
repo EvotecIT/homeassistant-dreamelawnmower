@@ -310,6 +310,61 @@ def test_app_schedules_reserve_slot_time_when_map_discovery_times_out(
     assert first_schedule_deadline == pytest.approx(105.0)
 
 
+def test_app_schedules_retry_early_slot_with_unused_shared_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+    default_attempts = 0
+
+    class _RecoveringSlotCloud(_FakeAppScheduleCloud):
+        def call_app_action(
+            self,
+            payload: dict[str, object],
+            **kwargs: object,
+        ) -> dict[str, object]:
+            nonlocal default_attempts
+            if payload.get("t") == "SCHDIV2" and payload["d"]["i"] == -1:
+                default_attempts += 1
+                if default_attempts == 1:
+                    self.calls.append(payload)
+                    self.request_options.append(
+                        {
+                            "command": "SCHDIV2",
+                            "retry_count": kwargs.get("retry_count"),
+                            "timeout": kwargs.get("timeout"),
+                            "deadline": kwargs.get("deadline"),
+                        }
+                    )
+                    clock[0] = float(kwargs["deadline"])
+                    raise TimeoutError("initial fair share expired")
+            return super().call_app_action(payload, **kwargs)
+
+    cloud = _RecoveringSlotCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+    settings_time = client._sync_get_app_schedules.__func__.__globals__["time"]
+    monkeypatch.setattr(settings_time, "monotonic", lambda: clock[0])
+
+    result = client._sync_get_app_schedules(
+        map_indices=[-1, 0, 1],
+        include_current_task=False,
+    )
+
+    assert result["errors"] == []
+    assert result["schedules"][0]["version"] == 31345
+    default_deadlines = [
+        option["deadline"]
+        for call, option in zip(cloud.calls, cloud.request_options, strict=True)
+        if call["t"] == "SCHDIV2" and call["d"]["i"] == -1
+    ]
+    assert default_deadlines == pytest.approx([103.3333333333, 108.3333333333])
+    assert max(
+        option["deadline"]
+        for option in cloud.request_options
+        if option["deadline"] is not None
+    ) <= 110.0
+
+
 @pytest.mark.parametrize(
     "payload_text",
     [

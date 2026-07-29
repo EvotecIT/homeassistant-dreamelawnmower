@@ -144,6 +144,7 @@ class _DreameLawnMowerClientSettingsMixin:
             map_indices,
             deadline=map_discovery_deadline,
         )
+        failed_schedule_positions: list[int] = []
         for position, map_index in enumerate(schedule_indices):
             now = time.monotonic()
             remaining = max(0.0, schedule_deadline - now)
@@ -152,64 +153,120 @@ class _DreameLawnMowerClientSettingsMixin:
                 schedule_deadline,
                 now + remaining / remaining_slots,
             )
-            schedule_result: dict[str, Any] = {
-                "idx": map_index,
-                "label": "default" if map_index == -1 else f"map_{map_index}",
-                "available": False,
-            }
-            try:
-                info_result = self._sync_call_app_action(
-                    {"m": "g", "t": "SCHDIV2", "d": {"i": map_index}},
-                    retry_count=0,
-                    timeout=SCHEDULE_READ_TIMEOUT_SECONDS,
-                    deadline=slot_deadline,
-                )
-                schedule_result["raw_info"] = _json_safe(info_result, max_depth=4)
-                info = _app_action_data(info_result)
-                if not isinstance(info, Mapping):
-                    raise DreameLawnMowerConnectionError(
-                        "SCHDIV2 returned invalid schedule metadata."
-                    )
-                size = _positive_int(info.get("l"))
-                version = _positive_int(info.get("v"))
-                schedule_result["size"] = size
-                schedule_result["version"] = version
-                if not size or version is None or version == EMPTY_SCHEDULE_VERSION:
-                    schedule_result["plans"] = []
-                    result["schedules"].append(schedule_result)
-                    continue
-
-                payload_text, chunk_count, offset = self._sync_get_app_schedule_text(
-                    size=size,
-                    version=version,
-                    chunk_size=chunk_size,
-                    deadline=slot_deadline,
-                )
-                plans = decode_schedule_payload_text(payload_text)
-                schedule_result.update(
-                    {
-                        "available": bool(plans),
-                        "chunk_count": chunk_count,
-                        "downloaded_size": offset,
-                        "plan_count": len(plans),
-                        "enabled_plan_count": sum(
-                            1 for plan in plans if plan.get("enabled")
-                        ),
-                        "plans": plans,
-                    }
-                )
-                if include_raw:
-                    schedule_result["raw_text"] = payload_text
-                if plans:
-                    result["available"] = True
-            except Exception as err:  # noqa: BLE001 - keep probing other maps
-                schedule_result["error"] = str(err)
+            schedule_result, error = self._sync_get_app_schedule_slot(
+                map_index=map_index,
+                chunk_size=chunk_size,
+                include_raw=include_raw,
+                deadline=slot_deadline,
+            )
+            if error is not None:
+                failed_schedule_positions.append(position)
                 result["errors"].append(
-                    {"idx": map_index, "stage": "schedule", "error": str(err)}
+                    {"idx": map_index, "stage": "schedule", "error": str(error)}
                 )
+            elif schedule_result.get("plans"):
+                result["available"] = True
             result["schedules"].append(schedule_result)
 
+        # A fair first pass prevents one slow slot from starving the rest. If
+        # later slots return quickly, spend the unused shared budget on one
+        # recovery pass so a valid early slot is not permanently limited to
+        # only its initial fraction of the operation deadline.
+        for position in failed_schedule_positions:
+            now = time.monotonic()
+            if now >= schedule_deadline:
+                break
+            map_index = schedule_indices[position]
+            retry_deadline = min(
+                schedule_deadline,
+                now + SCHEDULE_READ_TIMEOUT_SECONDS,
+            )
+            schedule_result, error = self._sync_get_app_schedule_slot(
+                map_index=map_index,
+                chunk_size=chunk_size,
+                include_raw=include_raw,
+                deadline=retry_deadline,
+            )
+            result["schedules"][position] = schedule_result
+            prior_error = next(
+                (
+                    item
+                    for item in result["errors"]
+                    if item.get("idx") == map_index
+                    and item.get("stage") == "schedule"
+                ),
+                None,
+            )
+            if error is None:
+                if prior_error is not None:
+                    result["errors"].remove(prior_error)
+                if schedule_result.get("plans"):
+                    result["available"] = True
+            elif prior_error is not None:
+                prior_error["error"] = str(error)
+
         return result
+
+    def _sync_get_app_schedule_slot(
+        self,
+        *,
+        map_index: int,
+        chunk_size: int,
+        include_raw: bool,
+        deadline: float,
+    ) -> tuple[dict[str, Any], Exception | None]:
+        """Fetch one schedule slot within its assigned deadline."""
+        schedule_result: dict[str, Any] = {
+            "idx": map_index,
+            "label": "default" if map_index == -1 else f"map_{map_index}",
+            "available": False,
+        }
+        try:
+            info_result = self._sync_call_app_action(
+                {"m": "g", "t": "SCHDIV2", "d": {"i": map_index}},
+                retry_count=0,
+                timeout=SCHEDULE_READ_TIMEOUT_SECONDS,
+                deadline=deadline,
+            )
+            schedule_result["raw_info"] = _json_safe(info_result, max_depth=4)
+            info = _app_action_data(info_result)
+            if not isinstance(info, Mapping):
+                raise DreameLawnMowerConnectionError(
+                    "SCHDIV2 returned invalid schedule metadata."
+                )
+            size = _positive_int(info.get("l"))
+            version = _positive_int(info.get("v"))
+            schedule_result["size"] = size
+            schedule_result["version"] = version
+            if not size or version is None or version == EMPTY_SCHEDULE_VERSION:
+                schedule_result["plans"] = []
+                return schedule_result, None
+
+            payload_text, chunk_count, offset = self._sync_get_app_schedule_text(
+                size=size,
+                version=version,
+                chunk_size=chunk_size,
+                deadline=deadline,
+            )
+            plans = decode_schedule_payload_text(payload_text)
+            schedule_result.update(
+                {
+                    "available": bool(plans),
+                    "chunk_count": chunk_count,
+                    "downloaded_size": offset,
+                    "plan_count": len(plans),
+                    "enabled_plan_count": sum(
+                        1 for plan in plans if plan.get("enabled")
+                    ),
+                    "plans": plans,
+                }
+            )
+            if include_raw:
+                schedule_result["raw_text"] = payload_text
+        except Exception as err:  # noqa: BLE001 - caller keeps probing other maps
+            schedule_result["error"] = str(err)
+            return schedule_result, err
+        return schedule_result, None
 
     def _sync_set_app_schedule_plan_enabled(
         self,
@@ -586,9 +643,10 @@ class _DreameLawnMowerClientSettingsMixin:
         self,
         include_raw: bool = False,
         map_index_hint: int | None = None,
+        discover_map_index: bool = True,
     ) -> dict[str, Any]:
         """Fetch and decode schedule data from batch device data."""
-        if map_index_hint is None:
+        if map_index_hint is None and discover_map_index:
             map_index_hint = self._sync_get_current_app_map_index()
         batch_data = self._sync_get_batch_device_data(_batch_schedule_keys())
         if batch_data is None:

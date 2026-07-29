@@ -389,6 +389,10 @@ def test_schedule_upload_force_refreshes_shared_cache_after_execution() -> None:
     coordinator.async_update_listeners = Mock()
     coordinator.last_schedule_write_result = None
     coordinator.schedules_refreshed_at = object()
+    coordinator._pending_schedule_plan_states = {
+        (0, 9): (8, False),
+        (1, 7): (10, False),
+    }
     coordinator.selected_map_index = 0
     coordinator.app_maps = {
         "current_map_index": 0,
@@ -453,6 +457,7 @@ def test_schedule_upload_force_refreshes_shared_cache_after_execution() -> None:
     assert "plans" not in uploaded_slot
     assert "active_schedule_version" not in coordinator.schedules
     assert "current_task" not in coordinator.schedules
+    assert (0, 9) not in coordinator._pending_schedule_plan_states
     coordinator.client.async_get_app_schedules.assert_awaited_once_with(
         include_current_task=False,
         map_indices=[-1, 0, 1],

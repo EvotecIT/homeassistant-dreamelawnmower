@@ -493,9 +493,16 @@ class DreameLawnMowerCoordinator(
         batch_read_succeeded = False
         try:
             batch_read_generation = self._begin_schedule_read()
+            batch_options: dict[str, Any] = {
+                "include_raw": False,
+                "map_index_hint": map_index_hint,
+            }
+            if map_index_hint is None:
+                # App-map discovery already ran as part of the bounded action
+                # read. Batch decoding can safely retain an unknown slot.
+                batch_options["discover_map_index"] = False
             batch_payload = await self.client.async_get_batch_schedules(
-                include_raw=False,
-                map_index_hint=map_index_hint,
+                **batch_options
             )
         except Exception as err:  # noqa: BLE001 - optional cloud capability
             _LOGGER.debug("Failed to recover batch mower schedules: %s", err)
@@ -774,6 +781,11 @@ class DreameLawnMowerCoordinator(
             )
             self.last_schedule_write_result = result
             self._invalidate_inflight_schedule_refreshes()
+            pending_states = getattr(self, "_pending_schedule_plan_states", None)
+            if pending_states:
+                for key in tuple(pending_states):
+                    if key[0] == map_index:
+                        pending_states.pop(key, None)
             # Never let a recently cached pre-upload payload hide the new plans.
             self.schedules = invalidate_schedule_slot(
                 getattr(self, "schedules", None),

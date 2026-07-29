@@ -1130,12 +1130,14 @@ class DreameLawnMowerClient(
         *,
         include_raw: bool = False,
         map_index_hint: int | None = None,
+        discover_map_index: bool = True,
     ) -> dict[str, Any]:
         """Fetch and decode schedule data from batch device data."""
         return await asyncio.to_thread(
             self._sync_get_batch_schedules,
             include_raw,
             map_index_hint,
+            discover_map_index,
         )
 
     async def async_get_batch_mowing_preferences(

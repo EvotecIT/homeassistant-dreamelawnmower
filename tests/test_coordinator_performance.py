@@ -1253,6 +1253,11 @@ def test_schedule_refresh_does_not_mark_retained_cache_fresh_after_failures() ->
 
     assert result["schedules"][0]["version"] == 1
     assert coordinator.schedules_refreshed_at is None
+    coordinator.client.async_get_batch_schedules.assert_awaited_once_with(
+        include_raw=False,
+        map_index_hint=None,
+        discover_map_index=False,
+    )
 
 
 def test_batch_metadata_reuses_fresh_schedule_fetch() -> None:
