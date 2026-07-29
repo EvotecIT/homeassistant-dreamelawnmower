@@ -87,6 +87,8 @@ from .schedule import (
 )
 
 SCHEDULE_CURRENT_TASK_TIMEOUT_SECONDS = 5.0
+SCHEDULE_READ_DEADLINE_SECONDS = 10.0
+SCHEDULE_READ_TIMEOUT_SECONDS = 5.0
 
 
 class _DreameLawnMowerClientSettingsMixin:
@@ -95,6 +97,7 @@ class _DreameLawnMowerClientSettingsMixin:
         include_raw: bool = False,
         map_indices: Sequence[int] | None = None,
         chunk_size: int = SCHEDULE_CHUNK_SIZE,
+        include_current_task: bool = True,
     ) -> dict[str, Any]:
         """Fetch and decode mower schedules through read-only app actions."""
         if chunk_size <= 0:
@@ -108,23 +111,30 @@ class _DreameLawnMowerClientSettingsMixin:
             "errors": [],
         }
 
-        try:
-            current_task_deadline = (
-                time.monotonic() + SCHEDULE_CURRENT_TASK_TIMEOUT_SECONDS
-            )
-            task_result = self._sync_call_app_action(
-                {"m": "g", "t": "SCHDT", "d": {"t": 0}},
-                retry_count=0,
-                timeout=SCHEDULE_CURRENT_TASK_TIMEOUT_SECONDS,
-                deadline=current_task_deadline,
-            )
-            result["raw_current_task"] = _json_safe(task_result, max_depth=4)
-            task_data = _app_action_data(task_result)
-            result["current_task"] = schedule_task_summary(task_data)
-        except Exception as err:  # noqa: BLE001 - schedule task is diagnostic
-            result["errors"].append({"stage": "current_task", "error": str(err)})
+        if include_current_task:
+            try:
+                current_task_deadline = (
+                    time.monotonic() + SCHEDULE_CURRENT_TASK_TIMEOUT_SECONDS
+                )
+                task_result = self._sync_call_app_action(
+                    {"m": "g", "t": "SCHDT", "d": {"t": 0}},
+                    retry_count=0,
+                    timeout=SCHEDULE_CURRENT_TASK_TIMEOUT_SECONDS,
+                    deadline=current_task_deadline,
+                )
+                result["raw_current_task"] = _json_safe(task_result, max_depth=4)
+                task_data = _app_action_data(task_result)
+                result["current_task"] = schedule_task_summary(task_data)
+            except Exception as err:  # noqa: BLE001 - optional diagnostic
+                result["errors"].append(
+                    {"stage": "current_task", "error": str(err)}
+                )
 
-        for map_index in self._app_schedule_map_indices(map_indices):
+        schedule_deadline = time.monotonic() + SCHEDULE_READ_DEADLINE_SECONDS
+        for map_index in self._app_schedule_map_indices(
+            map_indices,
+            deadline=schedule_deadline,
+        ):
             schedule_result: dict[str, Any] = {
                 "idx": map_index,
                 "label": "default" if map_index == -1 else f"map_{map_index}",
@@ -132,7 +142,10 @@ class _DreameLawnMowerClientSettingsMixin:
             }
             try:
                 info_result = self._sync_call_app_action(
-                    {"m": "g", "t": "SCHDIV2", "d": {"i": map_index}}
+                    {"m": "g", "t": "SCHDIV2", "d": {"i": map_index}},
+                    retry_count=0,
+                    timeout=SCHEDULE_READ_TIMEOUT_SECONDS,
+                    deadline=schedule_deadline,
                 )
                 schedule_result["raw_info"] = _json_safe(info_result, max_depth=4)
                 info = _app_action_data(info_result)
@@ -153,6 +166,7 @@ class _DreameLawnMowerClientSettingsMixin:
                     size=size,
                     version=version,
                     chunk_size=chunk_size,
+                    deadline=schedule_deadline,
                 )
                 plans = decode_schedule_payload_text(payload_text)
                 schedule_result.update(
@@ -1089,6 +1103,7 @@ class _DreameLawnMowerClientSettingsMixin:
         size: int,
         version: int,
         chunk_size: int = SCHEDULE_CHUNK_SIZE,
+        deadline: float | None = None,
     ) -> tuple[str, int, int]:
         chunks = bytearray()
         offset = 0
@@ -1100,7 +1115,10 @@ class _DreameLawnMowerClientSettingsMixin:
                     "m": "g",
                     "t": "SCHDDV2",
                     "d": {"s": offset, "l": request_size, "v": version},
-                }
+                },
+                retry_count=0,
+                timeout=SCHEDULE_READ_TIMEOUT_SECONDS,
+                deadline=deadline,
             )
             data = _app_action_data(chunk_result)
             if not isinstance(data, Mapping) or "d" not in data:
@@ -1126,19 +1144,35 @@ class _DreameLawnMowerClientSettingsMixin:
     def _app_schedule_map_indices(
         self,
         map_indices: Sequence[int] | None,
+        *,
+        deadline: float | None = None,
     ) -> list[int]:
         if map_indices is not None:
             return _dedupe_ints(map_indices)
-        return _dedupe_ints([-1, *self._app_map_indices(None)])
+        return _dedupe_ints(
+            [-1, *self._app_map_indices(None, deadline=deadline)]
+        )
 
     def _app_map_indices(
         self,
         map_indices: Sequence[int] | None,
+        *,
+        deadline: float | None = None,
     ) -> list[int]:
         if map_indices is not None:
             return [idx for idx in _dedupe_ints(map_indices) if idx >= 0]
         try:
-            map_list_result = self._sync_call_app_action({"m": "g", "t": "MAPL"})
+            request_options: dict[str, Any] = {}
+            if deadline is not None:
+                request_options = {
+                    "retry_count": 0,
+                    "timeout": SCHEDULE_READ_TIMEOUT_SECONDS,
+                    "deadline": deadline,
+                }
+            map_list_result = self._sync_call_app_action(
+                {"m": "g", "t": "MAPL"},
+                **request_options,
+            )
             detected = [
                 entry["idx"] for entry in _normalize_app_map_entries(map_list_result)
             ]

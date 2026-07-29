@@ -196,10 +196,14 @@ def test_app_schedules_decode_plans_and_current_task() -> None:
     assert cloud.request_options[0]["deadline"] > 0
     assert cloud.request_options[1] == {
         "command": "MAPL",
-        "retry_count": None,
-        "timeout": None,
-        "deadline": None,
+        "retry_count": 0,
+        "timeout": 5.0,
+        "deadline": cloud.request_options[2]["deadline"],
     }
+    assert isinstance(cloud.request_options[1]["deadline"], float)
+    assert cloud.request_options[1]["deadline"] > 0
+    assert cloud.request_options[2]["retry_count"] == 0
+    assert cloud.request_options[2]["timeout"] == 5.0
 
 
 def test_app_schedules_can_include_raw_payload_text() -> None:
@@ -216,6 +220,24 @@ def test_app_schedules_can_include_raw_payload_text() -> None:
     assert [schedule["idx"] for schedule in result["schedules"]] == [0]
     assert result["schedules"][0]["raw_text"].startswith('{"d":')
     assert [call["t"] for call in cloud.calls] == ["SCHDT", "SCHDIV2", "SCHDDV2"]
+
+
+def test_app_schedules_can_skip_optional_current_task_and_bound_plan_reads() -> None:
+    client = _client()
+    cloud = _FakeAppScheduleCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+
+    result = client._sync_get_app_schedules(
+        map_indices=[0],
+        include_current_task=False,
+    )
+
+    assert result["available"] is True
+    assert result["current_task"] is None
+    assert [call["t"] for call in cloud.calls] == ["SCHDIV2", "SCHDDV2"]
+    assert all(option["retry_count"] == 0 for option in cloud.request_options)
+    assert all(option["timeout"] == 5.0 for option in cloud.request_options)
+    assert cloud.request_options[0]["deadline"] == cloud.request_options[1]["deadline"]
 
 
 @pytest.mark.parametrize(
@@ -352,7 +374,10 @@ def test_set_app_schedule_plan_enabled_rejects_failed_write_response() -> None:
     cloud = _FakeAppScheduleCloud()
     client._sync_get_cloud_protocol = lambda **_kwargs: cloud
 
-    def failing_call(payload: dict[str, object]) -> dict[str, object]:
+    def failing_call(
+        payload: dict[str, object],
+        **_kwargs: object,
+    ) -> dict[str, object]:
         if payload["t"] == "SCHDSV2":
             return {"m": "r", "r": 0, "d": {"r": 1, "v": 19383}}
         return cloud.call_app_action(payload)["out"][0]
@@ -375,7 +400,7 @@ def test_set_app_schedule_plan_enabled_rejects_lost_acknowledgement() -> None:
     client._sync_get_cloud_protocol = lambda **_kwargs: cloud
     normal_call = client._sync_call_app_action
 
-    def lost_ack(payload: dict[str, object]) -> object:
+    def lost_ack(payload: dict[str, object], **_kwargs: object) -> object:
         if payload["t"] == "SCHDSV2":
             return None
         return normal_call(payload)

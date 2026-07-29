@@ -60,6 +60,8 @@ def decode_batch_schedule_payload(
         payload = json.loads(payload_text)
         version = _to_int(payload.get("v")) if isinstance(payload, Mapping) else None
         plans = decode_schedule_payload_text(payload_text)
+        if version is not None:
+            result["active_schedule_version"] = version
         schedule.update(
             {
                 "version": version,

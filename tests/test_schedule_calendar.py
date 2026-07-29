@@ -240,6 +240,53 @@ def test_schedule_calendar_selection_can_include_all_schedules() -> None:
     ]
 
 
+def test_schedule_selection_uses_batch_version_when_task_probe_is_skipped() -> None:
+    payload = {
+        "active_schedule_version": 12,
+        "current_task": None,
+        "schedules": [
+            {"idx": 0, "version": 8, "enabled_plan_count": 1},
+            {"idx": 1, "version": 12, "enabled_plan_count": 1},
+        ],
+    }
+
+    selection = schedule_calendar_selection(payload)
+
+    assert selection["active_version"] == 12
+    assert selection["active_version_filter_applied"] is True
+    assert selection["included_schedules"] == [
+        {
+            "idx": 1,
+            "label": "map 1",
+            "version": 12,
+            "enabled_plan_count": 1,
+        }
+    ]
+
+
+def test_schedule_selection_can_keep_default_schedule_active_without_schdt() -> None:
+    payload = {
+        "active_schedule_version": 20,
+        "current_task": None,
+        "schedules": [
+            {"idx": -1, "version": 20, "enabled_plan_count": 1},
+            {"idx": 0, "version": 21, "enabled_plan_count": 1},
+        ],
+    }
+
+    selection = schedule_calendar_selection(payload)
+
+    assert selection["active_version"] == 20
+    assert selection["included_schedules"] == [
+        {
+            "idx": -1,
+            "label": "default schedule",
+            "version": 20,
+            "enabled_plan_count": 1,
+        }
+    ]
+
+
 def test_schedule_calendar_attributes_expose_cached_selection() -> None:
     selection = {
         "mode": "active_schedule",

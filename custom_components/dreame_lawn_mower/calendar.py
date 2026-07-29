@@ -276,11 +276,16 @@ def schedule_calendar_attributes(
 
 def _active_schedule_version(payload: Mapping[str, Any]) -> int | None:
     current_task = payload.get("current_task")
-    if not isinstance(current_task, Mapping):
-        return None
+    if isinstance(current_task, Mapping):
+        try:
+            return int(current_task["version"])
+        except (KeyError, TypeError, ValueError):
+            pass
+
+    active_version = payload.get("active_schedule_version")
     try:
-        return int(current_task["version"])
-    except (KeyError, TypeError, ValueError):
+        return int(active_version) if active_version is not None else None
+    except (TypeError, ValueError):
         return None
 
 

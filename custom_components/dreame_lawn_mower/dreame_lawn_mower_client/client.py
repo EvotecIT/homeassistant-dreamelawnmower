@@ -896,6 +896,7 @@ class DreameLawnMowerClient(
         include_raw: bool = False,
         map_indices: Sequence[int] | None = None,
         chunk_size: int = SCHEDULE_CHUNK_SIZE,
+        include_current_task: bool = True,
     ) -> dict[str, Any]:
         """Return read-only mower schedules from the app action protocol."""
         return await asyncio.to_thread(
@@ -903,6 +904,7 @@ class DreameLawnMowerClient(
             include_raw,
             map_indices,
             chunk_size,
+            include_current_task,
         )
 
     async def async_set_app_schedule_plan_enabled(

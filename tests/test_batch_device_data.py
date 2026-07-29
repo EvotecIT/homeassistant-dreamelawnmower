@@ -156,6 +156,7 @@ def test_decode_batch_schedule_payload_decodes_live_shaped_schedule() -> None:
 
     assert result["source"] == "batch_device_data_schedule"
     assert result["available"] is True
+    assert result["active_schedule_version"] == 19383
     assert result["schedules"][0]["idx"] == 0
     assert result["schedules"][0]["version"] == 19383
     assert result["schedules"][0]["plan_count"] == 2

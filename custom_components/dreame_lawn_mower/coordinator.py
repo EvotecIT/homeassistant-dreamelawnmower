@@ -47,6 +47,12 @@ from .dreame_lawn_mower_client.models import (
 )
 from .performance import DreameLawnMowerPerformanceTracker
 from .runtime_cache import DreameLawnMowerRuntimeTelemetryCache
+from .schedule_cache import (
+    has_complete_schedule_cache,
+    merge_app_schedule_payload,
+    merge_batch_schedule_payload,
+    schedule_payload_has_usable_data,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -420,15 +426,20 @@ class DreameLawnMowerCoordinator(
             return self.schedules
 
         known_map_indices = _app_map_index_hints(getattr(self, "app_maps", None))
+        map_index_hint = getattr(self, "selected_map_index", None)
+        if map_index_hint is None:
+            map_index_hint = active_map_index(getattr(self, "app_maps", None))
+        if map_index_hint is None and len(known_map_indices) == 1:
+            map_index_hint = known_map_indices[0]
         if (
             not force
-            and len(known_map_indices) == 1
+            and map_index_hint is not None
             and self._has_complete_schedule_cache(known_map_indices)
         ):
             try:
                 batch_payload = await self.client.async_get_batch_schedules(
                     include_raw=False,
-                    map_index_hint=known_map_indices[0],
+                    map_index_hint=map_index_hint,
                 )
             except Exception as err:  # noqa: BLE001 - optional cloud capability
                 _LOGGER.debug("Failed to refresh batch mower schedules: %s", err)
@@ -437,56 +448,62 @@ class DreameLawnMowerCoordinator(
                     return self.schedules
 
         try:
-            payload = await self.client.async_get_app_schedules()
+            payload = await self.client.async_get_app_schedules(
+                include_current_task=False,
+                map_indices=(
+                    [-1, *known_map_indices] if known_map_indices else None
+                ),
+            )
         except Exception as err:  # noqa: BLE001 - optional cloud capability
             _LOGGER.debug("Failed to refresh mower schedules: %s", err)
             if force:
                 raise
             return self.schedules
-        self.schedules = payload
-        self.schedules_refreshed_at = now
-        return payload
+        action_read_succeeded = schedule_payload_has_usable_data(payload)
+        self.schedules = merge_app_schedule_payload(self.schedules, payload)
+        batch_read_succeeded = False
+        try:
+            batch_payload = await self.client.async_get_batch_schedules(
+                include_raw=False,
+                map_index_hint=map_index_hint,
+            )
+        except Exception as err:  # noqa: BLE001 - optional cloud capability
+            _LOGGER.debug("Failed to recover batch mower schedules: %s", err)
+        else:
+            batch_read_succeeded = self._cache_batch_schedules(
+                batch_payload,
+                now=now,
+                allow_incomplete=True,
+            )
+        if action_read_succeeded or batch_read_succeeded:
+            self.schedules_refreshed_at = now
+        return self.schedules
 
     def _cache_batch_schedules(
         self,
         payload: Mapping[str, Any],
         *,
         now: datetime,
+        allow_incomplete: bool = False,
     ) -> bool:
-        """Merge one fast physical-map read into a complete app schedule cache."""
-        schedules = payload.get("schedules")
-        errors = payload.get("errors")
+        """Merge one fast effective-schedule read into the app schedule cache."""
         known_map_indices = _app_map_index_hints(getattr(self, "app_maps", None))
         if (
-            len(known_map_indices) != 1
-            or not self._has_complete_schedule_cache(known_map_indices)
-            or not isinstance(schedules, Sequence)
-            or isinstance(schedules, str | bytes | bytearray)
-            or not schedules
-            or errors
-            or any(
-                not isinstance(schedule, Mapping)
-                or schedule.get("idx") != known_map_indices[0]
-                for schedule in schedules
+            not isinstance(self.schedules, Mapping)
+            or (
+                not allow_incomplete
+                and not self._has_complete_schedule_cache(known_map_indices)
             )
         ):
             return False
-        existing_schedules = self.schedules["schedules"]
-        batch_schedule = dict(schedules[0])
-        normalized = dict(self.schedules)
-        normalized["schedules"] = [
-            (
-                batch_schedule
-                if isinstance(schedule, Mapping)
-                and schedule.get("idx") == known_map_indices[0]
-                else schedule
-            )
-            for schedule in existing_schedules
-        ]
-        if "current_task" in payload:
-            normalized["current_task"] = payload["current_task"]
-        normalized["captured_at"] = now.isoformat()
-        normalized["source"] = "app_action_schedule_with_batch_refresh"
+        normalized = merge_batch_schedule_payload(
+            self.schedules,
+            payload,
+            captured_at=now,
+            allow_unknown_slot=allow_incomplete,
+        )
+        if normalized is None:
+            return False
         self.schedules = normalized
         self.schedules_refreshed_at = now
         return True
@@ -496,22 +513,7 @@ class DreameLawnMowerCoordinator(
         known_map_indices: Sequence[int],
     ) -> bool:
         """Return whether default and every known physical map are represented."""
-        schedules = (
-            self.schedules.get("schedules")
-            if isinstance(self.schedules, Mapping)
-            else None
-        )
-        if not isinstance(schedules, Sequence) or isinstance(
-            schedules,
-            str | bytes | bytearray,
-        ):
-            return False
-        cached_indices = {
-            schedule.get("idx")
-            for schedule in schedules
-            if isinstance(schedule, Mapping)
-        }
-        return {-1, *known_map_indices}.issubset(cached_indices)
+        return has_complete_schedule_cache(self.schedules, known_map_indices)
 
     async def async_set_schedule_plan_enabled(
         self,
