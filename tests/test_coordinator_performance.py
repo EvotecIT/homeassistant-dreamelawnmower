@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
@@ -471,6 +472,62 @@ def test_schedule_refresh_reads_inactive_default_slot_on_single_map_device() -> 
         include_raw=False,
         map_index_hint=2,
     )
+
+
+@pytest.mark.parametrize(
+    ("task_version", "expected_present"),
+    [(5, False), (6, True)],
+)
+def test_schedule_refresh_reconciles_current_task_with_batch_version(
+    task_version: int,
+    expected_present: bool,
+) -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    current_task = {"version": task_version}
+    coordinator.schedules = {
+        "source": "app_action_schedule_with_batch_refresh",
+        "active_schedule_version": task_version,
+        "current_task": current_task,
+        "schedules": [
+            {"idx": -1, "available": True, "version": 5, "plans": []},
+            {"idx": 2, "available": True, "version": 6, "plans": []},
+        ],
+    }
+    coordinator.schedules_refreshed_at = None
+    coordinator.app_maps = {
+        "current_map_index": 2,
+        "maps": [{"idx": 2, "created": True}],
+    }
+    coordinator.selected_map_index = 2
+    app_payload = {
+        "source": "app_action_schedule",
+        "schedules": [
+            {"idx": -1, "available": True, "version": 5, "plans": []},
+            {"idx": 2, "available": True, "version": 6, "plans": []},
+        ],
+        "errors": [],
+    }
+    batch_payload = {
+        "source": "batch_device_data_schedule",
+        "available": True,
+        "current_task": None,
+        "schedules": [
+            {"idx": 2, "available": True, "version": 6, "plans": []},
+        ],
+        "errors": [],
+    }
+    coordinator.client = SimpleNamespace(
+        async_get_batch_schedules=AsyncMock(return_value=batch_payload),
+        async_get_app_schedules=AsyncMock(return_value=app_payload),
+    )
+
+    result = asyncio.run(coordinator.async_refresh_schedules())
+
+    assert result["active_schedule_version"] == 6
+    if expected_present:
+        assert result["current_task"] is current_task
+    else:
+        assert "current_task" not in result
 
 
 def test_schedule_refresh_reads_inactive_maps_instead_of_batch_fast_path() -> None:

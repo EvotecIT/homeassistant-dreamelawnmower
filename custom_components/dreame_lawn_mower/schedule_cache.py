@@ -352,6 +352,13 @@ def merge_batch_schedule_payload(
     normalized["active_selection_available"] = True
     if incoming.get("current_task") is not None:
         normalized["current_task"] = incoming["current_task"]
+    else:
+        cached_current_task = normalized.get("current_task")
+        if (
+            isinstance(cached_current_task, Mapping)
+            and cached_current_task.get("version") != batch_version
+        ):
+            normalized.pop("current_task", None)
     normalized["captured_at"] = captured_at.isoformat()
     normalized["source"] = "app_action_schedule_with_batch_refresh"
     return normalized
