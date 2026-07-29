@@ -460,7 +460,11 @@ class DreameLawnMowerCoordinator(
                 raise
             return self.schedules
         action_read_succeeded = schedule_payload_has_usable_data(payload)
-        self.schedules = merge_app_schedule_payload(self.schedules, payload)
+        self.schedules = merge_app_schedule_payload(
+            self.schedules,
+            payload,
+            expected_indices=[-1, *known_map_indices],
+        )
         batch_read_succeeded = False
         try:
             batch_payload = await self.client.async_get_batch_schedules(

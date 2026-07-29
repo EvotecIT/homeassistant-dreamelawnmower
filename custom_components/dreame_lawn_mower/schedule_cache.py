@@ -55,6 +55,8 @@ def has_complete_schedule_cache(
 def merge_app_schedule_payload(
     existing: Mapping[str, Any] | None,
     incoming: Mapping[str, Any],
+    *,
+    expected_indices: Sequence[int],
 ) -> dict[str, Any]:
     """Merge successful action slots while retaining cached failed slots."""
     if not isinstance(existing, Mapping):
@@ -100,6 +102,13 @@ def merge_app_schedule_payload(
         and isinstance(schedule.get("version"), int)
         and not isinstance(schedule.get("version"), bool)
     }
+    usable_incoming_by_index = {
+        schedule.get("idx"): schedule
+        for schedule in incoming_schedules
+        if schedule_entry_has_usable_data(schedule)
+        and isinstance(schedule.get("idx"), int)
+        and not isinstance(schedule.get("idx"), bool)
+    }
     if discovered_versions:
         merged = [
             schedule
@@ -110,6 +119,47 @@ def merge_app_schedule_payload(
                 and schedule.get("version") in discovered_versions
             )
         ]
+
+    cached_active_version = existing.get("active_schedule_version")
+    cached_active_indices = {
+        schedule.get("idx")
+        for schedule in existing_schedules
+        if isinstance(schedule, Mapping)
+        and schedule.get("version") == cached_active_version
+        and isinstance(schedule.get("idx"), int)
+        and not isinstance(schedule.get("idx"), bool)
+    }
+    complete_refresh = set(expected_indices).issubset(usable_incoming_by_index)
+    active_version_invalidated = (
+        isinstance(cached_active_version, int)
+        and not isinstance(cached_active_version, bool)
+        and cached_active_version not in discovered_versions
+        and incoming.get("current_task") is None
+        and (
+            complete_refresh
+            or (
+                bool(cached_active_indices)
+                and cached_active_indices.issubset(usable_incoming_by_index)
+            )
+        )
+    )
+    if active_version_invalidated:
+        merged = [
+            schedule
+            for schedule in merged
+            if not (
+                isinstance(schedule, Mapping)
+                and schedule.get("idx") is None
+                and schedule.get("version") == cached_active_version
+            )
+        ]
+        normalized.pop("active_schedule_version", None)
+        current_task = normalized.get("current_task")
+        if (
+            isinstance(current_task, Mapping)
+            and current_task.get("version") == cached_active_version
+        ):
+            normalized.pop("current_task", None)
 
     normalized.update(
         {
