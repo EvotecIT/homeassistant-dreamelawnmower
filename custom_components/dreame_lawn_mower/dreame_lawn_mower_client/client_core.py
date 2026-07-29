@@ -266,6 +266,10 @@ class _DreameLawnMowerClientCoreMixin:
         prompt: bool | None,
     ) -> Any:
         _validate_remote_control_step(rotation=rotation, velocity=velocity)
+        if rotation or velocity:
+            # Movement must never be authorized by a cached snapshot. A stop
+            # remains available even when the link or safety refresh fails.
+            self._sync_update_device(force_request_properties=True)
         support = self._sync_get_remote_control_support(refresh=False)
         if not support.supported:
             reason = support.reason or "Remote control is not supported."

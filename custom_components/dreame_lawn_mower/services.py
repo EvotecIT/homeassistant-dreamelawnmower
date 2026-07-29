@@ -446,6 +446,11 @@ def _coordinator_from_call(
 
 def _guard_remote_control_step(coordinator: DreameLawnMowerCoordinator) -> None:
     """Block movement when the current snapshot looks unsafe for manual driving."""
+    if getattr(coordinator, "connection_degraded", False):
+        raise HomeAssistantError(
+            "Remote control is unavailable while the mower connection is "
+            "recovering. Wait for current mower state before moving it."
+        )
     snapshot = coordinator.data
     if snapshot is None:
         raise HomeAssistantError("Mower state is not available yet.")

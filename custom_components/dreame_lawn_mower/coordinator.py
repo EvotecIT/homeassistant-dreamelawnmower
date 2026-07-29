@@ -330,28 +330,52 @@ class DreameLawnMowerCoordinator(
                 or getattr(self, "_runtime_map_identity_verified", False)
                 else None
             )
+            runtime_status_blob: DreameLawnMowerStatusBlob | None = None
+            runtime_status_error: Exception | None = None
             try:
                 runtime_status_blob = await self.client.async_get_runtime_status_blob(
                     refresh=False,
                     include_cloud=False,
                 )
-                if self._device_snapshot_is_stale(snapshot):
-                    return
-                self.runtime_status_blob = runtime_status_blob
-                self.runtime_telemetry_cache.update(
-                    self.runtime_status_blob,
-                    allow_zero=runtime_active,
-                    active_session=runtime_active,
-                )
-                self.client.update_runtime_live_tracking(
-                    self.runtime_status_blob,
-                    active=runtime_active,
-                    map_index=runtime_map_index,
+            except Exception as err:  # noqa: BLE001 - best-effort MQTT metadata
+                runtime_status_error = err
+
+            bluetooth_connected: bool | None = None
+            bluetooth_error: Exception | None = None
+            try:
+                bluetooth_connected = await self.client.async_get_bluetooth_connected(
+                    refresh=False,
+                    include_cloud=False,
                 )
             except Exception as err:  # noqa: BLE001 - best-effort MQTT metadata
-                if self._device_snapshot_is_stale(snapshot):
-                    return
-                _LOGGER.debug("Failed to process realtime status blob: %s", err)
+                bluetooth_error = err
+
+            # Both optional reads can yield while a newer authoritative fetch
+            # publishes. Commit no runtime or Bluetooth side effects until the
+            # cached snapshot is still current after every await.
+            if self._device_snapshot_is_stale(snapshot):
+                return
+
+            if runtime_status_error is None:
+                try:
+                    self.runtime_status_blob = runtime_status_blob
+                    self.runtime_telemetry_cache.update(
+                        self.runtime_status_blob,
+                        allow_zero=runtime_active,
+                        active_session=runtime_active,
+                    )
+                    self.client.update_runtime_live_tracking(
+                        self.runtime_status_blob,
+                        active=runtime_active,
+                        map_index=runtime_map_index,
+                    )
+                except Exception as err:  # noqa: BLE001 - best-effort MQTT metadata
+                    runtime_status_error = err
+            if runtime_status_error is not None:
+                _LOGGER.debug(
+                    "Failed to process realtime status blob: %s",
+                    runtime_status_error,
+                )
                 self.runtime_status_blob = None
                 self.client.update_runtime_live_tracking(
                     None,
@@ -359,18 +383,12 @@ class DreameLawnMowerCoordinator(
                     map_index=runtime_map_index,
                 )
 
-            try:
-                bluetooth_connected = await self.client.async_get_bluetooth_connected(
-                    refresh=False,
-                    include_cloud=False,
-                )
-                if self._device_snapshot_is_stale(snapshot):
-                    return
+            if bluetooth_error is None:
                 self.bluetooth_connected = bluetooth_connected
-            except Exception as err:  # noqa: BLE001 - best-effort MQTT metadata
+            else:
                 _LOGGER.debug(
                     "Failed to process realtime Bluetooth state: %s",
-                    err,
+                    bluetooth_error,
                 )
             self.async_set_updated_data(snapshot)
         except Exception as err:  # noqa: BLE001 - callback must not escape HA task

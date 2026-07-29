@@ -308,15 +308,20 @@ def test_newer_video_safety_state_wins_over_delayed_cached_mqtt_update() -> None
             mowing_session_active=False,
             activity="idle",
         )
-        runtime_started = asyncio.Event()
-        release_runtime = asyncio.Event()
+        bluetooth_started = asyncio.Event()
+        release_bluetooth = asyncio.Event()
 
         async def runtime_status(*, refresh: bool, include_cloud: bool):
             assert refresh is False
             assert include_cloud is False
-            runtime_started.set()
-            await release_runtime.wait()
             return SimpleNamespace()
+
+        async def bluetooth_status(*, refresh: bool, include_cloud: bool):
+            assert refresh is False
+            assert include_cloud is False
+            bluetooth_started.set()
+            await release_bluetooth.wait()
+            return True
 
         coordinator._client_update_task = Mock()
         coordinator._client_update_pending = False
@@ -338,7 +343,7 @@ def test_newer_video_safety_state_wins_over_delayed_cached_mqtt_update() -> None
                 return_value=video_snapshot
             ),
             async_get_runtime_status_blob=runtime_status,
-            async_get_bluetooth_connected=AsyncMock(return_value=True),
+            async_get_bluetooth_connected=bluetooth_status,
             update_runtime_live_tracking=Mock(),
         )
 
@@ -349,9 +354,9 @@ def test_newer_video_safety_state_wins_over_delayed_cached_mqtt_update() -> None
             cached_task = asyncio.create_task(
                 coordinator._async_process_client_update()
             )
-            await asyncio.wait_for(runtime_started.wait(), timeout=1)
+            await asyncio.wait_for(bluetooth_started.wait(), timeout=1)
             result = await coordinator.async_refresh_video_safety_state()
-            release_runtime.set()
+            release_bluetooth.set()
             await cached_task
 
         assert result is video_snapshot
@@ -359,7 +364,6 @@ def test_newer_video_safety_state_wins_over_delayed_cached_mqtt_update() -> None
         assert coordinator.runtime_status_blob is None
         coordinator.runtime_telemetry_cache.update.assert_not_called()
         coordinator.client.update_runtime_live_tracking.assert_not_called()
-        coordinator.client.async_get_bluetooth_connected.assert_not_awaited()
         assert coordinator.bluetooth_connected is None
 
     asyncio.run(scenario())
