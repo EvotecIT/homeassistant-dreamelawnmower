@@ -181,7 +181,9 @@ class DreameLawnMowerCoordinator(
         for _attempt in range(2):
             async with self._device_refresh_lock:
                 try:
-                    snapshot = await self.client.async_refresh()
+                    snapshot = (
+                        await self.client.async_refresh_authoritative_snapshot()
+                    )
                 except Exception as err:
                     self._record_connectivity_failure(err)
                     raise

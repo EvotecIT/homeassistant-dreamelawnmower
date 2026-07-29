@@ -334,6 +334,9 @@ def test_newer_video_safety_state_wins_over_delayed_cached_mqtt_update() -> None
         coordinator.client = SimpleNamespace(
             async_get_cached_snapshot=AsyncMock(return_value=cached_snapshot),
             async_refresh=AsyncMock(return_value=video_snapshot),
+            async_refresh_authoritative_snapshot=AsyncMock(
+                return_value=video_snapshot
+            ),
             async_get_runtime_status_blob=runtime_status,
             async_get_bluetooth_connected=AsyncMock(return_value=True),
             update_runtime_live_tracking=Mock(),

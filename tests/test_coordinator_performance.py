@@ -102,8 +102,13 @@ def test_video_safety_refresh_retries_snapshot_that_is_already_stale() -> None:
         coordinator._device_snapshot_generations = {}
         coordinator.client = SimpleNamespace(
             async_refresh=AsyncMock(
+                side_effect=AssertionError(
+                    "Video safety must not use the ordinary cached refresh."
+                )
+            ),
+            async_refresh_authoritative_snapshot=AsyncMock(
                 side_effect=(stale_snapshot, current_snapshot)
-            )
+            ),
         )
         coordinator._device_snapshot_is_stale = Mock(side_effect=(True, False))
         coordinator.async_set_updated_data = Mock()
@@ -111,7 +116,11 @@ def test_video_safety_refresh_retries_snapshot_that_is_already_stale() -> None:
         result = await coordinator.async_refresh_video_safety_state()
 
         assert result is current_snapshot
-        assert coordinator.client.async_refresh.await_count == 2
+        assert (
+            coordinator.client.async_refresh_authoritative_snapshot.await_count
+            == 2
+        )
+        coordinator.client.async_refresh.assert_not_awaited()
         coordinator.async_set_updated_data.assert_called_once_with(current_snapshot)
 
     asyncio.run(scenario())
@@ -170,6 +179,7 @@ def test_newer_video_safety_snapshot_blocks_foreground_runtime_side_effects() ->
         coordinator.runtime_telemetry_cache = SimpleNamespace(update=Mock())
         coordinator.client = SimpleNamespace(
             async_refresh=refresh_snapshot,
+            async_refresh_authoritative_snapshot=refresh_snapshot,
             async_get_runtime_status_blob=refresh_runtime,
             update_runtime_live_tracking=Mock(),
         )

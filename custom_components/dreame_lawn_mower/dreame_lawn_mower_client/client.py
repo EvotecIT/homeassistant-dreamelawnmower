@@ -490,6 +490,12 @@ class DreameLawnMowerClient(
             account_type,
         )
 
+    async def async_refresh_authoritative_snapshot(
+        self,
+    ) -> DreameLawnMowerSnapshot:
+        """Force a device-property read for a safety-critical decision."""
+        return await self._async_refresh_authoritative_snapshot()
+
     async def async_refresh(self) -> DreameLawnMowerSnapshot:
         """Refresh device state and return a normalized snapshot."""
         device = await asyncio.to_thread(self._sync_update_device)

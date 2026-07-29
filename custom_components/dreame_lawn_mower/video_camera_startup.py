@@ -341,16 +341,16 @@ class DreameLawnMowerVideoStartupMixin:
         )
 
     async def _async_refresh_video_start_state(self) -> bool:
-        """Require a fresh safe mower snapshot before Auto or LAN startup."""
+        """Require a fresh authoritative snapshot before any video startup."""
         try:
             snapshot = await self.coordinator.async_refresh_video_safety_state()
         except Exception as err:  # noqa: BLE001 - fail closed before video startup.
             _LOGGER.debug(
-                "Failed to refresh mower state before Auto/LAN video: %s",
+                "Failed to refresh mower state before video startup: %s",
                 sanitize_diagnostic_text(err),
             )
             self._set_stream_error(
-                "Could not refresh mower state before starting Auto/LAN video.",
+                "Could not refresh mower state before starting video.",
                 stage="state_refresh",
             )
             return False
