@@ -173,6 +173,10 @@ The following areas are intentionally cautious:
 - the managed video runtime currently supports Linux x86_64 and aarch64 Home
   Assistant hosts, and the mower must be active and away from its station before
   the vendor permits live video
+- the 16 KB-page aarch64 compatibility worker is exercised in native ARM64
+  Home Assistant container CI, including runtime selection, installation, startup,
+  and request handling; live mower playback after that fix has not yet been
+  confirmed on the original Raspberry Pi 5 reporter host
 - 3D point-cloud generation and PCD download are validated on the Dreame A2;
   other mower families still need field reports
 - manual driving must stay supervised and uses strict state and battery guards
@@ -491,14 +495,15 @@ need source, counts, and parser evidence.
 
 The map camera also advertises a local `point_cloud_api_path` attribute. A
 Home Assistant administrator can sign that path for a short-lived download.
-When the mower has exactly one verified map, the integration first tries its
-stored LiDAR object so an existing 3D map can display without another upload.
-If that object is absent, expired, or invalid, it asks the mower to upload the
-selected app map, immediately captures the new announcement, and validates the
-returned PCD file. Multi-map requests always use fresh generation because the
-stored announcement does not identify its map. Firmware without the
-announcement retains the older transient-object lookup as a fallback. Responses
-use `private, no-store` caching.
+When the requested map is the mower's authoritative active map, the integration
+first tries its stored LiDAR object so an existing 3D map can display without
+another upload. This also applies when the mower has multiple saved maps; an
+inactive or ambiguous map request cannot reuse the stored object. If the stored
+object is absent, expired, or invalid, the integration asks the mower to upload
+the selected app map, immediately captures the new announcement, and validates
+the returned PCD file. Firmware without the announcement retains the older
+transient-object lookup as a fallback. Responses use `private, no-store`
+caching.
 Vendor filenames, cloud-signed URLs, and point coordinates are never written to
 entity state or logs.
 
