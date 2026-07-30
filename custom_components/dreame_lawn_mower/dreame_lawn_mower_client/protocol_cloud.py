@@ -37,6 +37,7 @@ _REDACTED_APP_ACTION_RESPONSE = "<redacted app action response>"
 _DEADLINE_RESPONSE_CHUNK_BYTES = 8 * 1024
 _MAX_DEADLINE_RESPONSE_BYTES = 1024 * 1024
 _READ_RETRY_DELAYS_SECONDS = (0.25, 1.0)
+_CLOUD_DISCONNECT_TIMEOUT_SECONDS = 2.0
 
 
 
@@ -1465,9 +1466,27 @@ class DreameMowerDreameHomeCloudProtocol:
             self._fail_count = self._fail_count + 1
         return None
 
-    def disconnect(self):
-        with self._operation_lock():
-            self._disconnect_unlocked()
+    def disconnect(self, timeout: float = _CLOUD_DISCONNECT_TIMEOUT_SECONDS):
+        deadline = time.monotonic() + max(0.0, timeout)
+        try:
+            with self._operation_lock_with_deadline(deadline):
+                self._disconnect_unlocked()
+        except requests.exceptions.Timeout:
+            _LOGGER.warning(
+                "Cloud disconnect skipped after waiting %.1f seconds for an "
+                "active request to finish.",
+                timeout,
+            )
+            self._connected = False
+            self._logged_in = False
+            self._message_callback = None
+            self._connected_callback = None
+            thread = getattr(self, "_thread", None)
+            request_queue = getattr(self, "_queue", None)
+            if thread and request_queue is not None:
+                request_queue.put([])
+            return False
+        return True
 
     def _disconnect_unlocked(self):
         self._session.close()

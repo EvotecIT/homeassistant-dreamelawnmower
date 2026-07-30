@@ -543,6 +543,9 @@ class DreameLawnMowerCoordinator(
                     False,
                 ),
             )
+            latest_map_index_hint = self._schedule_map_index_hint()
+            if latest_map_index_hint != map_index_hint:
+                batch_payload = _batch_schedule_without_map_hint(batch_payload)
             latest_expected_indices = _schedule_expected_indices(
                 self.schedules,
                 payload,
@@ -1760,6 +1763,27 @@ def _schedule_payload_has_active_selection(
             return True
     version = payload.get("active_schedule_version")
     return isinstance(version, int) and not isinstance(version, bool)
+
+
+def _batch_schedule_without_map_hint(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return a batch schedule copy without a stale caller-supplied slot hint."""
+    normalized = dict(payload)
+    schedules = payload.get("schedules")
+    if (
+        not isinstance(schedules, Sequence)
+        or isinstance(schedules, str | bytes | bytearray)
+        or len(schedules) != 1
+        or not isinstance(schedules[0], Mapping)
+    ):
+        return normalized
+    schedule = dict(schedules[0])
+    schedule["idx"] = None
+    schedule["label"] = "active_schedule"
+    schedule["writable"] = False
+    normalized["schedules"] = [schedule]
+    return normalized
 
 
 def _schedule_write_version(result: Mapping[str, Any]) -> int | None:

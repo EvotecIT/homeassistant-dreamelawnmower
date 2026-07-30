@@ -125,6 +125,39 @@ def test_deadline_worker_keeps_serialization_until_transport_exits() -> None:
     assert follower_started.is_set()
 
 
+def test_cloud_disconnect_does_not_wait_forever_for_deadline_worker() -> None:
+    cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
+    cloud._request_lock = RLock()
+    cloud._connected = True
+    cloud._logged_in = True
+    cloud._message_callback = object()
+    cloud._connected_callback = object()
+    lock_held = Event()
+    release_lock = Event()
+
+    def hold_lock() -> None:
+        with cloud._request_lock:
+            lock_held.set()
+            assert release_lock.wait(timeout=1)
+
+    worker = Thread(target=hold_lock)
+    worker.start()
+    assert lock_held.wait(timeout=1)
+
+    started = time.monotonic()
+    disconnected = cloud.disconnect(timeout=0.05)
+    elapsed = time.monotonic() - started
+    release_lock.set()
+    worker.join(timeout=1)
+
+    assert disconnected is False
+    assert elapsed < 0.5
+    assert cloud._connected is False
+    assert cloud._logged_in is False
+    assert cloud._message_callback is None
+    assert cloud._connected_callback is None
+
+
 def _capture_request_error(
     cloud: protocol_cloud.DreameMowerDreameHomeCloudProtocol,
     *,

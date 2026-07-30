@@ -183,6 +183,31 @@ def test_decode_batch_schedule_payload_decodes_live_shaped_schedule() -> None:
     )
 
 
+@pytest.mark.parametrize("plan_data", [None, {}, "invalid"])
+def test_decode_batch_schedule_payload_rejects_invalid_plan_list(
+    plan_data: object,
+) -> None:
+    payload: dict[str, object] = {"v": 22}
+    if plan_data is not None:
+        payload["d"] = plan_data
+    payload_text = json.dumps(payload, separators=(",", ":"))
+
+    result = decode_batch_schedule_payload({"SCHEDULE.0": payload_text})
+
+    assert result["available"] is False
+    assert "active_schedule_version" not in result
+    assert result["schedules"][0]["available"] is False
+    assert result["schedules"][0]["error"] == (
+        "missing_or_invalid_batch_schedule_plans"
+    )
+    assert result["errors"] == [
+        {
+            "stage": "schedule",
+            "error": "missing_or_invalid_batch_schedule_plans",
+        }
+    ]
+
+
 def test_decode_batch_mowing_preferences_decodes_map_settings() -> None:
     result = decode_batch_mowing_preferences(
         {

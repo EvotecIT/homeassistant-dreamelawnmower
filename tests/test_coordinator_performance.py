@@ -1602,6 +1602,90 @@ def test_schedule_refresh_revalidates_maps_after_action_request() -> None:
     asyncio.run(scenario())
 
 
+def test_schedule_refresh_rejects_batch_hint_after_selected_map_changes() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        coordinator.schedules = {
+            "source": "app_action_schedule",
+            "schedules": [
+                {"idx": -1, "available": True, "version": 10, "plans": []},
+                {"idx": 0, "available": True, "version": 11, "plans": []},
+                {"idx": 1, "available": True, "version": 12, "plans": []},
+            ],
+            "errors": [],
+        }
+        coordinator.schedules_refreshed_at = None
+        coordinator.selected_map_index = 0
+        coordinator.app_maps = {
+            "current_map_index": 0,
+            "maps": [
+                {"idx": 0, "created": True},
+                {"idx": 1, "created": True},
+            ],
+            "map_list_valid": True,
+        }
+        coordinator.app_maps_refresh_succeeded = True
+        batch_started = asyncio.Event()
+        release_batch = asyncio.Event()
+
+        async def get_batch_schedules(**_kwargs) -> dict[str, object]:
+            batch_started.set()
+            await release_batch.wait()
+            return {
+                "source": "batch_device_data_schedule",
+                "available": True,
+                "current_task": None,
+                "schedules": [
+                    {
+                        "idx": 0,
+                        "available": True,
+                        "version": 22,
+                        "plans": [{"plan_id": 1}],
+                    }
+                ],
+                "errors": [],
+            }
+
+        coordinator.client = SimpleNamespace(
+            async_get_app_schedules=AsyncMock(
+                return_value={
+                    "source": "app_action_schedule",
+                    "schedules": [
+                        {
+                            "idx": -1,
+                            "available": True,
+                            "version": 20,
+                            "plans": [],
+                        },
+                        {"idx": 0, "available": True, "version": 21, "plans": []},
+                        {"idx": 1, "available": True, "version": 22, "plans": []},
+                    ],
+                    "errors": [],
+                }
+            ),
+            async_get_batch_schedules=get_batch_schedules,
+        )
+
+        refresh_task = asyncio.create_task(
+            coordinator.async_refresh_schedules(force=True)
+        )
+        await batch_started.wait()
+        coordinator.selected_map_index = 1
+        coordinator.app_maps = {
+            **coordinator.app_maps,
+            "current_map_index": 1,
+        }
+        release_batch.set()
+        result = await refresh_task
+
+        assert result["active_schedule_index"] == 1
+        assert result["active_schedule_version"] == 22
+        assert result["schedules"][1]["version"] == 21
+        assert result["schedules"][2]["version"] == 22
+
+    asyncio.run(scenario())
+
+
 def test_schedule_refresh_marks_active_selection_unavailable_without_batch() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator.schedules = None
