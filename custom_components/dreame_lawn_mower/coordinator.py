@@ -507,6 +507,10 @@ class DreameLawnMowerCoordinator(
         self._apply_pending_schedule_plan_states()
         self._apply_pending_schedule_uploads()
         action_read_indices = _usable_schedule_indices(payload)
+        action_read_complete = set(expected_indices).issubset(action_read_indices)
+        allow_unknown_batch_slot = not (
+            map_hints_authoritative and action_read_complete
+        )
         batch_read_succeeded = False
         try:
             batch_read_generation = self._begin_schedule_read()
@@ -522,7 +526,7 @@ class DreameLawnMowerCoordinator(
             batch_read_succeeded = self._cache_batch_schedules(
                 batch_payload,
                 now=now,
-                allow_incomplete=True,
+                allow_incomplete=allow_unknown_batch_slot,
                 read_generation=batch_read_generation,
                 preserve_indices=action_read_indices,
             )
