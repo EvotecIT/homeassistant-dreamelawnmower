@@ -144,13 +144,24 @@ class _DreameLawnMowerClientSettingsMixin:
             map_indices,
             deadline=map_discovery_deadline,
         )
+        first_pass_deadline = schedule_deadline
+        if len(schedule_indices) > 1:
+            now = time.monotonic()
+            remaining = max(0.0, schedule_deadline - now)
+            # Reserve enough of the shared window for one slower slot to make
+            # meaningful progress after every slot receives a fair first pass.
+            recovery_reserve = min(
+                SCHEDULE_READ_TIMEOUT_SECONDS,
+                remaining / 2,
+            )
+            first_pass_deadline = schedule_deadline - recovery_reserve
         failed_schedule_positions: list[int] = []
         for position, map_index in enumerate(schedule_indices):
             now = time.monotonic()
-            remaining = max(0.0, schedule_deadline - now)
+            remaining = max(0.0, first_pass_deadline - now)
             remaining_slots = len(schedule_indices) - position
             slot_deadline = min(
-                schedule_deadline,
+                first_pass_deadline,
                 now + remaining / remaining_slots,
             )
             schedule_result, error = self._sync_get_app_schedule_slot(
@@ -172,6 +183,16 @@ class _DreameLawnMowerClientSettingsMixin:
         # later slots return quickly, spend the unused shared budget on one
         # recovery pass so a valid early slot is not permanently limited to
         # only its initial fraction of the operation deadline.
+        retry_offset = getattr(self, "_app_schedule_retry_offset", 0)
+        if failed_schedule_positions:
+            retry_offset %= len(failed_schedule_positions)
+            failed_schedule_positions = [
+                *failed_schedule_positions[retry_offset:],
+                *failed_schedule_positions[:retry_offset],
+            ]
+            self._app_schedule_retry_offset = (
+                retry_offset + 1
+            ) % len(failed_schedule_positions)
         for position in failed_schedule_positions:
             now = time.monotonic()
             if now >= schedule_deadline:
