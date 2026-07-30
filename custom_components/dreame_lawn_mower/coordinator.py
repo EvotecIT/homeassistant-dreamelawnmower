@@ -1528,6 +1528,8 @@ class DreameLawnMowerCoordinator(
         self.app_maps_refresh_succeeded = True
         current_idx = active_map_index(payload)
         if current_idx is not None:
+            if self.selected_map_index != current_idx:
+                self._invalidate_schedule_map_hint()
             if (
                 self.selected_map_index is not None
                 and self.selected_map_index != current_idx
@@ -1638,6 +1640,8 @@ class DreameLawnMowerCoordinator(
     async def async_switch_current_map(self, map_index: int) -> None:
         """Switch the active mower map and refresh all map-scoped state."""
         await self.client.async_switch_current_map(map_index)
+        if self.selected_map_index != map_index:
+            self._invalidate_schedule_map_hint()
         self.selected_map_index = map_index
         self.selected_contour_id = None
         self.selected_zone_id = None
@@ -1653,6 +1657,12 @@ class DreameLawnMowerCoordinator(
             source="vector_map_switch_current_map",
         )
         self.async_update_listeners()
+
+    def _invalidate_schedule_map_hint(self) -> None:
+        """Expire schedule selection tied to the previous active map."""
+        self.schedules_refreshed_at = None
+        if isinstance(getattr(self, "schedules", None), dict):
+            self.schedules["active_selection_available"] = False
 
     async def async_shutdown(self) -> None:
         """Disconnect client resources."""

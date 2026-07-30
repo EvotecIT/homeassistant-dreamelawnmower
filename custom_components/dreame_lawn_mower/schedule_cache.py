@@ -466,7 +466,6 @@ def merge_batch_schedule_payload(
             and isinstance(schedule, Mapping)
             and schedule is not matching_schedule
             and schedule.get("idx") is None
-            and schedule.get("version") == batch_version
         )
     ]
     if matching_schedule is None:

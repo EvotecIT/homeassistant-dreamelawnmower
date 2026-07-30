@@ -88,6 +88,12 @@ def test_batch_schedule_merge_prefers_explicit_hint_on_version_collision() -> No
                 "version": 8,
                 "plans": [{"plan_id": 2, "name": "Garden"}],
             },
+            {
+                "idx": None,
+                "available": True,
+                "version": 7,
+                "plans": [{"plan_id": 4, "name": "Old fallback"}],
+            },
         ]
     }
     incoming = {
@@ -114,6 +120,7 @@ def test_batch_schedule_merge_prefers_explicit_hint_on_version_collision() -> No
     assert result["schedules"][0]["plans"][0]["name"] == "Default"
     assert result["schedules"][1]["idx"] == 2
     assert result["schedules"][1]["plans"][0]["name"] == "Batch"
+    assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 2]
 
 
 def test_batch_schedule_merge_keeps_unknown_slot_on_unhinted_collision() -> None:
