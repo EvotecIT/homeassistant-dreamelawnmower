@@ -574,6 +574,9 @@ class DreameLawnMowerCoordinator(
             payload,
             captured_at=now,
             allow_unknown_slot=allow_incomplete,
+            allowed_hint_indices=(
+                [] if allow_incomplete else [-1, *known_map_indices]
+            ),
             preserve_indices=preserve_indices,
         )
         if normalized is None:

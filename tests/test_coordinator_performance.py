@@ -1375,6 +1375,73 @@ def test_schedule_refresh_rejects_lagging_batch_for_deleted_map(
     assert "active_schedule_index" not in result
 
 
+def test_schedule_refresh_accepts_newer_batch_version_for_known_hinted_map() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.schedules = {
+        "source": "app_action_schedule_with_batch_refresh",
+        "active_schedule_version": 11,
+        "active_schedule_index": 0,
+        "active_selection_available": True,
+        "schedules": [
+            {"idx": -1, "available": True, "version": 10, "plans": []},
+            {
+                "idx": 0,
+                "available": True,
+                "version": 11,
+                "plans": [{"plan_id": 1}],
+            },
+        ],
+        "errors": [],
+    }
+    coordinator.schedules_refreshed_at = None
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {
+        "current_map_index": 0,
+        "maps": [{"idx": 0, "created": True}],
+        "map_list_valid": True,
+    }
+    coordinator.app_maps_refresh_succeeded = True
+    incoming = {
+        "source": "app_action_schedule",
+        "schedules": [
+            {"idx": -1, "available": True, "version": 20, "plans": []},
+            {
+                "idx": 0,
+                "available": True,
+                "version": 21,
+                "plans": [{"plan_id": 1}],
+            },
+        ],
+        "errors": [],
+    }
+    newer_batch = {
+        "source": "batch_device_data_schedule",
+        "available": True,
+        "active_schedule_version": 22,
+        "current_task": None,
+        "schedules": [
+            {
+                "idx": 0,
+                "available": True,
+                "version": 22,
+                "plans": [{"plan_id": 1}],
+            }
+        ],
+        "errors": [],
+    }
+    coordinator.client = SimpleNamespace(
+        async_get_app_schedules=AsyncMock(return_value=incoming),
+        async_get_batch_schedules=AsyncMock(return_value=newer_batch),
+    )
+
+    result = asyncio.run(coordinator.async_refresh_schedules(force=True))
+
+    assert result["active_schedule_version"] == 22
+    assert result["active_schedule_index"] == 0
+    assert result["active_selection_available"] is True
+    assert [schedule["version"] for schedule in result["schedules"]] == [20, 22]
+
+
 def test_schedule_refresh_marks_active_selection_unavailable_without_batch() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator.schedules = None

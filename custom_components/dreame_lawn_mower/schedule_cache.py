@@ -344,6 +344,7 @@ def merge_batch_schedule_payload(
     *,
     captured_at: datetime,
     allow_unknown_slot: bool,
+    allowed_hint_indices: Sequence[int] = (),
     preserve_indices: Sequence[int] = (),
 ) -> dict[str, Any] | None:
     """Merge one effective batch schedule without guessing its writable slot."""
@@ -380,6 +381,9 @@ def merge_batch_schedule_payload(
         hinted_index,
         bool,
     )
+    hinted_index_is_allowed = (
+        hinted_index_is_valid and hinted_index in set(allowed_hint_indices)
+    )
     numeric_matching_schedules = [
         schedule
         for schedule in matching_schedules
@@ -397,6 +401,16 @@ def merge_batch_schedule_payload(
         )
         if matching_schedule is None and len(numeric_matching_schedules) == 1:
             matching_schedule = numeric_matching_schedules[0]
+        if matching_schedule is None and hinted_index_is_allowed:
+            matching_schedule = next(
+                (
+                    schedule
+                    for schedule in existing_schedules
+                    if isinstance(schedule, Mapping)
+                    and schedule.get("idx") == hinted_index
+                ),
+                None,
+            )
     else:
         matching_schedule = (
             numeric_matching_schedules[0]
@@ -410,13 +424,17 @@ def merge_batch_schedule_payload(
                 None,
             )
         )
-    if matching_schedule is None and not allow_unknown_slot:
+    if (
+        matching_schedule is None
+        and not allow_unknown_slot
+        and not hinted_index_is_allowed
+    ):
         return None
     if matching_schedule is not None:
         for key in ("idx", "label", "name"):
             if key in matching_schedule:
                 batch_schedule[key] = matching_schedule[key]
-    else:
+    elif not hinted_index_is_allowed:
         batch_schedule["idx"] = None
         batch_schedule["label"] = "active_schedule"
         batch_schedule["writable"] = False
@@ -426,6 +444,7 @@ def merge_batch_schedule_payload(
     if (
         matching_schedule is not None
         and matching_schedule.get("idx") in preserved_indices
+        and matching_schedule.get("version") == batch_version
         and schedule_entry_has_usable_data(matching_schedule)
     ):
         # A successful action read from this refresh is the authoritative plan
