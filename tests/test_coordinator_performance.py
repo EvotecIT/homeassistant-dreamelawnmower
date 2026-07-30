@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import suppress
 from datetime import UTC, datetime
+from threading import Event
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -2801,20 +2802,23 @@ def test_shutdown_drains_metadata_before_closing_shared_client() -> None:
     asyncio.run(scenario())
 
 
-def test_shutdown_cancels_shielded_batch_schedule_read() -> None:
+def test_shutdown_waits_for_shielded_batch_worker_before_close() -> None:
     async def scenario() -> None:
         coordinator = object.__new__(DreameLawnMowerCoordinator)
         batch_started = asyncio.Event()
-        batch_cancelled = asyncio.Event()
+        batch_release = Event()
+        batch_finished = Event()
         close_calls: list[str] = []
+        loop = asyncio.get_running_loop()
+
+        def blocking_batch_schedule() -> dict[str, object]:
+            loop.call_soon_threadsafe(batch_started.set)
+            batch_release.wait()
+            batch_finished.set()
+            return {}
 
         async def batch_schedule() -> dict[str, object]:
-            batch_started.set()
-            try:
-                await asyncio.Event().wait()
-            except asyncio.CancelledError:
-                batch_cancelled.set()
-                raise
+            return await asyncio.to_thread(blocking_batch_schedule)
 
         async def metadata() -> None:
             await asyncio.shield(coordinator._batch_schedule_read_task)
@@ -2841,9 +2845,76 @@ def test_shutdown_cancels_shielded_batch_schedule_read() -> None:
         )
         await batch_started.wait()
 
-        await asyncio.wait_for(coordinator.async_shutdown(), timeout=1)
+        shutdown = asyncio.create_task(coordinator.async_shutdown())
+        await asyncio.sleep(0)
+        closed_before_worker_finished = bool(close_calls)
+        batch_release.set()
+        await asyncio.wait_for(shutdown, timeout=1)
 
-        assert batch_cancelled.is_set()
+        assert not closed_before_worker_finished
+        assert batch_finished.is_set()
+        assert coordinator._batch_schedule_read_task is None
+        assert close_calls == ["close"]
+
+    asyncio.run(scenario())
+
+
+def test_shutdown_defers_close_until_batch_thread_finishes_after_grace() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        batch_started = asyncio.Event()
+        batch_release = Event()
+        batch_finished = Event()
+        close_calls: list[str] = []
+        loop = asyncio.get_running_loop()
+
+        def blocking_batch_schedule() -> dict[str, object]:
+            loop.call_soon_threadsafe(batch_started.set)
+            batch_release.wait()
+            batch_finished.set()
+            return {}
+
+        async def batch_schedule() -> dict[str, object]:
+            return await asyncio.to_thread(blocking_batch_schedule)
+
+        async def close() -> None:
+            close_calls.append("close")
+
+        coordinator._shutting_down = False
+        coordinator._client_update_pending = False
+        coordinator._client_update_task = None
+        coordinator._batch_schedule_read_task = asyncio.create_task(batch_schedule())
+        coordinator._batch_schedule_read_tasks = {
+            coordinator._batch_schedule_read_task
+        }
+        coordinator._batch_schedule_read_completed_at = None
+        coordinator._metadata_refresh_task = None
+        coordinator._metadata_shutdown_close_task = None
+        coordinator.hass = SimpleNamespace(
+            async_create_task=lambda coroutine, _name: asyncio.create_task(coroutine)
+        )
+        coordinator.client = SimpleNamespace(
+            set_update_callback=Mock(),
+            async_close=close,
+        )
+        await batch_started.wait()
+
+        with patch(
+            "custom_components.dreame_lawn_mower.coordinator_refresh."
+            "METADATA_SHUTDOWN_GRACE_SECONDS",
+            0.01,
+        ):
+            await asyncio.wait_for(coordinator.async_shutdown(), timeout=1)
+
+        assert close_calls == []
+        cleanup = coordinator._metadata_shutdown_close_task
+        assert cleanup is not None
+        assert not cleanup.done()
+
+        batch_release.set()
+        await asyncio.wait_for(cleanup, timeout=1)
+
+        assert batch_finished.is_set()
         assert coordinator._batch_schedule_read_task is None
         assert close_calls == ["close"]
 
@@ -2854,7 +2925,8 @@ def test_shutdown_drains_displaced_keyed_batch_schedule_reads() -> None:
     async def scenario() -> None:
         coordinator = object.__new__(DreameLawnMowerCoordinator)
         started = {0: asyncio.Event(), 1: asyncio.Event()}
-        cancelled: set[int] = set()
+        release = {0: asyncio.Event(), 1: asyncio.Event()}
+        completed: set[int] = set()
 
         async def get_batch_schedules(
             *,
@@ -2862,11 +2934,9 @@ def test_shutdown_drains_displaced_keyed_batch_schedule_reads() -> None:
             **_kwargs,
         ) -> dict[str, object]:
             started[map_index_hint].set()
-            try:
-                await asyncio.Event().wait()
-            except asyncio.CancelledError:
-                cancelled.add(map_index_hint)
-                raise
+            await release[map_index_hint].wait()
+            completed.add(map_index_hint)
+            return {}
 
         coordinator.client = SimpleNamespace(
             async_get_batch_schedules=get_batch_schedules
@@ -2895,11 +2965,17 @@ def test_shutdown_drains_displaced_keyed_batch_schedule_reads() -> None:
         with suppress(asyncio.CancelledError):
             await first
 
-        assert await coordinator._async_drain_batch_schedule_for_shutdown()
+        drain = asyncio.create_task(
+            coordinator._async_drain_batch_schedule_for_shutdown()
+        )
+        await asyncio.sleep(0)
+        assert not drain.done()
+        release[0].set()
+        release[1].set()
+        assert await drain
 
-        with suppress(asyncio.CancelledError):
-            await second
-        assert cancelled == {0, 1}
+        await second
+        assert completed == {0, 1}
         assert coordinator._batch_schedule_read_tasks == set()
         assert coordinator._batch_schedule_read_task is None
 

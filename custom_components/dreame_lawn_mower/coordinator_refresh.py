@@ -600,7 +600,7 @@ class DreameLawnMowerRefreshMixin:
         return await self._async_drain_batch_schedule_for_shutdown()
 
     async def _async_drain_batch_schedule_for_shutdown(self) -> bool:
-        """Cancel and retrieve the shared shielded batch-schedule task."""
+        """Wait for shared batch reads without cancelling their worker threads."""
         tasks = set(getattr(self, "_batch_schedule_read_tasks", set()))
         latest = getattr(self, "_batch_schedule_read_task", None)
         if latest is not None:
@@ -609,7 +609,7 @@ class DreameLawnMowerRefreshMixin:
         if not tasks:
             return True
 
-        drain_task = asyncio.create_task(self._async_cancel_batch_schedule_read())
+        drain_task = asyncio.create_task(self._async_wait_batch_schedule_reads())
         try:
             async with asyncio.timeout(METADATA_SHUTDOWN_GRACE_SECONDS):
                 await asyncio.shield(drain_task)
@@ -624,34 +624,34 @@ class DreameLawnMowerRefreshMixin:
             return False
         return True
 
-    async def _async_cancel_batch_schedule_read(self) -> None:
-        """Cancel the shared batch task and consume its terminal result."""
-        tasks = set(getattr(self, "_batch_schedule_read_tasks", set()))
-        latest = getattr(self, "_batch_schedule_read_task", None)
-        if latest is not None:
-            tasks.add(latest)
-        tasks.discard(asyncio.current_task())
-        if not tasks:
-            return
-        for task in tasks:
-            task.cancel()
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for result in results:
-            if isinstance(result, Exception) and not isinstance(
-                result,
-                asyncio.CancelledError,
-            ):
-                _LOGGER.debug(
-                    "Batch schedule task failed during shutdown: %s",
+    async def _async_wait_batch_schedule_reads(self) -> None:
+        """Wait until every tracked batch worker reaches a terminal result."""
+        while True:
+            tasks = set(getattr(self, "_batch_schedule_read_tasks", set()))
+            latest = getattr(self, "_batch_schedule_read_task", None)
+            if latest is not None:
+                tasks.add(latest)
+            tasks.discard(asyncio.current_task())
+            if not tasks:
+                return
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception) and not isinstance(
                     result,
-                )
-        tracked_tasks = getattr(self, "_batch_schedule_read_tasks", None)
-        if tracked_tasks is not None:
-            tracked_tasks.difference_update(tasks)
-        if getattr(self, "_batch_schedule_read_task", None) in tasks:
-            self._batch_schedule_read_task = None
-            self._batch_schedule_read_key = None
-            self._batch_schedule_read_completed_at = None
+                    asyncio.CancelledError,
+                ):
+                    _LOGGER.debug(
+                        "Batch schedule task failed during shutdown: %s",
+                        result,
+                    )
+            tracked_tasks = getattr(self, "_batch_schedule_read_tasks", None)
+            if tracked_tasks is not None:
+                tracked_tasks.difference_update(tasks)
+            if getattr(self, "_batch_schedule_read_task", None) in tasks:
+                self._batch_schedule_read_task = None
+                self._batch_schedule_read_key = None
+                self._batch_schedule_read_completed_at = None
 
     async def _async_close_after_metadata(
         self,
@@ -662,7 +662,7 @@ class DreameLawnMowerRefreshMixin:
             with suppress(asyncio.CancelledError, Exception):
                 await metadata_task
         finally:
-            await self._async_cancel_batch_schedule_read()
+            await self._async_wait_batch_schedule_reads()
             await self.client.async_close()
 
     @staticmethod
