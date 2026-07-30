@@ -1387,6 +1387,12 @@ def test_schedule_refresh_accepts_newer_batch_version_for_known_hinted_map() -> 
             {
                 "idx": 0,
                 "available": True,
+                "version": 22,
+                "plans": [{"plan_id": 7}],
+            },
+            {
+                "idx": 1,
+                "available": True,
                 "version": 11,
                 "plans": [{"plan_id": 1}],
             },
@@ -1394,10 +1400,13 @@ def test_schedule_refresh_accepts_newer_batch_version_for_known_hinted_map() -> 
         "errors": [],
     }
     coordinator.schedules_refreshed_at = None
-    coordinator.selected_map_index = 0
+    coordinator.selected_map_index = 1
     coordinator.app_maps = {
-        "current_map_index": 0,
-        "maps": [{"idx": 0, "created": True}],
+        "current_map_index": 1,
+        "maps": [
+            {"idx": 0, "created": True},
+            {"idx": 1, "created": True},
+        ],
         "map_list_valid": True,
     }
     coordinator.app_maps_refresh_succeeded = True
@@ -1407,6 +1416,12 @@ def test_schedule_refresh_accepts_newer_batch_version_for_known_hinted_map() -> 
             {"idx": -1, "available": True, "version": 20, "plans": []},
             {
                 "idx": 0,
+                "available": True,
+                "version": 22,
+                "plans": [{"plan_id": 7}],
+            },
+            {
+                "idx": 1,
                 "available": True,
                 "version": 21,
                 "plans": [{"plan_id": 1}],
@@ -1421,10 +1436,10 @@ def test_schedule_refresh_accepts_newer_batch_version_for_known_hinted_map() -> 
         "current_task": None,
         "schedules": [
             {
-                "idx": 0,
+                "idx": 1,
                 "available": True,
                 "version": 22,
-                "plans": [{"plan_id": 1}],
+                "plans": [{"plan_id": 9}],
             }
         ],
         "errors": [],
@@ -1437,9 +1452,99 @@ def test_schedule_refresh_accepts_newer_batch_version_for_known_hinted_map() -> 
     result = asyncio.run(coordinator.async_refresh_schedules(force=True))
 
     assert result["active_schedule_version"] == 22
-    assert result["active_schedule_index"] == 0
+    assert result["active_schedule_index"] == 1
     assert result["active_selection_available"] is True
-    assert [schedule["version"] for schedule in result["schedules"]] == [20, 22]
+    assert [schedule["version"] for schedule in result["schedules"]] == [
+        20,
+        22,
+        22,
+    ]
+    assert result["schedules"][1]["plans"] == [{"plan_id": 7}]
+    assert result["schedules"][2]["plans"] == [{"plan_id": 9}]
+
+
+def test_schedule_refresh_revalidates_maps_after_action_request() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        coordinator.schedules = {
+            "source": "app_action_schedule_with_batch_refresh",
+            "active_schedule_version": 12,
+            "active_schedule_index": 1,
+            "active_selection_available": True,
+            "schedules": [
+                {"idx": -1, "available": True, "version": 10, "plans": []},
+                {"idx": 0, "available": True, "version": 11, "plans": []},
+                {"idx": 1, "available": True, "version": 12, "plans": []},
+            ],
+            "errors": [],
+        }
+        coordinator.schedules_refreshed_at = None
+        coordinator.selected_map_index = 1
+        coordinator.app_maps = {
+            "current_map_index": 1,
+            "maps": [
+                {"idx": 0, "created": True},
+                {"idx": 1, "created": True},
+            ],
+            "map_list_valid": True,
+        }
+        coordinator.app_maps_refresh_succeeded = True
+        action_started = asyncio.Event()
+        release_action = asyncio.Event()
+
+        async def get_app_schedules(**_kwargs) -> dict[str, object]:
+            action_started.set()
+            await release_action.wait()
+            return {
+                "source": "app_action_schedule",
+                "schedules": [
+                    {"idx": -1, "available": True, "version": 20, "plans": []},
+                    {"idx": 0, "available": True, "version": 21, "plans": []},
+                    {"idx": 1, "available": True, "version": 22, "plans": []},
+                ],
+                "errors": [],
+            }
+
+        coordinator.client = SimpleNamespace(
+            async_get_app_schedules=get_app_schedules,
+            async_get_batch_schedules=AsyncMock(
+                return_value={
+                    "source": "batch_device_data_schedule",
+                    "available": True,
+                    "current_task": None,
+                    "schedules": [
+                        {
+                            "idx": None,
+                            "available": True,
+                            "version": 22,
+                            "plans": [],
+                        }
+                    ],
+                    "errors": [],
+                }
+            ),
+        )
+
+        refresh_task = asyncio.create_task(
+            coordinator.async_refresh_schedules(force=True)
+        )
+        await action_started.wait()
+        coordinator.app_maps = {
+            "current_map_index": 0,
+            "maps": [{"idx": 0, "created": True}],
+            "map_list_valid": True,
+        }
+        coordinator.selected_map_index = 0
+        release_action.set()
+        result = await refresh_task
+
+        assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 0]
+        assert [schedule["version"] for schedule in result["schedules"]] == [20, 21]
+        assert result["active_selection_available"] is False
+        assert "active_schedule_version" not in result
+        assert "active_schedule_index" not in result
+
+    asyncio.run(scenario())
 
 
 def test_schedule_refresh_marks_active_selection_unavailable_without_batch() -> None:

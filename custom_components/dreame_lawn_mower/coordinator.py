@@ -452,25 +452,24 @@ class DreameLawnMowerCoordinator(
         ):
             return self.schedules
 
-        app_maps = getattr(self, "app_maps", None)
-        known_map_indices = _app_map_index_hints(app_maps)
-        map_hints_authoritative = _app_map_hints_are_authoritative(
-            app_maps,
+        request_app_maps = getattr(self, "app_maps", None)
+        request_map_indices = _app_map_index_hints(request_app_maps)
+        request_map_hints_authoritative = _app_map_hints_are_authoritative(
+            request_app_maps,
             refresh_succeeded=getattr(
                 self,
                 "app_maps_refresh_succeeded",
                 False,
             ),
         )
-        map_index_hint = self._schedule_map_index_hint()
 
         try:
             action_read_generation = self._begin_schedule_read()
             payload = await self.client.async_get_app_schedules(
                 include_current_task=False,
                 map_indices=(
-                    [-1, *known_map_indices]
-                    if known_map_indices or map_hints_authoritative
+                    [-1, *request_map_indices]
+                    if request_map_indices or request_map_hints_authoritative
                     else None
                 ),
             )
@@ -487,6 +486,17 @@ class DreameLawnMowerCoordinator(
             and not self._schedule_read_can_publish(action_read_generation)
         ):
             return self.schedules
+        app_maps = getattr(self, "app_maps", None)
+        known_map_indices = _app_map_index_hints(app_maps)
+        map_hints_authoritative = _app_map_hints_are_authoritative(
+            app_maps,
+            refresh_succeeded=getattr(
+                self,
+                "app_maps_refresh_succeeded",
+                False,
+            ),
+        )
+        map_index_hint = self._schedule_map_index_hint()
         expected_indices = _schedule_expected_indices(
             self.schedules,
             payload,
@@ -523,6 +533,42 @@ class DreameLawnMowerCoordinator(
         else:
             if not self._schedule_refresh_is_current(refresh_generation):
                 return self.schedules
+            latest_app_maps = getattr(self, "app_maps", None)
+            latest_map_indices = _app_map_index_hints(latest_app_maps)
+            latest_map_hints_authoritative = _app_map_hints_are_authoritative(
+                latest_app_maps,
+                refresh_succeeded=getattr(
+                    self,
+                    "app_maps_refresh_succeeded",
+                    False,
+                ),
+            )
+            latest_expected_indices = _schedule_expected_indices(
+                self.schedules,
+                payload,
+                latest_map_indices,
+                map_hints_authoritative=latest_map_hints_authoritative,
+            )
+            if (
+                latest_expected_indices != expected_indices
+                or latest_map_hints_authoritative != map_hints_authoritative
+            ):
+                known_map_indices = latest_map_indices
+                map_hints_authoritative = latest_map_hints_authoritative
+                expected_indices = latest_expected_indices
+                self.schedules = merge_app_schedule_payload(
+                    self.schedules,
+                    payload,
+                    expected_indices=expected_indices,
+                )
+                if map_hints_authoritative:
+                    self._prune_pending_schedule_writes(known_map_indices)
+                action_read_complete = set(expected_indices).issubset(
+                    action_read_indices
+                )
+                allow_unknown_batch_slot = not (
+                    map_hints_authoritative and action_read_complete
+                )
             batch_read_succeeded = self._cache_batch_schedules(
                 batch_payload,
                 now=now,

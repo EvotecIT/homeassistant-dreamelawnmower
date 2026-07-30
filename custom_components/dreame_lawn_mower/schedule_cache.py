@@ -399,8 +399,6 @@ def merge_batch_schedule_payload(
             ),
             None,
         )
-        if matching_schedule is None and len(numeric_matching_schedules) == 1:
-            matching_schedule = numeric_matching_schedules[0]
         if matching_schedule is None and hinted_index_is_allowed:
             matching_schedule = next(
                 (
@@ -411,6 +409,8 @@ def merge_batch_schedule_payload(
                 ),
                 None,
             )
+        if matching_schedule is None and len(numeric_matching_schedules) == 1:
+            matching_schedule = numeric_matching_schedules[0]
     else:
         matching_schedule = (
             numeric_matching_schedules[0]
