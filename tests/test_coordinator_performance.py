@@ -1571,6 +1571,38 @@ def test_initial_schedule_payload_prunes_authoritatively_removed_map() -> None:
     assert result["available"] is True
 
 
+def test_pending_plan_overlay_recomputes_enabled_counts() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._pending_schedule_plan_states = {
+        (0, 1): (11, False),
+        (1, 2): (12, True),
+    }
+    coordinator.schedules = {
+        "schedules": [
+            {
+                "idx": 0,
+                "version": 11,
+                "enabled_plan_count": 1,
+                "plans": [{"plan_id": 1, "enabled": True}],
+            },
+            {
+                "idx": 1,
+                "version": 12,
+                "enabled_plan_count": 0,
+                "plans": [{"plan_id": 2, "enabled": False}],
+            },
+        ]
+    }
+
+    coordinator._apply_pending_schedule_plan_states()
+
+    schedules = coordinator.schedules["schedules"]
+    assert schedules[0]["plans"][0]["enabled"] is False
+    assert schedules[0]["enabled_plan_count"] == 0
+    assert schedules[1]["plans"][0]["enabled"] is True
+    assert schedules[1]["enabled_plan_count"] == 1
+
+
 def test_non_authoritative_map_subset_preserves_cached_schedule_slots() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator.schedules = {

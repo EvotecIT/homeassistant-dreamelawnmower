@@ -926,9 +926,17 @@ class DreameLawnMowerCoordinator(
                 plans = schedule.get("plans")
                 if not isinstance(plans, Sequence):
                     continue
+                plan_updated = False
                 for plan in plans:
                     if isinstance(plan, dict) and plan.get("plan_id") == plan_id:
                         plan["enabled"] = enabled
+                        plan_updated = True
+                if plan_updated:
+                    schedule["enabled_plan_count"] = sum(
+                        1
+                        for plan in plans
+                        if isinstance(plan, Mapping) and plan.get("enabled")
+                    )
             if (
                 version is not None
                 and not unknown_slot_is_unambiguous
