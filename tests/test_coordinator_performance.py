@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -577,6 +578,67 @@ def test_metadata_hydration_forces_incomplete_app_map_retry() -> None:
         assert "app_maps_retry" in sample["phases_ms"]
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("refresh_method", "cache_attr", "refreshed_at_attr", "client_method"),
+    [
+        (
+            "async_refresh_firmware_update_support",
+            "firmware_update_support",
+            "firmware_update_support_refreshed_at",
+            "async_get_firmware_update_support",
+        ),
+        (
+            "async_refresh_app_map_objects",
+            "app_map_objects",
+            "app_map_objects_refreshed_at",
+            "async_get_app_map_objects",
+        ),
+        (
+            "async_refresh_vector_map_details",
+            "vector_map_details",
+            "vector_map_details_refreshed_at",
+            "async_get_vector_map_details",
+        ),
+        (
+            "async_refresh_weather_protection",
+            "weather_protection",
+            "weather_protection_refreshed_at",
+            "async_get_weather_protection",
+        ),
+        (
+            "async_refresh_maintenance_status",
+            "maintenance_status",
+            "maintenance_status_refreshed_at",
+            "async_get_maintenance_status",
+        ),
+        (
+            "async_refresh_voice_settings",
+            "voice_settings",
+            "voice_settings_refreshed_at",
+            "async_get_voice_settings",
+        ),
+    ],
+)
+def test_failed_metadata_refresh_expires_old_cache_marker(
+    refresh_method: str,
+    cache_attr: str,
+    refreshed_at_attr: str,
+    client_method: str,
+) -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    cached = {"cached": True}
+    setattr(coordinator, cache_attr, cached)
+    setattr(coordinator, refreshed_at_attr, datetime.now(UTC))
+    coordinator.client = SimpleNamespace(
+        **{client_method: AsyncMock(side_effect=TimeoutError)}
+    )
+
+    result = asyncio.run(getattr(coordinator, refresh_method)(force=True))
+
+    assert result is cached
+    assert getattr(coordinator, refreshed_at_attr) is None
 
 
 def test_active_session_reuses_verified_map_identity_between_polls() -> None:
@@ -2002,6 +2064,7 @@ def test_schedule_refresh_rejects_batch_hint_after_selected_map_changes() -> Non
         }
         coordinator.schedules_refreshed_at = None
         coordinator.selected_map_index = 0
+        coordinator._pending_schedule_upload_active_indices = {0}
         coordinator.app_maps = {
             "current_map_index": 0,
             "maps": [
@@ -2067,6 +2130,7 @@ def test_schedule_refresh_rejects_batch_hint_after_selected_map_changes() -> Non
         assert result["active_selection_available"] is False
         assert "active_schedule_index" not in result
         assert "active_schedule_version" not in result
+        assert coordinator._pending_schedule_upload_active_indices == set()
         assert result["schedules"][1]["version"] == 21
         assert result["schedules"][2]["version"] == 22
 
@@ -2324,6 +2388,7 @@ def test_batch_metadata_rejects_hint_after_selected_map_changes() -> None:
         coordinator.batch_device_data = None
         coordinator.batch_device_data_refreshed_at = None
         coordinator.selected_map_index = 0
+        coordinator._pending_schedule_upload_active_indices = {0}
         coordinator.app_maps = {
             "current_map_index": 0,
             "maps": [
@@ -2383,6 +2448,7 @@ def test_batch_metadata_rejects_hint_after_selected_map_changes() -> None:
         assert "active_schedule_version" not in coordinator.schedules
         assert "current_task" not in coordinator.schedules
         assert coordinator.schedules["active_selection_available"] is False
+        assert coordinator._pending_schedule_upload_active_indices == set()
         assert coordinator.schedules["schedules"][1]["version"] == 11
         assert coordinator.schedules["schedules"][2]["version"] == 12
         assert coordinator.schedules_refreshed_at is None
@@ -2703,6 +2769,9 @@ def test_shutdown_cancels_shielded_batch_schedule_read() -> None:
         coordinator._client_update_pending = False
         coordinator._client_update_task = None
         coordinator._batch_schedule_read_task = asyncio.create_task(batch_schedule())
+        coordinator._batch_schedule_read_tasks = {
+            coordinator._batch_schedule_read_task
+        }
         coordinator._batch_schedule_read_completed_at = None
         coordinator._metadata_refresh_task = asyncio.create_task(metadata())
         coordinator._metadata_shutdown_close_task = None
@@ -2720,6 +2789,62 @@ def test_shutdown_cancels_shielded_batch_schedule_read() -> None:
         assert batch_cancelled.is_set()
         assert coordinator._batch_schedule_read_task is None
         assert close_calls == ["close"]
+
+    asyncio.run(scenario())
+
+
+def test_shutdown_drains_displaced_keyed_batch_schedule_reads() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        started = {0: asyncio.Event(), 1: asyncio.Event()}
+        cancelled: set[int] = set()
+
+        async def get_batch_schedules(
+            *,
+            map_index_hint: int,
+            **_kwargs,
+        ) -> dict[str, object]:
+            started[map_index_hint].set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.add(map_index_hint)
+                raise
+
+        coordinator.client = SimpleNamespace(
+            async_get_batch_schedules=get_batch_schedules
+        )
+        coordinator._batch_schedule_read_task = None
+        coordinator._batch_schedule_read_tasks = set()
+        coordinator._batch_schedule_read_key = None
+        coordinator._batch_schedule_read_completed_at = None
+
+        first = asyncio.create_task(
+            coordinator._async_get_shared_batch_schedules(
+                map_index_hint=0,
+                force=True,
+            )
+        )
+        await started[0].wait()
+        second = asyncio.create_task(
+            coordinator._async_get_shared_batch_schedules(
+                map_index_hint=1,
+                force=True,
+            )
+        )
+        await started[1].wait()
+
+        first.cancel()
+        with suppress(asyncio.CancelledError):
+            await first
+
+        assert await coordinator._async_drain_batch_schedule_for_shutdown()
+
+        with suppress(asyncio.CancelledError):
+            await second
+        assert cancelled == {0, 1}
+        assert coordinator._batch_schedule_read_tasks == set()
+        assert coordinator._batch_schedule_read_task is None
 
     asyncio.run(scenario())
 

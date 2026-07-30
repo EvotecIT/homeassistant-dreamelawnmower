@@ -142,6 +142,7 @@ class DreameLawnMowerCoordinator(
         self._pending_schedule_upload_contradictions: dict[int, int] = {}
         self._pending_schedule_upload_active_indices: set[int] = set()
         self._batch_schedule_read_task: asyncio.Task[dict[str, Any]] | None = None
+        self._batch_schedule_read_tasks: set[asyncio.Task[dict[str, Any]]] = set()
         self._batch_schedule_read_key: tuple[int | None, bool] | None = None
         self._batch_schedule_read_completed_at: float | None = None
         self._schedule_write_lock = asyncio.Lock()
@@ -1401,12 +1402,21 @@ class DreameLawnMowerCoordinator(
                 self.client.async_get_batch_schedules(**options)
             )
             self._batch_schedule_read_task = task
+            batch_tasks = getattr(self, "_batch_schedule_read_tasks", None)
+            if batch_tasks is None:
+                batch_tasks = set()
+                self._batch_schedule_read_tasks = batch_tasks
+            batch_tasks.add(task)
             self._batch_schedule_read_key = key
             self._batch_schedule_read_completed_at = None
 
             def record_completion(completed: asyncio.Task[dict[str, Any]]) -> None:
                 if getattr(self, "_batch_schedule_read_task", None) is completed:
                     self._batch_schedule_read_completed_at = loop.time()
+                if not completed.cancelled():
+                    with suppress(Exception):
+                        completed.exception()
+                batch_tasks.discard(completed)
 
             task.add_done_callback(record_completion)
         return await asyncio.shield(task)
@@ -1451,6 +1461,7 @@ class DreameLawnMowerCoordinator(
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh firmware update support: %s", err)
+            self.firmware_update_support_refreshed_at = None
             return self.firmware_update_support
 
         self.firmware_update_support = support
@@ -1480,6 +1491,7 @@ class DreameLawnMowerCoordinator(
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh app map objects: %s", err)
+            self.app_map_objects_refreshed_at = None
             return self.app_map_objects
 
         payload = {
@@ -1511,6 +1523,7 @@ class DreameLawnMowerCoordinator(
             vector_map_details = await self.client.async_get_vector_map_details()
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh vector map details: %s", err)
+            self.vector_map_details_refreshed_at = None
             return self.vector_map_details
 
         payload = dict(vector_map_details)
@@ -1626,6 +1639,7 @@ class DreameLawnMowerCoordinator(
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh weather protection: %s", err)
+            self.weather_protection_refreshed_at = None
             return self.weather_protection
 
         payload = dict(weather_protection)
@@ -1658,6 +1672,7 @@ class DreameLawnMowerCoordinator(
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh maintenance status: %s", err)
+            self.maintenance_status_refreshed_at = None
             return self.maintenance_status
 
         payload = dict(maintenance_status)
@@ -1689,6 +1704,7 @@ class DreameLawnMowerCoordinator(
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh voice settings: %s", err)
+            self.voice_settings_refreshed_at = None
             return self.voice_settings
 
         payload = {
@@ -1739,6 +1755,13 @@ class DreameLawnMowerCoordinator(
                     for entry in entries
                     if not isinstance(entry, Mapping) or entry.get("idx") is not None
                 ]
+        pending_active_indices = getattr(
+            self,
+            "_pending_schedule_upload_active_indices",
+            None,
+        )
+        if pending_active_indices is not None:
+            pending_active_indices.clear()
 
     async def async_shutdown(self) -> None:
         """Disconnect client resources."""
