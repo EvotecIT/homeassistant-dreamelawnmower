@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
 from typing import Any
 
@@ -40,10 +40,17 @@ SLOW_METADATA_REFRESH_SECONDS = 30.0
 
 def runtime_tracking_active(snapshot: DreameLawnMowerSnapshot) -> bool:
     """Prefer explicit heartbeat session state over legacy activity state."""
+    activity = getattr(snapshot, "activity", None)
+    state = getattr(snapshot, "state", None)
+    if (
+        getattr(snapshot, "docked", False)
+        or state in {"charging", "charging_completed"}
+    ):
+        return False
     session_active = getattr(snapshot, "mowing_session_active", None)
     if session_active is not None:
         return bool(session_active)
-    return getattr(snapshot, "activity", None) in {"mowing", "paused", "returning"}
+    return activity in {"mowing", "paused", "returning"}
 
 
 class DreameLawnMowerRefreshMixin:
@@ -491,8 +498,20 @@ class DreameLawnMowerRefreshMixin:
     def _metadata_phase_needs_retry(self, phase: str, result: Any) -> bool:
         """Return whether one core phase has not populated its cache yet."""
         if phase == "app_maps":
-            return hasattr(self, "app_maps_refresh_succeeded") and not bool(
-                self.app_maps_refresh_succeeded
+            if not hasattr(self, "app_maps_refresh_succeeded"):
+                return False
+            if not self.app_maps_refresh_succeeded:
+                return True
+            app_maps = getattr(self, "app_maps", None)
+            current_index = active_map_index(app_maps)
+            maps = app_maps.get("maps") if isinstance(app_maps, Mapping) else None
+            if current_index is None or not isinstance(maps, Sequence):
+                return False
+            return not any(
+                isinstance(item, Mapping)
+                and item.get("idx") == current_index
+                and bool(item.get("available"))
+                for item in maps
             )
         refreshed_at_by_phase = {
             "firmware": "firmware_update_support_refreshed_at",

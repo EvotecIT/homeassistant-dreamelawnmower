@@ -105,6 +105,18 @@ def test_runtime_tracking_falls_back_when_heartbeat_state_is_unknown() -> None:
     assert _runtime_tracking_active(snapshot) is True
 
 
+def test_runtime_tracking_rejects_stale_paused_heartbeat_while_docked() -> None:
+    snapshot = SimpleNamespace(
+        mowing_session_active=True,
+        task_status="paused",
+        activity="docked",
+        state="charging_completed",
+        docked=True,
+    )
+
+    assert _runtime_tracking_active(snapshot) is False
+
+
 def test_active_runtime_tracking_uses_fresh_app_map_identity() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     snapshot = SimpleNamespace(

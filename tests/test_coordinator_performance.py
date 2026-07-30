@@ -504,6 +504,30 @@ def test_metadata_hydration_retries_only_missing_core_phase() -> None:
     asyncio.run(scenario())
 
 
+def test_metadata_hydration_retries_incomplete_current_app_map() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.app_maps_refresh_succeeded = True
+    coordinator.app_maps = {
+        "current_map_index": 0,
+        "maps": [
+            {"idx": 0, "available": False},
+            {"idx": 1, "available": True},
+        ],
+    }
+
+    assert coordinator._metadata_phase_needs_retry(
+        "app_maps",
+        coordinator.app_maps,
+    )
+
+    coordinator.app_maps["maps"][0]["available"] = True
+
+    assert not coordinator._metadata_phase_needs_retry(
+        "app_maps",
+        coordinator.app_maps,
+    )
+
+
 def test_active_session_reuses_verified_map_identity_between_polls() -> None:
     async def scenario() -> None:
         coordinator = object.__new__(DreameLawnMowerCoordinator)
