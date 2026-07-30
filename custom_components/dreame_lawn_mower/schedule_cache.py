@@ -398,9 +398,17 @@ def merge_batch_schedule_payload(
         if matching_schedule is None and len(numeric_matching_schedules) == 1:
             matching_schedule = numeric_matching_schedules[0]
     else:
-        matching_schedule = next(
-            iter(numeric_matching_schedules),
-            matching_schedules[0] if matching_schedules else None,
+        matching_schedule = (
+            numeric_matching_schedules[0]
+            if len(numeric_matching_schedules) == 1
+            else next(
+                (
+                    schedule
+                    for schedule in matching_schedules
+                    if schedule.get("idx") is None
+                ),
+                None,
+            )
         )
     if matching_schedule is None and not allow_unknown_slot:
         return None

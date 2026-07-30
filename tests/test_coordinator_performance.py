@@ -116,6 +116,48 @@ def test_batch_schedule_merge_prefers_explicit_hint_on_version_collision() -> No
     assert result["schedules"][1]["plans"][0]["name"] == "Batch"
 
 
+def test_batch_schedule_merge_keeps_unknown_slot_on_unhinted_collision() -> None:
+    existing = {
+        "schedules": [
+            {
+                "idx": -1,
+                "available": True,
+                "version": 8,
+                "plans": [{"plan_id": 1, "name": "Default"}],
+            },
+            {
+                "idx": 2,
+                "available": True,
+                "version": 8,
+                "plans": [{"plan_id": 2, "name": "Garden"}],
+            },
+        ]
+    }
+    incoming = {
+        "schedules": [
+            {
+                "idx": None,
+                "available": True,
+                "version": 8,
+                "plans": [{"plan_id": 3, "name": "Batch"}],
+            }
+        ],
+        "errors": [],
+    }
+
+    result = merge_batch_schedule_payload(
+        existing,
+        incoming,
+        captured_at=datetime(2026, 7, 30, tzinfo=UTC),
+        allow_unknown_slot=True,
+    )
+
+    assert result is not None
+    assert "active_schedule_index" not in result
+    assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 2, None]
+    assert result["schedules"][-1]["plans"][0]["name"] == "Batch"
+
+
 def test_newer_video_safety_snapshot_wins_over_slow_foreground_publication() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator._device_snapshot_generation = 0
