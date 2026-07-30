@@ -575,10 +575,20 @@ class DreameLawnMowerCoordinator(
                 allow_unknown_batch_slot = not (
                     map_hints_authoritative and action_read_complete
                 )
+            allowed_batch_hint_indices = (
+                [map_index_hint]
+                if (
+                    allow_unknown_batch_slot
+                    and map_hints_authoritative
+                    and map_index_hint in known_map_indices
+                )
+                else None
+            )
             batch_read_succeeded = self._cache_batch_schedules(
                 batch_payload,
                 now=now,
                 allow_incomplete=allow_unknown_batch_slot,
+                allowed_hint_indices=allowed_batch_hint_indices,
                 read_generation=batch_read_generation,
                 preserve_indices=action_read_indices,
             )
@@ -618,6 +628,7 @@ class DreameLawnMowerCoordinator(
         *,
         now: datetime,
         allow_incomplete: bool = False,
+        allowed_hint_indices: Sequence[int] | None = None,
         read_generation: int | None = None,
         preserve_indices: Sequence[int] = (),
     ) -> bool:
@@ -641,7 +652,9 @@ class DreameLawnMowerCoordinator(
             captured_at=now,
             allow_unknown_slot=allow_incomplete,
             allowed_hint_indices=(
-                [] if allow_incomplete else [-1, *known_map_indices]
+                allowed_hint_indices
+                if allowed_hint_indices is not None
+                else ([] if allow_incomplete else [-1, *known_map_indices])
             ),
             preserve_indices=preserve_indices,
         )

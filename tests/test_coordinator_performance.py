@@ -1826,6 +1826,83 @@ def test_schedule_refresh_accepts_newer_batch_version_for_known_hinted_map() -> 
     assert result["schedules"][2]["plans"] == [{"plan_id": 9}]
 
 
+def test_partial_schedule_read_honors_validated_selected_map_hint() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.schedules = {
+        "source": "app_action_schedule",
+        "schedules": [
+            {"idx": -1, "available": True, "version": 20, "plans": []},
+            {
+                "idx": 0,
+                "available": True,
+                "version": 22,
+                "plans": [{"plan_id": 7}],
+            },
+            {
+                "idx": 1,
+                "available": True,
+                "version": 21,
+                "plans": [{"plan_id": 1}],
+            },
+        ],
+        "errors": [],
+    }
+    coordinator.schedules_refreshed_at = None
+    coordinator.selected_map_index = 1
+    coordinator.app_maps = {
+        "current_map_index": 1,
+        "maps": [
+            {"idx": 0, "created": True},
+            {"idx": 1, "created": True},
+        ],
+        "map_list_valid": True,
+    }
+    coordinator.app_maps_refresh_succeeded = True
+    partial_action = {
+        "source": "app_action_schedule",
+        "schedules": [
+            {"idx": -1, "available": True, "version": 20, "plans": []},
+            {
+                "idx": 0,
+                "available": True,
+                "version": 22,
+                "plans": [{"plan_id": 7}],
+            },
+            {"idx": 1, "available": False, "error": "timed out"},
+        ],
+        "errors": [{"idx": 1, "stage": "schedule", "error": "timed out"}],
+    }
+    batch = {
+        "source": "batch_device_data_schedule",
+        "available": True,
+        "active_schedule_version": 22,
+        "current_task": None,
+        "schedules": [
+            {
+                "idx": 1,
+                "available": True,
+                "version": 22,
+                "plans": [{"plan_id": 9}],
+            }
+        ],
+        "errors": [],
+    }
+    coordinator.client = SimpleNamespace(
+        async_get_app_schedules=AsyncMock(return_value=partial_action),
+        async_get_batch_schedules=AsyncMock(return_value=batch),
+    )
+
+    result = asyncio.run(coordinator.async_refresh_schedules(force=True))
+
+    assert result["active_schedule_version"] == 22
+    assert result["active_schedule_index"] == 1
+    assert result["active_selection_available"] is True
+    assert result["schedules"][1]["idx"] == 0
+    assert result["schedules"][1]["plans"] == [{"plan_id": 7}]
+    assert result["schedules"][2]["idx"] == 1
+    assert result["schedules"][2]["plans"] == [{"plan_id": 9}]
+
+
 def test_schedule_refresh_revalidates_maps_after_action_request() -> None:
     async def scenario() -> None:
         coordinator = object.__new__(DreameLawnMowerCoordinator)
