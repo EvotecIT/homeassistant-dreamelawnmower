@@ -582,7 +582,7 @@ class _DreameLawnMowerClientMapsMixin:
             "errors": [],
         }
         for entry in map_entries:
-            if entry.get("current"):
+            if map_list_valid and entry.get("current"):
                 result["current_map_index"] = entry["idx"]
             if not entry.get("created"):
                 result["maps"].append(entry)

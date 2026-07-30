@@ -408,6 +408,11 @@ def _app_map_entries_are_valid(
     """Return whether MAPL supplied one complete, unambiguous list."""
     raw_entries = _app_action_data(value)
     indices = [entry.get("idx") for entry in entries]
+    current_created_count = sum(
+        1
+        for entry in entries
+        if entry.get("created") is not False and entry.get("current") is True
+    )
     return (
         isinstance(raw_entries, Sequence)
         and not isinstance(raw_entries, str | bytes | bytearray)
@@ -419,6 +424,7 @@ def _app_map_entries_are_valid(
             for index in indices
         )
         and len(set(indices)) == len(indices)
+        and current_created_count <= 1
     )
 
 

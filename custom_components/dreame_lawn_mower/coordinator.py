@@ -618,7 +618,15 @@ class DreameLawnMowerCoordinator(
             # safely choose one slot. Keep the decoded schedules for the
             # diagnostic all-schedules view without presenting them as active.
             self.schedules["active_selection_available"] = False
-        if action_read_succeeded or batch_read_succeeded:
+        action_read_confirms_active_schedule = (
+            action_read_succeeded
+            and isinstance(self.schedules, Mapping)
+            and (
+                self.schedules.get("active_selection_available") is False
+                or self.schedules.get("active_schedule_index") in action_read_indices
+            )
+        )
+        if action_read_confirms_active_schedule or batch_read_succeeded:
             self.schedules_refreshed_at = now
         return self.schedules
 
@@ -1717,7 +1725,20 @@ class DreameLawnMowerCoordinator(
         """Expire schedule selection tied to the previous active map."""
         self.schedules_refreshed_at = None
         if isinstance(getattr(self, "schedules", None), dict):
+            self.schedules.pop("active_schedule_version", None)
+            self.schedules.pop("active_schedule_index", None)
+            self.schedules.pop("current_task", None)
             self.schedules["active_selection_available"] = False
+            entries = self.schedules.get("schedules")
+            if isinstance(entries, Sequence) and not isinstance(
+                entries,
+                str | bytes | bytearray,
+            ):
+                self.schedules["schedules"] = [
+                    entry
+                    for entry in entries
+                    if not isinstance(entry, Mapping) or entry.get("idx") is not None
+                ]
 
     async def async_shutdown(self) -> None:
         """Disconnect client resources."""

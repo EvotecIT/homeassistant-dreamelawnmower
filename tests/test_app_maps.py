@@ -309,6 +309,23 @@ def test_app_maps_mark_missing_map_list_response_invalid() -> None:
     assert result["maps"] == []
 
 
+def test_app_maps_reject_multiple_current_created_maps() -> None:
+    client = _client()
+
+    def app_action(payload):
+        if payload["t"] == "MAPL":
+            return {"r": 0, "d": [[0, 1, 1, 1], [1, 1, 1, 1]]}
+        return None
+
+    client._sync_call_app_action = app_action
+
+    result = client._sync_get_app_maps(include_objects=False)
+
+    assert result["map_list_valid"] is False
+    assert result["current_map_index"] is None
+    assert result["map_count"] == 2
+
+
 def test_app_maps_explain_rejected_point_values_without_exposing_them() -> None:
     client = _client()
     cloud = _FakeAppMapCloud(

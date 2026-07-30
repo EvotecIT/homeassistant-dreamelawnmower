@@ -2182,6 +2182,55 @@ def test_schedule_refresh_does_not_mark_retained_cache_fresh_after_failures() ->
     )
 
 
+def test_schedule_refresh_does_not_mark_unread_active_slot_fresh() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.schedules = {
+        "source": "app_action_schedule_with_batch_refresh",
+        "available": True,
+        "active_schedule_version": 11,
+        "active_schedule_index": 0,
+        "active_selection_available": True,
+        "schedules": [
+            {"idx": -1, "available": True, "version": 10, "plans": []},
+            {
+                "idx": 0,
+                "available": True,
+                "version": 11,
+                "plans": [{"plan_id": 1}],
+            },
+        ],
+        "errors": [],
+    }
+    coordinator.schedules_refreshed_at = None
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {
+        "current_map_index": 0,
+        "map_list_valid": True,
+        "maps": [{"idx": 0, "created": True}],
+    }
+    coordinator.app_maps_refresh_succeeded = True
+    incoming = {
+        "source": "app_action_schedule",
+        "available": True,
+        "schedules": [
+            {"idx": -1, "available": True, "version": 12, "plans": []},
+            {"idx": 0, "available": False, "error": "timed out"},
+        ],
+        "errors": [{"idx": 0, "stage": "schedule", "error": "timed out"}],
+    }
+    coordinator.client = SimpleNamespace(
+        async_get_app_schedules=AsyncMock(return_value=incoming),
+        async_get_batch_schedules=AsyncMock(side_effect=TimeoutError),
+    )
+
+    result = asyncio.run(coordinator.async_refresh_schedules(force=True))
+
+    assert result["active_schedule_index"] == 0
+    assert result["active_schedule_version"] == 11
+    assert result["schedules"][1]["plans"] == [{"plan_id": 1}]
+    assert coordinator.schedules_refreshed_at is None
+
+
 def test_batch_metadata_reuses_fresh_schedule_fetch() -> None:
     async def scenario() -> None:
         coordinator = object.__new__(DreameLawnMowerCoordinator)
@@ -2329,7 +2378,9 @@ def test_batch_metadata_rejects_hint_after_selected_map_changes() -> None:
             "stage": "schedule",
             "error": "active map changed during batch read",
         }
-        assert coordinator.schedules["active_schedule_index"] == 0
+        assert "active_schedule_index" not in coordinator.schedules
+        assert "active_schedule_version" not in coordinator.schedules
+        assert "current_task" not in coordinator.schedules
         assert coordinator.schedules["active_selection_available"] is False
         assert coordinator.schedules["schedules"][1]["version"] == 11
         assert coordinator.schedules["schedules"][2]["version"] == 12
