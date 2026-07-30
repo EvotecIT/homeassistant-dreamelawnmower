@@ -174,15 +174,6 @@ def merge_app_schedule_payload(
         elif schedule_entry_has_usable_data(schedule):
             merged[position] = schedule
 
-    discovered_versions = {
-        schedule.get("version")
-        for schedule in incoming_schedules
-        if schedule_entry_has_usable_data(schedule)
-        and isinstance(schedule.get("idx"), int)
-        and not isinstance(schedule.get("idx"), bool)
-        and isinstance(schedule.get("version"), int)
-        and not isinstance(schedule.get("version"), bool)
-    }
     usable_incoming_by_index = {
         schedule.get("idx"): schedule
         for schedule in incoming_schedules
@@ -190,18 +181,65 @@ def merge_app_schedule_payload(
         and isinstance(schedule.get("idx"), int)
         and not isinstance(schedule.get("idx"), bool)
     }
-    if discovered_versions:
+    discovered_versions = {
+        schedule.get("version")
+        for schedule in usable_incoming_by_index.values()
+        if isinstance(schedule.get("version"), int)
+        and not isinstance(schedule.get("version"), bool)
+    }
+
+    cached_active_version = existing.get("active_schedule_version")
+    cached_active_index = existing.get("active_schedule_index")
+    cached_active_index_is_valid = isinstance(
+        cached_active_index,
+        int,
+    ) and not isinstance(cached_active_index, bool)
+    expected_index_set = set(expected_indices)
+    complete_refresh = expected_index_set.issubset(usable_incoming_by_index)
+    incoming_indices_by_version = {
+        version: {
+            index
+            for index, schedule in usable_incoming_by_index.items()
+            if schedule.get("version") == version
+        }
+        for version in discovered_versions
+    }
+    resolved_fallback_versions = {
+        version
+        for version, indices in incoming_indices_by_version.items()
+        if (
+            cached_active_index_is_valid
+            and cached_active_index in indices
+        )
+        or (complete_refresh and len(indices) == 1)
+    }
+    active_version_indices = incoming_indices_by_version.get(
+        cached_active_version,
+        set(),
+    )
+    if cached_active_index_is_valid:
+        resolved_active_index = (
+            cached_active_index
+            if cached_active_index in active_version_indices
+            else None
+        )
+    else:
+        resolved_active_index = (
+            next(iter(active_version_indices))
+            if complete_refresh and len(active_version_indices) == 1
+            else None
+        )
+    if resolved_fallback_versions:
         merged = [
             schedule
             for schedule in merged
             if not (
                 isinstance(schedule, Mapping)
                 and schedule.get("idx") is None
-                and schedule.get("version") in discovered_versions
+                and schedule.get("version") in resolved_fallback_versions
             )
         ]
 
-    cached_active_version = existing.get("active_schedule_version")
     cached_active_indices = {
         schedule.get("idx")
         for schedule in existing_schedules
@@ -210,13 +248,17 @@ def merge_app_schedule_payload(
         and isinstance(schedule.get("idx"), int)
         and not isinstance(schedule.get("idx"), bool)
     }
-    cached_active_index = existing.get("active_schedule_index")
-    cached_active_index_is_valid = isinstance(
-        cached_active_index,
-        int,
-    ) and not isinstance(cached_active_index, bool)
-    expected_index_set = set(expected_indices)
-    complete_refresh = expected_index_set.issubset(usable_incoming_by_index)
+    ambiguous_active_fallback = (
+        not cached_active_index_is_valid
+        and cached_active_version in discovered_versions
+        and cached_active_version not in resolved_fallback_versions
+        and any(
+            isinstance(schedule, Mapping)
+            and schedule.get("idx") is None
+            and schedule.get("version") == cached_active_version
+            for schedule in existing_schedules
+        )
+    )
     if complete_refresh:
         merged = [
             schedule
@@ -284,6 +326,11 @@ def merge_app_schedule_payload(
     if incoming.get("current_task") is not None:
         normalized["current_task"] = incoming["current_task"]
         normalized["active_selection_available"] = True
+    elif resolved_active_index is not None:
+        normalized["active_schedule_index"] = resolved_active_index
+        normalized["active_selection_available"] = True
+    elif ambiguous_active_fallback:
+        normalized["active_selection_available"] = False
     normalized["available"] = any(
         isinstance(schedule, Mapping) and bool(schedule.get("available"))
         for schedule in merged

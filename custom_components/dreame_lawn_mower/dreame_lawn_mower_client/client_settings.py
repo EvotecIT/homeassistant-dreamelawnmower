@@ -665,11 +665,18 @@ class _DreameLawnMowerClientSettingsMixin:
         include_raw: bool = False,
         map_index_hint: int | None = None,
         discover_map_index: bool = True,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         """Fetch and decode schedule data from batch device data."""
+        if timeout is not None and timeout <= 0:
+            raise ValueError("timeout must be greater than zero.")
+        deadline = time.monotonic() + timeout if timeout is not None else None
         if map_index_hint is None and discover_map_index:
-            map_index_hint = self._sync_get_current_app_map_index()
-        batch_data = self._sync_get_batch_device_data(_batch_schedule_keys())
+            map_index_hint = self._sync_get_current_app_map_index(deadline=deadline)
+        batch_data = self._sync_get_batch_device_data(
+            _batch_schedule_keys(),
+            deadline=deadline,
+        )
         if batch_data is None:
             return {
                 "source": "batch_device_data_schedule",
@@ -689,9 +696,26 @@ class _DreameLawnMowerClientSettingsMixin:
             map_index_hint=map_index_hint,
         )
 
-    def _sync_get_current_app_map_index(self) -> int | None:
+    def _sync_get_current_app_map_index(
+        self,
+        *,
+        deadline: float | None = None,
+    ) -> int | None:
         try:
-            map_list_result = self._sync_call_app_action({"m": "g", "t": "MAPL"})
+            request_options: dict[str, Any] = {}
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                request_options = {
+                    "retry_count": 0,
+                    "timeout": remaining,
+                    "deadline": deadline,
+                }
+            map_list_result = self._sync_call_app_action(
+                {"m": "g", "t": "MAPL"},
+                **request_options,
+            )
             for entry in _normalize_app_map_entries(map_list_result):
                 if entry.get("current"):
                     return _positive_int(entry.get("idx"))

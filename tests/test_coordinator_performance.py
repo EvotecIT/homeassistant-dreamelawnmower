@@ -954,6 +954,64 @@ def test_schedule_refresh_promotes_batch_fallback_when_slot_becomes_known() -> N
             },
         ],
         "active_schedule_version": 12,
+        "active_selection_available": False,
+        "errors": [],
+    }
+    coordinator.schedules_refreshed_at = None
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {
+        "current_map_index": 0,
+        "maps": [{"idx": 0, "created": True}],
+    }
+    incoming = {
+        "source": "app_action_schedule",
+        "schedules": [
+            {"idx": -1, "available": True, "version": 10, "plans": []},
+            {
+                "idx": 0,
+                "available": True,
+                "version": 12,
+                "plans": [{"plan_id": 7}],
+            },
+        ],
+        "errors": [],
+    }
+    coordinator.client = SimpleNamespace(
+        async_get_app_schedules=AsyncMock(return_value=incoming),
+        async_get_batch_schedules=AsyncMock(side_effect=TimeoutError),
+    )
+
+    result = asyncio.run(coordinator.async_refresh_schedules(force=True))
+
+    matching = [
+        schedule
+        for schedule in result["schedules"]
+        if schedule.get("version") == 12
+    ]
+    assert len(matching) == 1
+    assert matching[0]["idx"] == 0
+    assert "writable" not in matching[0]
+    assert result["active_schedule_index"] == 0
+    assert result["active_selection_available"] is True
+
+
+def test_partial_collision_preserves_ambiguous_schedule_fallback() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.schedules = {
+        "source": "app_action_schedule_with_batch_refresh",
+        "schedules": [
+            {"idx": -1, "available": False, "error": "timed out"},
+            {
+                "idx": None,
+                "label": "active_schedule",
+                "writable": False,
+                "available": True,
+                "version": 12,
+                "plans": [{"plan_id": 7}],
+            },
+        ],
+        "active_schedule_version": 12,
+        "active_selection_available": True,
         "errors": [],
     }
     coordinator.schedules_refreshed_at = None
@@ -987,9 +1045,8 @@ def test_schedule_refresh_promotes_batch_fallback_when_slot_becomes_known() -> N
         for schedule in result["schedules"]
         if schedule.get("version") == 12
     ]
-    assert len(matching) == 1
-    assert matching[0]["idx"] == 0
-    assert "writable" not in matching[0]
+    assert {schedule["idx"] for schedule in matching} == {None, 0}
+    assert result["active_selection_available"] is False
 
 
 def test_schedule_refresh_clears_stale_active_version_after_complete_read() -> None:

@@ -1087,10 +1087,18 @@ class DreameMowerDreameHomeCloudProtocol:
 
         return api_response["data"][self._strings[33]]
 
-    def get_batch_device_datas(self, props) -> Any:
+    def get_batch_device_datas(
+        self,
+        props,
+        *,
+        timeout: float = 20,
+        deadline: float | None = None,
+    ) -> Any:
         api_response = self._api_call(
             f"{self._strings[23]}/{self._strings[26]}/{self._strings[44]}",
             {"did": self._did, self._strings[35]: props},
+            timeout=timeout,
+            deadline=deadline,
         )
         if api_response is None or "data" not in api_response:
             return None

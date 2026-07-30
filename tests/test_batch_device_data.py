@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 
 import pytest
 
@@ -103,6 +105,7 @@ class _FakeBatchCloud:
         schedule_text = _schedule_text()
         settings_text = _settings_text()
         self.calls: list[list[str]] = []
+        self.request_options: list[dict[str, float | None]] = []
         self.payload = {
             "SCHEDULE.0": schedule_text,
             "SCHEDULE.info": str(len(schedule_text)),
@@ -115,8 +118,20 @@ class _FakeBatchCloud:
             "prop.s_auto_upgrade": "0",
         }
 
-    def get_batch_device_datas(self, keys: list[str]) -> dict[str, object]:
+    def get_batch_device_datas(
+        self,
+        keys: list[str],
+        *,
+        timeout: float | None = None,
+        deadline: float | None = None,
+    ) -> dict[str, object]:
         self.calls.append(list(keys))
+        self.request_options.append(
+            {
+                "timeout": timeout,
+                "deadline": deadline,
+            }
+        )
         return dict(self.payload)
 
 
@@ -297,6 +312,24 @@ def test_batch_schedule_recovery_can_skip_map_discovery() -> None:
     assert result["schedules"][0]["idx"] is None
     assert len(cloud.calls) == 1
     assert "SCHEDULE.info" in cloud.calls[0]
+
+
+def test_async_batch_schedule_recovery_has_an_overall_deadline() -> None:
+    client = _client()
+    cloud = _FakeBatchCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+    started = time.monotonic()
+
+    result = asyncio.run(
+        client.async_get_batch_schedules(map_index_hint=0)
+    )
+
+    assert result["schedules"][0]["version"] == 19383
+    request_options = cloud.request_options[0]
+    assert request_options["timeout"] is not None
+    assert 0 < request_options["timeout"] <= 5.0
+    assert request_options["deadline"] is not None
+    assert started < request_options["deadline"] <= started + 5.1
 
 
 def test_vector_map_batch_fetch_requests_all_device_sized_path_chunks() -> None:
