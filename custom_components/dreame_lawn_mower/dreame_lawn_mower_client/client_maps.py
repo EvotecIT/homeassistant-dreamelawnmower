@@ -24,6 +24,7 @@ from .app_protocol import (
     mower_state_label,
 )
 from .client_map_helpers import (
+    _app_map_entries_are_valid,
     _app_map_payload_summary,
     _app_map_view_details,
     _app_map_view_summary,
@@ -562,20 +563,10 @@ class _DreameLawnMowerClientMapsMixin:
     ) -> dict[str, Any]:
         chunk_size = _validate_app_map_chunk_size(chunk_size)
         map_list_result = self._sync_call_app_action({"m": "g", "t": "MAPL"})
-        map_list_data = _app_action_data(map_list_result)
         map_entries = _normalize_app_map_entries(map_list_result)
-        map_indices = [entry.get("idx") for entry in map_entries]
-        map_list_valid = (
-            isinstance(map_list_data, Sequence)
-            and not isinstance(map_list_data, str | bytes | bytearray)
-            and len(map_entries) == len(map_list_data)
-            and all(
-                isinstance(index, int)
-                and not isinstance(index, bool)
-                and index >= 0
-                for index in map_indices
-            )
-            and len(set(map_indices)) == len(map_indices)
+        map_list_valid = _app_map_entries_are_valid(
+            map_list_result,
+            map_entries,
         )
         result: dict[str, Any] = {
             "source": "app_action_map",

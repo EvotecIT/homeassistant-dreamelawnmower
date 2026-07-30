@@ -306,6 +306,36 @@ def test_app_schedules_reserve_slot_time_when_map_discovery_times_out(
     assert first_schedule_deadline == pytest.approx(103.75)
 
 
+def test_app_schedules_fall_back_to_likely_slots_when_map_list_is_missing() -> None:
+    client = _client()
+
+    class _MissingMapListCloud(_FakeAppScheduleCloud):
+        def call_app_action(
+            self,
+            payload: dict[str, object],
+            **kwargs: object,
+        ) -> dict[str, object] | None:
+            if payload.get("t") == "MAPL":
+                self.calls.append(payload)
+                self.request_options.append(
+                    {
+                        "command": "MAPL",
+                        "retry_count": kwargs.get("retry_count"),
+                        "timeout": kwargs.get("timeout"),
+                        "deadline": kwargs.get("deadline"),
+                    }
+                )
+                return None
+            return super().call_app_action(payload, **kwargs)
+
+    cloud = _MissingMapListCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+
+    result = client._sync_get_app_schedules(include_current_task=False)
+
+    assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 0, 1]
+
+
 def test_app_schedules_retry_early_slot_with_unused_shared_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -21,6 +21,7 @@ from .client_constants import (
     VOICE_PROMPT_FIELDS,
 )
 from .client_map_helpers import (
+    _app_map_entries_are_valid,
     _normalize_app_map_entries,
 )
 from .client_settings_helpers import (
@@ -1293,9 +1294,10 @@ class _DreameLawnMowerClientSettingsMixin:
                 {"m": "g", "t": "MAPL"},
                 **request_options,
             )
-            detected = [
-                entry["idx"] for entry in _normalize_app_map_entries(map_list_result)
-            ]
+            map_entries = _normalize_app_map_entries(map_list_result)
+            if not _app_map_entries_are_valid(map_list_result, map_entries):
+                return [0, 1]
+            detected = [entry["idx"] for entry in map_entries]
         except Exception:  # noqa: BLE001 - fall back to the two likely map slots
             detected = [0, 1]
         return _dedupe_ints(detected)

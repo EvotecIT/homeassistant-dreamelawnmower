@@ -576,6 +576,20 @@ class DreameLawnMowerCoordinator(
                 read_generation=batch_read_generation,
                 preserve_indices=action_read_indices,
             )
+            batch_schedules = batch_payload.get("schedules")
+            if (
+                not batch_read_succeeded
+                and not allow_unknown_batch_slot
+                and not batch_payload.get("errors")
+                and isinstance(batch_schedules, Sequence)
+                and not isinstance(batch_schedules, str | bytes | bytearray)
+                and len(batch_schedules) == 1
+                and isinstance(batch_schedules[0], Mapping)
+                and isinstance(batch_schedules[0].get("version"), int)
+                and not isinstance(batch_schedules[0].get("version"), bool)
+                and isinstance(self.schedules, dict)
+            ):
+                self.schedules["active_selection_available"] = False
         if not self._schedule_refresh_is_current(refresh_generation):
             return self.schedules
         if (

@@ -401,6 +401,27 @@ def _normalize_app_map_entries(value: Any) -> list[dict[str, Any]]:
     return result
 
 
+def _app_map_entries_are_valid(
+    value: Any,
+    entries: Sequence[Mapping[str, Any]],
+) -> bool:
+    """Return whether MAPL supplied one complete, unambiguous list."""
+    raw_entries = _app_action_data(value)
+    indices = [entry.get("idx") for entry in entries]
+    return (
+        isinstance(raw_entries, Sequence)
+        and not isinstance(raw_entries, str | bytes | bytearray)
+        and len(entries) == len(raw_entries)
+        and all(
+            isinstance(index, int)
+            and not isinstance(index, bool)
+            and index >= 0
+            for index in indices
+        )
+        and len(set(indices)) == len(indices)
+    )
+
+
 def _app_map_payload_summary(value: Any) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         return {"payload_type": _operation_value_type(value)}
