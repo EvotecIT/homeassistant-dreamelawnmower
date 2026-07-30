@@ -450,6 +450,60 @@ def test_metadata_hydration_serializes_shared_vendor_protocol_calls() -> None:
     asyncio.run(scenario())
 
 
+def test_metadata_hydration_retries_only_missing_core_phase() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        app_map_object_calls = 0
+
+        async def refresh_app_map_objects(*, force: bool) -> dict[str, object] | None:
+            nonlocal app_map_object_calls
+            assert force is False
+            app_map_object_calls += 1
+            if app_map_object_calls == 1:
+                return None
+            coordinator.app_map_objects_refreshed_at = object()
+            return {"app_map_objects": []}
+
+        async def complete(*_args, **_kwargs) -> None:
+            return None
+
+        coordinator.performance = DreameLawnMowerPerformanceTracker()
+        coordinator._metadata_refresh_count = 0
+        coordinator._metadata_refresh_task = None
+        coordinator._metadata_refresh_semaphore = asyncio.Semaphore(
+            METADATA_REFRESH_CONCURRENCY
+        )
+        coordinator._shutting_down = False
+        coordinator.app_map_objects_refreshed_at = None
+        coordinator.async_update_listeners = Mock()
+        coordinator.async_refresh_app_map_objects = refresh_app_map_objects
+        coordinator.async_refresh_schedules = complete
+        coordinator.async_refresh_batch_device_data = complete
+        coordinator._async_refresh_bluetooth_state = complete
+        coordinator.async_refresh_firmware_update_support = complete
+        coordinator.async_refresh_vector_map_details = complete
+        coordinator.async_refresh_weather_protection = complete
+        coordinator.async_refresh_maintenance_status = complete
+        coordinator.async_refresh_voice_settings = complete
+
+        with patch(
+            "custom_components.dreame_lawn_mower.coordinator_refresh."
+            "METADATA_RETRY_DELAY_SECONDS",
+            0,
+        ):
+            await coordinator._async_refresh_metadata(
+                refresh_map_and_runtime=False,
+            )
+
+        assert app_map_object_calls == 2
+        assert coordinator.async_update_listeners.call_count == 3
+        sample = coordinator.performance.as_dict()["samples"][-1]
+        assert sample["outcome"] == "completed"
+        assert "app_map_objects_retry" in sample["phases_ms"]
+
+    asyncio.run(scenario())
+
+
 def test_active_session_reuses_verified_map_identity_between_polls() -> None:
     async def scenario() -> None:
         coordinator = object.__new__(DreameLawnMowerCoordinator)

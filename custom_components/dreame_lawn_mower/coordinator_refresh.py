@@ -32,6 +32,7 @@ _LOGGER = logging.getLogger(__name__)
 # requests session. Keep its background calls serialized until that owner
 # provides an explicit concurrency contract.
 METADATA_REFRESH_CONCURRENCY = 1
+METADATA_RETRY_DELAY_SECONDS = 2.0
 METADATA_SHUTDOWN_GRACE_SECONDS = 5.0
 SLOW_FOREGROUND_REFRESH_SECONDS = 15.0
 SLOW_METADATA_REFRESH_SECONDS = 30.0
@@ -297,14 +298,14 @@ class DreameLawnMowerRefreshMixin:
         current_task = asyncio.current_task()
         tasks: list[asyncio.Task[Any]] = []
         try:
+            core_operations: list[
+                tuple[str, Callable[[], Awaitable[Any]]]
+            ] = []
             if refresh_map_and_runtime:
-                tasks.append(
-                    asyncio.create_task(
-                        self._async_run_metadata_phase(
-                            cycle,
-                            "app_maps",
-                            lambda: self.async_refresh_app_maps(force=False),
-                        )
+                core_operations.append(
+                    (
+                        "app_maps",
+                        lambda: self.async_refresh_app_maps(force=False),
                     )
                 )
 
@@ -339,12 +340,13 @@ class DreameLawnMowerRefreshMixin:
                 ),
             )
 
-            tasks.extend(
+            core_operations.extend(operations)
+            tasks = [
                 asyncio.create_task(
                     self._async_run_metadata_phase(cycle, phase, operation)
                 )
-                for phase, operation in operations
-            )
+                for phase, operation in core_operations
+            ]
 
             core_results = await asyncio.gather(*tasks, return_exceptions=True)
             core_unexpected = [
@@ -364,6 +366,58 @@ class DreameLawnMowerRefreshMixin:
                 self, "_metadata_refresh_publish", True
             ):
                 self.async_update_listeners()
+
+            retry_operations = [
+                (phase, operation)
+                for (phase, operation), result in zip(
+                    core_operations,
+                    core_results,
+                    strict=True,
+                )
+                if self._metadata_phase_needs_retry(phase, result)
+            ]
+            if retry_operations:
+                await asyncio.sleep(METADATA_RETRY_DELAY_SECONDS)
+                tasks = [
+                    asyncio.create_task(
+                        self._async_run_metadata_phase(
+                            cycle,
+                            f"{phase}_retry",
+                            operation,
+                        )
+                    )
+                    for phase, operation in retry_operations
+                ]
+                retry_results = await asyncio.gather(
+                    *tasks,
+                    return_exceptions=True,
+                )
+                retry_failures = [
+                    result
+                    for (phase, _operation), result in zip(
+                        retry_operations,
+                        retry_results,
+                        strict=True,
+                    )
+                    if self._metadata_phase_needs_retry(phase, result)
+                ]
+                if retry_failures:
+                    outcome = "partial"
+                    _LOGGER.debug(
+                        "Optional mower core metadata remained incomplete "
+                        "after one bounded retry: %s",
+                        ", ".join(
+                            type(error).__name__
+                            if isinstance(error, Exception)
+                            else "empty"
+                            for error in retry_failures
+                        ),
+                    )
+                if (
+                    not self._shutting_down
+                    and getattr(self, "_metadata_refresh_publish", True)
+                ):
+                    self.async_update_listeners()
 
             tasks = [
                 asyncio.create_task(
@@ -433,6 +487,25 @@ class DreameLawnMowerRefreshMixin:
                 self._schedule_metadata_refresh(
                     refresh_map_and_runtime=True,
                 )
+
+    def _metadata_phase_needs_retry(self, phase: str, result: Any) -> bool:
+        """Return whether one core phase has not populated its cache yet."""
+        if phase == "app_maps":
+            return hasattr(self, "app_maps_refresh_succeeded") and not bool(
+                self.app_maps_refresh_succeeded
+            )
+        refreshed_at_by_phase = {
+            "firmware": "firmware_update_support_refreshed_at",
+            "app_map_objects": "app_map_objects_refreshed_at",
+            "vector_map": "vector_map_details_refreshed_at",
+            "weather": "weather_protection_refreshed_at",
+            "maintenance": "maintenance_status_refreshed_at",
+            "voice": "voice_settings_refreshed_at",
+        }
+        marker = refreshed_at_by_phase.get(phase)
+        if marker is None or not hasattr(self, marker):
+            return False
+        return isinstance(result, Exception) or getattr(self, marker) is None
 
     async def _async_run_metadata_phase(
         self,
