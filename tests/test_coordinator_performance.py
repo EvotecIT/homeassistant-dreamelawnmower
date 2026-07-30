@@ -32,6 +32,9 @@ from custom_components.dreame_lawn_mower.coordinator import (
 from custom_components.dreame_lawn_mower.performance import (
     DreameLawnMowerPerformanceTracker,
 )
+from custom_components.dreame_lawn_mower.schedule_cache import (
+    merge_batch_schedule_payload,
+)
 
 
 def test_coordinator_registers_its_config_entry_with_home_assistant() -> None:
@@ -68,6 +71,48 @@ def test_coordinator_registers_its_config_entry_with_home_assistant() -> None:
     client.set_update_callback.assert_called_once_with(
         coordinator._handle_client_update
     )
+
+
+def test_batch_schedule_merge_prefers_explicit_hint_on_version_collision() -> None:
+    existing = {
+        "schedules": [
+            {
+                "idx": -1,
+                "available": True,
+                "version": 8,
+                "plans": [{"plan_id": 1, "name": "Default"}],
+            },
+            {
+                "idx": 2,
+                "available": True,
+                "version": 8,
+                "plans": [{"plan_id": 2, "name": "Garden"}],
+            },
+        ]
+    }
+    incoming = {
+        "schedules": [
+            {
+                "idx": 2,
+                "available": True,
+                "version": 8,
+                "plans": [{"plan_id": 3, "name": "Batch"}],
+            }
+        ],
+        "errors": [],
+    }
+
+    result = merge_batch_schedule_payload(
+        existing,
+        incoming,
+        captured_at=datetime(2026, 7, 30, tzinfo=UTC),
+        allow_unknown_slot=True,
+    )
+
+    assert result is not None
+    assert result["schedules"][0]["plans"][0]["name"] == "Default"
+    assert result["schedules"][1]["idx"] == 2
+    assert result["schedules"][1]["plans"][0]["name"] == "Batch"
 
 
 def test_newer_video_safety_snapshot_wins_over_slow_foreground_publication() -> None:

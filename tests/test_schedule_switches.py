@@ -293,6 +293,48 @@ def test_schedule_write_keeps_confirmed_toggle_when_batch_readback_lags() -> Non
     coordinator.async_update_listeners.assert_called_once()
 
 
+def test_pending_schedule_toggle_expires_after_repeated_contradictory_reads() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._pending_schedule_plan_states = {(1, 2): (8, False)}
+    coordinator.schedules = {
+        "schedules": [
+            {
+                "idx": 1,
+                "available": True,
+                "version": 8,
+                "plans": [{"plan_id": 2, "enabled": True}],
+            }
+        ]
+    }
+    contradictory_payload = {
+        "schedules": [
+            {
+                "idx": 1,
+                "available": True,
+                "version": 8,
+                "plans": [{"plan_id": 2, "enabled": True}],
+            }
+        ]
+    }
+
+    coordinator._acknowledge_pending_schedule_plan_states(
+        contradictory_payload
+    )
+    coordinator._apply_pending_schedule_plan_states()
+
+    assert coordinator._pending_schedule_plan_states == {(1, 2): (8, False)}
+    assert coordinator.schedules["schedules"][0]["plans"][0]["enabled"] is False
+
+    coordinator.schedules = contradictory_payload
+    coordinator._acknowledge_pending_schedule_plan_states(
+        contradictory_payload
+    )
+    coordinator._apply_pending_schedule_plan_states()
+
+    assert coordinator._pending_schedule_plan_states == {}
+    assert coordinator.schedules["schedules"][0]["plans"][0]["enabled"] is True
+
+
 def test_schedule_upload_invalidates_unknown_active_fallback_by_version() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator._schedule_write_lock = asyncio.Lock()

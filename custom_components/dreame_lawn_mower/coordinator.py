@@ -68,6 +68,7 @@ VOICE_SETTINGS_REFRESH_INTERVAL = timedelta(minutes=5)
 SCHEDULE_REFRESH_INTERVAL = timedelta(minutes=5)
 FIRMWARE_UPDATE_REFRESH_INTERVAL = timedelta(minutes=15)
 DEVICE_SNAPSHOT_GENERATION_HISTORY = 32
+PENDING_SCHEDULE_PLAN_MAX_CONTRADICTORY_READS = 1
 
 
 _runtime_tracking_active = runtime_tracking_active
@@ -126,6 +127,10 @@ class DreameLawnMowerCoordinator(
         self._pending_schedule_plan_states: dict[
             tuple[int, int],
             tuple[int | None, bool],
+        ] = {}
+        self._pending_schedule_plan_state_contradictions: dict[
+            tuple[int, int],
+            int,
         ] = {}
         self._schedule_write_lock = asyncio.Lock()
         self._preference_write_lock = asyncio.Lock()
@@ -633,6 +638,17 @@ class DreameLawnMowerCoordinator(
                 schedule_version,
                 bool(enabled),
             )
+            pending_contradictions = getattr(
+                self,
+                "_pending_schedule_plan_state_contradictions",
+                None,
+            )
+            if pending_contradictions is None:
+                pending_contradictions = {}
+                self._pending_schedule_plan_state_contradictions = (
+                    pending_contradictions
+                )
+            pending_contradictions.pop((map_index, plan_id), None)
             self._reconcile_cached_schedule_plan_enabled(
                 map_index=map_index,
                 plan_id=plan_id,
@@ -690,6 +706,16 @@ class DreameLawnMowerCoordinator(
         schedules = payload.get("schedules")
         if not pending_states or not isinstance(schedules, Sequence):
             return
+        pending_contradictions = getattr(
+            self,
+            "_pending_schedule_plan_state_contradictions",
+            None,
+        )
+        if pending_contradictions is None:
+            pending_contradictions = {}
+            self._pending_schedule_plan_state_contradictions = (
+                pending_contradictions
+            )
         for key, (version, enabled) in tuple(pending_states.items()):
             map_index, plan_id = key
             schedule = next(
@@ -706,6 +732,7 @@ class DreameLawnMowerCoordinator(
                 continue
             if version is not None and schedule.get("version") != version:
                 pending_states.pop(key, None)
+                pending_contradictions.pop(key, None)
                 continue
             plans = schedule.get("plans")
             plan = next(
@@ -718,6 +745,17 @@ class DreameLawnMowerCoordinator(
             )
             if plan is None or bool(plan.get("enabled")) == enabled:
                 pending_states.pop(key, None)
+                pending_contradictions.pop(key, None)
+                continue
+            contradictory_reads = pending_contradictions.get(key, 0) + 1
+            if (
+                contradictory_reads
+                > PENDING_SCHEDULE_PLAN_MAX_CONTRADICTORY_READS
+            ):
+                pending_states.pop(key, None)
+                pending_contradictions.pop(key, None)
+            else:
+                pending_contradictions[key] = contradictory_reads
 
     def _apply_pending_schedule_plan_states(self) -> None:
         """Keep confirmed toggles visible while cloud readbacks lag."""
@@ -783,9 +821,15 @@ class DreameLawnMowerCoordinator(
             self._invalidate_inflight_schedule_refreshes()
             pending_states = getattr(self, "_pending_schedule_plan_states", None)
             if pending_states:
+                pending_contradictions = getattr(
+                    self,
+                    "_pending_schedule_plan_state_contradictions",
+                    {},
+                )
                 for key in tuple(pending_states):
                     if key[0] == map_index:
                         pending_states.pop(key, None)
+                        pending_contradictions.pop(key, None)
             # Never let a recently cached pre-upload payload hide the new plans.
             self.schedules = invalidate_schedule_slot(
                 getattr(self, "schedules", None),

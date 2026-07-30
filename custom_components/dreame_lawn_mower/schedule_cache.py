@@ -298,15 +298,33 @@ def merge_batch_schedule_payload(
         if isinstance(schedule, Mapping)
         and schedule.get("version") == batch_version
     ]
-    matching_schedule = next(
-        (
-            schedule
-            for schedule in matching_schedules
-            if isinstance(schedule.get("idx"), int)
-            and not isinstance(schedule.get("idx"), bool)
-        ),
-        matching_schedules[0] if matching_schedules else None,
+    hinted_index = batch_schedule.get("idx")
+    hinted_index_is_valid = isinstance(hinted_index, int) and not isinstance(
+        hinted_index,
+        bool,
     )
+    numeric_matching_schedules = [
+        schedule
+        for schedule in matching_schedules
+        if isinstance(schedule.get("idx"), int)
+        and not isinstance(schedule.get("idx"), bool)
+    ]
+    if hinted_index_is_valid:
+        matching_schedule = next(
+            (
+                schedule
+                for schedule in numeric_matching_schedules
+                if schedule.get("idx") == hinted_index
+            ),
+            None,
+        )
+        if matching_schedule is None and len(numeric_matching_schedules) == 1:
+            matching_schedule = numeric_matching_schedules[0]
+    else:
+        matching_schedule = next(
+            iter(numeric_matching_schedules),
+            matching_schedules[0] if matching_schedules else None,
+        )
     if matching_schedule is None and not allow_unknown_slot:
         return None
     if matching_schedule is not None:
