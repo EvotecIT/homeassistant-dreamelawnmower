@@ -1313,7 +1313,7 @@ class DreameLawnMowerCoordinator(
         force: bool = False,
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], int]:
         """Fetch batch schedule, settings, and OTA payloads in parallel."""
-        cached_schedule = self._fresh_batch_schedule()
+        cached_schedule = None if force else self._fresh_batch_schedule()
         if cached_schedule is None:
             schedule_generation = self._begin_schedule_read()
             map_index_hint = self._schedule_map_index_hint()
@@ -1580,6 +1580,7 @@ class DreameLawnMowerCoordinator(
                 self.selected_contour_id = None
                 self.selected_zone_id = None
                 self.selected_spot_id = None
+                self.selected_maintenance_point_id = None
             self.selected_map_index = current_idx
         elif (
             self.selected_map_index is not None
@@ -1591,6 +1592,7 @@ class DreameLawnMowerCoordinator(
             self.selected_contour_id = None
             self.selected_zone_id = None
             self.selected_spot_id = None
+            self.selected_maintenance_point_id = None
         return payload
 
     async def async_refresh_weather_protection(

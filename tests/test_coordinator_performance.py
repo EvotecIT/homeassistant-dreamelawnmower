@@ -2214,6 +2214,46 @@ def test_batch_metadata_reuses_fresh_schedule_fetch() -> None:
     asyncio.run(scenario())
 
 
+def test_forced_batch_metadata_bypasses_fresh_merged_schedule_cache() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        coordinator.schedules = {
+            "source": "app_action_schedule_with_batch_refresh",
+            "available": True,
+            "schedules": [{"idx": 0, "version": 11, "plans": []}],
+            "errors": [],
+        }
+        coordinator.schedules_refreshed_at = datetime.now(UTC)
+        coordinator.app_maps = {"current_map_index": 0}
+        fresh_batch_schedule = {
+            "source": "batch_device_data_schedule",
+            "available": True,
+            "schedules": [{"idx": 0, "version": 12, "plans": []}],
+            "errors": [],
+        }
+        coordinator.client = SimpleNamespace(
+            async_get_batch_schedules=AsyncMock(return_value=fresh_batch_schedule),
+            async_get_batch_mowing_preferences=AsyncMock(
+                return_value={"maps": []}
+            ),
+            async_get_batch_ota_info=AsyncMock(return_value={"available": True}),
+        )
+
+        schedule, preferences, ota, _generation = (
+            await coordinator._async_fetch_batch_device_data(force=True)
+        )
+
+        assert schedule is fresh_batch_schedule
+        assert preferences == {"maps": []}
+        assert ota == {"available": True}
+        coordinator.client.async_get_batch_schedules.assert_awaited_once_with(
+            include_raw=False,
+            map_index_hint=0,
+        )
+
+    asyncio.run(scenario())
+
+
 def test_batch_metadata_rejects_hint_after_selected_map_changes() -> None:
     async def scenario() -> None:
         coordinator = object.__new__(DreameLawnMowerCoordinator)
