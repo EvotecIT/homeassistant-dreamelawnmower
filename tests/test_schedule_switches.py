@@ -335,6 +335,40 @@ def test_pending_schedule_toggle_expires_after_repeated_contradictory_reads() ->
     assert coordinator.schedules["schedules"][0]["plans"][0]["enabled"] is True
 
 
+def test_pending_toggle_does_not_mutate_ambiguous_active_fallback() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._pending_schedule_plan_states = {(0, 1): (8, True)}
+    coordinator.schedules = {
+        "active_schedule_version": 8,
+        "active_schedule_index": None,
+        "active_selection_available": True,
+        "schedules": [
+            {
+                "idx": 0,
+                "version": 8,
+                "plans": [{"plan_id": 1, "enabled": False}],
+            },
+            {
+                "idx": 1,
+                "version": 8,
+                "plans": [{"plan_id": 1, "enabled": False}],
+            },
+            {
+                "idx": None,
+                "version": 8,
+                "plans": [{"plan_id": 1, "enabled": False}],
+            },
+        ],
+    }
+
+    coordinator._apply_pending_schedule_plan_states()
+
+    assert coordinator.schedules["schedules"][0]["plans"][0]["enabled"] is True
+    assert coordinator.schedules["schedules"][1]["plans"][0]["enabled"] is False
+    assert coordinator.schedules["schedules"][2]["plans"][0]["enabled"] is False
+    assert coordinator.schedules["active_selection_available"] is False
+
+
 def test_schedule_upload_invalidates_unknown_active_fallback_by_version() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator._schedule_write_lock = asyncio.Lock()
@@ -617,6 +651,88 @@ def test_schedule_upload_overrides_lagging_batch_readback() -> None:
     assert uploaded_slot["plans"] == uploaded_plans
     assert coordinator.schedules["active_schedule_index"] == 0
     assert coordinator._pending_schedule_uploads[0]["plans"] == uploaded_plans
+
+
+def test_schedule_upload_confirmation_restores_known_active_slot() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._schedule_write_lock = asyncio.Lock()
+    uploaded_plans = [
+        {
+            "plan_id": 1,
+            "enabled": True,
+            "name": "New",
+            "weeks": [],
+        }
+    ]
+    coordinator.client = SimpleNamespace(
+        async_plan_app_schedule_upload=AsyncMock(
+            return_value={
+                "executed": True,
+                "request_count": 2,
+                "version": 8,
+            }
+        ),
+        async_get_app_schedules=AsyncMock(
+            return_value={
+                "source": "app_action_schedule",
+                "schedules": [
+                    {"idx": -1, "available": True, "version": 7, "plans": []},
+                    {
+                        "idx": 0,
+                        "available": True,
+                        "version": 8,
+                        "plans": uploaded_plans,
+                    },
+                ],
+                "errors": [],
+            }
+        ),
+        async_get_batch_schedules=AsyncMock(side_effect=TimeoutError),
+    )
+    coordinator.async_update_listeners = Mock()
+    coordinator.last_schedule_write_result = None
+    coordinator.schedules_refreshed_at = object()
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {
+        "current_map_index": 0,
+        "maps": [{"idx": 0, "created": True}],
+    }
+    coordinator.schedules = {
+        "active_schedule_version": 8,
+        "active_schedule_index": 0,
+        "active_selection_available": True,
+        "schedules": [
+            {"idx": -1, "available": True, "version": 7, "plans": []},
+            {
+                "idx": 0,
+                "available": True,
+                "version": 8,
+                "plans": [
+                    {
+                        "plan_id": 1,
+                        "enabled": False,
+                        "name": "Old",
+                        "weeks": [],
+                    }
+                ],
+            },
+        ],
+    }
+
+    asyncio.run(
+        coordinator.async_plan_schedule_upload(
+            map_index=0,
+            plans=uploaded_plans,
+            chunk_size=100,
+            execute=True,
+            confirm_write=True,
+        )
+    )
+
+    assert coordinator._pending_schedule_uploads == {}
+    assert coordinator.schedules["active_schedule_version"] == 8
+    assert coordinator.schedules["active_schedule_index"] == 0
+    assert coordinator.schedules["active_selection_available"] is True
 
 
 def test_schedule_upload_discards_refresh_started_before_confirmed_write() -> None:

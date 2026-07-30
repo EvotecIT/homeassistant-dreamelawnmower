@@ -139,6 +139,7 @@ class DreameLawnMowerCoordinator(
         ] = {}
         self._pending_schedule_uploads: dict[int, dict[str, Any]] = {}
         self._pending_schedule_upload_contradictions: dict[int, int] = {}
+        self._pending_schedule_upload_active_indices: set[int] = set()
         self._schedule_write_lock = asyncio.Lock()
         self._preference_write_lock = asyncio.Lock()
         self._device_refresh_lock = asyncio.Lock()
@@ -778,6 +779,15 @@ class DreameLawnMowerCoordinator(
         if not pending_states or not isinstance(schedules, Sequence):
             return
         for (map_index, plan_id), (version, enabled) in pending_states.items():
+            matching_numeric_indices = {
+                schedule.get("idx")
+                for schedule in schedules
+                if isinstance(schedule, Mapping)
+                and schedule.get("version") == version
+                and isinstance(schedule.get("idx"), int)
+                and not isinstance(schedule.get("idx"), bool)
+            }
+            unknown_slot_is_unambiguous = matching_numeric_indices == {map_index}
             for schedule in schedules:
                 if not isinstance(schedule, dict) or not (
                     schedule.get("idx") == map_index
@@ -785,6 +795,7 @@ class DreameLawnMowerCoordinator(
                         version is not None
                         and schedule.get("idx") is None
                         and schedule.get("version") == version
+                        and unknown_slot_is_unambiguous
                     )
                 ):
                     continue
@@ -796,6 +807,19 @@ class DreameLawnMowerCoordinator(
                 for plan in plans:
                     if isinstance(plan, dict) and plan.get("plan_id") == plan_id:
                         plan["enabled"] = enabled
+            if (
+                version is not None
+                and not unknown_slot_is_unambiguous
+                and isinstance(self.schedules, dict)
+                and self.schedules.get("active_schedule_index") is None
+                and any(
+                    isinstance(schedule, Mapping)
+                    and schedule.get("idx") is None
+                    and schedule.get("version") == version
+                    for schedule in schedules
+                )
+            ):
+                self.schedules["active_selection_available"] = False
 
     def _remember_pending_schedule_upload(
         self,
@@ -860,6 +884,21 @@ class DreameLawnMowerCoordinator(
             pending_contradictions = {}
             self._pending_schedule_upload_contradictions = pending_contradictions
         pending_contradictions.pop(map_index, None)
+        pending_active_indices = getattr(
+            self,
+            "_pending_schedule_upload_active_indices",
+            None,
+        )
+        if pending_active_indices is None:
+            pending_active_indices = set()
+            self._pending_schedule_upload_active_indices = pending_active_indices
+        if (
+            isinstance(getattr(self, "schedules", None), Mapping)
+            and self.schedules.get("active_schedule_index") == map_index
+        ):
+            pending_active_indices.add(map_index)
+        else:
+            pending_active_indices.discard(map_index)
 
     def _acknowledge_pending_schedule_uploads(
         self,
@@ -878,6 +917,14 @@ class DreameLawnMowerCoordinator(
         if pending_contradictions is None:
             pending_contradictions = {}
             self._pending_schedule_upload_contradictions = pending_contradictions
+        pending_active_indices = getattr(
+            self,
+            "_pending_schedule_upload_active_indices",
+            None,
+        )
+        if pending_active_indices is None:
+            pending_active_indices = set()
+            self._pending_schedule_upload_active_indices = pending_active_indices
 
         for map_index, pending_schedule in tuple(pending_uploads.items()):
             schedule = next(
@@ -899,10 +946,19 @@ class DreameLawnMowerCoordinator(
             ):
                 pending_uploads.pop(map_index, None)
                 pending_contradictions.pop(map_index, None)
+                pending_active_indices.discard(map_index)
                 continue
             if schedule.get("plans") == pending_schedule.get("plans"):
+                if (
+                    map_index in pending_active_indices
+                    and isinstance(self.schedules, dict)
+                ):
+                    self.schedules["active_schedule_version"] = pending_version
+                    self.schedules["active_schedule_index"] = map_index
+                    self.schedules["active_selection_available"] = True
                 pending_uploads.pop(map_index, None)
                 pending_contradictions.pop(map_index, None)
+                pending_active_indices.discard(map_index)
                 continue
             contradictory_reads = pending_contradictions.get(map_index, 0) + 1
             if (
@@ -911,6 +967,7 @@ class DreameLawnMowerCoordinator(
             ):
                 pending_uploads.pop(map_index, None)
                 pending_contradictions.pop(map_index, None)
+                pending_active_indices.discard(map_index)
             else:
                 pending_contradictions[map_index] = contradictory_reads
 
