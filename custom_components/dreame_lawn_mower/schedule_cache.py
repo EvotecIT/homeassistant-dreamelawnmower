@@ -102,12 +102,23 @@ def invalidate_schedule_slot(
     normalized = dict(existing)
     normalized["schedules"] = retained
     cached_active_version = normalized.get("active_schedule_version")
-    if (
-        isinstance(cached_active_version, int)
-        and not isinstance(cached_active_version, bool)
-        and cached_active_version in invalidated_versions
-    ):
+    cached_active_index = normalized.get("active_schedule_index")
+    active_index_is_valid = isinstance(cached_active_index, int) and not isinstance(
+        cached_active_index,
+        bool,
+    )
+    active_slot_invalidated = (
+        cached_active_index == map_index
+        if active_index_is_valid
+        else (
+            isinstance(cached_active_version, int)
+            and not isinstance(cached_active_version, bool)
+            and cached_active_version in invalidated_versions
+        )
+    )
+    if active_slot_invalidated:
         normalized.pop("active_schedule_version", None)
+        normalized.pop("active_schedule_index", None)
         normalized["active_selection_available"] = False
         current_task = normalized.get("current_task")
         if (
@@ -199,9 +210,14 @@ def merge_app_schedule_payload(
         and isinstance(schedule.get("idx"), int)
         and not isinstance(schedule.get("idx"), bool)
     }
-    complete_refresh = set(expected_indices).issubset(usable_incoming_by_index)
+    cached_active_index = existing.get("active_schedule_index")
+    cached_active_index_is_valid = isinstance(
+        cached_active_index,
+        int,
+    ) and not isinstance(cached_active_index, bool)
+    expected_index_set = set(expected_indices)
+    complete_refresh = expected_index_set.issubset(usable_incoming_by_index)
     if complete_refresh:
-        expected_index_set = set(expected_indices)
         merged = [
             schedule
             for schedule in merged
@@ -212,19 +228,32 @@ def merge_app_schedule_payload(
                 and schedule.get("idx") not in expected_index_set
             )
         ]
-    active_version_invalidated = (
-        isinstance(cached_active_version, int)
-        and not isinstance(cached_active_version, bool)
-        and cached_active_version not in discovered_versions
-        and incoming.get("current_task") is None
-        and (
-            complete_refresh
+    if cached_active_index_is_valid:
+        refreshed_active_slot = usable_incoming_by_index.get(cached_active_index)
+        active_version_invalidated = incoming.get("current_task") is None and (
+            (
+                refreshed_active_slot is not None
+                and refreshed_active_slot.get("version") != cached_active_version
+            )
             or (
-                bool(cached_active_indices)
-                and cached_active_indices.issubset(usable_incoming_by_index)
+                complete_refresh
+                and cached_active_index not in expected_index_set
             )
         )
-    )
+    else:
+        active_version_invalidated = (
+            isinstance(cached_active_version, int)
+            and not isinstance(cached_active_version, bool)
+            and cached_active_version not in discovered_versions
+            and incoming.get("current_task") is None
+            and (
+                complete_refresh
+                or (
+                    bool(cached_active_indices)
+                    and cached_active_indices.issubset(usable_incoming_by_index)
+                )
+            )
+        )
     if active_version_invalidated:
         merged = [
             schedule
@@ -236,6 +265,7 @@ def merge_app_schedule_payload(
             )
         ]
         normalized.pop("active_schedule_version", None)
+        normalized.pop("active_schedule_index", None)
         current_task = normalized.get("current_task")
         if (
             isinstance(current_task, Mapping)
@@ -380,6 +410,11 @@ def merge_batch_schedule_payload(
         for schedule in normalized["schedules"]
     )
     normalized["active_schedule_version"] = batch_version
+    active_index = batch_schedule.get("idx")
+    if isinstance(active_index, int) and not isinstance(active_index, bool):
+        normalized["active_schedule_index"] = active_index
+    else:
+        normalized.pop("active_schedule_index", None)
     normalized["active_selection_available"] = True
     if incoming.get("current_task") is not None:
         normalized["current_task"] = incoming["current_task"]

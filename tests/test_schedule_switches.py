@@ -355,6 +355,7 @@ def test_schedule_upload_invalidates_unknown_active_fallback_by_version() -> Non
     coordinator.schedules_refreshed_at = object()
     coordinator.schedules = {
         "active_schedule_version": 8,
+        "active_schedule_index": 1,
         "active_selection_available": True,
         "current_task": {"version": 8},
         "schedules": [
@@ -384,6 +385,7 @@ def test_schedule_upload_invalidates_unknown_active_fallback_by_version() -> Non
         -1
     ]
     assert "active_schedule_version" not in coordinator.schedules
+    assert "active_schedule_index" not in coordinator.schedules
     assert coordinator.schedules["active_selection_available"] is False
     assert "current_task" not in coordinator.schedules
     assert coordinator.schedules_refreshed_at is None

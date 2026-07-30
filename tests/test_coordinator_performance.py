@@ -110,6 +110,7 @@ def test_batch_schedule_merge_prefers_explicit_hint_on_version_collision() -> No
     )
 
     assert result is not None
+    assert result["active_schedule_index"] == 2
     assert result["schedules"][0]["plans"][0]["name"] == "Default"
     assert result["schedules"][1]["idx"] == 2
     assert result["schedules"][1]["plans"][0]["name"] == "Batch"
@@ -996,7 +997,7 @@ def test_schedule_refresh_clears_stale_active_version_after_complete_read() -> N
     coordinator.schedules = {
         "source": "app_action_schedule_with_batch_refresh",
         "schedules": [
-            {"idx": -1, "available": True, "version": 10, "plans": []},
+            {"idx": -1, "available": True, "version": 11, "plans": []},
             {"idx": 0, "available": True, "version": 11, "plans": []},
             {
                 "idx": None,
@@ -1007,6 +1008,7 @@ def test_schedule_refresh_clears_stale_active_version_after_complete_read() -> N
             },
         ],
         "active_schedule_version": 11,
+        "active_schedule_index": 0,
         "current_task": {"version": 11},
         "errors": [],
     }
@@ -1019,7 +1021,7 @@ def test_schedule_refresh_clears_stale_active_version_after_complete_read() -> N
     incoming = {
         "source": "app_action_schedule",
         "schedules": [
-            {"idx": -1, "available": True, "version": 20, "plans": []},
+            {"idx": -1, "available": True, "version": 11, "plans": []},
             {"idx": 0, "available": True, "version": 21, "plans": []},
         ],
         "errors": [],
@@ -1032,8 +1034,9 @@ def test_schedule_refresh_clears_stale_active_version_after_complete_read() -> N
     result = asyncio.run(coordinator.async_refresh_schedules(force=True))
 
     assert "active_schedule_version" not in result
+    assert "active_schedule_index" not in result
     assert "current_task" not in result
-    assert [schedule["version"] for schedule in result["schedules"]] == [20, 21]
+    assert [schedule["version"] for schedule in result["schedules"]] == [11, 21]
 
 
 def test_schedule_refresh_preserves_active_version_when_its_slot_fails() -> None:

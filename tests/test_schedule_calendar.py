@@ -151,6 +151,58 @@ def test_schedule_calendar_events_prefer_current_task_version() -> None:
     assert [event.start.hour for event in all_events] == [8, 10, 10]
 
 
+def test_schedule_calendar_events_filter_same_version_by_active_index() -> None:
+    payload = {
+        "active_schedule_version": 8,
+        "active_schedule_index": 2,
+        "schedules": [
+            {
+                "idx": -1,
+                "version": 8,
+                "plans": [
+                    {
+                        "plan_id": 1,
+                        "enabled": True,
+                        "weeks": [
+                            {
+                                "week_day": 0,
+                                "tasks": [{"start": 8 * 60, "end": 9 * 60}],
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "idx": 2,
+                "version": 8,
+                "plans": [
+                    {
+                        "plan_id": 2,
+                        "enabled": True,
+                        "weeks": [
+                            {
+                                "week_day": 0,
+                                "tasks": [{"start": 10 * 60, "end": 11 * 60}],
+                            }
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+    start = datetime(2026, 4, 19, 0, 0, tzinfo=UTC)
+    end = datetime(2026, 4, 20, 0, 0, tzinfo=UTC)
+
+    events = schedule_calendar_events(payload, start, end)
+    selection = schedule_calendar_selection(payload)
+
+    assert len(events) == 1
+    assert events[0].start == datetime(2026, 4, 19, 10, 0, tzinfo=UTC)
+    assert selection["active_index"] == 2
+    assert [schedule["idx"] for schedule in selection["included_schedules"]] == [2]
+    assert [schedule["idx"] for schedule in selection["hidden_schedules"]] == [-1]
+
+
 def test_active_calendar_hides_slots_when_active_selection_is_unavailable() -> None:
     payload = {
         "active_selection_available": False,
