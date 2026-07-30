@@ -138,6 +138,7 @@ def merge_app_schedule_payload(
     incoming: Mapping[str, Any],
     *,
     expected_indices: Sequence[int],
+    prune_unexpected_indices: bool = False,
 ) -> dict[str, Any]:
     """Merge successful action slots while retaining cached failed slots."""
     if not isinstance(existing, Mapping):
@@ -196,6 +197,7 @@ def merge_app_schedule_payload(
     ) and not isinstance(cached_active_index, bool)
     expected_index_set = set(expected_indices)
     complete_refresh = expected_index_set.issubset(usable_incoming_by_index)
+    can_prune_unexpected_indices = complete_refresh or prune_unexpected_indices
     incoming_indices_by_version = {
         version: {
             index
@@ -259,7 +261,7 @@ def merge_app_schedule_payload(
             for schedule in existing_schedules
         )
     )
-    if complete_refresh:
+    if can_prune_unexpected_indices:
         merged = [
             schedule
             for schedule in merged
@@ -278,7 +280,7 @@ def merge_app_schedule_payload(
                 and refreshed_active_slot.get("version") != cached_active_version
             )
             or (
-                complete_refresh
+                can_prune_unexpected_indices
                 and cached_active_index not in expected_index_set
             )
         )
@@ -290,6 +292,11 @@ def merge_app_schedule_payload(
             and incoming.get("current_task") is None
             and (
                 complete_refresh
+                or (
+                    prune_unexpected_indices
+                    and bool(cached_active_indices)
+                    and cached_active_indices.isdisjoint(expected_index_set)
+                )
                 or (
                     bool(cached_active_indices)
                     and cached_active_indices.issubset(usable_incoming_by_index)

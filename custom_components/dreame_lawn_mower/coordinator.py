@@ -507,6 +507,7 @@ class DreameLawnMowerCoordinator(
             self.schedules,
             payload,
             expected_indices=expected_indices,
+            prune_unexpected_indices=map_hints_authoritative,
         )
         if action_read_succeeded:
             self._record_schedule_read_publication(action_read_generation)
@@ -563,6 +564,7 @@ class DreameLawnMowerCoordinator(
                     self.schedules,
                     payload,
                     expected_indices=expected_indices,
+                    prune_unexpected_indices=map_hints_authoritative,
                 )
                 if map_hints_authoritative:
                     self._prune_pending_schedule_writes(known_map_indices)
@@ -1300,9 +1302,10 @@ class DreameLawnMowerCoordinator(
         cached_schedule = self._fresh_batch_schedule()
         if cached_schedule is None:
             schedule_generation = self._begin_schedule_read()
+            map_index_hint = self._schedule_map_index_hint()
             schedule, preferences, ota = await asyncio.gather(
                 self._async_get_shared_batch_schedules(
-                    map_index_hint=self._schedule_map_index_hint(),
+                    map_index_hint=map_index_hint,
                     force=force,
                 ),
                 self.client.async_get_batch_mowing_preferences(
@@ -1311,6 +1314,8 @@ class DreameLawnMowerCoordinator(
                 ),
                 self.client.async_get_batch_ota_info(include_raw=False),
             )
+            if self._schedule_map_index_hint() != map_index_hint:
+                schedule = _batch_schedule_without_map_hint(schedule)
             return schedule, preferences, ota, schedule_generation
 
         batch_mowing_preferences, batch_ota_info = await asyncio.gather(

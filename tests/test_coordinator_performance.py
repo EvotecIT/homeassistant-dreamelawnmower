@@ -1224,6 +1224,50 @@ def test_schedule_refresh_prunes_deleted_map_after_complete_read() -> None:
     assert [schedule["version"] for schedule in result["schedules"]] == [20, 21]
 
 
+def test_schedule_refresh_prunes_deleted_map_after_partial_read() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.schedules = {
+        "source": "app_action_schedule",
+        "active_schedule_version": 12,
+        "active_schedule_index": 1,
+        "active_selection_available": True,
+        "schedules": [
+            {"idx": -1, "available": True, "version": 10, "plans": []},
+            {"idx": 0, "available": True, "version": 11, "plans": []},
+            {"idx": 1, "available": True, "version": 12, "plans": []},
+        ],
+        "errors": [],
+    }
+    coordinator.schedules_refreshed_at = None
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {
+        "current_map_index": 0,
+        "maps": [{"idx": 0, "created": True}],
+        "map_list_valid": True,
+    }
+    coordinator.app_maps_refresh_succeeded = True
+    incoming = {
+        "source": "app_action_schedule",
+        "schedules": [
+            {"idx": -1, "available": True, "version": 20, "plans": []},
+            {"idx": 0, "available": False, "error": "timed out"},
+        ],
+        "errors": [{"idx": 0, "stage": "schedule", "error": "timed out"}],
+    }
+    coordinator.client = SimpleNamespace(
+        async_get_app_schedules=AsyncMock(return_value=incoming),
+        async_get_batch_schedules=AsyncMock(side_effect=TimeoutError),
+    )
+
+    result = asyncio.run(coordinator.async_refresh_schedules(force=True))
+
+    assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 0]
+    assert [schedule["version"] for schedule in result["schedules"]] == [20, 11]
+    assert result["active_selection_available"] is False
+    assert "active_schedule_version" not in result
+    assert "active_schedule_index" not in result
+
+
 def test_schedule_refresh_keeps_auto_discovered_maps_without_app_hints() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator.schedules = {
@@ -1831,6 +1875,85 @@ def test_batch_metadata_reuses_fresh_schedule_fetch() -> None:
         assert ota == {"available": True}
         assert generation == 0
         coordinator.client.async_get_batch_schedules.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
+def test_batch_metadata_rejects_hint_after_selected_map_changes() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        coordinator.schedules = {
+            "source": "app_action_schedule",
+            "available": True,
+            "active_schedule_version": 11,
+            "active_schedule_index": 0,
+            "active_selection_available": True,
+            "schedules": [
+                {"idx": -1, "available": True, "version": 10, "plans": []},
+                {"idx": 0, "available": True, "version": 11, "plans": []},
+                {"idx": 1, "available": True, "version": 12, "plans": []},
+            ],
+            "errors": [],
+        }
+        coordinator.schedules_refreshed_at = None
+        coordinator.batch_device_data = None
+        coordinator.batch_device_data_refreshed_at = None
+        coordinator.selected_map_index = 0
+        coordinator.app_maps = {
+            "current_map_index": 0,
+            "maps": [
+                {"idx": 0, "created": True},
+                {"idx": 1, "created": True},
+            ],
+        }
+        batch_started = asyncio.Event()
+        release_batch = asyncio.Event()
+
+        async def get_batch_schedules(**_kwargs) -> dict[str, object]:
+            batch_started.set()
+            await release_batch.wait()
+            return {
+                "source": "batch_device_data_schedule",
+                "available": True,
+                "active_schedule_version": 22,
+                "current_task": None,
+                "schedules": [
+                    {
+                        "idx": 0,
+                        "available": True,
+                        "version": 22,
+                        "plans": [],
+                    }
+                ],
+                "errors": [],
+            }
+
+        coordinator.client = SimpleNamespace(
+            async_get_batch_schedules=get_batch_schedules,
+            async_get_batch_mowing_preferences=AsyncMock(
+                return_value={"maps": []}
+            ),
+            async_get_batch_ota_info=AsyncMock(return_value={"available": True}),
+        )
+
+        refresh_task = asyncio.create_task(
+            coordinator.async_refresh_batch_device_data(force=True)
+        )
+        await batch_started.wait()
+        coordinator._invalidate_schedule_map_hint()
+        coordinator.selected_map_index = 1
+        coordinator.app_maps["current_map_index"] = 1
+        release_batch.set()
+        result = await refresh_task
+
+        assert result is not None
+        batch_schedule = result["batch_schedule"]
+        assert batch_schedule["schedules"][0]["idx"] is None
+        assert coordinator.schedules["active_schedule_index"] == 0
+        assert coordinator.schedules["active_selection_available"] is False
+        assert coordinator.schedules["schedules"][1]["version"] == 11
+        assert coordinator.schedules["schedules"][2]["version"] == 12
+        assert coordinator.schedules_refreshed_at is None
 
     asyncio.run(scenario())
 
