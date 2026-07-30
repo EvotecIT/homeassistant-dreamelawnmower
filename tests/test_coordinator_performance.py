@@ -1274,6 +1274,19 @@ def test_schedule_refresh_prunes_last_map_after_authoritative_empty_map_list() -
     coordinator.selected_map_index = 0
     coordinator.app_maps = {"maps": []}
     coordinator.app_maps_refresh_succeeded = True
+    coordinator._pending_schedule_plan_states = {(0, 1): (11, False)}
+    coordinator._pending_schedule_plan_state_contradictions = {(0, 1): 1}
+    coordinator._pending_schedule_uploads = {
+        0: {
+            "idx": 0,
+            "available": True,
+            "writable": True,
+            "version": 11,
+            "plans": [{"plan_id": 1}],
+        }
+    }
+    coordinator._pending_schedule_upload_contradictions = {0: 1}
+    coordinator._pending_schedule_upload_active_indices = {0}
     incoming = {
         "source": "app_action_schedule",
         "schedules": [
@@ -1291,6 +1304,11 @@ def test_schedule_refresh_prunes_last_map_after_authoritative_empty_map_list() -
     assert [schedule["idx"] for schedule in result["schedules"]] == [-1]
     assert [schedule["version"] for schedule in result["schedules"]] == [20]
     assert result["active_selection_available"] is False
+    assert coordinator._pending_schedule_plan_states == {}
+    assert coordinator._pending_schedule_plan_state_contradictions == {}
+    assert coordinator._pending_schedule_uploads == {}
+    assert coordinator._pending_schedule_upload_contradictions == {}
+    assert coordinator._pending_schedule_upload_active_indices == set()
     coordinator.client.async_get_app_schedules.assert_awaited_once_with(
         include_current_task=False,
         map_indices=[-1],

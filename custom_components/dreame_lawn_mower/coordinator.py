@@ -500,6 +500,8 @@ class DreameLawnMowerCoordinator(
         )
         if action_read_succeeded:
             self._record_schedule_read_publication(action_read_generation)
+        if map_hints_authoritative:
+            self._prune_pending_schedule_writes(known_map_indices)
         self._acknowledge_pending_schedule_plan_states(payload)
         self._acknowledge_pending_schedule_uploads(payload)
         self._apply_pending_schedule_plan_states()
@@ -820,6 +822,47 @@ class DreameLawnMowerCoordinator(
                 )
             ):
                 self.schedules["active_selection_available"] = False
+
+    def _prune_pending_schedule_writes(
+        self,
+        known_map_indices: Sequence[int],
+    ) -> None:
+        """Drop pending writes for maps absent from authoritative app metadata."""
+        valid_indices = {-1, *known_map_indices}
+        pending_states = getattr(self, "_pending_schedule_plan_states", None)
+        pending_state_contradictions = getattr(
+            self,
+            "_pending_schedule_plan_state_contradictions",
+            None,
+        )
+        if pending_states:
+            for key in tuple(pending_states):
+                if key[0] in valid_indices:
+                    continue
+                pending_states.pop(key, None)
+                if pending_state_contradictions is not None:
+                    pending_state_contradictions.pop(key, None)
+
+        pending_uploads = getattr(self, "_pending_schedule_uploads", None)
+        pending_upload_contradictions = getattr(
+            self,
+            "_pending_schedule_upload_contradictions",
+            None,
+        )
+        pending_active_indices = getattr(
+            self,
+            "_pending_schedule_upload_active_indices",
+            None,
+        )
+        if pending_uploads:
+            for map_index in tuple(pending_uploads):
+                if map_index in valid_indices:
+                    continue
+                pending_uploads.pop(map_index, None)
+                if pending_upload_contradictions is not None:
+                    pending_upload_contradictions.pop(map_index, None)
+                if pending_active_indices is not None:
+                    pending_active_indices.discard(map_index)
 
     def _remember_pending_schedule_upload(
         self,
