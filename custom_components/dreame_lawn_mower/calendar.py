@@ -190,6 +190,9 @@ def schedule_calendar_events(
         None if include_all_schedules else _active_schedule_version(payload)
     )
     active_index = None if include_all_schedules else _active_schedule_index(payload)
+    filter_active_index = (
+        not include_all_schedules and "active_schedule_index" in payload
+    )
     for day in _candidate_days(local_start.date(), local_end.date()):
         week_day = _schedule_week_day(day)
         for schedule in payload.get("schedules") or []:
@@ -197,7 +200,7 @@ def schedule_calendar_events(
                 continue
             if active_version is not None and schedule.get("version") != active_version:
                 continue
-            if active_index is not None and schedule.get("idx") != active_index:
+            if filter_active_index and schedule.get("idx") != active_index:
                 continue
             map_index = schedule.get("idx")
             map_label = _schedule_label(schedule)
@@ -240,6 +243,9 @@ def schedule_calendar_selection(
         None if include_all_schedules else _active_schedule_version(payload)
     )
     active_index = None if include_all_schedules else _active_schedule_index(payload)
+    filter_active_index = (
+        not include_all_schedules and "active_schedule_index" in payload
+    )
     active_selection_available = (
         include_all_schedules
         or payload.get("active_selection_available") is not False
@@ -252,7 +258,7 @@ def schedule_calendar_selection(
         if not active_selection_available or (
             active_version is not None and schedule.get("version") != active_version
         ) or (
-            active_index is not None and schedule.get("idx") != active_index
+            filter_active_index and schedule.get("idx") != active_index
         ):
             target = hidden_schedules
         target.append(_schedule_selection_entry(schedule))

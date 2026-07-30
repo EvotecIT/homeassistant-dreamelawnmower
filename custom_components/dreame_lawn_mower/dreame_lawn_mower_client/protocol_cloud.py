@@ -9,7 +9,8 @@ import hmac
 import requests
 import zlib
 import queue
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from threading import RLock, Thread, Timer
 from time import sleep
 import time
@@ -182,6 +183,30 @@ class DreameMowerDreameHomeCloudProtocol:
             lock = RLock()
             self._request_lock = lock
         return lock
+
+    @contextmanager
+    def _operation_lock_with_deadline(
+        self,
+        deadline: float | None,
+    ) -> Iterator[None]:
+        """Acquire the shared cloud lock without exceeding an overall deadline."""
+        lock = self._operation_lock()
+        if deadline is None:
+            with lock:
+                yield
+            return
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not lock.acquire(timeout=remaining):
+            raise requests.exceptions.Timeout(
+                "The cloud operation timed out waiting for the shared request lock."
+            )
+        try:
+            if time.monotonic() >= deadline:
+                raise requests.exceptions.Timeout("The cloud operation timed out.")
+            yield
+        finally:
+            lock.release()
 
     def _api_task(self):
         while True:
@@ -376,7 +401,7 @@ class DreameMowerDreameHomeCloudProtocol:
         *,
         deadline: float | None = None,
     ) -> bool:
-        with self._operation_lock():
+        with self._operation_lock_with_deadline(deadline):
             return self._login_unlocked(timeout, deadline=deadline)
 
     def _login_unlocked(
@@ -845,7 +870,7 @@ class DreameMowerDreameHomeCloudProtocol:
         on_dispatch: Callable[[], None] | None = None,
         raise_on_api_error: bool = False,
     ) -> Any:
-        with self._operation_lock():
+        with self._operation_lock_with_deadline(deadline):
             return self._send_unlocked(
                 method,
                 parameters,
@@ -1125,7 +1150,7 @@ class DreameMowerDreameHomeCloudProtocol:
         redact_response: bool = False,
         on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
-        with self._operation_lock():
+        with self._operation_lock_with_deadline(deadline):
             return self._request_unlocked(
                 url,
                 data,

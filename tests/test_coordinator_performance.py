@@ -153,7 +153,7 @@ def test_batch_schedule_merge_keeps_unknown_slot_on_unhinted_collision() -> None
     )
 
     assert result is not None
-    assert "active_schedule_index" not in result
+    assert result["active_schedule_index"] is None
     assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 2, None]
     assert result["schedules"][-1]["plans"][0]["name"] == "Batch"
 

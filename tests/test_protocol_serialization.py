@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import time
 from threading import Event, RLock, Thread
+
+import requests
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     protocol_cloud,
@@ -49,6 +52,43 @@ def test_cloud_request_lock_serializes_app_and_device_operations() -> None:
     assert not send_thread.is_alive()
     assert send_started.is_set()
     assert sorted(results) == ["request", "send"]
+
+
+def test_cloud_request_deadline_includes_waiting_for_shared_lock() -> None:
+    cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
+    cloud._request_lock = RLock()
+    cloud._request_unlocked = lambda *_args, **_kwargs: "unexpected"
+    errors: list[Exception] = []
+
+    cloud._request_lock.acquire()
+    try:
+        request_thread = Thread(
+            target=lambda: _capture_request_error(
+                cloud,
+                deadline=time.monotonic() + 0.05,
+                errors=errors,
+            )
+        )
+        request_thread.start()
+        request_thread.join(timeout=0.5)
+    finally:
+        cloud._request_lock.release()
+
+    assert not request_thread.is_alive()
+    assert len(errors) == 1
+    assert isinstance(errors[0], requests.exceptions.Timeout)
+
+
+def _capture_request_error(
+    cloud: protocol_cloud.DreameMowerDreameHomeCloudProtocol,
+    *,
+    deadline: float,
+    errors: list[Exception],
+) -> None:
+    try:
+        cloud.request("https://example.invalid", None, deadline=deadline)
+    except Exception as err:  # noqa: BLE001 - thread forwards the observed failure
+        errors.append(err)
 
 
 def test_app_action_retries_reads_but_dispatches_mutations_once() -> None:

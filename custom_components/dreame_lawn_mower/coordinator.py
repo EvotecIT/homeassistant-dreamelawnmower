@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -44,6 +45,10 @@ from .diagnostic_events import DreameLawnMowerDiagnosticEventStore
 from .dreame_lawn_mower_client.models import (
     DreameLawnMowerStatusBlob,
     display_name_for_model,
+)
+from .dreame_lawn_mower_client.schedule import (
+    decode_schedule_payload_text,
+    encode_schedule_payload_text,
 )
 from .performance import DreameLawnMowerPerformanceTracker
 from .runtime_cache import DreameLawnMowerRuntimeTelemetryCache
@@ -132,6 +137,8 @@ class DreameLawnMowerCoordinator(
             tuple[int, int],
             int,
         ] = {}
+        self._pending_schedule_uploads: dict[int, dict[str, Any]] = {}
+        self._pending_schedule_upload_contradictions: dict[int, int] = {}
         self._schedule_write_lock = asyncio.Lock()
         self._preference_write_lock = asyncio.Lock()
         self._device_refresh_lock = asyncio.Lock()
@@ -493,7 +500,9 @@ class DreameLawnMowerCoordinator(
         if action_read_succeeded:
             self._record_schedule_read_publication(action_read_generation)
         self._acknowledge_pending_schedule_plan_states(payload)
+        self._acknowledge_pending_schedule_uploads(payload)
         self._apply_pending_schedule_plan_states()
+        self._apply_pending_schedule_uploads()
         action_read_indices = _usable_schedule_indices(payload)
         batch_read_succeeded = False
         try:
@@ -574,6 +583,7 @@ class DreameLawnMowerCoordinator(
         if read_generation is not None:
             self._record_schedule_read_publication(read_generation)
         self._apply_pending_schedule_plan_states()
+        self._apply_pending_schedule_uploads()
         return True
 
     def _has_complete_schedule_cache(
@@ -787,6 +797,164 @@ class DreameLawnMowerCoordinator(
                     if isinstance(plan, dict) and plan.get("plan_id") == plan_id:
                         plan["enabled"] = enabled
 
+    def _remember_pending_schedule_upload(
+        self,
+        *,
+        map_index: int,
+        plans: Sequence[Mapping[str, Any]],
+        schedule_version: int | None,
+    ) -> None:
+        """Retain a confirmed full upload until an action read settles it."""
+        normalized_plans = decode_schedule_payload_text(
+            encode_schedule_payload_text(list(plans))
+        )
+        schedules = (
+            self.schedules.get("schedules")
+            if isinstance(getattr(self, "schedules", None), Mapping)
+            else None
+        )
+        cached_schedule = next(
+            (
+                schedule
+                for schedule in schedules or []
+                if isinstance(schedule, Mapping)
+                and schedule.get("idx") == map_index
+            ),
+            None,
+        )
+        if schedule_version is None and isinstance(cached_schedule, Mapping):
+            cached_version = cached_schedule.get("version")
+            if isinstance(cached_version, int) and not isinstance(
+                cached_version,
+                bool,
+            ):
+                schedule_version = cached_version
+
+        pending_schedule: dict[str, Any] = {
+            "idx": map_index,
+            "available": bool(normalized_plans),
+            "writable": True,
+            "version": schedule_version,
+            "plan_count": len(normalized_plans),
+            "enabled_plan_count": sum(
+                1 for plan in normalized_plans if plan.get("enabled")
+            ),
+            "plans": normalized_plans,
+        }
+        if isinstance(cached_schedule, Mapping):
+            for key in ("label", "name"):
+                if key in cached_schedule:
+                    pending_schedule[key] = cached_schedule[key]
+
+        pending_uploads = getattr(self, "_pending_schedule_uploads", None)
+        if pending_uploads is None:
+            pending_uploads = {}
+            self._pending_schedule_uploads = pending_uploads
+        pending_uploads[map_index] = pending_schedule
+        pending_contradictions = getattr(
+            self,
+            "_pending_schedule_upload_contradictions",
+            None,
+        )
+        if pending_contradictions is None:
+            pending_contradictions = {}
+            self._pending_schedule_upload_contradictions = pending_contradictions
+        pending_contradictions.pop(map_index, None)
+
+    def _acknowledge_pending_schedule_uploads(
+        self,
+        payload: Mapping[str, Any],
+    ) -> None:
+        """Settle full uploads only from authoritative action-slot reads."""
+        pending_uploads = getattr(self, "_pending_schedule_uploads", None)
+        schedules = payload.get("schedules")
+        if not pending_uploads or not isinstance(schedules, Sequence):
+            return
+        pending_contradictions = getattr(
+            self,
+            "_pending_schedule_upload_contradictions",
+            None,
+        )
+        if pending_contradictions is None:
+            pending_contradictions = {}
+            self._pending_schedule_upload_contradictions = pending_contradictions
+
+        for map_index, pending_schedule in tuple(pending_uploads.items()):
+            schedule = next(
+                (
+                    entry
+                    for entry in schedules
+                    if isinstance(entry, Mapping)
+                    and entry.get("idx") == map_index
+                    and schedule_entry_has_usable_data(entry)
+                ),
+                None,
+            )
+            if schedule is None:
+                continue
+            pending_version = pending_schedule.get("version")
+            if (
+                pending_version is not None
+                and schedule.get("version") != pending_version
+            ):
+                pending_uploads.pop(map_index, None)
+                pending_contradictions.pop(map_index, None)
+                continue
+            if schedule.get("plans") == pending_schedule.get("plans"):
+                pending_uploads.pop(map_index, None)
+                pending_contradictions.pop(map_index, None)
+                continue
+            contradictory_reads = pending_contradictions.get(map_index, 0) + 1
+            if (
+                contradictory_reads
+                > PENDING_SCHEDULE_PLAN_MAX_CONTRADICTORY_READS
+            ):
+                pending_uploads.pop(map_index, None)
+                pending_contradictions.pop(map_index, None)
+            else:
+                pending_contradictions[map_index] = contradictory_reads
+
+    def _apply_pending_schedule_uploads(self) -> None:
+        """Keep confirmed full uploads visible while cloud readbacks lag."""
+        pending_uploads = getattr(self, "_pending_schedule_uploads", None)
+        schedules = (
+            self.schedules.get("schedules")
+            if isinstance(getattr(self, "schedules", None), dict)
+            else None
+        )
+        if not pending_uploads or not isinstance(schedules, list):
+            return
+
+        for map_index, pending_schedule in pending_uploads.items():
+            replaced = False
+            for position, schedule in enumerate(schedules):
+                if isinstance(schedule, Mapping) and schedule.get("idx") == map_index:
+                    schedules[position] = deepcopy(pending_schedule)
+                    replaced = True
+                    break
+            if not replaced:
+                schedules.append(deepcopy(pending_schedule))
+
+            pending_version = pending_schedule.get("version")
+            unknown_fallback = next(
+                (
+                    schedule
+                    for schedule in schedules
+                    if isinstance(schedule, Mapping)
+                    and schedule.get("idx") is None
+                    and schedule.get("version") == pending_version
+                ),
+                None,
+            )
+            if (
+                isinstance(unknown_fallback, Mapping)
+                and unknown_fallback.get("plans") != pending_schedule.get("plans")
+                and self.schedules.get("active_schedule_index") is None
+            ):
+                # The batch version cannot identify which colliding slot is
+                # active, and its content may predate the confirmed upload.
+                self.schedules["active_selection_available"] = False
+
     async def async_plan_schedule_upload(
         self,
         *,
@@ -830,12 +998,19 @@ class DreameLawnMowerCoordinator(
                     if key[0] == map_index:
                         pending_states.pop(key, None)
                         pending_contradictions.pop(key, None)
+            schedule_version = _schedule_write_version(result)
+            self._remember_pending_schedule_upload(
+                map_index=map_index,
+                plans=plans,
+                schedule_version=schedule_version,
+            )
             # Never let a recently cached pre-upload payload hide the new plans.
             self.schedules = invalidate_schedule_slot(
                 getattr(self, "schedules", None),
                 map_index,
-                schedule_version=_schedule_write_version(result),
+                schedule_version=schedule_version,
             )
+            self._apply_pending_schedule_uploads()
             self.schedules_refreshed_at = None
             try:
                 await self.async_refresh_schedules(force=True)

@@ -469,7 +469,10 @@ def merge_batch_schedule_payload(
     if isinstance(active_index, int) and not isinstance(active_index, bool):
         normalized["active_schedule_index"] = active_index
     else:
-        normalized.pop("active_schedule_index", None)
+        # Keep an explicit unknown-slot selection so calendar consumers can
+        # filter to the authoritative idx=None fallback instead of treating a
+        # missing numeric index as "include every slot with this version".
+        normalized["active_schedule_index"] = None
     normalized["active_selection_available"] = True
     if incoming.get("current_task") is not None:
         normalized["current_task"] = incoming["current_task"]
