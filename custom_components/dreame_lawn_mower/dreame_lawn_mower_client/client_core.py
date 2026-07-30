@@ -610,11 +610,28 @@ class _DreameLawnMowerClientCoreMixin:
     def _sync_get_batch_device_data(
         self,
         keys: Sequence[str] | None = None,
+        *,
+        deadline: float | None = None,
     ) -> Mapping[str, Any] | None:
-        cloud = self._sync_get_cloud_protocol()
+        cloud = (
+            self._sync_get_cloud_protocol(deadline=deadline)
+            if deadline is not None
+            else self._sync_get_cloud_protocol()
+        )
         requested = list(keys or [])
         try:
-            response = cloud.get_batch_device_datas(requested)
+            request_options: dict[str, Any] = {}
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise DreameLawnMowerConnectionError(
+                        "Batch device-data request timed out."
+                    )
+                request_options = {
+                    "timeout": remaining,
+                    "deadline": deadline,
+                }
+            response = cloud.get_batch_device_datas(requested, **request_options)
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
         return response if isinstance(response, Mapping) else None

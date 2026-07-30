@@ -29,6 +29,8 @@ _STREAM_HEALTH_ATTEMPTS = 3
 _STREAM_HEALTH_RETRY_INTERVAL = 0.5
 _STREAM_HEALTH_TIMEOUT = 3.0
 _STREAM_HEALTH_BYTES = 16
+
+
 def option_text(entry: ConfigEntry, key: str) -> str | None:
     """Return a trimmed non-empty string option."""
     value = entry.options.get(key)
@@ -118,7 +120,14 @@ def managed_runtime_environment() -> dict[str, str | bool | int]:
         if supported
         else "unsupported"
     )
-    libc_name, libc_version = platform.libc_ver()
+    libc_name = "unknown"
+    libc_version = "unknown"
+    try:
+        libc_description = os.confstr("CS_GNU_LIBC_VERSION")
+    except (AttributeError, OSError, ValueError):
+        libc_description = None
+    if libc_description:
+        libc_name, _, libc_version = libc_description.partition(" ")
     return {
         "system": system,
         "machine": normalized_machine,

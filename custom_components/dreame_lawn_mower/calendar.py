@@ -181,8 +181,17 @@ def schedule_calendar_events(
         return []
 
     events: list[CalendarEvent] = []
+    if (
+        not include_all_schedules
+        and payload.get("active_selection_available") is False
+    ):
+        return events
     active_version = (
         None if include_all_schedules else _active_schedule_version(payload)
+    )
+    active_index = None if include_all_schedules else _active_schedule_index(payload)
+    filter_active_index = (
+        not include_all_schedules and "active_schedule_index" in payload
     )
     for day in _candidate_days(local_start.date(), local_end.date()):
         week_day = _schedule_week_day(day)
@@ -190,6 +199,8 @@ def schedule_calendar_events(
             if not isinstance(schedule, Mapping):
                 continue
             if active_version is not None and schedule.get("version") != active_version:
+                continue
+            if filter_active_index and schedule.get("idx") != active_index:
                 continue
             map_index = schedule.get("idx")
             map_label = _schedule_label(schedule)
@@ -231,12 +242,24 @@ def schedule_calendar_selection(
     active_version = (
         None if include_all_schedules else _active_schedule_version(payload)
     )
+    active_index = None if include_all_schedules else _active_schedule_index(payload)
+    filter_active_index = (
+        not include_all_schedules and "active_schedule_index" in payload
+    )
+    active_selection_available = (
+        include_all_schedules
+        or payload.get("active_selection_available") is not False
+    )
     included_schedules: list[dict[str, Any]] = []
     hidden_schedules: list[dict[str, Any]] = []
 
     for schedule in schedules:
         target = included_schedules
-        if active_version is not None and schedule.get("version") != active_version:
+        if not active_selection_available or (
+            active_version is not None and schedule.get("version") != active_version
+        ) or (
+            filter_active_index and schedule.get("idx") != active_index
+        ):
             target = hidden_schedules
         target.append(_schedule_selection_entry(schedule))
 
@@ -244,13 +267,18 @@ def schedule_calendar_selection(
         "mode": "all_schedules" if include_all_schedules else "active_schedule",
         "active_version": active_version,
         "active_version_filter_applied": bool(
-            active_version is not None and not include_all_schedules
+            (active_version is not None or not active_selection_available)
+            and not include_all_schedules
         ),
         "included_schedule_count": len(included_schedules),
         "hidden_schedule_count": len(hidden_schedules),
         "included_schedules": included_schedules,
         "hidden_schedules": hidden_schedules,
     }
+    if active_index is not None:
+        selection["active_index"] = active_index
+    if not active_selection_available:
+        selection["active_selection_available"] = False
     current_task = payload.get("current_task")
     if isinstance(current_task, Mapping):
         selection["current_task"] = dict(current_task)
@@ -276,12 +304,26 @@ def schedule_calendar_attributes(
 
 def _active_schedule_version(payload: Mapping[str, Any]) -> int | None:
     current_task = payload.get("current_task")
-    if not isinstance(current_task, Mapping):
-        return None
+    if isinstance(current_task, Mapping):
+        try:
+            return int(current_task["version"])
+        except (KeyError, TypeError, ValueError):
+            pass
+
+    active_version = payload.get("active_schedule_version")
     try:
-        return int(current_task["version"])
-    except (KeyError, TypeError, ValueError):
+        return int(active_version) if active_version is not None else None
+    except (TypeError, ValueError):
         return None
+
+
+def _active_schedule_index(payload: Mapping[str, Any]) -> int | None:
+    active_index = payload.get("active_schedule_index")
+    return (
+        active_index
+        if isinstance(active_index, int) and not isinstance(active_index, bool)
+        else None
+    )
 
 
 def _schedule_selection_entry(schedule: Mapping[str, Any]) -> dict[str, Any]:

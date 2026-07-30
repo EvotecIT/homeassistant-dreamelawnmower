@@ -59,7 +59,15 @@ def decode_batch_schedule_payload(
     try:
         payload = json.loads(payload_text)
         version = _to_int(payload.get("v")) if isinstance(payload, Mapping) else None
+        plan_data = payload.get("d") if isinstance(payload, Mapping) else None
+        if not isinstance(plan_data, Sequence) or isinstance(
+            plan_data,
+            str | bytes | bytearray,
+        ):
+            raise ValueError("missing_or_invalid_batch_schedule_plans")
         plans = decode_schedule_payload_text(payload_text)
+        if version is not None:
+            result["active_schedule_version"] = version
         schedule.update(
             {
                 "version": version,

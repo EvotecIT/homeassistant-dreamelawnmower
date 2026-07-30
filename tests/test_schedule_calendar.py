@@ -151,6 +151,150 @@ def test_schedule_calendar_events_prefer_current_task_version() -> None:
     assert [event.start.hour for event in all_events] == [8, 10, 10]
 
 
+def test_schedule_calendar_events_filter_same_version_by_active_index() -> None:
+    payload = {
+        "active_schedule_version": 8,
+        "active_schedule_index": 2,
+        "schedules": [
+            {
+                "idx": -1,
+                "version": 8,
+                "plans": [
+                    {
+                        "plan_id": 1,
+                        "enabled": True,
+                        "weeks": [
+                            {
+                                "week_day": 0,
+                                "tasks": [{"start": 8 * 60, "end": 9 * 60}],
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "idx": 2,
+                "version": 8,
+                "plans": [
+                    {
+                        "plan_id": 2,
+                        "enabled": True,
+                        "weeks": [
+                            {
+                                "week_day": 0,
+                                "tasks": [{"start": 10 * 60, "end": 11 * 60}],
+                            }
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+    start = datetime(2026, 4, 19, 0, 0, tzinfo=UTC)
+    end = datetime(2026, 4, 20, 0, 0, tzinfo=UTC)
+
+    events = schedule_calendar_events(payload, start, end)
+    selection = schedule_calendar_selection(payload)
+
+    assert len(events) == 1
+    assert events[0].start == datetime(2026, 4, 19, 10, 0, tzinfo=UTC)
+    assert selection["active_index"] == 2
+    assert [schedule["idx"] for schedule in selection["included_schedules"]] == [2]
+    assert [schedule["idx"] for schedule in selection["hidden_schedules"]] == [-1]
+
+
+def test_schedule_calendar_filters_to_explicit_unknown_active_slot() -> None:
+    payload = {
+        "active_schedule_version": 8,
+        "active_schedule_index": None,
+        "active_selection_available": True,
+        "schedules": [
+            {
+                "idx": 0,
+                "version": 8,
+                "plans": [
+                    {
+                        "plan_id": 1,
+                        "enabled": True,
+                        "weeks": [
+                            {
+                                "week_day": 0,
+                                "tasks": [{"start": 8 * 60, "end": 9 * 60}],
+                            }
+                        ],
+                    }
+                ],
+            },
+            {
+                "idx": None,
+                "version": 8,
+                "plans": [
+                    {
+                        "plan_id": 2,
+                        "enabled": True,
+                        "weeks": [
+                            {
+                                "week_day": 0,
+                                "tasks": [{"start": 10 * 60, "end": 11 * 60}],
+                            }
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+    start = datetime(2026, 4, 19, 0, 0, tzinfo=UTC)
+    end = datetime(2026, 4, 20, 0, 0, tzinfo=UTC)
+
+    events = schedule_calendar_events(payload, start, end)
+    selection = schedule_calendar_selection(payload)
+
+    assert len(events) == 1
+    assert events[0].start == datetime(2026, 4, 19, 10, 0, tzinfo=UTC)
+    assert [schedule["idx"] for schedule in selection["included_schedules"]] == [None]
+    assert [schedule["idx"] for schedule in selection["hidden_schedules"]] == [0]
+
+
+def test_active_calendar_hides_slots_when_active_selection_is_unavailable() -> None:
+    payload = {
+        "active_selection_available": False,
+        "schedules": [
+            {
+                "idx": 0,
+                "version": 1,
+                "plans": [
+                    {
+                        "plan_id": 0,
+                        "enabled": True,
+                        "weeks": [
+                            {
+                                "week_day": 0,
+                                "tasks": [{"start": 8 * 60, "end": 9 * 60}],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    start = datetime(2026, 4, 19, 0, 0, tzinfo=UTC)
+    end = datetime(2026, 4, 20, 0, 0, tzinfo=UTC)
+
+    assert schedule_calendar_events(payload, start, end) == []
+    assert len(
+        schedule_calendar_events(
+            payload,
+            start,
+            end,
+            include_all_schedules=True,
+        )
+    ) == 1
+    selection = schedule_calendar_selection(payload)
+    assert selection["active_selection_available"] is False
+    assert selection["included_schedule_count"] == 0
+    assert selection["hidden_schedule_count"] == 1
+
+
 def test_all_schedules_calendar_is_diagnostic_disabled_by_default() -> None:
     assert DreameLawnMowerAllSchedulesCalendar._include_all_schedules is True
     assert (
@@ -237,6 +381,53 @@ def test_schedule_calendar_selection_can_include_all_schedules() -> None:
             "version": 19383,
             "enabled_plan_count": 1,
         },
+    ]
+
+
+def test_schedule_selection_uses_batch_version_when_task_probe_is_skipped() -> None:
+    payload = {
+        "active_schedule_version": 12,
+        "current_task": None,
+        "schedules": [
+            {"idx": 0, "version": 8, "enabled_plan_count": 1},
+            {"idx": 1, "version": 12, "enabled_plan_count": 1},
+        ],
+    }
+
+    selection = schedule_calendar_selection(payload)
+
+    assert selection["active_version"] == 12
+    assert selection["active_version_filter_applied"] is True
+    assert selection["included_schedules"] == [
+        {
+            "idx": 1,
+            "label": "map 1",
+            "version": 12,
+            "enabled_plan_count": 1,
+        }
+    ]
+
+
+def test_schedule_selection_can_keep_default_schedule_active_without_schdt() -> None:
+    payload = {
+        "active_schedule_version": 20,
+        "current_task": None,
+        "schedules": [
+            {"idx": -1, "version": 20, "enabled_plan_count": 1},
+            {"idx": 0, "version": 21, "enabled_plan_count": 1},
+        ],
+    }
+
+    selection = schedule_calendar_selection(payload)
+
+    assert selection["active_version"] == 20
+    assert selection["included_schedules"] == [
+        {
+            "idx": -1,
+            "label": "default schedule",
+            "version": 20,
+            "enabled_plan_count": 1,
+        }
     ]
 
 

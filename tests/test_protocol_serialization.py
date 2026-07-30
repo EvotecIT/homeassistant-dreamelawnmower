@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from threading import Event, RLock, Thread
+from unittest.mock import Mock
+
+import requests
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    protocol,
     protocol_cloud,
 )
 
@@ -49,6 +55,245 @@ def test_cloud_request_lock_serializes_app_and_device_operations() -> None:
     assert not send_thread.is_alive()
     assert send_started.is_set()
     assert sorted(results) == ["request", "send"]
+
+
+def test_cloud_request_deadline_includes_waiting_for_shared_lock() -> None:
+    cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
+    cloud._request_lock = RLock()
+    cloud._request_unlocked = lambda *_args, **_kwargs: "unexpected"
+    errors: list[Exception] = []
+
+    cloud._request_lock.acquire()
+    try:
+        request_thread = Thread(
+            target=lambda: _capture_request_error(
+                cloud,
+                deadline=time.monotonic() + 0.05,
+                errors=errors,
+            )
+        )
+        request_thread.start()
+        request_thread.join(timeout=0.5)
+    finally:
+        cloud._request_lock.release()
+
+    assert not request_thread.is_alive()
+    assert len(errors) == 1
+    assert isinstance(errors[0], requests.exceptions.Timeout)
+
+
+def test_deadline_worker_keeps_serialization_until_transport_exits() -> None:
+    cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
+    cloud._request_lock = RLock()
+    transport_started = Event()
+    release_transport = Event()
+    follower_started = Event()
+    errors: list[Exception] = []
+
+    def slow_transport() -> str:
+        transport_started.set()
+        assert release_transport.wait(timeout=1)
+        return "late"
+
+    caller = Thread(
+        target=lambda: _capture_serialized_operation_error(
+            cloud,
+            slow_transport,
+            deadline=time.monotonic() + 0.05,
+            errors=errors,
+        )
+    )
+    caller.start()
+    assert transport_started.wait(timeout=1)
+    caller.join(timeout=0.5)
+
+    assert not caller.is_alive()
+    assert len(errors) == 1
+    assert isinstance(errors[0], requests.exceptions.Timeout)
+
+    follower = Thread(
+        target=lambda: cloud._run_serialized_operation(
+            lambda: follower_started.set(),
+            deadline=None,
+        )
+    )
+    follower.start()
+    assert not follower_started.wait(timeout=0.05)
+
+    release_transport.set()
+    follower.join(timeout=1)
+
+    assert not follower.is_alive()
+    assert follower_started.is_set()
+
+
+def test_cloud_disconnect_does_not_wait_forever_for_deadline_worker() -> None:
+    cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
+    cloud._request_lock = RLock()
+    cloud._connected = True
+    cloud._logged_in = True
+    cloud._message_callback = object()
+    cloud._connected_callback = object()
+    cloud._session = Mock()
+    cloud._thread = None
+    mqtt_client = Mock()
+    cloud._client = mqtt_client
+    cloud._client_connected = True
+    cloud._client_connecting = True
+    lock_held = Event()
+    release_lock = Event()
+
+    def hold_lock() -> None:
+        with cloud._request_lock:
+            lock_held.set()
+            assert release_lock.wait(timeout=1)
+
+    worker = Thread(target=hold_lock)
+    worker.start()
+    assert lock_held.wait(timeout=1)
+
+    started = time.monotonic()
+    disconnected = cloud.disconnect(timeout=0.05)
+    elapsed = time.monotonic() - started
+    release_lock.set()
+    worker.join(timeout=1)
+    cloud._disconnect_cleanup_thread.join(timeout=1)
+
+    assert disconnected is False
+    assert elapsed < 0.5
+    assert not cloud._disconnect_cleanup_thread.is_alive()
+    cloud._session.close.assert_called_once_with()
+    assert cloud._connected is False
+    assert cloud._logged_in is False
+    assert cloud._message_callback is None
+    assert cloud._connected_callback is None
+    assert cloud._client is None
+    assert cloud._client_connected is False
+    assert cloud._client_connecting is False
+    mqtt_client.loop_stop.assert_called_once_with()
+    mqtt_client.disconnect.assert_called_once_with()
+
+
+def test_late_deadline_worker_cannot_restore_state_after_disconnect() -> None:
+    cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
+    cloud._request_lock = RLock()
+    cloud._session = Mock()
+    cloud._connected = True
+    cloud._logged_in = True
+    cloud._message_callback = object()
+    cloud._connected_callback = object()
+    cloud._client = None
+    cloud._client_connected = False
+    cloud._client_connecting = False
+    cloud._thread = None
+    operation_started = Event()
+    release_operation = Event()
+    errors: list[Exception] = []
+
+    def late_operation() -> None:
+        operation_started.set()
+        assert release_operation.wait(timeout=1)
+        if not cloud._disconnect_is_pending():
+            cloud._connected = True
+            cloud._logged_in = True
+
+    caller = Thread(
+        target=lambda: _capture_serialized_operation_error(
+            cloud,
+            late_operation,
+            deadline=time.monotonic() + 0.05,
+            errors=errors,
+        )
+    )
+    caller.start()
+    assert operation_started.wait(timeout=1)
+    caller.join(timeout=0.5)
+
+    disconnected = cloud.disconnect(timeout=0.05)
+    release_operation.set()
+    cloud._disconnect_cleanup_thread.join(timeout=1)
+
+    assert disconnected is False
+    assert len(errors) == 1
+    assert isinstance(errors[0], requests.exceptions.Timeout)
+    assert cloud._connected is False
+    assert cloud._logged_in is False
+    assert cloud._session.close.call_count == 1
+    assert cloud._disconnect_pending is False
+
+
+def test_queued_operation_cannot_restart_cloud_after_disconnect() -> None:
+    cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
+    cloud._request_lock = RLock()
+    cloud._session = Mock()
+    cloud._connected = True
+    cloud._logged_in = True
+    cloud._message_callback = object()
+    cloud._connected_callback = object()
+    cloud._client = None
+    cloud._client_connected = False
+    cloud._client_connecting = False
+    cloud._thread = None
+    operation_started = Event()
+
+    cloud._request_lock.acquire()
+    queued = Thread(
+        target=lambda: cloud._run_serialized_operation(
+            lambda: operation_started.set(),
+            deadline=None,
+        )
+    )
+    queued.start()
+    try:
+        assert cloud.disconnect(timeout=0.05) is True
+    finally:
+        cloud._request_lock.release()
+    queued.join(timeout=1)
+
+    assert not queued.is_alive()
+    assert not operation_started.is_set()
+    assert cloud._shutdown_requested is True
+    assert cloud._disconnect_pending is False
+    assert cloud._connected is False
+    assert cloud._logged_in is False
+
+
+def test_protocol_disconnects_aliased_cloud_only_once() -> None:
+    mower_protocol = object.__new__(protocol.DreameMowerProtocol)
+    cloud = Mock()
+    mower_protocol.cloud = cloud
+    mower_protocol.device_cloud = cloud
+    mower_protocol._connected = True
+
+    mower_protocol.disconnect()
+
+    cloud.disconnect.assert_called_once_with()
+    assert mower_protocol._connected is False
+
+
+def _capture_request_error(
+    cloud: protocol_cloud.DreameMowerDreameHomeCloudProtocol,
+    *,
+    deadline: float,
+    errors: list[Exception],
+) -> None:
+    try:
+        cloud.request("https://example.invalid", None, deadline=deadline)
+    except Exception as err:  # noqa: BLE001 - thread forwards the observed failure
+        errors.append(err)
+
+
+def _capture_serialized_operation_error(
+    cloud: protocol_cloud.DreameMowerDreameHomeCloudProtocol,
+    operation: Callable[[], object],
+    *,
+    deadline: float,
+    errors: list[Exception],
+) -> None:
+    try:
+        cloud._run_serialized_operation(operation, deadline=deadline)
+    except Exception as err:  # noqa: BLE001 - thread forwards the observed failure
+        errors.append(err)
 
 
 def test_app_action_retries_reads_but_dispatches_mutations_once() -> None:

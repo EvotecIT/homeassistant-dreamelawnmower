@@ -9,6 +9,8 @@ from typing import Any, Protocol
 
 from homeassistant.core import HomeAssistant
 
+from .ha_tasks import create_background_task
+
 _DEFAULT_PROVIDER_GRACE = 30.0
 _DEFAULT_IDLE_GRACE = 15.0
 _DEFAULT_IDLE_POLL_INTERVAL = 1.0
@@ -51,7 +53,11 @@ class DreameLawnMowerHaStreamIdleMonitor:
         task = self._task
         if task is not None and not task.done():
             task.cancel()
-        self._task = self._hass.async_create_task(self._async_watch(ha_stream, session))
+        self._task = create_background_task(
+            self._hass,
+            self._async_watch(ha_stream, session),
+            "dreame-lawn-mower-video-idle-monitor",
+        )
 
     async def async_cancel(self) -> None:
         """Cancel the current watcher without cancelling itself during cleanup."""

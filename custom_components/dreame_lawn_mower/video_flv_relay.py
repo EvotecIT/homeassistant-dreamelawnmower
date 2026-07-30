@@ -19,6 +19,8 @@ from aiohttp import ClientResponseError, ClientSession, ClientTimeout, web
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .ha_tasks import create_background_task
+
 _LOGGER = logging.getLogger(__name__)
 
 _QUEUE_DEPTH: Final = 96
@@ -619,8 +621,10 @@ class DreameLawnMowerFlvRelay:
                 if self._pump_task is None or self._pump_task.done():
                     self._last_failure = None
                     self._started_at = asyncio.get_running_loop().time()
-                    self._pump_task = self._hass.async_create_task(
-                        self._async_pump()
+                    self._pump_task = create_background_task(
+                        self._hass,
+                        self._async_pump(),
+                        "dreame-lawn-mower-video-relay",
                     )
                 break
 

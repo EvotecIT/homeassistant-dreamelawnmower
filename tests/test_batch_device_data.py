@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
+
+import pytest
 
 from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
@@ -101,6 +105,7 @@ class _FakeBatchCloud:
         schedule_text = _schedule_text()
         settings_text = _settings_text()
         self.calls: list[list[str]] = []
+        self.request_options: list[dict[str, float | None]] = []
         self.payload = {
             "SCHEDULE.0": schedule_text,
             "SCHEDULE.info": str(len(schedule_text)),
@@ -113,8 +118,20 @@ class _FakeBatchCloud:
             "prop.s_auto_upgrade": "0",
         }
 
-    def get_batch_device_datas(self, keys: list[str]) -> dict[str, object]:
+    def get_batch_device_datas(
+        self,
+        keys: list[str],
+        *,
+        timeout: float | None = None,
+        deadline: float | None = None,
+    ) -> dict[str, object]:
         self.calls.append(list(keys))
+        self.request_options.append(
+            {
+                "timeout": timeout,
+                "deadline": deadline,
+            }
+        )
         return dict(self.payload)
 
 
@@ -156,6 +173,7 @@ def test_decode_batch_schedule_payload_decodes_live_shaped_schedule() -> None:
 
     assert result["source"] == "batch_device_data_schedule"
     assert result["available"] is True
+    assert result["active_schedule_version"] == 19383
     assert result["schedules"][0]["idx"] == 0
     assert result["schedules"][0]["version"] == 19383
     assert result["schedules"][0]["plan_count"] == 2
@@ -163,6 +181,31 @@ def test_decode_batch_schedule_payload_decodes_live_shaped_schedule() -> None:
     assert result["schedules"][0]["plans"][0]["weeks"][0]["tasks"][0]["start_time"] == (
         "10:58"
     )
+
+
+@pytest.mark.parametrize("plan_data", [None, {}, "invalid"])
+def test_decode_batch_schedule_payload_rejects_invalid_plan_list(
+    plan_data: object,
+) -> None:
+    payload: dict[str, object] = {"v": 22}
+    if plan_data is not None:
+        payload["d"] = plan_data
+    payload_text = json.dumps(payload, separators=(",", ":"))
+
+    result = decode_batch_schedule_payload({"SCHEDULE.0": payload_text})
+
+    assert result["available"] is False
+    assert "active_schedule_version" not in result
+    assert result["schedules"][0]["available"] is False
+    assert result["schedules"][0]["error"] == (
+        "missing_or_invalid_batch_schedule_plans"
+    )
+    assert result["errors"] == [
+        {
+            "stage": "schedule",
+            "error": "missing_or_invalid_batch_schedule_plans",
+        }
+    ]
 
 
 def test_decode_batch_mowing_preferences_decodes_map_settings() -> None:
@@ -279,6 +322,39 @@ def test_client_batch_helpers_use_batch_device_data_api() -> None:
     assert ota_result["ota_progress"] == 0
     assert ota_result["auto_upgrade_enabled"] is False
     assert len(cloud.calls) == 3
+
+
+def test_batch_schedule_recovery_can_skip_map_discovery() -> None:
+    client = _client()
+    cloud = _FakeBatchCloud()
+    client._sync_get_cloud_protocol = lambda: cloud
+    client._sync_get_current_app_map_index = lambda: pytest.fail(
+        "batch recovery must not probe MAPL"
+    )
+
+    result = client._sync_get_batch_schedules(discover_map_index=False)
+
+    assert result["schedules"][0]["idx"] is None
+    assert len(cloud.calls) == 1
+    assert "SCHEDULE.info" in cloud.calls[0]
+
+
+def test_async_batch_schedule_recovery_has_an_overall_deadline() -> None:
+    client = _client()
+    cloud = _FakeBatchCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+    started = time.monotonic()
+
+    result = asyncio.run(
+        client.async_get_batch_schedules(map_index_hint=0)
+    )
+
+    assert result["schedules"][0]["version"] == 19383
+    request_options = cloud.request_options[0]
+    assert request_options["timeout"] is not None
+    assert 0 < request_options["timeout"] <= 5.0
+    assert request_options["deadline"] is not None
+    assert started < request_options["deadline"] <= started + 5.1
 
 
 def test_vector_map_batch_fetch_requests_all_device_sized_path_chunks() -> None:

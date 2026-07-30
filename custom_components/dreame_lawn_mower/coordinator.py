@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -45,8 +46,20 @@ from .dreame_lawn_mower_client.models import (
     DreameLawnMowerStatusBlob,
     display_name_for_model,
 )
+from .dreame_lawn_mower_client.schedule import (
+    decode_schedule_payload_text,
+    encode_schedule_payload_text,
+)
 from .performance import DreameLawnMowerPerformanceTracker
 from .runtime_cache import DreameLawnMowerRuntimeTelemetryCache
+from .schedule_cache import (
+    has_complete_schedule_cache,
+    invalidate_schedule_slot,
+    merge_app_schedule_payload,
+    merge_batch_schedule_payload,
+    schedule_entry_has_usable_data,
+    schedule_payload_has_usable_data,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -60,6 +73,8 @@ VOICE_SETTINGS_REFRESH_INTERVAL = timedelta(minutes=5)
 SCHEDULE_REFRESH_INTERVAL = timedelta(minutes=5)
 FIRMWARE_UPDATE_REFRESH_INTERVAL = timedelta(minutes=15)
 DEVICE_SNAPSHOT_GENERATION_HISTORY = 32
+PENDING_SCHEDULE_PLAN_MAX_CONTRADICTORY_READS = 1
+BATCH_SCHEDULE_RESULT_COALESCE_SECONDS = 1.0
 
 
 _runtime_tracking_active = runtime_tracking_active
@@ -112,6 +127,24 @@ class DreameLawnMowerCoordinator(
         self.voice_settings_refreshed_at: datetime | None = None
         self.schedules: dict[str, Any] | None = None
         self.schedules_refreshed_at: datetime | None = None
+        self._schedule_cache_generation = 0
+        self._schedule_read_generation = 0
+        self._published_schedule_read_generation = 0
+        self._pending_schedule_plan_states: dict[
+            tuple[int, int],
+            tuple[int | None, bool],
+        ] = {}
+        self._pending_schedule_plan_state_contradictions: dict[
+            tuple[int, int],
+            int,
+        ] = {}
+        self._pending_schedule_uploads: dict[int, dict[str, Any]] = {}
+        self._pending_schedule_upload_contradictions: dict[int, int] = {}
+        self._pending_schedule_upload_active_indices: set[int] = set()
+        self._batch_schedule_read_task: asyncio.Task[dict[str, Any]] | None = None
+        self._batch_schedule_read_tasks: set[asyncio.Task[dict[str, Any]]] = set()
+        self._batch_schedule_read_key: tuple[int | None, bool] | None = None
+        self._batch_schedule_read_completed_at: float | None = None
         self._schedule_write_lock = asyncio.Lock()
         self._preference_write_lock = asyncio.Lock()
         self._device_refresh_lock = asyncio.Lock()
@@ -411,6 +444,7 @@ class DreameLawnMowerCoordinator(
     ) -> dict[str, Any] | None:
         """Refresh schedules through the fast batch path with app fallback."""
         now = datetime.now(UTC)
+        refresh_generation = getattr(self, "_schedule_cache_generation", 0)
         if (
             not force
             and self.schedules is not None
@@ -419,76 +453,232 @@ class DreameLawnMowerCoordinator(
         ):
             return self.schedules
 
-        known_map_indices = _app_map_index_hints(getattr(self, "app_maps", None))
-        if (
-            not force
-            and len(known_map_indices) == 1
-            and self._has_complete_schedule_cache(known_map_indices)
-        ):
-            try:
-                batch_payload = await self.client.async_get_batch_schedules(
-                    include_raw=False,
-                    map_index_hint=known_map_indices[0],
-                )
-            except Exception as err:  # noqa: BLE001 - optional cloud capability
-                _LOGGER.debug("Failed to refresh batch mower schedules: %s", err)
-            else:
-                if self._cache_batch_schedules(batch_payload, now=now):
-                    return self.schedules
+        request_app_maps = getattr(self, "app_maps", None)
+        request_map_indices = _app_map_index_hints(request_app_maps)
+        request_map_hints_authoritative = _app_map_hints_are_authoritative(
+            request_app_maps,
+            refresh_succeeded=getattr(
+                self,
+                "app_maps_refresh_succeeded",
+                False,
+            ),
+        )
+        request_schedule_indices = [-1, *request_map_indices]
+        if not request_map_hints_authoritative:
+            # A partial or malformed MAPL result cannot exclude the other
+            # likely writable slot. Keep discovery bounded without issuing a
+            # second MAPL request inside the schedule action read.
+            for fallback_index in (0, 1):
+                if fallback_index not in request_schedule_indices:
+                    request_schedule_indices.append(fallback_index)
 
         try:
-            payload = await self.client.async_get_app_schedules()
+            action_read_generation = self._begin_schedule_read()
+            payload = await self.client.async_get_app_schedules(
+                include_current_task=False,
+                map_indices=request_schedule_indices,
+            )
         except Exception as err:  # noqa: BLE001 - optional cloud capability
             _LOGGER.debug("Failed to refresh mower schedules: %s", err)
             if force:
                 raise
             return self.schedules
-        self.schedules = payload
-        self.schedules_refreshed_at = now
-        return payload
+        if not self._schedule_refresh_is_current(refresh_generation):
+            return self.schedules
+        action_read_succeeded = schedule_payload_has_usable_data(payload)
+        if (
+            action_read_succeeded
+            and not self._schedule_read_can_publish(action_read_generation)
+        ):
+            return self.schedules
+        app_maps = getattr(self, "app_maps", None)
+        known_map_indices = _app_map_index_hints(app_maps)
+        map_hints_authoritative = _app_map_hints_are_authoritative(
+            app_maps,
+            refresh_succeeded=getattr(
+                self,
+                "app_maps_refresh_succeeded",
+                False,
+            ),
+        )
+        map_index_hint = self._schedule_map_index_hint()
+        expected_indices = _schedule_expected_indices(
+            self.schedules,
+            payload,
+            known_map_indices,
+            map_hints_authoritative=map_hints_authoritative,
+        )
+        self.schedules = merge_app_schedule_payload(
+            self.schedules,
+            payload,
+            expected_indices=expected_indices,
+            prune_unexpected_indices=map_hints_authoritative,
+        )
+        if action_read_succeeded:
+            self._record_schedule_read_publication(action_read_generation)
+        if map_hints_authoritative:
+            self._prune_pending_schedule_writes(known_map_indices)
+        self._acknowledge_pending_schedule_plan_states(payload)
+        self._acknowledge_pending_schedule_uploads(payload)
+        self._apply_pending_schedule_plan_states()
+        self._apply_pending_schedule_uploads()
+        action_read_indices = _usable_schedule_indices(payload)
+        action_read_complete = set(expected_indices).issubset(action_read_indices)
+        allow_unknown_batch_slot = not (
+            map_hints_authoritative and action_read_complete
+        )
+        batch_read_succeeded = False
+        try:
+            batch_read_generation = self._begin_schedule_read()
+            batch_payload = await self._async_get_shared_batch_schedules(
+                map_index_hint=map_index_hint,
+                force=force,
+            )
+        except Exception as err:  # noqa: BLE001 - optional cloud capability
+            _LOGGER.debug("Failed to recover batch mower schedules: %s", err)
+        else:
+            if not self._schedule_refresh_is_current(refresh_generation):
+                return self.schedules
+            latest_app_maps = getattr(self, "app_maps", None)
+            latest_map_indices = _app_map_index_hints(latest_app_maps)
+            latest_map_hints_authoritative = _app_map_hints_are_authoritative(
+                latest_app_maps,
+                refresh_succeeded=getattr(
+                    self,
+                    "app_maps_refresh_succeeded",
+                    False,
+                ),
+            )
+            latest_map_index_hint = self._schedule_map_index_hint()
+            if latest_map_index_hint != map_index_hint:
+                self._invalidate_schedule_map_hint()
+                batch_payload = _discard_stale_batch_schedule(batch_payload)
+            latest_expected_indices = _schedule_expected_indices(
+                self.schedules,
+                payload,
+                latest_map_indices,
+                map_hints_authoritative=latest_map_hints_authoritative,
+            )
+            if (
+                latest_expected_indices != expected_indices
+                or latest_map_hints_authoritative != map_hints_authoritative
+            ):
+                known_map_indices = latest_map_indices
+                map_hints_authoritative = latest_map_hints_authoritative
+                expected_indices = latest_expected_indices
+                self.schedules = merge_app_schedule_payload(
+                    self.schedules,
+                    payload,
+                    expected_indices=expected_indices,
+                    prune_unexpected_indices=map_hints_authoritative,
+                )
+                if map_hints_authoritative:
+                    self._prune_pending_schedule_writes(known_map_indices)
+                action_read_complete = set(expected_indices).issubset(
+                    action_read_indices
+                )
+                allow_unknown_batch_slot = not (
+                    map_hints_authoritative and action_read_complete
+                )
+            allowed_batch_hint_indices = (
+                [map_index_hint]
+                if (
+                    allow_unknown_batch_slot
+                    and map_hints_authoritative
+                    and map_index_hint in known_map_indices
+                )
+                else None
+            )
+            batch_read_succeeded = self._cache_batch_schedules(
+                batch_payload,
+                now=now,
+                allow_incomplete=allow_unknown_batch_slot,
+                allowed_hint_indices=allowed_batch_hint_indices,
+                read_generation=batch_read_generation,
+                preserve_indices=action_read_indices,
+            )
+            batch_schedules = batch_payload.get("schedules")
+            if (
+                not batch_read_succeeded
+                and not allow_unknown_batch_slot
+                and not batch_payload.get("errors")
+                and isinstance(batch_schedules, Sequence)
+                and not isinstance(batch_schedules, str | bytes | bytearray)
+                and len(batch_schedules) == 1
+                and isinstance(batch_schedules[0], Mapping)
+                and isinstance(batch_schedules[0].get("version"), int)
+                and not isinstance(batch_schedules[0].get("version"), bool)
+                and isinstance(self.schedules, dict)
+            ):
+                self.schedules["active_selection_available"] = False
+        if not self._schedule_refresh_is_current(refresh_generation):
+            return self.schedules
+        if (
+            action_read_succeeded
+            and not batch_read_succeeded
+            and not _schedule_payload_has_active_selection(self.schedules)
+            and isinstance(self.schedules, dict)
+        ):
+            # Without SCHDT or a batch version, the normal calendar cannot
+            # safely choose one slot. Keep the decoded schedules for the
+            # diagnostic all-schedules view without presenting them as active.
+            self.schedules["active_selection_available"] = False
+        action_read_confirms_active_schedule = (
+            action_read_succeeded
+            and isinstance(self.schedules, Mapping)
+            and (
+                self.schedules.get("active_selection_available") is False
+                or self.schedules.get("active_schedule_index") in action_read_indices
+            )
+        )
+        if action_read_confirms_active_schedule or batch_read_succeeded:
+            self.schedules_refreshed_at = now
+        return self.schedules
 
     def _cache_batch_schedules(
         self,
         payload: Mapping[str, Any],
         *,
         now: datetime,
+        allow_incomplete: bool = False,
+        allowed_hint_indices: Sequence[int] | None = None,
+        read_generation: int | None = None,
+        preserve_indices: Sequence[int] = (),
     ) -> bool:
-        """Merge one fast physical-map read into a complete app schedule cache."""
-        schedules = payload.get("schedules")
-        errors = payload.get("errors")
+        """Merge one fast effective-schedule read into the app schedule cache."""
+        if read_generation is not None and not self._schedule_read_can_publish(
+            read_generation
+        ):
+            return False
         known_map_indices = _app_map_index_hints(getattr(self, "app_maps", None))
         if (
-            len(known_map_indices) != 1
-            or not self._has_complete_schedule_cache(known_map_indices)
-            or not isinstance(schedules, Sequence)
-            or isinstance(schedules, str | bytes | bytearray)
-            or not schedules
-            or errors
-            or any(
-                not isinstance(schedule, Mapping)
-                or schedule.get("idx") != known_map_indices[0]
-                for schedule in schedules
+            not isinstance(self.schedules, Mapping)
+            or (
+                not allow_incomplete
+                and not self._has_complete_schedule_cache(known_map_indices)
             )
         ):
             return False
-        existing_schedules = self.schedules["schedules"]
-        batch_schedule = dict(schedules[0])
-        normalized = dict(self.schedules)
-        normalized["schedules"] = [
-            (
-                batch_schedule
-                if isinstance(schedule, Mapping)
-                and schedule.get("idx") == known_map_indices[0]
-                else schedule
-            )
-            for schedule in existing_schedules
-        ]
-        if "current_task" in payload:
-            normalized["current_task"] = payload["current_task"]
-        normalized["captured_at"] = now.isoformat()
-        normalized["source"] = "app_action_schedule_with_batch_refresh"
+        normalized = merge_batch_schedule_payload(
+            self.schedules,
+            payload,
+            captured_at=now,
+            allow_unknown_slot=allow_incomplete,
+            allowed_hint_indices=(
+                allowed_hint_indices
+                if allowed_hint_indices is not None
+                else ([] if allow_incomplete else [-1, *known_map_indices])
+            ),
+            preserve_indices=preserve_indices,
+        )
+        if normalized is None:
+            return False
         self.schedules = normalized
         self.schedules_refreshed_at = now
+        if read_generation is not None:
+            self._record_schedule_read_publication(read_generation)
+        self._apply_pending_schedule_plan_states()
+        self._apply_pending_schedule_uploads()
         return True
 
     def _has_complete_schedule_cache(
@@ -496,22 +686,35 @@ class DreameLawnMowerCoordinator(
         known_map_indices: Sequence[int],
     ) -> bool:
         """Return whether default and every known physical map are represented."""
-        schedules = (
-            self.schedules.get("schedules")
-            if isinstance(self.schedules, Mapping)
-            else None
+        return has_complete_schedule_cache(self.schedules, known_map_indices)
+
+    def _schedule_refresh_is_current(self, generation: int) -> bool:
+        """Return whether a schedule read predates no confirmed write."""
+        return generation == getattr(self, "_schedule_cache_generation", 0)
+
+    def _begin_schedule_read(self) -> int:
+        """Return an ordering token for one schedule request."""
+        generation = getattr(self, "_schedule_read_generation", 0) + 1
+        self._schedule_read_generation = generation
+        return generation
+
+    def _schedule_read_can_publish(self, generation: int) -> bool:
+        """Return whether no newer schedule request has published."""
+        return generation >= getattr(
+            self,
+            "_published_schedule_read_generation",
+            0,
         )
-        if not isinstance(schedules, Sequence) or isinstance(
-            schedules,
-            str | bytes | bytearray,
-        ):
-            return False
-        cached_indices = {
-            schedule.get("idx")
-            for schedule in schedules
-            if isinstance(schedule, Mapping)
-        }
-        return {-1, *known_map_indices}.issubset(cached_indices)
+
+    def _record_schedule_read_publication(self, generation: int) -> None:
+        """Record the newest schedule request allowed to publish."""
+        self._published_schedule_read_generation = generation
+
+    def _invalidate_inflight_schedule_refreshes(self) -> None:
+        """Prevent reads started before a confirmed write from publishing."""
+        self._schedule_cache_generation = (
+            getattr(self, "_schedule_cache_generation", 0) + 1
+        )
 
     async def async_set_schedule_plan_enabled(
         self,
@@ -530,10 +733,32 @@ class DreameLawnMowerCoordinator(
                 confirm_write=True,
             )
             self.last_schedule_write_result = result
+            self._invalidate_inflight_schedule_refreshes()
+            schedule_version = _schedule_write_version(result)
+            pending_states = getattr(self, "_pending_schedule_plan_states", None)
+            if pending_states is None:
+                pending_states = {}
+                self._pending_schedule_plan_states = pending_states
+            pending_states[(map_index, plan_id)] = (
+                schedule_version,
+                bool(enabled),
+            )
+            pending_contradictions = getattr(
+                self,
+                "_pending_schedule_plan_state_contradictions",
+                None,
+            )
+            if pending_contradictions is None:
+                pending_contradictions = {}
+                self._pending_schedule_plan_state_contradictions = (
+                    pending_contradictions
+                )
+            pending_contradictions.pop((map_index, plan_id), None)
             self._reconcile_cached_schedule_plan_enabled(
                 map_index=map_index,
                 plan_id=plan_id,
                 enabled=enabled,
+                schedule_version=schedule_version,
             )
             try:
                 await self.async_refresh_schedules(force=True)
@@ -549,6 +774,7 @@ class DreameLawnMowerCoordinator(
         map_index: int,
         plan_id: int,
         enabled: bool,
+        schedule_version: int | None = None,
     ) -> None:
         """Apply a confirmed schedule write to the shared cache."""
         schedules = (
@@ -558,8 +784,27 @@ class DreameLawnMowerCoordinator(
         )
         if not isinstance(schedules, list):
             return
+        matching_numeric_indices = {
+            schedule.get("idx")
+            for schedule in schedules
+            if isinstance(schedule, Mapping)
+            and schedule.get("version") == schedule_version
+            and isinstance(schedule.get("idx"), int)
+            and not isinstance(schedule.get("idx"), bool)
+        }
+        unknown_slot_is_unambiguous = (
+            not matching_numeric_indices or matching_numeric_indices == {map_index}
+        )
         for schedule in schedules:
-            if not isinstance(schedule, dict) or schedule.get("idx") != map_index:
+            if not isinstance(schedule, dict) or not (
+                schedule.get("idx") == map_index
+                or (
+                    schedule_version is not None
+                    and schedule.get("idx") is None
+                    and schedule.get("version") == schedule_version
+                    and unknown_slot_is_unambiguous
+                )
+            ):
                 continue
             plans = schedule.get("plans")
             if not isinstance(plans, list):
@@ -567,7 +812,382 @@ class DreameLawnMowerCoordinator(
             for plan in plans:
                 if isinstance(plan, dict) and plan.get("plan_id") == plan_id:
                     plan["enabled"] = enabled
+                    schedule["enabled_plan_count"] = sum(
+                        1
+                        for cached_plan in plans
+                        if isinstance(cached_plan, Mapping)
+                        and cached_plan.get("enabled")
+                    )
                     return
+        if (
+            schedule_version is not None
+            and not unknown_slot_is_unambiguous
+            and isinstance(self.schedules, dict)
+            and self.schedules.get("active_schedule_index") is None
+            and any(
+                isinstance(schedule, Mapping)
+                and schedule.get("idx") is None
+                and schedule.get("version") == schedule_version
+                for schedule in schedules
+            )
+        ):
+            self.schedules["active_selection_available"] = False
+
+    def _acknowledge_pending_schedule_plan_states(
+        self,
+        payload: Mapping[str, Any],
+    ) -> None:
+        """Clear confirmed writes once an action read observes their result."""
+        pending_states = getattr(self, "_pending_schedule_plan_states", None)
+        schedules = payload.get("schedules")
+        if not pending_states or not isinstance(schedules, Sequence):
+            return
+        pending_contradictions = getattr(
+            self,
+            "_pending_schedule_plan_state_contradictions",
+            None,
+        )
+        if pending_contradictions is None:
+            pending_contradictions = {}
+            self._pending_schedule_plan_state_contradictions = (
+                pending_contradictions
+            )
+        for key, (version, enabled) in tuple(pending_states.items()):
+            map_index, plan_id = key
+            schedule = next(
+                (
+                    entry
+                    for entry in schedules
+                    if isinstance(entry, Mapping)
+                    and entry.get("idx") == map_index
+                    and schedule_entry_has_usable_data(entry)
+                ),
+                None,
+            )
+            if schedule is None:
+                continue
+            if version is not None and schedule.get("version") != version:
+                pending_states.pop(key, None)
+                pending_contradictions.pop(key, None)
+                continue
+            plans = schedule.get("plans")
+            plan = next(
+                (
+                    entry
+                    for entry in plans
+                    if isinstance(entry, Mapping) and entry.get("plan_id") == plan_id
+                ),
+                None,
+            )
+            if plan is None or bool(plan.get("enabled")) == enabled:
+                pending_states.pop(key, None)
+                pending_contradictions.pop(key, None)
+                continue
+            contradictory_reads = pending_contradictions.get(key, 0) + 1
+            if (
+                contradictory_reads
+                > PENDING_SCHEDULE_PLAN_MAX_CONTRADICTORY_READS
+            ):
+                pending_states.pop(key, None)
+                pending_contradictions.pop(key, None)
+            else:
+                pending_contradictions[key] = contradictory_reads
+
+    def _apply_pending_schedule_plan_states(self) -> None:
+        """Keep confirmed toggles visible while cloud readbacks lag."""
+        pending_states = getattr(self, "_pending_schedule_plan_states", None)
+        schedules = (
+            self.schedules.get("schedules")
+            if isinstance(self.schedules, Mapping)
+            else None
+        )
+        if not pending_states or not isinstance(schedules, Sequence):
+            return
+        for (map_index, plan_id), (version, enabled) in pending_states.items():
+            matching_numeric_indices = {
+                schedule.get("idx")
+                for schedule in schedules
+                if isinstance(schedule, Mapping)
+                and schedule.get("version") == version
+                and isinstance(schedule.get("idx"), int)
+                and not isinstance(schedule.get("idx"), bool)
+            }
+            unknown_slot_is_unambiguous = (
+                not matching_numeric_indices
+                or matching_numeric_indices == {map_index}
+            )
+            for schedule in schedules:
+                if not isinstance(schedule, dict) or not (
+                    schedule.get("idx") == map_index
+                    or (
+                        version is not None
+                        and schedule.get("idx") is None
+                        and schedule.get("version") == version
+                        and unknown_slot_is_unambiguous
+                    )
+                ):
+                    continue
+                if version is not None and schedule.get("version") != version:
+                    continue
+                plans = schedule.get("plans")
+                if not isinstance(plans, Sequence):
+                    continue
+                plan_updated = False
+                for plan in plans:
+                    if isinstance(plan, dict) and plan.get("plan_id") == plan_id:
+                        plan["enabled"] = enabled
+                        plan_updated = True
+                if plan_updated:
+                    schedule["enabled_plan_count"] = sum(
+                        1
+                        for plan in plans
+                        if isinstance(plan, Mapping) and plan.get("enabled")
+                    )
+            if (
+                version is not None
+                and not unknown_slot_is_unambiguous
+                and isinstance(self.schedules, dict)
+                and self.schedules.get("active_schedule_index") is None
+                and any(
+                    isinstance(schedule, Mapping)
+                    and schedule.get("idx") is None
+                    and schedule.get("version") == version
+                    for schedule in schedules
+                )
+            ):
+                self.schedules["active_selection_available"] = False
+
+    def _prune_pending_schedule_writes(
+        self,
+        known_map_indices: Sequence[int],
+    ) -> None:
+        """Drop pending writes for maps absent from authoritative app metadata."""
+        valid_indices = {-1, *known_map_indices}
+        pending_states = getattr(self, "_pending_schedule_plan_states", None)
+        pending_state_contradictions = getattr(
+            self,
+            "_pending_schedule_plan_state_contradictions",
+            None,
+        )
+        if pending_states:
+            for key in tuple(pending_states):
+                if key[0] in valid_indices:
+                    continue
+                pending_states.pop(key, None)
+                if pending_state_contradictions is not None:
+                    pending_state_contradictions.pop(key, None)
+
+        pending_uploads = getattr(self, "_pending_schedule_uploads", None)
+        pending_upload_contradictions = getattr(
+            self,
+            "_pending_schedule_upload_contradictions",
+            None,
+        )
+        pending_active_indices = getattr(
+            self,
+            "_pending_schedule_upload_active_indices",
+            None,
+        )
+        if pending_uploads:
+            for map_index in tuple(pending_uploads):
+                if map_index in valid_indices:
+                    continue
+                pending_uploads.pop(map_index, None)
+                if pending_upload_contradictions is not None:
+                    pending_upload_contradictions.pop(map_index, None)
+                if pending_active_indices is not None:
+                    pending_active_indices.discard(map_index)
+
+    def _remember_pending_schedule_upload(
+        self,
+        *,
+        map_index: int,
+        plans: Sequence[Mapping[str, Any]],
+        schedule_version: int | None,
+    ) -> None:
+        """Retain a confirmed full upload until an action read settles it."""
+        normalized_plans = decode_schedule_payload_text(
+            encode_schedule_payload_text(list(plans))
+        )
+        schedules = (
+            self.schedules.get("schedules")
+            if isinstance(getattr(self, "schedules", None), Mapping)
+            else None
+        )
+        cached_schedule = next(
+            (
+                schedule
+                for schedule in schedules or []
+                if isinstance(schedule, Mapping)
+                and schedule.get("idx") == map_index
+            ),
+            None,
+        )
+        if schedule_version is None and isinstance(cached_schedule, Mapping):
+            cached_version = cached_schedule.get("version")
+            if isinstance(cached_version, int) and not isinstance(
+                cached_version,
+                bool,
+            ):
+                schedule_version = cached_version
+
+        pending_schedule: dict[str, Any] = {
+            "idx": map_index,
+            "available": bool(normalized_plans),
+            "writable": True,
+            "version": schedule_version,
+            "plan_count": len(normalized_plans),
+            "enabled_plan_count": sum(
+                1 for plan in normalized_plans if plan.get("enabled")
+            ),
+            "plans": normalized_plans,
+        }
+        if isinstance(cached_schedule, Mapping):
+            for key in ("label", "name"):
+                if key in cached_schedule:
+                    pending_schedule[key] = cached_schedule[key]
+
+        pending_uploads = getattr(self, "_pending_schedule_uploads", None)
+        if pending_uploads is None:
+            pending_uploads = {}
+            self._pending_schedule_uploads = pending_uploads
+        pending_uploads[map_index] = pending_schedule
+        pending_contradictions = getattr(
+            self,
+            "_pending_schedule_upload_contradictions",
+            None,
+        )
+        if pending_contradictions is None:
+            pending_contradictions = {}
+            self._pending_schedule_upload_contradictions = pending_contradictions
+        pending_contradictions.pop(map_index, None)
+        pending_active_indices = getattr(
+            self,
+            "_pending_schedule_upload_active_indices",
+            None,
+        )
+        if pending_active_indices is None:
+            pending_active_indices = set()
+            self._pending_schedule_upload_active_indices = pending_active_indices
+        if (
+            isinstance(getattr(self, "schedules", None), Mapping)
+            and self.schedules.get("active_schedule_index") == map_index
+        ):
+            pending_active_indices.add(map_index)
+        else:
+            pending_active_indices.discard(map_index)
+
+    def _acknowledge_pending_schedule_uploads(
+        self,
+        payload: Mapping[str, Any],
+    ) -> None:
+        """Settle full uploads only from authoritative action-slot reads."""
+        pending_uploads = getattr(self, "_pending_schedule_uploads", None)
+        schedules = payload.get("schedules")
+        if not pending_uploads or not isinstance(schedules, Sequence):
+            return
+        pending_contradictions = getattr(
+            self,
+            "_pending_schedule_upload_contradictions",
+            None,
+        )
+        if pending_contradictions is None:
+            pending_contradictions = {}
+            self._pending_schedule_upload_contradictions = pending_contradictions
+        pending_active_indices = getattr(
+            self,
+            "_pending_schedule_upload_active_indices",
+            None,
+        )
+        if pending_active_indices is None:
+            pending_active_indices = set()
+            self._pending_schedule_upload_active_indices = pending_active_indices
+
+        for map_index, pending_schedule in tuple(pending_uploads.items()):
+            schedule = next(
+                (
+                    entry
+                    for entry in schedules
+                    if isinstance(entry, Mapping)
+                    and entry.get("idx") == map_index
+                    and schedule_entry_has_usable_data(entry)
+                ),
+                None,
+            )
+            if schedule is None:
+                continue
+            pending_version = pending_schedule.get("version")
+            if (
+                pending_version is not None
+                and schedule.get("version") != pending_version
+            ):
+                pending_uploads.pop(map_index, None)
+                pending_contradictions.pop(map_index, None)
+                pending_active_indices.discard(map_index)
+                continue
+            if schedule.get("plans") == pending_schedule.get("plans"):
+                if (
+                    map_index in pending_active_indices
+                    and isinstance(self.schedules, dict)
+                ):
+                    self.schedules["active_schedule_version"] = pending_version
+                    self.schedules["active_schedule_index"] = map_index
+                    self.schedules["active_selection_available"] = True
+                pending_uploads.pop(map_index, None)
+                pending_contradictions.pop(map_index, None)
+                pending_active_indices.discard(map_index)
+                continue
+            contradictory_reads = pending_contradictions.get(map_index, 0) + 1
+            if (
+                contradictory_reads
+                > PENDING_SCHEDULE_PLAN_MAX_CONTRADICTORY_READS
+            ):
+                pending_uploads.pop(map_index, None)
+                pending_contradictions.pop(map_index, None)
+                pending_active_indices.discard(map_index)
+            else:
+                pending_contradictions[map_index] = contradictory_reads
+
+    def _apply_pending_schedule_uploads(self) -> None:
+        """Keep confirmed full uploads visible while cloud readbacks lag."""
+        pending_uploads = getattr(self, "_pending_schedule_uploads", None)
+        schedules = (
+            self.schedules.get("schedules")
+            if isinstance(getattr(self, "schedules", None), dict)
+            else None
+        )
+        if not pending_uploads or not isinstance(schedules, list):
+            return
+
+        for map_index, pending_schedule in pending_uploads.items():
+            replaced = False
+            for position, schedule in enumerate(schedules):
+                if isinstance(schedule, Mapping) and schedule.get("idx") == map_index:
+                    schedules[position] = deepcopy(pending_schedule)
+                    replaced = True
+                    break
+            if not replaced:
+                schedules.append(deepcopy(pending_schedule))
+
+            pending_version = pending_schedule.get("version")
+            unknown_fallback = next(
+                (
+                    schedule
+                    for schedule in schedules
+                    if isinstance(schedule, Mapping)
+                    and schedule.get("idx") is None
+                    and schedule.get("version") == pending_version
+                ),
+                None,
+            )
+            if (
+                isinstance(unknown_fallback, Mapping)
+                and unknown_fallback.get("plans") != pending_schedule.get("plans")
+                and self.schedules.get("active_schedule_index") is None
+            ):
+                # The batch version cannot identify which colliding slot is
+                # active, and its content may predate the confirmed upload.
+                self.schedules["active_selection_available"] = False
 
     async def async_plan_schedule_upload(
         self,
@@ -600,7 +1220,31 @@ class DreameLawnMowerCoordinator(
                 confirm_write=confirm_write,
             )
             self.last_schedule_write_result = result
+            self._invalidate_inflight_schedule_refreshes()
+            pending_states = getattr(self, "_pending_schedule_plan_states", None)
+            if pending_states:
+                pending_contradictions = getattr(
+                    self,
+                    "_pending_schedule_plan_state_contradictions",
+                    {},
+                )
+                for key in tuple(pending_states):
+                    if key[0] == map_index:
+                        pending_states.pop(key, None)
+                        pending_contradictions.pop(key, None)
+            schedule_version = _schedule_write_version(result)
+            self._remember_pending_schedule_upload(
+                map_index=map_index,
+                plans=plans,
+                schedule_version=schedule_version,
+            )
             # Never let a recently cached pre-upload payload hide the new plans.
+            self.schedules = invalidate_schedule_slot(
+                getattr(self, "schedules", None),
+                map_index,
+                schedule_version=schedule_version,
+            )
+            self._apply_pending_schedule_uploads()
             self.schedules_refreshed_at = None
             try:
                 await self.async_refresh_schedules(force=True)
@@ -625,12 +1269,14 @@ class DreameLawnMowerCoordinator(
         ):
             return self.batch_device_data
 
+        schedule_generation = getattr(self, "_schedule_cache_generation", 0)
         try:
             (
                 batch_schedule,
                 batch_mowing_preferences,
                 batch_ota_info,
-            ) = await self._async_fetch_batch_device_data()
+                batch_schedule_generation,
+            ) = await self._async_fetch_batch_device_data(force=force)
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh batch device data: %s", err)
             return self.batch_device_data
@@ -644,7 +1290,15 @@ class DreameLawnMowerCoordinator(
         }
         self.batch_device_data = payload
         self.batch_device_data_refreshed_at = now
-        self._cache_batch_schedules(batch_schedule, now=now)
+        if (
+            batch_schedule is not self.schedules
+            and self._schedule_refresh_is_current(schedule_generation)
+        ):
+            self._cache_batch_schedules(
+                batch_schedule,
+                now=now,
+                read_generation=batch_schedule_generation,
+            )
         return payload
 
     async def async_plan_mowing_preference_update(
@@ -682,18 +1336,29 @@ class DreameLawnMowerCoordinator(
 
     async def _async_fetch_batch_device_data(
         self,
-    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        *,
+        force: bool = False,
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], int]:
         """Fetch batch schedule, settings, and OTA payloads in parallel."""
-        cached_schedule = self._fresh_batch_schedule()
+        cached_schedule = None if force else self._fresh_batch_schedule()
         if cached_schedule is None:
-            return await asyncio.gather(
-                self.client.async_get_batch_schedules(include_raw=False),
+            schedule_generation = self._begin_schedule_read()
+            map_index_hint = self._schedule_map_index_hint()
+            schedule, preferences, ota = await asyncio.gather(
+                self._async_get_shared_batch_schedules(
+                    map_index_hint=map_index_hint,
+                    force=force,
+                ),
                 self.client.async_get_batch_mowing_preferences(
                     include_raw=False,
                     map_index_hints=_app_map_index_hints(self.app_maps),
                 ),
                 self.client.async_get_batch_ota_info(include_raw=False),
             )
+            if self._schedule_map_index_hint() != map_index_hint:
+                self._invalidate_schedule_map_hint()
+                schedule = _discard_stale_batch_schedule(schedule)
+            return schedule, preferences, ota, schedule_generation
 
         batch_mowing_preferences, batch_ota_info = await asyncio.gather(
             self.client.async_get_batch_mowing_preferences(
@@ -702,14 +1367,88 @@ class DreameLawnMowerCoordinator(
             ),
             self.client.async_get_batch_ota_info(include_raw=False),
         )
-        return cached_schedule, batch_mowing_preferences, batch_ota_info
+        return (
+            cached_schedule,
+            batch_mowing_preferences,
+            batch_ota_info,
+            getattr(self, "_published_schedule_read_generation", 0),
+        )
+
+    def _schedule_map_index_hint(self) -> int | None:
+        """Return the safest available writable-slot hint for batch decoding."""
+        map_index_hint = getattr(self, "selected_map_index", None)
+        if map_index_hint is None:
+            map_index_hint = active_map_index(getattr(self, "app_maps", None))
+        known_map_indices = _app_map_index_hints(getattr(self, "app_maps", None))
+        if map_index_hint is None and len(known_map_indices) == 1:
+            map_index_hint = known_map_indices[0]
+        return map_index_hint
+
+    async def _async_get_shared_batch_schedules(
+        self,
+        *,
+        map_index_hint: int | None,
+        force: bool,
+    ) -> dict[str, Any]:
+        """Coalesce aligned schedule and batch-metadata cloud reads."""
+        discover_map_index = map_index_hint is not None
+        key = (map_index_hint, discover_map_index)
+        loop = asyncio.get_running_loop()
+        task = getattr(self, "_batch_schedule_read_task", None)
+        completed_at = getattr(self, "_batch_schedule_read_completed_at", None)
+        reusable_result = (
+            task is not None
+            and task.done()
+            and not force
+            and completed_at is not None
+            and loop.time() - completed_at <= BATCH_SCHEDULE_RESULT_COALESCE_SECONDS
+        )
+        if (
+            task is None
+            or getattr(self, "_batch_schedule_read_key", None) != key
+            or (task.done() and not reusable_result)
+        ):
+            options: dict[str, Any] = {
+                "include_raw": False,
+                "map_index_hint": map_index_hint,
+            }
+            if not discover_map_index:
+                # App-map discovery already ran in this metadata cycle. Batch
+                # decoding can safely retain an explicit unknown slot.
+                options["discover_map_index"] = False
+            task = asyncio.create_task(
+                self.client.async_get_batch_schedules(**options)
+            )
+            self._batch_schedule_read_task = task
+            batch_tasks = getattr(self, "_batch_schedule_read_tasks", None)
+            if batch_tasks is None:
+                batch_tasks = set()
+                self._batch_schedule_read_tasks = batch_tasks
+            batch_tasks.add(task)
+            self._batch_schedule_read_key = key
+            self._batch_schedule_read_completed_at = None
+
+            def record_completion(completed: asyncio.Task[dict[str, Any]]) -> None:
+                if getattr(self, "_batch_schedule_read_task", None) is completed:
+                    self._batch_schedule_read_completed_at = loop.time()
+                if not completed.cancelled():
+                    with suppress(Exception):
+                        completed.exception()
+                batch_tasks.discard(completed)
+
+            task.add_done_callback(record_completion)
+        return await asyncio.shield(task)
 
     def _fresh_batch_schedule(self) -> dict[str, Any] | None:
         """Return the recent shared schedule cache when batch-sourced."""
         refreshed_at = self.schedules_refreshed_at
         if (
             not isinstance(self.schedules, dict)
-            or self.schedules.get("source") != "batch_device_data_schedule"
+            or self.schedules.get("source")
+            not in {
+                "batch_device_data_schedule",
+                "app_action_schedule_with_batch_refresh",
+            }
             or refreshed_at is None
             or datetime.now(UTC) - refreshed_at >= SCHEDULE_REFRESH_INTERVAL
         ):
@@ -740,6 +1479,7 @@ class DreameLawnMowerCoordinator(
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh firmware update support: %s", err)
+            self.firmware_update_support_refreshed_at = None
             return self.firmware_update_support
 
         self.firmware_update_support = support
@@ -769,6 +1509,7 @@ class DreameLawnMowerCoordinator(
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh app map objects: %s", err)
+            self.app_map_objects_refreshed_at = None
             return self.app_map_objects
 
         payload = {
@@ -800,6 +1541,7 @@ class DreameLawnMowerCoordinator(
             vector_map_details = await self.client.async_get_vector_map_details()
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh vector map details: %s", err)
+            self.vector_map_details_refreshed_at = None
             return self.vector_map_details
 
         payload = dict(vector_map_details)
@@ -823,9 +1565,19 @@ class DreameLawnMowerCoordinator(
             and self.app_maps_refreshed_at is not None
             and now - self.app_maps_refreshed_at < APP_MAP_REFRESH_INTERVAL
         ):
-            self.app_maps_refresh_succeeded = True
             return self.app_maps
 
+        previous_map_indices = set(
+            _app_map_index_hints(getattr(self, "app_maps", None))
+        )
+        previous_map_hints_authoritative = _app_map_hints_are_authoritative(
+            getattr(self, "app_maps", None),
+            refresh_succeeded=getattr(
+                self,
+                "app_maps_refresh_succeeded",
+                False,
+            ),
+        )
         try:
             app_maps = await self.client.async_get_app_maps(
                 include_payload=True,
@@ -842,9 +1594,24 @@ class DreameLawnMowerCoordinator(
         payload["source"] = source
         self.app_maps = payload
         self.app_maps_refreshed_at = now
-        self.app_maps_refresh_succeeded = True
+        self.app_maps_refresh_succeeded = payload.get("map_list_valid") is True
         current_idx = active_map_index(payload)
+        known_map_indices = set(_app_map_index_hints(payload))
+        map_hints_authoritative = _app_map_hints_are_authoritative(
+            payload,
+            refresh_succeeded=True,
+        )
+        if (
+            map_hints_authoritative
+            and (
+                not previous_map_hints_authoritative
+                or known_map_indices != previous_map_indices
+            )
+        ):
+            self._invalidate_schedule_map_hint()
         if current_idx is not None:
+            if self.selected_map_index != current_idx:
+                self._invalidate_schedule_map_hint()
             if (
                 self.selected_map_index is not None
                 and self.selected_map_index != current_idx
@@ -852,7 +1619,19 @@ class DreameLawnMowerCoordinator(
                 self.selected_contour_id = None
                 self.selected_zone_id = None
                 self.selected_spot_id = None
+                self.selected_maintenance_point_id = None
             self.selected_map_index = current_idx
+        elif (
+            self.selected_map_index is not None
+            and map_hints_authoritative
+            and self.selected_map_index not in known_map_indices
+        ):
+            self._invalidate_schedule_map_hint()
+            self.selected_map_index = None
+            self.selected_contour_id = None
+            self.selected_zone_id = None
+            self.selected_spot_id = None
+            self.selected_maintenance_point_id = None
         return payload
 
     async def async_refresh_weather_protection(
@@ -878,6 +1657,7 @@ class DreameLawnMowerCoordinator(
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh weather protection: %s", err)
+            self.weather_protection_refreshed_at = None
             return self.weather_protection
 
         payload = dict(weather_protection)
@@ -910,6 +1690,7 @@ class DreameLawnMowerCoordinator(
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh maintenance status: %s", err)
+            self.maintenance_status_refreshed_at = None
             return self.maintenance_status
 
         payload = dict(maintenance_status)
@@ -941,6 +1722,7 @@ class DreameLawnMowerCoordinator(
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh voice settings: %s", err)
+            self.voice_settings_refreshed_at = None
             return self.voice_settings
 
         payload = {
@@ -955,6 +1737,8 @@ class DreameLawnMowerCoordinator(
     async def async_switch_current_map(self, map_index: int) -> None:
         """Switch the active mower map and refresh all map-scoped state."""
         await self.client.async_switch_current_map(map_index)
+        if self.selected_map_index != map_index:
+            self._invalidate_schedule_map_hint()
         self.selected_map_index = map_index
         self.selected_contour_id = None
         self.selected_zone_id = None
@@ -970,6 +1754,32 @@ class DreameLawnMowerCoordinator(
             source="vector_map_switch_current_map",
         )
         self.async_update_listeners()
+
+    def _invalidate_schedule_map_hint(self) -> None:
+        """Expire schedule selection tied to the previous active map."""
+        self.schedules_refreshed_at = None
+        if isinstance(getattr(self, "schedules", None), dict):
+            self.schedules.pop("active_schedule_version", None)
+            self.schedules.pop("active_schedule_index", None)
+            self.schedules.pop("current_task", None)
+            self.schedules["active_selection_available"] = False
+            entries = self.schedules.get("schedules")
+            if isinstance(entries, Sequence) and not isinstance(
+                entries,
+                str | bytes | bytearray,
+            ):
+                self.schedules["schedules"] = [
+                    entry
+                    for entry in entries
+                    if not isinstance(entry, Mapping) or entry.get("idx") is not None
+                ]
+        pending_active_indices = getattr(
+            self,
+            "_pending_schedule_upload_active_indices",
+            None,
+        )
+        if pending_active_indices is not None:
+            pending_active_indices.clear()
 
     async def async_shutdown(self) -> None:
         """Disconnect client resources."""
@@ -1003,3 +1813,116 @@ def _app_map_index_hints(app_maps: Mapping[str, Any] | None) -> list[int]:
             continue
         indices.append(index)
     return indices
+
+
+def _app_map_hints_are_authoritative(
+    app_maps: Mapping[str, Any] | None,
+    *,
+    refresh_succeeded: bool,
+) -> bool:
+    """Return whether an empty map list is a confirmed, current result."""
+    if not refresh_succeeded or not isinstance(app_maps, Mapping):
+        return False
+    maps = app_maps.get("maps")
+    return (
+        app_maps.get("map_list_valid") is True
+        and isinstance(maps, Sequence)
+        and not isinstance(maps, str | bytes | bytearray)
+    )
+
+
+def _schedule_expected_indices(
+    existing: Mapping[str, Any] | None,
+    incoming: Mapping[str, Any],
+    known_map_indices: Sequence[int],
+    *,
+    map_hints_authoritative: bool,
+) -> list[int]:
+    """Return authoritative or conservatively discovered schedule slot ids."""
+    if map_hints_authoritative:
+        return [-1, *known_map_indices]
+
+    indices = [-1, *known_map_indices]
+    for payload in (existing, incoming):
+        schedules = payload.get("schedules") if isinstance(payload, Mapping) else None
+        if not isinstance(schedules, Sequence) or isinstance(
+            schedules,
+            str | bytes | bytearray,
+        ):
+            continue
+        for schedule in schedules:
+            index = schedule.get("idx") if isinstance(schedule, Mapping) else None
+            if (
+                isinstance(index, int)
+                and not isinstance(index, bool)
+                and index >= 0
+                and index not in indices
+            ):
+                indices.append(index)
+    return indices
+
+
+def _usable_schedule_indices(payload: Mapping[str, Any]) -> list[int]:
+    """Return writable slots read authoritatively in one action payload."""
+    schedules = payload.get("schedules")
+    if not isinstance(schedules, Sequence):
+        return []
+    return [
+        index
+        for schedule in schedules
+        if isinstance(schedule, Mapping)
+        and schedule_entry_has_usable_data(schedule)
+        and isinstance((index := schedule.get("idx")), int)
+        and not isinstance(index, bool)
+    ]
+
+
+def _schedule_payload_has_active_selection(
+    payload: Mapping[str, Any] | None,
+) -> bool:
+    """Return whether the cache identifies the effective schedule version."""
+    if not isinstance(payload, Mapping):
+        return False
+    current_task = payload.get("current_task")
+    if isinstance(current_task, Mapping):
+        version = current_task.get("version")
+        if isinstance(version, int) and not isinstance(version, bool):
+            return True
+    version = payload.get("active_schedule_version")
+    return isinstance(version, int) and not isinstance(version, bool)
+
+
+def _discard_stale_batch_schedule(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return a non-publishable batch result after its map hint changed."""
+    normalized = dict(payload)
+    normalized["available"] = False
+    normalized["schedules"] = []
+    normalized.pop("active_schedule_version", None)
+    normalized.pop("active_schedule_index", None)
+    normalized.pop("current_task", None)
+    errors = payload.get("errors")
+    normalized["errors"] = [
+        *(
+            errors
+            if isinstance(errors, Sequence)
+            and not isinstance(errors, str | bytes | bytearray)
+            else []
+        ),
+        {
+            "stage": "schedule",
+            "error": "active map changed during batch read",
+        },
+    ]
+    return normalized
+
+
+def _schedule_write_version(result: Mapping[str, Any]) -> int | None:
+    """Return the writable version confirmed by a schedule write."""
+    version = result.get("version")
+    return (
+        version
+        if isinstance(version, int) and not isinstance(version, bool)
+        else None
+    )

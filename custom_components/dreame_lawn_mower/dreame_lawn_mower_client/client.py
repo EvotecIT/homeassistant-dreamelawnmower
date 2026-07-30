@@ -80,6 +80,9 @@ from .client_maps import (
     _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS,
     _DreameLawnMowerClientMapsMixin,
 )
+from .client_settings import (
+    SCHEDULE_READ_TIMEOUT_SECONDS as _SCHEDULE_READ_TIMEOUT_SECONDS,
+)
 from .client_settings import _DreameLawnMowerClientSettingsMixin
 from .deadline import DeadlineExceededError as DeadlineExceededError
 from .deadline import run_with_deadline as run_with_deadline
@@ -896,6 +899,7 @@ class DreameLawnMowerClient(
         include_raw: bool = False,
         map_indices: Sequence[int] | None = None,
         chunk_size: int = SCHEDULE_CHUNK_SIZE,
+        include_current_task: bool = True,
     ) -> dict[str, Any]:
         """Return read-only mower schedules from the app action protocol."""
         return await asyncio.to_thread(
@@ -903,6 +907,7 @@ class DreameLawnMowerClient(
             include_raw,
             map_indices,
             chunk_size,
+            include_current_task,
         )
 
     async def async_set_app_schedule_plan_enabled(
@@ -1128,12 +1133,17 @@ class DreameLawnMowerClient(
         *,
         include_raw: bool = False,
         map_index_hint: int | None = None,
+        discover_map_index: bool = True,
+        timeout: float = _SCHEDULE_READ_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
         """Fetch and decode schedule data from batch device data."""
+        timeout = _validate_positive_number(timeout, "batch schedule timeout")
         return await asyncio.to_thread(
             self._sync_get_batch_schedules,
             include_raw,
             map_index_hint,
+            discover_map_index,
+            timeout,
         )
 
     async def async_get_batch_mowing_preferences(

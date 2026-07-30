@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
+from functools import partial
 from typing import Any
 
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -18,6 +19,7 @@ from .const import DOMAIN
 from .control_options import active_map_index
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
+from .ha_tasks import create_background_task
 from .performance import (
     DreameLawnMowerPerformanceCycle,
     DreameLawnMowerPerformanceSample,
@@ -31,6 +33,7 @@ _LOGGER = logging.getLogger(__name__)
 # requests session. Keep its background calls serialized until that owner
 # provides an explicit concurrency contract.
 METADATA_REFRESH_CONCURRENCY = 1
+METADATA_RETRY_DELAY_SECONDS = 2.0
 METADATA_SHUTDOWN_GRACE_SECONDS = 5.0
 SLOW_FOREGROUND_REFRESH_SECONDS = 15.0
 SLOW_METADATA_REFRESH_SECONDS = 30.0
@@ -38,10 +41,17 @@ SLOW_METADATA_REFRESH_SECONDS = 30.0
 
 def runtime_tracking_active(snapshot: DreameLawnMowerSnapshot) -> bool:
     """Prefer explicit heartbeat session state over legacy activity state."""
+    activity = getattr(snapshot, "activity", None)
+    state = getattr(snapshot, "state", None)
+    if (
+        getattr(snapshot, "docked", False)
+        or state in {"charging", "charging_completed"}
+    ):
+        return False
     session_active = getattr(snapshot, "mowing_session_active", None)
     if session_active is not None:
         return bool(session_active)
-    return getattr(snapshot, "activity", None) in {"mowing", "paused", "returning"}
+    return activity in {"mowing", "paused", "returning"}
 
 
 class DreameLawnMowerRefreshMixin:
@@ -69,9 +79,8 @@ class DreameLawnMowerRefreshMixin:
             0,
         )
         for candidate, generation in generations.values():
-            if (
-                generation == published_generation
-                and not self._snapshot_is_stale(candidate)
+            if generation == published_generation and not self._snapshot_is_stale(
+                candidate
             ):
                 return candidate
         raise UpdateFailed(
@@ -278,7 +287,8 @@ class DreameLawnMowerRefreshMixin:
             return
         self._metadata_refresh_pending = False
         self._metadata_refresh_publish = True
-        self._metadata_refresh_task = self.hass.async_create_task(
+        self._metadata_refresh_task = create_background_task(
+            self.hass,
             self._async_refresh_metadata(
                 refresh_map_and_runtime=refresh_map_and_runtime,
             ),
@@ -296,17 +306,16 @@ class DreameLawnMowerRefreshMixin:
         current_task = asyncio.current_task()
         tasks: list[asyncio.Task[Any]] = []
         try:
+            core_operations: list[
+                tuple[str, Callable[[], Awaitable[Any]]]
+            ] = []
             if refresh_map_and_runtime:
-                app_maps_task = asyncio.create_task(
-                    self._async_run_metadata_phase(
-                        cycle,
+                core_operations.append(
+                    (
                         "app_maps",
                         lambda: self.async_refresh_app_maps(force=False),
                     )
                 )
-                tasks.append(app_maps_task)
-            else:
-                app_maps_task = None
 
             operations: tuple[
                 tuple[str, Callable[[], Awaitable[Any]]],
@@ -339,45 +348,125 @@ class DreameLawnMowerRefreshMixin:
                 ),
             )
 
-            tasks.extend(
+            core_operations.extend(operations)
+            tasks = [
                 asyncio.create_task(
                     self._async_run_metadata_phase(cycle, phase, operation)
                 )
-                for phase, operation in operations
-            )
+                for phase, operation in core_operations
+            ]
 
-            if app_maps_task is not None:
-                await app_maps_task
-            tasks.extend(
-                (
+            core_results = await asyncio.gather(*tasks, return_exceptions=True)
+            core_unexpected = [
+                result
+                for result in core_results
+                if isinstance(result, Exception)
+                and not isinstance(result, asyncio.CancelledError)
+            ]
+            if core_unexpected:
+                outcome = "partial"
+                _LOGGER.debug(
+                    "Optional mower core metadata refresh had unexpected failures: %s",
+                    ", ".join(type(error).__name__ for error in core_unexpected),
+                )
+
+            if not self._shutting_down and getattr(
+                self, "_metadata_refresh_publish", True
+            ):
+                self.async_update_listeners()
+
+            retry_operations: list[
+                tuple[str, Callable[[], Awaitable[Any]]]
+            ] = []
+            for (phase, operation), result in zip(
+                core_operations,
+                core_results,
+                strict=True,
+            ):
+                if not self._metadata_phase_needs_retry(phase, result):
+                    continue
+                if phase == "app_maps":
+                    retry_operation = partial(
+                        self.async_refresh_app_maps,
+                        force=True,
+                    )
+                else:
+                    retry_operation = operation
+                retry_operations.append(
+                    (phase, retry_operation)
+                )
+            if retry_operations:
+                await asyncio.sleep(METADATA_RETRY_DELAY_SECONDS)
+                tasks = [
                     asyncio.create_task(
                         self._async_run_metadata_phase(
                             cycle,
-                            "schedules",
-                            lambda: self.async_refresh_schedules(force=False),
+                            f"{phase}_retry",
+                            operation,
                         )
-                    ),
-                    asyncio.create_task(
+                    )
+                    for phase, operation in retry_operations
+                ]
+                retry_results = await asyncio.gather(
+                    *tasks,
+                    return_exceptions=True,
+                )
+                retry_failures = [
+                    result
+                    for (phase, _operation), result in zip(
+                        retry_operations,
+                        retry_results,
+                        strict=True,
+                    )
+                    if self._metadata_phase_needs_retry(phase, result)
+                ]
+                if retry_failures:
+                    outcome = "partial"
+                    _LOGGER.debug(
+                        "Optional mower core metadata remained incomplete "
+                        "after one bounded retry: %s",
+                        ", ".join(
+                            type(error).__name__
+                            if isinstance(error, Exception)
+                            else "empty"
+                            for error in retry_failures
+                        ),
+                    )
+                if (
+                    not self._shutting_down
+                    and getattr(self, "_metadata_refresh_publish", True)
+                ):
+                    self.async_update_listeners()
+
+            tasks = [
+                asyncio.create_task(
+                    self._async_run_metadata_phase(
+                        cycle,
+                        "schedules",
+                        lambda: self.async_refresh_schedules(force=False),
+                    )
+                ),
+                asyncio.create_task(
                     self._async_run_metadata_phase(
                         cycle,
                         "batch_device_data",
                         lambda: self.async_refresh_batch_device_data(force=False),
                     )
-                    ),
-                )
-            )
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            unexpected = [
+                ),
+            ]
+            schedule_results = await asyncio.gather(*tasks, return_exceptions=True)
+            schedule_unexpected = [
                 result
-                for result in results
+                for result in schedule_results
                 if isinstance(result, Exception)
                 and not isinstance(result, asyncio.CancelledError)
             ]
-            if unexpected:
+            if schedule_unexpected:
                 outcome = "partial"
                 _LOGGER.debug(
-                    "Optional mower metadata refresh had unexpected failures: %s",
-                    ", ".join(type(error).__name__ for error in unexpected),
+                    "Optional mower schedule metadata refresh had unexpected "
+                    "failures: %s",
+                    ", ".join(type(error).__name__ for error in schedule_unexpected),
                 )
         except asyncio.CancelledError:
             outcome = "cancelled"
@@ -418,6 +507,58 @@ class DreameLawnMowerRefreshMixin:
                     refresh_map_and_runtime=True,
                 )
 
+    def _metadata_phase_needs_retry(self, phase: str, result: Any) -> bool:
+        """Return whether one core phase has not populated its cache yet."""
+        if phase == "app_maps":
+            if not hasattr(self, "app_maps_refresh_succeeded"):
+                return False
+            if not self.app_maps_refresh_succeeded:
+                return True
+            app_maps = getattr(self, "app_maps", None)
+            if (
+                not isinstance(app_maps, Mapping)
+                or app_maps.get("map_list_valid") is not True
+            ):
+                return True
+            current_index = active_map_index(app_maps)
+            maps = app_maps.get("maps")
+            if not isinstance(maps, Sequence):
+                return False
+            if current_index is None:
+                selected_index = getattr(self, "selected_map_index", None)
+                if (
+                    isinstance(selected_index, int)
+                    and not isinstance(selected_index, bool)
+                    and selected_index >= 0
+                    and any(
+                        isinstance(item, Mapping)
+                        and item.get("idx") == selected_index
+                        and item.get("created") is not False
+                        for item in maps
+                    )
+                ):
+                    current_index = selected_index
+            if current_index is None:
+                return False
+            return not any(
+                isinstance(item, Mapping)
+                and item.get("idx") == current_index
+                and bool(item.get("available"))
+                for item in maps
+            )
+        refreshed_at_by_phase = {
+            "firmware": "firmware_update_support_refreshed_at",
+            "app_map_objects": "app_map_objects_refreshed_at",
+            "vector_map": "vector_map_details_refreshed_at",
+            "weather": "weather_protection_refreshed_at",
+            "maintenance": "maintenance_status_refreshed_at",
+            "voice": "voice_settings_refreshed_at",
+        }
+        marker = refreshed_at_by_phase.get(phase)
+        if marker is None or not hasattr(self, marker):
+            return False
+        return isinstance(result, Exception) or getattr(self, marker) is None
+
     async def _async_run_metadata_phase(
         self,
         cycle: DreameLawnMowerPerformanceCycle,
@@ -437,7 +578,7 @@ class DreameLawnMowerRefreshMixin:
         """Cancel queued metadata and bound the wait for an in-flight request."""
         metadata_task = self._metadata_refresh_task
         if metadata_task is None or metadata_task is asyncio.current_task():
-            return True
+            return await self._async_drain_batch_schedule_for_shutdown()
 
         close_task = getattr(self, "_metadata_shutdown_close_task", None)
         if close_task is not None and not close_task.done():
@@ -456,17 +597,72 @@ class DreameLawnMowerRefreshMixin:
                 f"{DOMAIN}-metadata-shutdown",
             )
             return False
+        return await self._async_drain_batch_schedule_for_shutdown()
+
+    async def _async_drain_batch_schedule_for_shutdown(self) -> bool:
+        """Wait for shared batch reads without cancelling their worker threads."""
+        tasks = set(getattr(self, "_batch_schedule_read_tasks", set()))
+        latest = getattr(self, "_batch_schedule_read_task", None)
+        if latest is not None:
+            tasks.add(latest)
+        tasks.discard(asyncio.current_task())
+        if not tasks:
+            return True
+
+        drain_task = asyncio.create_task(self._async_wait_batch_schedule_reads())
+        try:
+            async with asyncio.timeout(METADATA_SHUTDOWN_GRACE_SECONDS):
+                await asyncio.shield(drain_task)
+        except asyncio.CancelledError:
+            if not drain_task.done():
+                raise
+        except TimeoutError:
+            self._metadata_shutdown_close_task = self.hass.async_create_task(
+                self._async_close_after_metadata(drain_task),
+                f"{DOMAIN}-batch-schedule-shutdown",
+            )
+            return False
         return True
+
+    async def _async_wait_batch_schedule_reads(self) -> None:
+        """Wait until every tracked batch worker reaches a terminal result."""
+        while True:
+            tasks = set(getattr(self, "_batch_schedule_read_tasks", set()))
+            latest = getattr(self, "_batch_schedule_read_task", None)
+            if latest is not None:
+                tasks.add(latest)
+            tasks.discard(asyncio.current_task())
+            if not tasks:
+                return
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception) and not isinstance(
+                    result,
+                    asyncio.CancelledError,
+                ):
+                    _LOGGER.debug(
+                        "Batch schedule task failed during shutdown: %s",
+                        result,
+                    )
+            tracked_tasks = getattr(self, "_batch_schedule_read_tasks", None)
+            if tracked_tasks is not None:
+                tracked_tasks.difference_update(tasks)
+            if getattr(self, "_batch_schedule_read_task", None) in tasks:
+                self._batch_schedule_read_task = None
+                self._batch_schedule_read_key = None
+                self._batch_schedule_read_completed_at = None
 
     async def _async_close_after_metadata(
         self,
-        metadata_task: asyncio.Task[None],
+        metadata_task: asyncio.Task[Any],
     ) -> None:
         """Close the shared client once a cancellation-resistant request drains."""
         try:
-            with suppress(asyncio.CancelledError):
+            with suppress(asyncio.CancelledError, Exception):
                 await metadata_task
         finally:
+            await self._async_wait_batch_schedule_reads()
             await self.client.async_close()
 
     @staticmethod
@@ -479,8 +675,7 @@ class DreameLawnMowerRefreshMixin:
         """Log deterministic privacy-safe timings at an appropriate level."""
         total, phases = format_performance_sample(sample)
         message = (
-            "Dreame mower performance: operation=%s outcome=%s total=%.3fs "
-            "phases=[%s]"
+            "Dreame mower performance: operation=%s outcome=%s total=%.3fs phases=[%s]"
         )
         args = (sample.operation, sample.outcome, total, phases)
         if total >= slow_after:

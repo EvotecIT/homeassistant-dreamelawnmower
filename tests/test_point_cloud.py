@@ -2270,7 +2270,7 @@ def test_point_cloud_401_reauthentication_uses_remaining_deadline(
     monkeypatch.setattr(
         _internal_protocol_module,
         "_post_cloud_response",
-        lambda session, url, request_options, *, deadline: response,
+        lambda session, url, request_options, *, deadline, run_in_worker=True: response,
     )
     monkeypatch.setattr(
         _internal_protocol_module,

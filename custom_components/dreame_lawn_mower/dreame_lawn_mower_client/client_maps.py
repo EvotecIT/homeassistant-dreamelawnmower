@@ -24,6 +24,7 @@ from .app_protocol import (
     mower_state_label,
 )
 from .client_map_helpers import (
+    _app_map_entries_are_valid,
     _app_map_payload_summary,
     _app_map_view_details,
     _app_map_view_summary,
@@ -563,9 +564,14 @@ class _DreameLawnMowerClientMapsMixin:
         chunk_size = _validate_app_map_chunk_size(chunk_size)
         map_list_result = self._sync_call_app_action({"m": "g", "t": "MAPL"})
         map_entries = _normalize_app_map_entries(map_list_result)
+        map_list_valid = _app_map_entries_are_valid(
+            map_list_result,
+            map_entries,
+        )
         result: dict[str, Any] = {
             "source": "app_action_map",
             "available": False,
+            "map_list_valid": map_list_valid,
             "map_count": len(map_entries),
             "created_map_count": sum(
                 1 for entry in map_entries if entry.get("created") is not False
@@ -576,7 +582,11 @@ class _DreameLawnMowerClientMapsMixin:
             "errors": [],
         }
         for entry in map_entries:
-            if entry.get("current"):
+            if (
+                map_list_valid
+                and entry.get("created") is not False
+                and entry.get("current")
+            ):
                 result["current_map_index"] = entry["idx"]
             if not entry.get("created"):
                 result["maps"].append(entry)

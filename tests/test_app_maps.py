@@ -203,6 +203,7 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
     result = client._sync_get_app_maps(chunk_size=40, include_payload=True)
 
     assert result["available"] is True
+    assert result["map_list_valid"] is True
     assert result["map_count"] == 2
     assert result["created_map_count"] == 1
     assert result["current_map_index"] == 0
@@ -294,6 +295,74 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
     expected_sizes = [min(40, payload_size - start) for start in expected_starts]
     assert [call["d"]["start"] for call in mapd_calls] == expected_starts
     assert [call["d"]["size"] for call in mapd_calls] == expected_sizes
+
+
+def test_app_maps_mark_missing_map_list_response_invalid() -> None:
+    client = _client()
+    client._sync_call_app_action = lambda *_args, **_kwargs: None
+
+    result = client._sync_get_app_maps(include_objects=False)
+
+    assert result["available"] is False
+    assert result["map_list_valid"] is False
+    assert result["map_count"] == 0
+    assert result["maps"] == []
+
+
+def test_app_maps_reject_multiple_current_created_maps() -> None:
+    client = _client()
+
+    def app_action(payload):
+        if payload["t"] == "MAPL":
+            return {"r": 0, "d": [[0, 1, 1, 1], [1, 1, 1, 1]]}
+        return None
+
+    client._sync_call_app_action = app_action
+
+    result = client._sync_get_app_maps(include_objects=False)
+
+    assert result["map_list_valid"] is False
+    assert result["current_map_index"] is None
+    assert result["map_count"] == 2
+
+
+def test_app_maps_ignore_current_flag_on_uncreated_map() -> None:
+    client = _client()
+
+    def app_action(payload):
+        if payload["t"] == "MAPL":
+            return {"r": 0, "d": [[0, 0, 1, 1], [1, 1, 0, 0]]}
+        return None
+
+    client._sync_call_app_action = app_action
+
+    result = client._sync_get_app_maps(include_objects=False)
+
+    assert result["map_list_valid"] is True
+    assert result["current_map_index"] is None
+    assert result["map_count"] == 2
+    assert result["created_map_count"] == 1
+
+
+def test_app_maps_reject_malformed_status_flags() -> None:
+    client = _client()
+    malformed_rows = (
+        [[0, "0", "0", 0]],
+        [[0, 2, 1, 1]],
+        [[0, 1, 1, 1, "0"]],
+    )
+
+    for rows in malformed_rows:
+        client._sync_call_app_action = (
+            lambda payload, rows=rows: {"r": 0, "d": rows}
+            if payload["t"] == "MAPL"
+            else None
+        )
+
+        result = client._sync_get_app_maps(include_objects=False)
+
+        assert result["map_list_valid"] is False
+        assert result["current_map_index"] is None
 
 
 def test_app_maps_explain_rejected_point_values_without_exposing_them() -> None:

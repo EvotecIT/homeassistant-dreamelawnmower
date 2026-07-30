@@ -105,6 +105,18 @@ def test_runtime_tracking_falls_back_when_heartbeat_state_is_unknown() -> None:
     assert _runtime_tracking_active(snapshot) is True
 
 
+def test_runtime_tracking_rejects_stale_paused_heartbeat_while_docked() -> None:
+    snapshot = SimpleNamespace(
+        mowing_session_active=True,
+        task_status="paused",
+        activity="docked",
+        state="charging_completed",
+        docked=True,
+    )
+
+    assert _runtime_tracking_active(snapshot) is False
+
+
 def test_active_runtime_tracking_uses_fresh_app_map_identity() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     snapshot = SimpleNamespace(
@@ -506,3 +518,76 @@ def test_app_map_refresh_synchronizes_selected_map_identity() -> None:
     assert coordinator.selected_contour_id is None
     assert coordinator.selected_zone_id is None
     assert coordinator.selected_spot_id is None
+
+
+def test_app_map_refresh_clears_map_scoped_selection_for_deleted_map() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.client = SimpleNamespace(
+        async_get_app_maps=AsyncMock(
+            return_value={
+                "current_map_index": None,
+                "map_list_valid": True,
+                "maps": [{"idx": 0, "created": True}],
+            }
+        )
+    )
+    coordinator.app_maps = {
+        "current_map_index": 1,
+        "map_list_valid": True,
+        "maps": [
+            {"idx": 0, "created": True},
+            {"idx": 1, "created": True},
+        ],
+    }
+    coordinator.app_maps_refreshed_at = None
+    coordinator.app_maps_refresh_succeeded = True
+    coordinator.selected_map_index = 1
+    coordinator.selected_contour_id = (3, 0)
+    coordinator.selected_zone_id = 3
+    coordinator.selected_spot_id = 2
+    coordinator.selected_maintenance_point_id = 302
+
+    asyncio.run(coordinator.async_refresh_app_maps(force=True))
+
+    assert coordinator.selected_map_index is None
+    assert coordinator.selected_contour_id is None
+    assert coordinator.selected_zone_id is None
+    assert coordinator.selected_spot_id is None
+    assert coordinator.selected_maintenance_point_id is None
+
+
+def test_app_map_cache_hit_preserves_failed_refresh_status() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.client = SimpleNamespace(async_get_app_maps=AsyncMock())
+    coordinator.app_maps = {"current_map_index": 0}
+    coordinator.app_maps_refreshed_at = datetime.now(UTC)
+    coordinator.app_maps_refresh_succeeded = False
+
+    result = asyncio.run(coordinator.async_refresh_app_maps())
+
+    assert result is coordinator.app_maps
+    assert coordinator.app_maps_refresh_succeeded is False
+    coordinator.client.async_get_app_maps.assert_not_awaited()
+
+
+def test_app_map_refresh_marks_invalid_inventory_for_retry() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.client = SimpleNamespace(
+        async_get_app_maps=AsyncMock(
+            return_value={
+                "map_list_valid": False,
+                "current_map_index": None,
+                "maps": [{"idx": 0, "created": True}],
+            }
+        )
+    )
+    coordinator.app_maps = None
+    coordinator.app_maps_refreshed_at = None
+    coordinator.app_maps_refresh_succeeded = False
+    coordinator.selected_map_index = None
+
+    result = asyncio.run(coordinator.async_refresh_app_maps(force=True))
+
+    assert result["map_list_valid"] is False
+    assert coordinator.app_maps_refresh_succeeded is False
+    assert coordinator._metadata_phase_needs_retry("app_maps", result)

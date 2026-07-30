@@ -194,12 +194,18 @@ def test_app_schedules_decode_plans_and_current_task() -> None:
     assert 0 < cloud.request_options[0]["timeout"] <= 5.0
     assert isinstance(cloud.request_options[0]["deadline"], float)
     assert cloud.request_options[0]["deadline"] > 0
-    assert cloud.request_options[1] == {
+    assert {
+        key: value
+        for key, value in cloud.request_options[1].items()
+        if key not in {"deadline", "timeout"}
+    } == {
         "command": "MAPL",
-        "retry_count": None,
-        "timeout": None,
-        "deadline": None,
+        "retry_count": 0,
     }
+    assert 0 < cloud.request_options[1]["timeout"] <= 2.5
+    assert isinstance(cloud.request_options[1]["deadline"], float)
+    assert cloud.request_options[2]["retry_count"] == 0
+    assert 0 < cloud.request_options[2]["timeout"] <= 5.0
 
 
 def test_app_schedules_can_include_raw_payload_text() -> None:
@@ -216,6 +222,230 @@ def test_app_schedules_can_include_raw_payload_text() -> None:
     assert [schedule["idx"] for schedule in result["schedules"]] == [0]
     assert result["schedules"][0]["raw_text"].startswith('{"d":')
     assert [call["t"] for call in cloud.calls] == ["SCHDT", "SCHDIV2", "SCHDDV2"]
+
+
+def test_app_schedules_can_skip_optional_current_task_and_bound_plan_reads() -> None:
+    client = _client()
+    cloud = _FakeAppScheduleCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+
+    result = client._sync_get_app_schedules(
+        map_indices=[0],
+        include_current_task=False,
+    )
+
+    assert result["available"] is True
+    assert result["current_task"] is None
+    assert [call["t"] for call in cloud.calls] == ["SCHDIV2", "SCHDDV2"]
+    assert all(option["retry_count"] == 0 for option in cloud.request_options)
+    assert all(option["timeout"] == 5.0 for option in cloud.request_options)
+    assert cloud.request_options[0]["deadline"] == cloud.request_options[1]["deadline"]
+
+
+def test_app_schedules_allocate_shared_deadline_fairly_across_slots() -> None:
+    client = _client()
+    cloud = _FakeAppScheduleCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+
+    result = client._sync_get_app_schedules(
+        map_indices=[-1, 0, 1],
+        include_current_task=False,
+    )
+
+    assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 0, 1]
+    metadata_deadlines = [
+        options["deadline"]
+        for call, options in zip(
+            cloud.calls,
+            cloud.request_options,
+            strict=True,
+        )
+        if call["t"] == "SCHDIV2"
+    ]
+    assert len(metadata_deadlines) == 3
+    assert metadata_deadlines[0] < metadata_deadlines[1] < metadata_deadlines[2]
+
+
+def test_app_schedules_reserve_slot_time_when_map_discovery_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+
+    class _SlowMapCloud(_FakeAppScheduleCloud):
+        def call_app_action(
+            self,
+            payload: dict[str, object],
+            **kwargs: object,
+        ) -> dict[str, object]:
+            if payload.get("t") == "MAPL":
+                self.calls.append(payload)
+                self.request_options.append(
+                    {
+                        "command": "MAPL",
+                        "retry_count": kwargs.get("retry_count"),
+                        "timeout": kwargs.get("timeout"),
+                        "deadline": kwargs.get("deadline"),
+                    }
+                )
+                clock[0] = float(kwargs["deadline"])
+                raise TimeoutError("MAPL timed out")
+            return super().call_app_action(payload, **kwargs)
+
+    cloud = _SlowMapCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+    settings_time = client._sync_get_app_schedules.__func__.__globals__["time"]
+    monkeypatch.setattr(settings_time, "monotonic", lambda: clock[0])
+
+    result = client._sync_get_app_schedules(include_current_task=False)
+
+    assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 0, 1]
+    map_deadline = cloud.request_options[0]["deadline"]
+    first_schedule_deadline = cloud.request_options[1]["deadline"]
+    assert map_deadline == pytest.approx(102.5)
+    assert first_schedule_deadline == pytest.approx(103.75)
+
+
+def test_app_schedules_fall_back_to_likely_slots_when_map_list_is_missing() -> None:
+    client = _client()
+
+    class _MissingMapListCloud(_FakeAppScheduleCloud):
+        def call_app_action(
+            self,
+            payload: dict[str, object],
+            **kwargs: object,
+        ) -> dict[str, object] | None:
+            if payload.get("t") == "MAPL":
+                self.calls.append(payload)
+                self.request_options.append(
+                    {
+                        "command": "MAPL",
+                        "retry_count": kwargs.get("retry_count"),
+                        "timeout": kwargs.get("timeout"),
+                        "deadline": kwargs.get("deadline"),
+                    }
+                )
+                return None
+            return super().call_app_action(payload, **kwargs)
+
+    cloud = _MissingMapListCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+
+    result = client._sync_get_app_schedules(include_current_task=False)
+
+    assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 0, 1]
+
+
+def test_app_schedules_retry_early_slot_with_unused_shared_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+    default_attempts = 0
+
+    class _RecoveringSlotCloud(_FakeAppScheduleCloud):
+        def call_app_action(
+            self,
+            payload: dict[str, object],
+            **kwargs: object,
+        ) -> dict[str, object]:
+            nonlocal default_attempts
+            if payload.get("t") == "SCHDIV2" and payload["d"]["i"] == -1:
+                default_attempts += 1
+                if default_attempts == 1:
+                    self.calls.append(payload)
+                    self.request_options.append(
+                        {
+                            "command": "SCHDIV2",
+                            "retry_count": kwargs.get("retry_count"),
+                            "timeout": kwargs.get("timeout"),
+                            "deadline": kwargs.get("deadline"),
+                        }
+                    )
+                    clock[0] = float(kwargs["deadline"])
+                    raise TimeoutError("initial fair share expired")
+            return super().call_app_action(payload, **kwargs)
+
+    cloud = _RecoveringSlotCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+    settings_time = client._sync_get_app_schedules.__func__.__globals__["time"]
+    monkeypatch.setattr(settings_time, "monotonic", lambda: clock[0])
+
+    result = client._sync_get_app_schedules(
+        map_indices=[-1, 0, 1],
+        include_current_task=False,
+    )
+
+    assert result["errors"] == []
+    assert result["schedules"][0]["version"] == 31345
+    default_deadlines = [
+        option["deadline"]
+        for call, option in zip(cloud.calls, cloud.request_options, strict=True)
+        if call["t"] == "SCHDIV2" and call["d"]["i"] == -1
+    ]
+    assert default_deadlines == pytest.approx([101.6666666667, 106.6666666667])
+    assert max(
+        option["deadline"]
+        for option in cloud.request_options
+        if option["deadline"] is not None
+    ) <= 110.0
+
+
+def test_app_schedules_rotate_reserved_recovery_across_slow_slots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+
+    class _MultipleSlowSlotsCloud(_FakeAppScheduleCloud):
+        def call_app_action(
+            self,
+            payload: dict[str, object],
+            **kwargs: object,
+        ) -> dict[str, object]:
+            command = payload.get("t")
+            if command == "MAPL":
+                self.calls.append(payload)
+                self.request_options.append(
+                    {
+                        "command": "MAPL",
+                        "retry_count": kwargs.get("retry_count"),
+                        "timeout": kwargs.get("timeout"),
+                        "deadline": kwargs.get("deadline"),
+                    }
+                )
+                clock[0] = float(kwargs["deadline"])
+                raise TimeoutError("MAPL timed out")
+            if command == "SCHDIV2" and payload["d"]["i"] in {-1, 0}:
+                deadline = float(kwargs["deadline"])
+                if deadline - clock[0] < 3.0:
+                    self.calls.append(payload)
+                    self.request_options.append(
+                        {
+                            "command": "SCHDIV2",
+                            "retry_count": kwargs.get("retry_count"),
+                            "timeout": kwargs.get("timeout"),
+                            "deadline": kwargs.get("deadline"),
+                        }
+                    )
+                    clock[0] = deadline
+                    raise TimeoutError("slot needs three seconds")
+                clock[0] += 3.0
+            return super().call_app_action(payload, **kwargs)
+
+    cloud = _MultipleSlowSlotsCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+    settings_time = client._sync_get_app_schedules.__func__.__globals__["time"]
+    monkeypatch.setattr(settings_time, "monotonic", lambda: clock[0])
+
+    first = client._sync_get_app_schedules(include_current_task=False)
+    second = client._sync_get_app_schedules(include_current_task=False)
+
+    assert first["schedules"][0]["version"] == 31345
+    assert first["schedules"][1]["available"] is False
+    assert second["schedules"][0]["available"] is False
+    assert second["schedules"][1]["version"] == 19383
+    assert client._app_schedule_retry_offset == 0
 
 
 @pytest.mark.parametrize(
@@ -352,7 +582,10 @@ def test_set_app_schedule_plan_enabled_rejects_failed_write_response() -> None:
     cloud = _FakeAppScheduleCloud()
     client._sync_get_cloud_protocol = lambda **_kwargs: cloud
 
-    def failing_call(payload: dict[str, object]) -> dict[str, object]:
+    def failing_call(
+        payload: dict[str, object],
+        **_kwargs: object,
+    ) -> dict[str, object]:
         if payload["t"] == "SCHDSV2":
             return {"m": "r", "r": 0, "d": {"r": 1, "v": 19383}}
         return cloud.call_app_action(payload)["out"][0]
@@ -375,7 +608,7 @@ def test_set_app_schedule_plan_enabled_rejects_lost_acknowledgement() -> None:
     client._sync_get_cloud_protocol = lambda **_kwargs: cloud
     normal_call = client._sync_call_app_action
 
-    def lost_ack(payload: dict[str, object]) -> object:
+    def lost_ack(payload: dict[str, object], **_kwargs: object) -> object:
         if payload["t"] == "SCHDSV2":
             return None
         return normal_call(payload)

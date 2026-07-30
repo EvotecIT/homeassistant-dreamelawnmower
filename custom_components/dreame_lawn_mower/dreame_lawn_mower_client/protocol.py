@@ -139,10 +139,12 @@ class DreameMowerProtocol:
         return info
 
     def disconnect(self):
-        if self.cloud is not None:
-            self.cloud.disconnect()
-        if self.device_cloud is not None:
-            self.device_cloud.disconnect()
+        disconnected_protocols: set[int] = set()
+        for cloud in (self.cloud, self.device_cloud):
+            if cloud is None or id(cloud) in disconnected_protocols:
+                continue
+            disconnected_protocols.add(id(cloud))
+            cloud.disconnect()
         self._connected = False
 
     def send_async(self, callback, method, parameters: Any = None, retry_count: int = 0):
