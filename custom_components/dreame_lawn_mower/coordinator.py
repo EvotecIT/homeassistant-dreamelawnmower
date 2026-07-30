@@ -74,6 +74,7 @@ SCHEDULE_REFRESH_INTERVAL = timedelta(minutes=5)
 FIRMWARE_UPDATE_REFRESH_INTERVAL = timedelta(minutes=15)
 DEVICE_SNAPSHOT_GENERATION_HISTORY = 32
 PENDING_SCHEDULE_PLAN_MAX_CONTRADICTORY_READS = 1
+BATCH_SCHEDULE_RESULT_COALESCE_SECONDS = 1.0
 
 
 _runtime_tracking_active = runtime_tracking_active
@@ -140,6 +141,9 @@ class DreameLawnMowerCoordinator(
         self._pending_schedule_uploads: dict[int, dict[str, Any]] = {}
         self._pending_schedule_upload_contradictions: dict[int, int] = {}
         self._pending_schedule_upload_active_indices: set[int] = set()
+        self._batch_schedule_read_task: asyncio.Task[dict[str, Any]] | None = None
+        self._batch_schedule_read_key: tuple[int | None, bool] | None = None
+        self._batch_schedule_read_completed_at: float | None = None
         self._schedule_write_lock = asyncio.Lock()
         self._preference_write_lock = asyncio.Lock()
         self._device_refresh_lock = asyncio.Lock()
@@ -458,11 +462,7 @@ class DreameLawnMowerCoordinator(
                 False,
             ),
         )
-        map_index_hint = getattr(self, "selected_map_index", None)
-        if map_index_hint is None:
-            map_index_hint = active_map_index(getattr(self, "app_maps", None))
-        if map_index_hint is None and len(known_map_indices) == 1:
-            map_index_hint = known_map_indices[0]
+        map_index_hint = self._schedule_map_index_hint()
 
         try:
             action_read_generation = self._begin_schedule_read()
@@ -510,16 +510,9 @@ class DreameLawnMowerCoordinator(
         batch_read_succeeded = False
         try:
             batch_read_generation = self._begin_schedule_read()
-            batch_options: dict[str, Any] = {
-                "include_raw": False,
-                "map_index_hint": map_index_hint,
-            }
-            if map_index_hint is None:
-                # App-map discovery already ran as part of the bounded action
-                # read. Batch decoding can safely retain an unknown slot.
-                batch_options["discover_map_index"] = False
-            batch_payload = await self.client.async_get_batch_schedules(
-                **batch_options
+            batch_payload = await self._async_get_shared_batch_schedules(
+                map_index_hint=map_index_hint,
+                force=force,
             )
         except Exception as err:  # noqa: BLE001 - optional cloud capability
             _LOGGER.debug("Failed to recover batch mower schedules: %s", err)
@@ -692,6 +685,17 @@ class DreameLawnMowerCoordinator(
         )
         if not isinstance(schedules, list):
             return
+        matching_numeric_indices = {
+            schedule.get("idx")
+            for schedule in schedules
+            if isinstance(schedule, Mapping)
+            and schedule.get("version") == schedule_version
+            and isinstance(schedule.get("idx"), int)
+            and not isinstance(schedule.get("idx"), bool)
+        }
+        unknown_slot_is_unambiguous = (
+            not matching_numeric_indices or matching_numeric_indices == {map_index}
+        )
         for schedule in schedules:
             if not isinstance(schedule, dict) or not (
                 schedule.get("idx") == map_index
@@ -699,6 +703,7 @@ class DreameLawnMowerCoordinator(
                     schedule_version is not None
                     and schedule.get("idx") is None
                     and schedule.get("version") == schedule_version
+                    and unknown_slot_is_unambiguous
                 )
             ):
                 continue
@@ -709,6 +714,19 @@ class DreameLawnMowerCoordinator(
                 if isinstance(plan, dict) and plan.get("plan_id") == plan_id:
                     plan["enabled"] = enabled
                     return
+        if (
+            schedule_version is not None
+            and not unknown_slot_is_unambiguous
+            and isinstance(self.schedules, dict)
+            and self.schedules.get("active_schedule_index") is None
+            and any(
+                isinstance(schedule, Mapping)
+                and schedule.get("idx") is None
+                and schedule.get("version") == schedule_version
+                for schedule in schedules
+            )
+        ):
+            self.schedules["active_selection_available"] = False
 
     def _acknowledge_pending_schedule_plan_states(
         self,
@@ -789,7 +807,10 @@ class DreameLawnMowerCoordinator(
                 and isinstance(schedule.get("idx"), int)
                 and not isinstance(schedule.get("idx"), bool)
             }
-            unknown_slot_is_unambiguous = matching_numeric_indices == {map_index}
+            unknown_slot_is_unambiguous = (
+                not matching_numeric_indices
+                or matching_numeric_indices == {map_index}
+            )
             for schedule in schedules:
                 if not isinstance(schedule, dict) or not (
                     schedule.get("idx") == map_index
@@ -1142,7 +1163,7 @@ class DreameLawnMowerCoordinator(
                 batch_mowing_preferences,
                 batch_ota_info,
                 batch_schedule_generation,
-            ) = await self._async_fetch_batch_device_data()
+            ) = await self._async_fetch_batch_device_data(force=force)
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh batch device data: %s", err)
             return self.batch_device_data
@@ -1156,7 +1177,10 @@ class DreameLawnMowerCoordinator(
         }
         self.batch_device_data = payload
         self.batch_device_data_refreshed_at = now
-        if self._schedule_refresh_is_current(schedule_generation):
+        if (
+            batch_schedule is not self.schedules
+            and self._schedule_refresh_is_current(schedule_generation)
+        ):
             self._cache_batch_schedules(
                 batch_schedule,
                 now=now,
@@ -1199,13 +1223,18 @@ class DreameLawnMowerCoordinator(
 
     async def _async_fetch_batch_device_data(
         self,
+        *,
+        force: bool = False,
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], int]:
         """Fetch batch schedule, settings, and OTA payloads in parallel."""
         cached_schedule = self._fresh_batch_schedule()
         if cached_schedule is None:
             schedule_generation = self._begin_schedule_read()
             schedule, preferences, ota = await asyncio.gather(
-                self.client.async_get_batch_schedules(include_raw=False),
+                self._async_get_shared_batch_schedules(
+                    map_index_hint=self._schedule_map_index_hint(),
+                    force=force,
+                ),
                 self.client.async_get_batch_mowing_preferences(
                     include_raw=False,
                     map_index_hints=_app_map_index_hints(self.app_maps),
@@ -1228,12 +1257,72 @@ class DreameLawnMowerCoordinator(
             getattr(self, "_published_schedule_read_generation", 0),
         )
 
+    def _schedule_map_index_hint(self) -> int | None:
+        """Return the safest available writable-slot hint for batch decoding."""
+        map_index_hint = getattr(self, "selected_map_index", None)
+        if map_index_hint is None:
+            map_index_hint = active_map_index(getattr(self, "app_maps", None))
+        known_map_indices = _app_map_index_hints(getattr(self, "app_maps", None))
+        if map_index_hint is None and len(known_map_indices) == 1:
+            map_index_hint = known_map_indices[0]
+        return map_index_hint
+
+    async def _async_get_shared_batch_schedules(
+        self,
+        *,
+        map_index_hint: int | None,
+        force: bool,
+    ) -> dict[str, Any]:
+        """Coalesce aligned schedule and batch-metadata cloud reads."""
+        discover_map_index = map_index_hint is not None
+        key = (map_index_hint, discover_map_index)
+        loop = asyncio.get_running_loop()
+        task = getattr(self, "_batch_schedule_read_task", None)
+        completed_at = getattr(self, "_batch_schedule_read_completed_at", None)
+        reusable_result = (
+            task is not None
+            and task.done()
+            and not force
+            and completed_at is not None
+            and loop.time() - completed_at <= BATCH_SCHEDULE_RESULT_COALESCE_SECONDS
+        )
+        if (
+            task is None
+            or getattr(self, "_batch_schedule_read_key", None) != key
+            or (task.done() and not reusable_result)
+        ):
+            options: dict[str, Any] = {
+                "include_raw": False,
+                "map_index_hint": map_index_hint,
+            }
+            if not discover_map_index:
+                # App-map discovery already ran in this metadata cycle. Batch
+                # decoding can safely retain an explicit unknown slot.
+                options["discover_map_index"] = False
+            task = asyncio.create_task(
+                self.client.async_get_batch_schedules(**options)
+            )
+            self._batch_schedule_read_task = task
+            self._batch_schedule_read_key = key
+            self._batch_schedule_read_completed_at = None
+
+            def record_completion(completed: asyncio.Task[dict[str, Any]]) -> None:
+                if getattr(self, "_batch_schedule_read_task", None) is completed:
+                    self._batch_schedule_read_completed_at = loop.time()
+
+            task.add_done_callback(record_completion)
+        return await asyncio.shield(task)
+
     def _fresh_batch_schedule(self) -> dict[str, Any] | None:
         """Return the recent shared schedule cache when batch-sourced."""
         refreshed_at = self.schedules_refreshed_at
         if (
             not isinstance(self.schedules, dict)
-            or self.schedules.get("source") != "batch_device_data_schedule"
+            or self.schedules.get("source")
+            not in {
+                "batch_device_data_schedule",
+                "app_action_schedule_with_batch_refresh",
+            }
             or refreshed_at is None
             or datetime.now(UTC) - refreshed_at >= SCHEDULE_REFRESH_INTERVAL
         ):
@@ -1538,9 +1627,10 @@ def _app_map_hints_are_authoritative(
     if not refresh_succeeded or not isinstance(app_maps, Mapping):
         return False
     maps = app_maps.get("maps")
-    return isinstance(maps, Sequence) and not isinstance(
-        maps,
-        str | bytes | bytearray,
+    return (
+        app_maps.get("map_list_valid") is True
+        and isinstance(maps, Sequence)
+        and not isinstance(maps, str | bytes | bytearray)
     )
 
 

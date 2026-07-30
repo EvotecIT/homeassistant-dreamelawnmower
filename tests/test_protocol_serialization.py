@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from threading import Event, RLock, Thread
 
 import requests
@@ -79,6 +80,51 @@ def test_cloud_request_deadline_includes_waiting_for_shared_lock() -> None:
     assert isinstance(errors[0], requests.exceptions.Timeout)
 
 
+def test_deadline_worker_keeps_serialization_until_transport_exits() -> None:
+    cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
+    cloud._request_lock = RLock()
+    transport_started = Event()
+    release_transport = Event()
+    follower_started = Event()
+    errors: list[Exception] = []
+
+    def slow_transport() -> str:
+        transport_started.set()
+        assert release_transport.wait(timeout=1)
+        return "late"
+
+    caller = Thread(
+        target=lambda: _capture_serialized_operation_error(
+            cloud,
+            slow_transport,
+            deadline=time.monotonic() + 0.05,
+            errors=errors,
+        )
+    )
+    caller.start()
+    assert transport_started.wait(timeout=1)
+    caller.join(timeout=0.5)
+
+    assert not caller.is_alive()
+    assert len(errors) == 1
+    assert isinstance(errors[0], requests.exceptions.Timeout)
+
+    follower = Thread(
+        target=lambda: cloud._run_serialized_operation(
+            lambda: follower_started.set(),
+            deadline=None,
+        )
+    )
+    follower.start()
+    assert not follower_started.wait(timeout=0.05)
+
+    release_transport.set()
+    follower.join(timeout=1)
+
+    assert not follower.is_alive()
+    assert follower_started.is_set()
+
+
 def _capture_request_error(
     cloud: protocol_cloud.DreameMowerDreameHomeCloudProtocol,
     *,
@@ -87,6 +133,19 @@ def _capture_request_error(
 ) -> None:
     try:
         cloud.request("https://example.invalid", None, deadline=deadline)
+    except Exception as err:  # noqa: BLE001 - thread forwards the observed failure
+        errors.append(err)
+
+
+def _capture_serialized_operation_error(
+    cloud: protocol_cloud.DreameMowerDreameHomeCloudProtocol,
+    operation: Callable[[], object],
+    *,
+    deadline: float,
+    errors: list[Exception],
+) -> None:
+    try:
+        cloud._run_serialized_operation(operation, deadline=deadline)
     except Exception as err:  # noqa: BLE001 - thread forwards the observed failure
         errors.append(err)
 

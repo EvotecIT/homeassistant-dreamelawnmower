@@ -562,10 +562,25 @@ class _DreameLawnMowerClientMapsMixin:
     ) -> dict[str, Any]:
         chunk_size = _validate_app_map_chunk_size(chunk_size)
         map_list_result = self._sync_call_app_action({"m": "g", "t": "MAPL"})
+        map_list_data = _app_action_data(map_list_result)
         map_entries = _normalize_app_map_entries(map_list_result)
+        map_indices = [entry.get("idx") for entry in map_entries]
+        map_list_valid = (
+            isinstance(map_list_data, Sequence)
+            and not isinstance(map_list_data, str | bytes | bytearray)
+            and len(map_entries) == len(map_list_data)
+            and all(
+                isinstance(index, int)
+                and not isinstance(index, bool)
+                and index >= 0
+                for index in map_indices
+            )
+            and len(set(map_indices)) == len(map_indices)
+        )
         result: dict[str, Any] = {
             "source": "app_action_map",
             "available": False,
+            "map_list_valid": map_list_valid,
             "map_count": len(map_entries),
             "created_map_count": sum(
                 1 for entry in map_entries if entry.get("created") is not False

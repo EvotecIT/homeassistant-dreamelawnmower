@@ -11,7 +11,7 @@ import zlib
 import queue
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from threading import RLock, Thread, Timer
+from threading import RLock, Thread, Timer, local
 from time import sleep
 import time
 import locale
@@ -121,6 +121,7 @@ def _post_cloud_response(
     *,
     deadline: float | None,
     on_dispatch: Callable[[], None] | None = None,
+    run_in_worker: bool = True,
 ) -> Any:
     """Post while bounding the response-header phase by an absolute deadline."""
     def post() -> Any:
@@ -128,7 +129,7 @@ def _post_cloud_response(
             on_dispatch()
         return session.post(url, **request_options)
 
-    if deadline is None:
+    if deadline is None or not run_in_worker:
         return post()
     try:
         return run_with_deadline(
@@ -151,6 +152,7 @@ class DreameMowerDreameHomeCloudProtocol:
         self._location = country
         self._did = did
         self._request_lock = RLock()
+        self._deadline_operation_state = local()
         self._session = requests.session()
         self._queue = queue.Queue()
         self._thread = None
@@ -183,6 +185,42 @@ class DreameMowerDreameHomeCloudProtocol:
             lock = RLock()
             self._request_lock = lock
         return lock
+
+    def _deadline_operation_runs_in_worker(self) -> bool:
+        """Return whether this thread owns a deadline-bounded cloud operation."""
+        state = getattr(self, "_deadline_operation_state", None)
+        return bool(state is not None and getattr(state, "active", False))
+
+    def _run_serialized_operation(
+        self,
+        operation: Callable[[], Any],
+        *,
+        deadline: float | None,
+    ) -> Any:
+        """Keep the shared lock with a deadline worker until transport exits."""
+        if deadline is None or self._deadline_operation_runs_in_worker():
+            with self._operation_lock_with_deadline(deadline):
+                return operation()
+
+        state = getattr(self, "_deadline_operation_state", None)
+        if state is None:
+            state = local()
+            self._deadline_operation_state = state
+
+        def run() -> Any:
+            state.active = True
+            try:
+                with self._operation_lock_with_deadline(deadline):
+                    return operation()
+            finally:
+                state.active = False
+
+        try:
+            return run_with_deadline(run, deadline=deadline)
+        except DeadlineExceededError as err:
+            raise requests.exceptions.Timeout(
+                "The cloud operation timed out."
+            ) from err
 
     @contextmanager
     def _operation_lock_with_deadline(
@@ -401,8 +439,10 @@ class DreameMowerDreameHomeCloudProtocol:
         *,
         deadline: float | None = None,
     ) -> bool:
-        with self._operation_lock_with_deadline(deadline):
-            return self._login_unlocked(timeout, deadline=deadline)
+        return self._run_serialized_operation(
+            lambda: self._login_unlocked(timeout, deadline=deadline),
+            deadline=deadline,
+        )
 
     def _login_unlocked(
         self,
@@ -461,6 +501,7 @@ class DreameMowerDreameHomeCloudProtocol:
                 self.get_api_url() + self._strings[17],
                 request_options,
                 deadline=deadline,
+                run_in_worker=not self._deadline_operation_runs_in_worker(),
             )
             if deadline is not None:
                 try:
@@ -870,8 +911,8 @@ class DreameMowerDreameHomeCloudProtocol:
         on_dispatch: Callable[[], None] | None = None,
         raise_on_api_error: bool = False,
     ) -> Any:
-        with self._operation_lock_with_deadline(deadline):
-            return self._send_unlocked(
+        return self._run_serialized_operation(
+            lambda: self._send_unlocked(
                 method,
                 parameters,
                 retry_count,
@@ -880,7 +921,9 @@ class DreameMowerDreameHomeCloudProtocol:
                 redact_response=redact_response,
                 on_dispatch=on_dispatch,
                 raise_on_api_error=raise_on_api_error,
-            )
+            ),
+            deadline=deadline,
+        )
 
     def _send_unlocked(
         self,
@@ -1150,8 +1193,8 @@ class DreameMowerDreameHomeCloudProtocol:
         redact_response: bool = False,
         on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
-        with self._operation_lock_with_deadline(deadline):
-            return self._request_unlocked(
+        return self._run_serialized_operation(
+            lambda: self._request_unlocked(
                 url,
                 data,
                 retry_count,
@@ -1159,7 +1202,9 @@ class DreameMowerDreameHomeCloudProtocol:
                 deadline=deadline,
                 redact_response=redact_response,
                 on_dispatch=on_dispatch,
-            )
+            ),
+            deadline=deadline,
+        )
 
     def _request_unlocked(
         self,
@@ -1237,6 +1282,7 @@ class DreameMowerDreameHomeCloudProtocol:
                     url,
                     request_options,
                     **post_options,
+                    run_in_worker=not self._deadline_operation_runs_in_worker(),
                 )
                 if deadline is not None:
                     try:

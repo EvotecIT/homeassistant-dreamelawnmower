@@ -369,6 +369,38 @@ def test_pending_toggle_does_not_mutate_ambiguous_active_fallback() -> None:
     assert coordinator.schedules["active_selection_available"] is False
 
 
+def test_immediate_toggle_does_not_mutate_ambiguous_active_fallback() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.schedules = {
+        "active_schedule_version": 8,
+        "active_schedule_index": None,
+        "active_selection_available": True,
+        "schedules": [
+            {
+                "idx": 1,
+                "version": 8,
+                "plans": [{"plan_id": 1, "enabled": False}],
+            },
+            {
+                "idx": None,
+                "version": 8,
+                "plans": [{"plan_id": 1, "enabled": False}],
+            },
+        ],
+    }
+
+    coordinator._reconcile_cached_schedule_plan_enabled(
+        map_index=0,
+        plan_id=1,
+        enabled=True,
+        schedule_version=8,
+    )
+
+    assert coordinator.schedules["schedules"][0]["plans"][0]["enabled"] is False
+    assert coordinator.schedules["schedules"][1]["plans"][0]["enabled"] is False
+    assert coordinator.schedules["active_selection_available"] is False
+
+
 def test_schedule_upload_invalidates_unknown_active_fallback_by_version() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator._schedule_write_lock = asyncio.Lock()

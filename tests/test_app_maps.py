@@ -203,6 +203,7 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
     result = client._sync_get_app_maps(chunk_size=40, include_payload=True)
 
     assert result["available"] is True
+    assert result["map_list_valid"] is True
     assert result["map_count"] == 2
     assert result["created_map_count"] == 1
     assert result["current_map_index"] == 0
@@ -294,6 +295,18 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
     expected_sizes = [min(40, payload_size - start) for start in expected_starts]
     assert [call["d"]["start"] for call in mapd_calls] == expected_starts
     assert [call["d"]["size"] for call in mapd_calls] == expected_sizes
+
+
+def test_app_maps_mark_missing_map_list_response_invalid() -> None:
+    client = _client()
+    client._sync_call_app_action = lambda *_args, **_kwargs: None
+
+    result = client._sync_get_app_maps(include_objects=False)
+
+    assert result["available"] is False
+    assert result["map_list_valid"] is False
+    assert result["map_count"] == 0
+    assert result["maps"] == []
 
 
 def test_app_maps_explain_rejected_point_values_without_exposing_them() -> None:
