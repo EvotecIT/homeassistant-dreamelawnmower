@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
+from functools import partial
 from typing import Any
 
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -374,15 +375,26 @@ class DreameLawnMowerRefreshMixin:
             ):
                 self.async_update_listeners()
 
-            retry_operations = [
-                (phase, operation)
-                for (phase, operation), result in zip(
-                    core_operations,
-                    core_results,
-                    strict=True,
+            retry_operations: list[
+                tuple[str, Callable[[], Awaitable[Any]]]
+            ] = []
+            for (phase, operation), result in zip(
+                core_operations,
+                core_results,
+                strict=True,
+            ):
+                if not self._metadata_phase_needs_retry(phase, result):
+                    continue
+                if phase == "app_maps":
+                    retry_operation = partial(
+                        self.async_refresh_app_maps,
+                        force=True,
+                    )
+                else:
+                    retry_operation = operation
+                retry_operations.append(
+                    (phase, retry_operation)
                 )
-                if self._metadata_phase_needs_retry(phase, result)
-            ]
             if retry_operations:
                 await asyncio.sleep(METADATA_RETRY_DELAY_SECONDS)
                 tasks = [

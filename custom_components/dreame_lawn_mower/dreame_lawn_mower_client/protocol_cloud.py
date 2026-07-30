@@ -155,6 +155,7 @@ class DreameMowerDreameHomeCloudProtocol:
         self._request_lock = RLock()
         self._deadline_operation_state = local()
         self._disconnect_pending = False
+        self._shutdown_requested = False
         self._disconnect_cleanup_thread = None
         self._session = requests.session()
         self._queue = queue.Queue()
@@ -198,6 +199,10 @@ class DreameMowerDreameHomeCloudProtocol:
         """Return whether teardown is waiting for an active transport to exit."""
         return bool(getattr(self, "_disconnect_pending", False))
 
+    def _shutdown_is_requested(self) -> bool:
+        """Return whether this protocol instance has started permanent teardown."""
+        return bool(getattr(self, "_shutdown_requested", False))
+
     def _run_serialized_operation(
         self,
         operation: Callable[[], Any],
@@ -205,9 +210,16 @@ class DreameMowerDreameHomeCloudProtocol:
         deadline: float | None,
     ) -> Any:
         """Keep the shared lock with a deadline worker until transport exits."""
+        def run_if_active() -> Any:
+            if self._shutdown_is_requested():
+                return None
+            return operation()
+
+        if self._shutdown_is_requested():
+            return None
         if deadline is None or self._deadline_operation_runs_in_worker():
             with self._operation_lock_with_deadline(deadline):
-                return operation()
+                return run_if_active()
 
         state = getattr(self, "_deadline_operation_state", None)
         if state is None:
@@ -218,7 +230,7 @@ class DreameMowerDreameHomeCloudProtocol:
             state.active = True
             try:
                 with self._operation_lock_with_deadline(deadline):
-                    return operation()
+                    return run_if_active()
             finally:
                 state.active = False
 
@@ -400,6 +412,8 @@ class DreameMowerDreameHomeCloudProtocol:
 
     def connect(self, message_callback=None, connected_callback=None):
         with self._operation_lock():
+            if self._shutdown_is_requested():
+                return None
             return self._connect_unlocked(message_callback, connected_callback)
 
     def _connect_unlocked(self, message_callback=None, connected_callback=None):
@@ -871,6 +885,8 @@ class DreameMowerDreameHomeCloudProtocol:
 
     def send_async(self, callback, method, parameters, retry_count: int = 2):
         with self._operation_lock():
+            if self._shutdown_is_requested():
+                return None
             return self._send_async_unlocked(
                 callback,
                 method,
@@ -1401,6 +1417,8 @@ class DreameMowerDreameHomeCloudProtocol:
         retry_count=2,
     ) -> Any:
         with self._operation_lock():
+            if self._shutdown_is_requested():
+                return None
             return self._get_unlocked(url, params, retry_count)
 
     def _get_unlocked(
@@ -1481,6 +1499,7 @@ class DreameMowerDreameHomeCloudProtocol:
         return None
 
     def disconnect(self, timeout: float = _CLOUD_DISCONNECT_TIMEOUT_SECONDS):
+        self._shutdown_requested = True
         self._disconnect_pending = True
         deadline = time.monotonic() + max(0.0, timeout)
         try:

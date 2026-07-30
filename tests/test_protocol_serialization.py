@@ -10,6 +10,7 @@ from unittest.mock import Mock
 import requests
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    protocol,
     protocol_cloud,
 )
 
@@ -219,6 +220,55 @@ def test_late_deadline_worker_cannot_restore_state_after_disconnect() -> None:
     assert cloud._logged_in is False
     assert cloud._session.close.call_count == 1
     assert cloud._disconnect_pending is False
+
+
+def test_queued_operation_cannot_restart_cloud_after_disconnect() -> None:
+    cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
+    cloud._request_lock = RLock()
+    cloud._session = Mock()
+    cloud._connected = True
+    cloud._logged_in = True
+    cloud._message_callback = object()
+    cloud._connected_callback = object()
+    cloud._client = None
+    cloud._client_connected = False
+    cloud._client_connecting = False
+    cloud._thread = None
+    operation_started = Event()
+
+    cloud._request_lock.acquire()
+    queued = Thread(
+        target=lambda: cloud._run_serialized_operation(
+            lambda: operation_started.set(),
+            deadline=None,
+        )
+    )
+    queued.start()
+    try:
+        assert cloud.disconnect(timeout=0.05) is True
+    finally:
+        cloud._request_lock.release()
+    queued.join(timeout=1)
+
+    assert not queued.is_alive()
+    assert not operation_started.is_set()
+    assert cloud._shutdown_requested is True
+    assert cloud._disconnect_pending is False
+    assert cloud._connected is False
+    assert cloud._logged_in is False
+
+
+def test_protocol_disconnects_aliased_cloud_only_once() -> None:
+    mower_protocol = object.__new__(protocol.DreameMowerProtocol)
+    cloud = Mock()
+    mower_protocol.cloud = cloud
+    mower_protocol.device_cloud = cloud
+    mower_protocol._connected = True
+
+    mower_protocol.disconnect()
+
+    cloud.disconnect.assert_called_once_with()
+    assert mower_protocol._connected is False
 
 
 def _capture_request_error(
