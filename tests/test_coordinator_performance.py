@@ -1204,7 +1204,9 @@ def test_schedule_refresh_prunes_deleted_map_after_complete_read() -> None:
     coordinator.app_maps = {
         "current_map_index": 0,
         "maps": [{"idx": 0, "created": True}],
+        "map_list_valid": True,
     }
+    coordinator.app_maps_refresh_succeeded = True
     incoming = {
         "source": "app_action_schedule",
         "schedules": [
@@ -1266,6 +1268,48 @@ def test_schedule_refresh_prunes_deleted_map_after_partial_read() -> None:
     assert result["active_selection_available"] is False
     assert "active_schedule_version" not in result
     assert "active_schedule_index" not in result
+
+
+def test_non_authoritative_map_subset_preserves_cached_schedule_slots() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.schedules = {
+        "source": "app_action_schedule",
+        "schedules": [
+            {"idx": -1, "available": True, "version": 10, "plans": []},
+            {"idx": 0, "available": True, "version": 11, "plans": []},
+            {"idx": 1, "available": True, "version": 12, "plans": []},
+        ],
+        "errors": [],
+    }
+    coordinator.schedules_refreshed_at = None
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {
+        "current_map_index": 0,
+        "maps": [{"idx": 0, "created": True}],
+        "map_list_valid": False,
+    }
+    coordinator.app_maps_refresh_succeeded = True
+    incoming = {
+        "source": "app_action_schedule",
+        "schedules": [
+            {"idx": -1, "available": True, "version": 20, "plans": []},
+            {"idx": 0, "available": True, "version": 21, "plans": []},
+        ],
+        "errors": [],
+    }
+    coordinator.client = SimpleNamespace(
+        async_get_app_schedules=AsyncMock(return_value=incoming),
+        async_get_batch_schedules=AsyncMock(side_effect=TimeoutError),
+    )
+
+    result = asyncio.run(coordinator.async_refresh_schedules(force=True))
+
+    assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 0, 1]
+    assert [schedule["version"] for schedule in result["schedules"]] == [20, 21, 12]
+    coordinator.client.async_get_app_schedules.assert_awaited_once_with(
+        include_current_task=False,
+        map_indices=[-1, 0],
+    )
 
 
 def test_schedule_refresh_keeps_auto_discovered_maps_without_app_hints() -> None:
@@ -1690,7 +1734,7 @@ def test_schedule_refresh_rejects_batch_hint_after_selected_map_changes() -> Non
                     {
                         "idx": 0,
                         "available": True,
-                        "version": 22,
+                        "version": 21,
                         "plans": [{"plan_id": 1}],
                     }
                 ],
@@ -1729,8 +1773,9 @@ def test_schedule_refresh_rejects_batch_hint_after_selected_map_changes() -> Non
         release_batch.set()
         result = await refresh_task
 
-        assert result["active_schedule_index"] == 1
-        assert result["active_schedule_version"] == 22
+        assert result["active_selection_available"] is False
+        assert "active_schedule_index" not in result
+        assert "active_schedule_version" not in result
         assert result["schedules"][1]["version"] == 21
         assert result["schedules"][2]["version"] == 22
 
@@ -1948,7 +1993,12 @@ def test_batch_metadata_rejects_hint_after_selected_map_changes() -> None:
 
         assert result is not None
         batch_schedule = result["batch_schedule"]
-        assert batch_schedule["schedules"][0]["idx"] is None
+        assert batch_schedule["schedules"] == []
+        assert batch_schedule["available"] is False
+        assert batch_schedule["errors"][-1] == {
+            "stage": "schedule",
+            "error": "active map changed during batch read",
+        }
         assert coordinator.schedules["active_schedule_index"] == 0
         assert coordinator.schedules["active_selection_available"] is False
         assert coordinator.schedules["schedules"][1]["version"] == 11

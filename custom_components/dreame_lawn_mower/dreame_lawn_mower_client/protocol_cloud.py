@@ -1481,6 +1481,7 @@ class DreameMowerDreameHomeCloudProtocol:
             self._logged_in = False
             self._message_callback = None
             self._connected_callback = None
+            self._disconnect_mqtt_client()
             thread = getattr(self, "_thread", None)
             request_queue = getattr(self, "_queue", None)
             if thread and request_queue is not None:
@@ -1492,13 +1493,24 @@ class DreameMowerDreameHomeCloudProtocol:
         self._session.close()
         self._connected = False
         self._logged_in = False
-        if self._client is not None:
-            self._client.loop_stop()
-            self._client.disconnect()
-            self._client = None
-            self._client_connected = False
-            self._client_connecting = False
+        self._disconnect_mqtt_client()
         if self._thread:
             self._queue.put([])
         self._message_callback = None
         self._connected_callback = None
+
+    def _disconnect_mqtt_client(self):
+        client = self._client
+        self._client = None
+        self._client_connected = False
+        self._client_connecting = False
+        if client is None:
+            return
+        try:
+            client.loop_stop()
+        except Exception as ex:
+            _LOGGER.debug("Failed to stop cloud MQTT loop: %s", ex)
+        try:
+            client.disconnect()
+        except Exception as ex:
+            _LOGGER.debug("Failed to disconnect cloud MQTT client: %s", ex)

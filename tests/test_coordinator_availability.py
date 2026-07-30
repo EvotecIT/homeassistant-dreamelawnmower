@@ -506,3 +506,17 @@ def test_app_map_refresh_synchronizes_selected_map_identity() -> None:
     assert coordinator.selected_contour_id is None
     assert coordinator.selected_zone_id is None
     assert coordinator.selected_spot_id is None
+
+
+def test_app_map_cache_hit_preserves_failed_refresh_status() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.client = SimpleNamespace(async_get_app_maps=AsyncMock())
+    coordinator.app_maps = {"current_map_index": 0}
+    coordinator.app_maps_refreshed_at = datetime.now(UTC)
+    coordinator.app_maps_refresh_succeeded = False
+
+    result = asyncio.run(coordinator.async_refresh_app_maps())
+
+    assert result is coordinator.app_maps
+    assert coordinator.app_maps_refresh_succeeded is False
+    coordinator.client.async_get_app_maps.assert_not_awaited()

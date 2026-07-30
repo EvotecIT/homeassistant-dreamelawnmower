@@ -546,7 +546,8 @@ class DreameLawnMowerCoordinator(
             )
             latest_map_index_hint = self._schedule_map_index_hint()
             if latest_map_index_hint != map_index_hint:
-                batch_payload = _batch_schedule_without_map_hint(batch_payload)
+                self._invalidate_schedule_map_hint()
+                batch_payload = _discard_stale_batch_schedule(batch_payload)
             latest_expected_indices = _schedule_expected_indices(
                 self.schedules,
                 payload,
@@ -1315,7 +1316,8 @@ class DreameLawnMowerCoordinator(
                 self.client.async_get_batch_ota_info(include_raw=False),
             )
             if self._schedule_map_index_hint() != map_index_hint:
-                schedule = _batch_schedule_without_map_hint(schedule)
+                self._invalidate_schedule_map_hint()
+                schedule = _discard_stale_batch_schedule(schedule)
             return schedule, preferences, ota, schedule_generation
 
         batch_mowing_preferences, batch_ota_info = await asyncio.gather(
@@ -1511,7 +1513,6 @@ class DreameLawnMowerCoordinator(
             and self.app_maps_refreshed_at is not None
             and now - self.app_maps_refreshed_at < APP_MAP_REFRESH_INTERVAL
         ):
-            self.app_maps_refresh_succeeded = True
             return self.app_maps
 
         try:
@@ -1543,6 +1544,19 @@ class DreameLawnMowerCoordinator(
                 self.selected_zone_id = None
                 self.selected_spot_id = None
             self.selected_map_index = current_idx
+        elif (
+            self.selected_map_index is not None
+            and _app_map_hints_are_authoritative(
+                payload,
+                refresh_succeeded=True,
+            )
+            and not _app_map_index_hints(payload)
+        ):
+            self._invalidate_schedule_map_hint()
+            self.selected_map_index = None
+            self.selected_contour_id = None
+            self.selected_zone_id = None
+            self.selected_spot_id = None
         return payload
 
     async def async_refresh_weather_protection(
@@ -1727,10 +1741,10 @@ def _schedule_expected_indices(
     map_hints_authoritative: bool,
 ) -> list[int]:
     """Return authoritative or conservatively discovered schedule slot ids."""
-    if known_map_indices or map_hints_authoritative:
+    if map_hints_authoritative:
         return [-1, *known_map_indices]
 
-    indices = [-1]
+    indices = [-1, *known_map_indices]
     for payload in (existing, incoming):
         schedules = payload.get("schedules") if isinstance(payload, Mapping) else None
         if not isinstance(schedules, Sequence) or isinstance(
@@ -1780,24 +1794,29 @@ def _schedule_payload_has_active_selection(
     return isinstance(version, int) and not isinstance(version, bool)
 
 
-def _batch_schedule_without_map_hint(
+def _discard_stale_batch_schedule(
     payload: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Return a batch schedule copy without a stale caller-supplied slot hint."""
+    """Return a non-publishable batch result after its map hint changed."""
     normalized = dict(payload)
-    schedules = payload.get("schedules")
-    if (
-        not isinstance(schedules, Sequence)
-        or isinstance(schedules, str | bytes | bytearray)
-        or len(schedules) != 1
-        or not isinstance(schedules[0], Mapping)
-    ):
-        return normalized
-    schedule = dict(schedules[0])
-    schedule["idx"] = None
-    schedule["label"] = "active_schedule"
-    schedule["writable"] = False
-    normalized["schedules"] = [schedule]
+    normalized["available"] = False
+    normalized["schedules"] = []
+    normalized.pop("active_schedule_version", None)
+    normalized.pop("active_schedule_index", None)
+    normalized.pop("current_task", None)
+    errors = payload.get("errors")
+    normalized["errors"] = [
+        *(
+            errors
+            if isinstance(errors, Sequence)
+            and not isinstance(errors, str | bytes | bytearray)
+            else []
+        ),
+        {
+            "stage": "schedule",
+            "error": "active map changed during batch read",
+        },
+    ]
     return normalized
 
 

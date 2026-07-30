@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from threading import Event, RLock, Thread
+from unittest.mock import Mock
 
 import requests
 
@@ -132,6 +133,10 @@ def test_cloud_disconnect_does_not_wait_forever_for_deadline_worker() -> None:
     cloud._logged_in = True
     cloud._message_callback = object()
     cloud._connected_callback = object()
+    mqtt_client = Mock()
+    cloud._client = mqtt_client
+    cloud._client_connected = True
+    cloud._client_connecting = True
     lock_held = Event()
     release_lock = Event()
 
@@ -156,6 +161,11 @@ def test_cloud_disconnect_does_not_wait_forever_for_deadline_worker() -> None:
     assert cloud._logged_in is False
     assert cloud._message_callback is None
     assert cloud._connected_callback is None
+    assert cloud._client is None
+    assert cloud._client_connected is False
+    assert cloud._client_connecting is False
+    mqtt_client.loop_stop.assert_called_once_with()
+    mqtt_client.disconnect.assert_called_once_with()
 
 
 def _capture_request_error(
