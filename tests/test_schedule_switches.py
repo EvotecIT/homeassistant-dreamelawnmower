@@ -136,6 +136,7 @@ def test_schedule_write_keeps_confirmed_state_when_readback_fails() -> None:
         "schedules": [
             {
                 "idx": 1,
+                "enabled_plan_count": 1,
                 "plans": [{"plan_id": 2, "enabled": True}],
             }
         ]
@@ -151,6 +152,7 @@ def test_schedule_write_keeps_confirmed_state_when_readback_fails() -> None:
         )
 
     assert coordinator.schedules["schedules"][0]["plans"][0]["enabled"] is False
+    assert coordinator.schedules["schedules"][0]["enabled_plan_count"] == 0
     coordinator.async_update_listeners.assert_called_once()
 
 

@@ -812,6 +812,12 @@ class DreameLawnMowerCoordinator(
             for plan in plans:
                 if isinstance(plan, dict) and plan.get("plan_id") == plan_id:
                     plan["enabled"] = enabled
+                    schedule["enabled_plan_count"] = sum(
+                        1
+                        for cached_plan in plans
+                        if isinstance(cached_plan, Mapping)
+                        and cached_plan.get("enabled")
+                    )
                     return
         if (
             schedule_version is not None
