@@ -1515,6 +1515,9 @@ class DreameLawnMowerCoordinator(
         ):
             return self.app_maps
 
+        previous_map_indices = set(
+            _app_map_index_hints(getattr(self, "app_maps", None))
+        )
         try:
             app_maps = await self.client.async_get_app_maps(
                 include_payload=True,
@@ -1533,6 +1536,16 @@ class DreameLawnMowerCoordinator(
         self.app_maps_refreshed_at = now
         self.app_maps_refresh_succeeded = True
         current_idx = active_map_index(payload)
+        known_map_indices = set(_app_map_index_hints(payload))
+        map_hints_authoritative = _app_map_hints_are_authoritative(
+            payload,
+            refresh_succeeded=True,
+        )
+        if (
+            map_hints_authoritative
+            and known_map_indices != previous_map_indices
+        ):
+            self._invalidate_schedule_map_hint()
         if current_idx is not None:
             if self.selected_map_index != current_idx:
                 self._invalidate_schedule_map_hint()
@@ -1546,11 +1559,8 @@ class DreameLawnMowerCoordinator(
             self.selected_map_index = current_idx
         elif (
             self.selected_map_index is not None
-            and _app_map_hints_are_authoritative(
-                payload,
-                refresh_succeeded=True,
-            )
-            and not _app_map_index_hints(payload)
+            and map_hints_authoritative
+            and self.selected_map_index not in known_map_indices
         ):
             self._invalidate_schedule_map_hint()
             self.selected_map_index = None

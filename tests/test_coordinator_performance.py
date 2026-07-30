@@ -33,6 +33,7 @@ from custom_components.dreame_lawn_mower.performance import (
     DreameLawnMowerPerformanceTracker,
 )
 from custom_components.dreame_lawn_mower.schedule_cache import (
+    merge_app_schedule_payload,
     merge_batch_schedule_payload,
 )
 
@@ -1265,6 +1266,51 @@ def test_schedule_refresh_prunes_deleted_map_after_partial_read() -> None:
 
     assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 0]
     assert [schedule["version"] for schedule in result["schedules"]] == [20, 11]
+    assert result["active_selection_available"] is False
+    assert "active_schedule_version" not in result
+    assert "active_schedule_index" not in result
+
+
+def test_authoritative_pruning_does_not_resolve_fallback_to_removed_slot() -> None:
+    existing = {
+        "source": "batch_device_data_schedule",
+        "active_schedule_version": 12,
+        "active_selection_available": False,
+        "schedules": [
+            {"idx": -1, "available": True, "version": 10, "plans": []},
+            {"idx": 0, "available": True, "version": 11, "plans": []},
+            {
+                "idx": None,
+                "available": True,
+                "version": 12,
+                "plans": [{"plan_id": 7}],
+            },
+        ],
+        "errors": [],
+    }
+    incoming = {
+        "source": "app_action_schedule",
+        "schedules": [
+            {"idx": -1, "available": True, "version": 20, "plans": []},
+            {"idx": 0, "available": True, "version": 21, "plans": []},
+            {
+                "idx": 1,
+                "available": True,
+                "version": 12,
+                "plans": [{"plan_id": 7}],
+            },
+        ],
+        "errors": [],
+    }
+
+    result = merge_app_schedule_payload(
+        existing,
+        incoming,
+        expected_indices=[-1, 0],
+        prune_unexpected_indices=True,
+    )
+
+    assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 0]
     assert result["active_selection_available"] is False
     assert "active_schedule_version" not in result
     assert "active_schedule_index" not in result

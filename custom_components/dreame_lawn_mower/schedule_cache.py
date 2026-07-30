@@ -182,13 +182,6 @@ def merge_app_schedule_payload(
         and isinstance(schedule.get("idx"), int)
         and not isinstance(schedule.get("idx"), bool)
     }
-    discovered_versions = {
-        schedule.get("version")
-        for schedule in usable_incoming_by_index.values()
-        if isinstance(schedule.get("version"), int)
-        and not isinstance(schedule.get("version"), bool)
-    }
-
     cached_active_version = existing.get("active_schedule_version")
     cached_active_index = existing.get("active_schedule_index")
     cached_active_index_is_valid = isinstance(
@@ -198,14 +191,25 @@ def merge_app_schedule_payload(
     expected_index_set = set(expected_indices)
     complete_refresh = expected_index_set.issubset(usable_incoming_by_index)
     can_prune_unexpected_indices = complete_refresh or prune_unexpected_indices
+    resolution_incoming_by_index = {
+        index: schedule
+        for index, schedule in usable_incoming_by_index.items()
+        if not prune_unexpected_indices or index in expected_index_set
+    }
     incoming_indices_by_version = {
         version: {
             index
-            for index, schedule in usable_incoming_by_index.items()
+            for index, schedule in resolution_incoming_by_index.items()
             if schedule.get("version") == version
         }
-        for version in discovered_versions
+        for version in {
+            schedule.get("version")
+            for schedule in resolution_incoming_by_index.values()
+            if isinstance(schedule.get("version"), int)
+            and not isinstance(schedule.get("version"), bool)
+        }
     }
+    discovered_versions = set(incoming_indices_by_version)
     resolved_fallback_versions = {
         version
         for version, indices in incoming_indices_by_version.items()
