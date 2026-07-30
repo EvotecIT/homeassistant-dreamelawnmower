@@ -42,6 +42,7 @@ from .dreame_lawn_mower_client.map_visuals import (
     map_render_style,
 )
 from .dreame_lawn_mower_client.models import DreameLawnMowerMapView
+from .ha_tasks import create_background_task
 from .image import (
     app_maps_contact_sheet_jpeg,
     map_diagnostics_jpeg,
@@ -246,7 +247,11 @@ class DreameLawnMowerMapCamera(
         task = self._map_refresh_task
         if task is not None and not task.done():
             return task
-        task = self.hass.async_create_task(self._async_refresh_and_render_map_image())
+        task = create_background_task(
+            self.hass,
+            self._async_refresh_and_render_map_image(),
+            "dreame-lawn-mower-map-render",
+        )
         self._map_refresh_task = task
         task.add_done_callback(self._map_refresh_finished)
         return task

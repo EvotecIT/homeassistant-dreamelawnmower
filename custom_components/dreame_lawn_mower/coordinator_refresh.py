@@ -18,6 +18,7 @@ from .const import DOMAIN
 from .control_options import active_map_index
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
+from .ha_tasks import create_background_task
 from .performance import (
     DreameLawnMowerPerformanceCycle,
     DreameLawnMowerPerformanceSample,
@@ -69,9 +70,8 @@ class DreameLawnMowerRefreshMixin:
             0,
         )
         for candidate, generation in generations.values():
-            if (
-                generation == published_generation
-                and not self._snapshot_is_stale(candidate)
+            if generation == published_generation and not self._snapshot_is_stale(
+                candidate
             ):
                 return candidate
         raise UpdateFailed(
@@ -278,7 +278,8 @@ class DreameLawnMowerRefreshMixin:
             return
         self._metadata_refresh_pending = False
         self._metadata_refresh_publish = True
-        self._metadata_refresh_task = self.hass.async_create_task(
+        self._metadata_refresh_task = create_background_task(
+            self.hass,
             self._async_refresh_metadata(
                 refresh_map_and_runtime=refresh_map_and_runtime,
             ),
@@ -297,16 +298,15 @@ class DreameLawnMowerRefreshMixin:
         tasks: list[asyncio.Task[Any]] = []
         try:
             if refresh_map_and_runtime:
-                app_maps_task = asyncio.create_task(
-                    self._async_run_metadata_phase(
-                        cycle,
-                        "app_maps",
-                        lambda: self.async_refresh_app_maps(force=False),
+                tasks.append(
+                    asyncio.create_task(
+                        self._async_run_metadata_phase(
+                            cycle,
+                            "app_maps",
+                            lambda: self.async_refresh_app_maps(force=False),
+                        )
                     )
                 )
-                tasks.append(app_maps_task)
-            else:
-                app_maps_task = None
 
             operations: tuple[
                 tuple[str, Callable[[], Awaitable[Any]]],
@@ -346,38 +346,54 @@ class DreameLawnMowerRefreshMixin:
                 for phase, operation in operations
             )
 
-            if app_maps_task is not None:
-                await app_maps_task
-            tasks.extend(
-                (
-                    asyncio.create_task(
-                        self._async_run_metadata_phase(
-                            cycle,
-                            "schedules",
-                            lambda: self.async_refresh_schedules(force=False),
-                        )
-                    ),
-                    asyncio.create_task(
+            core_results = await asyncio.gather(*tasks, return_exceptions=True)
+            core_unexpected = [
+                result
+                for result in core_results
+                if isinstance(result, Exception)
+                and not isinstance(result, asyncio.CancelledError)
+            ]
+            if core_unexpected:
+                outcome = "partial"
+                _LOGGER.debug(
+                    "Optional mower core metadata refresh had unexpected failures: %s",
+                    ", ".join(type(error).__name__ for error in core_unexpected),
+                )
+
+            if not self._shutting_down and getattr(
+                self, "_metadata_refresh_publish", True
+            ):
+                self.async_update_listeners()
+
+            tasks = [
+                asyncio.create_task(
+                    self._async_run_metadata_phase(
+                        cycle,
+                        "schedules",
+                        lambda: self.async_refresh_schedules(force=False),
+                    )
+                ),
+                asyncio.create_task(
                     self._async_run_metadata_phase(
                         cycle,
                         "batch_device_data",
                         lambda: self.async_refresh_batch_device_data(force=False),
                     )
-                    ),
-                )
-            )
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            unexpected = [
+                ),
+            ]
+            schedule_results = await asyncio.gather(*tasks, return_exceptions=True)
+            schedule_unexpected = [
                 result
-                for result in results
+                for result in schedule_results
                 if isinstance(result, Exception)
                 and not isinstance(result, asyncio.CancelledError)
             ]
-            if unexpected:
+            if schedule_unexpected:
                 outcome = "partial"
                 _LOGGER.debug(
-                    "Optional mower metadata refresh had unexpected failures: %s",
-                    ", ".join(type(error).__name__ for error in unexpected),
+                    "Optional mower schedule metadata refresh had unexpected "
+                    "failures: %s",
+                    ", ".join(type(error).__name__ for error in schedule_unexpected),
                 )
         except asyncio.CancelledError:
             outcome = "cancelled"
@@ -479,8 +495,7 @@ class DreameLawnMowerRefreshMixin:
         """Log deterministic privacy-safe timings at an appropriate level."""
         total, phases = format_performance_sample(sample)
         message = (
-            "Dreame mower performance: operation=%s outcome=%s total=%.3fs "
-            "phases=[%s]"
+            "Dreame mower performance: operation=%s outcome=%s total=%.3fs phases=[%s]"
         )
         args = (sample.operation, sample.outcome, total, phases)
         if total >= slow_after:

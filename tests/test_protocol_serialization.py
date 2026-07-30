@@ -133,6 +133,8 @@ def test_cloud_disconnect_does_not_wait_forever_for_deadline_worker() -> None:
     cloud._logged_in = True
     cloud._message_callback = object()
     cloud._connected_callback = object()
+    cloud._session = Mock()
+    cloud._thread = None
     mqtt_client = Mock()
     cloud._client = mqtt_client
     cloud._client_connected = True
@@ -154,9 +156,12 @@ def test_cloud_disconnect_does_not_wait_forever_for_deadline_worker() -> None:
     elapsed = time.monotonic() - started
     release_lock.set()
     worker.join(timeout=1)
+    cloud._disconnect_cleanup_thread.join(timeout=1)
 
     assert disconnected is False
     assert elapsed < 0.5
+    assert not cloud._disconnect_cleanup_thread.is_alive()
+    cloud._session.close.assert_called_once_with()
     assert cloud._connected is False
     assert cloud._logged_in is False
     assert cloud._message_callback is None
@@ -166,6 +171,54 @@ def test_cloud_disconnect_does_not_wait_forever_for_deadline_worker() -> None:
     assert cloud._client_connecting is False
     mqtt_client.loop_stop.assert_called_once_with()
     mqtt_client.disconnect.assert_called_once_with()
+
+
+def test_late_deadline_worker_cannot_restore_state_after_disconnect() -> None:
+    cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
+    cloud._request_lock = RLock()
+    cloud._session = Mock()
+    cloud._connected = True
+    cloud._logged_in = True
+    cloud._message_callback = object()
+    cloud._connected_callback = object()
+    cloud._client = None
+    cloud._client_connected = False
+    cloud._client_connecting = False
+    cloud._thread = None
+    operation_started = Event()
+    release_operation = Event()
+    errors: list[Exception] = []
+
+    def late_operation() -> None:
+        operation_started.set()
+        assert release_operation.wait(timeout=1)
+        if not cloud._disconnect_is_pending():
+            cloud._connected = True
+            cloud._logged_in = True
+
+    caller = Thread(
+        target=lambda: _capture_serialized_operation_error(
+            cloud,
+            late_operation,
+            deadline=time.monotonic() + 0.05,
+            errors=errors,
+        )
+    )
+    caller.start()
+    assert operation_started.wait(timeout=1)
+    caller.join(timeout=0.5)
+
+    disconnected = cloud.disconnect(timeout=0.05)
+    release_operation.set()
+    cloud._disconnect_cleanup_thread.join(timeout=1)
+
+    assert disconnected is False
+    assert len(errors) == 1
+    assert isinstance(errors[0], requests.exceptions.Timeout)
+    assert cloud._connected is False
+    assert cloud._logged_in is False
+    assert cloud._session.close.call_count == 1
+    assert cloud._disconnect_pending is False
 
 
 def _capture_request_error(

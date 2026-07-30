@@ -154,6 +154,8 @@ class DreameMowerDreameHomeCloudProtocol:
         self._did = did
         self._request_lock = RLock()
         self._deadline_operation_state = local()
+        self._disconnect_pending = False
+        self._disconnect_cleanup_thread = None
         self._session = requests.session()
         self._queue = queue.Queue()
         self._thread = None
@@ -191,6 +193,10 @@ class DreameMowerDreameHomeCloudProtocol:
         """Return whether this thread owns a deadline-bounded cloud operation."""
         state = getattr(self, "_deadline_operation_state", None)
         return bool(state is not None and getattr(state, "active", False))
+
+    def _disconnect_is_pending(self) -> bool:
+        """Return whether teardown is waiting for an active transport to exit."""
+        return bool(getattr(self, "_disconnect_pending", False))
 
     def _run_serialized_operation(
         self,
@@ -397,6 +403,8 @@ class DreameMowerDreameHomeCloudProtocol:
             return self._connect_unlocked(message_callback, connected_callback)
 
     def _connect_unlocked(self, message_callback=None, connected_callback=None):
+        if self._disconnect_is_pending():
+            return None
         if self._logged_in:
             info = self.get_device_info()
             if info:
@@ -430,6 +438,8 @@ class DreameMowerDreameHomeCloudProtocol:
                     elif not self._client_connected:
                         _LOGGER.error("Not connected to the device client")
                         self._set_client_key()
+                if self._disconnect_is_pending():
+                    return None
                 self._connected = True
                 return info
         return None
@@ -516,7 +526,7 @@ class DreameMowerDreameHomeCloudProtocol:
                 response_text = response.text
             if response.status_code == 200:
                 data = json.loads(response_text)
-                if self._strings[18] in data:
+                if self._strings[18] in data and not self._disconnect_is_pending():
                     self._key = data.get(self._strings[18])
                     self._secondary_key = data.get(self._strings[19])
                     self._key_expire = time.time(
@@ -546,7 +556,7 @@ class DreameMowerDreameHomeCloudProtocol:
             response = None
             _LOGGER.error("Login failed: %s", str(ex))
 
-        if self._logged_in:
+        if self._logged_in and not self._disconnect_is_pending():
             self._fail_count = 0
             self._connected = True
         return self._logged_in
@@ -1326,6 +1336,8 @@ class DreameMowerDreameHomeCloudProtocol:
             "DreameMowerDreameHomeCloudProtocol.request response: %s", response)
         if response is not None:
             if response.status_code == 200:
+                if self._disconnect_is_pending():
+                    return None
                 self._fail_count = 0
                 self._connected = True
                 _LOGGER.debug(
@@ -1446,6 +1458,8 @@ class DreameMowerDreameHomeCloudProtocol:
 
         if response is not None:
             if response.status_code == 200:
+                if self._disconnect_is_pending():
+                    return None
                 self._fail_count = 0
                 self._connected = True
                 _LOGGER.debug(
@@ -1467,6 +1481,7 @@ class DreameMowerDreameHomeCloudProtocol:
         return None
 
     def disconnect(self, timeout: float = _CLOUD_DISCONNECT_TIMEOUT_SECONDS):
+        self._disconnect_pending = True
         deadline = time.monotonic() + max(0.0, timeout)
         try:
             with self._operation_lock_with_deadline(deadline):
@@ -1486,18 +1501,41 @@ class DreameMowerDreameHomeCloudProtocol:
             request_queue = getattr(self, "_queue", None)
             if thread and request_queue is not None:
                 request_queue.put([])
+            self._schedule_deferred_disconnect()
             return False
         return True
 
     def _disconnect_unlocked(self):
-        self._session.close()
-        self._connected = False
-        self._logged_in = False
-        self._disconnect_mqtt_client()
-        if self._thread:
-            self._queue.put([])
-        self._message_callback = None
-        self._connected_callback = None
+        try:
+            self._session.close()
+            self._connected = False
+            self._logged_in = False
+            self._disconnect_mqtt_client()
+            if self._thread:
+                self._queue.put([])
+            self._message_callback = None
+            self._connected_callback = None
+        finally:
+            self._disconnect_pending = False
+
+    def _schedule_deferred_disconnect(self):
+        """Finish session teardown after an active serialized request exits."""
+        cleanup_thread = getattr(self, "_disconnect_cleanup_thread", None)
+        if cleanup_thread is not None and cleanup_thread.is_alive():
+            return
+        cleanup_thread = Thread(
+            target=self._complete_deferred_disconnect,
+            name="dreame-cloud-disconnect",
+            daemon=True,
+        )
+        self._disconnect_cleanup_thread = cleanup_thread
+        cleanup_thread.start()
+
+    def _complete_deferred_disconnect(self):
+        """Acquire the transport lock and complete a pending disconnect."""
+        with self._operation_lock():
+            if self._disconnect_is_pending():
+                self._disconnect_unlocked()
 
     def _disconnect_mqtt_client(self):
         client = self._client

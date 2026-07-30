@@ -652,6 +652,38 @@ def test_app_map_refresh_invalidates_schedules_when_inventory_changes() -> None:
     assert coordinator.schedules["active_selection_available"] is False
 
 
+def test_app_map_refresh_invalidates_when_hints_become_authoritative() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.client = SimpleNamespace(
+        async_get_app_maps=AsyncMock(
+            return_value={
+                "current_map_index": 0,
+                "maps": [{"idx": 0, "created": True}],
+                "map_list_valid": True,
+            }
+        )
+    )
+    coordinator.app_maps = {
+        "current_map_index": 0,
+        "maps": [{"idx": 0, "created": True}],
+        "map_list_valid": False,
+    }
+    coordinator.app_maps_refreshed_at = None
+    coordinator.app_maps_refresh_succeeded = True
+    coordinator.selected_map_index = 0
+    coordinator.selected_contour_id = None
+    coordinator.selected_zone_id = None
+    coordinator.selected_spot_id = None
+    coordinator.schedules_refreshed_at = object()
+    coordinator.schedules = {"active_selection_available": True}
+
+    asyncio.run(coordinator.async_refresh_app_maps(force=True))
+
+    assert coordinator.selected_map_index == 0
+    assert coordinator.schedules_refreshed_at is None
+    assert coordinator.schedules["active_selection_available"] is False
+
+
 def test_zone_select_sets_zone_and_switches_action() -> None:
     entity = object.__new__(DreameLawnMowerZoneSelect)
     entity.coordinator = SimpleNamespace(

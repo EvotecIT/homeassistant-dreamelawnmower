@@ -331,8 +331,23 @@ def test_first_refresh_does_not_wait_for_optional_metadata() -> None:
         coordinator._metadata_refresh_task = None
         coordinator._runtime_map_identity_verified = False
         coordinator._shutting_down = False
+        background_tasks: list[asyncio.Task[None]] = []
+
+        def create_background_task(
+            coroutine,
+            _name: str,
+        ) -> asyncio.Task[None]:
+            task = asyncio.create_task(coroutine)
+            background_tasks.append(task)
+            return task
+
         coordinator.hass = SimpleNamespace(
-            async_create_task=lambda coroutine, _name: asyncio.create_task(coroutine)
+            async_create_task=Mock(
+                side_effect=AssertionError(
+                    "metadata hydration must not be tracked as config-entry setup work"
+                )
+            ),
+            async_create_background_task=create_background_task,
         )
         coordinator.client = SimpleNamespace(
             async_refresh=AsyncMock(return_value=snapshot),
@@ -346,6 +361,7 @@ def test_first_refresh_does_not_wait_for_optional_metadata() -> None:
         await asyncio.wait_for(metadata_started.wait(), timeout=1)
         assert coordinator._metadata_refresh_task is not None
         assert not coordinator._metadata_refresh_task.done()
+        assert background_tasks == [coordinator._metadata_refresh_task]
         sample = coordinator.performance.as_dict()["samples"][-1]
         assert sample["operation"] == "foreground_refresh"
         assert set(sample["phases_ms"]) == {"snapshot"}
@@ -417,12 +433,13 @@ def test_metadata_hydration_serializes_shared_vendor_protocol_calls() -> None:
         release_app_maps.set()
         await asyncio.wait_for(schedules_started.wait(), timeout=1)
         assert not batch_started.is_set()
+        coordinator.async_update_listeners.assert_called_once_with()
 
         release_schedules.set()
         await asyncio.wait_for(batch_started.wait(), timeout=1)
         await task
 
-        coordinator.async_update_listeners.assert_called_once_with()
+        assert coordinator.async_update_listeners.call_count == 2
         sample = coordinator.performance.as_dict()["samples"][-1]
         assert sample["operation"] == "metadata_refresh"
         assert sample["outcome"] == "completed"

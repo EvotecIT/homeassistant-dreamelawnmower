@@ -234,12 +234,20 @@ def test_managed_runtime_environment_is_privacy_safe(
     monkeypatch.setattr(
         video_helpers_module.platform,
         "libc_ver",
-        lambda: ("glibc", "2.39"),
+        lambda: (_ for _ in ()).throw(
+            AssertionError("platform.libc_ver must not run on the event loop")
+        ),
     )
     monkeypatch.setattr(
         video_helpers_module.os,
         "sysconf",
         lambda _name: 4096,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        video_helpers_module.os,
+        "confstr",
+        lambda _name: "glibc 2.39",
         raising=False,
     )
 
@@ -272,12 +280,20 @@ def test_managed_runtime_environment_reports_large_page_compatibility(
     monkeypatch.setattr(
         video_helpers_module.platform,
         "libc_ver",
-        lambda: ("musl", "1"),
+        lambda: (_ for _ in ()).throw(
+            AssertionError("platform.libc_ver must not run on the event loop")
+        ),
     )
     monkeypatch.setattr(
         video_helpers_module.os,
         "sysconf",
         lambda _name: 16384,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        video_helpers_module.os,
+        "confstr",
+        lambda _name: None,
         raising=False,
     )
 
@@ -2485,7 +2501,7 @@ def test_video_camera_unload_is_bounded_when_every_cleanup_stage_hangs() -> None
                 video_camera_module.STREAM_DOMAIN: {
                     video_camera_module.ATTR_STREAMS: [stream],
                 }
-            },
+            }
         )
         entity.async_write_ha_state = lambda: None
 
@@ -2677,7 +2693,7 @@ def test_video_camera_exposes_managed_runtime_failure_context() -> None:
                 "returncode": -11,
                 "exit": "signal=11",
                 "native_trace": "xp2p-worker: runtime loaded",
-            }
+            },
         )
 
         with pytest.raises(
