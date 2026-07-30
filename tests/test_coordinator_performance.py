@@ -1461,6 +1461,28 @@ def test_authoritative_pruning_does_not_resolve_fallback_to_removed_slot() -> No
     assert "active_schedule_index" not in result
 
 
+def test_initial_schedule_payload_prunes_authoritatively_removed_map() -> None:
+    incoming = {
+        "source": "app_action_schedule",
+        "schedules": [
+            {"idx": -1, "available": True, "version": 20, "plans": []},
+            {"idx": 0, "available": True, "version": 21, "plans": []},
+            {"idx": 1, "available": True, "version": 22, "plans": []},
+        ],
+        "errors": [],
+    }
+
+    result = merge_app_schedule_payload(
+        None,
+        incoming,
+        expected_indices=[-1, 0],
+        prune_unexpected_indices=True,
+    )
+
+    assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 0]
+    assert result["available"] is True
+
+
 def test_non_authoritative_map_subset_preserves_cached_schedule_slots() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator.schedules = {

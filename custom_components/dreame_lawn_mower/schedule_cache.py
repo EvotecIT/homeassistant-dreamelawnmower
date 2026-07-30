@@ -142,7 +142,11 @@ def merge_app_schedule_payload(
 ) -> dict[str, Any]:
     """Merge successful action slots while retaining cached failed slots."""
     if not isinstance(existing, Mapping):
-        return dict(incoming)
+        return _initial_app_schedule_payload(
+            incoming,
+            expected_indices=expected_indices,
+            prune_unexpected_indices=prune_unexpected_indices,
+        )
 
     normalized = dict(existing)
     incoming_schedules = incoming.get("schedules")
@@ -156,7 +160,11 @@ def merge_app_schedule_payload(
         existing_schedules,
         str | bytes | bytearray,
     ):
-        return dict(incoming)
+        return _initial_app_schedule_payload(
+            incoming,
+            expected_indices=expected_indices,
+            prune_unexpected_indices=prune_unexpected_indices,
+        )
 
     merged = list(existing_schedules)
     positions = {
@@ -345,6 +353,41 @@ def merge_app_schedule_payload(
     normalized["available"] = any(
         isinstance(schedule, Mapping) and bool(schedule.get("available"))
         for schedule in merged
+    )
+    return normalized
+
+
+def _initial_app_schedule_payload(
+    incoming: Mapping[str, Any],
+    *,
+    expected_indices: Sequence[int],
+    prune_unexpected_indices: bool,
+) -> dict[str, Any]:
+    """Normalize a first action payload against authoritative map indices."""
+    normalized = dict(incoming)
+    schedules = incoming.get("schedules")
+    if (
+        not prune_unexpected_indices
+        or not isinstance(schedules, Sequence)
+        or isinstance(schedules, str | bytes | bytearray)
+    ):
+        return normalized
+
+    expected_index_set = set(expected_indices)
+    normalized_schedules = [
+        schedule
+        for schedule in schedules
+        if not (
+            isinstance(schedule, Mapping)
+            and isinstance(schedule.get("idx"), int)
+            and not isinstance(schedule.get("idx"), bool)
+            and schedule.get("idx") not in expected_index_set
+        )
+    ]
+    normalized["schedules"] = normalized_schedules
+    normalized["available"] = any(
+        isinstance(schedule, Mapping) and bool(schedule.get("available"))
+        for schedule in normalized_schedules
     )
     return normalized
 
