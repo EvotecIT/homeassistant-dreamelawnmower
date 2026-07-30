@@ -508,6 +508,7 @@ def test_metadata_hydration_retries_incomplete_current_app_map() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator.app_maps_refresh_succeeded = True
     coordinator.app_maps = {
+        "map_list_valid": True,
         "current_map_index": 0,
         "maps": [
             {"idx": 0, "available": False},
@@ -536,7 +537,7 @@ def test_metadata_hydration_forces_incomplete_app_map_retry() -> None:
         async def refresh_app_maps(*, force: bool) -> dict[str, object]:
             app_map_forces.append(force)
             coordinator.app_maps_refresh_succeeded = len(app_map_forces) > 1
-            return {"maps": []}
+            return {"map_list_valid": True, "maps": []}
 
         async def complete(*_args, **_kwargs) -> None:
             return None
@@ -2672,6 +2673,52 @@ def test_shutdown_drains_metadata_before_closing_shared_client() -> None:
         metadata_finished.set()
         await shutdown
 
+        assert close_calls == ["close"]
+
+    asyncio.run(scenario())
+
+
+def test_shutdown_cancels_shielded_batch_schedule_read() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        batch_started = asyncio.Event()
+        batch_cancelled = asyncio.Event()
+        close_calls: list[str] = []
+
+        async def batch_schedule() -> dict[str, object]:
+            batch_started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                batch_cancelled.set()
+                raise
+
+        async def metadata() -> None:
+            await asyncio.shield(coordinator._batch_schedule_read_task)
+
+        async def close() -> None:
+            close_calls.append("close")
+
+        coordinator._shutting_down = False
+        coordinator._client_update_pending = False
+        coordinator._client_update_task = None
+        coordinator._batch_schedule_read_task = asyncio.create_task(batch_schedule())
+        coordinator._batch_schedule_read_completed_at = None
+        coordinator._metadata_refresh_task = asyncio.create_task(metadata())
+        coordinator._metadata_shutdown_close_task = None
+        coordinator.hass = SimpleNamespace(
+            async_create_task=lambda coroutine, _name: asyncio.create_task(coroutine)
+        )
+        coordinator.client = SimpleNamespace(
+            set_update_callback=Mock(),
+            async_close=close,
+        )
+        await batch_started.wait()
+
+        await asyncio.wait_for(coordinator.async_shutdown(), timeout=1)
+
+        assert batch_cancelled.is_set()
+        assert coordinator._batch_schedule_read_task is None
         assert close_calls == ["close"]
 
     asyncio.run(scenario())

@@ -1563,7 +1563,7 @@ class DreameLawnMowerCoordinator(
         payload["source"] = source
         self.app_maps = payload
         self.app_maps_refreshed_at = now
-        self.app_maps_refresh_succeeded = True
+        self.app_maps_refresh_succeeded = payload.get("map_list_valid") is True
         current_idx = active_map_index(payload)
         known_map_indices = set(_app_map_index_hints(payload))
         map_hints_authoritative = _app_map_hints_are_authoritative(

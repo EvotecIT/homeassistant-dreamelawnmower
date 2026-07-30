@@ -417,6 +417,7 @@ def _app_map_entries_are_valid(
         isinstance(raw_entries, Sequence)
         and not isinstance(raw_entries, str | bytes | bytearray)
         and len(entries) == len(raw_entries)
+        and all(_app_map_status_flags_are_valid(item) for item in raw_entries)
         and all(
             isinstance(index, int)
             and not isinstance(index, bool)
@@ -425,6 +426,24 @@ def _app_map_entries_are_valid(
         )
         and len(set(indices)) == len(indices)
         and current_created_count <= 1
+    )
+
+
+def _app_map_status_flags_are_valid(value: Any) -> bool:
+    """Return whether one raw MAPL row uses only boolean or 0/1 flags."""
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes | bytearray):
+        return False
+    values = list(value)
+    if len(values) < 4:
+        return False
+    return all(
+        isinstance(flag, bool)
+        or (
+            isinstance(flag, int)
+            and not isinstance(flag, bool)
+            and flag in {0, 1}
+        )
+        for flag in values[1:5]
     )
 
 

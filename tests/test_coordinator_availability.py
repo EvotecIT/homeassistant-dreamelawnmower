@@ -568,3 +568,26 @@ def test_app_map_cache_hit_preserves_failed_refresh_status() -> None:
     assert result is coordinator.app_maps
     assert coordinator.app_maps_refresh_succeeded is False
     coordinator.client.async_get_app_maps.assert_not_awaited()
+
+
+def test_app_map_refresh_marks_invalid_inventory_for_retry() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.client = SimpleNamespace(
+        async_get_app_maps=AsyncMock(
+            return_value={
+                "map_list_valid": False,
+                "current_map_index": None,
+                "maps": [{"idx": 0, "created": True}],
+            }
+        )
+    )
+    coordinator.app_maps = None
+    coordinator.app_maps_refreshed_at = None
+    coordinator.app_maps_refresh_succeeded = False
+    coordinator.selected_map_index = None
+
+    result = asyncio.run(coordinator.async_refresh_app_maps(force=True))
+
+    assert result["map_list_valid"] is False
+    assert coordinator.app_maps_refresh_succeeded is False
+    assert coordinator._metadata_phase_needs_retry("app_maps", result)
