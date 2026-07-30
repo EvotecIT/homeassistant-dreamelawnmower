@@ -795,7 +795,7 @@ def test_schedule_refresh_reads_inactive_default_slot_on_single_map_device() -> 
     assert result["active_schedule_version"] == 6
     coordinator.client.async_get_app_schedules.assert_awaited_once_with(
         include_current_task=False,
-        map_indices=[-1, 2],
+        map_indices=[-1, 2, 0, 1],
     )
     coordinator.client.async_get_batch_schedules.assert_awaited_once_with(
         include_raw=False,
@@ -911,7 +911,7 @@ def test_schedule_refresh_reads_inactive_maps_instead_of_batch_fast_path() -> No
     assert [schedule["version"] for schedule in result["schedules"]] == [3, 5, 6]
     coordinator.client.async_get_app_schedules.assert_awaited_once_with(
         include_current_task=False,
-        map_indices=[-1, 1, 2],
+        map_indices=[-1, 1, 2, 0],
     )
     coordinator.client.async_get_batch_schedules.assert_awaited_once_with(
         include_raw=False,
@@ -964,7 +964,7 @@ def test_initial_single_map_schedule_refresh_keeps_default_app_schedule() -> Non
     )
     coordinator.client.async_get_app_schedules.assert_awaited_once_with(
         include_current_task=False,
-        map_indices=[-1, 2],
+        map_indices=[-1, 2, 0, 1],
     )
 
 
@@ -1102,7 +1102,7 @@ def test_schedule_refresh_retries_app_when_batch_slot_is_unknown() -> None:
     assert result["active_schedule_version"] == 12
     coordinator.client.async_get_app_schedules.assert_awaited_once_with(
         include_current_task=False,
-        map_indices=[-1, 0],
+        map_indices=[-1, 0, 1],
     )
     coordinator.client.async_get_batch_schedules.assert_awaited_once_with(
         include_raw=False,
@@ -1159,7 +1159,7 @@ def test_schedule_refresh_keeps_complete_app_payload_for_multiple_maps() -> None
     )
     coordinator.client.async_get_app_schedules.assert_awaited_once_with(
         include_current_task=False,
-        map_indices=[-1, 1, 2],
+        map_indices=[-1, 1, 2, 0],
     )
 
 
@@ -1609,7 +1609,7 @@ def test_non_authoritative_map_subset_preserves_cached_schedule_slots() -> None:
     assert [schedule["version"] for schedule in result["schedules"]] == [20, 21, 12]
     coordinator.client.async_get_app_schedules.assert_awaited_once_with(
         include_current_task=False,
-        map_indices=[-1, 0],
+        map_indices=[-1, 0, 1],
     )
 
 
@@ -1647,7 +1647,7 @@ def test_schedule_refresh_keeps_auto_discovered_maps_without_app_hints() -> None
     assert [schedule["version"] for schedule in result["schedules"]] == [20, 21, 22]
     coordinator.client.async_get_app_schedules.assert_awaited_once_with(
         include_current_task=False,
-        map_indices=None,
+        map_indices=[-1, 0, 1],
     )
 
 

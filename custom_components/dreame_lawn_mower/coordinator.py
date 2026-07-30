@@ -463,16 +463,20 @@ class DreameLawnMowerCoordinator(
                 False,
             ),
         )
+        request_schedule_indices = [-1, *request_map_indices]
+        if not request_map_hints_authoritative:
+            # A partial or malformed MAPL result cannot exclude the other
+            # likely writable slot. Keep discovery bounded without issuing a
+            # second MAPL request inside the schedule action read.
+            for fallback_index in (0, 1):
+                if fallback_index not in request_schedule_indices:
+                    request_schedule_indices.append(fallback_index)
 
         try:
             action_read_generation = self._begin_schedule_read()
             payload = await self.client.async_get_app_schedules(
                 include_current_task=False,
-                map_indices=(
-                    [-1, *request_map_indices]
-                    if request_map_indices or request_map_hints_authoritative
-                    else None
-                ),
+                map_indices=request_schedule_indices,
             )
         except Exception as err:  # noqa: BLE001 - optional cloud capability
             _LOGGER.debug("Failed to refresh mower schedules: %s", err)
