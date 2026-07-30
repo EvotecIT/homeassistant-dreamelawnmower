@@ -522,7 +522,23 @@ class DreameLawnMowerRefreshMixin:
                 return True
             current_index = active_map_index(app_maps)
             maps = app_maps.get("maps")
-            if current_index is None or not isinstance(maps, Sequence):
+            if not isinstance(maps, Sequence):
+                return False
+            if current_index is None:
+                selected_index = getattr(self, "selected_map_index", None)
+                if (
+                    isinstance(selected_index, int)
+                    and not isinstance(selected_index, bool)
+                    and selected_index >= 0
+                    and any(
+                        isinstance(item, Mapping)
+                        and item.get("idx") == selected_index
+                        and item.get("created") is not False
+                        for item in maps
+                    )
+                ):
+                    current_index = selected_index
+            if current_index is None:
                 return False
             return not any(
                 isinstance(item, Mapping)

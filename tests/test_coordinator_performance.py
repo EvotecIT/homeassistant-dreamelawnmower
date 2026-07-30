@@ -530,6 +530,31 @@ def test_metadata_hydration_retries_incomplete_current_app_map() -> None:
     )
 
 
+def test_metadata_hydration_retries_selected_map_without_current_flag() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.app_maps_refresh_succeeded = True
+    coordinator.selected_map_index = 1
+    coordinator.app_maps = {
+        "map_list_valid": True,
+        "maps": [
+            {"idx": 0, "created": True, "available": True},
+            {"idx": 1, "created": True, "available": False},
+        ],
+    }
+
+    assert coordinator._metadata_phase_needs_retry(
+        "app_maps",
+        coordinator.app_maps,
+    )
+
+    coordinator.app_maps["maps"][1]["available"] = True
+
+    assert not coordinator._metadata_phase_needs_retry(
+        "app_maps",
+        coordinator.app_maps,
+    )
+
+
 def test_metadata_hydration_forces_incomplete_app_map_retry() -> None:
     async def scenario() -> None:
         coordinator = object.__new__(DreameLawnMowerCoordinator)
