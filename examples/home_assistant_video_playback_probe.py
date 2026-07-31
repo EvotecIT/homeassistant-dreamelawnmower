@@ -106,7 +106,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--frame-out",
         type=Path,
-        help="Optional JPEG path for the deployed HA camera's still image.",
+        help="Optional JPEG path for a frame decoded from the deployed HA HLS stream.",
     )
     parser.add_argument(
         "--video-out",
@@ -325,6 +325,23 @@ async def _wait_for_hls_media(output: Any, *, timeout: float) -> Any:
             await output.part_recv(timeout=min(remaining, 5.0))
 
 
+async def _capture_hls_and_camera_image(
+    camera: Any,
+    hls_output: Any,
+    *,
+    timeout: float,
+) -> tuple[Any, bytes | None]:
+    """Capture HA HLS and snapshot consumers from the same initial keyframes."""
+    camera_image_task = asyncio.create_task(camera.async_camera_image())
+    try:
+        segment = await _wait_for_hls_media(hls_output, timeout=timeout)
+        return segment, await camera_image_task
+    finally:
+        if not camera_image_task.done():
+            camera_image_task.cancel()
+            await asyncio.gather(camera_image_task, return_exceptions=True)
+
+
 def _decode_best_video_frame(
     segment: Any,
     frame_out: Path | None,
@@ -413,7 +430,7 @@ async def _verify_cached_xp2p_after_reload(
     port: int,
     timeout: float,
 ) -> tuple[Any, Any, Any, dict[str, Any]]:
-    """Prove persisted XP2P restart while the whole Dreame client is offline."""
+    """Prove persisted XP2P restart after blocking subsequent Dreame access."""
     blocked_calls: list[str] = []
 
     async def _blocked_refresh(_self: Any) -> Any:
@@ -434,19 +451,23 @@ async def _verify_cached_xp2p_after_reload(
             "Dreame camera toggle was blocked by the cache proof."
         )
 
-    client_type = type(hass.data[DOMAIN][entry.entry_id].client)
-    original_refresh = client_type.async_refresh
-    original_inputs = client_type.async_get_camera_stream_runtime_inputs
-    original_toggle = client_type.async_set_camera_stream_enabled
+    client_type = None
+    original_refresh = None
+    original_inputs = None
+    original_toggle = None
     try:
-        client_type.async_refresh = _blocked_refresh
-        client_type.async_get_camera_stream_runtime_inputs = _blocked_inputs
-        client_type.async_set_camera_stream_enabled = _blocked_toggle
         if not await hass.config_entries.async_reload(entry.entry_id):
             raise RuntimeError("Dreame config entry did not reload for cache proof.")
         await hass.async_block_till_done()
         coordinator = hass.data[DOMAIN][entry.entry_id]
         client = coordinator.client
+        client_type = type(client)
+        original_refresh = client_type.async_refresh
+        original_inputs = client_type.async_get_camera_stream_runtime_inputs
+        original_toggle = client_type.async_set_camera_stream_enabled
+        client_type.async_refresh = _blocked_refresh
+        client_type.async_get_camera_stream_runtime_inputs = _blocked_inputs
+        client_type.async_set_camera_stream_enabled = _blocked_toggle
         camera = _find_video_camera(hass)
         ha_stream = await camera.async_create_stream()
         if ha_stream is None:
@@ -467,9 +488,10 @@ async def _verify_cached_xp2p_after_reload(
         status, playlist = await _fetch_hls_playlist(port, endpoint)
         attributes = camera.extra_state_attributes
     finally:
-        client_type.async_refresh = original_refresh
-        client_type.async_get_camera_stream_runtime_inputs = original_inputs
-        client_type.async_set_camera_stream_enabled = original_toggle
+        if client_type is not None:
+            client_type.async_refresh = original_refresh
+            client_type.async_get_camera_stream_runtime_inputs = original_inputs
+            client_type.async_set_camera_stream_enabled = original_toggle
 
     result = {
         "blocked_dreame_client_calls": blocked_calls,
@@ -481,7 +503,7 @@ async def _verify_cached_xp2p_after_reload(
         "width": frame["width"],
         "height": frame["height"],
         "verified": bool(
-            blocked_calls == ["refresh"]
+            blocked_calls == []
             and attributes["last_video_transport"] == "cached_xp2p"
             and status == 200
             and "#EXTM3U" in playlist
@@ -504,6 +526,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         "home_assistant_hls_verified": False,
         "playable_video_verified": False,
         "visual_frame_verified": False,
+        "camera_image_verified": False,
     }
     hass: HomeAssistant | None = None
     entry = None
@@ -604,25 +627,25 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             hls_output = ha_stream.add_provider("hls")
             endpoint = ha_stream.endpoint_url("hls")
             await ha_stream.start()
-            segment = await _wait_for_hls_media(
+            segment, camera_jpeg = await _capture_hls_and_camera_image(
+                camera,
                 hls_output,
                 timeout=args.stream_timeout,
-            )
-            camera_jpeg = await camera.async_camera_image()
-            if not camera_jpeg:
-                raise RuntimeError(
-                    "The deployed HA camera returned no still-image bytes."
-                )
-            camera_image = await hass.async_add_executor_job(
-                _inspect_camera_jpeg,
-                camera_jpeg,
-                args.frame_out,
             )
             frame = await hass.async_add_executor_job(
                 _decode_best_video_frame,
                 segment,
-                None,
+                args.frame_out,
                 args.video_out,
+            )
+            camera_image = (
+                await hass.async_add_executor_job(
+                    _inspect_camera_jpeg,
+                    camera_jpeg,
+                    None,
+                )
+                if camera_jpeg
+                else None
             )
             status, playlist = await _fetch_hls_playlist(port, endpoint)
             output["playback"] = {
@@ -647,6 +670,9 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                 and frame["width"] > 0
                 and frame["height"] > 0
                 and frame["jpeg_bytes"] > 0
+            )
+            output["camera_image_verified"] = bool(
+                camera_image is not None
                 and camera_image["width"] > 0
                 and camera_image["height"] > 0
                 and camera_image["jpeg_bytes"] > 0
