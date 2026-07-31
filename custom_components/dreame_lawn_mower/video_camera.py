@@ -33,7 +33,6 @@ from .const import (
     DEFAULT_VIDEO_RETENTION,
     DOMAIN,
     VIDEO_RETENTION_OPTIONS,
-    VIDEO_RETENTION_PRIORITY,
     VIDEO_TRANSPORT_AUTO,
     VIDEO_TRANSPORT_CLOUD,
     VIDEO_TRANSPORT_LAN,
@@ -87,6 +86,7 @@ from .video_lan_cache import DreameLawnMowerVideoLanCache
 from .video_provisioning_cache import DreameLawnMowerVideoProvisioningCache
 from .video_session_lifecycle import (
     DreameLawnMowerHaStreamIdleMonitor,
+    mower_video_mowing_session_is_current,
     mower_video_relay_idle_grace,
     mower_video_session_should_stay_warm,
 )
@@ -374,17 +374,29 @@ class DreameLawnMowerVideoCamera(
     def _video_session_should_stay_warm(self) -> bool:
         """Apply the configured retention policy to an active mower session."""
         self._reset_video_live_view_if_inactive()
+        if not self._video_retention_state_is_fresh():
+            return False
         return mower_video_session_should_stay_warm(
             self.coordinator.data,
             retention_mode=self._video_retention_mode,
             live_view_seen=self._video_live_view_seen,
         )
 
+    def _video_retention_state_is_fresh(self) -> bool:
+        """Return whether zero-viewer retention has authoritative mower state."""
+        last_update_success = bool(
+            getattr(self.coordinator, "last_update_success", False)
+        )
+        connection_degraded = bool(
+            getattr(self.coordinator, "connection_degraded", False)
+        )
+        return last_update_success and not connection_degraded
+
     def _reset_video_live_view_if_inactive(self) -> None:
         """Do not carry live-view intent into a later mowing run."""
-        if not mower_video_session_should_stay_warm(
-            self.coordinator.data,
-            retention_mode=VIDEO_RETENTION_PRIORITY,
+        if (
+            not self._video_retention_state_is_fresh()
+            or not mower_video_mowing_session_is_current(self.coordinator.data)
         ):
             self._video_live_view_seen = False
 

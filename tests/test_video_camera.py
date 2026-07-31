@@ -82,6 +82,7 @@ from custom_components.dreame_lawn_mower.video_camera import (
 )
 from custom_components.dreame_lawn_mower.video_session_lifecycle import (
     DreameLawnMowerHaStreamIdleMonitor,
+    mower_video_mowing_session_is_current,
     mower_video_relay_idle_grace,
     mower_video_session_should_stay_warm,
 )
@@ -164,6 +165,7 @@ def _uninitialized_entity(*, snapshot: object | None = None):
     entity.coordinator = SimpleNamespace(
         data=snapshot,
         last_update_success=True,
+        connection_degraded=False,
         async_refresh=_async_refresh,
         async_refresh_video_safety_state=_async_refresh_video_safety_state,
     )
@@ -2988,7 +2990,20 @@ def test_video_camera_idle_monitor_keeps_mowing_session_warm() -> None:
     [
         (None, False),
         (SimpleNamespace(state="mowing", activity="idle"), True),
-        (SimpleNamespace(state="idle", activity="mowing"), True),
+        (SimpleNamespace(state="spot_cleaning", activity="mowing"), True),
+        (SimpleNamespace(state="idle", activity="mowing"), False),
+        (
+            SimpleNamespace(state="monitoring", activity="mowing", mowing=True),
+            False,
+        ),
+        (
+            SimpleNamespace(state="remote_control", activity="mowing", mowing=True),
+            False,
+        ),
+        (
+            SimpleNamespace(state="human_following", activity="mowing", mowing=True),
+            False,
+        ),
         (SimpleNamespace(state="paused", activity="paused", mowing=True), False),
         (SimpleNamespace(state="paused", activity="paused"), False),
         (SimpleNamespace(state="returning", activity="returning"), False),
@@ -3122,6 +3137,94 @@ def test_balanced_retention_arms_only_for_live_viewing() -> None:
     entity.coordinator.data = SimpleNamespace(state="idle", activity="idle")
     entity._reset_video_live_view_if_inactive()
     assert entity._video_live_view_seen is False
+
+
+def test_balanced_retention_preserves_intent_across_same_run_pause() -> None:
+    entity = _uninitialized_entity(
+        snapshot=SimpleNamespace(
+            state="mowing",
+            activity="mowing",
+            task_status="mowing",
+            mowing_session_active=True,
+        )
+    )
+    entity._mark_video_live_view()
+
+    entity.coordinator.data = SimpleNamespace(
+        state="paused",
+        activity="paused",
+        task_status="paused",
+        mowing_session_active=True,
+        paused=True,
+    )
+    entity._reset_video_live_view_if_inactive()
+    assert entity._video_live_view_seen is True
+    assert entity._video_session_should_stay_warm() is False
+
+    entity.coordinator.data = SimpleNamespace(
+        state="idle",
+        activity="idle",
+        task_status="mowing",
+        mowing_session_active=True,
+    )
+    assert entity._video_session_should_stay_warm() is True
+
+    entity.coordinator.data = SimpleNamespace(
+        state="idle",
+        activity="idle",
+        mowing_session_active=False,
+    )
+    entity._reset_video_live_view_if_inactive()
+    assert entity._video_live_view_seen is False
+
+
+@pytest.mark.parametrize(
+    ("last_update_success", "connection_degraded"),
+    [(False, False), (True, True)],
+)
+def test_video_retention_fails_closed_without_fresh_coordinator_state(
+    last_update_success: bool,
+    connection_degraded: bool,
+) -> None:
+    entity = _uninitialized_entity(
+        snapshot=SimpleNamespace(state="mowing", activity="mowing")
+    )
+    entity._mark_video_live_view()
+    entity.coordinator.last_update_success = last_update_success
+    entity.coordinator.connection_degraded = connection_degraded
+
+    assert entity._video_session_should_stay_warm() is False
+    assert entity._video_live_view_seen is False
+
+
+@pytest.mark.parametrize(
+    ("snapshot", "expected"),
+    [
+        (
+            SimpleNamespace(
+                state="paused",
+                activity="paused",
+                mowing_session_active=True,
+            ),
+            True,
+        ),
+        (SimpleNamespace(state="paused", activity="paused"), True),
+        (SimpleNamespace(state="monitoring_paused", activity="paused"), False),
+        (
+            SimpleNamespace(
+                state="returning",
+                activity="returning",
+                mowing_session_active=True,
+            ),
+            False,
+        ),
+    ],
+)
+def test_video_live_view_intent_tracks_the_current_mowing_run(
+    snapshot: object,
+    expected: bool,
+) -> None:
+    assert mower_video_mowing_session_is_current(snapshot) is expected
 
 
 def test_ha_live_stream_arms_balanced_retention_during_snapshot_overlap() -> None:

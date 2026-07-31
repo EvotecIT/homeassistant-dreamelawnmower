@@ -21,6 +21,42 @@ _DEFAULT_PROVIDER_GRACE = 30.0
 _DEFAULT_IDLE_GRACE = 15.0
 _BALANCED_IDLE_GRACE = 60.0
 _DEFAULT_IDLE_POLL_INTERVAL = 1.0
+_FALLBACK_ACTIVE_MOWING_STATES = {
+    "clean_summon",
+    "mowing",
+    "second_cleaning",
+    "shortcut",
+    "spot_cleaning",
+}
+
+
+def mower_video_mowing_session_is_current(snapshot: Any) -> bool:
+    """Return whether live-view intent still belongs to the same mowing run."""
+    if snapshot is None:
+        return False
+    state = str(getattr(snapshot, "state", None) or "").casefold()
+    activity = str(getattr(snapshot, "activity", None) or "").casefold()
+    task_status = str(getattr(snapshot, "task_status", None) or "").casefold()
+    raw_attributes = getattr(snapshot, "raw_attributes", None) or {}
+    if (
+        bool(getattr(snapshot, "docked", False))
+        or state in {"charging", "charging_completed"}
+        or activity in {"docked", "charging", "charging_completed"}
+        or bool(getattr(snapshot, "returning", False))
+        or state in {"returning", "mapping", "fast_mapping", "error"}
+        or activity in {"returning", "mapping", "fast_mapping", "error"}
+        or any(marker in task_status for marker in ("returning", "mapping", "error"))
+        or bool(raw_attributes.get("mapping"))
+        or bool(raw_attributes.get("fast_mapping"))
+    ):
+        return False
+    session_active = getattr(snapshot, "mowing_session_active", None)
+    if session_active is not None:
+        return bool(session_active)
+    # Without heartbeat session evidence, preserve intent only for explicit
+    # mower states. The broad ``activity == mowing`` bucket also includes
+    # camera monitoring, remote control, and human-following states.
+    return state == "paused" or state in _FALLBACK_ACTIVE_MOWING_STATES
 
 
 def mower_video_relay_idle_grace(retention_mode: str) -> float:
@@ -65,11 +101,10 @@ def mower_video_session_should_stay_warm(
     if getattr(snapshot, "mowing_session_active", None) is not None:
         actively_mowing = snapshot_session_control_state(snapshot) == "mowing"
     else:
-        actively_mowing = (
-            bool(getattr(snapshot, "mowing", False))
-            or state == "mowing"
-            or activity == "mowing"
-        )
+        # Fail closed when heartbeat task state is unavailable. Normalized
+        # activity/mowing flags intentionally group camera monitoring, remote
+        # control, and human-following with mowing for general HA presentation.
+        actively_mowing = state in _FALLBACK_ACTIVE_MOWING_STATES
     if not actively_mowing or retention_mode == VIDEO_RETENTION_BATTERY_SAVER:
         return False
     if retention_mode == VIDEO_RETENTION_PRIORITY:
