@@ -41,9 +41,14 @@ from custom_components.dreame_lawn_mower import (
     video_provisioning_cache as provisioning_cache_module,
 )
 from custom_components.dreame_lawn_mower.const import (
+    CONF_VIDEO_RETENTION,
     CONF_VIDEO_TRANSPORT,
     CONF_XP2P_LIBRARY_PATH,
     CONF_XP2P_RUNNER_COMMAND,
+    DEFAULT_VIDEO_RETENTION,
+    VIDEO_RETENTION_BALANCED,
+    VIDEO_RETENTION_BATTERY_SAVER,
+    VIDEO_RETENTION_PRIORITY,
     VIDEO_TRANSPORT_AUTO,
     VIDEO_TRANSPORT_CLOUD,
     VIDEO_TRANSPORT_LAN,
@@ -77,6 +82,7 @@ from custom_components.dreame_lawn_mower.video_camera import (
 )
 from custom_components.dreame_lawn_mower.video_session_lifecycle import (
     DreameLawnMowerHaStreamIdleMonitor,
+    mower_video_relay_idle_grace,
     mower_video_session_should_stay_warm,
 )
 from custom_components.dreame_lawn_mower.video_stream_helpers import (
@@ -176,6 +182,11 @@ def _uninitialized_entity(*, snapshot: object | None = None):
     entity._snapshot_lock = asyncio.Lock()
     entity._snapshot_requests = 0
     entity._snapshot_owned_stream = None
+    entity._video_retention_mode = entity._entry.options.get(
+        CONF_VIDEO_RETENTION,
+        DEFAULT_VIDEO_RETENTION,
+    )
+    entity._video_live_view_seen = False
     entity._lan_cache = SimpleNamespace(inputs=None, endpoint=None)
     entity._provisioning_cache = _ProvisioningCache()
     entity._provisioning_cache_error = None
@@ -2978,7 +2989,7 @@ def test_video_camera_idle_monitor_keeps_mowing_session_warm() -> None:
         (None, False),
         (SimpleNamespace(state="mowing", activity="idle"), True),
         (SimpleNamespace(state="idle", activity="mowing"), True),
-        (SimpleNamespace(state="paused", activity="paused", mowing=True), True),
+        (SimpleNamespace(state="paused", activity="paused", mowing=True), False),
         (SimpleNamespace(state="paused", activity="paused"), False),
         (SimpleNamespace(state="returning", activity="returning"), False),
         (
@@ -2986,6 +2997,23 @@ def test_video_camera_idle_monitor_keeps_mowing_session_warm() -> None:
                 state="mowing",
                 activity="mowing",
                 mowing_session_active=False,
+            ),
+            False,
+        ),
+        (
+            SimpleNamespace(
+                state="returning",
+                activity="returning",
+                mowing_session_active=True,
+            ),
+            False,
+        ),
+        (
+            SimpleNamespace(
+                state="mowing",
+                activity="mowing",
+                task_status="fast_mapping",
+                mowing_session_active=True,
             ),
             False,
         ),
@@ -3023,7 +3051,96 @@ def test_video_session_stays_warm_only_while_actively_mowing(
     snapshot: object | None,
     expected: bool,
 ) -> None:
-    assert mower_video_session_should_stay_warm(snapshot) is expected
+    assert (
+        mower_video_session_should_stay_warm(
+            snapshot,
+            retention_mode=VIDEO_RETENTION_PRIORITY,
+        )
+        is expected
+    )
+
+
+@pytest.mark.parametrize(
+    ("retention_mode", "live_view_seen", "expected"),
+    [
+        (VIDEO_RETENTION_BALANCED, False, False),
+        (VIDEO_RETENTION_BALANCED, True, True),
+        (VIDEO_RETENTION_BATTERY_SAVER, False, False),
+        (VIDEO_RETENTION_BATTERY_SAVER, True, False),
+        (VIDEO_RETENTION_PRIORITY, False, True),
+        (VIDEO_RETENTION_PRIORITY, True, True),
+    ],
+)
+def test_video_retention_modes_distinguish_snapshots_from_live_viewing(
+    retention_mode: str,
+    live_view_seen: bool,
+    expected: bool,
+) -> None:
+    snapshot = SimpleNamespace(state="mowing", activity="mowing")
+
+    assert (
+        mower_video_session_should_stay_warm(
+            snapshot,
+            retention_mode=retention_mode,
+            live_view_seen=live_view_seen,
+        )
+        is expected
+    )
+
+
+@pytest.mark.parametrize(
+    ("retention_mode", "expected"),
+    [
+        (VIDEO_RETENTION_BALANCED, 60.0),
+        (VIDEO_RETENTION_BATTERY_SAVER, 15.0),
+        (VIDEO_RETENTION_PRIORITY, 15.0),
+    ],
+)
+def test_video_retention_mode_selects_bounded_relay_grace(
+    retention_mode: str,
+    expected: float,
+) -> None:
+    assert mower_video_relay_idle_grace(retention_mode) == expected
+
+
+def test_balanced_retention_arms_only_for_live_viewing() -> None:
+    entity = _uninitialized_entity(
+        snapshot=SimpleNamespace(state="mowing", activity="mowing")
+    )
+
+    entity._snapshot_requests = 1
+    entity._video_relay_subscriber_started(ha_stream_owned=True)
+    assert entity._video_session_should_stay_warm() is False
+
+    entity._video_relay_subscriber_started(ha_stream_owned=False)
+    assert entity._video_session_should_stay_warm() is True
+
+    entity._snapshot_requests = 0
+    entity._mark_video_live_view()
+    assert entity._video_session_should_stay_warm() is True
+
+    entity.coordinator.data = SimpleNamespace(state="idle", activity="idle")
+    entity._reset_video_live_view_if_inactive()
+    assert entity._video_live_view_seen is False
+
+
+def test_ha_live_stream_arms_balanced_retention_during_snapshot_overlap() -> None:
+    async def _run() -> tuple[bool, bool]:
+        entity = _uninitialized_entity(
+            snapshot=SimpleNamespace(state="mowing", activity="mowing")
+        )
+        stream = object()
+        entity._snapshot_requests = 1
+        entity._snapshot_owned_stream = stream
+
+        async def _create_stream() -> object:
+            return stream
+
+        entity._async_create_stream_locked = _create_stream
+        result = await entity.async_create_stream()
+        return result is stream, entity._video_session_should_stay_warm()
+
+    assert asyncio.run(_run()) == (True, True)
 
 
 def test_video_camera_idle_monitor_keeps_snapshot_request_alive() -> None:

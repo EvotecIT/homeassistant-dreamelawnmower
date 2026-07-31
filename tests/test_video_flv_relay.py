@@ -147,6 +147,7 @@ async def _relay_fans_out_one_upstream_and_retires_after_last_viewer() -> None:
     media_ready = asyncio.Event()
     relay_idle = asyncio.Event()
     failures: list[str] = []
+    subscriber_starts: list[bool] = []
     sequence = _tag(9, 0, b"\x17\x00\x00\x00\x00\x01\x64\x00\x1f")
     keyframe = _tag(9, 0, b"\x17\x01\x00\x00\x00\x00\x00\x00\x01")
     interframe = _tag(9, 40, b"\x27\x01\x00\x00\x00\x00\x00\x00\x02")
@@ -197,6 +198,7 @@ async def _relay_fans_out_one_upstream_and_retires_after_last_viewer() -> None:
         media_ready=_media_ready,
         failed=_failed,
         idle=_idle,
+        subscriber_started=subscriber_starts.append,
         idle_grace=0.02,
     )
     try:
@@ -227,6 +229,7 @@ async def _relay_fans_out_one_upstream_and_retires_after_last_viewer() -> None:
             assert upstream_connections == 1
             assert relay.subscriber_count == 2
             assert relay.direct_subscriber_count == 1
+            assert subscriber_starts == [False, True]
 
             first.close()
             for _attempt in range(100):

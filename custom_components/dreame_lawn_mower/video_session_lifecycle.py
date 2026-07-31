@@ -9,33 +9,72 @@ from typing import Any, Protocol
 
 from homeassistant.core import HomeAssistant
 
+from .const import (
+    DEFAULT_VIDEO_RETENTION,
+    VIDEO_RETENTION_BATTERY_SAVER,
+    VIDEO_RETENTION_PRIORITY,
+)
 from .dreame_lawn_mower_client.runtime_state import snapshot_session_control_state
 from .ha_tasks import create_background_task
 
 _DEFAULT_PROVIDER_GRACE = 30.0
 _DEFAULT_IDLE_GRACE = 15.0
+_BALANCED_IDLE_GRACE = 60.0
 _DEFAULT_IDLE_POLL_INTERVAL = 1.0
 
 
-def mower_video_session_should_stay_warm(snapshot: Any) -> bool:
+def mower_video_relay_idle_grace(retention_mode: str) -> float:
+    """Return the zero-viewer relay grace for a retention mode."""
+    if retention_mode == DEFAULT_VIDEO_RETENTION:
+        return _BALANCED_IDLE_GRACE
+    return _DEFAULT_IDLE_GRACE
+
+
+def mower_video_session_should_stay_warm(
+    snapshot: Any,
+    *,
+    retention_mode: str = DEFAULT_VIDEO_RETENTION,
+    live_view_seen: bool = False,
+) -> bool:
     """Return whether an already-started video session should stay warm."""
     if snapshot is None:
         return False
     state = str(getattr(snapshot, "state", None) or "").casefold()
     activity = str(getattr(snapshot, "activity", None) or "").casefold()
+    task_status = str(getattr(snapshot, "task_status", None) or "").casefold()
+    raw_attributes = getattr(snapshot, "raw_attributes", None) or {}
     if (
         bool(getattr(snapshot, "docked", False))
         or state in {"charging", "charging_completed"}
         or activity in {"docked", "charging", "charging_completed"}
     ):
         return False
+    if (
+        bool(getattr(snapshot, "paused", False))
+        or bool(getattr(snapshot, "returning", False))
+        or state in {"paused", "returning", "mapping", "fast_mapping", "error"}
+        or activity in {"paused", "returning", "mapping", "fast_mapping", "error"}
+        or any(
+            marker in task_status
+            for marker in ("paused", "returning", "mapping", "error")
+        )
+        or bool(raw_attributes.get("mapping"))
+        or bool(raw_attributes.get("fast_mapping"))
+    ):
+        return False
     if getattr(snapshot, "mowing_session_active", None) is not None:
-        return snapshot_session_control_state(snapshot) == "mowing"
-    return (
-        bool(getattr(snapshot, "mowing", False))
-        or state == "mowing"
-        or activity == "mowing"
-    )
+        actively_mowing = snapshot_session_control_state(snapshot) == "mowing"
+    else:
+        actively_mowing = (
+            bool(getattr(snapshot, "mowing", False))
+            or state == "mowing"
+            or activity == "mowing"
+        )
+    if not actively_mowing or retention_mode == VIDEO_RETENTION_BATTERY_SAVER:
+        return False
+    if retention_mode == VIDEO_RETENTION_PRIORITY:
+        return True
+    return live_view_seen
 
 
 class _HaStream(Protocol):
@@ -101,8 +140,9 @@ class DreameLawnMowerHaStreamIdleMonitor:
         try:
             while self._is_current(ha_stream, session):
                 stop_due = False
+                outputs = bool(ha_stream.outputs())
                 if (
-                    ha_stream.outputs()
+                    outputs
                     or self._has_external_consumers()
                     or self._should_stay_warm()
                 ):

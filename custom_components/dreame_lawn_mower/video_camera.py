@@ -26,10 +26,14 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import video_stream_helpers as video_helpers
 from .const import (
+    CONF_VIDEO_RETENTION,
     CONF_XP2P_LIBRARY_PATH,
     CONF_XP2P_RUNNER_COMMAND,
     CONF_XP2P_RUNNER_MODE,
+    DEFAULT_VIDEO_RETENTION,
     DOMAIN,
+    VIDEO_RETENTION_OPTIONS,
+    VIDEO_RETENTION_PRIORITY,
     VIDEO_TRANSPORT_AUTO,
     VIDEO_TRANSPORT_CLOUD,
     VIDEO_TRANSPORT_LAN,
@@ -83,6 +87,7 @@ from .video_lan_cache import DreameLawnMowerVideoLanCache
 from .video_provisioning_cache import DreameLawnMowerVideoProvisioningCache
 from .video_session_lifecycle import (
     DreameLawnMowerHaStreamIdleMonitor,
+    mower_video_relay_idle_grace,
     mower_video_session_should_stay_warm,
 )
 
@@ -200,6 +205,13 @@ class DreameLawnMowerVideoCamera(
         self._snapshot_lock = asyncio.Lock()
         self._snapshot_requests = 0
         self._snapshot_owned_stream: Any | None = None
+        self._video_retention_mode = entry.options.get(
+            CONF_VIDEO_RETENTION,
+            DEFAULT_VIDEO_RETENTION,
+        )
+        if self._video_retention_mode not in VIDEO_RETENTION_OPTIONS:
+            self._video_retention_mode = DEFAULT_VIDEO_RETENTION
+        self._video_live_view_seen = False
         self._stream_idle_monitor = DreameLawnMowerHaStreamIdleMonitor(
             coordinator.hass,
             stream_lock=self._stream_lock,
@@ -355,11 +367,35 @@ class DreameLawnMowerVideoCamera(
             failed=self._async_relay_failed,
             idle=self._async_relay_idle,
             should_stay_warm=self._video_session_should_stay_warm,
+            subscriber_started=self._video_relay_subscriber_started,
+            idle_grace=mower_video_relay_idle_grace(self._video_retention_mode),
         )
 
     def _video_session_should_stay_warm(self) -> bool:
-        """Keep an already-viewed stream warm while the mower is mowing."""
-        return mower_video_session_should_stay_warm(self.coordinator.data)
+        """Apply the configured retention policy to an active mower session."""
+        self._reset_video_live_view_if_inactive()
+        return mower_video_session_should_stay_warm(
+            self.coordinator.data,
+            retention_mode=self._video_retention_mode,
+            live_view_seen=self._video_live_view_seen,
+        )
+
+    def _reset_video_live_view_if_inactive(self) -> None:
+        """Do not carry live-view intent into a later mowing run."""
+        if not mower_video_session_should_stay_warm(
+            self.coordinator.data,
+            retention_mode=VIDEO_RETENTION_PRIORITY,
+        ):
+            self._video_live_view_seen = False
+
+    def _mark_video_live_view(self) -> None:
+        """Remember a request already classified as deliberate live viewing."""
+        self._video_live_view_seen = True
+
+    def _video_relay_subscriber_started(self, ha_stream_owned: bool) -> None:
+        """Recognize a direct relay viewer; HA Stream is classified separately."""
+        if not ha_stream_owned:
+            self._mark_video_live_view()
 
     def _ensure_flv_relay(self) -> DreameLawnMowerFlvRelay:
         """Create the relay lazily for compatibility with restored entities."""
@@ -626,6 +662,8 @@ class DreameLawnMowerVideoCamera(
             self._create_stream_lock = asyncio.Lock()
         async with self._create_stream_lock:
             ha_stream = await self._async_create_stream_locked()
+            if ha_stream is not None:
+                self._mark_video_live_view()
             if (
                 ha_stream is not None
                 and getattr(self, "_snapshot_owned_stream", None) is ha_stream

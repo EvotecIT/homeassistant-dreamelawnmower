@@ -24,6 +24,7 @@ CONF_MAP_MARKER_IMAGE = "map_marker_image"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_TOKEN = "token"
 CONF_USERNAME = "username"
+CONF_VIDEO_RETENTION = "video_retention"
 CONF_VIDEO_TRANSPORT = "video_transport"
 CONF_XP2P_LIBRARY_PATH = "xp2p_library_path"
 CONF_XP2P_RUNNER_COMMAND = "xp2p_runner_command"
@@ -75,6 +76,16 @@ DEFAULT_VIDEO_TRANSPORT = VIDEO_TRANSPORT_AUTO
 VIDEO_TRANSPORT_OPTIONS = {
     VIDEO_TRANSPORT_AUTO: "Automatic XP2P with cached restart",
     VIDEO_TRANSPORT_CLOUD: "XP2P (cloud provisioned)",
+}
+
+VIDEO_RETENTION_BALANCED = "balanced"
+VIDEO_RETENTION_BATTERY_SAVER = "battery_saver"
+VIDEO_RETENTION_PRIORITY = "video_priority"
+DEFAULT_VIDEO_RETENTION = VIDEO_RETENTION_BALANCED
+VIDEO_RETENTION_OPTIONS = {
+    VIDEO_RETENTION_BALANCED: "Balanced (live viewing stays ready)",
+    VIDEO_RETENTION_BATTERY_SAVER: "Battery saver (stop after viewers leave)",
+    VIDEO_RETENTION_PRIORITY: "Video priority (snapshots also stay ready)",
 }
 
 PLATFORMS: list[Platform] = [

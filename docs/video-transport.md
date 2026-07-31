@@ -31,10 +31,14 @@ The integration exposes a dormant loopback FLV relay to Home Assistant. The
 first actual media GET starts XP2P, while camera capability discovery remains
 local. The relay owns the mower's single-consumer source and fans it out to
 WebRTC, HLS, and still-image consumers. WebRTC is selected when Home Assistant
-has a compatible provider; HLS remains the fallback. Once viewed, an upstream
-stays warm while the mower is actively mowing so intermittent dashboard visits
-do not trigger repeated cold starts. In other mower states, a 15-second
-zero-viewer grace supports quick re-entry before the relay releases XP2P.
+has a compatible provider; HLS remains the fallback. Retention is separately
+configurable: `Balanced` is the default and keeps an upstream warm during active
+mowing after a live viewer appears. Snapshot-only access gets a bounded
+60-second reconnect window so normal preview refreshes reuse one session.
+`Battery saver` always retires the upstream after the short zero-viewer grace.
+`Video priority` also lets snapshot access keep it ready during mowing. All
+three modes remain lazy until a media request arrives and stop when mower state
+blocks video. The short zero-viewer grace is 15 seconds.
 
 ## Two different Tencent paths
 

@@ -40,6 +40,7 @@ MediaReadyCallback = Callable[[dict[str, object]], Awaitable[None]]
 FailureCallback = Callable[[str], Awaitable[None]]
 IdleCallback = Callable[[], Awaitable[None]]
 KeepWarmCallback = Callable[[], bool]
+SubscriberStartedCallback = Callable[[bool], None]
 
 
 class _FlvFormatError(ValueError):
@@ -407,6 +408,7 @@ class DreameLawnMowerFlvRelay:
         failed: FailureCallback,
         idle: IdleCallback,
         should_stay_warm: KeepWarmCallback | None = None,
+        subscriber_started: SubscriberStartedCallback | None = None,
         idle_grace: float = _IDLE_GRACE,
         idle_poll_interval: float = _IDLE_POLL_INTERVAL,
     ) -> None:
@@ -416,6 +418,7 @@ class DreameLawnMowerFlvRelay:
         self._failure_callback = failed
         self._idle_callback = idle
         self._should_stay_warm = should_stay_warm or (lambda: False)
+        self._subscriber_started = subscriber_started or (lambda _ha_owned: None)
         self._idle_grace = idle_grace
         self._idle_poll_interval = idle_poll_interval
         self._token = secrets.token_urlsafe(32)
@@ -630,6 +633,7 @@ class DreameLawnMowerFlvRelay:
                     subscriber.queue.put_nowait(bootstrap)
                     subscriber.queued_bytes = len(bootstrap)
                 self._subscribers.add(subscriber)
+                self._subscriber_started(ha_stream_owned)
                 if self._pump_task is None or self._pump_task.done():
                     self._last_failure = None
                     self._started_at = asyncio.get_running_loop().time()

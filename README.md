@@ -232,11 +232,13 @@ The relay is the only consumer of the mower's private source. It fans that
 source out to Home Assistant's standard camera providers, so a configured
 WebRTC provider is preferred and HLS remains the compatibility fallback. A
 still-image request and a live viewer can share the same mower session instead
-of racing for its single-consumer endpoint. After a viewer starts video, the
-integration keeps that upstream warm while the mower is actively mowing, so
-returning to a dashboard does not repeatedly pay the mower's cold-start cost.
-Outside mowing, the last viewer still gets a 15-second reconnect grace before
-the integration releases XP2P and the mower camera mode.
+of racing for its single-consumer endpoint. The default `Balanced` retention
+keeps that upstream warm for the active mowing run only after someone opens
+live video. Snapshot cards get a bounded 60-second reconnect window, which
+avoids cold-starting XP2P between normal preview refreshes but releases it after
+the preview surface is no longer active. `Battery saver` always uses the short
+grace after the last consumer, while `Video priority` also lets snapshot access
+keep the session ready during mowing. The short reconnect grace is 15 seconds.
 
 The camera entity remains available while the mower is docked, returning, or in
 another state where Dreame blocks video. Its `video_block_reason` attribute
