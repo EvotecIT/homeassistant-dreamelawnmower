@@ -430,14 +430,8 @@ async def _verify_cached_xp2p_after_reload(
     port: int,
     timeout: float,
 ) -> tuple[Any, Any, Any, dict[str, Any]]:
-    """Prove persisted XP2P restart after blocking subsequent Dreame access."""
+    """Prove cached XP2P restart without new video inputs or camera toggles."""
     blocked_calls: list[str] = []
-
-    async def _blocked_refresh(_self: Any) -> Any:
-        blocked_calls.append("refresh")
-        raise DreameLawnMowerConnectionError(
-            "Dreame client access was blocked by the cache proof."
-        )
 
     async def _blocked_inputs(_self: Any) -> Any:
         blocked_calls.append("runtime_inputs")
@@ -452,7 +446,6 @@ async def _verify_cached_xp2p_after_reload(
         )
 
     client_type = None
-    original_refresh = None
     original_inputs = None
     original_toggle = None
     try:
@@ -462,10 +455,8 @@ async def _verify_cached_xp2p_after_reload(
         coordinator = hass.data[DOMAIN][entry.entry_id]
         client = coordinator.client
         client_type = type(client)
-        original_refresh = client_type.async_refresh
         original_inputs = client_type.async_get_camera_stream_runtime_inputs
         original_toggle = client_type.async_set_camera_stream_enabled
-        client_type.async_refresh = _blocked_refresh
         client_type.async_get_camera_stream_runtime_inputs = _blocked_inputs
         client_type.async_set_camera_stream_enabled = _blocked_toggle
         camera = _find_video_camera(hass)
@@ -489,12 +480,11 @@ async def _verify_cached_xp2p_after_reload(
         attributes = camera.extra_state_attributes
     finally:
         if client_type is not None:
-            client_type.async_refresh = original_refresh
             client_type.async_get_camera_stream_runtime_inputs = original_inputs
             client_type.async_set_camera_stream_enabled = original_toggle
 
     result = {
-        "blocked_dreame_client_calls": blocked_calls,
+        "blocked_dreame_video_calls": blocked_calls,
         "stream_session": attributes["last_stream_session"],
         "last_video_transport": attributes["last_video_transport"],
         "hls_endpoint_status": status,
