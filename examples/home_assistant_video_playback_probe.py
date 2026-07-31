@@ -146,6 +146,25 @@ def _at_station(snapshot: Any) -> bool:
     )
 
 
+class _ProbeMovement:
+    """Track mower movement that this probe must clean up."""
+
+    __slots__ = ("start_attempted",)
+
+    def __init__(self) -> None:
+        self.start_attempted = False
+
+    async def async_start(self, mower: Any) -> None:
+        """Claim cleanup ownership before issuing an ambiguous device mutation."""
+        self.start_attempted = True
+        await mower.async_start_mowing()
+
+
+def _should_dock_after_probe(*, start_attempted: bool) -> bool:
+    """Return whether cleanup must undo mower movement issued by this probe."""
+    return start_attempted
+
+
 async def _wait_for_camera_available(camera: Any, *, timeout: float) -> bool:
     """Wait for HA's debounced coordinator refresh to expose active video."""
     deadline = asyncio.get_running_loop().time() + max(timeout, 0.1)
@@ -492,7 +511,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     mower = None
     ha_stream = None
     client = None
-    start_sent = False
+    movement = _ProbeMovement()
 
     with tempfile.TemporaryDirectory(prefix="dreame-ha-video-proof-") as temp_dir:
         try:
@@ -540,8 +559,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                         "Mower is docked; rerun under supervision with "
                         "--start-before-active."
                     )
-                await mower.async_start_mowing()
-                start_sent = True
+                await movement.async_start(mower)
                 snapshot = await _wait_for_state(
                     client,
                     lambda value: not _at_station(value),
@@ -673,7 +691,12 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                     output["camera_turn_off_error"] = str(err)
             if ha_stream is not None:
                 await ha_stream.stop()
-            if client is not None and (args.execute or start_sent):
+            # Only undo mower movement that this probe initiated.  A camera-only
+            # proof against an already-active mower must never dock the owner's
+            # in-progress mission during cleanup.
+            if client is not None and _should_dock_after_probe(
+                start_attempted=movement.start_attempted
+            ):
                 dock_request_error = None
                 try:
                     if mower is not None:
