@@ -33,11 +33,14 @@ _MAX_SPS_BIT_OPERATIONS: Final = 32 * 1024
 _UPSTREAM_READ_TIMEOUT: Final = 30.0
 _MEDIA_READY_TIMEOUT: Final = 15.0
 _IDLE_GRACE: Final = 15.0
+_IDLE_POLL_INTERVAL: Final = 1.0
 
 SourceFactory = Callable[[], Awaitable[str | None]]
 MediaReadyCallback = Callable[[dict[str, object]], Awaitable[None]]
 FailureCallback = Callable[[str], Awaitable[None]]
 IdleCallback = Callable[[], Awaitable[None]]
+KeepWarmCallback = Callable[[], bool]
+SubscriberStartedCallback = Callable[[bool], None]
 
 
 class _FlvFormatError(ValueError):
@@ -404,14 +407,20 @@ class DreameLawnMowerFlvRelay:
         media_ready: MediaReadyCallback,
         failed: FailureCallback,
         idle: IdleCallback,
+        should_stay_warm: KeepWarmCallback | None = None,
+        subscriber_started: SubscriberStartedCallback | None = None,
         idle_grace: float = _IDLE_GRACE,
+        idle_poll_interval: float = _IDLE_POLL_INTERVAL,
     ) -> None:
         self._hass = hass
         self._source_factory = source_factory
         self._media_ready_callback = media_ready
         self._failure_callback = failed
         self._idle_callback = idle
+        self._should_stay_warm = should_stay_warm or (lambda: False)
+        self._subscriber_started = subscriber_started or (lambda _ha_owned: None)
         self._idle_grace = idle_grace
+        self._idle_poll_interval = idle_poll_interval
         self._token = secrets.token_urlsafe(32)
         self._ha_stream_token = secrets.token_urlsafe(32)
         self._runner: web.AppRunner | None = None
@@ -461,6 +470,12 @@ class DreameLawnMowerFlvRelay:
             "relay_direct_consumers": self.direct_subscriber_count,
             "relay_upstream_active": self._pump_task is not None
             and not self._pump_task.done(),
+            "relay_upstream_held_warm": (
+                not self._subscribers
+                and self._pump_task is not None
+                and not self._pump_task.done()
+                and self._should_stay_warm()
+            ),
             "relay_startup_elapsed_ms": (
                 round(((self._first_media_at or now) - self._started_at) * 1000)
                 if self._started_at is not None
@@ -618,6 +633,7 @@ class DreameLawnMowerFlvRelay:
                     subscriber.queue.put_nowait(bootstrap)
                     subscriber.queued_bytes = len(bootstrap)
                 self._subscribers.add(subscriber)
+                self._subscriber_started(ha_stream_owned)
                 if self._pump_task is None or self._pump_task.done():
                     self._last_failure = None
                     self._started_at = asyncio.get_running_loop().time()
@@ -726,13 +742,17 @@ class DreameLawnMowerFlvRelay:
         pump_task: asyncio.Task[None] | None = None
         try:
             await asyncio.sleep(self._idle_grace)
-            async with self._lock:
-                if self._subscribers or self._pump_task is None:
-                    return
-                self._idle_stopping = True
-                self._idle_ready.clear()
-                pump_task = self._pump_task
-                self._pump_task = None
+            while True:
+                async with self._lock:
+                    if self._subscribers or self._pump_task is None:
+                        return
+                    if not self._should_stay_warm():
+                        self._idle_stopping = True
+                        self._idle_ready.clear()
+                        pump_task = self._pump_task
+                        self._pump_task = None
+                        break
+                await asyncio.sleep(self._idle_poll_interval)
             if pump_task is not None and not pump_task.done():
                 pump_task.cancel()
                 with suppress(asyncio.CancelledError):

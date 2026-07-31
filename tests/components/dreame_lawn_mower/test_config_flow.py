@@ -29,6 +29,7 @@ from custom_components.dreame_lawn_mower.const import (
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
     CONF_USERNAME,
+    CONF_VIDEO_RETENTION,
     CONF_VIDEO_TRANSPORT,
     CONF_XP2P_LIBRARY_PATH,
     CONF_XP2P_RUNNER_COMMAND,
@@ -36,6 +37,7 @@ from custom_components.dreame_lawn_mower.const import (
     DEFAULT_MAP_MARKER_SCALE,
     DEFAULT_MAP_STROKE_SCALE,
     DEFAULT_MAP_THEME,
+    DEFAULT_VIDEO_RETENTION,
     DEFAULT_VIDEO_TRANSPORT,
     DOMAIN,
     VIDEO_TRANSPORT_LAN,
@@ -249,6 +251,7 @@ def test_options_flow_accepts_map_label_scale() -> None:
         CONF_MAP_STROKE_SCALE: DEFAULT_MAP_STROKE_SCALE,
         CONF_MAP_MARKER_SCALE: DEFAULT_MAP_MARKER_SCALE,
         CONF_MAP_MARKER_IMAGE: "",
+        CONF_VIDEO_RETENTION: DEFAULT_VIDEO_RETENTION,
         CONF_VIDEO_TRANSPORT: DEFAULT_VIDEO_TRANSPORT,
         CONF_XP2P_LIBRARY_PATH: "",
         CONF_XP2P_RUNNER_COMMAND: "",
@@ -265,3 +268,14 @@ def test_options_flow_replaces_prerelease_lan_only_default() -> None:
     validated = result["data_schema"]({})
 
     assert validated[CONF_VIDEO_TRANSPORT] == DEFAULT_VIDEO_TRANSPORT
+
+
+def test_options_flow_replaces_unknown_video_retention_default() -> None:
+    flow = DreameLawnMowerOptionsFlow(
+        SimpleNamespace(options={CONF_VIDEO_RETENTION: "unknown"})
+    )
+
+    result = asyncio.run(flow.async_step_init())
+    validated = result["data_schema"]({})
+
+    assert validated[CONF_VIDEO_RETENTION] == DEFAULT_VIDEO_RETENTION

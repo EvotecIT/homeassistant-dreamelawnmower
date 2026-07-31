@@ -147,6 +147,7 @@ async def _relay_fans_out_one_upstream_and_retires_after_last_viewer() -> None:
     media_ready = asyncio.Event()
     relay_idle = asyncio.Event()
     failures: list[str] = []
+    subscriber_starts: list[bool] = []
     sequence = _tag(9, 0, b"\x17\x00\x00\x00\x00\x01\x64\x00\x1f")
     keyframe = _tag(9, 0, b"\x17\x01\x00\x00\x00\x00\x00\x00\x01")
     interframe = _tag(9, 40, b"\x27\x01\x00\x00\x00\x00\x00\x00\x02")
@@ -197,6 +198,7 @@ async def _relay_fans_out_one_upstream_and_retires_after_last_viewer() -> None:
         media_ready=_media_ready,
         failed=_failed,
         idle=_idle,
+        subscriber_started=subscriber_starts.append,
         idle_grace=0.02,
     )
     try:
@@ -227,6 +229,7 @@ async def _relay_fans_out_one_upstream_and_retires_after_last_viewer() -> None:
             assert upstream_connections == 1
             assert relay.subscriber_count == 2
             assert relay.direct_subscriber_count == 1
+            assert subscriber_starts == [False, True]
 
             first.close()
             for _attempt in range(100):
@@ -583,6 +586,47 @@ def test_relay_retires_cold_start_when_waiting_viewer_disconnects() -> None:
             await client.close()
 
     assert asyncio.run(_run()) == (0, False)
+
+
+def test_relay_keeps_upstream_warm_while_mower_is_mowing() -> None:
+    async def _run() -> tuple[bool, bool, bool]:
+        mowing = True
+        idle = asyncio.Event()
+        release_pump = asyncio.Event()
+        relay = DreameLawnMowerFlvRelay(
+            SimpleNamespace(async_create_task=asyncio.create_task),
+            source_factory=lambda: asyncio.sleep(0, result=None),
+            media_ready=lambda _diagnostics: asyncio.sleep(0),
+            failed=lambda _error: asyncio.sleep(0),
+            idle=lambda: asyncio.sleep(0, result=idle.set()),
+            should_stay_warm=lambda: mowing,
+            idle_grace=0,
+            idle_poll_interval=0,
+        )
+
+        async def _pump() -> None:
+            await release_pump.wait()
+
+        relay._pump_task = asyncio.create_task(_pump())  # noqa: SLF001
+        try:
+            async with relay._lock:  # noqa: SLF001
+                relay._schedule_idle_if_empty_locked()  # noqa: SLF001
+            for _attempt in range(10):
+                await asyncio.sleep(0)
+            held_warm = relay.diagnostics["relay_upstream_held_warm"]
+            still_running = relay.diagnostics["relay_upstream_active"]
+            assert not idle.is_set()
+
+            mowing = False
+            await asyncio.wait_for(idle.wait(), timeout=1)
+            return bool(held_warm), bool(still_running), bool(
+                relay.diagnostics["relay_upstream_active"]
+            )
+        finally:
+            release_pump.set()
+            await relay.async_close()
+
+    assert asyncio.run(_run()) == (True, True, False)
 
 
 def test_relay_fails_stream_that_never_reaches_decoder_ready_media() -> None:

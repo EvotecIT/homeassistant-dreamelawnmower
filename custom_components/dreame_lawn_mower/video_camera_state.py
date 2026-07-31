@@ -43,6 +43,7 @@ class DreameLawnMowerVideoStateMixin:
     def _handle_coordinator_update(self) -> None:
         """Remember video support and retire sessions when state blocks video."""
         snapshot = self.coordinator.data
+        self._reset_video_live_view_if_inactive()
         if snapshot_advertises_video(snapshot):
             self._video_capability_observed = True
 
@@ -138,6 +139,8 @@ class DreameLawnMowerVideoStateMixin:
             "video_runtime_configured": self._runtime_configured,
             "video_runtime_mode": self._runtime_mode,
             "video_transport_policy": self._video_transport,
+            "video_retention_mode": self._video_retention_mode,
+            "video_live_view_seen": self._video_live_view_seen,
             "video_block_reason": camera_stream_block_reason(self.coordinator.data),
             "video_capability_advertised": snapshot_advertises_video(
                 self.coordinator.data
