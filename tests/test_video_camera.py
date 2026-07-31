@@ -3197,6 +3197,41 @@ def test_video_retention_fails_closed_without_fresh_coordinator_state(
     assert entity._video_live_view_seen is False
 
 
+@pytest.mark.parametrize("viewer_kind", ["direct", "ha_stream"])
+def test_video_retention_preserves_connected_viewer_intent_during_degraded_state(
+    viewer_kind: str,
+) -> None:
+    entity = _uninitialized_entity(
+        snapshot=SimpleNamespace(state="mowing", activity="mowing")
+    )
+    if viewer_kind == "direct":
+        entity._flv_relay = SimpleNamespace(direct_subscriber_count=1)
+    else:
+        entity.stream = SimpleNamespace(outputs=lambda: {"hls": object()})
+    entity._mark_video_live_view()
+    entity.coordinator.connection_degraded = True
+
+    assert entity._video_session_should_stay_warm() is False
+    assert entity._video_live_view_seen is True
+
+    entity.coordinator.connection_degraded = False
+    assert entity._video_session_should_stay_warm() is True
+
+
+def test_video_retention_does_not_treat_snapshot_output_as_live_viewer() -> None:
+    entity = _uninitialized_entity(
+        snapshot=SimpleNamespace(state="mowing", activity="mowing")
+    )
+    stream = SimpleNamespace(outputs=lambda: {"snapshot": object()})
+    entity.stream = stream
+    entity._snapshot_owned_stream = stream
+    entity._mark_video_live_view()
+    entity.coordinator.connection_degraded = True
+
+    assert entity._video_session_should_stay_warm() is False
+    assert entity._video_live_view_seen is False
+
+
 @pytest.mark.parametrize(
     ("snapshot", "expected"),
     [

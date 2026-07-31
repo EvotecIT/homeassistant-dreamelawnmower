@@ -394,11 +394,23 @@ class DreameLawnMowerVideoCamera(
 
     def _reset_video_live_view_if_inactive(self) -> None:
         """Do not carry live-view intent into a later mowing run."""
-        if (
-            not self._video_retention_state_is_fresh()
-            or not mower_video_mowing_session_is_current(self.coordinator.data)
-        ):
+        if not self._video_retention_state_is_fresh():
+            if not self._video_has_active_live_viewer():
+                self._video_live_view_seen = False
+            return
+        if not mower_video_mowing_session_is_current(self.coordinator.data):
             self._video_live_view_seen = False
+
+    def _video_has_active_live_viewer(self) -> bool:
+        """Return whether a deliberate direct or HA live viewer remains."""
+        relay = getattr(self, "_flv_relay", None)
+        if getattr(relay, "direct_subscriber_count", 0) > 0:
+            return True
+        ha_stream = getattr(self, "stream", None)
+        if ha_stream is None or self._snapshot_owned_stream is ha_stream:
+            return False
+        outputs = getattr(ha_stream, "outputs", None)
+        return bool(outputs()) if callable(outputs) else False
 
     def _mark_video_live_view(self) -> None:
         """Remember a request already classified as deliberate live viewing."""
