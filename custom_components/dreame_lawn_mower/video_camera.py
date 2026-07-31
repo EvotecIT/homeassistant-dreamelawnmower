@@ -81,7 +81,10 @@ from .video_camera_types import _DreameVideoRuntime as _DreameVideoRuntime
 from .video_flv_relay import DreameLawnMowerFlvRelay
 from .video_lan_cache import DreameLawnMowerVideoLanCache
 from .video_provisioning_cache import DreameLawnMowerVideoProvisioningCache
-from .video_session_lifecycle import DreameLawnMowerHaStreamIdleMonitor
+from .video_session_lifecycle import (
+    DreameLawnMowerHaStreamIdleMonitor,
+    mower_video_session_should_stay_warm,
+)
 
 _LOGGER = logging.getLogger(__name__)
 _VIDEO_UPSTREAM_START_TIMEOUT = DEFAULT_XP2P_HOST_STARTUP_TIMEOUT
@@ -208,6 +211,7 @@ class DreameLawnMowerVideoCamera(
                 self._flv_relay.direct_subscriber_count > 0
                 or self._snapshot_requests > 0
             ),
+            should_stay_warm=self._video_session_should_stay_warm,
         )
         self._flv_relay = self._create_flv_relay()
         self._video_start_requested_at: float | None = None
@@ -350,7 +354,12 @@ class DreameLawnMowerVideoCamera(
             media_ready=self._async_relay_media_ready,
             failed=self._async_relay_failed,
             idle=self._async_relay_idle,
+            should_stay_warm=self._video_session_should_stay_warm,
         )
+
+    def _video_session_should_stay_warm(self) -> bool:
+        """Keep an already-viewed stream warm while the mower is mowing."""
+        return mower_video_session_should_stay_warm(self.coordinator.data)
 
     def _ensure_flv_relay(self) -> DreameLawnMowerFlvRelay:
         """Create the relay lazily for compatibility with restored entities."""

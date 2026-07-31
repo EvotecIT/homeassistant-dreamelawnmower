@@ -77,6 +77,7 @@ from custom_components.dreame_lawn_mower.video_camera import (
 )
 from custom_components.dreame_lawn_mower.video_session_lifecycle import (
     DreameLawnMowerHaStreamIdleMonitor,
+    mower_video_session_should_stay_warm,
 )
 from custom_components.dreame_lawn_mower.video_stream_helpers import (
     split_runner_command,
@@ -2921,6 +2922,108 @@ def test_video_camera_idle_monitor_keeps_direct_relay_viewer_alive() -> None:
         return stops
 
     assert asyncio.run(_run()) == 1
+
+
+def test_video_camera_idle_monitor_keeps_mowing_session_warm() -> None:
+    async def _run() -> int:
+        entity = _uninitialized_entity()
+        session = SimpleNamespace(service_id="product-1/device-1")
+        mowing = True
+        stops = 0
+
+        class _Stream:
+            @staticmethod
+            def outputs() -> dict[str, object]:
+                return {}
+
+        stream = _Stream()
+        entity.stream = stream
+        entity._session = session
+
+        async def _stop() -> None:
+            nonlocal stops
+            stops += 1
+            entity.stream = None
+            entity._session = None
+
+        monitor = DreameLawnMowerHaStreamIdleMonitor(
+            SimpleNamespace(async_create_task=asyncio.create_task),
+            stream_lock=entity._stream_lock,
+            is_current=lambda actual_stream, actual_session: (
+                entity.stream is actual_stream and entity._session is actual_session
+            ),
+            stop_active=_stop,
+            should_stay_warm=lambda: mowing,
+            provider_grace=0,
+            idle_grace=0,
+            poll_interval=0,
+        )
+        monitor.schedule(stream, session)
+        for _attempt in range(10):
+            await asyncio.sleep(0)
+        assert stops == 0
+
+        mowing = False
+        while stops == 0:
+            await asyncio.sleep(0)
+        await monitor.async_cancel()
+        return stops
+
+    assert asyncio.run(_run()) == 1
+
+
+@pytest.mark.parametrize(
+    ("snapshot", "expected"),
+    [
+        (None, False),
+        (SimpleNamespace(state="mowing", activity="idle"), True),
+        (SimpleNamespace(state="idle", activity="mowing"), True),
+        (SimpleNamespace(state="paused", activity="paused", mowing=True), True),
+        (SimpleNamespace(state="paused", activity="paused"), False),
+        (SimpleNamespace(state="returning", activity="returning"), False),
+        (
+            SimpleNamespace(
+                state="mowing",
+                activity="mowing",
+                mowing_session_active=False,
+            ),
+            False,
+        ),
+        (
+            SimpleNamespace(
+                state="idle",
+                activity="idle",
+                task_status="mowing",
+                mowing_session_active=True,
+            ),
+            True,
+        ),
+        (
+            SimpleNamespace(
+                state="mowing",
+                activity="mowing",
+                task_status="paused",
+                mowing_session_active=True,
+            ),
+            False,
+        ),
+        (
+            SimpleNamespace(
+                state="charging",
+                activity="docked",
+                task_status="mowing",
+                mowing_session_active=True,
+                docked=True,
+            ),
+            False,
+        ),
+    ],
+)
+def test_video_session_stays_warm_only_while_actively_mowing(
+    snapshot: object | None,
+    expected: bool,
+) -> None:
+    assert mower_video_session_should_stay_warm(snapshot) is expected
 
 
 def test_video_camera_idle_monitor_keeps_snapshot_request_alive() -> None:
