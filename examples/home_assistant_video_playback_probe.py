@@ -106,7 +106,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--frame-out",
         type=Path,
-        help="Optional JPEG path for the deployed HA camera's still image.",
+        help="Optional JPEG path for a frame decoded from the deployed HA HLS stream.",
     )
     parser.add_argument(
         "--video-out",
@@ -144,6 +144,25 @@ def _at_station(snapshot: Any) -> bool:
         or summary["raw_docked"]
         or summary["state"] in _STATION_STATES
     )
+
+
+class _ProbeMovement:
+    """Track mower movement that this probe must clean up."""
+
+    __slots__ = ("start_attempted",)
+
+    def __init__(self) -> None:
+        self.start_attempted = False
+
+    async def async_start(self, mower: Any) -> None:
+        """Claim cleanup ownership before issuing an ambiguous device mutation."""
+        self.start_attempted = True
+        await mower.async_start_mowing()
+
+
+def _should_dock_after_probe(*, start_attempted: bool) -> bool:
+    """Return whether cleanup must undo mower movement issued by this probe."""
+    return start_attempted
 
 
 async def _wait_for_camera_available(camera: Any, *, timeout: float) -> bool:
@@ -306,6 +325,23 @@ async def _wait_for_hls_media(output: Any, *, timeout: float) -> Any:
             await output.part_recv(timeout=min(remaining, 5.0))
 
 
+async def _capture_hls_and_camera_image(
+    camera: Any,
+    hls_output: Any,
+    *,
+    timeout: float,
+) -> tuple[Any, bytes | None]:
+    """Capture HA HLS and snapshot consumers from the same initial keyframes."""
+    camera_image_task = asyncio.create_task(camera.async_camera_image())
+    try:
+        segment = await _wait_for_hls_media(hls_output, timeout=timeout)
+        return segment, await camera_image_task
+    finally:
+        if not camera_image_task.done():
+            camera_image_task.cancel()
+            await asyncio.gather(camera_image_task, return_exceptions=True)
+
+
 def _decode_best_video_frame(
     segment: Any,
     frame_out: Path | None,
@@ -394,14 +430,8 @@ async def _verify_cached_xp2p_after_reload(
     port: int,
     timeout: float,
 ) -> tuple[Any, Any, Any, dict[str, Any]]:
-    """Prove persisted XP2P restart while the whole Dreame client is offline."""
+    """Prove cached XP2P restart without new video inputs or camera toggles."""
     blocked_calls: list[str] = []
-
-    async def _blocked_refresh(_self: Any) -> Any:
-        blocked_calls.append("refresh")
-        raise DreameLawnMowerConnectionError(
-            "Dreame client access was blocked by the cache proof."
-        )
 
     async def _blocked_inputs(_self: Any) -> Any:
         blocked_calls.append("runtime_inputs")
@@ -415,19 +445,20 @@ async def _verify_cached_xp2p_after_reload(
             "Dreame camera toggle was blocked by the cache proof."
         )
 
-    client_type = type(hass.data[DOMAIN][entry.entry_id].client)
-    original_refresh = client_type.async_refresh
-    original_inputs = client_type.async_get_camera_stream_runtime_inputs
-    original_toggle = client_type.async_set_camera_stream_enabled
+    client_type = None
+    original_inputs = None
+    original_toggle = None
     try:
-        client_type.async_refresh = _blocked_refresh
-        client_type.async_get_camera_stream_runtime_inputs = _blocked_inputs
-        client_type.async_set_camera_stream_enabled = _blocked_toggle
         if not await hass.config_entries.async_reload(entry.entry_id):
             raise RuntimeError("Dreame config entry did not reload for cache proof.")
         await hass.async_block_till_done()
         coordinator = hass.data[DOMAIN][entry.entry_id]
         client = coordinator.client
+        client_type = type(client)
+        original_inputs = client_type.async_get_camera_stream_runtime_inputs
+        original_toggle = client_type.async_set_camera_stream_enabled
+        client_type.async_get_camera_stream_runtime_inputs = _blocked_inputs
+        client_type.async_set_camera_stream_enabled = _blocked_toggle
         camera = _find_video_camera(hass)
         ha_stream = await camera.async_create_stream()
         if ha_stream is None:
@@ -448,12 +479,12 @@ async def _verify_cached_xp2p_after_reload(
         status, playlist = await _fetch_hls_playlist(port, endpoint)
         attributes = camera.extra_state_attributes
     finally:
-        client_type.async_refresh = original_refresh
-        client_type.async_get_camera_stream_runtime_inputs = original_inputs
-        client_type.async_set_camera_stream_enabled = original_toggle
+        if client_type is not None:
+            client_type.async_get_camera_stream_runtime_inputs = original_inputs
+            client_type.async_set_camera_stream_enabled = original_toggle
 
     result = {
-        "blocked_dreame_client_calls": blocked_calls,
+        "blocked_dreame_video_calls": blocked_calls,
         "stream_session": attributes["last_stream_session"],
         "last_video_transport": attributes["last_video_transport"],
         "hls_endpoint_status": status,
@@ -462,7 +493,7 @@ async def _verify_cached_xp2p_after_reload(
         "width": frame["width"],
         "height": frame["height"],
         "verified": bool(
-            blocked_calls == ["refresh"]
+            blocked_calls == []
             and attributes["last_video_transport"] == "cached_xp2p"
             and status == 200
             and "#EXTM3U" in playlist
@@ -485,6 +516,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         "home_assistant_hls_verified": False,
         "playable_video_verified": False,
         "visual_frame_verified": False,
+        "camera_image_verified": False,
     }
     hass: HomeAssistant | None = None
     entry = None
@@ -492,7 +524,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     mower = None
     ha_stream = None
     client = None
-    start_sent = False
+    movement = _ProbeMovement()
 
     with tempfile.TemporaryDirectory(prefix="dreame-ha-video-proof-") as temp_dir:
         try:
@@ -540,8 +572,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                         "Mower is docked; rerun under supervision with "
                         "--start-before-active."
                     )
-                await mower.async_start_mowing()
-                start_sent = True
+                await movement.async_start(mower)
                 snapshot = await _wait_for_state(
                     client,
                     lambda value: not _at_station(value),
@@ -586,25 +617,25 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             hls_output = ha_stream.add_provider("hls")
             endpoint = ha_stream.endpoint_url("hls")
             await ha_stream.start()
-            segment = await _wait_for_hls_media(
+            segment, camera_jpeg = await _capture_hls_and_camera_image(
+                camera,
                 hls_output,
                 timeout=args.stream_timeout,
-            )
-            camera_jpeg = await camera.async_camera_image()
-            if not camera_jpeg:
-                raise RuntimeError(
-                    "The deployed HA camera returned no still-image bytes."
-                )
-            camera_image = await hass.async_add_executor_job(
-                _inspect_camera_jpeg,
-                camera_jpeg,
-                args.frame_out,
             )
             frame = await hass.async_add_executor_job(
                 _decode_best_video_frame,
                 segment,
-                None,
+                args.frame_out,
                 args.video_out,
+            )
+            camera_image = (
+                await hass.async_add_executor_job(
+                    _inspect_camera_jpeg,
+                    camera_jpeg,
+                    None,
+                )
+                if camera_jpeg
+                else None
             )
             status, playlist = await _fetch_hls_playlist(port, endpoint)
             output["playback"] = {
@@ -629,6 +660,9 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                 and frame["width"] > 0
                 and frame["height"] > 0
                 and frame["jpeg_bytes"] > 0
+            )
+            output["camera_image_verified"] = bool(
+                camera_image is not None
                 and camera_image["width"] > 0
                 and camera_image["height"] > 0
                 and camera_image["jpeg_bytes"] > 0
@@ -673,7 +707,12 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                     output["camera_turn_off_error"] = str(err)
             if ha_stream is not None:
                 await ha_stream.stop()
-            if client is not None and (args.execute or start_sent):
+            # Only undo mower movement that this probe initiated.  A camera-only
+            # proof against an already-active mower must never dock the owner's
+            # in-progress mission during cleanup.
+            if client is not None and _should_dock_after_probe(
+                start_attempted=movement.start_attempted
+            ):
                 dock_request_error = None
                 try:
                     if mower is not None:

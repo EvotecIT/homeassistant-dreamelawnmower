@@ -1786,7 +1786,7 @@ def test_video_camera_stays_available_during_active_stream_connectivity_loss() -
 
 
 def test_video_camera_relay_failure_bypasses_stale_cached_xp2p() -> None:
-    async def _run() -> tuple[int, list[bool], bool]:
+    async def _run() -> tuple[int, int, list[bool], bool]:
         entity = _uninitialized_entity()
         entity.async_write_ha_state = lambda: None
         entity._last_video_transport = "cached_xp2p"
@@ -1794,6 +1794,7 @@ def test_video_camera_relay_failure_bypasses_stale_cached_xp2p() -> None:
         entity._session = entity._unverified_playback_session
         entity.stream = None
         clears = 0
+        disables = 0
         skip_values: list[bool] = []
 
         class _ProvisioningCache:
@@ -1810,15 +1811,20 @@ def test_video_camera_relay_failure_bypasses_stale_cached_xp2p() -> None:
             skip_values.append(skip_cached_xp2p)
             return "http://127.0.0.1/fresh.flv"
 
+        async def _disable() -> None:
+            nonlocal disables
+            disables += 1
+
         entity._provisioning_cache = _ProvisioningCache()
         entity._async_stop_active_session = _stop
         entity._async_start_raw_source = _start
+        entity._async_disable_camera_stream = _disable
 
         await entity._async_relay_failed("cached media was invalid")
         await entity._async_start_relay_upstream()
-        return clears, skip_values, entity._bypass_cached_xp2p
+        return clears, disables, skip_values, entity._bypass_cached_xp2p
 
-    assert asyncio.run(_run()) == (1, [True], True)
+    assert asyncio.run(_run()) == (1, 1, [True], True)
 
 
 def test_video_camera_relay_failure_clears_cache_before_reconnect_start() -> None:
@@ -1850,9 +1856,13 @@ def test_video_camera_relay_failure_clears_cache_before_reconnect_start() -> Non
             order.append("replacement_started")
             return "http://127.0.0.1/fresh.flv"
 
+        async def _disable() -> None:
+            order.append("camera_disabled")
+
         entity._provisioning_cache = _ProvisioningCache()
         entity._async_stop_active_session = _stop
         entity._async_start_stream = _start
+        entity._async_disable_camera_stream = _disable
 
         failure = asyncio.create_task(
             entity._async_relay_failed("cached media was invalid")
@@ -1870,10 +1880,64 @@ def test_video_camera_relay_failure_clears_cache_before_reconnect_start() -> Non
         return order, replacement_was_blocked, source
 
     assert asyncio.run(_run()) == (
-        ["clear_started", "clear_finished", "replacement_started"],
+        [
+            "camera_disabled",
+            "clear_started",
+            "clear_finished",
+            "replacement_started",
+        ],
         True,
         "http://127.0.0.1/fresh.flv",
     )
+
+
+@pytest.mark.parametrize("first_media_at", [None, 1.0])
+def test_video_camera_idle_invalidates_only_unverified_cached_start(
+    first_media_at: float | None,
+) -> None:
+    async def _run() -> tuple[list[str], bool]:
+        entity = _uninitialized_entity()
+        entity._last_video_transport = "cached_xp2p"
+        entity._last_video_transport_attempted = "cached_xp2p"
+        entity._bypass_cached_xp2p = False
+        entity._video_first_media_at = first_media_at
+        entity._unverified_playback_session = (
+            object() if first_media_at is None else None
+        )
+        entity._session = object()
+        entity.stream = object()
+        order: list[str] = []
+
+        async def _stop(*, reason: str = "session_stop", **_kwargs: object) -> None:
+            assert reason == "stream_idle"
+            order.append("stopped")
+            entity._session = None
+            entity._unverified_playback_session = None
+            entity.stream = None
+
+        async def _disable() -> None:
+            order.append("camera_disabled")
+
+        async def _clear(*, cached_xp2p: bool, lan: bool) -> None:
+            assert cached_xp2p is True
+            assert lan is False
+            order.append("cache_cleared")
+
+        entity._async_stop_active_session = _stop
+        entity._async_disable_camera_stream = _disable
+        entity._async_clear_failed_playback_caches = _clear
+
+        await entity._async_relay_idle()
+        return order, entity._bypass_cached_xp2p
+
+    order, bypassed = asyncio.run(_run())
+
+    if first_media_at is None:
+        assert order == ["stopped", "camera_disabled", "cache_cleared"]
+        assert bypassed is True
+    else:
+        assert order == ["stopped"]
+        assert bypassed is False
 
 
 def test_video_camera_relay_failure_bypasses_stale_lan_for_auto() -> None:
@@ -2841,12 +2905,14 @@ def test_video_camera_stream_reuses_inflight_runtime_preparation() -> None:
     assert asyncio.run(_run()) == (True, True)
 
 
-def test_video_camera_idle_monitor_ignores_ha_owned_relay_subscriber() -> None:
-    async def _run() -> int:
+def test_video_camera_ha_idle_monitor_invalidates_unverified_cached_start() -> None:
+    async def _run() -> tuple[int, int, int, bool]:
         entity = _uninitialized_entity()
         session = SimpleNamespace(service_id="product-1/device-1")
         outputs_calls = 0
         stops = 0
+        disables = 0
+        clears = 0
 
         class _Stream:
             def outputs(self) -> dict[str, object]:
@@ -2861,21 +2927,39 @@ def test_video_camera_idle_monitor_ignores_ha_owned_relay_subscriber() -> None:
         )
         entity.stream = stream
         entity._session = session
+        entity._unverified_playback_session = session
+        entity._last_video_transport = "cached_xp2p"
+        entity._last_video_transport_attempted = "cached_xp2p"
+        entity._bypass_cached_xp2p = False
 
-        async def _stop() -> None:
+        async def _stop(*, reason: str = "session_stop") -> None:
             nonlocal stops
+            assert reason == "stream_idle"
             stops += 1
             entity.stream = None
             entity._session = None
+            entity._unverified_playback_session = None
+
+        async def _disable() -> None:
+            nonlocal disables
+            disables += 1
+
+        async def _clear(*, cached_xp2p: bool, lan: bool) -> None:
+            nonlocal clears
+            assert cached_xp2p is True
+            assert lan is False
+            clears += 1
 
         entity._async_stop_active_session = _stop
+        entity._async_disable_camera_stream = _disable
+        entity._async_clear_failed_playback_caches = _clear
         monitor = DreameLawnMowerHaStreamIdleMonitor(
             SimpleNamespace(async_create_task=asyncio.create_task),
             stream_lock=entity._stream_lock,
             is_current=lambda actual_stream, actual_session: (
                 entity.stream is actual_stream and entity._session is actual_session
             ),
-            stop_active=entity._async_stop_active_session,
+            stop_active=entity._async_stop_idle_session,
             has_external_consumers=lambda: relay.direct_subscriber_count > 0,
             idle_grace=0,
             poll_interval=0,
@@ -2884,9 +2968,10 @@ def test_video_camera_idle_monitor_ignores_ha_owned_relay_subscriber() -> None:
         monitor.schedule(stream, session)
         while stops == 0:
             await asyncio.sleep(0)
-        return stops
+        await monitor.async_cancel()
+        return stops, disables, clears, entity._bypass_cached_xp2p
 
-    assert asyncio.run(_run()) == 1
+    assert asyncio.run(_run()) == (1, 1, 1, True)
 
 
 def test_video_camera_idle_monitor_keeps_direct_relay_viewer_alive() -> None:
@@ -3122,6 +3207,7 @@ def test_balanced_retention_arms_only_for_live_viewing() -> None:
     entity = _uninitialized_entity(
         snapshot=SimpleNamespace(state="mowing", activity="mowing")
     )
+    entity._video_first_media_at = 1.0
 
     entity._snapshot_requests = 1
     entity._video_relay_subscriber_started(ha_stream_owned=True)
@@ -3148,6 +3234,7 @@ def test_balanced_retention_preserves_intent_across_same_run_pause() -> None:
             mowing_session_active=True,
         )
     )
+    entity._video_first_media_at = 1.0
     entity._mark_video_live_view()
 
     entity.coordinator.data = SimpleNamespace(
@@ -3189,6 +3276,7 @@ def test_video_retention_fails_closed_without_fresh_coordinator_state(
     entity = _uninitialized_entity(
         snapshot=SimpleNamespace(state="mowing", activity="mowing")
     )
+    entity._video_first_media_at = 1.0
     entity._mark_video_live_view()
     entity.coordinator.last_update_success = last_update_success
     entity.coordinator.connection_degraded = connection_degraded
@@ -3204,6 +3292,7 @@ def test_video_retention_preserves_connected_viewer_intent_during_degraded_state
     entity = _uninitialized_entity(
         snapshot=SimpleNamespace(state="mowing", activity="mowing")
     )
+    entity._video_first_media_at = 1.0
     if viewer_kind == "direct":
         entity._flv_relay = SimpleNamespace(direct_subscriber_count=1)
     else:
@@ -3222,6 +3311,7 @@ def test_video_retention_does_not_treat_snapshot_output_as_live_viewer() -> None
     entity = _uninitialized_entity(
         snapshot=SimpleNamespace(state="mowing", activity="mowing")
     )
+    entity._video_first_media_at = 1.0
     stream = SimpleNamespace(outputs=lambda: {"snapshot": object()})
     entity.stream = stream
     entity._snapshot_owned_stream = stream
@@ -3262,8 +3352,8 @@ def test_video_live_view_intent_tracks_the_current_mowing_run(
     assert mower_video_mowing_session_is_current(snapshot) is expected
 
 
-def test_ha_live_stream_arms_balanced_retention_during_snapshot_overlap() -> None:
-    async def _run() -> tuple[bool, bool]:
+def test_ha_live_stream_arms_balanced_retention_after_verified_media() -> None:
+    async def _run() -> tuple[bool, bool, bool, bool]:
         entity = _uninitialized_entity(
             snapshot=SimpleNamespace(state="mowing", activity="mowing")
         )
@@ -3276,9 +3366,16 @@ def test_ha_live_stream_arms_balanced_retention_during_snapshot_overlap() -> Non
 
         entity._async_create_stream_locked = _create_stream
         result = await entity.async_create_stream()
-        return result is stream, entity._video_session_should_stay_warm()
+        warm_before_media = entity._video_session_should_stay_warm()
+        entity._video_first_media_at = 1.0
+        return (
+            result is stream,
+            entity._video_live_view_seen,
+            warm_before_media,
+            entity._video_session_should_stay_warm(),
+        )
 
-    assert asyncio.run(_run()) == (True, True)
+    assert asyncio.run(_run()) == (True, True, False, True)
 
 
 def test_video_camera_idle_monitor_keeps_snapshot_request_alive() -> None:

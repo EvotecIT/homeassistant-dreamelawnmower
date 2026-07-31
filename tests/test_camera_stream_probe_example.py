@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
+import pytest
 import pytest_socket
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
@@ -32,6 +33,75 @@ def _load_probe_module() -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _load_ha_playback_probe_module() -> ModuleType:
+    path = Path("examples/home_assistant_video_playback_probe.py")
+    spec = importlib.util.spec_from_file_location(
+        "home_assistant_video_playback_probe", path
+    )
+    if spec is None or spec.loader is None:
+        raise AssertionError("Could not load Home Assistant playback probe module")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_ha_playback_probe_docks_only_mower_movement_it_started() -> None:
+    module = _load_ha_playback_probe_module()
+
+    assert module._should_dock_after_probe(start_attempted=False) is False
+    assert module._should_dock_after_probe(start_attempted=True) is True
+
+
+def test_ha_playback_probe_owns_cleanup_before_ambiguous_start_failure() -> None:
+    module = _load_ha_playback_probe_module()
+    movement = module._ProbeMovement()
+
+    class _Mower:
+        async def async_start_mowing(self) -> None:
+            raise RuntimeError("response lost after command")
+
+    with pytest.raises(RuntimeError, match="response lost"):
+        asyncio.run(movement.async_start(_Mower()))
+
+    assert movement.start_attempted is True
+    assert module._should_dock_after_probe(start_attempted=True) is True
+
+
+def test_ha_playback_probe_starts_snapshot_consumer_with_hls() -> None:
+    module = _load_ha_playback_probe_module()
+
+    async def _run() -> tuple[object, bytes]:
+        snapshot_started = asyncio.Event()
+        segment = SimpleNamespace(
+            complete=True,
+            init=b"ftyp",
+            data_size=1,
+        )
+
+        class _Camera:
+            async def async_camera_image(self) -> bytes:
+                snapshot_started.set()
+                return b"jpeg"
+
+        class _HlsOutput:
+            last_segment = None
+
+            async def recv(self) -> None:
+                await asyncio.wait_for(snapshot_started.wait(), timeout=1)
+                self.last_segment = segment
+
+        return await module._capture_hls_and_camera_image(
+            _Camera(),
+            _HlsOutput(),
+            timeout=1,
+        )
+
+    actual_segment, image = asyncio.run(_run())
+
+    assert actual_segment.complete is True
+    assert image == b"jpeg"
 
 
 def test_probe_help_uses_standalone_client_package(tmp_path) -> None:

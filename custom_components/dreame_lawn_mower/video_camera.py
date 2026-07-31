@@ -218,7 +218,7 @@ class DreameLawnMowerVideoCamera(
             is_current=lambda stream, owner: (
                 self.stream is stream and owner is self._flv_relay
             ),
-            stop_active=self._async_stop_active_session,
+            stop_active=self._async_stop_idle_session,
             has_external_consumers=lambda: (
                 self._flv_relay.direct_subscriber_count > 0
                 or self._snapshot_requests > 0
@@ -375,6 +375,12 @@ class DreameLawnMowerVideoCamera(
         """Apply the configured retention policy to an active mower session."""
         self._reset_video_live_view_if_inactive()
         if not self._video_retention_state_is_fresh():
+            return False
+        # Retention is only for a stream that has already proved it can deliver
+        # decoder-ready media.  Keeping an unverified cold start alive lets a
+        # dashboard's reconnecting consumers pin a zero-frame XP2P attempt
+        # instead of allowing the normal cleanup/retry path to re-arm video.
+        if self._video_first_media_at is None:
             return False
         return mower_video_session_should_stay_warm(
             self.coordinator.data,
@@ -580,6 +586,12 @@ class DreameLawnMowerVideoCamera(
                     reason="relay_failure",
                     failed_pump_task=asyncio.current_task(),
                 )
+            if cached_playback_failed:
+                # Cached XP2P deliberately avoids the cloud camera toggle.  If
+                # that warm/cached route reaches no media, explicitly clear the
+                # mower's stale video mode before the reconnect bypasses cache
+                # and performs a fresh cloud enable.
+                await self._async_disable_camera_stream()
             await self._async_clear_failed_playback_caches(
                 cached_xp2p=cached_playback_failed,
                 lan=lan_playback_failed,
@@ -659,8 +671,32 @@ class DreameLawnMowerVideoCamera(
     async def _async_relay_idle(self) -> None:
         """Release mower video after the last local WebRTC/HLS viewer leaves."""
         async with self._stream_lock:
-            if self._session is not None or getattr(self, "stream", None) is not None:
-                await self._async_stop_active_session(reason="relay_idle")
+            await self._async_stop_idle_session()
+
+    async def _async_stop_idle_session(self) -> None:
+        """Retire one idle session and invalidate an unverified cached route."""
+        cached_start_unverified = (
+            self._video_first_media_at is None
+            and (
+                self._last_video_transport_attempted == "cached_xp2p"
+                or (
+                    self._last_video_transport == "cached_xp2p"
+                    and self._unverified_playback_session is not None
+                )
+            )
+        )
+        if self._session is not None or getattr(self, "stream", None) is not None:
+            await self._async_stop_active_session(reason="stream_idle")
+        if cached_start_unverified:
+            # Both relay and HA Stream idle monitors can cancel the pump without
+            # invoking the relay-failure callback. Invalidate the same zero-frame
+            # cached route before either monitor allows a replacement start.
+            self._bypass_cached_xp2p = True
+            await self._async_disable_camera_stream()
+            await self._async_clear_failed_playback_caches(
+                cached_xp2p=True,
+                lan=False,
+            )
 
     async def _async_start_raw_source(
         self,
