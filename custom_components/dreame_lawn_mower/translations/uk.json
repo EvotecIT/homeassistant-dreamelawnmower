@@ -1,0 +1,33 @@
+{
+  "entity": {
+    "sensor": {
+      "state_name": {
+        "name": "Стан",
+        "state": {
+          "unknown": "Невідомо",
+          "mowing": "Косіння",
+          "idle": "Бездіяльність",
+          "paused": "Призупинено",
+          "error": "Помилка",
+          "returning": "Повернення до станції",
+          "charging": "Заряджання",
+          "building": "Створення карти",
+          "charging_completed": "Заряджання завершено",
+          "upgrading": "Оновлення",
+          "mow_summon": "Косіння на вимогу",
+          "station_reset": "Скидання станції",
+          "remote_control": "Дистанційне керування",
+          "smart_charging": "Розумне заряджання",
+          "second_mowing": "Повторне косіння",
+          "human_following": "Слідування за людиною",
+          "spot_mowing": "Точкове косіння",
+          "waiting_for_task": "Очікування завдання",
+          "station_cleaning": "Очищення станції",
+          "shortcut": "Швидка команда",
+          "monitoring": "Моніторинг",
+          "monitoring_paused": "Моніторинг призупинено"
+        }
+      }
+    }
+  }
+}

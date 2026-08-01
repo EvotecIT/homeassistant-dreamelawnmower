@@ -1,0 +1,33 @@
+{
+  "entity": {
+    "sensor": {
+      "state_name": {
+        "name": "Состояние",
+        "state": {
+          "unknown": "Неизвестно",
+          "mowing": "Кошение",
+          "idle": "Бездействие",
+          "paused": "Пауза",
+          "error": "Ошибка",
+          "returning": "Возвращение на станцию",
+          "charging": "Зарядка",
+          "building": "Создание карты",
+          "charging_completed": "Зарядка завершена",
+          "upgrading": "Обновление",
+          "mow_summon": "Кошение по запросу",
+          "station_reset": "Сброс станции",
+          "remote_control": "Дистанционное управление",
+          "smart_charging": "Интеллектуальная зарядка",
+          "second_mowing": "Повторное кошение",
+          "human_following": "Следование за человеком",
+          "spot_mowing": "Точечное кошение",
+          "waiting_for_task": "Ожидание задания",
+          "station_cleaning": "Очистка станции",
+          "shortcut": "Быстрая команда",
+          "monitoring": "Наблюдение",
+          "monitoring_paused": "Наблюдение приостановлено"
+        }
+      }
+    }
+  }
+}

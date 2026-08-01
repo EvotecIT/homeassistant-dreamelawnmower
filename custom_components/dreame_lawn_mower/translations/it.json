@@ -1,0 +1,33 @@
+{
+  "entity": {
+    "sensor": {
+      "state_name": {
+        "name": "Stato",
+        "state": {
+          "unknown": "Sconosciuto",
+          "mowing": "Taglio in corso",
+          "idle": "Inattivo",
+          "paused": "In pausa",
+          "error": "Errore",
+          "returning": "Ritorno alla stazione",
+          "charging": "In carica",
+          "building": "Mappatura in corso",
+          "charging_completed": "Ricarica completata",
+          "upgrading": "Aggiornamento in corso",
+          "mow_summon": "Taglio su richiesta",
+          "station_reset": "Ripristino della stazione",
+          "remote_control": "Controllo remoto",
+          "smart_charging": "Ricarica intelligente",
+          "second_mowing": "Secondo passaggio di taglio",
+          "human_following": "Segue una persona",
+          "spot_mowing": "Taglio localizzato",
+          "waiting_for_task": "In attesa di un’attività",
+          "station_cleaning": "Pulizia della stazione",
+          "shortcut": "Scorciatoia",
+          "monitoring": "Monitoraggio",
+          "monitoring_paused": "Monitoraggio in pausa"
+        }
+      }
+    }
+  }
+}

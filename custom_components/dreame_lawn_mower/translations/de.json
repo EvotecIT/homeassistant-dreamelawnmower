@@ -1,0 +1,33 @@
+{
+  "entity": {
+    "sensor": {
+      "state_name": {
+        "name": "Status",
+        "state": {
+          "unknown": "Unbekannt",
+          "mowing": "Mähen",
+          "idle": "Inaktiv",
+          "paused": "Pausiert",
+          "error": "Fehler",
+          "returning": "Rückkehr zur Ladestation",
+          "charging": "Wird geladen",
+          "building": "Kartierung",
+          "charging_completed": "Ladevorgang abgeschlossen",
+          "upgrading": "Wird aktualisiert",
+          "mow_summon": "Mähen auf Abruf",
+          "station_reset": "Station wird zurückgesetzt",
+          "remote_control": "Fernsteuerung",
+          "smart_charging": "Intelligentes Laden",
+          "second_mowing": "Zweiter Mähdurchgang",
+          "human_following": "Folgt einer Person",
+          "spot_mowing": "Punktuelles Mähen",
+          "waiting_for_task": "Wartet auf Aufgabe",
+          "station_cleaning": "Stationsreinigung",
+          "shortcut": "Verknüpfung",
+          "monitoring": "Überwachung",
+          "monitoring_paused": "Überwachung pausiert"
+        }
+      }
+    }
+  }
+}

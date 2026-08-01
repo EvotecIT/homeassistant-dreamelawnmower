@@ -38,12 +38,14 @@ from .coordinator import (
     DreameLawnMowerCoordinator,
     runtime_tracking_active,  # noqa: F401
 )
+from .dreame_lawn_mower_client.const import STATE_CODE_TO_STATE
 from .dreame_lawn_mower_client.maintenance import (  # noqa: F401
     MAINTENANCE_ITEMS,
     MaintenanceItem,
     maintenance_item_status,
     maintenance_status_attributes,
 )
+from .dreame_lawn_mower_client.models import _mower_terminology
 from .entity import DreameLawnMowerEntity
 from .manual_control import remote_control_block_reason
 from .runtime_cache import (
@@ -233,6 +235,13 @@ def _raw_attribute(snapshot: Any, key: str) -> Any:
     return snapshot.raw_attributes.get(key)
 
 
+MOWER_STATE_OPTIONS = list(
+    dict.fromkeys(
+        _mower_terminology(state) or state for state in STATE_CODE_TO_STATE.values()
+    )
+)
+
+
 SENSORS = [
     DreameSensorDescription(
         key="activity",
@@ -244,6 +253,9 @@ SENSORS = [
         key="state_name",
         name="State Name",
         value_fn=lambda snapshot: snapshot.mower_state_name,
+        translation_key="state_name",
+        device_class=SensorDeviceClass.ENUM,
+        options=MOWER_STATE_OPTIONS,
         icon="mdi:state-machine",
     ),
     DreameSensorDescription(
@@ -492,6 +504,9 @@ class DreameLawnMowerSensor(DreameLawnMowerEntity, SensorEntity):
         self._attr_name = description.name
         self._attr_device_class = description.device_class
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
+        self._attr_translation_key = description.translation_key
+        self._attr_translation_placeholders = description.translation_placeholders
+        self._attr_options = description.options
         self._attr_icon = description.icon
         self._attr_entity_category = description.entity_category
         self._attr_entity_registry_enabled_default = (

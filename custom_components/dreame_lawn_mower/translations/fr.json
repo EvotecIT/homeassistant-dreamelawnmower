@@ -1,0 +1,33 @@
+{
+  "entity": {
+    "sensor": {
+      "state_name": {
+        "name": "État",
+        "state": {
+          "unknown": "Inconnu",
+          "mowing": "Tonte en cours",
+          "idle": "Inactif",
+          "paused": "En pause",
+          "error": "Erreur",
+          "returning": "Retour à la station",
+          "charging": "En charge",
+          "building": "Cartographie en cours",
+          "charging_completed": "Charge terminée",
+          "upgrading": "Mise à jour en cours",
+          "mow_summon": "Tonte à la demande",
+          "station_reset": "Réinitialisation de la station",
+          "remote_control": "Commande à distance",
+          "smart_charging": "Charge intelligente",
+          "second_mowing": "Deuxième passage de tonte",
+          "human_following": "Suivi d’une personne",
+          "spot_mowing": "Tonte ciblée",
+          "waiting_for_task": "En attente d’une tâche",
+          "station_cleaning": "Nettoyage de la station",
+          "shortcut": "Raccourci",
+          "monitoring": "Surveillance",
+          "monitoring_paused": "Surveillance en pause"
+        }
+      }
+    }
+  }
+}
