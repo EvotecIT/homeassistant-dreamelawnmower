@@ -1,0 +1,33 @@
+{
+  "entity": {
+    "sensor": {
+      "state_name": {
+        "name": "Stan",
+        "state": {
+          "unknown": "Nieznany",
+          "mowing": "Koszenie",
+          "idle": "Bezczynny",
+          "paused": "Wstrzymany",
+          "error": "Błąd",
+          "returning": "Powrót do stacji",
+          "charging": "Ładowanie",
+          "building": "Tworzenie mapy",
+          "charging_completed": "Ładowanie zakończone",
+          "upgrading": "Aktualizacja",
+          "clean_summon": "Koszenie na żądanie",
+          "station_reset": "Resetowanie stacji",
+          "remote_control": "Zdalne sterowanie",
+          "smart_charging": "Inteligentne ładowanie",
+          "second_cleaning": "Drugi przejazd koszenia",
+          "human_following": "Podążanie za osobą",
+          "spot_cleaning": "Koszenie punktowe",
+          "waiting_for_task": "Oczekiwanie na zadanie",
+          "station_cleaning": "Czyszczenie stacji",
+          "shortcut": "Skrót",
+          "monitoring": "Monitorowanie",
+          "monitoring_paused": "Monitorowanie wstrzymane"
+        }
+      }
+    }
+  }
+}

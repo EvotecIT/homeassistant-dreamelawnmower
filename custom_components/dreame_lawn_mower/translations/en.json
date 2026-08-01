@@ -72,5 +72,36 @@
         }
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "state_name": {
+        "name": "State",
+        "state": {
+          "unknown": "Unknown",
+          "mowing": "Mowing",
+          "idle": "Idle",
+          "paused": "Paused",
+          "error": "Error",
+          "returning": "Returning to dock",
+          "charging": "Charging",
+          "building": "Mapping",
+          "charging_completed": "Charging completed",
+          "upgrading": "Upgrading",
+          "clean_summon": "Mowing on demand",
+          "station_reset": "Station reset",
+          "remote_control": "Remote control",
+          "smart_charging": "Smart charging",
+          "second_cleaning": "Second mowing pass",
+          "human_following": "Following a person",
+          "spot_cleaning": "Spot mowing",
+          "waiting_for_task": "Waiting for task",
+          "station_cleaning": "Station cleaning",
+          "shortcut": "Shortcut",
+          "monitoring": "Monitoring",
+          "monitoring_paused": "Monitoring paused"
+        }
+      }
+    }
   }
 }

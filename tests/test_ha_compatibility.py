@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import Platform
 from PIL import Image, ImageFont
 
@@ -65,6 +66,7 @@ from custom_components.dreame_lawn_mower.image import (
     png_bytes_to_jpeg,
 )
 from custom_components.dreame_lawn_mower.sensor import (
+    MOWER_STATE_OPTIONS,
     SENSORS,
     DreameLawnMowerAppMapObjectCountSensor,
     DreameLawnMowerConfiguredScheduleCountSensor,
@@ -202,6 +204,24 @@ def test_sensor_applies_description_registry_defaults() -> None:
 
     assert entity._attr_entity_registry_enabled_default is False
     assert entity._attr_entity_registry_visible_default is False
+
+
+def test_state_name_sensor_uses_translatable_enum_contract() -> None:
+    description = next(item for item in SENSORS if item.key == "state_name")
+    coordinator = SimpleNamespace(
+        client=SimpleNamespace(
+            descriptor=SimpleNamespace(unique_id="mower-1"),
+        )
+    )
+
+    entity = DreameLawnMowerSensor(coordinator, description)
+
+    assert description.translation_key == "state_name"
+    assert description.device_class is SensorDeviceClass.ENUM
+    assert description.options == MOWER_STATE_OPTIONS
+    assert entity._attr_translation_key == "state_name"
+    assert entity._attr_device_class is SensorDeviceClass.ENUM
+    assert entity._attr_options == MOWER_STATE_OPTIONS
 
 
 def test_binary_sensor_description_exposes_ha_compat_fields() -> None:
