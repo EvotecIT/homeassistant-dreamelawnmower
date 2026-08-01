@@ -45,6 +45,7 @@ from .dreame_lawn_mower_client.maintenance import (  # noqa: F401
     maintenance_item_status,
     maintenance_status_attributes,
 )
+from .dreame_lawn_mower_client.models import _mower_terminology
 from .entity import DreameLawnMowerEntity
 from .manual_control import remote_control_block_reason
 from .runtime_cache import (
@@ -234,7 +235,11 @@ def _raw_attribute(snapshot: Any, key: str) -> Any:
     return snapshot.raw_attributes.get(key)
 
 
-MOWER_STATE_OPTIONS = list(dict.fromkeys(STATE_CODE_TO_STATE.values()))
+MOWER_STATE_OPTIONS = list(
+    dict.fromkeys(
+        _mower_terminology(state) or state for state in STATE_CODE_TO_STATE.values()
+    )
+)
 
 
 SENSORS = [
