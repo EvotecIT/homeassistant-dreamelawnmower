@@ -5,15 +5,71 @@
 [![Hassfest](https://img.shields.io/github/actions/workflow/status/EvotecIT/homeassistant-dreamelawnmower/hassfest.yml?branch=main&style=for-the-badge&label=HASSFEST&labelColor=555)](https://github.com/EvotecIT/homeassistant-dreamelawnmower/actions/workflows/hassfest.yml)
 [![License](https://img.shields.io/badge/LICENSE-MIT-yellow?style=for-the-badge&labelColor=555)](LICENSE)
 
-Bring a Dreame or MOVA robotic mower into Home Assistant with mower-native
-controls, schedules, maps, live coverage, and camera support.
+Control, monitor, and automate Dreame and MOVA robotic lawn mowers from Home
+Assistant. The integration covers everyday mowing controls, schedules, maps,
+live coverage, rain protection, firmware, maintenance, and camera features
+without presenting the mower as a repurposed robot vacuum.
+
+[Install with HACS](#hacs) · [Check mower support](#supported-mowers) ·
+[Explore features](#what-you-can-do) · [Troubleshoot](#troubleshooting)
 
 ![Lawn Mower Card Hero layout preview](assets/dreame-lawn-mower-hero-card.png)
 
-The integration follows the Dreamehome and MOVAhome app protocol and is tested
-against real A2-family hardware. Everyday state and controls stay simple, while
-reverse-engineering probes and riskier maintenance operations remain out of the
-default dashboard.
+Use the standard Home Assistant `lawn_mower` entity to start, pause, resume, and
+dock the mower. Add the integration's typed controls when you want to switch
+maps, mow a saved zone or edge, adjust supported mowing preferences, manage
+schedules, or build automations around live mower state.
+
+## What You Can Do
+
+| Area | Available today |
+| --- | --- |
+| Everyday control | Start, pause, resume, stop, dock, or return to the station without discarding a resumable session |
+| Maps and targeted mowing | View the active map and live cut path, switch maps, and start all-area, zone, spot, or edge runs |
+| Schedules | Read mower-native schedules through a calendar, use per-plan switches, and make guarded enable/disable changes |
+| Mowing preferences | Control supported map-wide or per-zone cutting height, mowing efficiency, edge behavior, and obstacle avoidance |
+| Monitoring | Track battery, charging, mower state, active and resumable tasks, progress, errors, maintenance, firmware, and rain protection |
+| Cameras and 3D | Use the map camera, optional live video on supported Linux hosts, and authenticated 3D point-cloud downloads where validated |
+| Home Assistant automation | Build automations from normal entities and use guarded services for map, schedule, preference, and supervised remote-control workflows |
+
+Advanced probes and riskier maintenance operations remain diagnostic or
+disabled by default. The normal device page stays useful instead of being
+filled with reverse-engineering controls.
+
+## Supported Mowers
+
+The integration follows the Dreamehome and MOVAhome mower protocol. Support is
+based on real mower reports and repository fixtures, not only on a matching
+brand name:
+
+- **Validated** means the model has been exercised against real hardware and
+  captured fixtures.
+- **Field-reported** means owners have confirmed important paths, but the full
+  feature set has not been validated yet.
+- **Recognized** means the model identity and protocol family are known; treat
+  unconfirmed features as experimental.
+
+| Brand and model | Raw model identifier | Support | Confirmed coverage |
+| --- | --- | --- | --- |
+| Dreame A2 | `dreame.mower.g2408` | **Validated** | Primary development mower; core control, schedules, maps, remote control, guarded preferences, diagnostics, video, and 3D maps |
+| Dreame A3 AWD 1000 | `dreame.mower.q2501a` | **Validated** | Core entities, mower state, maps, and cloud live video on firmware `4.3.6_0418` with an EU account |
+| MOVA LiDAX Ultra 1000 | `mova.mower.g2529c` | **Field-reported** | MOVAhome EU login, commands, battery, and model-specific cloud property handling |
+| Dreame A3 AWD Pro 3500 | `dreame.mower.g2541e` | **Recognized** | Model mapping and diagnostics report; broader live confirmation is still needed |
+| Dreame A1 | `dreame.mower.p2255` | **Recognized** | Model mapping and mower-specific state semantics; needs fixtures and live validation |
+| Dreame A1 Pro | `dreame.mower.g2422` | **Recognized** | Model mapping and mower-specific state semantics; needs fixtures and live validation |
+| Newer A-series mower | `dreame.mower.g3255` | **Recognized** | Raw identifier observed; retail name and feature coverage are not yet confirmed |
+
+MOVAhome account login is supported. Other MOVA-branded mowers, rebadges,
+regional variants, and firmware revisions may be discovered, but should be
+treated as experimental until their behavior is reported. A model being listed
+does not guarantee that every vendor- or region-gated feature—especially live
+video—will be available on every account.
+
+If your mower is not fully validated, see [Help Expand Support](#help-expand-support)
+for the small, sanitized report that helps turn recognition into confirmed
+support.
+
+## Companion Dashboard
 
 For the dashboard shown above, pair this integration with the
 [Lawn Mower Card](https://github.com/EvotecIT/lovelace-lawn-mower-card). Its Hero
@@ -62,124 +118,29 @@ and diagnostics:
 
 ![Dreame Lawn Mower device overview](assets/dreame-lawn-mower-overview.png)
 
-## Status
+## Current Limits
 
-This project is usable, but still young. Core mower state, controls, schedules,
-maps, and diagnostics are available. Some features remain diagnostic or
-disabled by default while the protocol is validated across more models.
+The integration deliberately keeps uncertain or potentially disruptive
+operations behind clear boundaries:
 
-## Support Matrix
-
-Support levels in this table mean:
-
-- `Validated`: exercised against real hardware and fixtures in this repository
-- `Recognized`: model strings, account types, or rebadges are known and should
-  degrade gracefully, but still need more real-world confirmation
-- `Needs reports`: intended target, but not yet proven enough to claim support
-
-| Scope | Status | Notes |
-| --- | --- | --- |
-| Dreame A2 (`dreame.mower.g2408`) | Validated | Primary live development device, including schedules, maps, remote control, guarded preference writes, and diagnostics |
-| MOVA LiDAX Ultra 1000 (`mova.mower.g2529c`) | Recognized | Added from a MOVAhome EU diagnostics report; commands and battery are reported working, state handling now accepts model-specific cloud property ids |
-| Dreame A3 AWD Pro 3500 (`dreame.mower.g2541e`) | Recognized | Added from a Dreamehome EU diagnostics report; needs broader live confirmation before it is considered validated |
-| Dreame A3 AWD 1000 (`dreame.mower.q2501a`) | Validated | Core entities, maps, mower state, and cloud live video are field-confirmed on firmware `4.3.6_0418`; video worked after the same mower was bound to an EU account, while its previous RU account lacked the required cloud video identity |
-| Newer A-series mower (`dreame.mower.g3255`) | Recognized | Raw model has been observed in code mapping, but the public retail name is still unverified |
-| Dreame A1 (`dreame.mower.p2255`) | Recognized | Model mapping is present; needs fixtures and live validation |
-| Dreame A1 Pro (`dreame.mower.g2422`) | Recognized | Model mapping is present; needs fixtures and live validation |
-| MOVAhome accounts | Recognized | Login flow and account type are supported; needs broader live confirmation |
-| MOVA-branded mower rebadges | Needs reports | Expected to follow the same protocol family, but still needs sanitized fixtures and user reports |
-| Regional / firmware variants of known A-series models | Needs reports | Should avoid crashing, but behavior can still vary by firmware and region |
-
-Current live validation is still centered on:
-
-- Dreamehome account in the EU region
-- A2-family hardware
-
-If you have a mower model not listed as `Validated`, please open an issue or PR.
-Model reports with sanitized diagnostics, screenshots, raw model identifiers, and
-region/account details are especially helpful for moving a device from
-`Recognized` or `Needs reports` to `Validated`.
-
-## Features
-
-- UI config flow with Dreamehome or MOVAhome account login
-- automatic mower discovery from the cloud account
-- `lawn_mower` entity for start, pause, and dock
-- button to dock without ending the current mowing session
-- heartbeat-backed task status and automatic resume of a paused mowing session
-- battery, activity, state, task, firmware, and error sensors
-- active-map selector that switches the mower, plus mowing action, edge, zone,
-  and spot selectors that follow the selected map
-- maintenance-point selector and action button for maps where a maintenance
-  point has been configured in the mower app
-- current-map services for switching maps and starting explicit zone, spot, or edge runs
-- binary sensors for docked, charging, mowing, paused, returning, and error state
-- binary sensors for active and resumable mowing sessions
-- binary sensor for Bluetooth-connected runtime state
-- read-only schedule calendar using the mower-native app schedule protocol
-- standard per-plan schedule switches for direct dashboard and automation use
-- disabled-by-default all-schedules calendar for default and per-map schedule diagnosis
-- guarded schedule enable/disable service with dry-run mode by default
-- guarded mowing-preference update service with dry-run mode by default
-- self-refreshing map cameras with live session overlays, Unicode labels,
-  coordinated light/dark themes, line and marker scaling, and per-map rotation
-- optional custom mower marker loaded only from Home Assistant's `config/www`
-  folder, with path, type, size, and image-dimension limits
-- on-demand stored-or-fresh PCD point-cloud download through an authenticated,
-  admin-only Home Assistant endpoint
-- disabled-by-default all-maps and map-diagnostics cameras
-- live video camera with a managed XP2P runtime on Linux x86_64 and aarch64 hosts
-- runtime telemetry sensors for mission progress, mission area, mower pose, and live-track length
-- last-session mission progress and coverage retained after docking, explicitly
-  marked with `cached: true` and a `captured_at` timestamp
-- selected-run sensors for mowing action, chosen map, and scoped zone/spot/edge target
-- selected-zone preference sensors for mowing height, efficiency, direction, and obstacle-avoidance details
-- standard Home Assistant controls for global/custom preference mode, global
-  and selected-zone cutting height, mowing efficiency, edge behavior, and
-  obstacle avoidance
-- read-only weather/rain-protection diagnostics
-- read-only weather/rain-protection entities from cached app settings
-- read-only mowing-preference diagnostics
-- supervised remote-control service for short validation pulses
-- sanitized diagnostics and debug snapshot helpers
-- cloud presence checks that make entities unavailable instead of showing stale
-  mower values while the device is offline
-
-## Not Yet Public-Ready Features
-
-The following areas are intentionally cautious:
-
-- firmware OTA now exposes a Home Assistant update entity using the app's
-  approved `checkDeviceVersion` target and `manualFirmwareUpdate` approval
-  step, but release notes remain best-effort because the live A2 endpoint still
-  embeds a `missing lang` error string in the changelog field
-  the live Dreame A2 verification on April 22, 2026 completed from
-  `4.3.6_0320` to `4.3.6_0447`
-- a read-only debug OTA catalog probe exists for version-trace work, but it is
-  not treated as authoritative latest-version, changelog, or install approval
-  data because it is a manual catalog rather than the mobile app's approved OTA
-  response
-- firmware diagnostics now include those debug-catalog candidate versions when
-  available, so operation snapshots can show plausible newer builds without
-  conflating them with the app-approved update target
-- rain-protection writes are not exposed yet
-- mowing-preference writes are validated on a supervised A2 no-op write and
-  still need broader model and firmware validation
-- map rendering is read-only; no-go editing, virtual-wall editing, and other map
-  editing flows are not exposed yet
-- live video has been validated end to end on a Dreame A2 and on an A3 AWD 1000
-  (`dreame.mower.q2501a`, firmware `4.3.6_0418`) using an EU account; other
-  Tencent-video mower models and firmware still need field validation
-- the managed video runtime currently supports Linux x86_64 and aarch64 Home
-  Assistant hosts, and the mower must be active and away from its station before
-  the vendor permits live video
-- the 16 KB-page aarch64 compatibility worker is exercised in native ARM64
-  Home Assistant container CI, including runtime selection, installation, startup,
-  and request handling; live mower playback after that fix has not yet been
-  confirmed on the original Raspberry Pi 5 reporter host
-- 3D point-cloud generation and PCD download are validated on the Dreame A2;
-  other mower families still need field reports
-- manual driving must stay supervised and uses strict state and battery guards
+- Model, firmware, region, and account provisioning can change which advanced
+  features the vendor makes available.
+- Live video is field-validated on the Dreame A2 and A3 AWD 1000. It currently
+  requires a Linux x86_64 or aarch64 Home Assistant host, a provisioned account,
+  and a mower state in which the vendor permits video.
+- 3D point-cloud generation and download are validated on the Dreame A2; other
+  mower families still need reports.
+- Map rendering and map selection are supported, but editing no-go areas,
+  virtual walls, and garden geometry is not.
+- Rain-protection state, configured delay, and the active delay end time are
+  readable; changing rain-protection settings is not exposed yet.
+- Mowing-preference writes use guarded paths and have the strongest live proof
+  on the A2. Other models and firmware need broader confirmation.
+- Firmware updates use the app-approved target and confirmation flow. Release
+  notes remain best-effort, and debug catalog candidates stay diagnostic rather
+  than being presented as approved updates.
+- Manual driving remains a supervised diagnostic action with strict mower-state
+  and battery guards.
 
 ## Installation
 
