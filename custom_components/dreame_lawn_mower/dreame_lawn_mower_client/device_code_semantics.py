@@ -6,10 +6,10 @@ lifecycle notifications, and operating conditions, so numeric overlap with a
 vacuum code is not evidence of a mower fault.
 
 The base registry is the mower community's cross-model table. The A2 overrides
-come from the g2408 Dreame app plugin fault catalog, whose FAULT/ALERT/INFO
-metadata distinguishes hard faults from notifications. Unknown codes remain
-visible but are never promoted to hard faults solely because a vacuum enum
-happens to contain the same number.
+come from the equivalent g2408 and g2568 Dreame app plugin fault catalogs,
+whose FAULT/ALERT/INFO metadata distinguishes hard faults from notifications.
+Unknown codes remain visible but are never promoted to hard faults solely
+because a vacuum enum happens to contain the same number.
 """
 
 from __future__ import annotations
@@ -145,9 +145,9 @@ _BASE_DEVICE_CODES: Final[dict[int, MowerDeviceCodeDefinition]] = {
 }
 
 
-# Dreame A2 / g2408 app-plugin differences. In particular, 16 and 59 do not
-# mean what the cross-model registry says, and human detection is an attention
-# notice rather than a hard fault.
+# Dreame A2 g2408/g2568 app-plugin differences. In particular, 16 and 59 do
+# not mean what the cross-model registry says, and human detection is an
+# attention notice rather than a hard fault.
 _A2_DEVICE_CODE_OVERRIDES: Final[dict[int, MowerDeviceCodeDefinition]] = {
     **_definitions(
         MowerDeviceCodeTier.ERROR,
@@ -202,7 +202,14 @@ _MOVA_DEVICE_CODE_OVERRIDES: Final[dict[int, MowerDeviceCodeDefinition]] = {
     ),
 }
 
-_A2_MODELS: Final[frozenset[str]] = frozenset({"dreame.mower.g2408", "g2408"})
+_A2_MODELS: Final[frozenset[str]] = frozenset(
+    {
+        "dreame.mower.g2408",
+        "dreame.mower.g2568d",
+        "g2408",
+        "g2568d",
+    }
+)
 _A1_MODELS: Final[frozenset[str]] = frozenset(
     {
         "dreame.mower.p2255",

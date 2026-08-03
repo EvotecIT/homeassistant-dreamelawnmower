@@ -414,8 +414,8 @@ SENSORS = [
     DreameSensorDescription(
         key="mower_state",
         name="Mower State",
-        value_fn=lambda snapshot: _raw_attribute(snapshot, "mower_state"),
-        exists_fn=lambda snapshot: bool(_raw_attribute(snapshot, "mower_state")),
+        value_fn=lambda snapshot: snapshot.mower_state,
+        exists_fn=lambda snapshot: bool(snapshot.mower_state),
         icon="mdi:robot-mower-outline",
         entity_category=EntityCategory.DIAGNOSTIC,
     ),

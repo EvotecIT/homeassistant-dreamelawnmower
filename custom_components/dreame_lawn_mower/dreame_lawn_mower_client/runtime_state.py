@@ -22,18 +22,41 @@ def snapshot_with_heartbeat_task_state(
     snapshot: DreameLawnMowerSnapshot,
     status_blob: DreameLawnMowerStatusBlob,
 ) -> DreameLawnMowerSnapshot:
-    """Apply heartbeat-confirmed mowing-session state to a snapshot."""
+    """Apply heartbeat-confirmed task and physical docking state."""
     task_status = status_blob.task_status
-    if task_status is None:
+    changes: dict[str, Any] = {}
+    if task_status is not None:
+        changes.update(
+            task_status=task_status,
+            task_status_name=task_status.replace("_", " ").title(),
+            task_status_source=f"heartbeat_{status_blob.source or 'unknown'}",
+            mowing_session_active=status_blob.mowing_session_active,
+            task_resumable=status_blob.task_resumable,
+        )
+
+    if status_blob.heartbeat_docked is True:
+        changes.update(raw_docked=True, docked=True)
+        stale_paused_state = snapshot.state in {"paused", "monitoring_paused"}
+        if (
+            status_blob.mowing_session_active is False
+            and snapshot.activity == "paused"
+            and stale_paused_state
+        ):
+            # Some firmware leaves property 2.1 at a paused/event state while
+            # the heartbeat and app both report an idle mower in the station.
+            changes.update(
+                state="idle",
+                state_name="idle",
+                activity="docked",
+                started=False,
+                paused=False,
+                mowing=False,
+                returning=False,
+            )
+
+    if not changes:
         return snapshot
-    return replace(
-        snapshot,
-        task_status=task_status,
-        task_status_name=task_status.replace("_", " ").title(),
-        task_status_source=f"heartbeat_{status_blob.source or 'unknown'}",
-        mowing_session_active=status_blob.mowing_session_active,
-        task_resumable=status_blob.task_resumable,
-    )
+    return replace(snapshot, **changes)
 
 
 def snapshot_with_cloud_presence(

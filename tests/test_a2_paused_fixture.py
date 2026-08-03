@@ -15,6 +15,7 @@ def _snapshot() -> SimpleNamespace:
     values = payload["data"]["snapshot"]
     return SimpleNamespace(
         **values,
+        mower_state=values["state"],
         mower_state_name=values["state_name"],
         mowing_task_status_name=values["task_status_name"],
         mowing_mode_name=values["cleaning_mode_name"],

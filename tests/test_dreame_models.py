@@ -118,6 +118,22 @@ def test_descriptor_maps_known_model_names() -> None:
     assert descriptor.title == "Garage Mower (A2)"
 
 
+def test_descriptor_maps_a2_3000_model_name() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-127",
+            "model": "dreame.mower.g2568d",
+            "customName": "Garden Mower",
+        },
+        account_type="dreame",
+        country="eu",
+    )
+
+    assert descriptor is not None
+    assert descriptor.display_model == "A2 3000"
+    assert descriptor.title == "Garden Mower (A2 3000)"
+
+
 def test_descriptor_uses_cloud_display_name_for_unknown_rebadge_model() -> None:
     descriptor = descriptor_from_cloud_record(
         {

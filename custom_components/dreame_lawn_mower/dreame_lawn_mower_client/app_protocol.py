@@ -207,7 +207,8 @@ def decode_mower_status_blob(
 
     The Dreamehome app exposes this as a framed byte array. We preserve indexed
     bytes for cross-device comparison and decode only the battery, charging,
-    and task-state fields confirmed by fixtures and supervised transitions.
+    docking, and task-state fields confirmed by app logic, fixtures, and
+    supervised transitions.
     """
     raw = _normalize_byte_array(value)
     if raw is None:
@@ -232,6 +233,17 @@ def decode_mower_status_blob(
         if normalized_battery <= 100:
             candidate_battery_level = normalized_battery
 
+    heartbeat_docking_state = None
+    heartbeat_docking_state_name = None
+    heartbeat_docked = None
+    if frame_valid and len(raw) == 20:
+        heartbeat_docking_state = (raw[14] & 0x1C) >> 2
+        heartbeat_docking_state_name = _HEARTBEAT_DOCKING_STATES.get(
+            heartbeat_docking_state
+        )
+        if heartbeat_docking_state_name is not None:
+            heartbeat_docked = heartbeat_docking_state == 0
+
     task_state = _decode_heartbeat_task_state(raw, frame_valid=frame_valid)
     notes.extend(task_state.pop("notes", ()))
 
@@ -251,6 +263,9 @@ def decode_mower_status_blob(
         bytes_by_index={str(index): item for index, item in enumerate(raw)},
         candidate_battery_level=candidate_battery_level,
         heartbeat_charging=heartbeat_charging,
+        heartbeat_docking_state=heartbeat_docking_state,
+        heartbeat_docking_state_name=heartbeat_docking_state_name,
+        heartbeat_docked=heartbeat_docked,
         main_state=task_state.get("main_state"),
         sub_state=task_state.get("sub_state"),
         task_status=task_state.get("task_status"),
@@ -275,6 +290,14 @@ def decode_mower_status_blob(
 
 
 _HEARTBEAT_MOWING_MAIN_STATE = 4
+_HEARTBEAT_DOCKING_STATES = {
+    0: "in_station",
+    1: "out_of_station",
+    2: "docking_paused",
+    3: "docking_finished",
+    4: "docking_failed",
+    5: "docking_in_base",
+}
 _HEARTBEAT_TASK_SUBSTATE_BASE = 33
 _HEARTBEAT_TASK_STATUSES = {
     0: "idle",
