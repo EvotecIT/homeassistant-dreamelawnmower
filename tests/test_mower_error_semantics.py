@@ -133,6 +133,20 @@ def test_mower_fault_codes_override_vacuum_labels(
     assert snapshot.error_display == expected
 
 
+def test_a2_3000_uses_a2_maintenance_point_notice_catalog() -> None:
+    snapshot = _snapshot(
+        75,
+        "unknown",
+        realtime_error_code=75,
+        model="dreame.mower.g2568d",
+    )
+
+    assert snapshot.error_code is None
+    assert snapshot.status_notice_code == 75
+    assert snapshot.status_notice_name == "maintenance_point_reached"
+    assert snapshot.status_notice_display == "Maintenance point reached"
+
+
 @pytest.mark.parametrize(
     ("code", "inherited_name", "state", "expected_activity", "expected_notice"),
     [

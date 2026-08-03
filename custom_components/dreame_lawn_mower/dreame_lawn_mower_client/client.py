@@ -533,7 +533,7 @@ class DreameLawnMowerClient(
             )
         except DreameLawnMowerConnectionError:
             status_blob = None
-        if status_blob is not None and status_blob.task_status is not None:
+        if status_blob is not None:
             snapshot = snapshot_with_heartbeat_task_state(snapshot, status_blob)
 
         try:

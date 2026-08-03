@@ -316,6 +316,41 @@ def test_status_blob_decoder_exposes_paused_resumable_session_at_dock() -> None:
     assert decoded.task_status == "paused"
     assert decoded.mowing_session_active is True
     assert decoded.task_resumable is True
+    assert decoded.heartbeat_docking_state == 0
+    assert decoded.heartbeat_docking_state_name == "in_station"
+    assert decoded.heartbeat_docked is True
+
+
+def test_status_blob_decoder_exposes_out_of_station_state() -> None:
+    decoded = decode_mower_status_blob(
+        [
+            206,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            128,
+            0,
+            128,
+            87,
+            113,
+            255,
+            4,
+            0,
+            128,
+            206,
+            186,
+            206,
+        ]
+    )
+
+    assert decoded is not None
+    assert decoded.heartbeat_docking_state == 1
+    assert decoded.heartbeat_docking_state_name == "out_of_station"
+    assert decoded.heartbeat_docked is False
 
 
 def test_status_blob_decoder_removes_charging_flag_from_battery_byte() -> None:

@@ -119,6 +119,7 @@ def test_home_assistant_labels_change_without_changing_entity_keys() -> None:
         18,
     )
     assert _sensor("state_name").value_fn(snapshot) == "spot_mowing"
+    assert _sensor("mower_state").value_fn(snapshot) == "spot_mowing"
     assert _sensor("task_status").value_fn(snapshot) == "zone_mowing_paused"
     assert _binary_sensor("scheduled_task").value_fn(snapshot) is True
 

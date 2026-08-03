@@ -29,6 +29,7 @@ MODEL_NAME_MAP = {
     "dreame.mower.p2255": "A1",
     "dreame.mower.g2422": "A1 Pro",
     "dreame.mower.g2408": "A2",
+    "dreame.mower.g2568d": "A2 3000",
     "dreame.mower.g2541e": "A3 AWD Pro 3500",
     "dreame.mower.q2501a": "A3 AWD 1000",
     "mova.mower.g2529c": "LiDAX Ultra 1000",
@@ -537,6 +538,9 @@ class DreameLawnMowerStatusBlob:
     bytes_by_index: Mapping[str, int] = field(default_factory=dict)
     candidate_battery_level: int | None = None
     heartbeat_charging: bool | None = None
+    heartbeat_docking_state: int | None = None
+    heartbeat_docking_state_name: str | None = None
+    heartbeat_docked: bool | None = None
     main_state: int | None = None
     sub_state: int | None = None
     task_status: str | None = None
