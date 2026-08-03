@@ -236,7 +236,7 @@ def decode_mower_status_blob(
     heartbeat_docking_state = None
     heartbeat_docking_state_name = None
     heartbeat_docked = None
-    if frame_valid and len(raw) > 14:
+    if frame_valid and len(raw) == 20:
         heartbeat_docking_state = (raw[14] & 0x1C) >> 2
         heartbeat_docking_state_name = _HEARTBEAT_DOCKING_STATES.get(
             heartbeat_docking_state

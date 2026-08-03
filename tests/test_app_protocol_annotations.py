@@ -264,6 +264,9 @@ def test_status_blob_decoder_accepts_a3_awd_pro_22_byte_frame() -> None:
     assert decoded.candidate_battery_level == 100
     assert decoded.candidate_runtime_pose_x == 0
     assert decoded.candidate_runtime_pose_y == 0
+    assert decoded.heartbeat_docking_state is None
+    assert decoded.heartbeat_docking_state_name is None
+    assert decoded.heartbeat_docked is None
 
 
 def test_status_blob_decoder_does_not_treat_heartbeat_bytes_as_pose() -> None:

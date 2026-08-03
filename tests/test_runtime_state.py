@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from dreame_lawn_mower_client import (
     DreameLawnMowerDescriptor,
     DreameLawnMowerSnapshot,
@@ -16,13 +18,17 @@ snapshot_with_heartbeat_task_state = load_internal_module(
 ).snapshot_with_heartbeat_task_state
 
 
-def _snapshot() -> DreameLawnMowerSnapshot:
+def _snapshot(
+    *,
+    model: str = "dreame.mower.g2568d",
+    display_model: str = "A2 3000",
+) -> DreameLawnMowerSnapshot:
     return DreameLawnMowerSnapshot(
         descriptor=DreameLawnMowerDescriptor(
             did="device-127",
             name="Garden Mower",
-            model="dreame.mower.g2568d",
-            display_model="A2 3000",
+            model=model,
+            display_model=display_model,
             account_type="dreame",
             country="eu",
         ),
@@ -41,7 +47,17 @@ def _snapshot() -> DreameLawnMowerSnapshot:
     )
 
 
-def test_idle_in_station_heartbeat_corrects_stale_paused_snapshot() -> None:
+@pytest.mark.parametrize(
+    ("model", "display_model"),
+    [
+        ("dreame.mower.g2408", "A2"),
+        ("dreame.mower.g2568d", "A2 3000"),
+    ],
+)
+def test_idle_in_station_heartbeat_corrects_stale_paused_snapshot(
+    model: str,
+    display_model: str,
+) -> None:
     status_blob = decode_mower_status_blob(
         [
             206,
@@ -69,7 +85,10 @@ def test_idle_in_station_heartbeat_corrects_stale_paused_snapshot() -> None:
     )
 
     assert status_blob is not None
-    reconciled = snapshot_with_heartbeat_task_state(_snapshot(), status_blob)
+    reconciled = snapshot_with_heartbeat_task_state(
+        _snapshot(model=model, display_model=display_model),
+        status_blob,
+    )
 
     assert reconciled.state == "idle"
     assert reconciled.state_name == "idle"
