@@ -19,9 +19,23 @@ def map_camera_should_refresh(
     context_changed: bool,
     runtime_active: bool,
     manages_cached_view: bool = True,
+    demand_active: bool = True,
 ) -> bool:
     """Return whether a coordinator update should refresh a cached map view."""
-    return manages_cached_view and (context_changed or runtime_active)
+    return manages_cached_view and demand_active and (context_changed or runtime_active)
+
+
+def map_camera_refresh_demand_active(
+    last_request_at: float | None,
+    *,
+    now: float,
+    window_seconds: float,
+) -> bool:
+    """Return whether a recent image request warrants background refreshes."""
+    if last_request_at is None or window_seconds <= 0:
+        return False
+    age = now - last_request_at
+    return 0 <= age <= window_seconds
 
 
 def map_camera_followup_refresh_required(
@@ -59,6 +73,7 @@ class DreameLawnMowerMapCameraCache:
     last_image: bytes | None = None
     last_image_source_sha256: str | None = None
     last_image_render_context: Any = None
+    last_image_is_placeholder: bool = False
     last_view: DreameLawnMowerMapView | None = None
     last_refresh_at: datetime | None = None
     last_error: str | None = None
@@ -142,6 +157,7 @@ class DreameLawnMowerMapCameraCache:
         *,
         source_image: bytes | None = None,
         render_context: Any = None,
+        placeholder: bool = False,
     ) -> None:
         """Store rendered JPEG bytes for reuse by both map camera entities."""
         self.last_image = image
@@ -149,6 +165,7 @@ class DreameLawnMowerMapCameraCache:
             sha256(source_image).hexdigest() if source_image is not None else None
         )
         self.last_image_render_context = render_context
+        self.last_image_is_placeholder = placeholder
 
     def invalidate_view(self) -> None:
         """Expire source metadata while preserving the last good image."""

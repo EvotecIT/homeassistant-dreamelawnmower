@@ -7,6 +7,7 @@ import logging
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
 from homeassistant.components.camera import Camera
@@ -54,6 +55,7 @@ from .map_cache import (
     DreameLawnMowerMapCameraCache,
     map_camera_available,
     map_camera_followup_refresh_required,
+    map_camera_refresh_demand_active,
     map_camera_should_refresh,
 )
 from .point_cloud_api import current_point_cloud_api_path
@@ -63,6 +65,7 @@ _LOGGER = logging.getLogger(__name__)
 _MAP_CACHE_TTL = timedelta(seconds=60)
 _MAP_TIMEOUT_SECONDS = 6.0
 _MAP_POLL_INTERVAL_SECONDS = 0.5
+_MAP_ACTIVE_REFRESH_WINDOW_SECONDS = 90.0
 
 
 async def async_setup_entry(
@@ -74,11 +77,12 @@ async def async_setup_entry(
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
     map_cache = DreameLawnMowerMapCameraCache(ttl=_MAP_CACHE_TTL)
     live_map_cache = DreameLawnMowerMapCameraCache(ttl=_MAP_CACHE_TTL)
+    all_maps_cache = DreameLawnMowerMapCameraCache(ttl=_MAP_CACHE_TTL)
     async_add_entities(
         [
             DreameLawnMowerMapCamera(coordinator, map_cache),
             DreameLawnMowerLivePathMapCamera(coordinator, live_map_cache),
-            DreameLawnMowerAllMapsCamera(coordinator, map_cache),
+            DreameLawnMowerAllMapsCamera(coordinator, all_maps_cache),
             DreameLawnMowerMapDataCamera(coordinator, map_cache),
             DreameLawnMowerVideoCamera(coordinator, entry),
         ]
@@ -130,10 +134,12 @@ class DreameLawnMowerMapCamera(
         self._map_refresh_task: asyncio.Task[bytes | None] | None = None
         self._map_refresh_pending = False
         self._last_refresh_context: tuple[Any, ...] | None = None
+        self._last_image_request_at: float | None = None
 
     async def async_added_to_hass(self) -> None:
         """Warm an enabled map camera without delaying entity setup."""
         await super().async_added_to_hass()
+        self._last_refresh_context = self._map_refresh_context
         if self._prewarm_map_image and self.available:
             self._start_map_refresh()
 
@@ -155,6 +161,11 @@ class DreameLawnMowerMapCamera(
             context_changed=context != self._last_refresh_context,
             runtime_active=active,
             manages_cached_view=self._refresh_cached_view_on_coordinator_update,
+            demand_active=map_camera_refresh_demand_active(
+                self._last_image_request_at,
+                now=monotonic(),
+                window_seconds=_MAP_ACTIVE_REFRESH_WINDOW_SECONDS,
+            ),
         ):
             self._last_refresh_context = context
             self._map_cache.invalidate_view()
@@ -199,6 +210,7 @@ class DreameLawnMowerMapCamera(
             image_cached=self._map_cache.last_image is not None,
             refreshed_at=self._map_cache.last_refresh_at,
             last_error=self._map_cache.last_error,
+            image_placeholder=self._map_cache.last_image_is_placeholder,
             runtime_status_blob=getattr(
                 self.coordinator,
                 "runtime_status_blob",
@@ -222,6 +234,11 @@ class DreameLawnMowerMapCamera(
         del width, height
         if not self.available:
             return None
+        self._last_image_request_at = monotonic()
+        context = self._map_refresh_context
+        if context != self._last_refresh_context:
+            self._last_refresh_context = context
+            self._map_cache.invalidate_view()
         return await self._async_camera_image_impl()
 
     async def _async_camera_image_impl(self) -> bytes | None:
@@ -419,6 +436,7 @@ class DreameLawnMowerLivePathMapCamera(DreameLawnMowerMapCamera):
     _attr_name = "Live Path Map"
     _attr_icon = "mdi:map-marker-path"
     _attr_entity_registry_enabled_default = False
+    _refresh_cached_view_on_coordinator_update = False
 
     def __init__(
         self,
@@ -464,6 +482,7 @@ class DreameLawnMowerMapDataCamera(DreameLawnMowerMapCamera):
     _attr_entity_registry_enabled_default = False
     _requires_map_capability = False
     _prewarm_map_image = False
+    _refresh_cached_view_on_coordinator_update = False
 
     def __init__(
         self,
@@ -560,13 +579,29 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
         self.content_type = "image/jpeg"
 
     async def _async_camera_image_impl(self) -> bytes | None:
-        """Return a JPEG contact sheet for every drawable app map."""
+        """Return cached bytes while one contact-sheet refresh runs."""
+        if self._map_cache.last_image is not None:
+            if not self._map_cache.is_fresh():
+                self._start_map_refresh()
+            return self._map_cache.last_image
+
+        self._start_map_refresh()
+        return await self.hass.async_add_executor_job(
+            partial(
+                map_placeholder_jpeg,
+                title="Dreame all maps loading",
+                detail="The map contact sheet is being prepared in the background.",
+            )
+        )
+
+    async def _async_refresh_and_render_map_image(self) -> bytes | None:
+        """Fetch and cache a contact sheet without blocking camera requests."""
         try:
             app_maps = await self.coordinator.client.async_get_app_maps(
                 include_payload=True,
                 include_objects=False,
             )
-            return await self.hass.async_add_executor_job(
+            image = await self.hass.async_add_executor_job(
                 partial(
                     _all_maps_contact_sheet_from_payload,
                     app_maps,
@@ -574,6 +609,12 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
                     style=self._map_style,
                 )
             )
+            self._map_cache.store_view(
+                DreameLawnMowerMapView(source="app_maps_contact_sheet")
+            )
+            self._map_cache.store_image(image)
+            self.async_write_ha_state()
+            return image
         except Exception as err:
             safe_error = sanitize_diagnostic_text(err)
             _LOGGER.warning(
@@ -585,13 +626,22 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
                 source="map_camera",
                 message=safe_error,
             )
-            return await self.hass.async_add_executor_job(
-                partial(
-                    map_placeholder_jpeg,
-                    title="Dreame all maps unavailable",
-                    detail=safe_error,
-                )
+            self._map_cache.store_error(
+                safe_error,
+                source="app_maps_contact_sheet",
             )
+            image = self._map_cache.last_image
+            if image is None:
+                image = await self.hass.async_add_executor_job(
+                    partial(
+                        map_placeholder_jpeg,
+                        title="Dreame all maps unavailable",
+                        detail=safe_error,
+                    )
+                )
+                self._map_cache.store_image(image, placeholder=True)
+            self.async_write_ha_state()
+            return image
 
 
 def _all_maps_contact_sheet_from_payload(
