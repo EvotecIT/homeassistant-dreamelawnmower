@@ -6,6 +6,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+from custom_components.dreame_lawn_mower import camera as camera_module
 from custom_components.dreame_lawn_mower.camera import (
     DreameLawnMowerAllMapsCamera,
     DreameLawnMowerLivePathMapCamera,
@@ -243,6 +244,47 @@ def test_all_maps_camera_serves_stale_image_during_background_refresh() -> None:
 
     assert image == b"cached-contact-sheet"
     assert refresh_calls == 1
+
+
+def test_all_maps_camera_caches_failure_placeholder_until_ttl(monkeypatch) -> None:
+    """A failed cloud fetch must not be retried on every HA camera poll."""
+    cache = DreameLawnMowerMapCameraCache(ttl=timedelta(seconds=60))
+    entity = object.__new__(DreameLawnMowerAllMapsCamera)
+    entity._map_cache = cache
+    cloud_calls = 0
+    refresh_calls = 0
+
+    async def async_get_app_maps(**kwargs: object) -> dict[str, object]:
+        nonlocal cloud_calls
+        del kwargs
+        cloud_calls += 1
+        raise TimeoutError("cloud timeout")
+
+    async def async_add_executor_job(target: object) -> bytes:
+        return target()  # type: ignore[operator]
+
+    def start_refresh() -> None:
+        nonlocal refresh_calls
+        refresh_calls += 1
+
+    entity.coordinator = SimpleNamespace(
+        client=SimpleNamespace(async_get_app_maps=async_get_app_maps)
+    )
+    entity.hass = SimpleNamespace(async_add_executor_job=async_add_executor_job)
+    entity.async_write_ha_state = lambda: None  # type: ignore[method-assign]
+    monkeypatch.setattr(camera_module, "record_diagnostic_event", lambda *a, **k: None)
+
+    failure_image = asyncio.run(entity._async_refresh_and_render_map_image())
+    entity._start_map_refresh = start_refresh  # type: ignore[method-assign]
+    repeated_image = asyncio.run(entity._async_camera_image_impl())
+
+    assert failure_image is not None
+    assert failure_image.startswith(b"\xff\xd8")
+    assert repeated_image == failure_image
+    assert cache.is_fresh() is True
+    assert cache.last_error == "cloud timeout"
+    assert cloud_calls == 1
+    assert refresh_calls == 0
 
 
 def test_map_camera_queues_new_context_after_inflight_refresh() -> None:

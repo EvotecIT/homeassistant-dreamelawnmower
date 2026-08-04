@@ -629,8 +629,18 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
                 safe_error,
                 source="app_maps_contact_sheet",
             )
+            image = self._map_cache.last_image
+            if image is None:
+                image = await self.hass.async_add_executor_job(
+                    partial(
+                        map_placeholder_jpeg,
+                        title="Dreame all maps unavailable",
+                        detail=safe_error,
+                    )
+                )
+                self._map_cache.store_image(image)
             self.async_write_ha_state()
-            return self._map_cache.last_image
+            return image
 
 
 def _all_maps_contact_sheet_from_payload(
