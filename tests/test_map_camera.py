@@ -17,6 +17,7 @@ from custom_components.dreame_lawn_mower.map_cache import (
     DreameLawnMowerMapCameraCache,
     map_camera_available,
     map_camera_followup_refresh_required,
+    map_camera_refresh_demand_active,
     map_camera_should_refresh,
 )
 from dreame_lawn_mower_client.models import (
@@ -32,6 +33,14 @@ def test_primary_map_camera_is_the_only_map_camera_enabled_by_default() -> None:
     assert DreameLawnMowerLivePathMapCamera.__dict__[enabled_default] is False
     assert DreameLawnMowerAllMapsCamera.__dict__[enabled_default] is False
     assert DreameLawnMowerMapDataCamera.__dict__[enabled_default] is False
+
+
+def test_optional_map_cameras_refresh_only_when_requested() -> None:
+    """Enabling diagnostic map variants must not create background render loops."""
+    refresh_policy = "_refresh_cached_view_on_coordinator_update"
+    assert DreameLawnMowerLivePathMapCamera.__dict__[refresh_policy] is False
+    assert DreameLawnMowerAllMapsCamera.__dict__[refresh_policy] is False
+    assert DreameLawnMowerMapDataCamera.__dict__[refresh_policy] is False
 
 
 def test_map_camera_attributes_include_app_map_summary_counts() -> None:
@@ -138,6 +147,102 @@ def test_all_maps_camera_skips_cached_view_refresh_on_coordinator_updates() -> N
         )
         is False
     )
+
+
+def test_map_camera_background_refresh_requires_recent_viewer_demand() -> None:
+    """Mowing updates alone must not keep an unviewed map renderer active."""
+    assert (
+        map_camera_should_refresh(
+            context_changed=True,
+            runtime_active=True,
+            demand_active=False,
+        )
+        is False
+    )
+    assert (
+        map_camera_should_refresh(
+            context_changed=False,
+            runtime_active=True,
+            demand_active=True,
+        )
+        is True
+    )
+
+
+def test_map_camera_refresh_demand_expires_after_window() -> None:
+    assert (
+        map_camera_refresh_demand_active(
+            100.0,
+            now=190.0,
+            window_seconds=90.0,
+        )
+        is True
+    )
+    assert (
+        map_camera_refresh_demand_active(
+            100.0,
+            now=190.001,
+            window_seconds=90.0,
+        )
+        is False
+    )
+    assert (
+        map_camera_refresh_demand_active(
+            None,
+            now=190.0,
+            window_seconds=90.0,
+        )
+        is False
+    )
+
+
+def test_all_maps_camera_returns_loading_image_while_refresh_starts() -> None:
+    """An empty contact-sheet cache must not block HA's camera response."""
+    cache = DreameLawnMowerMapCameraCache(ttl=timedelta(seconds=60))
+    entity = object.__new__(DreameLawnMowerAllMapsCamera)
+    entity._map_cache = cache
+    refresh_calls = 0
+
+    async def async_add_executor_job(target: object) -> bytes:
+        return target()  # type: ignore[operator]
+
+    def start_refresh() -> None:
+        nonlocal refresh_calls
+        refresh_calls += 1
+
+    entity.hass = SimpleNamespace(async_add_executor_job=async_add_executor_job)
+    entity._start_map_refresh = start_refresh  # type: ignore[method-assign]
+
+    image = asyncio.run(entity._async_camera_image_impl())
+
+    assert image is not None
+    assert image.startswith(b"\xff\xd8")
+    assert refresh_calls == 1
+    assert cache.last_image is None
+
+
+def test_all_maps_camera_serves_stale_image_during_background_refresh() -> None:
+    """A slow refresh must not blank or delay the last good contact sheet."""
+    cache = DreameLawnMowerMapCameraCache(ttl=timedelta(seconds=60))
+    cache.store_view(
+        DreameLawnMowerMapView(source="app_maps_contact_sheet"),
+        now=datetime(2026, 4, 19, 8, 0, tzinfo=UTC),
+    )
+    cache.store_image(b"cached-contact-sheet")
+    entity = object.__new__(DreameLawnMowerAllMapsCamera)
+    entity._map_cache = cache
+    refresh_calls = 0
+
+    def start_refresh() -> None:
+        nonlocal refresh_calls
+        refresh_calls += 1
+
+    entity._start_map_refresh = start_refresh  # type: ignore[method-assign]
+
+    image = asyncio.run(entity._async_camera_image_impl())
+
+    assert image == b"cached-contact-sheet"
+    assert refresh_calls == 1
 
 
 def test_map_camera_queues_new_context_after_inflight_refresh() -> None:
