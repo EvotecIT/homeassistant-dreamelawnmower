@@ -6,6 +6,12 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+from custom_components.dreame_lawn_mower.camera import (
+    DreameLawnMowerAllMapsCamera,
+    DreameLawnMowerLivePathMapCamera,
+    DreameLawnMowerMapCamera,
+    DreameLawnMowerMapDataCamera,
+)
 from custom_components.dreame_lawn_mower.map_attributes import map_camera_attributes
 from custom_components.dreame_lawn_mower.map_cache import (
     DreameLawnMowerMapCameraCache,
@@ -17,6 +23,15 @@ from dreame_lawn_mower_client.models import (
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
 )
+
+
+def test_primary_map_camera_is_the_only_map_camera_enabled_by_default() -> None:
+    """Users get one useful map entity without enabling diagnostic variants."""
+    enabled_default = "__attr_entity_registry_enabled_default"
+    assert DreameLawnMowerMapCamera.__dict__[enabled_default] is True
+    assert DreameLawnMowerLivePathMapCamera.__dict__[enabled_default] is False
+    assert DreameLawnMowerAllMapsCamera.__dict__[enabled_default] is False
+    assert DreameLawnMowerMapDataCamera.__dict__[enabled_default] is False
 
 
 def test_map_camera_attributes_include_app_map_summary_counts() -> None:

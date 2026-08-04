@@ -349,7 +349,7 @@ Common user-facing helpers include:
 Many reverse-engineering and validation helpers are disabled by default. Enable
 them from the entity registry only when troubleshooting:
 
-- map and all-map cameras
+- live-path and all-map cameras
 - map diagnostics camera
 - runtime pose / heading / segment-count sensors
 - all-schedules calendar
@@ -425,6 +425,11 @@ inspect the complete candidate preference payload before sending it.
 The map camera uses the confirmed app-map JSON path first and falls back to the
 vector source when it carries the active session. Both renderers use the same
 palette, bundled Unicode font, path widths, and marker settings.
+
+The primary `Map` camera is enabled by default and follows the current mowing
+session, including the mower position and live path when the device reports
+them. `Live Path Map`, `All Maps`, and `Map Diagnostics` remain optional,
+disabled-by-default cameras for troubleshooting or specialized dashboards.
 
 Enabled map cameras warm their first image in the background during entity
 startup. While a mowing session is active, coordinator updates also refresh the

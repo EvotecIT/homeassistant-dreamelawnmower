@@ -42,6 +42,8 @@ from .const import (
     CONF_XP2P_LIBRARY_PATH,
     CONF_XP2P_RUNNER_COMMAND,
     CONF_XP2P_RUNNER_MODE,
+    CONFIG_ENTRY_MINOR_VERSION,
+    CONFIG_ENTRY_VERSION,
     COUNTRY_OPTIONS,
     DEFAULT_COUNTRY,
     DEFAULT_MAP_LABEL_SCALE,
@@ -113,7 +115,8 @@ def auth_error_key(err: Exception) -> str:
 class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle the Dreame lawn mower config flow."""
 
-    VERSION = 1
+    VERSION = CONFIG_ENTRY_VERSION
+    MINOR_VERSION = CONFIG_ENTRY_MINOR_VERSION
 
     def __init__(self) -> None:
         self._devices: dict[str, DreameLawnMowerDescriptor] = {}

@@ -95,7 +95,7 @@ class DreameLawnMowerMapCamera(
     _attr_name = "Map"
     _attr_icon = "mdi:map-search-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_entity_registry_enabled_default = False
+    _attr_entity_registry_enabled_default = True
     _requires_map_capability = True
     _prewarm_map_image = True
     _refresh_cached_view_on_coordinator_update = True
@@ -418,6 +418,7 @@ class DreameLawnMowerLivePathMapCamera(DreameLawnMowerMapCamera):
 
     _attr_name = "Live Path Map"
     _attr_icon = "mdi:map-marker-path"
+    _attr_entity_registry_enabled_default = False
 
     def __init__(
         self,
@@ -460,6 +461,7 @@ class DreameLawnMowerMapDataCamera(DreameLawnMowerMapCamera):
 
     _attr_name = "Map Diagnostics"
     _attr_icon = "mdi:code-json"
+    _attr_entity_registry_enabled_default = False
     _requires_map_capability = False
     _prewarm_map_image = False
 
@@ -543,6 +545,7 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
 
     _attr_name = "All Maps"
     _attr_icon = "mdi:map-multiple-outline"
+    _attr_entity_registry_enabled_default = False
     _requires_map_capability = False
     _prewarm_map_image = False
     _refresh_cached_view_on_coordinator_update = False

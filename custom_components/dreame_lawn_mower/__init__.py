@@ -6,9 +6,14 @@ import asyncio
 import logging
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
 from .const import (
+    CONF_DID,
+    CONFIG_ENTRY_MINOR_VERSION,
+    CONFIG_ENTRY_VERSION,
     DOMAIN,
     PLATFORMS,
 )
@@ -25,6 +30,41 @@ from .video_provisioning_cache import DreameLawnMowerVideoProvisioningCache
 
 _LOGGER = logging.getLogger(__name__)
 SLOW_SETUP_SECONDS = 15.0
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Enable the primary map camera without overriding user choices."""
+    if entry.version > CONFIG_ENTRY_VERSION:
+        return False
+
+    if (
+        entry.version == CONFIG_ENTRY_VERSION
+        and entry.minor_version < CONFIG_ENTRY_MINOR_VERSION
+    ):
+        unique_id = entry.data.get(CONF_DID) or entry.unique_id
+        if unique_id and not entry.pref_disable_new_entities:
+            registry = er.async_get(hass)
+            entity_id = registry.async_get_entity_id(
+                Platform.CAMERA,
+                DOMAIN,
+                f"{unique_id}_map",
+            )
+            if entity_id is not None:
+                registry_entry = registry.async_get(entity_id)
+                if (
+                    registry_entry is not None
+                    and registry_entry.disabled_by
+                    is er.RegistryEntryDisabler.INTEGRATION
+                ):
+                    registry.async_update_entity(entity_id, disabled_by=None)
+
+        hass.config_entries.async_update_entry(
+            entry,
+            version=CONFIG_ENTRY_VERSION,
+            minor_version=CONFIG_ENTRY_MINOR_VERSION,
+        )
+
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
