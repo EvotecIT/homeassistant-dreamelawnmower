@@ -210,6 +210,7 @@ class DreameLawnMowerMapCamera(
             image_cached=self._map_cache.last_image is not None,
             refreshed_at=self._map_cache.last_refresh_at,
             last_error=self._map_cache.last_error,
+            image_placeholder=self._map_cache.last_image_is_placeholder,
             runtime_status_blob=getattr(
                 self.coordinator,
                 "runtime_status_blob",
@@ -638,7 +639,7 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
                         detail=safe_error,
                     )
                 )
-                self._map_cache.store_image(image)
+                self._map_cache.store_image(image, placeholder=True)
             self.async_write_ha_state()
             return image
 

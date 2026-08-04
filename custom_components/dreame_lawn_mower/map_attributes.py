@@ -51,12 +51,13 @@ def map_camera_attributes(
     refreshed_at: datetime | None,
     last_error: str | None,
     runtime_status_blob: Any = None,
+    image_placeholder: bool = False,
 ) -> dict[str, Any]:
     """Return Home Assistant attributes for a cached map camera view."""
     summary = map_summary_to_dict(None if view is None else view.summary)
     attributes: dict[str, Any] = {
-        "map_cached": image_cached,
-        "map_placeholder": not image_cached,
+        "map_cached": image_cached and not image_placeholder,
+        "map_placeholder": not image_cached or image_placeholder,
         "map_source": None if view is None else view.source,
         "map_has_image": False if view is None else view.has_image,
         "map_error": last_error or (None if view is None else view.error),

@@ -73,6 +73,7 @@ class DreameLawnMowerMapCameraCache:
     last_image: bytes | None = None
     last_image_source_sha256: str | None = None
     last_image_render_context: Any = None
+    last_image_is_placeholder: bool = False
     last_view: DreameLawnMowerMapView | None = None
     last_refresh_at: datetime | None = None
     last_error: str | None = None
@@ -156,6 +157,7 @@ class DreameLawnMowerMapCameraCache:
         *,
         source_image: bytes | None = None,
         render_context: Any = None,
+        placeholder: bool = False,
     ) -> None:
         """Store rendered JPEG bytes for reuse by both map camera entities."""
         self.last_image = image
@@ -163,6 +165,7 @@ class DreameLawnMowerMapCameraCache:
             sha256(source_image).hexdigest() if source_image is not None else None
         )
         self.last_image_render_context = render_context
+        self.last_image_is_placeholder = placeholder
 
     def invalidate_view(self) -> None:
         """Expire source metadata while preserving the last good image."""

@@ -283,8 +283,30 @@ def test_all_maps_camera_caches_failure_placeholder_until_ttl(monkeypatch) -> No
     assert repeated_image == failure_image
     assert cache.is_fresh() is True
     assert cache.last_error == "cloud timeout"
+    assert cache.last_image_is_placeholder is True
     assert cloud_calls == 1
     assert refresh_calls == 0
+
+    attributes = map_camera_attributes(
+        cache.last_view,
+        image_cached=cache.last_image is not None,
+        image_placeholder=cache.last_image_is_placeholder,
+        refreshed_at=cache.last_refresh_at,
+        last_error=cache.last_error,
+    )
+    assert attributes["map_cached"] is False
+    assert attributes["map_placeholder"] is True
+
+    cache.last_refresh_at = datetime.now(UTC) - timedelta(seconds=61)
+    expired_image = asyncio.run(entity._async_camera_image_impl())
+    assert expired_image == failure_image
+    assert refresh_calls == 1
+
+    cache.store_image(b"last-good-contact-sheet")
+    preserved_image = asyncio.run(entity._async_refresh_and_render_map_image())
+    assert preserved_image == b"last-good-contact-sheet"
+    assert cache.last_image_is_placeholder is False
+    assert cloud_calls == 2
 
 
 def test_map_camera_queues_new_context_after_inflight_refresh() -> None:
