@@ -5,6 +5,8 @@ from __future__ import annotations
 from homeassistant.const import Platform
 
 DOMAIN = "dreame_lawn_mower"
+CONFIG_ENTRY_VERSION = 1
+CONFIG_ENTRY_MINOR_VERSION = 2
 
 CONF_ACCOUNT_TYPE = "account_type"
 CONF_COUNTRY = "country"

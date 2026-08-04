@@ -4,26 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sys
 from contextlib import suppress
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-
-try:
-    import turbojpeg  # noqa: F401
-except ModuleNotFoundError:
-    turbojpeg_stub = ModuleType("turbojpeg")
-
-    class _UnavailableTurboJPEG:
-        def __init__(self) -> None:
-            raise RuntimeError("TurboJPEG is unavailable in the lightweight test job")
-
-    turbojpeg_stub.TurboJPEG = _UnavailableTurboJPEG
-    sys.modules["turbojpeg"] = turbojpeg_stub
-
 from homeassistant.components.camera import CameraEntityFeature
 
 import custom_components.dreame_lawn_mower.video_camera as video_camera_module

@@ -10,8 +10,10 @@ import voluptuous_serialize
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.dreame_lawn_mower import async_migrate_entry
 from custom_components.dreame_lawn_mower.config_flow import DreameLawnMowerOptionsFlow
 from custom_components.dreame_lawn_mower.const import (
     ACCOUNT_TYPE_DREAME,
@@ -82,6 +84,117 @@ async def _start_user_flow(hass):
             CONF_USERNAME: "user@example.com",
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_migration_enables_only_integration_disabled_primary_map(hass) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="device-1",
+        data={CONF_DID: "device-1"},
+        version=1,
+    )
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    primary_map = registry.async_get_or_create(
+        "camera",
+        DOMAIN,
+        "device-1_map",
+        config_entry=entry,
+        disabled_by=er.RegistryEntryDisabler.INTEGRATION,
+    )
+    live_path_map = registry.async_get_or_create(
+        "camera",
+        DOMAIN,
+        "device-1_live_path_map",
+        config_entry=entry,
+        disabled_by=er.RegistryEntryDisabler.INTEGRATION,
+    )
+
+    assert await async_migrate_entry(hass, entry) is True
+
+    assert entry.version == 1
+    assert entry.minor_version == 2
+    assert registry.async_get(primary_map.entity_id).disabled_by is None
+    assert (
+        registry.async_get(live_path_map.entity_id).disabled_by
+        is er.RegistryEntryDisabler.INTEGRATION
+    )
+
+
+@pytest.mark.asyncio
+async def test_migration_preserves_user_disabled_primary_map(hass) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="device-1",
+        data={CONF_DID: "device-1"},
+        version=1,
+    )
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    primary_map = registry.async_get_or_create(
+        "camera",
+        DOMAIN,
+        "device-1_map",
+        config_entry=entry,
+        disabled_by=er.RegistryEntryDisabler.USER,
+    )
+
+    assert await async_migrate_entry(hass, entry) is True
+
+    assert entry.version == 1
+    assert entry.minor_version == 2
+    assert (
+        registry.async_get(primary_map.entity_id).disabled_by
+        is er.RegistryEntryDisabler.USER
+    )
+
+
+@pytest.mark.asyncio
+async def test_migration_preserves_disable_new_entities_preference(hass) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="device-1",
+        data={CONF_DID: "device-1"},
+        version=1,
+        minor_version=1,
+        pref_disable_new_entities=True,
+    )
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    primary_map = registry.async_get_or_create(
+        "camera",
+        DOMAIN,
+        "device-1_map",
+        config_entry=entry,
+        disabled_by=er.RegistryEntryDisabler.INTEGRATION,
+    )
+
+    assert await async_migrate_entry(hass, entry) is True
+
+    assert entry.version == 1
+    assert entry.minor_version == 2
+    assert (
+        registry.async_get(primary_map.entity_id).disabled_by
+        is er.RegistryEntryDisabler.INTEGRATION
+    )
+
+
+@pytest.mark.asyncio
+async def test_migration_accepts_future_minor_version_without_changes(hass) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="device-1",
+        data={CONF_DID: "device-1"},
+        version=1,
+        minor_version=3,
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry) is True
+
+    assert entry.version == 1
+    assert entry.minor_version == 3
 
 
 @pytest.mark.asyncio
