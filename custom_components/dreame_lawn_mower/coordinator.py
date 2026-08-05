@@ -53,6 +53,7 @@ from .dreame_lawn_mower_client.schedule import (
 from .performance import DreameLawnMowerPerformanceTracker
 from .runtime_cache import DreameLawnMowerRuntimeTelemetryCache
 from .schedule_cache import (
+    ScheduleActionReadBackoff,
     has_complete_schedule_cache,
     invalidate_schedule_slot,
     merge_app_schedule_payload,
@@ -127,6 +128,7 @@ class DreameLawnMowerCoordinator(
         self.voice_settings_refreshed_at: datetime | None = None
         self.schedules: dict[str, Any] | None = None
         self.schedules_refreshed_at: datetime | None = None
+        self._schedule_action_read_backoff = ScheduleActionReadBackoff()
         self._schedule_cache_generation = 0
         self._schedule_read_generation = 0
         self._published_schedule_read_generation = 0
@@ -472,25 +474,49 @@ class DreameLawnMowerCoordinator(
                 if fallback_index not in request_schedule_indices:
                     request_schedule_indices.append(fallback_index)
 
-        try:
-            action_read_generation = self._begin_schedule_read()
-            payload = await self.client.async_get_app_schedules(
-                include_current_task=False,
-                map_indices=request_schedule_indices,
-            )
-        except Exception as err:  # noqa: BLE001 - optional cloud capability
-            _LOGGER.debug("Failed to refresh mower schedules: %s", err)
-            if force:
-                raise
-            return self.schedules
-        if not self._schedule_refresh_is_current(refresh_generation):
-            return self.schedules
-        action_read_succeeded = schedule_payload_has_usable_data(payload)
-        if (
-            action_read_succeeded
-            and not self._schedule_read_can_publish(action_read_generation)
-        ):
-            return self.schedules
+        action_backoff = getattr(self, "_schedule_action_read_backoff", None)
+        if not isinstance(action_backoff, ScheduleActionReadBackoff):
+            action_backoff = ScheduleActionReadBackoff()
+            self._schedule_action_read_backoff = action_backoff
+        attempt_action_read = action_backoff.permits(now, force=force)
+        action_read_generation: int | None = None
+        action_read_succeeded = False
+        payload: Mapping[str, Any] = {
+            "source": "app_action_schedule",
+            "available": False,
+            "schedules": [],
+            "errors": [],
+        }
+        if attempt_action_read:
+            try:
+                action_read_generation = self._begin_schedule_read()
+                payload = await self.client.async_get_app_schedules(
+                    include_current_task=False,
+                    map_indices=request_schedule_indices,
+                )
+            except Exception as err:  # noqa: BLE001 - optional cloud capability
+                action_backoff.record_result(
+                    now,
+                    succeeded=False,
+                    generation=action_read_generation,
+                )
+                _LOGGER.debug("Failed to refresh mower schedules: %s", err)
+                if force:
+                    raise
+            else:
+                if not self._schedule_refresh_is_current(refresh_generation):
+                    return self.schedules
+                action_read_succeeded = schedule_payload_has_usable_data(payload)
+                action_backoff.record_result(
+                    now,
+                    succeeded=action_read_succeeded,
+                    generation=action_read_generation,
+                )
+                if (
+                    action_read_succeeded
+                    and not self._schedule_read_can_publish(action_read_generation)
+                ):
+                    return self.schedules
         app_maps = getattr(self, "app_maps", None)
         known_map_indices = _app_map_index_hints(app_maps)
         map_hints_authoritative = _app_map_hints_are_authoritative(
@@ -508,18 +534,20 @@ class DreameLawnMowerCoordinator(
             known_map_indices,
             map_hints_authoritative=map_hints_authoritative,
         )
-        self.schedules = merge_app_schedule_payload(
-            self.schedules,
-            payload,
-            expected_indices=expected_indices,
-            prune_unexpected_indices=map_hints_authoritative,
-        )
-        if action_read_succeeded:
+        if attempt_action_read:
+            self.schedules = merge_app_schedule_payload(
+                self.schedules,
+                payload,
+                expected_indices=expected_indices,
+                prune_unexpected_indices=map_hints_authoritative,
+            )
+        if action_read_succeeded and action_read_generation is not None:
             self._record_schedule_read_publication(action_read_generation)
         if map_hints_authoritative:
             self._prune_pending_schedule_writes(known_map_indices)
-        self._acknowledge_pending_schedule_plan_states(payload)
-        self._acknowledge_pending_schedule_uploads(payload)
+        if attempt_action_read:
+            self._acknowledge_pending_schedule_plan_states(payload)
+            self._acknowledge_pending_schedule_uploads(payload)
         self._apply_pending_schedule_plan_states()
         self._apply_pending_schedule_uploads()
         action_read_indices = _usable_schedule_indices(payload)
@@ -566,12 +594,13 @@ class DreameLawnMowerCoordinator(
                 known_map_indices = latest_map_indices
                 map_hints_authoritative = latest_map_hints_authoritative
                 expected_indices = latest_expected_indices
-                self.schedules = merge_app_schedule_payload(
-                    self.schedules,
-                    payload,
-                    expected_indices=expected_indices,
-                    prune_unexpected_indices=map_hints_authoritative,
-                )
+                if attempt_action_read:
+                    self.schedules = merge_app_schedule_payload(
+                        self.schedules,
+                        payload,
+                        expected_indices=expected_indices,
+                        prune_unexpected_indices=map_hints_authoritative,
+                    )
                 if map_hints_authoritative:
                     self._prune_pending_schedule_writes(known_map_indices)
                 action_read_complete = set(expected_indices).issubset(

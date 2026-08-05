@@ -3,8 +3,51 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
+
+SCHEDULE_ACTION_RETRY_DELAYS = (
+    timedelta(minutes=5),
+    timedelta(minutes=15),
+    timedelta(minutes=30),
+    timedelta(hours=1),
+)
+
+
+@dataclass
+class ScheduleActionReadBackoff:
+    """Bound retries for optional app-action schedule reads."""
+
+    consecutive_failures: int = 0
+    retry_not_before: datetime | None = None
+    latest_generation: int = 0
+
+    def permits(self, now: datetime, *, force: bool = False) -> bool:
+        """Return whether an automatic or explicitly forced read may run."""
+        return force or self.retry_not_before is None or now >= self.retry_not_before
+
+    def record_result(
+        self,
+        now: datetime,
+        *,
+        succeeded: bool,
+        generation: int,
+    ) -> None:
+        """Reset after success or advance the bounded failure cooldown."""
+        if generation < self.latest_generation:
+            return
+        self.latest_generation = generation
+        if succeeded:
+            self.consecutive_failures = 0
+            self.retry_not_before = None
+            return
+
+        self.consecutive_failures += 1
+        delay = SCHEDULE_ACTION_RETRY_DELAYS[
+            min(self.consecutive_failures - 1, len(SCHEDULE_ACTION_RETRY_DELAYS) - 1)
+        ]
+        self.retry_not_before = now + delay
 
 
 def schedule_entry_has_usable_data(value: Any) -> bool:

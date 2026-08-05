@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from threading import Event
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -35,6 +35,7 @@ from custom_components.dreame_lawn_mower.performance import (
     DreameLawnMowerPerformanceTracker,
 )
 from custom_components.dreame_lawn_mower.schedule_cache import (
+    ScheduleActionReadBackoff,
     merge_app_schedule_payload,
     merge_batch_schedule_payload,
 )
@@ -2259,6 +2260,81 @@ def test_schedule_refresh_does_not_mark_all_failed_reads_fresh() -> None:
 
     assert result is not None
     assert coordinator.schedules_refreshed_at is None
+
+
+def test_failed_schedule_action_reads_back_off_automatic_retries() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        coordinator.schedules = None
+        coordinator.schedules_refreshed_at = None
+        coordinator.selected_map_index = 0
+        coordinator.app_maps = {
+            "current_map_index": 0,
+            "maps": [{"idx": 0, "created": True}],
+        }
+        failed_app_payload = {
+            "source": "app_action_schedule",
+            "available": False,
+            "schedules": [
+                {"idx": -1, "available": False, "error": "timed out"},
+                {"idx": 0, "available": False, "error": "timed out"},
+            ],
+            "errors": [{"stage": "schedule", "error": "timed out"}],
+        }
+        failed_batch_payload = {
+            "source": "batch_device_data_schedule",
+            "available": False,
+            "schedules": [],
+            "errors": [{"stage": "schedule", "error": "missing schedule"}],
+        }
+        coordinator.client = SimpleNamespace(
+            async_get_app_schedules=AsyncMock(return_value=failed_app_payload),
+            async_get_batch_schedules=AsyncMock(return_value=failed_batch_payload),
+        )
+
+        await coordinator.async_refresh_schedules()
+        coordinator._batch_schedule_read_completed_at = 0.0
+        await coordinator.async_refresh_schedules()
+
+        coordinator.client.async_get_app_schedules.assert_awaited_once()
+        assert coordinator._schedule_action_read_backoff.consecutive_failures == 1
+        assert coordinator._schedule_action_read_backoff.retry_not_before is not None
+
+        coordinator.client.async_get_app_schedules.return_value = {
+            "source": "app_action_schedule",
+            "available": True,
+            "schedules": [
+                {"idx": -1, "available": True, "version": 1, "plans": []},
+                {"idx": 0, "available": True, "version": 2, "plans": []},
+            ],
+            "errors": [],
+        }
+        await coordinator.async_refresh_schedules(force=True)
+
+        assert coordinator.client.async_get_app_schedules.await_count == 2
+        assert coordinator._schedule_action_read_backoff.consecutive_failures == 0
+        assert coordinator._schedule_action_read_backoff.retry_not_before is None
+
+    asyncio.run(scenario())
+
+
+def test_schedule_action_backoff_is_bounded_and_resets_after_success() -> None:
+    now = datetime.now(UTC)
+    backoff = ScheduleActionReadBackoff()
+
+    for generation in range(1, 11):
+        backoff.record_result(now, succeeded=False, generation=generation)
+
+    assert backoff.retry_not_before == now + timedelta(hours=1)
+    assert not backoff.permits(now)
+    assert backoff.permits(now, force=True)
+
+    backoff.record_result(now, succeeded=True, generation=11)
+    backoff.record_result(now, succeeded=False, generation=10)
+
+    assert backoff.consecutive_failures == 0
+    assert backoff.retry_not_before is None
+    assert backoff.permits(now)
 
 
 def test_schedule_refresh_does_not_mark_retained_cache_fresh_after_failures() -> None:
