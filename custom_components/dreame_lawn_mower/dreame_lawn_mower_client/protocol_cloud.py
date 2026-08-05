@@ -1035,7 +1035,7 @@ class DreameMowerDreameHomeCloudProtocol:
             or not isinstance(api_response["data"], Mapping)
             or "result" not in api_response["data"]
         ):
-            _LOGGER.warning(
+            _LOGGER.debug(
                 "DreameMowerDreameHomeCloudProtocol.send failed: %s",
                 logged_response,
             )
@@ -1326,7 +1326,7 @@ class DreameMowerDreameHomeCloudProtocol:
                 retries = retries + 1
                 response = None
                 if self._connected:
-                    _LOGGER.warning(
+                    _LOGGER.debug(
                         "DreameMowerDreameHomeCloudProtocol.request: Read timed out. (read timeout=%s): %s",
                         timeout,
                         _cloud_request_log_value(url, data),

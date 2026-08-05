@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable
 from threading import Event, RLock, Thread
 from unittest.mock import Mock
 
+import pytest
 import requests
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
@@ -269,6 +271,63 @@ def test_protocol_disconnects_aliased_cloud_only_once() -> None:
 
     cloud.disconnect.assert_called_once_with()
     assert mower_protocol._connected is False
+
+
+def test_optional_cloud_timeout_details_are_debug_only(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
+    cloud._key_expire = 0
+    cloud._country = "eu"
+    cloud._strings = [f"header-{index}" for index in range(53)]
+    cloud._ti = ""
+    cloud._key = "key"
+    cloud._session = Mock()
+    cloud._connected = True
+    cloud._fail_count = 0
+    cloud._deadline_operation_runs_in_worker = lambda: False
+    monkeypatch.setattr(
+        protocol_cloud,
+        "_post_cloud_response",
+        Mock(side_effect=requests.exceptions.Timeout),
+    )
+
+    with caplog.at_level(logging.DEBUG, logger=protocol_cloud.__name__):
+        result = cloud._request_unlocked(
+            "https://example.invalid",
+            {"data": "optional"},
+            retry_count=0,
+            timeout=0.01,
+        )
+
+    assert result is None
+    warning_records = [
+        record for record in caplog.records if record.levelno >= logging.WARNING
+    ]
+    assert not warning_records
+    assert "Read timed out" in caplog.text
+
+
+def test_missing_optional_cloud_response_is_debug_only(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
+    cloud._host = ""
+    cloud._did = "device-1"
+    cloud._id = 1
+    cloud._strings = [f"value-{index}" for index in range(53)]
+    cloud._api_call = Mock(return_value=None)
+
+    with caplog.at_level(logging.DEBUG, logger=protocol_cloud.__name__):
+        result = cloud._send_unlocked("action", [])
+
+    assert result is None
+    warning_records = [
+        record for record in caplog.records if record.levelno >= logging.WARNING
+    ]
+    assert not warning_records
+    assert "send failed" in caplog.text
 
 
 def _capture_request_error(
