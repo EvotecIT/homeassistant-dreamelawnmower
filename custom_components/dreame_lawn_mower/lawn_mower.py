@@ -42,6 +42,9 @@ from .control_options import (
     mowing_action_label,
 )
 from .coordinator import DreameLawnMowerCoordinator
+from .dreame_lawn_mower_client.feature_capabilities import (
+    resolved_feature_capabilities,
+)
 from .dreame_lawn_mower_client.mowing_preferences import (
     normalize_mowing_preference_mode,
 )
@@ -352,6 +355,10 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             "serial_number": snapshot.serial_number,
             "cloud_update_time": snapshot.cloud_update_time,
             "capabilities": list(snapshot.capabilities),
+            "feature_capabilities": resolved_feature_capabilities(
+                snapshot,
+                descriptor=getattr(self, "_descriptor", None),
+            ),
             "selected_mowing_action": self.coordinator.selected_mowing_action,
             "selected_mowing_action_label": mowing_action_label(
                 self.coordinator.selected_mowing_action

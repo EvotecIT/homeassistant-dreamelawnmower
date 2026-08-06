@@ -45,6 +45,7 @@ from .debug import (
 )
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
+from .dreame_lawn_mower_client.feature_capabilities import CAPABILITY_SUPPORTED
 from .dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
     camera_stream_block_reason,
@@ -280,7 +281,10 @@ class DreameLawnMowerVideoCamera(
         self._bypass_lan = False
         self._last_video_transport: str | None = None
         self._last_video_transport_attempted: str | None = None
-        self._video_capability_observed = snapshot_advertises_video(coordinator.data)
+        self._video_capability_advertised = snapshot_advertises_video(
+            coordinator.data
+        )
+        self._video_capability_observed = False
 
     async def async_added_to_hass(self) -> None:
         """Schedule managed runtime preparation without blocking entity setup."""
@@ -308,7 +312,10 @@ class DreameLawnMowerVideoCamera(
         if not self._runtime_configured or (
             self._lan_cache.inputs is None
             and self._provisioning_cache.inputs is None
-            and (snapshot is None or not snapshot_advertises_video(snapshot))
+            and (
+                snapshot is None
+                or self._resolved_video_capability().state != CAPABILITY_SUPPORTED
+            )
         ):
             return
         self._runtime_prepare_task = self.hass.async_create_task(
@@ -463,6 +470,7 @@ class DreameLawnMowerVideoCamera(
         relay_diagnostics: dict[str, object],
     ) -> None:
         """Commit a session only after the relay observes decodable FLV media."""
+        self._video_capability_observed = True
         self._video_first_media_at = monotonic()
         if self._video_recovery_pending:
             self._video_recovery_success_count += 1

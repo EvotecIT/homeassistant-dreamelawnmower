@@ -6,6 +6,8 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import pytest
+
 from custom_components.dreame_lawn_mower import camera as camera_module
 from custom_components.dreame_lawn_mower.camera import (
     DreameLawnMowerAllMapsCamera,
@@ -42,6 +44,69 @@ def test_optional_map_cameras_refresh_only_when_requested() -> None:
     assert DreameLawnMowerLivePathMapCamera.__dict__[refresh_policy] is False
     assert DreameLawnMowerAllMapsCamera.__dict__[refresh_policy] is False
     assert DreameLawnMowerMapDataCamera.__dict__[refresh_policy] is False
+
+
+@pytest.mark.parametrize(
+    ("model", "video_expected"),
+    [
+        ("dreame.mower.p2255", False),
+        ("dreame.mower.g2408", True),
+        ("dreame.mower.future", True),
+    ],
+)
+async def test_camera_setup_only_omits_definitively_unsupported_video(
+    monkeypatch: pytest.MonkeyPatch,
+    model: str,
+    video_expected: bool,
+) -> None:
+    """Unknown models keep detection while the known A1 avoids a dead entity."""
+    descriptor = SimpleNamespace(model=model)
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            descriptor=descriptor,
+            capabilities=(),
+            raw_info={},
+        ),
+        client=SimpleNamespace(descriptor=descriptor),
+    )
+    entry = SimpleNamespace(entry_id="entry-1")
+    hass = SimpleNamespace(
+        data={camera_module.DOMAIN: {entry.entry_id: coordinator}},
+    )
+    added: list[object] = []
+
+    def _entity(name: str):
+        return lambda *_args, **_kwargs: name
+
+    monkeypatch.setattr(camera_module, "DreameLawnMowerMapCamera", _entity("map"))
+    monkeypatch.setattr(
+        camera_module,
+        "DreameLawnMowerLivePathMapCamera",
+        _entity("live_path_map"),
+    )
+    monkeypatch.setattr(
+        camera_module,
+        "DreameLawnMowerAllMapsCamera",
+        _entity("all_maps"),
+    )
+    monkeypatch.setattr(
+        camera_module,
+        "DreameLawnMowerMapDataCamera",
+        _entity("map_data"),
+    )
+    monkeypatch.setattr(
+        camera_module,
+        "DreameLawnMowerVideoCamera",
+        _entity("live_video"),
+    )
+
+    await camera_module.async_setup_entry(
+        hass,
+        entry,
+        lambda entities: added.extend(entities),
+    )
+
+    assert ("live_video" in added) is video_expected
 
 
 def test_map_camera_attributes_include_app_map_summary_counts() -> None:

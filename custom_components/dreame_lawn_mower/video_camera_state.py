@@ -7,6 +7,12 @@ from typing import Any
 
 from . import video_stream_helpers as _video_helpers
 from .const import DOMAIN
+from .dreame_lawn_mower_client.feature_capabilities import (
+    CAPABILITY_SUPPORTED,
+    FEATURE_LIVE_VIDEO,
+    DreameLawnMowerFeatureCapability,
+    resolve_feature_capability,
+)
 from .dreame_lawn_mower_client.models import (
     camera_stream_block_reason as _camera_stream_block_reason,
 )
@@ -40,12 +46,22 @@ def snapshot_advertises_video(snapshot: Any) -> bool:
 class DreameLawnMowerVideoStateMixin:
     """Expose mower video capability, availability, and diagnostics."""
 
+    def _resolved_video_capability(self) -> DreameLawnMowerFeatureCapability:
+        """Return stable support independently from temporary availability."""
+        return resolve_feature_capability(
+            FEATURE_LIVE_VIDEO,
+            snapshot=self.coordinator.data,
+            descriptor=self._descriptor,
+            observed=self._video_capability_observed,
+            advertised=self._video_capability_advertised,
+        )
+
     def _handle_coordinator_update(self) -> None:
         """Remember video support and retire sessions when state blocks video."""
         snapshot = self.coordinator.data
         self._reset_video_live_view_if_inactive()
         if snapshot_advertises_video(snapshot):
-            self._video_capability_observed = True
+            self._video_capability_advertised = True
 
         block_reason = camera_stream_block_reason(snapshot)
         cleanup_task = self._state_gate_cleanup_task
@@ -115,7 +131,7 @@ class DreameLawnMowerVideoStateMixin:
             return False
         if snapshot is None:
             return False
-        return self._video_capability_observed
+        return self._resolved_video_capability().state == CAPABILITY_SUPPORTED
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -135,6 +151,7 @@ class DreameLawnMowerVideoStateMixin:
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Expose stream readiness without leaking runtime credentials."""
+        capability = self._resolved_video_capability()
         return {
             "video_runtime_configured": self._runtime_configured,
             "video_runtime_mode": self._runtime_mode,
@@ -146,6 +163,8 @@ class DreameLawnMowerVideoStateMixin:
                 self.coordinator.data
             ),
             "video_capability_observed": self._video_capability_observed,
+            "video_capability": capability.state,
+            "video_capability_source": capability.source,
             "last_video_transport": self._last_video_transport,
             "last_video_transport_attempted": self._last_video_transport_attempted,
             "lan_video_identity_cached": self._lan_cache.inputs is not None,
