@@ -56,7 +56,7 @@ brand name:
 | Dreame A3 AWD 1000 | `dreame.mower.q2501a` | **Validated** | Core entities, mower state, maps, and cloud live video on firmware `4.3.6_0418` with an EU account |
 | MOVA LiDAX Ultra 1000 | `mova.mower.g2529c` | **Field-reported** | MOVAhome EU login, commands, battery, and model-specific cloud property handling |
 | Dreame A3 AWD Pro 3500 | `dreame.mower.g2541e` | **Recognized** | Model mapping and diagnostics report; broader live confirmation is still needed |
-| Dreame A1 | `dreame.mower.p2255` | **Recognized** | Model mapping and mower-specific state semantics; needs fixtures and live validation |
+| Dreame A1 | `dreame.mower.p2255` | **Recognized** | Model mapping and mower-specific state semantics; live video is explicitly unsupported |
 | Dreame A1 Pro | `dreame.mower.g2422` | **Recognized** | Model mapping and mower-specific state semantics; needs fixtures and live validation |
 | Newer A-series mower | `dreame.mower.g3255` | **Recognized** | Raw identifier observed; retail name and feature coverage are not yet confirmed |
 
@@ -306,6 +306,13 @@ other secrets before attaching files.
 The primary entity is:
 
 - `lawn_mower.<device>`
+
+Its `feature_capabilities` attribute exposes stable optional-feature support as
+`supported`, `unsupported`, or `unknown`, together with the evidence source.
+Only confirmed model facts are listed explicitly; unlisted models and features
+remain unknown so runtime discovery can continue. The live-video camera is not
+created for a model known not to support it, while unknown models retain normal
+capability detection.
 
 Common user-facing helpers include:
 

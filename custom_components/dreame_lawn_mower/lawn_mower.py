@@ -42,6 +42,9 @@ from .control_options import (
     mowing_action_label,
 )
 from .coordinator import DreameLawnMowerCoordinator
+from .dreame_lawn_mower_client.feature_capabilities import (
+    resolved_feature_capabilities,
+)
 from .dreame_lawn_mower_client.mowing_preferences import (
     normalize_mowing_preference_mode,
 )
@@ -186,6 +189,16 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional mower attributes."""
         snapshot = self.coordinator.data
+        capability_evidence = getattr(
+            self.coordinator,
+            "feature_capability_evidence",
+            None,
+        )
+        observed_features, advertised_features = (
+            capability_evidence()
+            if capability_evidence is not None
+            else (frozenset(), frozenset())
+        )
         device = getattr(self.coordinator.client, "device", None)
         vector_map_details = (
             self.coordinator.vector_map_details
@@ -352,6 +365,12 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             "serial_number": snapshot.serial_number,
             "cloud_update_time": snapshot.cloud_update_time,
             "capabilities": list(snapshot.capabilities),
+            "feature_capabilities": resolved_feature_capabilities(
+                snapshot,
+                descriptor=getattr(self, "_descriptor", None),
+                observed=observed_features,
+                advertised=advertised_features,
+            ),
             "selected_mowing_action": self.coordinator.selected_mowing_action,
             "selected_mowing_action_label": mowing_action_label(
                 self.coordinator.selected_mowing_action

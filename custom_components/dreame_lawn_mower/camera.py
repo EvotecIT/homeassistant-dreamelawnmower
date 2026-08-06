@@ -37,6 +37,11 @@ from .coordinator import DreameLawnMowerCoordinator, runtime_tracking_active
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
 from .dreame_lawn_mower_client.client import render_app_map_payload_png
+from .dreame_lawn_mower_client.feature_capabilities import (
+    CAPABILITY_UNSUPPORTED,
+    FEATURE_LIVE_VIDEO,
+    resolve_feature_capability,
+)
 from .dreame_lawn_mower_client.map_visuals import (
     MapRenderStyle,
     load_map_marker,
@@ -78,15 +83,25 @@ async def async_setup_entry(
     map_cache = DreameLawnMowerMapCameraCache(ttl=_MAP_CACHE_TTL)
     live_map_cache = DreameLawnMowerMapCameraCache(ttl=_MAP_CACHE_TTL)
     all_maps_cache = DreameLawnMowerMapCameraCache(ttl=_MAP_CACHE_TTL)
-    async_add_entities(
-        [
-            DreameLawnMowerMapCamera(coordinator, map_cache),
-            DreameLawnMowerLivePathMapCamera(coordinator, live_map_cache),
-            DreameLawnMowerAllMapsCamera(coordinator, all_maps_cache),
-            DreameLawnMowerMapDataCamera(coordinator, map_cache),
-            DreameLawnMowerVideoCamera(coordinator, entry),
-        ]
+    entities: list[Camera] = [
+        DreameLawnMowerMapCamera(coordinator, map_cache),
+        DreameLawnMowerLivePathMapCamera(coordinator, live_map_cache),
+        DreameLawnMowerAllMapsCamera(coordinator, all_maps_cache),
+        DreameLawnMowerMapDataCamera(coordinator, map_cache),
+    ]
+    observed_features, advertised_features = (
+        coordinator.feature_capability_evidence()
     )
+    video_capability = resolve_feature_capability(
+        FEATURE_LIVE_VIDEO,
+        snapshot=coordinator.data,
+        descriptor=coordinator.client.descriptor,
+        observed=FEATURE_LIVE_VIDEO in observed_features,
+        advertised=FEATURE_LIVE_VIDEO in advertised_features,
+    )
+    if video_capability.state != CAPABILITY_UNSUPPORTED:
+        entities.append(DreameLawnMowerVideoCamera(coordinator, entry))
+    async_add_entities(entities)
 
 
 class DreameLawnMowerMapCamera(

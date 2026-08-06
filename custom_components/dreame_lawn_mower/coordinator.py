@@ -42,9 +42,11 @@ from .coordinator_refresh import (
     runtime_tracking_active,
 )
 from .diagnostic_events import DreameLawnMowerDiagnosticEventStore
+from .dreame_lawn_mower_client.feature_capabilities import FEATURE_LIVE_VIDEO
 from .dreame_lawn_mower_client.models import (
     DreameLawnMowerStatusBlob,
     display_name_for_model,
+    snapshot_advertises_video,
 )
 from .dreame_lawn_mower_client.schedule import (
     decode_schedule_payload_text,
@@ -166,6 +168,8 @@ class DreameLawnMowerCoordinator(
         self.bluetooth_connected: bool | None = None
         self.runtime_status_blob: DreameLawnMowerStatusBlob | None = None
         self.runtime_telemetry_cache = DreameLawnMowerRuntimeTelemetryCache()
+        self._advertised_feature_capabilities: set[str] = set()
+        self._observed_feature_capabilities: set[str] = set()
         self.diagnostic_events = DreameLawnMowerDiagnosticEventStore()
         self.performance = DreameLawnMowerPerformanceTracker()
         self.last_batch_device_data_probe_result: dict[str, Any] | None = None
@@ -284,6 +288,7 @@ class DreameLawnMowerCoordinator(
         """Publish fetched snapshots only while they remain the newest."""
         if self._device_snapshot_is_stale(data):
             return
+        self._retain_feature_capability_evidence(data)
         generations = getattr(self, "_device_snapshot_generations", None)
         recorded = generations.get(id(data)) if generations else None
         generation = (
@@ -294,6 +299,54 @@ class DreameLawnMowerCoordinator(
         if generation is not None:
             self._published_device_snapshot_generation = generation
         super().async_set_updated_data(data)
+
+    def _retain_feature_capability_evidence(
+        self,
+        snapshot: DreameLawnMowerSnapshot | None = None,
+    ) -> None:
+        """Keep positive support evidence across sparse metadata refreshes."""
+        advertised = getattr(self, "_advertised_feature_capabilities", None)
+        if advertised is None:
+            advertised = self._advertised_feature_capabilities = set()
+        observed = getattr(self, "_observed_feature_capabilities", None)
+        if observed is None:
+            observed = self._observed_feature_capabilities = set()
+        if snapshot_advertises_video(snapshot):
+            advertised.add(FEATURE_LIVE_VIDEO)
+        if self._persisted_video_route_available():
+            observed.add(FEATURE_LIVE_VIDEO)
+
+    def _persisted_video_route_available(self) -> bool:
+        """Return whether a health-verified persisted video route is loaded."""
+        lan_cache = getattr(self, "video_lan_cache", None)
+        provisioning_cache = getattr(self, "video_provisioning_cache", None)
+        return bool(
+            (
+                lan_cache is not None
+                and lan_cache.inputs is not None
+                and lan_cache.endpoint is not None
+            )
+            or (
+                provisioning_cache is not None
+                and provisioning_cache.inputs is not None
+                and provisioning_cache.device_config is not None
+            )
+        )
+
+    def record_feature_capability_observed(self, feature: str) -> None:
+        """Retain direct runtime proof for later entity and card consumers."""
+        observed = getattr(self, "_observed_feature_capabilities", None)
+        if observed is None:
+            observed = self._observed_feature_capabilities = set()
+        observed.add(feature)
+
+    def feature_capability_evidence(self) -> tuple[frozenset[str], frozenset[str]]:
+        """Return observed and advertised capability evidence."""
+        self._retain_feature_capability_evidence(self.data)
+        return (
+            frozenset(self._observed_feature_capabilities),
+            frozenset(self._advertised_feature_capabilities),
+        )
 
     def _device_snapshot_is_stale(self, snapshot: DreameLawnMowerSnapshot) -> bool:
         """Return whether a newer device snapshot has already been fetched."""

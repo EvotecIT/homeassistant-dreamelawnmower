@@ -199,9 +199,10 @@ def _uninitialized_entity(*, snapshot: object | None = None):
     entity._bypass_lan = False
     entity._last_video_transport = None
     entity._last_video_transport_attempted = None
-    entity._video_capability_observed = video_camera_module.snapshot_advertises_video(
-        snapshot
+    entity._video_capability_advertised = (
+        video_camera_module.snapshot_advertises_video(snapshot)
     )
+    entity._video_capability_observed = False
     entity._video_recovery_failure_count = 0
     entity._video_recovery_success_count = 0
     entity._video_recovery_consecutive_failures = 0
@@ -616,6 +617,32 @@ def test_video_camera_available_from_a2_video_metadata() -> None:
     assert entity.available is True
 
 
+def test_known_a2_video_camera_is_available_before_metadata_arrives() -> None:
+    snapshot = SimpleNamespace(
+        descriptor=SimpleNamespace(model="dreame.mower.g2408"),
+        capabilities=("map", "lidar_navigation"),
+        raw_info={"deviceInfo": {}},
+    )
+    entity = _uninitialized_entity(snapshot=snapshot)
+
+    assert entity.available is True
+    assert entity.extra_state_attributes["video_capability"] == "supported"
+    assert entity.extra_state_attributes["video_capability_source"] == "model"
+
+
+def test_known_a1_video_camera_reports_unsupported_after_registry_restore() -> None:
+    snapshot = SimpleNamespace(
+        descriptor=SimpleNamespace(model="dreame.mower.p2255"),
+        capabilities=("map", "lidar_navigation"),
+        raw_info={"deviceInfo": {}},
+    )
+    entity = _uninitialized_entity(snapshot=snapshot)
+
+    assert entity.available is False
+    assert entity.extra_state_attributes["video_capability"] == "unsupported"
+    assert entity.extra_state_attributes["video_capability_source"] == "model"
+
+
 def test_video_camera_unavailable_without_video_metadata() -> None:
     snapshot = SimpleNamespace(
         capabilities=("map", "lidar_navigation"),
@@ -730,7 +757,9 @@ def test_video_camera_remembers_support_when_metadata_disappears() -> None:
 
     assert entity.available is True
     assert entity.extra_state_attributes["video_capability_advertised"] is False
-    assert entity.extra_state_attributes["video_capability_observed"] is True
+    assert entity.extra_state_attributes["video_capability_observed"] is False
+    assert entity.extra_state_attributes["video_capability"] == "supported"
+    assert entity.extra_state_attributes["video_capability_source"] == "advertised"
 
 
 def test_video_camera_restores_support_from_healthy_cache_after_docked_reload() -> None:
@@ -1515,7 +1544,7 @@ def test_video_camera_creates_home_assistant_stream_from_live_source() -> None:
 
 
 def test_video_camera_marks_relay_media_ready_without_waiting_for_hls() -> None:
-    async def _run() -> tuple[dict[str, object], bool, bool]:
+    async def _run() -> tuple[dict[str, object], bool, bool, str, str]:
         entity = _uninitialized_entity()
         entity.async_write_ha_state = lambda: None
         provisioning = object()
@@ -1541,15 +1570,19 @@ def test_video_camera_marks_relay_media_ready_without_waiting_for_hls() -> None:
             entity._last_stream_health,
             cached == [provisioning],
             entity._bypass_lan,
+            entity.extra_state_attributes["video_capability"],
+            entity.extra_state_attributes["video_capability_source"],
         )
 
-    health, cached, bypass_lan = asyncio.run(_run())
+    health, cached, bypass_lan, capability, source = asyncio.run(_run())
 
     assert health["playback_session_verified"] is True
     assert health["verification_source"] == "local_flv_relay"
     assert health["video_width"] == 640
     assert cached is True
     assert bypass_lan is False
+    assert capability == "supported"
+    assert source == "observed"
 
 
 def test_video_camera_relay_failure_retires_active_session() -> None:
