@@ -164,3 +164,15 @@ def test_home_assistant_capability_matrix_is_compact_and_extensible() -> None:
             "source": CAPABILITY_SOURCE_ADVERTISED,
         },
     }
+
+
+def test_home_assistant_capability_matrix_accepts_retained_evidence() -> None:
+    snapshot = _snapshot("dreame.mower.future")
+
+    assert resolved_feature_capabilities(
+        snapshot,
+        observed=(FEATURE_LIVE_VIDEO,),
+    )[FEATURE_LIVE_VIDEO] == {
+        "state": CAPABILITY_SUPPORTED,
+        "source": CAPABILITY_SOURCE_OBSERVED,
+    }

@@ -45,7 +45,10 @@ from .debug import (
 )
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
-from .dreame_lawn_mower_client.feature_capabilities import CAPABILITY_SUPPORTED
+from .dreame_lawn_mower_client.feature_capabilities import (
+    CAPABILITY_SUPPORTED,
+    FEATURE_LIVE_VIDEO,
+)
 from .dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
     camera_stream_block_reason,
@@ -471,6 +474,13 @@ class DreameLawnMowerVideoCamera(
     ) -> None:
         """Commit a session only after the relay observes decodable FLV media."""
         self._video_capability_observed = True
+        record_observed = getattr(
+            self.coordinator,
+            "record_feature_capability_observed",
+            None,
+        )
+        if record_observed is not None:
+            record_observed(FEATURE_LIVE_VIDEO)
         self._video_first_media_at = monotonic()
         if self._video_recovery_pending:
             self._video_recovery_success_count += 1

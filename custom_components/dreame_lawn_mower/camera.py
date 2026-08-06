@@ -89,10 +89,15 @@ async def async_setup_entry(
         DreameLawnMowerAllMapsCamera(coordinator, all_maps_cache),
         DreameLawnMowerMapDataCamera(coordinator, map_cache),
     ]
+    observed_features, advertised_features = (
+        coordinator.feature_capability_evidence()
+    )
     video_capability = resolve_feature_capability(
         FEATURE_LIVE_VIDEO,
         snapshot=coordinator.data,
         descriptor=coordinator.client.descriptor,
+        observed=FEATURE_LIVE_VIDEO in observed_features,
+        advertised=FEATURE_LIVE_VIDEO in advertised_features,
     )
     if video_capability.state != CAPABILITY_UNSUPPORTED:
         entities.append(DreameLawnMowerVideoCamera(coordinator, entry))

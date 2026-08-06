@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -119,13 +120,21 @@ def resolved_feature_capabilities(
     *,
     descriptor: Any = None,
     features: tuple[str, ...] = (FEATURE_LIVE_VIDEO,),
+    observed: Collection[str] = (),
+    advertised: Collection[str] = (),
 ) -> dict[str, dict[str, str]]:
     """Return a compact capability matrix for Home Assistant consumers."""
+    observed_features = {_normalized_feature(feature) for feature in observed}
+    advertised_features = {
+        _normalized_feature(feature) for feature in advertised
+    }
     return {
         feature: resolve_feature_capability(
             feature,
             snapshot=snapshot,
             descriptor=descriptor,
+            observed=_normalized_feature(feature) in observed_features,
+            advertised=_normalized_feature(feature) in advertised_features,
         ).as_dict()
         for feature in features
     }

@@ -47,16 +47,18 @@ def test_optional_map_cameras_refresh_only_when_requested() -> None:
 
 
 @pytest.mark.parametrize(
-    ("model", "video_expected"),
+    ("model", "observed", "video_expected"),
     [
-        ("dreame.mower.p2255", False),
-        ("dreame.mower.g2408", True),
-        ("dreame.mower.future", True),
+        ("dreame.mower.p2255", False, False),
+        ("dreame.mower.p2255", True, True),
+        ("dreame.mower.g2408", False, True),
+        ("dreame.mower.future", False, True),
     ],
 )
-async def test_camera_setup_only_omits_definitively_unsupported_video(
+def test_camera_setup_only_omits_definitively_unsupported_video(
     monkeypatch: pytest.MonkeyPatch,
     model: str,
+    observed: bool,
     video_expected: bool,
 ) -> None:
     """Unknown models keep detection while the known A1 avoids a dead entity."""
@@ -68,6 +70,10 @@ async def test_camera_setup_only_omits_definitively_unsupported_video(
             raw_info={},
         ),
         client=SimpleNamespace(descriptor=descriptor),
+        feature_capability_evidence=lambda: (
+            frozenset({"live_video"}) if observed else frozenset(),
+            frozenset(),
+        ),
     )
     entry = SimpleNamespace(entry_id="entry-1")
     hass = SimpleNamespace(
@@ -100,10 +106,12 @@ async def test_camera_setup_only_omits_definitively_unsupported_video(
         _entity("live_video"),
     )
 
-    await camera_module.async_setup_entry(
-        hass,
-        entry,
-        lambda entities: added.extend(entities),
+    asyncio.run(
+        camera_module.async_setup_entry(
+            hass,
+            entry,
+            lambda entities: added.extend(entities),
+        )
     )
 
     assert ("live_video" in added) is video_expected

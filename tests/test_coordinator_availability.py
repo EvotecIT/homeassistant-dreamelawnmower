@@ -16,6 +16,48 @@ from custom_components.dreame_lawn_mower.coordinator import (
 from custom_components.dreame_lawn_mower.coordinator_connectivity import (
     CONNECTIVITY_STALE_GRACE_SECONDS,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    FEATURE_LIVE_VIDEO,
+)
+
+
+def test_feature_capability_evidence_survives_sparse_snapshots() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.video_lan_cache = SimpleNamespace(inputs=None, endpoint=None)
+    coordinator.video_provisioning_cache = SimpleNamespace(
+        inputs=None,
+        device_config=None,
+    )
+    advertised_snapshot = SimpleNamespace(
+        capabilities=(),
+        raw_info={"deviceInfo": {"permit": "pincode,video"}},
+    )
+    sparse_snapshot = SimpleNamespace(capabilities=(), raw_info={})
+
+    coordinator._retain_feature_capability_evidence(advertised_snapshot)
+    coordinator.data = sparse_snapshot
+
+    observed, advertised = coordinator.feature_capability_evidence()
+    assert observed == frozenset()
+    assert advertised == frozenset({FEATURE_LIVE_VIDEO})
+
+
+def test_persisted_video_route_is_observed_capability_evidence() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.video_lan_cache = SimpleNamespace(
+        inputs=object(),
+        endpoint=object(),
+    )
+    coordinator.video_provisioning_cache = SimpleNamespace(
+        inputs=None,
+        device_config=None,
+    )
+    coordinator.data = SimpleNamespace(capabilities=(), raw_info={})
+
+    observed, advertised = coordinator.feature_capability_evidence()
+
+    assert observed == frozenset({FEATURE_LIVE_VIDEO})
+    assert advertised == frozenset()
 
 
 def test_offline_snapshot_returns_normally_so_entities_remain_loaded() -> None:
