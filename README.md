@@ -55,6 +55,7 @@ brand name:
 | Dreame A2 3000 | `dreame.mower.g2568d` | **Field-reported** | Home Assistant discovery, core state entities, and heartbeat docking state on firmware `4.3.6_0625`; broader controls and media still need live validation |
 | Dreame A3 AWD 1000 | `dreame.mower.q2501a` | **Validated** | Core entities, mower state, maps, and cloud live video on firmware `4.3.6_0418` with an EU account |
 | MOVA LiDAX Ultra 1000 | `mova.mower.g2529c` | **Field-reported** | MOVAhome EU login, commands, battery, and model-specific cloud property handling |
+| MOVA LiDAX Ultra 2000 | `mova.mower.g2529f` | **Field-reported** | MOVAhome US login, core state and commands, maps, and cloud live video on firmware `4.3.6_0453` |
 | Dreame A3 AWD Pro 3500 | `dreame.mower.g2541e` | **Recognized** | Model mapping and diagnostics report; broader live confirmation is still needed |
 | Dreame A1 | `dreame.mower.p2255` | **Recognized** | Model mapping and mower-specific state semantics; live video is explicitly unsupported |
 | Dreame A1 Pro | `dreame.mower.g2422` | **Recognized** | Model mapping and mower-specific state semantics; needs fixtures and live validation |

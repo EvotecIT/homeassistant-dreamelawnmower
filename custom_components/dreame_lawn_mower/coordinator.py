@@ -53,7 +53,11 @@ from .dreame_lawn_mower_client.schedule import (
     encode_schedule_payload_text,
 )
 from .performance import DreameLawnMowerPerformanceTracker
-from .runtime_cache import DreameLawnMowerRuntimeTelemetryCache
+from .runtime_cache import (
+    DreameLawnMowerRuntimeTelemetryCache,
+    observe_runtime_session_state,
+    runtime_mission_completion_confirmed,
+)
 from .schedule_cache import (
     ScheduleActionReadBackoff,
     has_complete_schedule_cache,
@@ -412,6 +416,14 @@ class DreameLawnMowerCoordinator(
                 self.async_set_updated_data(snapshot)
                 return
             runtime_active = runtime_tracking_active(snapshot)
+            observe_runtime_session_state(
+                getattr(self, "runtime_telemetry_cache", None),
+                active_session=runtime_active,
+                completion_confirmed=runtime_mission_completion_confirmed(
+                    snapshot,
+                    tracking_active=runtime_active,
+                ),
+            )
             runtime_map_index = (
                 self._runtime_map_index()
                 if not runtime_active
@@ -451,6 +463,10 @@ class DreameLawnMowerCoordinator(
                         self.runtime_status_blob,
                         allow_zero=runtime_active,
                         active_session=runtime_active,
+                        completion_confirmed=runtime_mission_completion_confirmed(
+                            snapshot,
+                            tracking_active=runtime_active,
+                        ),
                     )
                     self.client.update_runtime_live_tracking(
                         self.runtime_status_blob,

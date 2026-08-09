@@ -131,6 +131,17 @@ def test_sensor_facade_preserves_split_implementation_exports() -> None:
             assert getattr(sensor_module, name) is value
 
 
+def test_sensor_facade_preserves_runtime_progress_helper() -> None:
+    """Keep the historical raw runtime-progress helper importable."""
+    blob = SimpleNamespace(candidate_runtime_area_progress_percent=99.7)
+
+    assert (
+        sensor_module._runtime_status_blob_progress_percent
+        is sensor_runtime._runtime_status_blob_progress_percent
+    )
+    assert sensor_module._runtime_status_blob_progress_percent(blob) == 99.7
+
+
 def test_sensor_facade_preserves_historical_domain_exports() -> None:
     """Keep domain dependencies historically exposed by the platform importable."""
     expected_exports = {

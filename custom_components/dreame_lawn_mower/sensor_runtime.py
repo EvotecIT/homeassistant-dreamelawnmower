@@ -9,7 +9,11 @@ from homeassistant.helpers.entity import EntityCategory
 
 from .coordinator import DreameLawnMowerCoordinator, runtime_tracking_active
 from .entity import DreameLawnMowerEntity
-from .runtime_cache import DreameLawnMowerRuntimeTelemetryCache
+from .runtime_cache import (
+    DreameLawnMowerRuntimeTelemetryCache,
+    runtime_mission_completion_confirmed,
+    runtime_mission_progress_percent,
+)
 from .sensor_map_data import (
     _coordinate_path_length_m,
     _current_app_map_summary,
@@ -116,8 +120,16 @@ class DreameLawnMowerRuntimeMissionProgressSensor(
     @property
     def native_value(self) -> float | int | None:
         """Return live or last-known mission progress from runtime telemetry."""
-        return _runtime_status_blob_progress_percent(
-            _runtime_session_blob(self.coordinator)
+        snapshot = getattr(self.coordinator, "data", None)
+        tracking_active = (
+            snapshot is not None and _runtime_progress_available_for_snapshot(snapshot)
+        )
+        return runtime_mission_progress_percent(
+            _runtime_session_blob(self.coordinator),
+            completion_confirmed=_runtime_session_completion_confirmed(
+                self.coordinator,
+                tracking_active=tracking_active,
+            ),
         )
 
     @property
@@ -451,6 +463,8 @@ def _runtime_session_attributes(coordinator: Any) -> dict[str, Any]:
     attributes = _runtime_status_blob_summary(blob)
     if not attributes:
         return {}
+    if _runtime_session_completion_confirmed(coordinator, tracking_active=live):
+        attributes["completion_confirmed"] = True
     cache = getattr(coordinator, "runtime_telemetry_cache", None)
     captured_at = (
         cache.captured_at
@@ -472,6 +486,24 @@ def _runtime_session_attributes(coordinator: Any) -> dict[str, Any]:
             captured_at.isoformat() if captured_at is not None else None
         )
     return {key: value for key, value in attributes.items() if value is not None}
+
+
+def _runtime_session_completion_confirmed(
+    coordinator: Any,
+    *,
+    tracking_active: bool,
+) -> bool:
+    """Return live or cached completion evidence for the current mission."""
+    cache = getattr(coordinator, "runtime_telemetry_cache", None)
+    return runtime_mission_completion_confirmed(
+        getattr(coordinator, "data", None),
+        tracking_active=tracking_active,
+        cached_completion_confirmed=(
+            cache.completion_confirmed
+            if isinstance(cache, DreameLawnMowerRuntimeTelemetryCache)
+            else False
+        ),
+    )
 
 
 def _runtime_status_blob_summary(blob: Any) -> dict[str, Any]:
@@ -521,11 +553,8 @@ def _runtime_status_blob_summary(blob: Any) -> dict[str, Any]:
 
 
 def _runtime_status_blob_progress_percent(blob: Any) -> float | int | None:
-    area_progress = getattr(blob, "candidate_runtime_area_progress_percent", None)
-    if isinstance(area_progress, int | float):
-        return area_progress
-    progress = getattr(blob, "candidate_runtime_progress_percent", None)
-    return progress if isinstance(progress, int | float) else None
+    """Return raw measured progress for historical direct imports."""
+    return runtime_mission_progress_percent(blob, completion_confirmed=False)
 
 
 def _runtime_status_blob_current_area_sqm(blob: Any) -> float | int | None:

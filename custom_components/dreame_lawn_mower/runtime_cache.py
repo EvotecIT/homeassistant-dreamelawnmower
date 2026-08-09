@@ -12,6 +12,8 @@ _SESSION_METRIC_FIELDS = (
     "candidate_runtime_current_area_sqm",
     "candidate_runtime_total_area_sqm",
 )
+_COMPLETED_TASK_STATUSES = frozenset({"completed", "finished"})
+_COMPLETED_STATUS_NOTICES = frozenset({"mowing_task_completed"})
 
 
 def _session_metric_signature(blob: Any) -> tuple[Any, ...]:
@@ -39,13 +41,58 @@ def runtime_blob_has_nonzero_session_metrics(blob: Any) -> bool:
     )
 
 
+def runtime_mission_completion_confirmed(
+    snapshot: Any,
+    *,
+    tracking_active: bool,
+    cached_completion_confirmed: bool = False,
+) -> bool:
+    """Return whether an inactive mission has an explicit completion signal."""
+    if snapshot is None or tracking_active:
+        return False
+    return (
+        cached_completion_confirmed
+        or getattr(snapshot, "task_status", None) in _COMPLETED_TASK_STATUSES
+        or getattr(snapshot, "status_notice_name", None) in _COMPLETED_STATUS_NOTICES
+    )
+
+
+def runtime_mission_progress_percent(
+    blob: Any,
+    *,
+    completion_confirmed: bool,
+) -> float | int | None:
+    """Return measured mission progress, normalized after confirmed completion."""
+    area_progress = getattr(blob, "candidate_runtime_area_progress_percent", None)
+    progress = getattr(blob, "candidate_runtime_progress_percent", None)
+    measured = area_progress if isinstance(area_progress, int | float) else progress
+    if not isinstance(measured, int | float):
+        return None
+    if completion_confirmed:
+        return 100.0
+    return measured
+
+
 @dataclass(slots=True)
 class DreameLawnMowerRuntimeTelemetryCache:
     """Preserve the latest useful mission metrics after a session ends."""
 
     blob: Any = None
     captured_at: datetime | None = None
+    completion_confirmed: bool = False
     _metric_signature: tuple[Any, ...] | None = None
+
+    def observe_session_state(
+        self,
+        *,
+        active_session: bool,
+        completion_confirmed: bool = False,
+    ) -> None:
+        """Apply authoritative mission state before optional telemetry work."""
+        if active_session:
+            self.completion_confirmed = False
+        elif completion_confirmed:
+            self.completion_confirmed = True
 
     def update(
         self,
@@ -54,8 +101,13 @@ class DreameLawnMowerRuntimeTelemetryCache:
         now: datetime | None = None,
         allow_zero: bool = True,
         active_session: bool = False,
+        completion_confirmed: bool = False,
     ) -> bool:
         """Store a useful runtime payload without erasing it with empty polls."""
+        self.observe_session_state(
+            active_session=active_session,
+            completion_confirmed=completion_confirmed,
+        )
         if not runtime_blob_has_session_metrics(blob):
             return False
         if not allow_zero and not runtime_blob_has_nonzero_session_metrics(blob):
@@ -71,3 +123,17 @@ class DreameLawnMowerRuntimeTelemetryCache:
         self.captured_at = now or datetime.now(UTC)
         self._metric_signature = signature
         return True
+
+
+def observe_runtime_session_state(
+    cache: Any,
+    *,
+    active_session: bool,
+    completion_confirmed: bool = False,
+) -> None:
+    """Apply authoritative session state when the integration owns this cache."""
+    if isinstance(cache, DreameLawnMowerRuntimeTelemetryCache):
+        cache.observe_session_state(
+            active_session=active_session,
+            completion_confirmed=completion_confirmed,
+        )

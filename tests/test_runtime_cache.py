@@ -8,6 +8,8 @@ from types import SimpleNamespace
 from custom_components.dreame_lawn_mower.runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,
     runtime_blob_has_session_metrics,
+    runtime_mission_completion_confirmed,
+    runtime_mission_progress_percent,
 )
 
 
@@ -92,3 +94,108 @@ def test_active_zero_blob_starts_a_new_session() -> None:
 
     assert cache.update(idle, allow_zero=True) is True
     assert cache.blob is idle
+
+
+def test_completed_mission_normalizes_rounded_area_progress() -> None:
+    """Explicit completion wins over a slightly short measured area ratio."""
+    snapshot = SimpleNamespace(
+        task_status="idle",
+        status_notice_name="mowing_task_completed",
+    )
+    blob = SimpleNamespace(candidate_runtime_area_progress_percent=99.7)
+
+    completion_confirmed = runtime_mission_completion_confirmed(
+        snapshot,
+        tracking_active=False,
+    )
+    assert (
+        runtime_mission_progress_percent(
+            blob,
+            completion_confirmed=completion_confirmed,
+        )
+        == 100.0
+    )
+    assert completion_confirmed is True
+
+
+def test_finished_heartbeat_normalizes_rounded_area_progress() -> None:
+    """The heartbeat's terminal task state is also authoritative completion."""
+    snapshot = SimpleNamespace(task_status="finished", status_notice_name=None)
+    blob = SimpleNamespace(candidate_runtime_area_progress_percent=99.7)
+
+    assert (
+        runtime_mission_progress_percent(
+            blob,
+            completion_confirmed=runtime_mission_completion_confirmed(
+                snapshot,
+                tracking_active=False,
+            ),
+        )
+        == 100.0
+    )
+
+
+def test_active_or_incomplete_mission_keeps_measured_progress() -> None:
+    """Returns, pauses, and new sessions must not be presented as complete."""
+    blob = SimpleNamespace(candidate_runtime_area_progress_percent=73.3)
+    returning = SimpleNamespace(
+        task_status="returning_to_dock",
+        status_notice_name="low_battery_returning",
+    )
+    stale_notice = SimpleNamespace(
+        task_status="mowing",
+        status_notice_name="mowing_task_completed",
+    )
+
+    assert (
+        runtime_mission_progress_percent(
+            blob,
+            completion_confirmed=runtime_mission_completion_confirmed(
+                returning,
+                tracking_active=False,
+            ),
+        )
+        == 73.3
+    )
+    assert (
+        runtime_mission_progress_percent(
+            blob,
+            completion_confirmed=runtime_mission_completion_confirmed(
+                stale_notice,
+                tracking_active=True,
+            ),
+        )
+        == 73.3
+    )
+
+
+def test_completion_without_runtime_measurement_remains_unavailable() -> None:
+    """A completion event alone must not invent runtime telemetry."""
+    snapshot = SimpleNamespace(
+        task_status="finished",
+        status_notice_name="mowing_task_completed",
+    )
+
+    assert (
+        runtime_mission_progress_percent(
+            SimpleNamespace(),
+            completion_confirmed=runtime_mission_completion_confirmed(
+                snapshot,
+                tracking_active=False,
+            ),
+        )
+        is None
+    )
+
+
+def test_cache_preserves_completion_until_the_next_active_session() -> None:
+    """Transient completion evidence remains attached to the cached mission."""
+    blob = SimpleNamespace(candidate_runtime_area_progress_percent=99.7)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+
+    assert cache.update(blob, completion_confirmed=True) is True
+    assert cache.completion_confirmed is True
+    assert cache.update(SimpleNamespace()) is False
+    assert cache.completion_confirmed is True
+    assert cache.update(SimpleNamespace(), active_session=True) is False
+    assert cache.completion_confirmed is False

@@ -26,6 +26,10 @@ from .performance import (
     DreameLawnMowerPerformanceTracker,
     format_performance_sample,
 )
+from .runtime_cache import (
+    observe_runtime_session_state,
+    runtime_mission_completion_confirmed,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -146,6 +150,14 @@ class DreameLawnMowerRefreshMixin:
             self._record_connectivity_success(snapshot)
 
             runtime_active = runtime_tracking_active(snapshot)
+            observe_runtime_session_state(
+                getattr(self, "runtime_telemetry_cache", None),
+                active_session=runtime_active,
+                completion_confirmed=runtime_mission_completion_confirmed(
+                    snapshot,
+                    tracking_active=runtime_active,
+                ),
+            )
             if runtime_active:
                 if not await self._async_refresh_active_runtime(cycle, snapshot):
                     return self._snapshot_for_publication(snapshot)
@@ -243,6 +255,10 @@ class DreameLawnMowerRefreshMixin:
                 self.runtime_status_blob,
                 allow_zero=runtime_active,
                 active_session=runtime_active,
+                completion_confirmed=runtime_mission_completion_confirmed(
+                    snapshot,
+                    tracking_active=runtime_active,
+                ),
             )
             self.client.update_runtime_live_tracking(
                 self.runtime_status_blob,
