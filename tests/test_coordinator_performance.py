@@ -34,6 +34,9 @@ from custom_components.dreame_lawn_mower.coordinator import (
 from custom_components.dreame_lawn_mower.performance import (
     DreameLawnMowerPerformanceTracker,
 )
+from custom_components.dreame_lawn_mower.runtime_cache import (
+    DreameLawnMowerRuntimeTelemetryCache,
+)
 from custom_components.dreame_lawn_mower.schedule_cache import (
     ScheduleActionReadBackoff,
     merge_app_schedule_payload,
@@ -246,6 +249,14 @@ def test_newer_video_safety_snapshot_blocks_foreground_runtime_side_effects() ->
         runtime_started = asyncio.Event()
         release_runtime = asyncio.Event()
         retained_runtime = SimpleNamespace(source="newer-state")
+        completed_blob = SimpleNamespace(
+            candidate_runtime_area_progress_percent=100.0
+        )
+        runtime_cache = DreameLawnMowerRuntimeTelemetryCache()
+        assert runtime_cache.update(
+            completed_blob,
+            completion_confirmed=True,
+        ) is True
 
         async def refresh_snapshot() -> object:
             return next(snapshots)
@@ -276,7 +287,7 @@ def test_newer_video_safety_snapshot_blocks_foreground_runtime_side_effects() ->
         coordinator.app_maps_refresh_succeeded = False
         coordinator.selected_map_index = 2
         coordinator.runtime_status_blob = retained_runtime
-        coordinator.runtime_telemetry_cache = SimpleNamespace(update=Mock())
+        coordinator.runtime_telemetry_cache = runtime_cache
         coordinator.client = SimpleNamespace(
             async_refresh=refresh_snapshot,
             async_refresh_authoritative_snapshot=refresh_snapshot,
@@ -307,7 +318,8 @@ def test_newer_video_safety_snapshot_blocks_foreground_runtime_side_effects() ->
         publish.assert_called_with(video_snapshots[-1])
         assert coordinator.runtime_status_blob is retained_runtime
         assert coordinator._runtime_map_identity_verified is False
-        coordinator.runtime_telemetry_cache.update.assert_not_called()
+        assert runtime_cache.blob is completed_blob
+        assert runtime_cache.completion_confirmed is True
         coordinator.client.update_runtime_live_tracking.assert_not_called()
         coordinator._schedule_metadata_refresh.assert_not_called()
 
