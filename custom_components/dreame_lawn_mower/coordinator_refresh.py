@@ -27,7 +27,6 @@ from .performance import (
     format_performance_sample,
 )
 from .runtime_cache import (
-    observe_runtime_session_state,
     runtime_mission_completion_confirmed,
     runtime_mission_completion_rejected,
     runtime_mission_new_session,
@@ -155,10 +154,6 @@ class DreameLawnMowerRefreshMixin:
             self._record_connectivity_success(snapshot)
 
             runtime_active = runtime_tracking_active(snapshot)
-            mission_active = runtime_mission_session_active(
-                snapshot,
-                tracking_active=runtime_active,
-            )
             if runtime_active:
                 if not await self._async_refresh_active_runtime(cycle, snapshot):
                     return self._snapshot_for_publication(snapshot)
@@ -169,18 +164,7 @@ class DreameLawnMowerRefreshMixin:
             # Active runtime hydration yields to app-map and telemetry reads.
             # Commit the authoritative mission boundary only after those awaits
             # confirm that this foreground snapshot is still current.
-            observe_runtime_session_state(
-                getattr(self, "runtime_telemetry_cache", None),
-                active_session=mission_active,
-                completion_confirmed=runtime_mission_completion_confirmed(
-                    snapshot,
-                    tracking_active=mission_active,
-                ),
-                completion_rejected=runtime_mission_completion_rejected(snapshot),
-                new_session=runtime_mission_new_session(snapshot),
-                new_session_evidence=runtime_mission_new_session_evidence(snapshot),
-                session_identity=runtime_mission_session_identity(snapshot),
-            )
+            self._observe_runtime_mission_boundary(snapshot)
             self._schedule_metadata_refresh(
                 refresh_map_and_runtime=not runtime_active,
             )

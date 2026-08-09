@@ -153,11 +153,13 @@ def test_realtime_start_notice_retains_event_time_for_session_identity() -> None
         "unknown",
         realtime_error_code=53,
         realtime_error_last_seen=123.5,
+        realtime_state_last_seen=120.0,
         state="MOWING",
     )
 
     assert snapshot.status_notice_name == "scheduled_mowing_started"
     assert snapshot.status_notice_event_at == 123.5
+    assert snapshot.state_event_at == 120.0
 
 
 @pytest.mark.parametrize(

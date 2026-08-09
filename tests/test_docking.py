@@ -387,6 +387,50 @@ def test_fallback_start_captures_device_session_decision(
     assert result is expected_new_session
 
 
+def test_fallback_start_locks_identity_decision_through_dispatch() -> None:
+    """MQTT cannot change the start branch between inspection and dispatch."""
+
+    class StateLock:
+        held = False
+
+        def __enter__(self) -> None:
+            self.held = True
+
+        def __exit__(self, *_args: object) -> None:
+            self.held = False
+
+    state_lock = StateLock()
+
+    class LockedStatus:
+        @property
+        def task_status(self) -> DreameMowerTaskStatus:
+            assert state_lock.held
+            return DreameMowerTaskStatus.COMPLETED
+
+        @property
+        def started(self) -> bool:
+            assert state_lock.held
+            return False
+
+    def start_mowing() -> dict[str, int]:
+        assert state_lock.held
+        return {"result": 0}
+
+    client = object.__new__(DreameLawnMowerClient)
+    client._ensure_device = Mock(
+        return_value=SimpleNamespace(
+            _state_lock=state_lock,
+            status=LockedStatus(),
+            start_mowing=start_mowing,
+        )
+    )
+
+    result = asyncio.run(client._async_call_start_mowing_with_session_identity())
+
+    assert result is True
+    assert state_lock.held is False
+
+
 def test_fallback_start_does_not_reclassify_paused_return_to_dock() -> None:
     """A special resume branch remains part of the existing mower task."""
     start_mowing = Mock(return_value={"result": 0})

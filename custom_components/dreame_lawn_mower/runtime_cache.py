@@ -102,12 +102,21 @@ def runtime_mission_session_active(
         return True
     if getattr(snapshot, "task_status", None) in _RESUMABLE_TASK_STATUSES:
         return True
-    if getattr(snapshot, "status_notice_name", None) in _RESUME_STATUS_NOTICES:
-        return True
     if runtime_mission_new_session(snapshot):
         return True
     if tracking_active:
         return True
+    if getattr(snapshot, "status_notice_name", None) in _RESUME_STATUS_NOTICES:
+        notice_event_at = getattr(snapshot, "status_notice_event_at", None)
+        state_event_at = getattr(snapshot, "state_event_at", None)
+        if (
+            isinstance(notice_event_at, int | float)
+            and not isinstance(notice_event_at, bool)
+            and isinstance(state_event_at, int | float)
+            and not isinstance(state_event_at, bool)
+            and notice_event_at > state_event_at
+        ):
+            return True
     if getattr(snapshot, "task_status", None) in _COMPLETED_TASK_STATUSES:
         return False
     if getattr(snapshot, "state", None) in {

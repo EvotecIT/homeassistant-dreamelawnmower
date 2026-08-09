@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import nullcontext
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
@@ -137,26 +138,36 @@ class _DreameLawnMowerClientCoreMixin:
             nonlocal new_session
             from .device_types import DreameMowerTaskStatus
 
-            status = device.status
-            resumes_special_task = bool(
-                getattr(status, "fast_mapping_paused", False)
-                or getattr(status, "returning_paused", False)
-                or (
-                    getattr(getattr(device, "capability", None), "cruising", False)
-                    and getattr(status, "cruising_paused", False)
+            state_lock = getattr(device, "_state_lock", None)
+            state_context = state_lock if state_lock is not None else nullcontext()
+            with state_context:
+                status = device.status
+                resumes_special_task = bool(
+                    getattr(status, "fast_mapping_paused", False)
+                    or getattr(status, "returning_paused", False)
+                    or (
+                        getattr(
+                            getattr(device, "capability", None),
+                            "cruising",
+                            False,
+                        )
+                        and getattr(status, "cruising_paused", False)
+                    )
                 )
-            )
-            task_status = getattr(status, "task_status", None)
-            started = getattr(status, "started", None)
-            if resumes_special_task:
-                new_session = False
-            elif task_status is None or task_status is DreameMowerTaskStatus.UNKNOWN:
-                new_session = None
-            elif started is not None:
-                # Capture the same value immediately before start_mowing uses
-                # it to decide whether to create or resume a task.
-                new_session = not bool(started)
-            return device.start_mowing()
+                task_status = getattr(status, "task_status", None)
+                started = getattr(status, "started", None)
+                if resumes_special_task:
+                    new_session = False
+                elif (
+                    task_status is None
+                    or task_status is DreameMowerTaskStatus.UNKNOWN
+                ):
+                    new_session = None
+                elif started is not None:
+                    # Keep the identity decision and the device's own branch
+                    # under the same lock used by MQTT state mutations.
+                    new_session = not bool(started)
+                return device.start_mowing()
 
         try:
             await asyncio.to_thread(call_start_mowing)

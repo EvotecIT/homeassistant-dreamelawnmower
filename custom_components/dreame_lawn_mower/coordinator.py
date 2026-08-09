@@ -307,7 +307,33 @@ class DreameLawnMowerCoordinator(
         )
         if generation is not None:
             self._published_device_snapshot_generation = generation
+        if getattr(data, "available", True):
+            self._observe_runtime_mission_boundary(data)
         super().async_set_updated_data(data)
+
+    def _observe_runtime_mission_boundary(
+        self,
+        snapshot: DreameLawnMowerSnapshot,
+    ) -> bool | None:
+        """Apply one authoritative snapshot to the integration-owned cache."""
+        runtime_active = runtime_tracking_active(snapshot)
+        mission_active = runtime_mission_session_active(
+            snapshot,
+            tracking_active=runtime_active,
+        )
+        observe_runtime_session_state(
+            getattr(self, "runtime_telemetry_cache", None),
+            active_session=mission_active,
+            completion_confirmed=runtime_mission_completion_confirmed(
+                snapshot,
+                tracking_active=mission_active,
+            ),
+            completion_rejected=runtime_mission_completion_rejected(snapshot),
+            new_session=runtime_mission_new_session(snapshot),
+            new_session_evidence=runtime_mission_new_session_evidence(snapshot),
+            session_identity=runtime_mission_session_identity(snapshot),
+        )
+        return mission_active
 
     def _retain_feature_capability_evidence(
         self,
@@ -457,18 +483,7 @@ class DreameLawnMowerCoordinator(
             if self._device_snapshot_is_stale(snapshot):
                 return
 
-            observe_runtime_session_state(
-                getattr(self, "runtime_telemetry_cache", None),
-                active_session=mission_active,
-                completion_confirmed=runtime_mission_completion_confirmed(
-                    snapshot,
-                    tracking_active=mission_active,
-                ),
-                completion_rejected=runtime_mission_completion_rejected(snapshot),
-                new_session=runtime_mission_new_session(snapshot),
-                new_session_evidence=runtime_mission_new_session_evidence(snapshot),
-                session_identity=runtime_mission_session_identity(snapshot),
-            )
+            self._observe_runtime_mission_boundary(snapshot)
             if runtime_status_error is None:
                 try:
                     self.runtime_status_blob = runtime_status_blob

@@ -229,6 +229,43 @@ def test_video_safety_refresh_retries_snapshot_that_is_already_stale() -> None:
     asyncio.run(scenario())
 
 
+def test_video_safety_refresh_applies_replacement_mission_boundary() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        previous = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+        cache = DreameLawnMowerRuntimeTelemetryCache()
+        assert cache.update(previous, active_session=True) is True
+        replacement = SimpleNamespace(
+            available=True,
+            mowing_session_active=True,
+            activity="mowing",
+            state="mowing",
+            docked=False,
+            task_status="mowing",
+            task_resumable=False,
+            status_notice_name="mowing_task_started",
+            status_notice_event_at=2.0,
+            mission_task_id=None,
+        )
+        coordinator._device_refresh_lock = asyncio.Lock()
+        coordinator._device_snapshot_generation = 0
+        coordinator._published_device_snapshot_generation = 0
+        coordinator._device_snapshot_generations = {}
+        coordinator.runtime_telemetry_cache = cache
+        coordinator.client = SimpleNamespace(
+            async_refresh_authoritative_snapshot=AsyncMock(return_value=replacement),
+        )
+
+        with patch.object(DataUpdateCoordinator, "async_set_updated_data") as publish:
+            result = await coordinator.async_refresh_video_safety_state()
+
+        assert result is replacement
+        assert cache.blob is None
+        publish.assert_called_once_with(replacement)
+
+    asyncio.run(scenario())
+
+
 def test_newer_video_safety_snapshot_blocks_foreground_runtime_side_effects() -> None:
     async def scenario() -> None:
         coordinator = object.__new__(DreameLawnMowerCoordinator)

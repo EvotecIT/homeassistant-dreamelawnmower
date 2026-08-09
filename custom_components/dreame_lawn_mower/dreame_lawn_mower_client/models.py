@@ -351,6 +351,11 @@ class DreameLawnMowerSnapshot:
     state_name: str
     activity: str
     battery_level: int | None = None
+    state_event_at: float | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
     task_status: str | None = None
     task_status_name: str | None = None
     task_status_source: str | None = None
@@ -1337,6 +1342,10 @@ def snapshot_from_device(
         state_name=state_name,
         activity=activity,
         battery_level=getattr(device.status, "battery_level", None),
+        state_event_at=_realtime_property_last_seen(
+            device,
+            REALTIME_STATE_PROPERTY_KEY,
+        ),
         task_status=task_obj.name.lower() if task_obj is not None else None,
         task_status_name=getattr(device.status, "task_status_name", None),
         task_status_event_at=_realtime_property_last_seen(

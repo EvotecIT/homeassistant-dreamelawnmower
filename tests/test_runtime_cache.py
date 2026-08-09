@@ -228,6 +228,38 @@ def test_missing_idle_heartbeat_ends_active_session_boundary() -> None:
     assert cache.blob is None
 
 
+def test_stale_resume_notice_cannot_override_newer_idle_state() -> None:
+    """A retained property 2.2 notice cannot keep an ended mission active."""
+    idle = SimpleNamespace(
+        mowing_session_active=None,
+        docked=True,
+        state="idle",
+        state_event_at=2.0,
+        task_status=None,
+        task_resumable=None,
+        status_notice_name="mowing_resumed_after_charging",
+        status_notice_event_at=1.0,
+    )
+
+    assert runtime_mission_session_active(idle, tracking_active=False) is False
+
+
+def test_newer_resume_notice_can_precede_lagging_physical_state() -> None:
+    """Ordered realtime evidence can retain a resumed charging mission."""
+    resuming = SimpleNamespace(
+        mowing_session_active=None,
+        docked=True,
+        state="charging",
+        state_event_at=1.0,
+        task_status=None,
+        task_resumable=None,
+        status_notice_name="mowing_resumed_after_charging",
+        status_notice_event_at=2.0,
+    )
+
+    assert runtime_mission_session_active(resuming, tracking_active=False) is True
+
+
 def test_starting_signal_resets_an_already_active_prior_session_once() -> None:
     """Coalesced stop/start callbacks cannot reuse the prior mission blob."""
     previous = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
