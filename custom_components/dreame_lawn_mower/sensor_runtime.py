@@ -14,6 +14,7 @@ from .runtime_cache import (
     runtime_mission_completion_confirmed,
     runtime_mission_progress_percent,
     runtime_mission_session_active,
+    runtime_mission_session_started_at,
 )
 from .sensor_map_data import (
     _coordinate_path_length_m,
@@ -509,6 +510,7 @@ def _runtime_session_completion_confirmed(
             if isinstance(cache, DreameLawnMowerRuntimeTelemetryCache)
             else False
         ),
+        session_started_at=runtime_mission_session_started_at(cache),
     )
 
 

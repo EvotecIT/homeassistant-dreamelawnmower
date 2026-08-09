@@ -11,11 +11,13 @@ from custom_components.dreame_lawn_mower.runtime_cache import (
     runtime_mission_completion_confirmed,
     runtime_mission_completion_rejected,
     runtime_mission_new_session,
+    runtime_mission_new_session_event_at,
     runtime_mission_new_session_evidence,
     runtime_mission_progress_percent,
     runtime_mission_session_active,
     runtime_mission_session_generation,
     runtime_mission_session_identity,
+    runtime_mission_session_started_at,
 )
 
 
@@ -409,6 +411,90 @@ def test_all_area_start_notice_announces_a_new_session() -> None:
     )
 
     assert runtime_mission_new_session(snapshot) is True
+
+
+def test_retained_start_notice_cannot_override_explicit_inactive_heartbeat() -> None:
+    """An older start property cannot keep a manually stopped mission active."""
+    snapshot = SimpleNamespace(
+        mowing_session_active=False,
+        state="idle",
+        state_event_at=30.0,
+        task_status="idle",
+        task_status_event_at=30.0,
+        status_notice_name="mowing_task_started",
+        status_notice_event_at=10.0,
+    )
+
+    assert runtime_mission_new_session(snapshot) is False
+    assert runtime_mission_new_session_event_at(snapshot) is None
+    assert runtime_mission_session_active(snapshot, tracking_active=False) is False
+
+
+def test_newer_start_notice_can_precede_lagging_inactive_heartbeat() -> None:
+    """A newly emitted start notice wins over older physical-state evidence."""
+    snapshot = SimpleNamespace(
+        mowing_session_active=False,
+        state="idle",
+        state_event_at=30.0,
+        task_status="idle",
+        task_status_event_at=30.0,
+        status_notice_name="mowing_task_started",
+        status_notice_event_at=40.0,
+    )
+
+    assert runtime_mission_new_session(snapshot) is True
+    assert runtime_mission_new_session_event_at(snapshot) == 40.0
+    assert runtime_mission_session_active(snapshot, tracking_active=False) is False
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    cache.observe_session_state(
+        active_session=False,
+        new_session=True,
+        new_session_event_at=runtime_mission_new_session_event_at(snapshot),
+    )
+    assert runtime_mission_session_generation(cache) == 1
+
+
+def test_completion_notice_older_than_current_mission_is_rejected() -> None:
+    """A retained prior success cannot complete a later manually stopped mission."""
+    current = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+    starting = SimpleNamespace(
+        mowing_session_active=True,
+        task_status="starting",
+        task_status_event_at=20.0,
+        status_notice_name="mowing_task_completed",
+        status_notice_event_at=10.0,
+    )
+    stopped = SimpleNamespace(
+        mowing_session_active=False,
+        task_status="idle",
+        task_status_event_at=30.0,
+        status_notice_name="mowing_task_completed",
+        status_notice_event_at=10.0,
+    )
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    cache.observe_session_state(
+        active_session=True,
+        new_session=runtime_mission_new_session(starting),
+        new_session_evidence=runtime_mission_new_session_evidence(starting),
+        new_session_event_at=runtime_mission_new_session_event_at(starting),
+    )
+    assert cache.update(current, active_session=True) is True
+
+    completion_confirmed = runtime_mission_completion_confirmed(
+        stopped,
+        tracking_active=False,
+        session_started_at=runtime_mission_session_started_at(cache),
+    )
+    cache.observe_session_state(
+        active_session=False,
+        completion_confirmed=completion_confirmed,
+        new_session=runtime_mission_new_session(stopped),
+        new_session_event_at=runtime_mission_new_session_event_at(stopped),
+    )
+
+    assert completion_confirmed is False
+    assert cache.completion_confirmed is False
+    assert cache.blob is current
 
 
 def test_new_session_evidence_prefers_stable_heartbeat_task_identity() -> None:
