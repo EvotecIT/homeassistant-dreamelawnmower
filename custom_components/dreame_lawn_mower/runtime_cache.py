@@ -99,7 +99,7 @@ def runtime_mission_session_active(
         return True
     if getattr(snapshot, "task_status", None) in _COMPLETED_TASK_STATUSES:
         return False
-    if getattr(snapshot, "docked", False) or getattr(snapshot, "state", None) in {
+    if getattr(snapshot, "state", None) in {
         "charging",
         "charging_completed",
     }:

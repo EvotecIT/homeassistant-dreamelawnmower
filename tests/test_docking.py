@@ -275,6 +275,23 @@ def test_start_uses_fresh_action_without_resumable_session() -> None:
     assert started_new_session is True
 
 
+def test_duplicate_start_preserves_active_mission_identity() -> None:
+    """Starting an already active mower is not a fresh mission boundary."""
+    client = object.__new__(DreameLawnMowerClient)
+    client.async_get_status_blob = AsyncMock(
+        return_value=SimpleNamespace(
+            task_resumable=False,
+            mowing_session_active=True,
+        )
+    )
+    client._async_call_device_method = AsyncMock()
+
+    started_new_session = asyncio.run(client.async_start_mowing())
+
+    client._async_call_device_method.assert_not_awaited()
+    assert started_new_session is False
+
+
 @pytest.mark.parametrize("expected_new_session", (False, True, None))
 def test_start_without_heartbeat_preserves_cached_session_identity(
     expected_new_session: bool | None,

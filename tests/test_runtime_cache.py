@@ -202,6 +202,28 @@ def test_missing_charging_heartbeat_preserves_active_session_boundary() -> None:
     assert cache.completion_confirmed is False
 
 
+def test_missing_idle_heartbeat_ends_active_session_boundary() -> None:
+    """A docked idle snapshot cannot join the next mission to the prior one."""
+    previous = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+    idle = SimpleNamespace(
+        mowing_session_active=None,
+        docked=True,
+        state="idle",
+        task_status=None,
+        task_resumable=None,
+        status_notice_name=None,
+    )
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(previous, active_session=True) is True
+
+    idle_active = runtime_mission_session_active(idle, tracking_active=False)
+    assert idle_active is False
+    cache.observe_session_state(active_session=idle_active)
+    cache.observe_session_state(active_session=True)
+
+    assert cache.blob is None
+
+
 def test_starting_signal_resets_an_already_active_prior_session_once() -> None:
     """Coalesced stop/start callbacks cannot reuse the prior mission blob."""
     previous = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
