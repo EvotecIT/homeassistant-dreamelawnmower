@@ -954,8 +954,11 @@ def test_lawn_mower_start_uses_selected_edge() -> None:
     entity.coordinator.async_request_refresh.assert_awaited_once()
 
 
-def test_lawn_mower_resume_preserves_runtime_session_cache() -> None:
-    client = SimpleNamespace(async_start_mowing=AsyncMock(return_value=False))
+@pytest.mark.parametrize("start_result", (False, None))
+def test_lawn_mower_resume_or_unknown_preserves_runtime_session_cache(
+    start_result: bool | None,
+) -> None:
+    client = SimpleNamespace(async_start_mowing=AsyncMock(return_value=start_result))
     previous_blob = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
     cache = DreameLawnMowerRuntimeTelemetryCache()
     assert cache.update(previous_blob, active_session=True) is True

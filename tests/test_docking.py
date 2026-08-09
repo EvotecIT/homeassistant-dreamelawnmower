@@ -275,6 +275,66 @@ def test_start_uses_fresh_action_without_resumable_session() -> None:
     assert started_new_session is True
 
 
+@pytest.mark.parametrize("expected_new_session", (False, True, None))
+def test_start_without_heartbeat_preserves_cached_session_identity(
+    expected_new_session: bool | None,
+) -> None:
+    """Heartbeat failure returns the fallback command's session identity."""
+    client = object.__new__(DreameLawnMowerClient)
+    client.async_get_status_blob = AsyncMock(
+        side_effect=DreameLawnMowerConnectionError("status unavailable")
+    )
+    client._async_call_start_mowing_with_session_identity = AsyncMock(
+        return_value=expected_new_session
+    )
+
+    started_new_session = asyncio.run(client.async_start_mowing())
+
+    client._async_call_start_mowing_with_session_identity.assert_awaited_once_with()
+    assert started_new_session is expected_new_session
+
+
+@pytest.mark.parametrize(
+    ("started", "expected_new_session"),
+    ((True, False), (False, True), (None, None)),
+)
+def test_fallback_start_captures_device_session_decision(
+    started: bool | None,
+    expected_new_session: bool | None,
+) -> None:
+    """The fallback result mirrors device.start_mowing's cached-state branch."""
+    start_mowing = Mock(return_value={"result": 0})
+    client = object.__new__(DreameLawnMowerClient)
+    client._ensure_device = Mock(
+        return_value=SimpleNamespace(
+            status=SimpleNamespace(started=started),
+            start_mowing=start_mowing,
+        )
+    )
+
+    result = asyncio.run(client._async_call_start_mowing_with_session_identity())
+
+    start_mowing.assert_called_once_with()
+    assert result is expected_new_session
+
+
+def test_fallback_start_does_not_reclassify_paused_return_to_dock() -> None:
+    """A special resume branch remains part of the existing mower task."""
+    start_mowing = Mock(return_value={"result": 0})
+    client = object.__new__(DreameLawnMowerClient)
+    client._ensure_device = Mock(
+        return_value=SimpleNamespace(
+            status=SimpleNamespace(started=False, returning_paused=True),
+            start_mowing=start_mowing,
+        )
+    )
+
+    result = asyncio.run(client._async_call_start_mowing_with_session_identity())
+
+    start_mowing.assert_called_once_with()
+    assert result is False
+
+
 def test_lost_start_acknowledgement_reconciles_without_resending() -> None:
     client = object.__new__(DreameLawnMowerClient)
     start = Mock(

@@ -547,8 +547,8 @@ class DreameLawnMowerClient(
         self._latest_snapshot = snapshot
         return snapshot
 
-    async def async_start_mowing(self) -> bool:
-        """Start mowing and return whether a fresh mission was accepted."""
+    async def async_start_mowing(self) -> bool | None:
+        """Start mowing and report fresh, resumed, or unknown session identity."""
         try:
             status_blob = await self.async_get_status_blob(
                 refresh=True,
@@ -571,6 +571,8 @@ class DreameLawnMowerClient(
                     ),
                 )
             return False
+        if status_blob is None:
+            return await self._async_call_start_mowing_with_session_identity()
         await self._async_call_device_method("start_mowing")
         return True
 

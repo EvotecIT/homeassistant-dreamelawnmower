@@ -614,7 +614,16 @@ def test_newer_video_safety_state_wins_over_delayed_cached_mqtt_update() -> None
         coordinator.app_maps = {"current_map_index": 2}
         coordinator.selected_map_index = 2
         coordinator.runtime_status_blob = None
-        coordinator.runtime_telemetry_cache = SimpleNamespace(update=Mock())
+        completed_blob = SimpleNamespace(
+            candidate_runtime_area_progress_percent=99.7
+        )
+        coordinator.runtime_telemetry_cache = (
+            DreameLawnMowerRuntimeTelemetryCache()
+        )
+        assert coordinator.runtime_telemetry_cache.update(
+            completed_blob,
+            completion_confirmed=True,
+        ) is True
         coordinator.bluetooth_connected = None
         coordinator.client = SimpleNamespace(
             async_get_cached_snapshot=AsyncMock(return_value=cached_snapshot),
@@ -642,7 +651,8 @@ def test_newer_video_safety_state_wins_over_delayed_cached_mqtt_update() -> None
         assert result is video_snapshot
         publish.assert_called_once_with(video_snapshot)
         assert coordinator.runtime_status_blob is None
-        coordinator.runtime_telemetry_cache.update.assert_not_called()
+        assert coordinator.runtime_telemetry_cache.blob is completed_blob
+        assert coordinator.runtime_telemetry_cache.completion_confirmed is True
         coordinator.client.update_runtime_live_tracking.assert_not_called()
         assert coordinator.bluetooth_connected is None
 

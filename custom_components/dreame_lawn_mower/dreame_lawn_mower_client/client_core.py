@@ -128,6 +128,47 @@ class _DreameLawnMowerClientCoreMixin:
                 predicate,
             )
 
+    async def _async_call_start_mowing_with_session_identity(self) -> bool | None:
+        """Invoke the fallback start and capture its cached-state decision."""
+        device = await asyncio.to_thread(self._ensure_device)
+        new_session: bool | None = None
+
+        def call_start_mowing() -> Any:
+            nonlocal new_session
+            status = device.status
+            resumes_special_task = bool(
+                getattr(status, "fast_mapping_paused", False)
+                or getattr(status, "returning_paused", False)
+                or (
+                    getattr(getattr(device, "capability", None), "cruising", False)
+                    and getattr(status, "cruising_paused", False)
+                )
+            )
+            started = getattr(status, "started", None)
+            if resumes_special_task:
+                new_session = False
+            elif started is not None:
+                # Capture the same value immediately before start_mowing uses
+                # it to decide whether to create or resume a task.
+                new_session = not bool(started)
+            return device.start_mowing()
+
+        try:
+            await asyncio.to_thread(call_start_mowing)
+        except DeviceCommandRejectedException as err:
+            raise DreameLawnMowerCommandRejectedError(str(err)) from err
+        except DeviceException as err:
+            await self._async_reconcile_ambiguous_mutation(
+                "start mowing",
+                DreameLawnMowerConnectionError(str(err)),
+                lambda snapshot: bool(
+                    snapshot.started
+                    or snapshot.mowing
+                    or snapshot.mowing_session_active is True
+                ),
+            )
+        return new_session
+
     async def _async_reconcile_ambiguous_mutation(
         self,
         label: str,

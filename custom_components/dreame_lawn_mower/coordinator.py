@@ -422,15 +422,6 @@ class DreameLawnMowerCoordinator(
                 snapshot,
                 tracking_active=runtime_active,
             )
-            observe_runtime_session_state(
-                getattr(self, "runtime_telemetry_cache", None),
-                active_session=mission_active,
-                completion_confirmed=runtime_mission_completion_confirmed(
-                    snapshot,
-                    tracking_active=mission_active,
-                ),
-                new_session=runtime_mission_new_session(snapshot),
-            )
             runtime_map_index = (
                 self._runtime_map_index()
                 if not runtime_active
@@ -463,6 +454,15 @@ class DreameLawnMowerCoordinator(
             if self._device_snapshot_is_stale(snapshot):
                 return
 
+            observe_runtime_session_state(
+                getattr(self, "runtime_telemetry_cache", None),
+                active_session=mission_active,
+                completion_confirmed=runtime_mission_completion_confirmed(
+                    snapshot,
+                    tracking_active=mission_active,
+                ),
+                new_session=runtime_mission_new_session(snapshot),
+            )
             if runtime_status_error is None:
                 try:
                     self.runtime_status_blob = runtime_status_blob
