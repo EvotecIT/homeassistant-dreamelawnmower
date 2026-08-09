@@ -9,6 +9,7 @@ from custom_components.dreame_lawn_mower.runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,
     runtime_blob_has_session_metrics,
     runtime_mission_completion_confirmed,
+    runtime_mission_completion_rejected,
     runtime_mission_new_session,
     runtime_mission_progress_percent,
     runtime_mission_session_active,
@@ -316,6 +317,20 @@ def test_active_or_incomplete_mission_keeps_measured_progress() -> None:
         )
         == 73.3
     )
+    for unsuccessful_status in ("failed", "exit"):
+        assert (
+            runtime_mission_progress_percent(
+                blob,
+                completion_confirmed=runtime_mission_completion_confirmed(
+                    SimpleNamespace(
+                        task_status=unsuccessful_status,
+                        status_notice_name="mowing_task_completed",
+                    ),
+                    tracking_active=False,
+                ),
+            )
+            == 73.3
+        )
     assert (
         runtime_mission_progress_percent(
             blob,
@@ -355,6 +370,29 @@ def test_completion_without_runtime_measurement_remains_unavailable() -> None:
         )
         is None
     )
+
+
+def test_explicit_failure_clears_cached_completion_latch() -> None:
+    """A later failed heartbeat cannot leave stale success attached."""
+    blob = SimpleNamespace(candidate_runtime_area_progress_percent=99.7)
+    failed = SimpleNamespace(
+        task_status="failed",
+        status_notice_name="mowing_task_completed",
+    )
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(blob, completion_confirmed=True) is True
+
+    cache.observe_session_state(
+        active_session=False,
+        completion_confirmed=runtime_mission_completion_confirmed(
+            failed,
+            tracking_active=False,
+            cached_completion_confirmed=cache.completion_confirmed,
+        ),
+        completion_rejected=runtime_mission_completion_rejected(failed),
+    )
+
+    assert cache.completion_confirmed is False
 
 
 def test_cache_preserves_completion_until_the_next_active_session() -> None:

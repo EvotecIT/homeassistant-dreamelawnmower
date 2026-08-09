@@ -57,6 +57,7 @@ from .runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,
     observe_runtime_session_state,
     runtime_mission_completion_confirmed,
+    runtime_mission_completion_rejected,
     runtime_mission_new_session,
     runtime_mission_session_active,
 )
@@ -461,6 +462,7 @@ class DreameLawnMowerCoordinator(
                     snapshot,
                     tracking_active=mission_active,
                 ),
+                completion_rejected=runtime_mission_completion_rejected(snapshot),
                 new_session=runtime_mission_new_session(snapshot),
             )
             if runtime_status_error is None:
@@ -473,6 +475,9 @@ class DreameLawnMowerCoordinator(
                         completion_confirmed=runtime_mission_completion_confirmed(
                             snapshot,
                             tracking_active=mission_active,
+                        ),
+                        completion_rejected=runtime_mission_completion_rejected(
+                            snapshot
                         ),
                         new_session=runtime_mission_new_session(snapshot),
                     )

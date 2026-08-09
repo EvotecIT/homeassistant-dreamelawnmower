@@ -14,6 +14,7 @@ _SESSION_METRIC_FIELDS = (
 )
 _COMPLETED_TASK_STATUSES = frozenset({"finished"})
 _COMPLETED_STATUS_NOTICES = frozenset({"mowing_task_completed"})
+_UNSUCCESSFUL_TASK_STATUSES = frozenset({"failed", "exit"})
 _NEW_SESSION_TASK_STATUSES = frozenset({"starting"})
 _NEW_SESSION_STATUS_NOTICES = frozenset(
     {"mowing_started", "mowing_task_started", "scheduled_mowing_started"}
@@ -64,10 +65,20 @@ def runtime_mission_completion_confirmed(
         return False
     if mission_active is None:
         return cached_completion_confirmed
+    if getattr(snapshot, "task_status", None) in _UNSUCCESSFUL_TASK_STATUSES:
+        return False
     return (
         cached_completion_confirmed
         or getattr(snapshot, "task_status", None) in _COMPLETED_TASK_STATUSES
         or getattr(snapshot, "status_notice_name", None) in _COMPLETED_STATUS_NOTICES
+    )
+
+
+def runtime_mission_completion_rejected(snapshot: Any) -> bool:
+    """Return whether the mower explicitly ended the mission unsuccessfully."""
+    return (
+        snapshot is not None
+        and getattr(snapshot, "task_status", None) in _UNSUCCESSFUL_TASK_STATUSES
     )
 
 
@@ -165,6 +176,7 @@ class DreameLawnMowerRuntimeTelemetryCache:
         *,
         active_session: bool | None,
         completion_confirmed: bool = False,
+        completion_rejected: bool = False,
         new_session: bool = False,
     ) -> None:
         """Apply authoritative mission state before optional telemetry work."""
@@ -183,12 +195,16 @@ class DreameLawnMowerRuntimeTelemetryCache:
             self._session_active = True
             self._new_session_pending_activation = False
             return
-        if self._new_session_pending_activation and not completion_confirmed:
+        if self._new_session_pending_activation and not (
+            completion_confirmed or completion_rejected
+        ):
             return
         self._session_active = False
         self._new_session_signal_seen = False
         self._new_session_pending_activation = False
-        if completion_confirmed:
+        if completion_rejected:
+            self.completion_confirmed = False
+        elif completion_confirmed:
             self.completion_confirmed = True
 
     def update(
@@ -199,12 +215,14 @@ class DreameLawnMowerRuntimeTelemetryCache:
         allow_zero: bool = True,
         active_session: bool | None = False,
         completion_confirmed: bool = False,
+        completion_rejected: bool = False,
         new_session: bool = False,
     ) -> bool:
         """Store a useful runtime payload without erasing it with empty polls."""
         self.observe_session_state(
             active_session=active_session,
             completion_confirmed=completion_confirmed,
+            completion_rejected=completion_rejected,
             new_session=new_session,
         )
         if not runtime_blob_has_session_metrics(blob):
@@ -229,6 +247,7 @@ def observe_runtime_session_state(
     *,
     active_session: bool | None,
     completion_confirmed: bool = False,
+    completion_rejected: bool = False,
     new_session: bool = False,
 ) -> None:
     """Apply authoritative session state when the integration owns this cache."""
@@ -236,6 +255,7 @@ def observe_runtime_session_state(
         cache.observe_session_state(
             active_session=active_session,
             completion_confirmed=completion_confirmed,
+            completion_rejected=completion_rejected,
             new_session=new_session,
         )
 

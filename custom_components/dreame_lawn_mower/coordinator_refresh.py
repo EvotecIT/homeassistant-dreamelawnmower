@@ -29,6 +29,7 @@ from .performance import (
 from .runtime_cache import (
     observe_runtime_session_state,
     runtime_mission_completion_confirmed,
+    runtime_mission_completion_rejected,
     runtime_mission_new_session,
     runtime_mission_session_active,
 )
@@ -163,6 +164,7 @@ class DreameLawnMowerRefreshMixin:
                     snapshot,
                     tracking_active=mission_active,
                 ),
+                completion_rejected=runtime_mission_completion_rejected(snapshot),
                 new_session=runtime_mission_new_session(snapshot),
             )
             if runtime_active:
@@ -270,6 +272,7 @@ class DreameLawnMowerRefreshMixin:
                     snapshot,
                     tracking_active=mission_active,
                 ),
+                completion_rejected=runtime_mission_completion_rejected(snapshot),
                 new_session=runtime_mission_new_session(snapshot),
             )
             self.client.update_runtime_live_tracking(

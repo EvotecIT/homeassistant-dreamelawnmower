@@ -311,6 +311,7 @@ def test_cached_device_update_publishes_realtime_runtime_position() -> None:
         allow_zero=True,
         active_session=True,
         completion_confirmed=False,
+        completion_rejected=False,
         new_session=False,
     )
     assert tracking_updates == [(status_blob, True, 2)]

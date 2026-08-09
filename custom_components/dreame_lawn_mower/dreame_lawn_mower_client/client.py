@@ -571,14 +571,14 @@ class DreameLawnMowerClient(
                     ),
                 )
             return False
-        if status_blob is not None and getattr(
-            status_blob,
-            "mowing_session_active",
-            None,
-        ) is True:
-            return False
-        if status_blob is None:
+        if status_blob is None or getattr(
+            status_blob, "mowing_session_active", None
+        ) is None:
             return await self._async_call_start_mowing_with_session_identity()
+        if status_blob.mowing_session_active is True:
+            if status_blob.task_status not in {"starting", "mowing"}:
+                await self._async_call_device_method("start_mowing")
+            return False
         await self._async_call_device_method("start_mowing")
         return True
 

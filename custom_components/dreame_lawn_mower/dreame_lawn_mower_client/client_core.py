@@ -135,6 +135,8 @@ class _DreameLawnMowerClientCoreMixin:
 
         def call_start_mowing() -> Any:
             nonlocal new_session
+            from .device_types import DreameMowerTaskStatus
+
             status = device.status
             resumes_special_task = bool(
                 getattr(status, "fast_mapping_paused", False)
@@ -144,9 +146,12 @@ class _DreameLawnMowerClientCoreMixin:
                     and getattr(status, "cruising_paused", False)
                 )
             )
+            task_status = getattr(status, "task_status", None)
             started = getattr(status, "started", None)
             if resumes_special_task:
                 new_session = False
+            elif task_status is None or task_status is DreameMowerTaskStatus.UNKNOWN:
+                new_session = None
             elif started is not None:
                 # Capture the same value immediately before start_mowing uses
                 # it to decide whether to create or resume a task.
