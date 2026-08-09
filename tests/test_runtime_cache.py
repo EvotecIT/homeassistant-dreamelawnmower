@@ -236,6 +236,28 @@ def test_starting_signal_resets_an_already_active_prior_session_once() -> None:
     assert cache.blob is current
 
 
+def test_command_start_deduplicates_noncontiguous_start_notice() -> None:
+    """A delayed start notice cannot erase telemetry from the same mission."""
+    previous = SimpleNamespace(candidate_runtime_area_progress_percent=100.0)
+    current = SimpleNamespace(candidate_runtime_area_progress_percent=12.5)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(previous, completion_confirmed=True) is True
+
+    cache.begin_new_session()
+    cache.observe_session_state(active_session=False, new_session=False)
+    assert cache.update(current, active_session=True, new_session=False) is True
+    cache.observe_session_state(active_session=True, new_session=False)
+    cache.observe_session_state(active_session=True, new_session=True)
+
+    assert cache.blob is current
+    assert cache.completion_confirmed is False
+
+    cache.observe_session_state(active_session=False)
+    cache.observe_session_state(active_session=True, new_session=True)
+
+    assert cache.blob is None
+
+
 def test_all_area_start_notice_announces_a_new_session() -> None:
     """The emitted base-model start notice resets coalesced prior telemetry."""
     snapshot = SimpleNamespace(

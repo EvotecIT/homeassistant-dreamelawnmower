@@ -143,7 +143,8 @@ class DreameLawnMowerRuntimeTelemetryCache:
     completion_confirmed: bool = False
     _metric_signature: tuple[Any, ...] | None = None
     _session_active: bool = False
-    _new_session_signal_active: bool = False
+    _new_session_signal_seen: bool = False
+    _new_session_pending_activation: bool = False
 
     def _invalidate_for_new_session(self) -> None:
         self.blob = None
@@ -151,11 +152,13 @@ class DreameLawnMowerRuntimeTelemetryCache:
         self.completion_confirmed = False
         self._metric_signature = None
         self._session_active = True
+        self._new_session_pending_activation = False
 
     def begin_new_session(self) -> None:
         """Invalidate prior telemetry after a fresh mission is accepted."""
         self._invalidate_for_new_session()
-        self._new_session_signal_active = True
+        self._new_session_signal_seen = True
+        self._new_session_pending_activation = True
 
     def observe_session_state(
         self,
@@ -165,10 +168,11 @@ class DreameLawnMowerRuntimeTelemetryCache:
         new_session: bool = False,
     ) -> None:
         """Apply authoritative mission state before optional telemetry work."""
-        if new_session and not self._new_session_signal_active:
+        if new_session and not self._new_session_signal_seen:
             self._invalidate_for_new_session()
-        self._new_session_signal_active = new_session
         if new_session:
+            self._new_session_signal_seen = True
+            self._new_session_pending_activation = False
             active_session = True
         if active_session is None:
             return
@@ -177,8 +181,13 @@ class DreameLawnMowerRuntimeTelemetryCache:
                 self._invalidate_for_new_session()
             self.completion_confirmed = False
             self._session_active = True
+            self._new_session_pending_activation = False
+            return
+        if self._new_session_pending_activation and not completion_confirmed:
             return
         self._session_active = False
+        self._new_session_signal_seen = False
+        self._new_session_pending_activation = False
         if completion_confirmed:
             self.completion_confirmed = True
 
