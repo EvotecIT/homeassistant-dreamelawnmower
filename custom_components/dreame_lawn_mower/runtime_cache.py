@@ -52,15 +52,18 @@ def runtime_blob_has_nonzero_session_metrics(blob: Any) -> bool:
 def runtime_mission_completion_confirmed(
     snapshot: Any,
     *,
-    tracking_active: bool,
+    tracking_active: bool | None,
     cached_completion_confirmed: bool = False,
 ) -> bool:
     """Return whether an inactive mission has an explicit completion signal."""
-    if snapshot is None or runtime_mission_session_active(
+    mission_active = runtime_mission_session_active(
         snapshot,
         tracking_active=tracking_active,
-    ):
+    )
+    if snapshot is None or mission_active is True:
         return False
+    if mission_active is None:
+        return cached_completion_confirmed
     return (
         cached_completion_confirmed
         or getattr(snapshot, "task_status", None) in _COMPLETED_TASK_STATUSES
@@ -71,9 +74,16 @@ def runtime_mission_completion_confirmed(
 def runtime_mission_session_active(
     snapshot: Any,
     *,
-    tracking_active: bool,
-) -> bool:
-    """Return whether telemetry belongs to a continuing mower mission."""
+    tracking_active: bool | None,
+) -> bool | None:
+    """Return whether telemetry belongs to a continuing mower mission.
+
+    ``None`` preserves the prior cache boundary when a docked device snapshot
+    is missing the optional heartbeat fields that distinguish a charging pause
+    from an inactive mower.
+    """
+    if snapshot is None:
+        return tracking_active
     session_active = getattr(snapshot, "mowing_session_active", None)
     if session_active is not None:
         return bool(session_active)
@@ -85,7 +95,16 @@ def runtime_mission_session_active(
         return True
     if runtime_mission_new_session(snapshot):
         return True
-    return tracking_active
+    if tracking_active:
+        return True
+    if getattr(snapshot, "task_status", None) in _COMPLETED_TASK_STATUSES:
+        return False
+    if getattr(snapshot, "docked", False) or getattr(snapshot, "state", None) in {
+        "charging",
+        "charging_completed",
+    }:
+        return None
+    return False
 
 
 def runtime_mission_new_session(snapshot: Any) -> bool:
@@ -141,7 +160,7 @@ class DreameLawnMowerRuntimeTelemetryCache:
     def observe_session_state(
         self,
         *,
-        active_session: bool,
+        active_session: bool | None,
         completion_confirmed: bool = False,
         new_session: bool = False,
     ) -> None:
@@ -151,6 +170,8 @@ class DreameLawnMowerRuntimeTelemetryCache:
         self._new_session_signal_active = new_session
         if new_session:
             active_session = True
+        if active_session is None:
+            return
         if active_session:
             if not self._session_active:
                 self._invalidate_for_new_session()
@@ -167,7 +188,7 @@ class DreameLawnMowerRuntimeTelemetryCache:
         *,
         now: datetime | None = None,
         allow_zero: bool = True,
-        active_session: bool = False,
+        active_session: bool | None = False,
         completion_confirmed: bool = False,
         new_session: bool = False,
     ) -> bool:
@@ -197,7 +218,7 @@ class DreameLawnMowerRuntimeTelemetryCache:
 def observe_runtime_session_state(
     cache: Any,
     *,
-    active_session: bool,
+    active_session: bool | None,
     completion_confirmed: bool = False,
     new_session: bool = False,
 ) -> None:

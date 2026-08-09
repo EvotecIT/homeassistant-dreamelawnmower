@@ -157,6 +157,51 @@ def test_docked_active_mission_remains_the_same_session() -> None:
     )
 
 
+def test_missing_charging_heartbeat_preserves_active_session_boundary() -> None:
+    """A failed heartbeat cannot turn a charging pause into a session end."""
+    current = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+    missing_heartbeat = SimpleNamespace(
+        mowing_session_active=None,
+        docked=True,
+        state="charging",
+        task_status=None,
+        task_resumable=None,
+        status_notice_name="mowing_task_completed",
+    )
+    paused_heartbeat = SimpleNamespace(
+        mowing_session_active=None,
+        docked=True,
+        state="charging",
+        task_status="paused",
+        task_resumable=True,
+        status_notice_name=None,
+    )
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(current, active_session=True) is True
+
+    missing_active = runtime_mission_session_active(
+        missing_heartbeat,
+        tracking_active=False,
+    )
+    assert missing_active is None
+    cache.observe_session_state(
+        active_session=missing_active,
+        completion_confirmed=runtime_mission_completion_confirmed(
+            missing_heartbeat,
+            tracking_active=missing_active,
+        ),
+    )
+    cache.observe_session_state(
+        active_session=runtime_mission_session_active(
+            paused_heartbeat,
+            tracking_active=False,
+        ),
+    )
+
+    assert cache.blob is current
+    assert cache.completion_confirmed is False
+
+
 def test_starting_signal_resets_an_already_active_prior_session_once() -> None:
     """Coalesced stop/start callbacks cannot reuse the prior mission blob."""
     previous = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)

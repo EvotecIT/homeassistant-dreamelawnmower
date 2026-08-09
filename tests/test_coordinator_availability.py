@@ -417,8 +417,18 @@ def test_new_session_discards_prior_telemetry_before_completion() -> None:
 
 
 def test_resumed_charging_session_preserves_current_telemetry() -> None:
-    """Leaving the charger does not look like a brand-new mower mission."""
-    charging = SimpleNamespace(
+    """Missing and paused heartbeats cannot split one charging mission."""
+    missing_heartbeat = SimpleNamespace(
+        available=True,
+        mowing_session_active=None,
+        activity="docked",
+        state="charging",
+        docked=True,
+        task_status=None,
+        task_resumable=None,
+        status_notice_name=None,
+    )
+    paused_heartbeat = SimpleNamespace(
         available=True,
         mowing_session_active=None,
         activity="docked",
@@ -438,6 +448,16 @@ def test_resumed_charging_session_preserves_current_telemetry() -> None:
         task_resumable=False,
         status_notice_name=None,
     )
+    completed = SimpleNamespace(
+        available=True,
+        mowing_session_active=False,
+        activity="docked",
+        state="charging",
+        docked=True,
+        task_status="finished",
+        task_resumable=False,
+        status_notice_name="mowing_task_completed",
+    )
     current_blob = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
     cache = DreameLawnMowerRuntimeTelemetryCache()
     assert cache.update(current_blob, active_session=True) is True
@@ -450,7 +470,14 @@ def test_resumed_charging_session_preserves_current_telemetry() -> None:
     coordinator.runtime_telemetry_cache = cache
     coordinator.bluetooth_connected = None
     coordinator.client = SimpleNamespace(
-        async_get_cached_snapshot=AsyncMock(side_effect=(charging, resumed)),
+        async_get_cached_snapshot=AsyncMock(
+            side_effect=(
+                missing_heartbeat,
+                paused_heartbeat,
+                resumed,
+                completed,
+            )
+        ),
         async_get_runtime_status_blob=AsyncMock(
             side_effect=RuntimeError("telemetry unavailable")
         ),
@@ -467,17 +494,25 @@ def test_resumed_charging_session_preserves_current_telemetry() -> None:
     assert cache.blob is current_blob
     assert cache.completion_confirmed is False
 
+    asyncio.run(coordinator._async_process_client_update())
+    assert cache.blob is current_blob
+    assert cache.completion_confirmed is False
+
+    asyncio.run(coordinator._async_process_client_update())
+    assert cache.blob is current_blob
+    assert cache.completion_confirmed is True
+
 
 def test_foreground_charging_snapshot_preserves_current_session_cache() -> None:
-    """Foreground refresh uses resumable evidence absent heartbeat annotation."""
+    """Foreground refresh preserves cache when heartbeat enrichment fails."""
     charging = SimpleNamespace(
         available=True,
         mowing_session_active=None,
         activity="docked",
         state="charging",
         docked=True,
-        task_status="paused",
-        task_resumable=True,
+        task_status=None,
+        task_resumable=None,
         status_notice_name="mowing_task_completed",
     )
     current_blob = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
