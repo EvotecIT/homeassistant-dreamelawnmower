@@ -16,7 +16,7 @@ _COMPLETED_TASK_STATUSES = frozenset({"finished"})
 _COMPLETED_STATUS_NOTICES = frozenset({"mowing_task_completed"})
 _NEW_SESSION_TASK_STATUSES = frozenset({"starting"})
 _NEW_SESSION_STATUS_NOTICES = frozenset(
-    {"mowing_started", "scheduled_mowing_started"}
+    {"mowing_started", "mowing_task_started", "scheduled_mowing_started"}
 )
 _RESUMABLE_TASK_STATUSES = frozenset({"paused"})
 _RESUME_STATUS_NOTICES = frozenset(

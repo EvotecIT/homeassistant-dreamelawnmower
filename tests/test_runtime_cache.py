@@ -191,6 +191,16 @@ def test_starting_signal_resets_an_already_active_prior_session_once() -> None:
     assert cache.blob is current
 
 
+def test_all_area_start_notice_announces_a_new_session() -> None:
+    """The emitted base-model start notice resets coalesced prior telemetry."""
+    snapshot = SimpleNamespace(
+        task_status="mowing",
+        status_notice_name="mowing_task_started",
+    )
+
+    assert runtime_mission_new_session(snapshot) is True
+
+
 def test_active_or_incomplete_mission_keeps_measured_progress() -> None:
     """Returns, pauses, and new sessions must not be presented as complete."""
     blob = SimpleNamespace(candidate_runtime_area_progress_percent=73.3)
