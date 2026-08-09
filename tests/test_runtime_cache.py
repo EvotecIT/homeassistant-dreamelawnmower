@@ -13,6 +13,7 @@ from custom_components.dreame_lawn_mower.runtime_cache import (
     runtime_mission_new_session,
     runtime_mission_progress_percent,
     runtime_mission_session_active,
+    runtime_mission_session_generation,
 )
 
 
@@ -279,6 +280,37 @@ def test_command_start_deduplicates_noncontiguous_start_notice() -> None:
     cache.observe_session_state(active_session=True, new_session=True)
 
     assert cache.blob is None
+
+
+def test_command_acceptance_preserves_callback_telemetry_from_new_generation() -> None:
+    """A callback-observed mission is not invalidated again on command return."""
+    previous = SimpleNamespace(candidate_runtime_area_progress_percent=100.0)
+    current = SimpleNamespace(candidate_runtime_area_progress_percent=4.0)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(previous, completion_confirmed=True) is True
+    observed_generation = runtime_mission_session_generation(cache)
+
+    cache.observe_session_state(active_session=True)
+    assert cache.update(current, active_session=True) is True
+    cache.begin_new_session(observed_generation=observed_generation)
+
+    assert cache.blob is current
+    assert cache.completion_confirmed is False
+
+
+def test_command_acceptance_still_resets_unidentified_active_telemetry() -> None:
+    """An active update without a new boundary cannot mask a fresh command."""
+    previous = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+    current = SimpleNamespace(candidate_runtime_area_progress_percent=43.0)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(previous, active_session=True) is True
+    observed_generation = runtime_mission_session_generation(cache)
+
+    assert cache.update(current, active_session=True) is True
+    cache.begin_new_session(observed_generation=observed_generation)
+
+    assert cache.blob is None
+    assert cache.completion_confirmed is False
 
 
 def test_all_area_start_notice_announces_a_new_session() -> None:

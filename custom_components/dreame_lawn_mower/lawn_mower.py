@@ -50,7 +50,10 @@ from .dreame_lawn_mower_client.mowing_preferences import (
 )
 from .entity import DreameLawnMowerEntity
 from .mowing_preference_control import async_update_selected_mowing_preference
-from .runtime_cache import begin_runtime_mission_session
+from .runtime_cache import (
+    begin_runtime_mission_session,
+    runtime_mission_session_generation,
+)
 from .services import (
     ATTR_CONFIRM_PREFERENCE_WRITE,
     ATTR_EXECUTE,
@@ -472,6 +475,8 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
     async def async_start_mowing(self) -> None:
         """Start or resume mowing."""
         action = self.coordinator.selected_mowing_action
+        runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
+        observed_generation = runtime_mission_session_generation(runtime_cache)
         new_session = False
         if action == MOWING_ACTION_EDGE:
             self._ensure_selected_map_matches_active()
@@ -517,7 +522,8 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             new_session = await self.coordinator.client.async_start_mowing()
         if new_session is True:
             begin_runtime_mission_session(
-                getattr(self.coordinator, "runtime_telemetry_cache", None)
+                runtime_cache,
+                observed_generation=observed_generation,
             )
         await self.coordinator.async_request_refresh()
 
@@ -538,9 +544,12 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             available_ids=[int(entry["area_id"]) for entry in zone_entries],
             target_name="Zone",
         )
+        runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
+        observed_generation = runtime_mission_session_generation(runtime_cache)
         await self.coordinator.client.async_start_zone_mowing(normalized)
         begin_runtime_mission_session(
-            getattr(self.coordinator, "runtime_telemetry_cache", None)
+            runtime_cache,
+            observed_generation=observed_generation,
         )
         await self.coordinator.async_request_refresh()
 
@@ -560,9 +569,12 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             available_ids=[int(entry["spot_id"]) for entry in spot_entries],
             target_name="Spot",
         )
+        runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
+        observed_generation = runtime_mission_session_generation(runtime_cache)
         await self.coordinator.client.async_start_spot_mowing(normalized)
         begin_runtime_mission_session(
-            getattr(self.coordinator, "runtime_telemetry_cache", None)
+            runtime_cache,
+            observed_generation=observed_generation,
         )
         await self.coordinator.async_request_refresh()
 
@@ -595,9 +607,12 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
                 f"Edge contour {missing_text} is not available on the active map. "
                 f"Available contour ids: {available_text or 'none'}."
             )
+        runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
+        observed_generation = runtime_mission_session_generation(runtime_cache)
         await self.coordinator.client.async_start_edge_mowing(normalized)
         begin_runtime_mission_session(
-            getattr(self.coordinator, "runtime_telemetry_cache", None)
+            runtime_cache,
+            observed_generation=observed_generation,
         )
         await self.coordinator.async_request_refresh()
 

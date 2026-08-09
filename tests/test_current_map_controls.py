@@ -976,6 +976,35 @@ def test_lawn_mower_resume_or_unknown_preserves_runtime_session_cache(
     entity.coordinator.async_request_refresh.assert_awaited_once()
 
 
+def test_lawn_mower_start_preserves_callback_telemetry_before_command_return() -> None:
+    """Command acceptance cannot erase a mission already observed by MQTT."""
+    previous_blob = SimpleNamespace(candidate_runtime_area_progress_percent=100.0)
+    current_blob = SimpleNamespace(candidate_runtime_area_progress_percent=3.0)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(previous_blob, completion_confirmed=True) is True
+
+    async def accept_after_callback() -> bool:
+        cache.observe_session_state(active_session=True)
+        assert cache.update(current_blob, active_session=True) is True
+        return True
+
+    client = SimpleNamespace(
+        async_start_mowing=AsyncMock(side_effect=accept_after_callback)
+    )
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = SimpleNamespace(
+        client=client,
+        selected_mowing_action="all_area",
+        runtime_telemetry_cache=cache,
+        async_request_refresh=AsyncMock(),
+    )
+
+    asyncio.run(entity.async_start_mowing())
+
+    assert cache.blob is current_blob
+    entity.coordinator.async_request_refresh.assert_awaited_once()
+
+
 def test_lawn_mower_start_edge_service_uses_explicit_contours() -> None:
     client = SimpleNamespace(
         async_start_edge_mowing=AsyncMock(),

@@ -154,6 +154,7 @@ class DreameLawnMowerRuntimeTelemetryCache:
     completion_confirmed: bool = False
     _metric_signature: tuple[Any, ...] | None = None
     _session_active: bool = False
+    _session_generation: int = 0
     _new_session_signal_seen: bool = False
     _new_session_pending_activation: bool = False
 
@@ -163,10 +164,21 @@ class DreameLawnMowerRuntimeTelemetryCache:
         self.completion_confirmed = False
         self._metric_signature = None
         self._session_active = True
+        self._session_generation += 1
         self._new_session_pending_activation = False
 
-    def begin_new_session(self) -> None:
+    def begin_new_session(self, *, observed_generation: int | None = None) -> None:
         """Invalidate prior telemetry after a fresh mission is accepted."""
+        if (
+            observed_generation is not None
+            and self._session_generation != observed_generation
+        ):
+            # A realtime callback already observed and invalidated the new
+            # mission while the command awaited its device response. Keep any
+            # telemetry that callback captured instead of resetting it again.
+            self._new_session_signal_seen = True
+            self._new_session_pending_activation = False
+            return
         self._invalidate_for_new_session()
         self._new_session_signal_seen = True
         self._new_session_pending_activation = True
@@ -260,7 +272,18 @@ def observe_runtime_session_state(
         )
 
 
-def begin_runtime_mission_session(cache: Any) -> None:
+def runtime_mission_session_generation(cache: Any) -> int | None:
+    """Return the current integration-owned mission generation."""
+    if isinstance(cache, DreameLawnMowerRuntimeTelemetryCache):
+        return cache._session_generation
+    return None
+
+
+def begin_runtime_mission_session(
+    cache: Any,
+    *,
+    observed_generation: int | None = None,
+) -> None:
     """Invalidate prior telemetry when an integration-owned start succeeds."""
     if isinstance(cache, DreameLawnMowerRuntimeTelemetryCache):
-        cache.begin_new_session()
+        cache.begin_new_session(observed_generation=observed_generation)
