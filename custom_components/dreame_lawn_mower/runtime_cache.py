@@ -12,7 +12,7 @@ _SESSION_METRIC_FIELDS = (
     "candidate_runtime_current_area_sqm",
     "candidate_runtime_total_area_sqm",
 )
-_COMPLETED_TASK_STATUSES = frozenset({"completed", "finished"})
+_COMPLETED_TASK_STATUSES = frozenset({"finished"})
 _COMPLETED_STATUS_NOTICES = frozenset({"mowing_task_completed"})
 
 
@@ -81,6 +81,7 @@ class DreameLawnMowerRuntimeTelemetryCache:
     captured_at: datetime | None = None
     completion_confirmed: bool = False
     _metric_signature: tuple[Any, ...] | None = None
+    _session_active: bool = False
 
     def observe_session_state(
         self,
@@ -90,8 +91,15 @@ class DreameLawnMowerRuntimeTelemetryCache:
     ) -> None:
         """Apply authoritative mission state before optional telemetry work."""
         if active_session:
+            if not self._session_active:
+                self.blob = None
+                self.captured_at = None
+                self._metric_signature = None
             self.completion_confirmed = False
-        elif completion_confirmed:
+            self._session_active = True
+            return
+        self._session_active = False
+        if completion_confirmed:
             self.completion_confirmed = True
 
     def update(

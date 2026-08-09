@@ -146,12 +146,26 @@ def test_active_or_incomplete_mission_keeps_measured_progress() -> None:
         task_status="mowing",
         status_notice_name="mowing_task_completed",
     )
+    manually_stopped = SimpleNamespace(
+        task_status="completed",
+        status_notice_name=None,
+    )
 
     assert (
         runtime_mission_progress_percent(
             blob,
             completion_confirmed=runtime_mission_completion_confirmed(
                 returning,
+                tracking_active=False,
+            ),
+        )
+        == 73.3
+    )
+    assert (
+        runtime_mission_progress_percent(
+            blob,
+            completion_confirmed=runtime_mission_completion_confirmed(
+                manually_stopped,
                 tracking_active=False,
             ),
         )
@@ -198,4 +212,20 @@ def test_cache_preserves_completion_until_the_next_active_session() -> None:
     assert cache.update(SimpleNamespace()) is False
     assert cache.completion_confirmed is True
     assert cache.update(SimpleNamespace(), active_session=True) is False
+    assert cache.completion_confirmed is False
+    assert cache.blob is None
+    assert cache.captured_at is None
+
+
+def test_cache_only_invalidates_once_during_an_active_session() -> None:
+    """Fresh telemetry remains cached across later polls in the same mission."""
+    previous = SimpleNamespace(candidate_runtime_area_progress_percent=99.7)
+    current = SimpleNamespace(candidate_runtime_area_progress_percent=12.5)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+
+    assert cache.update(previous, completion_confirmed=True) is True
+    assert cache.update(current, active_session=True) is True
+    cache.observe_session_state(active_session=True)
+
+    assert cache.blob is current
     assert cache.completion_confirmed is False

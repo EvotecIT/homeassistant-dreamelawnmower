@@ -366,6 +366,54 @@ def test_cached_completion_survives_runtime_failure_and_later_idle_refresh() -> 
     assert cache.blob is blob
 
 
+def test_new_session_discards_prior_telemetry_before_completion() -> None:
+    """A later success event cannot relabel a prior mission's measurements."""
+    active = SimpleNamespace(
+        available=True,
+        mowing_session_active=True,
+        activity="mowing",
+        docked=False,
+        task_status="mowing",
+        status_notice_name=None,
+    )
+    completed = SimpleNamespace(
+        available=True,
+        mowing_session_active=False,
+        activity="docked",
+        docked=True,
+        task_status="idle",
+        status_notice_name="mowing_task_completed",
+    )
+    previous_blob = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(previous_blob, completion_confirmed=True) is True
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._client_update_task = Mock()
+    coordinator._runtime_map_identity_verified = True
+    coordinator.app_maps = {"current_map_index": 2}
+    coordinator.selected_map_index = 2
+    coordinator.runtime_status_blob = None
+    coordinator.runtime_telemetry_cache = cache
+    coordinator.bluetooth_connected = None
+    coordinator.client = SimpleNamespace(
+        async_get_cached_snapshot=AsyncMock(side_effect=(active, completed)),
+        async_get_runtime_status_blob=AsyncMock(
+            side_effect=RuntimeError("telemetry unavailable")
+        ),
+        async_get_bluetooth_connected=AsyncMock(return_value=False),
+        update_runtime_live_tracking=Mock(),
+    )
+    coordinator.async_set_updated_data = Mock()
+
+    asyncio.run(coordinator._async_process_client_update())
+    assert cache.blob is None
+    assert cache.completion_confirmed is False
+
+    asyncio.run(coordinator._async_process_client_update())
+    assert cache.blob is None
+    assert cache.completion_confirmed is True
+
+
 def test_cached_device_update_does_not_confirm_connectivity() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     confirmed = SimpleNamespace(
