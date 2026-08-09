@@ -129,6 +129,40 @@ def runtime_mission_new_session(snapshot: Any) -> bool:
     )
 
 
+def runtime_mission_session_identity(snapshot: Any) -> int | None:
+    """Return the heartbeat task id that identifies the current mission."""
+    task_id = getattr(snapshot, "mission_task_id", None)
+    if isinstance(task_id, int) and not isinstance(task_id, bool):
+        return task_id
+    return None
+
+
+def runtime_mission_new_session_evidence(snapshot: Any) -> tuple[Any, ...] | None:
+    """Return stable evidence that distinguishes repeated start snapshots."""
+    if snapshot is None or not runtime_mission_new_session(snapshot):
+        return None
+    task_id = runtime_mission_session_identity(snapshot)
+    if task_id is not None:
+        return ("task", task_id)
+    task_status = getattr(snapshot, "task_status", None)
+    task_status_event_at = getattr(snapshot, "task_status_event_at", None)
+    if (
+        task_status in _NEW_SESSION_TASK_STATUSES
+        and isinstance(task_status_event_at, int | float)
+        and not isinstance(task_status_event_at, bool)
+    ):
+        return ("task_status", task_status, float(task_status_event_at))
+    notice_name = getattr(snapshot, "status_notice_name", None)
+    notice_event_at = getattr(snapshot, "status_notice_event_at", None)
+    if (
+        notice_name in _NEW_SESSION_STATUS_NOTICES
+        and isinstance(notice_event_at, int | float)
+        and not isinstance(notice_event_at, bool)
+    ):
+        return ("notice", notice_name, float(notice_event_at))
+    return None
+
+
 def runtime_mission_progress_percent(
     blob: Any,
     *,
@@ -155,16 +189,27 @@ class DreameLawnMowerRuntimeTelemetryCache:
     _metric_signature: tuple[Any, ...] | None = None
     _session_active: bool = False
     _session_generation: int = 0
+    _session_identity: int | None = None
     _new_session_signal_seen: bool = False
+    _new_session_evidence: tuple[Any, ...] | None = None
+    _new_session_evidence_pending: bool = False
     _new_session_pending_activation: bool = False
 
-    def _invalidate_for_new_session(self) -> None:
+    def _invalidate_for_new_session(
+        self,
+        *,
+        session_identity: int | None = None,
+    ) -> None:
         self.blob = None
         self.captured_at = None
         self.completion_confirmed = False
         self._metric_signature = None
         self._session_active = True
         self._session_generation += 1
+        self._session_identity = session_identity
+        self._new_session_signal_seen = False
+        self._new_session_evidence = None
+        self._new_session_evidence_pending = False
         self._new_session_pending_activation = False
 
     def begin_new_session(self, *, observed_generation: int | None = None) -> None:
@@ -177,10 +222,12 @@ class DreameLawnMowerRuntimeTelemetryCache:
             # mission while the command awaited its device response. Keep any
             # telemetry that callback captured instead of resetting it again.
             self._new_session_signal_seen = True
+            self._new_session_evidence_pending = self._new_session_evidence is None
             self._new_session_pending_activation = False
             return
         self._invalidate_for_new_session()
         self._new_session_signal_seen = True
+        self._new_session_evidence_pending = True
         self._new_session_pending_activation = True
 
     def observe_session_state(
@@ -190,11 +237,41 @@ class DreameLawnMowerRuntimeTelemetryCache:
         completion_confirmed: bool = False,
         completion_rejected: bool = False,
         new_session: bool = False,
+        new_session_evidence: tuple[Any, ...] | None = None,
+        session_identity: int | None = None,
     ) -> None:
         """Apply authoritative mission state before optional telemetry work."""
-        if new_session and not self._new_session_signal_seen:
-            self._invalidate_for_new_session()
+        invalidated = False
+        if (
+            active_session
+            and session_identity is not None
+            and self._session_identity is not None
+            and session_identity != self._session_identity
+        ):
+            self._invalidate_for_new_session(session_identity=session_identity)
+            invalidated = True
         if new_session:
+            if (
+                new_session_evidence is not None
+                and new_session_evidence != self._new_session_evidence
+            ):
+                if self._new_session_evidence_pending:
+                    self._new_session_evidence_pending = False
+                elif not invalidated:
+                    self._invalidate_for_new_session(
+                        session_identity=session_identity,
+                    )
+                    invalidated = True
+                self._new_session_evidence = new_session_evidence
+            elif (
+                new_session_evidence is None
+                and not self._new_session_signal_seen
+                and not invalidated
+            ):
+                self._invalidate_for_new_session(
+                    session_identity=session_identity,
+                )
+                invalidated = True
             self._new_session_signal_seen = True
             self._new_session_pending_activation = False
             active_session = True
@@ -202,7 +279,9 @@ class DreameLawnMowerRuntimeTelemetryCache:
             return
         if active_session:
             if not self._session_active:
-                self._invalidate_for_new_session()
+                self._invalidate_for_new_session(session_identity=session_identity)
+            elif session_identity is not None:
+                self._session_identity = session_identity
             self.completion_confirmed = False
             self._session_active = True
             self._new_session_pending_activation = False
@@ -212,7 +291,10 @@ class DreameLawnMowerRuntimeTelemetryCache:
         ):
             return
         self._session_active = False
+        self._session_identity = None
         self._new_session_signal_seen = False
+        self._new_session_evidence = None
+        self._new_session_evidence_pending = False
         self._new_session_pending_activation = False
         if completion_rejected:
             self.completion_confirmed = False
@@ -229,6 +311,8 @@ class DreameLawnMowerRuntimeTelemetryCache:
         completion_confirmed: bool = False,
         completion_rejected: bool = False,
         new_session: bool = False,
+        new_session_evidence: tuple[Any, ...] | None = None,
+        session_identity: int | None = None,
     ) -> bool:
         """Store a useful runtime payload without erasing it with empty polls."""
         self.observe_session_state(
@@ -236,6 +320,8 @@ class DreameLawnMowerRuntimeTelemetryCache:
             completion_confirmed=completion_confirmed,
             completion_rejected=completion_rejected,
             new_session=new_session,
+            new_session_evidence=new_session_evidence,
+            session_identity=session_identity,
         )
         if not runtime_blob_has_session_metrics(blob):
             return False
@@ -261,6 +347,8 @@ def observe_runtime_session_state(
     completion_confirmed: bool = False,
     completion_rejected: bool = False,
     new_session: bool = False,
+    new_session_evidence: tuple[Any, ...] | None = None,
+    session_identity: int | None = None,
 ) -> None:
     """Apply authoritative session state when the integration owns this cache."""
     if isinstance(cache, DreameLawnMowerRuntimeTelemetryCache):
@@ -269,6 +357,8 @@ def observe_runtime_session_state(
             completion_confirmed=completion_confirmed,
             completion_rejected=completion_rejected,
             new_session=new_session,
+            new_session_evidence=new_session_evidence,
+            session_identity=session_identity,
         )
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -101,6 +102,7 @@ def test_idle_in_station_heartbeat_corrects_stale_paused_snapshot(
     assert reconciled.task_status == "idle"
     assert reconciled.task_status_source == "heartbeat_realtime"
     assert reconciled.mowing_session_active is False
+    assert reconciled.mission_task_id == status_blob.candidate_runtime_task_id
 
 
 def test_active_paused_session_keeps_task_activity_while_recording_dock() -> None:
@@ -117,6 +119,22 @@ def test_active_paused_session_keeps_task_activity_while_recording_dock() -> Non
     assert reconciled.raw_docked is True
     assert reconciled.task_status == "paused"
     assert reconciled.mowing_session_active is True
+    assert reconciled.mission_task_id == status_blob.candidate_runtime_task_id
+
+
+def test_heartbeat_runtime_task_identity_is_retained_when_available() -> None:
+    status_blob = SimpleNamespace(
+        task_status="mowing",
+        source="realtime",
+        mowing_session_active=True,
+        task_resumable=False,
+        heartbeat_docked=False,
+        candidate_runtime_task_id=101,
+    )
+
+    reconciled = snapshot_with_heartbeat_task_state(_snapshot(), status_blob)
+
+    assert reconciled.mission_task_id == 101
 
 
 def test_idle_in_station_heartbeat_preserves_bare_active_error() -> None:

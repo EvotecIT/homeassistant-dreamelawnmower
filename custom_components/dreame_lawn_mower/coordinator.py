@@ -59,7 +59,9 @@ from .runtime_cache import (
     runtime_mission_completion_confirmed,
     runtime_mission_completion_rejected,
     runtime_mission_new_session,
+    runtime_mission_new_session_evidence,
     runtime_mission_session_active,
+    runtime_mission_session_identity,
 )
 from .schedule_cache import (
     ScheduleActionReadBackoff,
@@ -464,6 +466,8 @@ class DreameLawnMowerCoordinator(
                 ),
                 completion_rejected=runtime_mission_completion_rejected(snapshot),
                 new_session=runtime_mission_new_session(snapshot),
+                new_session_evidence=runtime_mission_new_session_evidence(snapshot),
+                session_identity=runtime_mission_session_identity(snapshot),
             )
             if runtime_status_error is None:
                 try:
@@ -480,6 +484,10 @@ class DreameLawnMowerCoordinator(
                             snapshot
                         ),
                         new_session=runtime_mission_new_session(snapshot),
+                        new_session_evidence=runtime_mission_new_session_evidence(
+                            snapshot
+                        ),
+                        session_identity=runtime_mission_session_identity(snapshot),
                     )
                     self.client.update_runtime_live_tracking(
                         self.runtime_status_blob,

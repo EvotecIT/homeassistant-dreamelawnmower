@@ -25,6 +25,8 @@ def snapshot_with_heartbeat_task_state(
     """Apply heartbeat-confirmed task and physical docking state."""
     task_status = status_blob.task_status
     changes: dict[str, Any] = {}
+    if status_blob.candidate_runtime_task_id is not None:
+        changes["mission_task_id"] = status_blob.candidate_runtime_task_id
     if task_status is not None:
         changes.update(
             task_status=task_status,

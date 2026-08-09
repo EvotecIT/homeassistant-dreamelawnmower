@@ -11,9 +11,11 @@ from custom_components.dreame_lawn_mower.runtime_cache import (
     runtime_mission_completion_confirmed,
     runtime_mission_completion_rejected,
     runtime_mission_new_session,
+    runtime_mission_new_session_evidence,
     runtime_mission_progress_percent,
     runtime_mission_session_active,
     runtime_mission_session_generation,
+    runtime_mission_session_identity,
 )
 
 
@@ -282,6 +284,60 @@ def test_command_start_deduplicates_noncontiguous_start_notice() -> None:
     assert cache.blob is None
 
 
+def test_coalesced_replacement_start_advances_mission_identity() -> None:
+    """A replacement task id resets cache without an inactive snapshot."""
+    prior = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    cache.observe_session_state(
+        active_session=True,
+        new_session=True,
+        new_session_evidence=("task", 100),
+        session_identity=100,
+    )
+    assert cache.update(
+        prior,
+        active_session=True,
+        session_identity=100,
+    ) is True
+
+    cache.observe_session_state(
+        active_session=True,
+        new_session=True,
+        new_session_evidence=("task", 101),
+        session_identity=101,
+    )
+
+    assert cache.blob is None
+
+
+def test_coalesced_replacement_notice_uses_realtime_event_identity() -> None:
+    """A newer same-code notice resets cache after the command notice is consumed."""
+    current = SimpleNamespace(candidate_runtime_area_progress_percent=12.5)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    cache.begin_new_session()
+    assert cache.update(current, active_session=True) is True
+    cache.observe_session_state(
+        active_session=True,
+        new_session=True,
+        new_session_evidence=("notice", "mowing_task_started", 1.0),
+    )
+    assert cache.blob is current
+    cache.observe_session_state(
+        active_session=True,
+        new_session=True,
+        new_session_evidence=("notice", "mowing_task_started", 1.0),
+    )
+    assert cache.blob is current
+
+    cache.observe_session_state(
+        active_session=True,
+        new_session=True,
+        new_session_evidence=("notice", "mowing_task_started", 2.0),
+    )
+
+    assert cache.blob is None
+
+
 def test_command_acceptance_preserves_callback_telemetry_from_new_generation() -> None:
     """A callback-observed mission is not invalidated again on command return."""
     previous = SimpleNamespace(candidate_runtime_area_progress_percent=100.0)
@@ -321,6 +377,34 @@ def test_all_area_start_notice_announces_a_new_session() -> None:
     )
 
     assert runtime_mission_new_session(snapshot) is True
+
+
+def test_new_session_evidence_prefers_stable_heartbeat_task_identity() -> None:
+    """Task identity deduplicates repeated snapshots and separates missions."""
+    snapshot = SimpleNamespace(
+        task_status="mowing",
+        status_notice_name="mowing_task_started",
+        status_notice_event_at=20.0,
+        mission_task_id=101,
+    )
+
+    assert runtime_mission_session_identity(snapshot) == 101
+    assert runtime_mission_new_session_evidence(snapshot) == ("task", 101)
+
+
+def test_new_session_evidence_uses_starting_property_event_without_task_id() -> None:
+    snapshot = SimpleNamespace(
+        task_status="starting",
+        task_status_event_at=21.0,
+        status_notice_name=None,
+        mission_task_id=None,
+    )
+
+    assert runtime_mission_new_session_evidence(snapshot) == (
+        "task_status",
+        "starting",
+        21.0,
+    )
 
 
 def test_active_or_incomplete_mission_keeps_measured_progress() -> None:

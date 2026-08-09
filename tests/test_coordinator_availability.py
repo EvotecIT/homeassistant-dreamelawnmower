@@ -313,6 +313,8 @@ def test_cached_device_update_publishes_realtime_runtime_position() -> None:
         completion_confirmed=False,
         completion_rejected=False,
         new_session=False,
+        new_session_evidence=None,
+        session_identity=None,
     )
     assert tracking_updates == [(status_blob, True, 2)]
     assert coordinator.runtime_status_blob is status_blob
