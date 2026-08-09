@@ -29,6 +29,8 @@ from .performance import (
 from .runtime_cache import (
     observe_runtime_session_state,
     runtime_mission_completion_confirmed,
+    runtime_mission_new_session,
+    runtime_mission_session_active,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -150,13 +152,18 @@ class DreameLawnMowerRefreshMixin:
             self._record_connectivity_success(snapshot)
 
             runtime_active = runtime_tracking_active(snapshot)
+            mission_active = runtime_mission_session_active(
+                snapshot,
+                tracking_active=runtime_active,
+            )
             observe_runtime_session_state(
                 getattr(self, "runtime_telemetry_cache", None),
-                active_session=runtime_active,
+                active_session=mission_active,
                 completion_confirmed=runtime_mission_completion_confirmed(
                     snapshot,
-                    tracking_active=runtime_active,
+                    tracking_active=mission_active,
                 ),
+                new_session=runtime_mission_new_session(snapshot),
             )
             if runtime_active:
                 if not await self._async_refresh_active_runtime(cycle, snapshot):
@@ -241,6 +248,10 @@ class DreameLawnMowerRefreshMixin:
     ) -> bool:
         """Refresh optional runtime telemetry without failing the main snapshot."""
         runtime_active = runtime_tracking_active(snapshot)
+        mission_active = runtime_mission_session_active(
+            snapshot,
+            tracking_active=runtime_active,
+        )
         if runtime_map_index is None and not runtime_active:
             runtime_map_index = self._runtime_map_index()
         try:
@@ -254,11 +265,12 @@ class DreameLawnMowerRefreshMixin:
             self.runtime_telemetry_cache.update(
                 self.runtime_status_blob,
                 allow_zero=runtime_active,
-                active_session=runtime_active,
+                active_session=mission_active,
                 completion_confirmed=runtime_mission_completion_confirmed(
                     snapshot,
-                    tracking_active=runtime_active,
+                    tracking_active=mission_active,
                 ),
+                new_session=runtime_mission_new_session(snapshot),
             )
             self.client.update_runtime_live_tracking(
                 self.runtime_status_blob,

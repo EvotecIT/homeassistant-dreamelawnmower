@@ -21,6 +21,9 @@ from custom_components.dreame_lawn_mower.control_options import (
 )
 from custom_components.dreame_lawn_mower.coordinator import DreameLawnMowerCoordinator
 from custom_components.dreame_lawn_mower.lawn_mower import DreameLawnMower
+from custom_components.dreame_lawn_mower.runtime_cache import (
+    DreameLawnMowerRuntimeTelemetryCache,
+)
 from custom_components.dreame_lawn_mower.select import (
     DreameLawnMowerEdgeSelect,
     DreameLawnMowerMapSelect,
@@ -924,6 +927,9 @@ def test_lawn_mower_start_uses_selected_edge() -> None:
         async_start_mowing=AsyncMock(),
     )
     entity = object.__new__(DreameLawnMower)
+    previous_blob = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(previous_blob, active_session=True) is True
     entity.coordinator = SimpleNamespace(
         client=client,
         selected_mowing_action=MOWING_ACTION_EDGE,
@@ -934,6 +940,7 @@ def test_lawn_mower_start_uses_selected_edge() -> None:
         vector_map_details=_vector_map_details(),
         batch_device_data=_batch_device_data(),
         app_maps=_app_maps(),
+        runtime_telemetry_cache=cache,
         async_request_refresh=AsyncMock(),
     )
 
@@ -943,6 +950,26 @@ def test_lawn_mower_start_uses_selected_edge() -> None:
     client.async_start_zone_mowing.assert_not_called()
     client.async_start_spot_mowing.assert_not_called()
     client.async_start_mowing.assert_not_called()
+    assert cache.blob is None
+    entity.coordinator.async_request_refresh.assert_awaited_once()
+
+
+def test_lawn_mower_resume_preserves_runtime_session_cache() -> None:
+    client = SimpleNamespace(async_start_mowing=AsyncMock(return_value=False))
+    previous_blob = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(previous_blob, active_session=True) is True
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = SimpleNamespace(
+        client=client,
+        selected_mowing_action="all_area",
+        runtime_telemetry_cache=cache,
+        async_request_refresh=AsyncMock(),
+    )
+
+    asyncio.run(entity.async_start_mowing())
+
+    assert cache.blob is previous_blob
     entity.coordinator.async_request_refresh.assert_awaited_once()
 
 

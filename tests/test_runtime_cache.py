@@ -9,7 +9,9 @@ from custom_components.dreame_lawn_mower.runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,
     runtime_blob_has_session_metrics,
     runtime_mission_completion_confirmed,
+    runtime_mission_new_session,
     runtime_mission_progress_percent,
+    runtime_mission_session_active,
 )
 
 
@@ -133,6 +135,60 @@ def test_finished_heartbeat_normalizes_rounded_area_progress() -> None:
         )
         == 100.0
     )
+
+
+def test_docked_active_mission_remains_the_same_session() -> None:
+    """Charging pauses tracking without ending a resumable mission."""
+    snapshot = SimpleNamespace(
+        mowing_session_active=None,
+        docked=True,
+        state="charging",
+        task_status="paused",
+        task_resumable=True,
+        status_notice_name="mowing_task_completed",
+    )
+
+    assert (
+        runtime_mission_session_active(snapshot, tracking_active=False) is True
+    )
+    assert (
+        runtime_mission_completion_confirmed(snapshot, tracking_active=False)
+        is False
+    )
+
+
+def test_starting_signal_resets_an_already_active_prior_session_once() -> None:
+    """Coalesced stop/start callbacks cannot reuse the prior mission blob."""
+    previous = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+    current = SimpleNamespace(candidate_runtime_area_progress_percent=1.0)
+    starting = SimpleNamespace(
+        mowing_session_active=None,
+        docked=True,
+        state="charging",
+        task_status="starting",
+        status_notice_name=None,
+    )
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(previous, active_session=True) is True
+
+    mission_active = runtime_mission_session_active(
+        starting,
+        tracking_active=False,
+    )
+    assert mission_active is True
+    cache.observe_session_state(
+        active_session=mission_active,
+        new_session=runtime_mission_new_session(starting),
+    )
+    assert cache.blob is None
+    assert cache.update(
+        current,
+        active_session=mission_active,
+        new_session=runtime_mission_new_session(starting),
+    ) is True
+    cache.observe_session_state(active_session=True, new_session=False)
+
+    assert cache.blob is current
 
 
 def test_active_or_incomplete_mission_keeps_measured_progress() -> None:

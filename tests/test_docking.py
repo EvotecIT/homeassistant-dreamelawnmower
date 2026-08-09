@@ -179,7 +179,7 @@ def test_start_resumes_heartbeat_confirmed_paused_session() -> None:
     client._sync_resume_mowing = Mock(return_value={"r": 0})
     client._async_call_device_method = AsyncMock()
 
-    asyncio.run(client.async_start_mowing())
+    started_new_session = asyncio.run(client.async_start_mowing())
 
     client.async_get_status_blob.assert_awaited_once_with(
         refresh=True,
@@ -187,6 +187,7 @@ def test_start_resumes_heartbeat_confirmed_paused_session() -> None:
     )
     client._sync_resume_mowing.assert_called_once_with()
     client._async_call_device_method.assert_not_awaited()
+    assert started_new_session is False
 
 
 def test_lost_resume_acknowledgement_requires_transition_out_of_paused() -> None:
@@ -263,7 +264,7 @@ def test_start_uses_fresh_action_without_resumable_session() -> None:
     client._sync_resume_mowing = Mock()
     client._async_call_device_method = AsyncMock()
 
-    asyncio.run(client.async_start_mowing())
+    started_new_session = asyncio.run(client.async_start_mowing())
 
     client.async_get_status_blob.assert_awaited_once_with(
         refresh=True,
@@ -271,6 +272,7 @@ def test_start_uses_fresh_action_without_resumable_session() -> None:
     )
     client._sync_resume_mowing.assert_not_called()
     client._async_call_device_method.assert_awaited_once_with("start_mowing")
+    assert started_new_session is True
 
 
 def test_lost_start_acknowledgement_reconciles_without_resending() -> None:

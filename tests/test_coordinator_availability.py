@@ -311,6 +311,7 @@ def test_cached_device_update_publishes_realtime_runtime_position() -> None:
         allow_zero=True,
         active_session=True,
         completion_confirmed=False,
+        new_session=False,
     )
     assert tracking_updates == [(status_blob, True, 2)]
     assert coordinator.runtime_status_blob is status_blob
@@ -370,10 +371,11 @@ def test_new_session_discards_prior_telemetry_before_completion() -> None:
     """A later success event cannot relabel a prior mission's measurements."""
     active = SimpleNamespace(
         available=True,
-        mowing_session_active=True,
+        mowing_session_active=None,
         activity="mowing",
         docked=False,
-        task_status="mowing",
+        task_status="starting",
+        task_resumable=False,
         status_notice_name=None,
     )
     completed = SimpleNamespace(
@@ -386,7 +388,7 @@ def test_new_session_discards_prior_telemetry_before_completion() -> None:
     )
     previous_blob = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
     cache = DreameLawnMowerRuntimeTelemetryCache()
-    assert cache.update(previous_blob, completion_confirmed=True) is True
+    assert cache.update(previous_blob, active_session=True) is True
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator._client_update_task = Mock()
     coordinator._runtime_map_identity_verified = True
@@ -413,6 +415,93 @@ def test_new_session_discards_prior_telemetry_before_completion() -> None:
     assert cache.blob is None
     assert cache.completion_confirmed is True
 
+
+def test_resumed_charging_session_preserves_current_telemetry() -> None:
+    """Leaving the charger does not look like a brand-new mower mission."""
+    charging = SimpleNamespace(
+        available=True,
+        mowing_session_active=None,
+        activity="docked",
+        state="charging",
+        docked=True,
+        task_status="paused",
+        task_resumable=True,
+        status_notice_name=None,
+    )
+    resumed = SimpleNamespace(
+        available=True,
+        mowing_session_active=None,
+        activity="mowing",
+        state="mowing",
+        docked=False,
+        task_status="mowing",
+        task_resumable=False,
+        status_notice_name=None,
+    )
+    current_blob = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(current_blob, active_session=True) is True
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._client_update_task = Mock()
+    coordinator._runtime_map_identity_verified = True
+    coordinator.app_maps = {"current_map_index": 2}
+    coordinator.selected_map_index = 2
+    coordinator.runtime_status_blob = None
+    coordinator.runtime_telemetry_cache = cache
+    coordinator.bluetooth_connected = None
+    coordinator.client = SimpleNamespace(
+        async_get_cached_snapshot=AsyncMock(side_effect=(charging, resumed)),
+        async_get_runtime_status_blob=AsyncMock(
+            side_effect=RuntimeError("telemetry unavailable")
+        ),
+        async_get_bluetooth_connected=AsyncMock(return_value=False),
+        update_runtime_live_tracking=Mock(),
+    )
+    coordinator.async_set_updated_data = Mock()
+
+    asyncio.run(coordinator._async_process_client_update())
+    assert cache.blob is current_blob
+    assert cache.completion_confirmed is False
+
+    asyncio.run(coordinator._async_process_client_update())
+    assert cache.blob is current_blob
+    assert cache.completion_confirmed is False
+
+
+def test_foreground_charging_snapshot_preserves_current_session_cache() -> None:
+    """Foreground refresh uses resumable evidence absent heartbeat annotation."""
+    charging = SimpleNamespace(
+        available=True,
+        mowing_session_active=None,
+        activity="docked",
+        state="charging",
+        docked=True,
+        task_status="paused",
+        task_resumable=True,
+        status_notice_name="mowing_task_completed",
+    )
+    current_blob = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(current_blob, active_session=True) is True
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.runtime_status_blob = None
+    coordinator.runtime_telemetry_cache = cache
+    coordinator._runtime_map_identity_verified = True
+    coordinator._schedule_metadata_refresh = Mock()
+    coordinator.client = SimpleNamespace(
+        async_refresh=AsyncMock(return_value=charging),
+        update_runtime_live_tracking=Mock(),
+    )
+
+    result = asyncio.run(coordinator._async_update_data())
+
+    assert result is charging
+    assert cache.blob is current_blob
+    assert cache.completion_confirmed is False
+    coordinator.client.update_runtime_live_tracking.assert_called_once_with(
+        None,
+        active=False,
+    )
 
 def test_cached_device_update_does_not_confirm_connectivity() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)

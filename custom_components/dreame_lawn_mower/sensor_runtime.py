@@ -13,6 +13,7 @@ from .runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,
     runtime_mission_completion_confirmed,
     runtime_mission_progress_percent,
+    runtime_mission_session_active,
 )
 from .sensor_map_data import (
     _coordinate_path_length_m,
@@ -495,9 +496,14 @@ def _runtime_session_completion_confirmed(
 ) -> bool:
     """Return live or cached completion evidence for the current mission."""
     cache = getattr(coordinator, "runtime_telemetry_cache", None)
-    return runtime_mission_completion_confirmed(
-        getattr(coordinator, "data", None),
+    snapshot = getattr(coordinator, "data", None)
+    mission_active = runtime_mission_session_active(
+        snapshot,
         tracking_active=tracking_active,
+    )
+    return runtime_mission_completion_confirmed(
+        snapshot,
+        tracking_active=mission_active,
         cached_completion_confirmed=(
             cache.completion_confirmed
             if isinstance(cache, DreameLawnMowerRuntimeTelemetryCache)

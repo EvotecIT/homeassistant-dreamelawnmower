@@ -14,6 +14,14 @@ _SESSION_METRIC_FIELDS = (
 )
 _COMPLETED_TASK_STATUSES = frozenset({"finished"})
 _COMPLETED_STATUS_NOTICES = frozenset({"mowing_task_completed"})
+_NEW_SESSION_TASK_STATUSES = frozenset({"starting"})
+_NEW_SESSION_STATUS_NOTICES = frozenset(
+    {"mowing_started", "scheduled_mowing_started"}
+)
+_RESUMABLE_TASK_STATUSES = frozenset({"paused"})
+_RESUME_STATUS_NOTICES = frozenset(
+    {"mowing_resumed_after_charging", "resuming_unfinished_task"}
+)
 
 
 def _session_metric_signature(blob: Any) -> tuple[Any, ...]:
@@ -48,12 +56,46 @@ def runtime_mission_completion_confirmed(
     cached_completion_confirmed: bool = False,
 ) -> bool:
     """Return whether an inactive mission has an explicit completion signal."""
-    if snapshot is None or tracking_active:
+    if snapshot is None or runtime_mission_session_active(
+        snapshot,
+        tracking_active=tracking_active,
+    ):
         return False
     return (
         cached_completion_confirmed
         or getattr(snapshot, "task_status", None) in _COMPLETED_TASK_STATUSES
         or getattr(snapshot, "status_notice_name", None) in _COMPLETED_STATUS_NOTICES
+    )
+
+
+def runtime_mission_session_active(
+    snapshot: Any,
+    *,
+    tracking_active: bool,
+) -> bool:
+    """Return whether telemetry belongs to a continuing mower mission."""
+    session_active = getattr(snapshot, "mowing_session_active", None)
+    if session_active is not None:
+        return bool(session_active)
+    if getattr(snapshot, "task_resumable", None) is True:
+        return True
+    if getattr(snapshot, "task_status", None) in _RESUMABLE_TASK_STATUSES:
+        return True
+    if getattr(snapshot, "status_notice_name", None) in _RESUME_STATUS_NOTICES:
+        return True
+    if runtime_mission_new_session(snapshot):
+        return True
+    return tracking_active
+
+
+def runtime_mission_new_session(snapshot: Any) -> bool:
+    """Return whether a snapshot explicitly announces a fresh mower mission."""
+    if snapshot is None:
+        return False
+    return (
+        getattr(snapshot, "task_status", None) in _NEW_SESSION_TASK_STATUSES
+        or getattr(snapshot, "status_notice_name", None)
+        in _NEW_SESSION_STATUS_NOTICES
     )
 
 
@@ -82,19 +124,36 @@ class DreameLawnMowerRuntimeTelemetryCache:
     completion_confirmed: bool = False
     _metric_signature: tuple[Any, ...] | None = None
     _session_active: bool = False
+    _new_session_signal_active: bool = False
+
+    def _invalidate_for_new_session(self) -> None:
+        self.blob = None
+        self.captured_at = None
+        self.completion_confirmed = False
+        self._metric_signature = None
+        self._session_active = True
+
+    def begin_new_session(self) -> None:
+        """Invalidate prior telemetry after a fresh mission is accepted."""
+        self._invalidate_for_new_session()
+        self._new_session_signal_active = True
 
     def observe_session_state(
         self,
         *,
         active_session: bool,
         completion_confirmed: bool = False,
+        new_session: bool = False,
     ) -> None:
         """Apply authoritative mission state before optional telemetry work."""
+        if new_session and not self._new_session_signal_active:
+            self._invalidate_for_new_session()
+        self._new_session_signal_active = new_session
+        if new_session:
+            active_session = True
         if active_session:
             if not self._session_active:
-                self.blob = None
-                self.captured_at = None
-                self._metric_signature = None
+                self._invalidate_for_new_session()
             self.completion_confirmed = False
             self._session_active = True
             return
@@ -110,11 +169,13 @@ class DreameLawnMowerRuntimeTelemetryCache:
         allow_zero: bool = True,
         active_session: bool = False,
         completion_confirmed: bool = False,
+        new_session: bool = False,
     ) -> bool:
         """Store a useful runtime payload without erasing it with empty polls."""
         self.observe_session_state(
             active_session=active_session,
             completion_confirmed=completion_confirmed,
+            new_session=new_session,
         )
         if not runtime_blob_has_session_metrics(blob):
             return False
@@ -138,10 +199,18 @@ def observe_runtime_session_state(
     *,
     active_session: bool,
     completion_confirmed: bool = False,
+    new_session: bool = False,
 ) -> None:
     """Apply authoritative session state when the integration owns this cache."""
     if isinstance(cache, DreameLawnMowerRuntimeTelemetryCache):
         cache.observe_session_state(
             active_session=active_session,
             completion_confirmed=completion_confirmed,
+            new_session=new_session,
         )
+
+
+def begin_runtime_mission_session(cache: Any) -> None:
+    """Invalidate prior telemetry when an integration-owned start succeeds."""
+    if isinstance(cache, DreameLawnMowerRuntimeTelemetryCache):
+        cache.begin_new_session()

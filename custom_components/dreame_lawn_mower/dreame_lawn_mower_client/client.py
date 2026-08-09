@@ -547,8 +547,8 @@ class DreameLawnMowerClient(
         self._latest_snapshot = snapshot
         return snapshot
 
-    async def async_start_mowing(self) -> None:
-        """Start a new task or resume the heartbeat-confirmed paused task."""
+    async def async_start_mowing(self) -> bool:
+        """Start mowing and return whether a fresh mission was accepted."""
         try:
             status_blob = await self.async_get_status_blob(
                 refresh=True,
@@ -570,8 +570,9 @@ class DreameLawnMowerClient(
                         and not getattr(snapshot, "task_resumable", False)
                     ),
                 )
-            return
+            return False
         await self._async_call_device_method("start_mowing")
+        return True
 
     async def async_pause(self) -> None:
         """Pause mowing."""
