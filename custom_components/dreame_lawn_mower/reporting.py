@@ -95,8 +95,32 @@ def build_coordinator_diagnostics(coordinator: object) -> dict[str, Any]:
             performance.as_dict() if hasattr(performance, "as_dict") else None
         ),
         "maintenance_points": build_maintenance_point_diagnostics(coordinator),
+        "work_log_totals": _work_log_totals_diagnostics(coordinator),
         "last_maintenance_point_probe": (
             dict(last_map_probe) if isinstance(last_map_probe, Mapping) else None
+        ),
+    }
+
+
+def _work_log_totals_diagnostics(coordinator: object) -> dict[str, Any] | None:
+    """Return aggregate work-log totals without exposing individual sessions."""
+    totals = getattr(coordinator, "work_log_totals", None)
+    if totals is None:
+        return None
+    refreshed_at = getattr(coordinator, "work_log_totals_refreshed_at", None)
+    return {
+        "source": "app_action_mihis",
+        "total_mowed_area_sqm": getattr(totals, "total_mowed_area_sqm", None),
+        "total_mowing_time_minutes": getattr(
+            totals,
+            "total_mowing_time_minutes",
+            None,
+        ),
+        "total_mowing_sessions": getattr(totals, "total_mowing_sessions", None),
+        "refreshed_at": (
+            refreshed_at.isoformat()
+            if hasattr(refreshed_at, "isoformat")
+            else None
         ),
     }
 

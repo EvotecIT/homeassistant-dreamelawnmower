@@ -408,6 +408,10 @@ class DreameLawnMowerRefreshMixin:
                     lambda: self.async_refresh_maintenance_status(force=False),
                 ),
                 (
+                    "work_log_totals",
+                    lambda: self.async_refresh_work_log_totals(force=False),
+                ),
+                (
                     "voice",
                     lambda: self.async_refresh_voice_settings(force=False),
                 ),
@@ -617,6 +621,7 @@ class DreameLawnMowerRefreshMixin:
             "vector_map": "vector_map_details_refreshed_at",
             "weather": "weather_protection_refreshed_at",
             "maintenance": "maintenance_status_refreshed_at",
+            "work_log_totals": "work_log_totals_refreshed_at",
             "voice": "voice_settings_refreshed_at",
         }
         marker = refreshed_at_by_phase.get(phase)

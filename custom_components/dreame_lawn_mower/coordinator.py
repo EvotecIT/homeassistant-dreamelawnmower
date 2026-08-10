@@ -18,6 +18,7 @@ from .api import (
     DreameLawnMowerDescriptor,
     DreameLawnMowerFirmwareUpdateSupport,
     DreameLawnMowerSnapshot,
+    DreameLawnMowerWorkLogTotals,
 )
 from .const import (
     CONF_ACCOUNT_TYPE,
@@ -88,6 +89,7 @@ MAINTENANCE_REFRESH_INTERVAL = timedelta(minutes=5)
 VOICE_SETTINGS_REFRESH_INTERVAL = timedelta(minutes=5)
 SCHEDULE_REFRESH_INTERVAL = timedelta(minutes=5)
 FIRMWARE_UPDATE_REFRESH_INTERVAL = timedelta(minutes=15)
+WORK_LOG_TOTALS_REFRESH_INTERVAL = timedelta(minutes=15)
 DEVICE_SNAPSHOT_GENERATION_HISTORY = 32
 PENDING_SCHEDULE_PLAN_MAX_CONTRADICTORY_READS = 1
 BATCH_SCHEDULE_RESULT_COALESCE_SECONDS = 1.0
@@ -156,6 +158,8 @@ class DreameLawnMowerCoordinator(
         self.maintenance_status_refreshed_at: datetime | None = None
         self.voice_settings: dict[str, Any] | None = None
         self.voice_settings_refreshed_at: datetime | None = None
+        self.work_log_totals: DreameLawnMowerWorkLogTotals | None = None
+        self.work_log_totals_refreshed_at: datetime | None = None
         self.schedules: dict[str, Any] | None = None
         self.schedules_refreshed_at: datetime | None = None
         self._schedule_action_read_backoff = ScheduleActionReadBackoff()
@@ -2025,6 +2029,33 @@ class DreameLawnMowerCoordinator(
         self.maintenance_status = payload
         self.maintenance_status_refreshed_at = now
         return payload
+
+    async def async_refresh_work_log_totals(
+        self,
+        *,
+        force: bool = False,
+    ) -> DreameLawnMowerWorkLogTotals | None:
+        """Refresh cached mower-owned lifetime work-log totals."""
+        now = datetime.now(UTC)
+        if (
+            not force
+            and self.work_log_totals is not None
+            and self.work_log_totals_refreshed_at is not None
+            and now - self.work_log_totals_refreshed_at
+            < WORK_LOG_TOTALS_REFRESH_INTERVAL
+        ):
+            return self.work_log_totals
+
+        try:
+            totals = await self.client.async_get_work_log_totals()
+        except Exception as err:  # noqa: BLE001 - best-effort extra metadata
+            _LOGGER.debug("Failed to refresh work-log totals: %s", err)
+            self.work_log_totals_refreshed_at = None
+            return self.work_log_totals
+
+        self.work_log_totals = totals
+        self.work_log_totals_refreshed_at = now
+        return totals
 
     async def async_refresh_voice_settings(
         self,

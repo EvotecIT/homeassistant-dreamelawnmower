@@ -208,6 +208,7 @@ from .vector_map import vector_map_to_summary as vector_map_to_summary
 
 if _typing.TYPE_CHECKING:
     from .map_visuals import MapRenderStyle
+    from .work_log import DreameLawnMowerWorkLogTotals
 
 _CLOUD_PRESENCE_REFRESH_INTERVAL = _client_constants.CLOUD_PRESENCE_REFRESH_INTERVAL
 
@@ -1024,6 +1025,10 @@ class DreameLawnMowerClient(
             self._sync_get_weather_protection,
             include_raw,
         )
+
+    async def async_get_work_log_totals(self) -> DreameLawnMowerWorkLogTotals:
+        """Return mower-owned lifetime area, time, and session totals."""
+        return await asyncio.to_thread(self._sync_get_work_log_totals)
 
     async def async_get_maintenance_status(
         self,

@@ -519,6 +519,7 @@ def test_metadata_hydration_serializes_shared_vendor_protocol_calls() -> None:
         coordinator.async_refresh_vector_map_details = complete
         coordinator.async_refresh_weather_protection = complete
         coordinator.async_refresh_maintenance_status = complete
+        coordinator.async_refresh_work_log_totals = complete
         coordinator.async_refresh_voice_settings = complete
         task = asyncio.create_task(
             coordinator._async_refresh_metadata(
@@ -584,6 +585,7 @@ def test_metadata_hydration_retries_only_missing_core_phase() -> None:
         coordinator.async_refresh_vector_map_details = complete
         coordinator.async_refresh_weather_protection = complete
         coordinator.async_refresh_maintenance_status = complete
+        coordinator.async_refresh_work_log_totals = complete
         coordinator.async_refresh_voice_settings = complete
 
         with patch(
@@ -686,6 +688,7 @@ def test_metadata_hydration_forces_incomplete_app_map_retry() -> None:
         coordinator.async_refresh_vector_map_details = complete
         coordinator.async_refresh_weather_protection = complete
         coordinator.async_refresh_maintenance_status = complete
+        coordinator.async_refresh_work_log_totals = complete
         coordinator.async_refresh_voice_settings = complete
 
         with patch(

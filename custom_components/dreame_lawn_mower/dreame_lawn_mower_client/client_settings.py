@@ -84,6 +84,11 @@ from .schedule import (
     encode_schedule_payload_text,
     schedule_task_summary,
 )
+from .work_log import (
+    WORK_LOG_TOTALS_REQUEST,
+    DreameLawnMowerWorkLogTotals,
+    work_log_totals_from_app_data,
+)
 
 SCHEDULE_CURRENT_TASK_TIMEOUT_SECONDS = 5.0
 SCHEDULE_READ_DEADLINE_SECONDS = 10.0
@@ -91,6 +96,18 @@ SCHEDULE_READ_TIMEOUT_SECONDS = 5.0
 
 
 class _DreameLawnMowerClientSettingsMixin:
+    def _sync_get_work_log_totals(self) -> DreameLawnMowerWorkLogTotals:
+        """Fetch mower-owned lifetime totals through the MIHIS app action."""
+        response = self._sync_call_app_action(
+            WORK_LOG_TOTALS_REQUEST,
+            redact_response=True,
+        )
+        if not isinstance(response, Mapping):
+            raise DreameLawnMowerConnectionError(
+                "MIHIS returned an invalid response."
+            )
+        return work_log_totals_from_app_data(response)
+
     def _sync_get_app_schedules(
         self,
         include_raw: bool = False,
