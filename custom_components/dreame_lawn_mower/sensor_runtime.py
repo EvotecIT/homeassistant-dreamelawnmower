@@ -11,6 +11,7 @@ from .coordinator import DreameLawnMowerCoordinator, runtime_tracking_active
 from .entity import DreameLawnMowerEntity
 from .runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,
+    runtime_mission_cached_session_identity,
     runtime_mission_completion_confirmed,
     runtime_mission_progress_percent,
     runtime_mission_session_active,
@@ -501,6 +502,8 @@ def _runtime_session_completion_confirmed(
     mission_active = runtime_mission_session_active(
         snapshot,
         tracking_active=tracking_active,
+        session_started_at=runtime_mission_session_started_at(cache),
+        session_identity=runtime_mission_cached_session_identity(cache),
     )
     return runtime_mission_completion_confirmed(
         snapshot,
@@ -511,6 +514,7 @@ def _runtime_session_completion_confirmed(
             else False
         ),
         session_started_at=runtime_mission_session_started_at(cache),
+        session_identity=runtime_mission_cached_session_identity(cache),
     )
 
 

@@ -27,6 +27,7 @@ from .performance import (
     format_performance_sample,
 )
 from .runtime_cache import (
+    runtime_mission_cached_session_identity,
     runtime_mission_completion_confirmed,
     runtime_mission_completion_rejected,
     runtime_mission_new_session,
@@ -243,9 +244,17 @@ class DreameLawnMowerRefreshMixin:
     ) -> bool:
         """Refresh optional runtime telemetry without failing the main snapshot."""
         runtime_active = runtime_tracking_active(snapshot)
+        session_started_at = runtime_mission_session_started_at(
+            self.runtime_telemetry_cache
+        )
+        session_identity = runtime_mission_cached_session_identity(
+            self.runtime_telemetry_cache
+        )
         mission_active = runtime_mission_session_active(
             snapshot,
             tracking_active=runtime_active,
+            session_started_at=session_started_at,
+            session_identity=session_identity,
         )
         if runtime_map_index is None and not runtime_active:
             runtime_map_index = self._runtime_map_index()
@@ -264,18 +273,25 @@ class DreameLawnMowerRefreshMixin:
                 completion_confirmed=runtime_mission_completion_confirmed(
                     snapshot,
                     tracking_active=mission_active,
-                    session_started_at=runtime_mission_session_started_at(
-                        self.runtime_telemetry_cache
-                    ),
+                    session_started_at=session_started_at,
+                    session_identity=session_identity,
                 ),
-                completion_rejected=runtime_mission_completion_rejected(snapshot),
+                completion_rejected=runtime_mission_completion_rejected(
+                    snapshot,
+                    session_started_at=session_started_at,
+                    session_identity=session_identity,
+                ),
                 new_session=runtime_mission_new_session(snapshot),
                 new_session_event_at=runtime_mission_session_event_at(
                     snapshot,
                     active_session=mission_active,
                 ),
                 new_session_evidence=runtime_mission_new_session_evidence(snapshot),
-                session_identity=runtime_mission_session_identity(snapshot),
+                session_identity=runtime_mission_session_identity(
+                    snapshot,
+                    session_started_at=session_started_at,
+                    cached_session_identity=session_identity,
+                ),
             )
             self.client.update_runtime_live_tracking(
                 self.runtime_status_blob,

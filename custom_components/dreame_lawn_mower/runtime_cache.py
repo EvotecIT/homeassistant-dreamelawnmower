@@ -15,6 +15,7 @@ _SESSION_METRIC_FIELDS = (
 _COMPLETED_TASK_STATUSES = frozenset({"finished"})
 _COMPLETED_STATUS_NOTICES = frozenset({"mowing_task_completed"})
 _UNSUCCESSFUL_TASK_STATUSES = frozenset({"failed", "exit"})
+_TERMINAL_TASK_STATUSES = _COMPLETED_TASK_STATUSES | _UNSUCCESSFUL_TASK_STATUSES
 _NEW_SESSION_TASK_STATUSES = frozenset({"starting"})
 _NEW_SESSION_STATUS_NOTICES = frozenset(
     {"mowing_started", "mowing_task_started", "scheduled_mowing_started"}
@@ -56,11 +57,14 @@ def runtime_mission_completion_confirmed(
     tracking_active: bool | None,
     cached_completion_confirmed: bool = False,
     session_started_at: float | None = None,
+    session_identity: int | None = None,
 ) -> bool:
     """Return whether an inactive mission has an explicit completion signal."""
     mission_active = runtime_mission_session_active(
         snapshot,
         tracking_active=tracking_active,
+        session_started_at=session_started_at,
+        session_identity=session_identity,
     )
     if snapshot is None or mission_active is True:
         return False
@@ -86,11 +90,21 @@ def runtime_mission_completion_confirmed(
     return True
 
 
-def runtime_mission_completion_rejected(snapshot: Any) -> bool:
+def runtime_mission_completion_rejected(
+    snapshot: Any,
+    *,
+    session_started_at: float | None = None,
+    session_identity: int | None = None,
+) -> bool:
     """Return whether the mower explicitly ended the mission unsuccessfully."""
     return (
         snapshot is not None
         and getattr(snapshot, "task_status", None) in _UNSUCCESSFUL_TASK_STATUSES
+        and _runtime_terminal_state_is_current(
+            snapshot,
+            session_started_at=session_started_at,
+            session_identity=session_identity,
+        )
     )
 
 
@@ -98,6 +112,8 @@ def runtime_mission_session_active(
     snapshot: Any,
     *,
     tracking_active: bool | None,
+    session_started_at: float | None = None,
+    session_identity: int | None = None,
 ) -> bool | None:
     """Return whether telemetry belongs to a continuing mower mission.
 
@@ -107,12 +123,22 @@ def runtime_mission_session_active(
     """
     if snapshot is None:
         return tracking_active
+    task_status = getattr(snapshot, "task_status", None)
+    if (
+        task_status in _TERMINAL_TASK_STATUSES
+        and not _runtime_terminal_state_is_current(
+            snapshot,
+            session_started_at=session_started_at,
+            session_identity=session_identity,
+        )
+    ):
+        return True
     session_active = getattr(snapshot, "mowing_session_active", None)
     if session_active is not None:
         return bool(session_active)
     if getattr(snapshot, "task_resumable", None) is True:
         return True
-    if getattr(snapshot, "task_status", None) in _RESUMABLE_TASK_STATUSES:
+    if task_status in _RESUMABLE_TASK_STATUSES:
         return True
     if runtime_mission_new_session(snapshot):
         return True
@@ -129,7 +155,7 @@ def runtime_mission_session_active(
             and notice_event_at > state_event_at
         ):
             return True
-    if getattr(snapshot, "task_status", None) in _COMPLETED_TASK_STATUSES:
+    if task_status in _COMPLETED_TASK_STATUSES:
         return False
     if getattr(snapshot, "state", None) in {
         "charging",
@@ -214,12 +240,55 @@ def runtime_mission_session_event_at(
     )
 
 
-def runtime_mission_session_identity(snapshot: Any) -> int | None:
-    """Return the heartbeat task id that identifies the current mission."""
+def runtime_mission_session_identity(
+    snapshot: Any,
+    *,
+    session_started_at: float | None = None,
+    cached_session_identity: int | None = None,
+) -> int | None:
+    """Return a heartbeat task id only when it can belong to this mission."""
+    task_id = _snapshot_mission_session_identity(snapshot)
+    if (
+        getattr(snapshot, "task_status", None) in _TERMINAL_TASK_STATUSES
+        and (session_started_at is not None or cached_session_identity is not None)
+        and not _runtime_terminal_state_is_current(
+            snapshot,
+            session_started_at=session_started_at,
+            session_identity=cached_session_identity,
+        )
+    ):
+        return None
+    return task_id
+
+
+def _snapshot_mission_session_identity(snapshot: Any) -> int | None:
+    """Return the raw heartbeat task id carried by a snapshot."""
     task_id = getattr(snapshot, "mission_task_id", None)
     if isinstance(task_id, int) and not isinstance(task_id, bool):
         return task_id
     return None
+
+
+def _runtime_terminal_state_is_current(
+    snapshot: Any,
+    *,
+    session_started_at: float | None,
+    session_identity: int | None,
+) -> bool:
+    """Return whether terminal task evidence belongs to the cached mission."""
+    if session_started_at is None and session_identity is None:
+        return True
+    snapshot_identity = _snapshot_mission_session_identity(snapshot)
+    if session_identity is not None and snapshot_identity is not None:
+        return snapshot_identity == session_identity
+    terminal_event_at = _event_timestamp(
+        getattr(snapshot, "task_status_event_at", None)
+    )
+    return (
+        session_started_at is not None
+        and terminal_event_at is not None
+        and terminal_event_at > session_started_at
+    )
 
 
 def runtime_mission_new_session_evidence(snapshot: Any) -> tuple[Any, ...] | None:
@@ -483,6 +552,13 @@ def runtime_mission_session_started_at(cache: Any) -> float | None:
     """Return ordered evidence for the current cached mission boundary."""
     if isinstance(cache, DreameLawnMowerRuntimeTelemetryCache):
         return cache._session_started_at
+    return None
+
+
+def runtime_mission_cached_session_identity(cache: Any) -> int | None:
+    """Return the current integration-owned heartbeat task identity."""
+    if isinstance(cache, DreameLawnMowerRuntimeTelemetryCache):
+        return cache._session_identity
     return None
 
 

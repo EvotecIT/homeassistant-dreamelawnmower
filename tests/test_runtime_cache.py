@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from custom_components.dreame_lawn_mower.runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,
     runtime_blob_has_session_metrics,
+    runtime_mission_cached_session_identity,
     runtime_mission_completion_confirmed,
     runtime_mission_completion_rejected,
     runtime_mission_new_session,
@@ -141,6 +142,109 @@ def test_finished_heartbeat_normalizes_rounded_area_progress() -> None:
             ),
         )
         == 100.0
+    )
+
+
+def test_stale_terminal_heartbeat_cannot_end_the_current_mission() -> None:
+    """A retained prior heartbeat cannot complete or reject the new mission."""
+    stale_finished = SimpleNamespace(
+        mowing_session_active=False,
+        task_status="finished",
+        task_status_event_at=10.0,
+        mission_task_id=100,
+        status_notice_name="mowing_task_completed",
+    )
+    stale_failed = SimpleNamespace(
+        mowing_session_active=False,
+        task_status="failed",
+        task_status_event_at=10.0,
+        mission_task_id=100,
+        status_notice_name=None,
+    )
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    cache.observe_session_state(
+        active_session=True,
+        session_identity=101,
+        new_session_event_at=20.0,
+    )
+    current = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+    assert cache.update(current, active_session=True, session_identity=101) is True
+    session_started_at = runtime_mission_session_started_at(cache)
+    session_identity = runtime_mission_cached_session_identity(cache)
+    generation = runtime_mission_session_generation(cache)
+
+    for stale_terminal in (stale_finished, stale_failed):
+        assert (
+            runtime_mission_session_active(
+                stale_terminal,
+                tracking_active=False,
+                session_started_at=session_started_at,
+                session_identity=session_identity,
+            )
+            is True
+        )
+    assert (
+        runtime_mission_completion_confirmed(
+            stale_finished,
+            tracking_active=False,
+            session_started_at=session_started_at,
+            session_identity=session_identity,
+        )
+        is False
+    )
+    assert (
+        runtime_mission_completion_rejected(
+            stale_failed,
+            session_started_at=session_started_at,
+            session_identity=session_identity,
+        )
+        is False
+    )
+    cache.observe_session_state(
+        active_session=True,
+        session_identity=runtime_mission_session_identity(
+            stale_finished,
+            session_started_at=session_started_at,
+            cached_session_identity=session_identity,
+        ),
+    )
+    assert runtime_mission_session_generation(cache) == generation
+    assert cache.blob is current
+
+
+def test_current_terminal_heartbeat_can_end_the_current_mission() -> None:
+    """Matching identity or newer timing accepts terminal heartbeat evidence."""
+    matching = SimpleNamespace(
+        mowing_session_active=False,
+        task_status="finished",
+        task_status_event_at=10.0,
+        mission_task_id=101,
+        status_notice_name=None,
+    )
+    newer = SimpleNamespace(
+        mowing_session_active=False,
+        task_status="finished",
+        task_status_event_at=30.0,
+        mission_task_id=None,
+        status_notice_name=None,
+    )
+
+    assert (
+        runtime_mission_completion_confirmed(
+            matching,
+            tracking_active=False,
+            session_started_at=20.0,
+            session_identity=101,
+        )
+        is True
+    )
+    assert (
+        runtime_mission_completion_confirmed(
+            newer,
+            tracking_active=False,
+            session_started_at=20.0,
+        )
+        is True
     )
 
 
