@@ -76,6 +76,7 @@ from .client_core_helpers import (
 from .client_core_helpers import (
     _FIRMWARE_DESCRIPTION_PREFERRED_KEYS as _FIRMWARE_DESCRIPTION_PREFERRED_KEYS,
 )
+from .client_device_settings import _DreameLawnMowerClientDeviceSettingsMixin
 from .client_maps import (
     _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS,
     _DreameLawnMowerClientMapsMixin,
@@ -357,6 +358,7 @@ def _targeted_task_confirmed(
 class DreameLawnMowerClient(
     _DreameLawnMowerCameraMixin,
     _DreameLawnMowerClientCoreMixin,
+    _DreameLawnMowerClientDeviceSettingsMixin,
     _DreameLawnMowerClientSettingsMixin,
     _DreameLawnMowerClientMapsMixin,
 ):
@@ -688,29 +690,57 @@ class DreameLawnMowerClient(
         )
 
     async def async_switch_current_map(self, map_index: int) -> Any:
-        """Switch the active mower map through the app task path."""
+        """Switch the active map only while idle and require map-list readback."""
         map_index = int(map_index)
+        snapshot = await self.async_refresh_authoritative_snapshot()
+        session_unknown_outside_safe_state = (
+            snapshot.mowing_session_active is None
+            and snapshot.activity not in {"docked", "idle"}
+        )
+        if (
+            snapshot.mowing_session_active is True
+            or session_unknown_outside_safe_state
+            or snapshot.mowing
+            or snapshot.paused
+            or snapshot.returning
+        ):
+            raise _DreameLawnMowerCommandRejectedError(
+                "The active map cannot be changed while a mowing task is active, "
+                "paused, or returning to the dock. Finish or cancel the task first."
+            )
         try:
-            return await asyncio.to_thread(self._sync_switch_current_map, map_index)
+            response = await asyncio.to_thread(self._sync_switch_current_map, map_index)
         except _DreameLawnMowerCommandRejectedError:
             raise
-        except DreameLawnMowerConnectionError as err:
-            for delay in (0.5, 1.5, 3.0):
+        except DreameLawnMowerConnectionError:
+            # A timed-out setter can still have reached the mower. The same
+            # mandatory readback below decides whether it took effect.
+            response = None
+
+        readable = False
+        for delay in (0.0, 0.75, 1.5, 3.0):
+            if delay:
                 await asyncio.sleep(delay)
-                try:
-                    maps = await self.async_get_app_maps(
-                        include_payload=False,
-                        include_objects=False,
-                    )
-                except DreameLawnMowerConnectionError:
-                    continue
-                if maps.get("current_map_index") == map_index:
-                    return None
-            raise DreameLawnMowerConnectionError(
-                "The mower may have received the map switch request, but the "
-                "active map could not be confirmed after the connection was "
-                "interrupted. Refresh the map state before trying again."
-            ) from err
+            try:
+                maps = await self.async_get_app_maps(
+                    include_payload=False,
+                    include_objects=False,
+                )
+            except DreameLawnMowerConnectionError:
+                continue
+            readable = True
+            if maps.get("current_map_index") == map_index:
+                return response
+
+        if readable:
+            raise _DreameLawnMowerCommandRejectedError(
+                "The mower acknowledged the map switch but stayed on its previous "
+                "map. Map switching is only supported while no task is active."
+            )
+        raise DreameLawnMowerConnectionError(
+            "The active map could not be confirmed because every map-list "
+            "readback failed. Refresh the mower before trying again."
+        )
 
     async def async_get_vector_map_details(self) -> dict[str, Any]:
         """Return JSON-safe parsed batch vector-map details."""

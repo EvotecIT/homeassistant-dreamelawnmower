@@ -294,17 +294,19 @@ Last updated: 2026-04-21
   already-current `mowing_height_cm=6.0` value. The mower returned top-level
   `r: 0` and the client recorded `executed=true` with `request_verified=true`
   in ignored `preference-write-live-noop.json`.
-- The downloaded A2 plugin bundle identifies weather/rain protection settings
-  in read-only `CFG`: `WRF` is the weather switch and `WRP` is the rain
-  protection tuple. `RPET` returns `endTime` while
+- The downloaded A2 plugin bundle identifies charging and rain settings in
+  `CFG`: `BAT[3:6]` is charging-period enable/start/end, `WRF` is the weather
+  switch, and `WRP` is the rain-protection tuple. `RPET` returns `endTime` while
   `INFO_BAD_WEATHER_PROTECTING` is active. The reusable client now has
   `async_get_weather_protection()` plus `examples/weather_probe.py`, and Home
   Assistant has disabled-by-default Capture/Last Weather Probe diagnostics.
   The probe distinguishes configured rain protection from an observed active
   rain-delay window with `rain_protection_active`; when an end time is present,
   it also exposes `rain_protect_end_time_iso`.
-  Keep writes (`setWRF`/`setWRP`) unexposed until runtime locks and safety are
-  validated live.
+  The client now owns confirmed `BAT` charging-period and `WRP` rain-protection
+  writes. Home Assistant exposes switches, charging start/end times, and a rain
+  delay select. Every write preserves unrelated values and requires `CFG`
+  readback; `2:51` notifications coalesce into a settings refresh.
 - A live read-only weather probe on 2026-04-19 while rain was expected returned
   `WRP=[1,8,0]`, decoded as rain protection enabled for 8 hours with sensitivity
   `0`. `CFG` did not include `WRF`, and `RPET` returned no active end time at

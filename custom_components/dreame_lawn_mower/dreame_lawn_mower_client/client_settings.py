@@ -38,8 +38,6 @@ from .client_settings_helpers import (
     _schedule_plan_overview,
     _schedule_upload_overview,
     _voice_settings_summary,
-    _weather_protection_active_summary,
-    _weather_protection_summary,
 )
 from .client_shared_helpers import (
     _app_action_data,
@@ -1013,71 +1011,6 @@ class _DreameLawnMowerClientSettingsMixin:
             result["refreshed_item"] = maintenance_item_status(refreshed, item)
         except Exception as err:  # noqa: BLE001 - write result is still useful
             result["refresh_error"] = str(err)
-        return result
-
-    def _sync_get_weather_protection(
-        self,
-        include_raw: bool = False,
-    ) -> dict[str, Any]:
-        """Fetch read-only weather and rain-protection settings."""
-        result: dict[str, Any] = {
-            "source": "app_action_weather_protection",
-            "available": False,
-            "fault_hint": "INFO_BAD_WEATHER_PROTECTING",
-            "config_keys": ["WRF", "WRP"],
-            "rain_end_time_command": "RPET",
-            "errors": [],
-            "warnings": [],
-        }
-
-        try:
-            config_result = self._sync_call_app_action({"m": "g", "t": "CFG"})
-            if include_raw:
-                result["raw_config"] = _json_safe(config_result, max_depth=4)
-            config = _app_action_data(config_result)
-            if not isinstance(config, Mapping):
-                raise DreameLawnMowerConnectionError(
-                    f"CFG returned invalid weather config: {config_result}"
-                )
-            result["present_config_keys"] = [
-                key for key in result["config_keys"] if key in config
-            ]
-            result.update(_weather_protection_summary(config))
-            result["available"] = True
-        except Exception as err:  # noqa: BLE001 - diagnostic probe should return evidence
-            result["errors"].append({"stage": "config", "error": str(err)})
-
-        try:
-            rain_end_result = self._sync_call_app_action({"m": "g", "t": "RPET"})
-            if include_raw:
-                result["raw_rain_end_time"] = _json_safe(
-                    rain_end_result,
-                    max_depth=4,
-                )
-            rain_end_data = _app_action_data(rain_end_result)
-            if isinstance(rain_end_data, Mapping):
-                end_time = rain_end_data.get("endTime")
-                if end_time is None:
-                    end_time = rain_end_data.get("end_time")
-                if end_time is not None:
-                    result["rain_protect_end_time"] = end_time
-                    result["rain_protect_end_time_present"] = True
-                    result["available"] = True
-                else:
-                    result["rain_protect_end_time_present"] = False
-            elif rain_end_data is None:
-                result["rain_protect_end_time_present"] = False
-            elif rain_end_data is not None:
-                result["warnings"].append(
-                    {
-                        "stage": "rain_end_time",
-                        "warning": f"RPET returned unexpected data: {rain_end_data}",
-                    }
-                )
-        except Exception as err:  # noqa: BLE001 - RPET may only answer while protection is active
-            result["warnings"].append({"stage": "rain_end_time", "warning": str(err)})
-
-        result.update(_weather_protection_active_summary(result))
         return result
 
     def _sync_get_voice_settings(

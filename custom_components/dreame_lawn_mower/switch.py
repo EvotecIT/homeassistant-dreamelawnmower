@@ -13,6 +13,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
+from .device_settings_control import device_settings_section
 from .entity import DreameLawnMowerEntity
 from .preference_switch import (
     AI_CLASS_SWITCHES,
@@ -76,6 +77,8 @@ async def async_setup_entry(
                 )
                 for key, name, index, icon in VOICE_PROMPT_SWITCHES
             ),
+            DreameLawnMowerChargingPeriodSwitch(coordinator),
+            DreameLawnMowerRainProtectionSwitch(coordinator),
         ]
     )
     known_schedule_plans: set[tuple[int, int]] = set()
@@ -159,6 +162,74 @@ class DreameLawnMowerVoicePromptSwitch(DreameLawnMowerEntity, SwitchEntity):
         await self.coordinator.client.async_set_voice_prompts(updated)
         await self.coordinator.async_refresh_voice_settings(force=True)
         self.coordinator.async_update_listeners()
+
+
+class DreameLawnMowerChargingPeriodSwitch(DreameLawnMowerEntity, SwitchEntity):
+    """Enable the mower-native custom charging window."""
+
+    _attr_name = "Charging Period"
+    _attr_icon = "mdi:battery-clock"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_charging_period"
+
+    @property
+    def available(self) -> bool:
+        settings = device_settings_section(self.coordinator.device_settings)
+        return bool(
+            self.coordinator.data is not None
+            and settings
+            and settings.get("charging_settings_available")
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        settings = device_settings_section(self.coordinator.device_settings)
+        if settings is None or not settings.get("charging_settings_available"):
+            return None
+        return bool(settings.get("charging_period_enabled"))
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_charging_period(enabled=True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_charging_period(enabled=False)
+
+
+class DreameLawnMowerRainProtectionSwitch(DreameLawnMowerEntity, SwitchEntity):
+    """Enable mower-native rain detection and return-to-dock protection."""
+
+    _attr_name = "Rain Protection"
+    _attr_icon = "mdi:weather-rainy"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_rain_protection"
+
+    @property
+    def available(self) -> bool:
+        settings = device_settings_section(self.coordinator.device_settings)
+        return bool(
+            self.coordinator.data is not None
+            and settings
+            and settings.get("rain_settings_available")
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        settings = device_settings_section(self.coordinator.device_settings)
+        if settings is None or not settings.get("rain_settings_available"):
+            return None
+        return bool(settings.get("rain_protection_enabled"))
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_rain_protection(enabled=True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_rain_protection(enabled=False)
 
 
 class DreameLawnMowerSchedulePlanSwitch(DreameLawnMowerEntity, SwitchEntity):

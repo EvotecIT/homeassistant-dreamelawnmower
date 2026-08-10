@@ -22,6 +22,7 @@ REMOTE_CONTROL_STATES = {"remote_control"}
 REALTIME_STATE_PROPERTY_KEY = "2.1"
 REALTIME_ERROR_PROPERTY_KEY = "2.2"
 REALTIME_TASK_STATUS_PROPERTY_KEY = "4.7"
+REALTIME_SETTINGS_PROPERTY_KEY = "2.51"
 OPERATIONAL_HUMAN_DETECTION_NOTICE_MODELS = frozenset(
     {"dreame.mower.q2501a", "q2501a"}
 )
@@ -360,6 +361,11 @@ class DreameLawnMowerSnapshot:
     task_status_name: str | None = None
     task_status_source: str | None = None
     task_status_event_at: float | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    device_settings_event_at: float | None = field(
         default=None,
         repr=False,
         compare=False,
@@ -1351,6 +1357,10 @@ def snapshot_from_device(
         task_status_event_at=_realtime_property_last_seen(
             device,
             REALTIME_TASK_STATUS_PROPERTY_KEY,
+        ),
+        device_settings_event_at=_realtime_property_last_seen(
+            device,
+            REALTIME_SETTINGS_PROPERTY_KEY,
         ),
         error_code=error_code,
         error_name=error_name,

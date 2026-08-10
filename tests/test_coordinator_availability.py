@@ -324,6 +324,48 @@ def test_cached_device_update_publishes_realtime_runtime_position() -> None:
     assert coordinator._client_update_task is None
 
 
+def test_cached_settings_event_refreshes_cfg_once_per_event() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    snapshot = SimpleNamespace(
+        available=True,
+        mowing_session_active=False,
+        activity="docked",
+        device_settings_event_at=123.0,
+    )
+    coordinator._client_update_task = Mock()
+    coordinator._runtime_map_identity_verified = True
+    coordinator._last_device_settings_event_at = None
+    coordinator._device_settings_write_lock = asyncio.Lock()
+    coordinator.app_maps = {"current_map_index": 0}
+    coordinator.selected_map_index = 0
+    coordinator.runtime_status_blob = None
+    coordinator.runtime_telemetry_cache = SimpleNamespace(update=Mock())
+    coordinator.bluetooth_connected = None
+    coordinator.client = SimpleNamespace(
+        async_get_cached_snapshot=AsyncMock(return_value=snapshot),
+        async_get_runtime_status_blob=AsyncMock(return_value=None),
+        async_get_bluetooth_connected=AsyncMock(return_value=False),
+        update_runtime_live_tracking=Mock(),
+    )
+    coordinator.async_set_updated_data = Mock()
+    coordinator.async_refresh_device_settings = AsyncMock()
+    coordinator.async_update_listeners = Mock()
+
+    with patch(
+        "custom_components.dreame_lawn_mower.coordinator.asyncio.sleep",
+        new=AsyncMock(),
+    ):
+        asyncio.run(coordinator._async_process_client_update())
+        asyncio.run(coordinator._async_process_client_update())
+
+    coordinator.async_refresh_device_settings.assert_awaited_once_with(
+        force=True,
+        source="device_settings_realtime",
+    )
+    coordinator.async_update_listeners.assert_called_once_with()
+    assert coordinator._last_device_settings_event_at == 123.0
+
+
 def test_cached_completion_survives_runtime_failure_and_later_idle_refresh() -> None:
     """A transient completion event is cached before optional telemetry reads."""
     completed = SimpleNamespace(

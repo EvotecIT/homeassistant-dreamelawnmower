@@ -236,28 +236,37 @@ path using map `0`, area `1`, and the already-current
 recorded `executed=true` and `request_verified=true` without changing the
 effective mower settings.
 
-## Observed weather and rain protection settings
+## Observed charging and rain-protection settings
 
 The A2 plugin bundle identifies the weather/rain-protection read path as the
 general settings app action `CFG`. Relevant fields observed in the bundle:
 
 - `WRF`: boolean weather switch used by the app as `weatherSwitch`.
+- `BAT`: six-value battery record. Slots `0-2` are recharge/resume settings;
+  slots `3-5` are charging-period enabled, start minutes, and end minutes.
 - `WRP`: rain-protection tuple. The app default is `[1, 8, 0]`, and older
   two-value payloads are padded with a third `0` before use.
 - `RPET`: read-only app action returning `endTime` while
   `INFO_BAD_WEATHER_PROTECTING` is active.
 
-The Python client now exposes `async_get_weather_protection()` and
-`examples/weather_probe.py`. Home Assistant mirrors this as disabled-by-default
-diagnostic entities: `Capture Weather Probe` and `Last Weather Probe`. These are
-read-only; write actions such as `setWRF` and `setWRP` remain intentionally
-unexposed until their runtime constraints and mower-state safety are validated
-live.
+The Python client exposes `async_get_device_settings()` (with the historical
+`async_get_weather_protection()` read alias), confirmed charging/rain setters,
+and `examples/weather_probe.py`. Home Assistant exposes a charging-period
+switch with start/end time entities plus a rain-protection switch and delay
+select. Writes preserve unrelated BAT thresholds and WRP sensitivity, then
+require a full `CFG` readback before publishing state.
 
 A live read-only A2 run of `examples/weather_probe.py` on 2026-04-19 while rain
 was expected returned `WRP=[1,8,0]`, decoded as rain protection enabled for 8
 hours with sensitivity `0`. `CFG` did not include `WRF` on that device, and
 `RPET` returned no active `endTime` at capture time.
+
+On 2026-08-10, the live A2 on firmware `4.3.6_0625` reported
+`BAT=[15,95,1,0,1080,480]`, `WRF=1`, and `WRP=[1,8,1]` while docked and idle.
+Supervised charging-period and rain-protection writes were followed by `CFG`
+readback and restoration of the original values. Property `2:51` remains a
+generic settings-change announcement: it says that a setting changed without
+naming the CFG key, so the integration coalesces it into one settings refresh.
 
 ## First live probe result
 

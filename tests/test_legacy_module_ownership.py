@@ -150,12 +150,14 @@ def test_client_facade_composes_canonical_domain_owners() -> None:
     facade = load_internal_module("client")
     camera = load_internal_module("client_camera")
     core = load_internal_module("client_core")
+    device_settings = load_internal_module("client_device_settings")
     maps = load_internal_module("client_maps")
     settings = load_internal_module("client_settings")
 
     assert facade.DreameLawnMowerClient.__bases__ == (
         camera._DreameLawnMowerCameraMixin,
         core._DreameLawnMowerClientCoreMixin,
+        device_settings._DreameLawnMowerClientDeviceSettingsMixin,
         settings._DreameLawnMowerClientSettingsMixin,
         maps._DreameLawnMowerClientMapsMixin,
     )
