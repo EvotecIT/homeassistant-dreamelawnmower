@@ -485,12 +485,16 @@ def test_command_acceptance_preserves_callback_telemetry_from_new_generation() -
     assert cache.update(previous, completion_confirmed=True) is True
     observed_generation = runtime_mission_session_generation(cache)
 
-    cache.observe_session_state(active_session=True)
+    cache.observe_session_state(active_session=True, new_session_event_at=30.0)
     assert cache.update(current, active_session=True) is True
-    cache.begin_new_session(observed_generation=observed_generation)
+    cache.begin_new_session(
+        observed_generation=observed_generation,
+        session_started_at=20.0,
+    )
 
     assert cache.blob is current
     assert cache.completion_confirmed is False
+    assert runtime_mission_session_started_at(cache) == 30.0
 
 
 def test_command_acceptance_still_resets_unidentified_active_telemetry() -> None:

@@ -63,6 +63,7 @@ from .runtime_cache import (
     runtime_mission_new_session_evidence,
     runtime_mission_session_active,
     runtime_mission_session_event_at,
+    runtime_mission_session_generation,
     runtime_mission_session_identity,
     runtime_mission_session_started_at,
 )
@@ -469,6 +470,9 @@ class DreameLawnMowerCoordinator(
                 self.async_set_updated_data(snapshot)
                 return
             runtime_active = runtime_tracking_active(snapshot)
+            observed_mission_generation = runtime_mission_session_generation(
+                self.runtime_telemetry_cache
+            )
             session_started_at = runtime_mission_session_started_at(
                 self.runtime_telemetry_cache
             )
@@ -510,7 +514,13 @@ class DreameLawnMowerCoordinator(
             # Both optional reads can yield while a newer authoritative fetch
             # publishes. Commit no runtime or Bluetooth side effects until the
             # cached snapshot is still current after every await.
-            if self._device_snapshot_is_stale(snapshot):
+            if self._device_snapshot_is_stale(snapshot) or (
+                observed_mission_generation is not None
+                and runtime_mission_session_generation(
+                    self.runtime_telemetry_cache
+                )
+                != observed_mission_generation
+            ):
                 return
 
             self._observe_runtime_mission_boundary(snapshot)

@@ -663,6 +663,65 @@ def test_newer_video_safety_state_wins_over_delayed_cached_mqtt_update() -> None
     asyncio.run(scenario())
 
 
+def test_command_boundary_blocks_delayed_cached_mqtt_runtime_side_effects() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        snapshot = SimpleNamespace(
+            available=True,
+            mowing_session_active=False,
+            activity="idle",
+        )
+        runtime_started = asyncio.Event()
+        release_runtime = asyncio.Event()
+        stale_runtime = SimpleNamespace(
+            candidate_runtime_area_progress_percent=100.0
+        )
+        cache = DreameLawnMowerRuntimeTelemetryCache()
+        assert cache.update(stale_runtime, completion_confirmed=True) is True
+
+        async def runtime_status(*, refresh: bool, include_cloud: bool) -> object:
+            assert refresh is False
+            assert include_cloud is False
+            runtime_started.set()
+            await release_runtime.wait()
+            return stale_runtime
+
+        coordinator._client_update_task = Mock()
+        coordinator._client_update_pending = False
+        coordinator._shutting_down = False
+        coordinator._runtime_map_identity_verified = True
+        coordinator._device_refresh_lock = asyncio.Lock()
+        coordinator._device_snapshot_generation = 0
+        coordinator._published_device_snapshot_generation = 0
+        coordinator._device_snapshot_generations = {}
+        coordinator.app_maps = {"current_map_index": 2}
+        coordinator.selected_map_index = 2
+        coordinator.runtime_status_blob = None
+        coordinator.runtime_telemetry_cache = cache
+        coordinator.bluetooth_connected = None
+        coordinator.client = SimpleNamespace(
+            async_get_cached_snapshot=AsyncMock(return_value=snapshot),
+            async_get_runtime_status_blob=runtime_status,
+            async_get_bluetooth_connected=AsyncMock(return_value=True),
+            update_runtime_live_tracking=Mock(),
+        )
+        coordinator.async_set_updated_data = Mock()
+
+        update_task = asyncio.create_task(coordinator._async_process_client_update())
+        await asyncio.wait_for(runtime_started.wait(), timeout=1)
+        cache.begin_new_session(session_started_at=20.0)
+        release_runtime.set()
+        await update_task
+
+        assert cache.blob is None
+        assert coordinator.runtime_status_blob is None
+        assert coordinator.bluetooth_connected is None
+        coordinator.client.update_runtime_live_tracking.assert_not_called()
+        coordinator.async_set_updated_data.assert_not_called()
+
+    asyncio.run(scenario())
+
+
 def test_cached_device_update_waits_for_verified_active_map_identity() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     snapshot = SimpleNamespace(

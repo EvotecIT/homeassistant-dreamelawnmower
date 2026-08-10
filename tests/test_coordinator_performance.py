@@ -363,6 +363,54 @@ def test_newer_video_safety_snapshot_blocks_foreground_runtime_side_effects() ->
     asyncio.run(scenario())
 
 
+def test_command_boundary_blocks_delayed_foreground_runtime_side_effects() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        snapshot = SimpleNamespace(
+            mowing_session_active=False,
+            activity="idle",
+        )
+        runtime_started = asyncio.Event()
+        release_runtime = asyncio.Event()
+        retained_runtime = SimpleNamespace(source="retained")
+        stale_runtime = SimpleNamespace(
+            candidate_runtime_area_progress_percent=100.0
+        )
+        cache = DreameLawnMowerRuntimeTelemetryCache()
+        assert cache.update(stale_runtime, completion_confirmed=True) is True
+
+        async def refresh_runtime(*, refresh: bool, include_cloud: bool) -> object:
+            assert refresh is False
+            assert include_cloud is True
+            runtime_started.set()
+            await release_runtime.wait()
+            return stale_runtime
+
+        coordinator.runtime_status_blob = retained_runtime
+        coordinator.runtime_telemetry_cache = cache
+        coordinator.client = SimpleNamespace(
+            async_get_runtime_status_blob=refresh_runtime,
+            update_runtime_live_tracking=Mock(),
+        )
+
+        refresh_task = asyncio.create_task(
+            coordinator._async_refresh_runtime_status(
+                snapshot,
+                runtime_map_index=2,
+            )
+        )
+        await asyncio.wait_for(runtime_started.wait(), timeout=1)
+        cache.begin_new_session(session_started_at=20.0)
+        release_runtime.set()
+
+        assert await refresh_task is False
+        assert cache.blob is None
+        assert coordinator.runtime_status_blob is retained_runtime
+        coordinator.client.update_runtime_live_tracking.assert_not_called()
+
+    asyncio.run(scenario())
+
+
 def test_first_refresh_does_not_wait_for_optional_metadata() -> None:
     async def scenario() -> None:
         coordinator = object.__new__(DreameLawnMowerCoordinator)

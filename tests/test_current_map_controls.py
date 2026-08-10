@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from homeassistant.components.lawn_mower import LawnMowerActivity
@@ -1005,6 +1005,37 @@ def test_lawn_mower_start_preserves_callback_telemetry_before_command_return() -
 
     assert cache.blob is current_blob
     entity.coordinator.async_request_refresh.assert_awaited_once()
+
+
+def test_lawn_mower_records_command_boundary_after_acceptance() -> None:
+    """A delayed prior notice cannot postdate the accepted mission boundary."""
+    command_accepted = False
+
+    async def accept_start() -> bool:
+        nonlocal command_accepted
+        command_accepted = True
+        return True
+
+    def accepted_at() -> float:
+        assert command_accepted is True
+        return 20.0
+
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = SimpleNamespace(
+        client=SimpleNamespace(async_start_mowing=AsyncMock(side_effect=accept_start)),
+        selected_mowing_action="all_area",
+        runtime_telemetry_cache=cache,
+        async_request_refresh=AsyncMock(),
+    )
+
+    with patch(
+        "custom_components.dreame_lawn_mower.lawn_mower.time",
+        side_effect=accepted_at,
+    ):
+        asyncio.run(entity.async_start_mowing())
+
+    assert runtime_mission_session_started_at(cache) == 20.0
 
 
 def test_lawn_mower_start_edge_service_uses_explicit_contours() -> None:

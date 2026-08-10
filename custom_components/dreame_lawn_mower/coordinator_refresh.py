@@ -34,6 +34,7 @@ from .runtime_cache import (
     runtime_mission_new_session_evidence,
     runtime_mission_session_active,
     runtime_mission_session_event_at,
+    runtime_mission_session_generation,
     runtime_mission_session_identity,
     runtime_mission_session_started_at,
 )
@@ -250,6 +251,9 @@ class DreameLawnMowerRefreshMixin:
         session_identity = runtime_mission_cached_session_identity(
             self.runtime_telemetry_cache
         )
+        observed_mission_generation = runtime_mission_session_generation(
+            self.runtime_telemetry_cache
+        )
         mission_active = runtime_mission_session_active(
             snapshot,
             tracking_active=runtime_active,
@@ -263,7 +267,13 @@ class DreameLawnMowerRefreshMixin:
                 refresh=False,
                 include_cloud=True,
             )
-            if self._snapshot_is_stale(snapshot):
+            if self._snapshot_is_stale(snapshot) or (
+                observed_mission_generation is not None
+                and runtime_mission_session_generation(
+                    self.runtime_telemetry_cache
+                )
+                != observed_mission_generation
+            ):
                 return False
             self.runtime_status_blob = runtime_status_blob
             self.runtime_telemetry_cache.update(
@@ -300,7 +310,13 @@ class DreameLawnMowerRefreshMixin:
             )
             return True
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
-            if self._snapshot_is_stale(snapshot):
+            if self._snapshot_is_stale(snapshot) or (
+                observed_mission_generation is not None
+                and runtime_mission_session_generation(
+                    self.runtime_telemetry_cache
+                )
+                != observed_mission_generation
+            ):
                 return False
             _LOGGER.debug("Failed to refresh runtime status blob: %s", err)
             self.runtime_status_blob = None
