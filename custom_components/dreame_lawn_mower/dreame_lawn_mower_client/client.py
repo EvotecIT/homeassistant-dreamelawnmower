@@ -722,14 +722,11 @@ class DreameLawnMowerClient(
             if delay:
                 await asyncio.sleep(delay)
             try:
-                maps = await self.async_get_app_maps(
-                    include_payload=False,
-                    include_objects=False,
-                )
+                current_map_index = await self.async_get_current_app_map_index()
             except DreameLawnMowerConnectionError:
                 continue
             readable = True
-            if maps.get("current_map_index") == map_index:
+            if current_map_index == map_index:
                 return response
 
         if readable:
@@ -1163,6 +1160,12 @@ class DreameLawnMowerClient(
             include_payload,
             include_objects,
             include_object_urls,
+        )
+
+    async def async_get_current_app_map_index(self) -> int | None:
+        """Read the active map index without downloading map payloads."""
+        return await asyncio.to_thread(
+            self._sync_get_current_app_map_index_readback,
         )
 
     async def async_get_batch_schedules(

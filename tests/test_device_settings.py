@@ -12,6 +12,9 @@ import pytest
 from custom_components.dreame_lawn_mower.button import (
     DreameLawnMowerCaptureWeatherProbeButton,
 )
+from custom_components.dreame_lawn_mower.coordinator import (
+    DreameLawnMowerCoordinator,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     device_settings,
 )
@@ -216,16 +219,16 @@ def test_weather_probe_updates_canonical_device_settings_cache() -> None:
     payload = {
         "source": "app_action_weather_protection",
         "available": True,
+        "present_config_keys": ["BAT", "WRP"],
+        "errors": [],
         "charging_settings_available": True,
         "rain_settings_available": True,
     }
     coordinator = SimpleNamespace(
         client=SimpleNamespace(
-            async_get_weather_protection=AsyncMock(return_value=payload),
             descriptor=SimpleNamespace(title="Test mower"),
         ),
-        last_weather_probe_result=None,
-        _cache_device_settings=Mock(),
+        async_capture_weather_protection=AsyncMock(return_value=payload),
         hass=SimpleNamespace(),
         entry=SimpleNamespace(entry_id="entry-1"),
     )
@@ -237,11 +240,89 @@ def test_weather_probe_updates_canonical_device_settings_cache() -> None:
     ):
         asyncio.run(button.async_press())
 
-    coordinator._cache_device_settings.assert_called_once_with(
-        payload,
-        source="weather_probe",
+    coordinator.async_capture_weather_protection.assert_awaited_once_with()
+
+
+def test_weather_probe_serializes_and_updates_canonical_cache() -> None:
+    payload = {
+        "available": True,
+        "present_config_keys": ["BAT", "WRP"],
+        "errors": [],
+    }
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._device_settings_write_lock = asyncio.Lock()
+    coordinator.client = SimpleNamespace(
+        async_get_weather_protection=AsyncMock(return_value=payload)
     )
+    coordinator.last_weather_probe_result = None
+    coordinator.device_settings = None
+    coordinator.weather_protection = None
+    coordinator.weather_protection_refreshed_at = None
+    coordinator.async_update_listeners = Mock()
+
+    result = asyncio.run(coordinator.async_capture_weather_protection())
+
+    assert result is payload
     assert coordinator.last_weather_probe_result is payload
+    assert coordinator.device_settings["source"] == "weather_probe"
+    assert coordinator.weather_protection == coordinator.device_settings
+    coordinator.async_update_listeners.assert_called_once_with()
+
+
+def test_device_settings_refresh_and_write_cache_are_serialized() -> None:
+    old_payload = {
+        "available": True,
+        "present_config_keys": ["BAT", "WRP"],
+        "errors": [],
+        "charging_period_enabled": False,
+    }
+    new_payload = {
+        **old_payload,
+        "charging_period_enabled": True,
+    }
+
+    async def scenario() -> None:
+        read_started = asyncio.Event()
+        release_read = asyncio.Event()
+
+        async def read_settings(*, include_raw: bool) -> dict:
+            assert include_raw is False
+            read_started.set()
+            await release_read.wait()
+            return old_payload
+
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        coordinator._device_settings_write_lock = asyncio.Lock()
+        coordinator.client = SimpleNamespace(
+            async_get_device_settings=read_settings,
+            async_set_charging_period=AsyncMock(return_value=new_payload),
+        )
+        coordinator.device_settings = None
+        coordinator.weather_protection = None
+        coordinator.weather_protection_refreshed_at = None
+        coordinator.async_update_listeners = Mock()
+
+        refresh_task = asyncio.create_task(
+            coordinator.async_refresh_device_settings(force=True)
+        )
+        await read_started.wait()
+        write_task = asyncio.create_task(
+            coordinator.async_set_charging_period(enabled=True)
+        )
+        await asyncio.sleep(0)
+        assert write_task.done() is False
+
+        release_read.set()
+        await asyncio.gather(refresh_task, write_task)
+
+        assert coordinator.device_settings["charging_period_enabled"] is True
+        coordinator.client.async_set_charging_period.assert_awaited_once_with(
+            enabled=True,
+            start_minutes=None,
+            end_minutes=None,
+        )
+
+    asyncio.run(scenario())
 
 
 def test_settings_entities_are_thin_over_confirmed_coordinator_writes() -> None:

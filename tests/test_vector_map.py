@@ -482,6 +482,16 @@ def test_client_map_switch_rejects_missing_or_failed_reply(response: object) -> 
         client._sync_switch_current_map(1)
 
 
+def test_current_map_readback_uses_only_map_list() -> None:
+    client = _client()
+    client._sync_call_app_action = Mock(
+        return_value={"r": 0, "d": [[0, 0, 1, 1, 0], [1, 1, 1, 1, 0]]}
+    )
+
+    assert client._sync_get_current_app_map_index_readback() == 1
+    client._sync_call_app_action.assert_called_once_with({"m": "g", "t": "MAPL"})
+
+
 def test_async_map_switch_requires_idle_state_and_confirmed_readback() -> None:
     client = _client()
     client.async_refresh_authoritative_snapshot = AsyncMock(
@@ -493,15 +503,12 @@ def test_async_map_switch_requires_idle_state_and_confirmed_readback() -> None:
         )
     )
     client._sync_switch_current_map = lambda map_index: {"map_index": map_index}  # type: ignore[method-assign]
-    client.async_get_app_maps = AsyncMock(return_value={"current_map_index": 1})
+    client.async_get_current_app_map_index = AsyncMock(return_value=1)
 
     result = asyncio.run(client.async_switch_current_map(1))
 
     assert result == {"map_index": 1}
-    client.async_get_app_maps.assert_awaited_once_with(
-        include_payload=False,
-        include_objects=False,
-    )
+    client.async_get_current_app_map_index.assert_awaited_once_with()
 
 
 def test_async_map_switch_rejects_active_task_before_write() -> None:
@@ -534,7 +541,7 @@ def test_async_map_switch_allows_docked_snapshot_with_unknown_session_flag() -> 
         )
     )
     client._sync_switch_current_map = lambda map_index: {"map_index": map_index}  # type: ignore[method-assign]
-    client.async_get_app_maps = AsyncMock(return_value={"current_map_index": 1})
+    client.async_get_current_app_map_index = AsyncMock(return_value=1)
 
     assert asyncio.run(client.async_switch_current_map(1)) == {"map_index": 1}
 
@@ -550,7 +557,7 @@ def test_async_map_switch_rejects_acknowledged_but_ignored_switch() -> None:
         )
     )
     client._sync_switch_current_map = lambda map_index: {"map_index": map_index}  # type: ignore[method-assign]
-    client.async_get_app_maps = AsyncMock(return_value={"current_map_index": 0})
+    client.async_get_current_app_map_index = AsyncMock(return_value=0)
 
     with patch("asyncio.sleep", new=AsyncMock()):
         with pytest.raises(DreameLawnMowerCommandRejectedError, match="stayed"):
