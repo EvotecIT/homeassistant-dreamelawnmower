@@ -23,6 +23,7 @@ from custom_components.dreame_lawn_mower.coordinator import DreameLawnMowerCoord
 from custom_components.dreame_lawn_mower.lawn_mower import DreameLawnMower
 from custom_components.dreame_lawn_mower.runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,
+    runtime_mission_session_started_at,
 )
 from custom_components.dreame_lawn_mower.select import (
     DreameLawnMowerEdgeSelect,
@@ -951,6 +952,7 @@ def test_lawn_mower_start_uses_selected_edge() -> None:
     client.async_start_spot_mowing.assert_not_called()
     client.async_start_mowing.assert_not_called()
     assert cache.blob is None
+    assert runtime_mission_session_started_at(cache) is not None
     entity.coordinator.async_request_refresh.assert_awaited_once()
 
 

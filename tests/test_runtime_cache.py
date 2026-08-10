@@ -15,6 +15,7 @@ from custom_components.dreame_lawn_mower.runtime_cache import (
     runtime_mission_new_session_evidence,
     runtime_mission_progress_percent,
     runtime_mission_session_active,
+    runtime_mission_session_event_at,
     runtime_mission_session_generation,
     runtime_mission_session_identity,
     runtime_mission_session_started_at,
@@ -401,6 +402,71 @@ def test_command_acceptance_still_resets_unidentified_active_telemetry() -> None
 
     assert cache.blob is None
     assert cache.completion_confirmed is False
+
+
+def test_command_owned_start_rejects_retained_prior_completion_notice() -> None:
+    """A missed start callback still establishes an ordered mission boundary."""
+    current = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+    stopped = SimpleNamespace(
+        mowing_session_active=False,
+        task_status="idle",
+        status_notice_name="mowing_task_completed",
+        status_notice_event_at=10.0,
+    )
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    cache.begin_new_session(session_started_at=20.0)
+    assert cache.update(current, active_session=True) is True
+
+    completion_confirmed = runtime_mission_completion_confirmed(
+        stopped,
+        tracking_active=False,
+        session_started_at=runtime_mission_session_started_at(cache),
+    )
+    cache.observe_session_state(
+        active_session=False,
+        completion_confirmed=completion_confirmed,
+    )
+
+    assert completion_confirmed is False
+    assert cache.completion_confirmed is False
+    assert cache.blob is current
+    assert (
+        runtime_mission_completion_confirmed(
+            SimpleNamespace(
+                mowing_session_active=False,
+                task_status="idle",
+                status_notice_name="mowing_task_completed",
+                status_notice_event_at=30.0,
+            ),
+            tracking_active=False,
+            session_started_at=runtime_mission_session_started_at(cache),
+        )
+        is True
+    )
+
+
+def test_active_transition_uses_physical_event_as_external_start_boundary() -> None:
+    """An app-owned start remains ordered when its explicit notice is missed."""
+    snapshot = SimpleNamespace(
+        mowing_session_active=True,
+        state_event_at=20.0,
+        task_status="mowing",
+        task_status_event_at=21.0,
+        status_notice_name="mowing_task_completed",
+        status_notice_event_at=10.0,
+    )
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    mission_active = runtime_mission_session_active(snapshot, tracking_active=True)
+    cache.observe_session_state(
+        active_session=mission_active,
+        new_session=False,
+        new_session_event_at=runtime_mission_session_event_at(
+            snapshot,
+            active_session=mission_active,
+        ),
+    )
+
+    assert runtime_mission_session_started_at(cache) == 21.0
 
 
 def test_all_area_start_notice_announces_a_new_session() -> None:

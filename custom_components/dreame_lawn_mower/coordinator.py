@@ -59,9 +59,9 @@ from .runtime_cache import (
     runtime_mission_completion_confirmed,
     runtime_mission_completion_rejected,
     runtime_mission_new_session,
-    runtime_mission_new_session_event_at,
     runtime_mission_new_session_evidence,
     runtime_mission_session_active,
+    runtime_mission_session_event_at,
     runtime_mission_session_identity,
     runtime_mission_session_started_at,
 )
@@ -335,7 +335,10 @@ class DreameLawnMowerCoordinator(
             ),
             completion_rejected=runtime_mission_completion_rejected(snapshot),
             new_session=runtime_mission_new_session(snapshot),
-            new_session_event_at=runtime_mission_new_session_event_at(snapshot),
+            new_session_event_at=runtime_mission_session_event_at(
+                snapshot,
+                active_session=mission_active,
+            ),
             new_session_evidence=runtime_mission_new_session_evidence(snapshot),
             session_identity=runtime_mission_session_identity(snapshot),
         )
@@ -508,8 +511,9 @@ class DreameLawnMowerCoordinator(
                             snapshot
                         ),
                         new_session=runtime_mission_new_session(snapshot),
-                        new_session_event_at=runtime_mission_new_session_event_at(
-                            snapshot
+                        new_session_event_at=runtime_mission_session_event_at(
+                            snapshot,
+                            active_session=mission_active,
                         ),
                         new_session_evidence=runtime_mission_new_session_evidence(
                             snapshot

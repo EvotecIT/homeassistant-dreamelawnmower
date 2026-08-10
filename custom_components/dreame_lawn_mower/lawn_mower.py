@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from time import time
 from types import SimpleNamespace
 from typing import Any
 
@@ -477,6 +478,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         action = self.coordinator.selected_mowing_action
         runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
         observed_generation = runtime_mission_session_generation(runtime_cache)
+        session_started_at = time()
         new_session = False
         if action == MOWING_ACTION_EDGE:
             self._ensure_selected_map_matches_active()
@@ -524,6 +526,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             begin_runtime_mission_session(
                 runtime_cache,
                 observed_generation=observed_generation,
+                session_started_at=session_started_at,
             )
         await self.coordinator.async_request_refresh()
 
@@ -546,10 +549,12 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         )
         runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
         observed_generation = runtime_mission_session_generation(runtime_cache)
+        session_started_at = time()
         await self.coordinator.client.async_start_zone_mowing(normalized)
         begin_runtime_mission_session(
             runtime_cache,
             observed_generation=observed_generation,
+            session_started_at=session_started_at,
         )
         await self.coordinator.async_request_refresh()
 
@@ -571,10 +576,12 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         )
         runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
         observed_generation = runtime_mission_session_generation(runtime_cache)
+        session_started_at = time()
         await self.coordinator.client.async_start_spot_mowing(normalized)
         begin_runtime_mission_session(
             runtime_cache,
             observed_generation=observed_generation,
+            session_started_at=session_started_at,
         )
         await self.coordinator.async_request_refresh()
 
@@ -609,10 +616,12 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             )
         runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
         observed_generation = runtime_mission_session_generation(runtime_cache)
+        session_started_at = time()
         await self.coordinator.client.async_start_edge_mowing(normalized)
         begin_runtime_mission_session(
             runtime_cache,
             observed_generation=observed_generation,
+            session_started_at=session_started_at,
         )
         await self.coordinator.async_request_refresh()
 

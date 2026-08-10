@@ -192,6 +192,28 @@ def runtime_mission_new_session_event_at(snapshot: Any) -> float | None:
     return None
 
 
+def runtime_mission_session_event_at(
+    snapshot: Any,
+    *,
+    active_session: bool | None,
+) -> float | None:
+    """Return the best ordered boundary for a newly observed active mission."""
+    explicit_start_at = runtime_mission_new_session_event_at(snapshot)
+    if explicit_start_at is not None or active_session is not True:
+        return explicit_start_at
+    return max(
+        (
+            event_at
+            for event_at in (
+                _event_timestamp(getattr(snapshot, "state_event_at", None)),
+                _event_timestamp(getattr(snapshot, "task_status_event_at", None)),
+            )
+            if event_at is not None
+        ),
+        default=None,
+    )
+
+
 def runtime_mission_session_identity(snapshot: Any) -> int | None:
     """Return the heartbeat task id that identifies the current mission."""
     task_id = getattr(snapshot, "mission_task_id", None)
@@ -278,7 +300,12 @@ class DreameLawnMowerRuntimeTelemetryCache:
         self._new_session_evidence_pending = False
         self._new_session_pending_activation = False
 
-    def begin_new_session(self, *, observed_generation: int | None = None) -> None:
+    def begin_new_session(
+        self,
+        *,
+        observed_generation: int | None = None,
+        session_started_at: float | None = None,
+    ) -> None:
         """Invalidate prior telemetry after a fresh mission is accepted."""
         if (
             observed_generation is not None
@@ -290,8 +317,10 @@ class DreameLawnMowerRuntimeTelemetryCache:
             self._new_session_signal_seen = True
             self._new_session_evidence_pending = self._new_session_evidence is None
             self._new_session_pending_activation = False
+            if self._session_started_at is None:
+                self._session_started_at = session_started_at
             return
-        self._invalidate_for_new_session()
+        self._invalidate_for_new_session(session_started_at=session_started_at)
         self._new_session_signal_seen = True
         self._new_session_evidence_pending = True
         self._new_session_pending_activation = True
@@ -353,7 +382,10 @@ class DreameLawnMowerRuntimeTelemetryCache:
             return
         if active_session:
             if not self._session_active:
-                self._invalidate_for_new_session(session_identity=session_identity)
+                self._invalidate_for_new_session(
+                    session_identity=session_identity,
+                    session_started_at=new_session_event_at,
+                )
             elif session_identity is not None:
                 self._session_identity = session_identity
             self.completion_confirmed = False
@@ -458,7 +490,11 @@ def begin_runtime_mission_session(
     cache: Any,
     *,
     observed_generation: int | None = None,
+    session_started_at: float | None = None,
 ) -> None:
     """Invalidate prior telemetry when an integration-owned start succeeds."""
     if isinstance(cache, DreameLawnMowerRuntimeTelemetryCache):
-        cache.begin_new_session(observed_generation=observed_generation)
+        cache.begin_new_session(
+            observed_generation=observed_generation,
+            session_started_at=session_started_at,
+        )
