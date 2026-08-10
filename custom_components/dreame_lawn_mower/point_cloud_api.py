@@ -60,6 +60,14 @@ _POINT_CLOUD_PROBLEM_TITLE = {
 }
 
 
+def _exception_type_name(error: BaseException) -> str:
+    """Return a privacy-safe exception classifier without message or payload."""
+    exception_type = type(error)
+    if exception_type.__module__ == "builtins":
+        return exception_type.__qualname__
+    return f"{exception_type.__module__}.{exception_type.__qualname__}"
+
+
 def point_cloud_api_path(entry_id: str, map_index: int) -> str:
     """Return the local authenticated API path advertised to frontends."""
     return f"{POINT_CLOUD_API_PATH}/{entry_id}/{map_index}"
@@ -341,6 +349,7 @@ class DreameLawnMowerPointCloudAPI:
                 sample,
                 map_index=key[1],
                 allow_stored=allow_stored,
+                unexpected_error=err,
             )
             raise public_error from err
         else:
@@ -435,6 +444,7 @@ class DreameLawnMowerPointCloudAPI:
         *,
         map_index: int,
         allow_stored: bool,
+        unexpected_error: Exception | None = None,
     ) -> None:
         """Keep one privacy-safe failure event and benchmark sample."""
         context: dict[str, Any] = {
@@ -446,6 +456,14 @@ class DreameLawnMowerPointCloudAPI:
             "map_index": map_index,
             "allow_stored": allow_stored,
         }
+        exception_type = None
+        if unexpected_error is not None:
+            exception_type = _exception_type_name(unexpected_error)
+            context["exception_type"] = exception_type
+            if unexpected_error.__cause__ is not None:
+                context["cause_exception_type"] = _exception_type_name(
+                    unexpected_error.__cause__
+                )
         if sample is not None:
             context["duration_ms"] = round(sample.total_seconds * 1000, 1)
             total, phases = format_performance_sample(sample)
@@ -460,12 +478,14 @@ class DreameLawnMowerPointCloudAPI:
         )
         _LOGGER.warning(
             "Dreame mower performance: operation=point_cloud_generation "
-            "outcome=%s total=%.3fs phases=%s stage=%s retryable=%s",
+            "outcome=%s total=%.3fs phases=%s stage=%s retryable=%s "
+            "exception_type=%s",
             error.code,
             total,
             phases,
             error.stage,
             error.retryable,
+            exception_type or "none",
         )
 
     @callback
@@ -616,12 +636,14 @@ class DreameLawnMowerPointCloudView(HomeAssistantView):
                 err,
                 elapsed_seconds=time.monotonic() - started_at,
             )
-        except Exception:  # noqa: BLE001 - keep private cloud details private.
+        except Exception as err:  # noqa: BLE001 - keep private cloud details private.
             elapsed_seconds = time.monotonic() - started_at
+            exception_type = _exception_type_name(err)
             _LOGGER.warning(
                 "Dreame point-cloud request failed: code=point_cloud_failed "
-                "stage=delivery elapsed=%.3fs retryable=True",
+                "stage=delivery elapsed=%.3fs retryable=True exception_type=%s",
                 elapsed_seconds,
+                exception_type,
             )
             return _point_cloud_problem_response(
                 DreameLawnMowerPointCloudError(

@@ -295,6 +295,76 @@ def test_all_maps_camera_returns_loading_image_while_refresh_starts() -> None:
     assert cache.last_image is None
 
 
+def test_map_diagnostics_serves_stale_shared_view_during_background_refresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Diagnostics must not wait for a slow provider when shared map data exists."""
+    cache = DreameLawnMowerMapCameraCache(ttl=timedelta(seconds=60))
+    cache.store_view(
+        DreameLawnMowerMapView(source="batch_vector_map"),
+        now=datetime(2026, 4, 19, 8, 0, tzinfo=UTC),
+    )
+    entity = object.__new__(DreameLawnMowerMapDataCamera)
+    entity._map_cache = cache
+    entity._descriptor = SimpleNamespace(name="Garden", display_model="A2")
+    refresh_calls = 0
+    rendered_lines: list[str] = []
+
+    async def async_add_executor_job(target: object) -> bytes:
+        return target()  # type: ignore[operator]
+
+    def start_refresh() -> None:
+        nonlocal refresh_calls
+        refresh_calls += 1
+
+    def render(*, lines: list[str]) -> bytes:
+        rendered_lines.extend(lines)
+        return b"diagnostics-jpeg"
+
+    entity.hass = SimpleNamespace(async_add_executor_job=async_add_executor_job)
+    entity._start_map_refresh = start_refresh  # type: ignore[method-assign]
+    monkeypatch.setattr(camera_module, "map_diagnostics_jpeg", render)
+
+    image = asyncio.run(entity._async_camera_image_impl())
+
+    assert image == b"diagnostics-jpeg"
+    assert refresh_calls == 1
+    assert "Source: batch_vector_map" in rendered_lines
+
+
+def test_map_diagnostics_refreshes_in_foreground_without_shared_view(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The first diagnostics request still hydrates an otherwise empty cache."""
+    cache = DreameLawnMowerMapCameraCache(ttl=timedelta(seconds=60))
+    entity = object.__new__(DreameLawnMowerMapDataCamera)
+    entity._map_cache = cache
+    entity._descriptor = SimpleNamespace(name="Garden", display_model="A2")
+    refresh_calls = 0
+    view = DreameLawnMowerMapView(source="app_action_map")
+
+    async def async_add_executor_job(target: object) -> bytes:
+        return target()  # type: ignore[operator]
+
+    async def refresh_view() -> DreameLawnMowerMapView:
+        nonlocal refresh_calls
+        refresh_calls += 1
+        return view
+
+    entity.hass = SimpleNamespace(async_add_executor_job=async_add_executor_job)
+    entity._async_refresh_map_view = refresh_view  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        camera_module,
+        "map_diagnostics_jpeg",
+        lambda *, lines: b"diagnostics-jpeg",
+    )
+
+    image = asyncio.run(entity._async_camera_image_impl())
+
+    assert image == b"diagnostics-jpeg"
+    assert refresh_calls == 1
+
+
 def test_all_maps_camera_serves_stale_image_during_background_refresh() -> None:
     """A slow refresh must not blank or delay the last good contact sheet."""
     cache = DreameLawnMowerMapCameraCache(ttl=timedelta(seconds=60))
