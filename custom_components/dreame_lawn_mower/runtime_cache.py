@@ -25,7 +25,7 @@ _RESUME_STATUS_NOTICES = frozenset(
     {"mowing_resumed_after_charging", "resuming_unfinished_task"}
 )
 _INACTIVE_PHYSICAL_STATES = frozenset(
-    {"error", "idle", "standby", "waiting_for_task", "water_tank_drying"}
+    {"idle", "standby", "waiting_for_task", "water_tank_drying"}
 )
 
 
@@ -73,21 +73,33 @@ def runtime_mission_completion_confirmed(
         return False
     if mission_active is None:
         return cached_completion_confirmed
-    if getattr(snapshot, "task_status", None) in _UNSUCCESSFUL_TASK_STATUSES:
+    if (
+        getattr(snapshot, "task_status", None) in _UNSUCCESSFUL_TASK_STATUSES
+        and _runtime_terminal_state_is_current(
+            snapshot,
+            session_started_at=session_started_at,
+            session_identity=session_identity,
+        )
+    ):
         return False
     if cached_completion_confirmed:
         return True
-    if getattr(snapshot, "task_status", None) in _COMPLETED_TASK_STATUSES:
+    if (
+        getattr(snapshot, "task_status", None) in _COMPLETED_TASK_STATUSES
+        and _runtime_terminal_state_is_current(
+            snapshot,
+            session_started_at=session_started_at,
+            session_identity=session_identity,
+        )
+    ):
         return True
     if getattr(snapshot, "status_notice_name", None) not in _COMPLETED_STATUS_NOTICES:
         return False
     notice_event_at = _event_timestamp(
         getattr(snapshot, "status_notice_event_at", None)
     )
-    if (
-        notice_event_at is not None
-        and session_started_at is not None
-        and notice_event_at <= session_started_at
+    if session_started_at is not None and (
+        notice_event_at is None or notice_event_at <= session_started_at
     ):
         return False
     return True
@@ -127,6 +139,7 @@ def runtime_mission_session_active(
     if snapshot is None:
         return tracking_active
     task_status = getattr(snapshot, "task_status", None)
+    heartbeat_state_superseded = _runtime_heartbeat_state_is_superseded(snapshot)
     if (
         task_status in _TERMINAL_TASK_STATUSES
         and not _runtime_terminal_state_is_current(
@@ -134,17 +147,13 @@ def runtime_mission_session_active(
             session_started_at=session_started_at,
             session_identity=session_identity,
         )
+        and not heartbeat_state_superseded
     ):
         return True
     session_active = getattr(snapshot, "mowing_session_active", None)
     terminal_event_at = _runtime_terminal_evidence_event_at(snapshot)
-    heartbeat_event_at = _event_timestamp(
-        getattr(snapshot, "task_status_event_at", None)
-    )
     active_heartbeat_superseded = bool(
-        session_active is True
-        and terminal_event_at is not None
-        and (heartbeat_event_at is None or terminal_event_at > heartbeat_event_at)
+        session_active is True and heartbeat_state_superseded
     )
     if session_active is not None and not active_heartbeat_superseded:
         return bool(session_active)
@@ -170,6 +179,14 @@ def runtime_mission_session_active(
             and notice_event_at > state_event_at
         ):
             return True
+    if (
+        terminal_event_at is None
+        and getattr(snapshot, "activity", None) == "error"
+        and getattr(snapshot, "started", False)
+        and getattr(snapshot, "state", None)
+        in {"error", "monitoring_paused", "paused"}
+    ):
+        return None
     if task_status in _COMPLETED_TASK_STATUSES:
         return False
     if getattr(snapshot, "state", None) in {
@@ -246,6 +263,17 @@ def _runtime_terminal_evidence_event_at(snapshot: Any) -> float | None:
         if notice_event_at is not None:
             candidates.append(notice_event_at)
     return max(candidates, default=None)
+
+
+def _runtime_heartbeat_state_is_superseded(snapshot: Any) -> bool:
+    """Return whether newer non-heartbeat terminal evidence wins ordering."""
+    terminal_event_at = _runtime_terminal_evidence_event_at(snapshot)
+    if terminal_event_at is None:
+        return False
+    heartbeat_event_at = _event_timestamp(
+        getattr(snapshot, "task_status_event_at", None)
+    )
+    return heartbeat_event_at is None or terminal_event_at > heartbeat_event_at
 
 
 def runtime_mission_new_session_event_at(snapshot: Any) -> float | None:

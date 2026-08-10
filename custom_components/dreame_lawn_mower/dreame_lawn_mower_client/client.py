@@ -571,16 +571,14 @@ class DreameLawnMowerClient(
                     ),
                 )
             return False
-        if status_blob is None or getattr(
-            status_blob, "mowing_session_active", None
-        ) is None:
-            return await self._async_call_start_mowing_with_session_identity()
-        if status_blob.mowing_session_active is True:
-            if status_blob.task_status not in {"starting", "mowing"}:
-                await self._async_call_device_method("start_mowing")
+        if (
+            status_blob is not None
+            and status_blob.mowing_session_active is True
+            and status_blob.task_status in {"starting", "mowing"}
+            and await self._async_get_cached_start_mowing_session_identity() is False
+        ):
             return False
-        await self._async_call_device_method("start_mowing")
-        return True
+        return await self._async_call_start_mowing_with_session_identity()
 
     async def async_pause(self) -> None:
         """Pause mowing."""

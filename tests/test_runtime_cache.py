@@ -212,6 +212,97 @@ def test_stale_terminal_heartbeat_cannot_end_the_current_mission() -> None:
     assert cache.blob is current
 
 
+def test_newer_terminal_properties_supersede_stale_terminal_heartbeat() -> None:
+    """Current physical evidence can end a mission despite a retained task id."""
+    stopped = SimpleNamespace(
+        mowing_session_active=False,
+        task_status="finished",
+        task_status_event_at=10.0,
+        mission_task_id=100,
+        state="idle",
+        state_event_at=30.0,
+        status_notice_name=None,
+        status_notice_event_at=None,
+    )
+    completed = SimpleNamespace(
+        mowing_session_active=False,
+        task_status="finished",
+        task_status_event_at=10.0,
+        mission_task_id=100,
+        state="idle",
+        state_event_at=30.0,
+        status_notice_name="mowing_task_completed",
+        status_notice_event_at=30.0,
+    )
+    completed_after_stale_failure = SimpleNamespace(
+        mowing_session_active=False,
+        task_status="failed",
+        task_status_event_at=10.0,
+        mission_task_id=100,
+        state="idle",
+        state_event_at=30.0,
+        status_notice_name="mowing_task_completed",
+        status_notice_event_at=30.0,
+    )
+    unordered_completion = SimpleNamespace(
+        mowing_session_active=False,
+        task_status="finished",
+        task_status_event_at=10.0,
+        mission_task_id=100,
+        state="idle",
+        state_event_at=30.0,
+        status_notice_name="mowing_task_completed",
+        status_notice_event_at=None,
+    )
+
+    for snapshot in (stopped, completed, completed_after_stale_failure):
+        assert (
+            runtime_mission_session_active(
+                snapshot,
+                tracking_active=False,
+                session_started_at=20.0,
+                session_identity=101,
+            )
+            is False
+        )
+    assert (
+        runtime_mission_completion_confirmed(
+            stopped,
+            tracking_active=False,
+            session_started_at=20.0,
+            session_identity=101,
+        )
+        is False
+    )
+    assert (
+        runtime_mission_completion_confirmed(
+            completed,
+            tracking_active=False,
+            session_started_at=20.0,
+            session_identity=101,
+        )
+        is True
+    )
+    assert (
+        runtime_mission_completion_confirmed(
+            unordered_completion,
+            tracking_active=False,
+            session_started_at=20.0,
+            session_identity=101,
+        )
+        is False
+    )
+    assert (
+        runtime_mission_completion_confirmed(
+            completed_after_stale_failure,
+            tracking_active=False,
+            session_started_at=20.0,
+            session_identity=101,
+        )
+        is True
+    )
+
+
 def test_current_terminal_heartbeat_can_end_the_current_mission() -> None:
     """Matching identity or newer timing accepts terminal heartbeat evidence."""
     matching = SimpleNamespace(
@@ -333,6 +424,36 @@ def test_missing_idle_heartbeat_ends_active_session_boundary() -> None:
     cache.observe_session_state(active_session=True)
 
     assert cache.blob is None
+
+
+def test_recoverable_fault_pause_preserves_active_session_boundary() -> None:
+    """A paused active task remains the same mission while faulted."""
+    current = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(current, active_session=True) is True
+    generation = runtime_mission_session_generation(cache)
+
+    for state in ("error", "paused"):
+        faulted = SimpleNamespace(
+            mowing_session_active=None,
+            activity="error",
+            state=state,
+            started=True,
+            task_status="unknown",
+            task_resumable=None,
+            status_notice_name="return_to_station_failed",
+            status_notice_event_at=None,
+        )
+        mission_active = runtime_mission_session_active(
+            faulted,
+            tracking_active=False,
+        )
+        assert mission_active is None
+        cache.observe_session_state(active_session=mission_active)
+    cache.observe_session_state(active_session=True)
+
+    assert runtime_mission_session_generation(cache) == generation
+    assert cache.blob is current
 
 
 def test_stale_resume_notice_cannot_override_newer_idle_state() -> None:

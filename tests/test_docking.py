@@ -269,7 +269,9 @@ def test_start_uses_fresh_action_without_resumable_session() -> None:
         )
     )
     client._sync_resume_mowing = Mock()
-    client._async_call_device_method = AsyncMock()
+    client._async_call_start_mowing_with_session_identity = AsyncMock(
+        return_value=True
+    )
 
     started_new_session = asyncio.run(client.async_start_mowing())
 
@@ -278,7 +280,7 @@ def test_start_uses_fresh_action_without_resumable_session() -> None:
         include_cloud=True,
     )
     client._sync_resume_mowing.assert_not_called()
-    client._async_call_device_method.assert_awaited_once_with("start_mowing")
+    client._async_call_start_mowing_with_session_identity.assert_awaited_once_with()
     assert started_new_session is True
 
 
@@ -292,11 +294,14 @@ def test_duplicate_start_preserves_active_mission_identity() -> None:
             mowing_session_active=True,
         )
     )
-    client._async_call_device_method = AsyncMock()
+    client._async_get_cached_start_mowing_session_identity = AsyncMock(
+        return_value=False
+    )
+    client._async_call_start_mowing_with_session_identity = AsyncMock()
 
     started_new_session = asyncio.run(client.async_start_mowing())
 
-    client._async_call_device_method.assert_not_awaited()
+    client._async_call_start_mowing_with_session_identity.assert_not_awaited()
     assert started_new_session is False
 
 
@@ -310,12 +315,68 @@ def test_start_while_returning_forwards_resume_without_new_session() -> None:
             mowing_session_active=True,
         )
     )
-    client._async_call_device_method = AsyncMock()
+    client._async_call_start_mowing_with_session_identity = AsyncMock(
+        return_value=False
+    )
 
     started_new_session = asyncio.run(client.async_start_mowing())
 
-    client._async_call_device_method.assert_awaited_once_with("start_mowing")
+    client._async_call_start_mowing_with_session_identity.assert_awaited_once_with()
     assert started_new_session is False
+
+
+def test_stale_inactive_heartbeat_uses_device_start_identity() -> None:
+    """A retained inactive blob cannot reset a mission already in progress."""
+    start_mowing = Mock(return_value={"result": 0})
+    client = object.__new__(DreameLawnMowerClient)
+    client.async_get_status_blob = AsyncMock(
+        return_value=SimpleNamespace(
+            task_status="idle",
+            task_resumable=False,
+            mowing_session_active=False,
+        )
+    )
+    client._ensure_device = Mock(
+        return_value=SimpleNamespace(
+            status=SimpleNamespace(
+                task_status=DreameMowerTaskStatus.AUTO_CLEANING,
+                started=True,
+            ),
+            start_mowing=start_mowing,
+        )
+    )
+
+    started_new_session = asyncio.run(client.async_start_mowing())
+
+    start_mowing.assert_called_once_with()
+    assert started_new_session is False
+
+
+def test_stale_active_heartbeat_cannot_hide_fresh_device_start() -> None:
+    """A cached active blob is skipped only when device state still agrees."""
+    start_mowing = Mock(return_value={"result": 0})
+    client = object.__new__(DreameLawnMowerClient)
+    client.async_get_status_blob = AsyncMock(
+        return_value=SimpleNamespace(
+            task_status="mowing",
+            task_resumable=False,
+            mowing_session_active=True,
+        )
+    )
+    client._ensure_device = Mock(
+        return_value=SimpleNamespace(
+            status=SimpleNamespace(
+                task_status=DreameMowerTaskStatus.COMPLETED,
+                started=False,
+            ),
+            start_mowing=start_mowing,
+        )
+    )
+
+    started_new_session = asyncio.run(client.async_start_mowing())
+
+    start_mowing.assert_called_once_with()
+    assert started_new_session is True
 
 
 def test_start_with_unrecognized_heartbeat_uses_cached_identity() -> None:
