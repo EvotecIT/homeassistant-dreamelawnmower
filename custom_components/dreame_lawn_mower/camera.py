@@ -518,7 +518,11 @@ class DreameLawnMowerMapDataCamera(DreameLawnMowerMapCamera):
 
     async def _async_camera_image_impl(self) -> bytes | None:
         """Return a readable diagnostics card as JPEG bytes."""
-        view = await self._async_refresh_map_view()
+        view = self._map_cache.last_view
+        if view is None:
+            view = await self._async_refresh_map_view()
+        elif not self._map_cache.is_fresh():
+            self._start_map_refresh()
         summary = view.summary
         lines = [
             f"Device: {self._descriptor.name} ({self._descriptor.display_model})",

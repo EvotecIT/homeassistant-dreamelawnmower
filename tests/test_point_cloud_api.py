@@ -940,6 +940,41 @@ def test_point_cloud_view_does_not_log_private_exception_details(
     assert response.status == 502
     assert json.loads(response.text)["code"] == "point_cloud_failed"
     assert "code=point_cloud_failed" in caplog.text
+    assert "exception_type=RuntimeError" in caplog.text
     assert private_detail not in caplog.text
     assert "do-not-log" not in caplog.text
     assert private_detail not in response.text
+
+
+def test_point_cloud_api_records_safe_unexpected_exception_type(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Unexpected generation failures retain a useful, payload-free classifier."""
+    private_detail = (
+        "https://downloads.example.invalid/private-map.pcd?secret=do-not-log"
+    )
+
+    async def download(**kwargs: Any) -> None:
+        del kwargs
+        raise RuntimeError(private_detail)
+
+    coordinator = SimpleNamespace(
+        app_maps={"current_map_index": 0, "maps": [{"idx": 0}]},
+        selected_map_index=0,
+        client=SimpleNamespace(async_download_app_map_point_cloud=download),
+        diagnostic_events=DreameLawnMowerDiagnosticEventStore(),
+        performance=DreameLawnMowerPerformanceTracker(),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    api = DreameLawnMowerPointCloudAPI(hass)
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(DreameLawnMowerPointCloudError) as raised:
+            asyncio.run(api.async_get("entry-1", 0))
+
+    assert raised.value.code == "point_cloud_failed"
+    event = coordinator.diagnostic_events.as_list()[0]
+    assert event["context"]["exception_type"] == "RuntimeError"
+    assert "exception_type=RuntimeError" in caplog.text
+    assert private_detail not in repr(event)
+    assert private_detail not in caplog.text
