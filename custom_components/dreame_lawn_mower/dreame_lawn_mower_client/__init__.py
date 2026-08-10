@@ -54,6 +54,7 @@ from .debug_ota_catalog import (
     build_debug_ota_catalog_url,
     normalize_debug_ota_catalog_payload,
 )
+from .exceptions import DreameLawnMowerCommandRejectedError
 from .feature_capabilities import (
     CAPABILITY_SOURCE_ADVERTISED,
     CAPABILITY_SOURCE_MODEL,
@@ -201,6 +202,7 @@ __all__ = [
     "DreameLawnMowerCameraStreamRuntimeInputs",
     "DreameLawnMowerClient",
     "DreameLawnMowerConnectionError",
+    "DreameLawnMowerCommandRejectedError",
     "DreameLawnMowerDescriptor",
     "DreameLawnMowerError",
     "DreameLawnMowerFirmwareUpdateSupport",

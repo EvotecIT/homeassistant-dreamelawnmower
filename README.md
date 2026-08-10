@@ -134,8 +134,9 @@ operations behind clear boundaries:
   mower families still need reports.
 - Map rendering and map selection are supported, but editing no-go areas,
   virtual walls, and garden geometry is not.
-- Rain-protection state, configured delay, and the active delay end time are
-  readable; changing rain-protection settings is not exposed yet.
+- Charging-period and rain-protection controls are field-validated on the
+  Dreame A2. Other models expose them only when their native `CFG` record
+  reports the matching setting.
 - Mowing-preference writes use guarded paths and have the strongest live proof
   on the A2. Other models and firmware need broader confirmation.
 - Firmware updates use the app-approved target and confirmation flow. Release
@@ -343,6 +344,11 @@ Common user-facing helpers include:
 - `select.<device>_edge`
 - `select.<device>_zone`
 - `select.<device>_spot`
+- `select.<device>_rain_delay`
+- `switch.<device>_charging_period`
+- `switch.<device>_rain_protection`
+- `time.<device>_charging_period_start`
+- `time.<device>_charging_period_end`
 - `binary_sensor.<device>_docked`
 - `binary_sensor.<device>_charging`
 - `binary_sensor.<device>_bluetooth_connected`
@@ -427,6 +433,21 @@ dashboards, automations, and voice assistants. The companion Lawn Mower Card
 can use them when explicitly configured; automatic discovery support is tracked
 in the card project. The guarded service remains available when you need to
 inspect the complete candidate preference payload before sending it.
+
+## Charging And Rain Protection
+
+Models that report the mower-native `BAT` and `WRP` settings expose normal
+Home Assistant configuration entities. The charging-period switch keeps the
+configured start and end times; its two time entities can define a window that
+crosses midnight. Rain protection has a switch and a whole-hour delay select.
+The zero-hour delay means the mower stays docked until it is manually started.
+
+Every setting change first reads the current `CFG` record, writes only the
+setting-specific payload, and reads `CFG` again. Home Assistant updates only
+after the mower reports the requested value. Battery thresholds and rain-sensor
+sensitivity are preserved. The mower's `2:51` settings-change announcement also
+causes one coalesced refresh, so changes made in the Dreame app appear without
+waiting for the normal metadata interval.
 
 ## Maps
 
@@ -522,6 +543,11 @@ Current map support now includes:
 - an admin-only, stored-or-fresh PCD point-cloud download for the selected app map
 - circular and rotated rectangular forbidden areas rendered from their compact
   mower map representation
+
+The mower acknowledges map-switch commands even when it ignores them during an
+active, paused, or returning task. The integration blocks those states before
+writing and does not change the selected map until `MAPL` confirms the requested
+map index.
 
 Interactive map editing is still intentionally out of scope for now:
 

@@ -152,6 +152,22 @@ def _app_map_inventory_identity(
 
 
 class _DreameLawnMowerClientMapsMixin:
+    def _sync_get_current_app_map_index_readback(self) -> int | None:
+        """Read only MAPL and return its unambiguous current map index."""
+        try:
+            map_list_result = self._sync_call_app_action({"m": "g", "t": "MAPL"})
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+        entries = _normalize_app_map_entries(map_list_result)
+        if not _app_map_entries_are_valid(map_list_result, entries):
+            raise DreameLawnMowerConnectionError(
+                "MAPL returned an incomplete or ambiguous map list."
+            )
+        for entry in entries:
+            if entry.get("created") is not False and entry.get("current") is True:
+                return int(entry["idx"])
+        return None
+
     def _sync_switch_current_map(self, map_index: int) -> Any:
         """Switch the active mower map by app map index."""
         if map_index < 0:

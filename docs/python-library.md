@@ -104,7 +104,8 @@ upgrade does not create duplicate entities.
   app payloads, with explicit confirmation required before execution
 - read-only app-map retrieval, all-map summaries, and simple map rendering
 - on-demand app-map point-cloud generation, bounded download, and PCD validation
-- weather/rain-protection and mowing-preference diagnostics
+- decoded mower-native charging/rain settings, confirmed setting writes, and
+  mowing-preference diagnostics
 - firmware/update evidence gathering without claiming unverified OTA support
 - guarded remote-control support helpers for supervised short movement pulses
 - reusable payload decoders for app realtime/status keys

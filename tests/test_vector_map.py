@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from io import BytesIO
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from PIL import Image
@@ -21,6 +23,7 @@ from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
     DreameLawnMowerConnectionError,
 )
+from dreame_lawn_mower_client.exceptions import DreameLawnMowerCommandRejectedError
 from dreame_lawn_mower_client.models import (
     DreameLawnMowerDescriptor,
     DreameLawnMowerMapSummary,
@@ -477,6 +480,88 @@ def test_client_map_switch_rejects_missing_or_failed_reply(response: object) -> 
 
     with pytest.raises(DreameLawnMowerConnectionError, match="map switch"):
         client._sync_switch_current_map(1)
+
+
+def test_current_map_readback_uses_only_map_list() -> None:
+    client = _client()
+    client._sync_call_app_action = Mock(
+        return_value={"r": 0, "d": [[0, 0, 1, 1, 0], [1, 1, 1, 1, 0]]}
+    )
+
+    assert client._sync_get_current_app_map_index_readback() == 1
+    client._sync_call_app_action.assert_called_once_with({"m": "g", "t": "MAPL"})
+
+
+def test_async_map_switch_requires_idle_state_and_confirmed_readback() -> None:
+    client = _client()
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        return_value=SimpleNamespace(
+            mowing_session_active=False,
+            mowing=False,
+            paused=False,
+            returning=False,
+        )
+    )
+    client._sync_switch_current_map = lambda map_index: {"map_index": map_index}  # type: ignore[method-assign]
+    client.async_get_current_app_map_index = AsyncMock(return_value=1)
+
+    result = asyncio.run(client.async_switch_current_map(1))
+
+    assert result == {"map_index": 1}
+    client.async_get_current_app_map_index.assert_awaited_once_with()
+
+
+def test_async_map_switch_rejects_active_task_before_write() -> None:
+    client = _client()
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        return_value=SimpleNamespace(
+            mowing_session_active=True,
+            mowing=False,
+            paused=True,
+            returning=False,
+        )
+    )
+    client._sync_switch_current_map = Mock()  # type: ignore[method-assign]
+
+    with pytest.raises(DreameLawnMowerCommandRejectedError, match="Finish or cancel"):
+        asyncio.run(client.async_switch_current_map(1))
+
+    client._sync_switch_current_map.assert_not_called()
+
+
+def test_async_map_switch_allows_docked_snapshot_with_unknown_session_flag() -> None:
+    client = _client()
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        return_value=SimpleNamespace(
+            activity="docked",
+            mowing_session_active=None,
+            mowing=False,
+            paused=False,
+            returning=False,
+        )
+    )
+    client._sync_switch_current_map = lambda map_index: {"map_index": map_index}  # type: ignore[method-assign]
+    client.async_get_current_app_map_index = AsyncMock(return_value=1)
+
+    assert asyncio.run(client.async_switch_current_map(1)) == {"map_index": 1}
+
+
+def test_async_map_switch_rejects_acknowledged_but_ignored_switch() -> None:
+    client = _client()
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        return_value=SimpleNamespace(
+            mowing_session_active=False,
+            mowing=False,
+            paused=False,
+            returning=False,
+        )
+    )
+    client._sync_switch_current_map = lambda map_index: {"map_index": map_index}  # type: ignore[method-assign]
+    client.async_get_current_app_map_index = AsyncMock(return_value=0)
+
+    with patch("asyncio.sleep", new=AsyncMock()):
+        with pytest.raises(DreameLawnMowerCommandRejectedError, match="stayed"):
+            asyncio.run(client.async_switch_current_map(1))
 
 
 def test_map_view_uses_batch_vector_map_when_app_map_fails() -> None:

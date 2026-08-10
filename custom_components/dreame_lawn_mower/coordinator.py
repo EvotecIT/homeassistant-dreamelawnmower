@@ -96,6 +96,20 @@ BATCH_SCHEDULE_RESULT_COALESCE_SECONDS = 1.0
 _runtime_tracking_active = runtime_tracking_active
 
 
+def _device_settings_read_succeeded(settings: Mapping[str, Any]) -> bool:
+    """Return whether a settings payload contains a successful CFG read."""
+    if "present_config_keys" not in settings:
+        return False
+    errors = settings.get("errors")
+    return not (
+        isinstance(errors, Sequence)
+        and any(
+            isinstance(error, Mapping) and error.get("stage") == "config"
+            for error in errors
+        )
+    )
+
+
 class DreameLawnMowerCoordinator(
     DreameLawnMowerConnectivityMixin,
     DreameLawnMowerRefreshMixin,
@@ -136,6 +150,7 @@ class DreameLawnMowerCoordinator(
         self.vector_map_details: dict[str, Any] | None = None
         self.vector_map_details_refreshed_at: datetime | None = None
         self.weather_protection: dict[str, Any] | None = None
+        self.device_settings: dict[str, Any] | None = None
         self.weather_protection_refreshed_at: datetime | None = None
         self.maintenance_status: dict[str, Any] | None = None
         self.maintenance_status_refreshed_at: datetime | None = None
@@ -164,6 +179,7 @@ class DreameLawnMowerCoordinator(
         self._batch_schedule_read_completed_at: float | None = None
         self._schedule_write_lock = asyncio.Lock()
         self._preference_write_lock = asyncio.Lock()
+        self._device_settings_write_lock = asyncio.Lock()
         self._device_refresh_lock = asyncio.Lock()
         self._device_snapshot_generation = 0
         self._published_device_snapshot_generation = 0
@@ -196,6 +212,7 @@ class DreameLawnMowerCoordinator(
         self.last_maintenance_reset_result: dict[str, Any] | None = None
         self._client_update_task: asyncio.Task[None] | None = None
         self._client_update_pending = False
+        self._last_device_settings_event_at: float | None = None
         self._metadata_refresh_task: asyncio.Task[None] | None = None
         self._metadata_shutdown_close_task: asyncio.Task[None] | None = None
         self._metadata_refresh_semaphore = asyncio.Semaphore(
@@ -583,6 +600,21 @@ class DreameLawnMowerCoordinator(
                     bluetooth_error,
                 )
             self.async_set_updated_data(snapshot)
+            settings_event_at = getattr(snapshot, "device_settings_event_at", None)
+            if (
+                settings_event_at is not None
+                and settings_event_at != self._last_device_settings_event_at
+            ):
+                # Property 2:51 identifies that some CFG value changed but not
+                # which one. Let the mower finish applying it, then read CFG once.
+                await asyncio.sleep(1)
+                refreshed = await self.async_refresh_device_settings(
+                    force=True,
+                    source="device_settings_realtime",
+                )
+                if refreshed is not None:
+                    self._last_device_settings_event_at = settings_event_at
+                    self.async_update_listeners()
         except Exception as err:  # noqa: BLE001 - callback must not escape HA task
             _LOGGER.debug("Failed to process cached mower update: %s", err)
         finally:
@@ -1826,7 +1858,24 @@ class DreameLawnMowerCoordinator(
         force: bool = False,
         source: str = "weather_protection_auto",
     ) -> dict[str, Any] | None:
-        """Refresh cached read-only weather and rain-protection state."""
+        """Refresh the mower-native settings record and rain-delay state."""
+        async with self._device_settings_write_lock:
+            return await self._async_refresh_device_settings_unlocked(
+                force=force,
+                source=source,
+                use_weather_alias=True,
+                return_stale_on_failure=True,
+            )
+
+    async def _async_refresh_device_settings_unlocked(
+        self,
+        *,
+        force: bool,
+        source: str,
+        use_weather_alias: bool,
+        return_stale_on_failure: bool,
+    ) -> dict[str, Any] | None:
+        """Refresh CFG while the caller owns the settings lock."""
         now = datetime.now(UTC)
         if (
             not force
@@ -1838,20 +1887,111 @@ class DreameLawnMowerCoordinator(
             return self.weather_protection
 
         try:
-            weather_protection = await self.client.async_get_weather_protection(
-                include_raw=False,
+            read_settings = (
+                self.client.async_get_weather_protection
+                if use_weather_alias
+                else self.client.async_get_device_settings
             )
+            device_settings = await read_settings(include_raw=False)
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
-            _LOGGER.debug("Failed to refresh weather protection: %s", err)
+            _LOGGER.debug("Failed to refresh device settings: %s", err)
             self.weather_protection_refreshed_at = None
-            return self.weather_protection
+            return self.weather_protection if return_stale_on_failure else None
 
-        payload = dict(weather_protection)
+        if not _device_settings_read_succeeded(device_settings):
+            _LOGGER.debug("Device settings refresh returned no successful CFG read")
+            self.weather_protection_refreshed_at = None
+            return self.weather_protection if return_stale_on_failure else None
+
+        payload = dict(device_settings)
         payload.setdefault("captured_at", now.isoformat())
         payload["source"] = source
+        self.device_settings = payload
         self.weather_protection = payload
         self.weather_protection_refreshed_at = now
         return payload
+
+    async def async_refresh_device_settings(
+        self,
+        *,
+        force: bool = False,
+        source: str = "device_settings_auto",
+    ) -> dict[str, Any] | None:
+        """Expose the canonical name for the shared CFG settings refresh."""
+        async with self._device_settings_write_lock:
+            return await self._async_refresh_device_settings_unlocked(
+                force=force,
+                source=source,
+                use_weather_alias=False,
+                return_stale_on_failure=False,
+            )
+
+    async def async_capture_weather_protection(self) -> dict[str, Any]:
+        """Capture the historical weather probe under the settings lock."""
+        async with self._device_settings_write_lock:
+            payload = await self.client.async_get_weather_protection(
+                include_raw=False,
+            )
+            payload.setdefault("captured_at", datetime.now(UTC).isoformat())
+            self.last_weather_probe_result = payload
+            if _device_settings_read_succeeded(payload):
+                self._cache_device_settings(payload, source="weather_probe")
+            else:
+                self.async_update_listeners()
+            return payload
+
+    def _cache_device_settings(
+        self,
+        settings: Mapping[str, Any],
+        *,
+        source: str,
+    ) -> dict[str, Any]:
+        """Publish one confirmed settings readback to every settings entity."""
+        now = datetime.now(UTC)
+        payload = dict(settings)
+        payload["captured_at"] = now.isoformat()
+        payload["source"] = source
+        self.device_settings = payload
+        self.weather_protection = payload
+        self.weather_protection_refreshed_at = now
+        self.async_update_listeners()
+        return payload
+
+    async def async_set_charging_period(
+        self,
+        *,
+        enabled: bool | None = None,
+        start_minutes: int | None = None,
+        end_minutes: int | None = None,
+    ) -> dict[str, Any]:
+        """Persist and publish one confirmed charging-period update."""
+        async with self._device_settings_write_lock:
+            settings = await self.client.async_set_charging_period(
+                enabled=enabled,
+                start_minutes=start_minutes,
+                end_minutes=end_minutes,
+            )
+            return self._cache_device_settings(
+                settings,
+                source="charging_period_write",
+            )
+
+    async def async_set_rain_protection(
+        self,
+        *,
+        enabled: bool | None = None,
+        delay_hours: int | None = None,
+    ) -> dict[str, Any]:
+        """Persist and publish one confirmed rain-protection update."""
+        async with self._device_settings_write_lock:
+            settings = await self.client.async_set_rain_protection(
+                enabled=enabled,
+                delay_hours=delay_hours,
+            )
+            return self._cache_device_settings(
+                settings,
+                source="rain_protection_write",
+            )
 
     async def async_refresh_maintenance_status(
         self,

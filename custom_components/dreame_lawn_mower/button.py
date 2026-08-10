@@ -508,14 +508,7 @@ class DreameLawnMowerCaptureWeatherProbeButton(
 
     async def async_press(self) -> None:
         """Probe read-only weather/rain protection settings and log the result."""
-        payload = await self.coordinator.client.async_get_weather_protection(
-            include_raw=False,
-        )
-        payload.setdefault("captured_at", datetime.now(UTC).isoformat())
-        self.coordinator.last_weather_probe_result = payload
-        self.coordinator.weather_protection = dict(payload)
-        self.coordinator.weather_protection_refreshed_at = datetime.now(UTC)
-        self.coordinator.async_update_listeners()
+        payload = await self.coordinator.async_capture_weather_protection()
         _LOGGER.info(
             "Captured Dreame lawn mower weather probe for %s: %s",
             self.coordinator.client.descriptor.title,

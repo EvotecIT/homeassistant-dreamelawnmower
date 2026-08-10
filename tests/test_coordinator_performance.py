@@ -755,6 +755,8 @@ def test_failed_metadata_refresh_expires_old_cache_marker(
     cached = {"cached": True}
     setattr(coordinator, cache_attr, cached)
     setattr(coordinator, refreshed_at_attr, datetime.now(UTC))
+    if refresh_method == "async_refresh_weather_protection":
+        coordinator._device_settings_write_lock = asyncio.Lock()
     coordinator.client = SimpleNamespace(
         **{client_method: AsyncMock(side_effect=TimeoutError)}
     )

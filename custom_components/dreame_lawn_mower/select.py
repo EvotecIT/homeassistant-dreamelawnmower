@@ -35,10 +35,15 @@ from .control_options import (
     zone_label,
 )
 from .coordinator import DreameLawnMowerCoordinator
+from .device_settings_control import device_settings_section, rain_delay_label
 from .dreame_lawn_mower_client.client import (
     VOICE_LANGUAGE_INDEX_TO_LABEL,
     VOICE_LANGUAGE_LABEL_TO_INDEX,
     VOICE_LANGUAGE_LABELS,
+)
+from .dreame_lawn_mower_client.device_settings import (
+    RAIN_DELAY_MAX_HOURS,
+    RAIN_DELAY_MIN_HOURS,
 )
 from .entity import DreameLawnMowerEntity
 from .mowing_preference_control import (
@@ -62,6 +67,7 @@ async def async_setup_entry(
     async_add_entities(
         [
             DreameLawnMowerVoiceLanguageSelect(coordinator),
+            DreameLawnMowerRainDelaySelect(coordinator),
             DreameLawnMowerMapSelect(coordinator),
             DreameLawnMowerSelectedMapRotationSelect(coordinator),
             DreameLawnMowerMowingActionSelect(coordinator),
@@ -80,6 +86,49 @@ async def async_setup_entry(
 
 class DreameLawnMowerSelectEntity(DreameLawnMowerEntity, SelectEntity):
     """Shared base class for current-map selector entities."""
+
+
+class DreameLawnMowerRainDelaySelect(DreameLawnMowerSelectEntity):
+    """Choose how long the mower waits after rain before resuming."""
+
+    _attr_name = "After-Rain Delay"
+    _attr_icon = "mdi:weather-rainy"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_rain_delay"
+        self._hours_by_label = {
+            rain_delay_label(hours): hours
+            for hours in range(RAIN_DELAY_MIN_HOURS, RAIN_DELAY_MAX_HOURS + 1)
+        }
+
+    @property
+    def available(self) -> bool:
+        settings = device_settings_section(self.coordinator.device_settings)
+        return bool(
+            self.coordinator.data is not None
+            and settings
+            and settings.get("rain_settings_available")
+        )
+
+    @property
+    def options(self) -> list[str]:
+        return list(self._hours_by_label)
+
+    @property
+    def current_option(self) -> str | None:
+        settings = device_settings_section(self.coordinator.device_settings)
+        if settings is None:
+            return None
+        delay = settings.get("rain_protection_duration_hours")
+        return rain_delay_label(int(delay)) if delay is not None else None
+
+    async def async_select_option(self, option: str) -> None:
+        delay = self._hours_by_label.get(option)
+        if delay is None:
+            raise ValueError(f"Unknown after-rain delay option: {option}")
+        await self.coordinator.async_set_rain_protection(delay_hours=delay)
 
 
 class DreameLawnMowerVoiceLanguageSelect(DreameLawnMowerSelectEntity):
