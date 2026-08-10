@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -113,32 +114,34 @@ def test_client_requests_mower_owned_mihis_summary() -> None:
     assert calls == [(WORK_LOG_TOTALS_REQUEST, {"redact_response": True})]
 
 
-@pytest.mark.asyncio
-async def test_coordinator_caches_totals_and_preserves_them_on_failure() -> None:
-    coordinator = object.__new__(DreameLawnMowerCoordinator)
-    coordinator.work_log_totals = None
-    coordinator.work_log_totals_refreshed_at = None
-    coordinator.client = SimpleNamespace(
-        async_get_work_log_totals=AsyncMock(return_value=_totals())
-    )
+def test_coordinator_caches_totals_and_preserves_them_on_failure() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        coordinator.work_log_totals = None
+        coordinator.work_log_totals_refreshed_at = None
+        coordinator.client = SimpleNamespace(
+            async_get_work_log_totals=AsyncMock(return_value=_totals())
+        )
 
-    first = await coordinator.async_refresh_work_log_totals()
-    second = await coordinator.async_refresh_work_log_totals()
+        first = await coordinator.async_refresh_work_log_totals()
+        second = await coordinator.async_refresh_work_log_totals()
 
-    assert first == _totals()
-    assert second is first
-    coordinator.client.async_get_work_log_totals.assert_awaited_once()
-    assert WORK_LOG_TOTALS_REFRESH_INTERVAL == timedelta(minutes=15)
+        assert first == _totals()
+        assert second is first
+        coordinator.client.async_get_work_log_totals.assert_awaited_once()
+        assert WORK_LOG_TOTALS_REFRESH_INTERVAL == timedelta(minutes=15)
 
-    coordinator.work_log_totals_refreshed_at = None
-    coordinator.client.async_get_work_log_totals = AsyncMock(
-        side_effect=DreameLawnMowerConnectionError("offline")
-    )
+        coordinator.work_log_totals_refreshed_at = None
+        coordinator.client.async_get_work_log_totals = AsyncMock(
+            side_effect=DreameLawnMowerConnectionError("offline")
+        )
 
-    retained = await coordinator.async_refresh_work_log_totals()
+        retained = await coordinator.async_refresh_work_log_totals()
 
-    assert retained is first
-    assert coordinator.work_log_totals_refreshed_at is None
+        assert retained is first
+        assert coordinator.work_log_totals_refreshed_at is None
+
+    asyncio.run(scenario())
 
 
 def test_work_log_sensors_expose_vendor_totals() -> None:
