@@ -240,7 +240,7 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
                 "keys": ["id", "type"],
             },
         ],
-        "maintenance_point_ids": [301, 302],
+        "maintenance_point_ids": [301],
         "point_type_codes": [1, 2],
         "point_record_validation": {
             "total_count": 5,
@@ -441,21 +441,35 @@ def test_app_maps_accept_three_value_maintenance_point_vectors() -> None:
                     "param": {},
                     "point": [5910, 12400, 270],
                     "time": 1,
-                    "type": 9,
+                    "type": 1,
                 },
                 {
                     "id": 502,
                     "param": {},
                     "point": [7100, 8300, 90],
                     "time": 2,
-                    "type": 9,
+                    "type": 1,
+                },
+                {
+                    "id": 504,
+                    "param": {},
+                    "point": [9000, 9200, 180],
+                    "time": 3,
+                    "type": 2,
+                },
+                {
+                    "id": 505,
+                    "param": {},
+                    "point": [9400, 9600, 0],
+                    "time": 4,
+                    "type": 2,
                 },
                 {
                     "id": 503,
                     "param": {},
                     "point": [1, 2, 3, 4],
                     "time": 3,
-                    "type": 9,
+                    "type": 1,
                 },
             ]
         }
@@ -466,18 +480,18 @@ def test_app_maps_accept_three_value_maintenance_point_vectors() -> None:
 
     summary = result["maps"][0]["summary"]
     assert summary["maintenance_point_ids"] == [501, 502]
-    assert summary["point_type_codes"] == [9]
+    assert summary["point_type_codes"] == [1, 2]
     assert summary["point_record_validation"] == {
-        "total_count": 3,
-        "exact_shape_count": 3,
-        "parser_accepted_count": 2,
-        "identified_count": 2,
+        "total_count": 5,
+        "exact_shape_count": 5,
+        "parser_accepted_count": 4,
+        "identified_count": 4,
         "rejection_reason_counts": [
             {"reason": "point_not_coordinate_pair", "count": 1},
         ],
         "value_type_shapes": [
             {
-                "count": 2,
+                "count": 4,
                 "id_type": "number",
                 "param_type": "object",
                 "point_type": "array",

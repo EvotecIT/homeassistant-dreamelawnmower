@@ -10,6 +10,7 @@ from .client_shared_helpers import _operation_value_type
 
 _REQUIRED_KEYS = frozenset({"id", "param", "point", "time", "type"})
 _SUPPORTED_POINT_VECTOR_LENGTHS = frozenset({2, 3})
+_MAINTENANCE_POINT_TYPE = 1
 
 
 def app_map_maintenance_point_ids(entries: Sequence[Any]) -> list[int]:
@@ -34,7 +35,7 @@ def app_map_point_type_codes(entries: Sequence[Any]) -> list[int]:
     """Return numeric vendor type codes from recognized point records."""
     result: list[int] = []
     for entry in entries:
-        if not is_app_map_maintenance_point_record(entry):
+        if not _is_app_map_point_record(entry):
             continue
         point_type = entry.get("type")
         if (
@@ -66,7 +67,7 @@ def app_map_point_record_diagnostics(
         exact_shape_count += 1
         shape = _maintenance_point_value_shape(entry)
         grouped_shapes[shape] = grouped_shapes.get(shape, 0) + 1
-        if is_app_map_maintenance_point_record(entry):
+        if _is_app_map_point_record(entry):
             parser_accepted_count += 1
             point_id = entry.get("id")
             if (
@@ -114,7 +115,15 @@ def app_map_point_record_diagnostics(
 
 
 def is_app_map_maintenance_point_record(value: object) -> bool:
-    """Recognize exact A2-family point records without interpreting geometry."""
+    """Recognize A2-family maintenance points, excluding patrol points."""
+    return (
+        _is_app_map_point_record(value)
+        and value.get("type") == _MAINTENANCE_POINT_TYPE
+    )
+
+
+def _is_app_map_point_record(value: object) -> bool:
+    """Recognize an exact A2-family point record without assigning semantics."""
     if not isinstance(value, Mapping) or set(value) != _REQUIRED_KEYS:
         return False
     point_type = value.get("type")

@@ -184,6 +184,11 @@ from .video_runtime import (
     DreameLawnMowerXp2pRuntimeDiagnostics,
     diagnose_native_xp2p_runtime,
 )
+from .work_log import (
+    WORK_LOG_TOTALS_REQUEST,
+    DreameLawnMowerWorkLogTotals,
+    work_log_totals_from_app_data,
+)
 from .xp2p_config import (
     DreameLawnMowerXp2pConfigError,
     DreameLawnMowerXp2pDeviceConfig,
@@ -221,6 +226,7 @@ __all__ = [
     "DreameLawnMowerStatusBlob",
     "DreameLawnMowerStreamUrlProbeResult",
     "DreameLawnMowerTwoFactorRequiredError",
+    "DreameLawnMowerWorkLogTotals",
     "DreameLawnMowerXp2pExternalRunner",
     "DreameLawnMowerXp2pConfigError",
     "DreameLawnMowerXp2pDeviceConfig",
@@ -275,6 +281,7 @@ __all__ = [
     "MOWING_PREFERENCE_MODE_FIELD",
     "MOWING_PREFERENCE_PROPERTY_KEY",
     "MOWING_PREFERENCE_UPDATE_FIELDS",
+    "WORK_LOG_TOTALS_REQUEST",
     "SUPPORTED_ACCOUNT_TYPES",
     "CAPABILITY_SOURCE_ADVERTISED",
     "CAPABILITY_SOURCE_MODEL",
@@ -358,4 +365,5 @@ __all__ = [
     "run_jadx_decompile",
     "schedule_task_summary",
     "summarize_mowing_preference_info",
+    "work_log_totals_from_app_data",
 ]

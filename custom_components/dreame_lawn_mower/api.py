@@ -9,6 +9,7 @@ from .dreame_lawn_mower_client import (
     DreameLawnMowerFirmwareUpdateSupport,
     DreameLawnMowerSnapshot,
     DreameLawnMowerTwoFactorRequiredError,
+    DreameLawnMowerWorkLogTotals,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "DreameLawnMowerFirmwareUpdateSupport",
     "DreameLawnMowerSnapshot",
     "DreameLawnMowerTwoFactorRequiredError",
+    "DreameLawnMowerWorkLogTotals",
 ]

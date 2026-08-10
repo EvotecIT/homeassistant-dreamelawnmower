@@ -122,6 +122,7 @@ def test_coordinator_diagnostics_sanitize_last_failure() -> None:
             "app_maps": [],
             "vector_maps": [],
         },
+        "work_log_totals": None,
         "last_maintenance_point_probe": None,
     }
 

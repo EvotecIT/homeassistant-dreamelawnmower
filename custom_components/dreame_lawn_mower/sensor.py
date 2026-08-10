@@ -202,6 +202,11 @@ from .sensor_runtime import (  # noqa: F401
     _runtime_status_blob_summary,
     _runtime_status_blob_total_area_sqm,
 )
+from .sensor_work_log import (
+    DreameLawnMowerTotalMowedAreaSensor,
+    DreameLawnMowerTotalMowingSessionsSensor,
+    DreameLawnMowerTotalMowingTimeSensor,
+)
 from .task_status_probe import (  # noqa: F401
     task_status_probe_result_attributes,
     task_status_probe_state,
@@ -469,6 +474,9 @@ async def async_setup_entry(
         + [DreameLawnMowerRuntimeTrackLengthSensor(coordinator)]
         + [DreameLawnMowerRuntimeTrackSegmentCountSensor(coordinator)]
         + [DreameLawnMowerMowingProgressSensor(coordinator)]
+        + [DreameLawnMowerTotalMowedAreaSensor(coordinator)]
+        + [DreameLawnMowerTotalMowingTimeSensor(coordinator)]
+        + [DreameLawnMowerTotalMowingSessionsSensor(coordinator)]
         + [DreameLawnMowerAppMapObjectCountSensor(coordinator)]
         + [DreameLawnMowerFirmwareUpdateStatusSensor(coordinator)]
         + [DreameLawnMowerConfiguredScheduleCountSensor(coordinator)]
