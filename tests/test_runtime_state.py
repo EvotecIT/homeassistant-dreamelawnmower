@@ -137,6 +137,54 @@ def test_heartbeat_runtime_task_identity_is_retained_when_available() -> None:
     assert reconciled.mission_task_id == 101
 
 
+def test_heartbeat_task_state_replaces_retained_property_timestamp() -> None:
+    """Heartbeat state uses only its own reception time for mission identity."""
+    property_snapshot = replace(
+        _snapshot(),
+        task_status="starting",
+        task_status_source="property",
+        task_status_event_at=10.0,
+    )
+    status_blob = SimpleNamespace(
+        task_status="starting",
+        source="realtime",
+        received_at="1970-01-01T00:00:20+00:00",
+        mowing_session_active=True,
+        task_resumable=False,
+        heartbeat_docked=False,
+        candidate_runtime_task_id=None,
+    )
+
+    reconciled = snapshot_with_heartbeat_task_state(property_snapshot, status_blob)
+
+    assert reconciled.task_status_source == "heartbeat_realtime"
+    assert reconciled.task_status_event_at == 20.0
+
+
+def test_heartbeat_task_state_clears_unowned_property_timestamp() -> None:
+    """Missing heartbeat timing never borrows the retained property event."""
+    property_snapshot = replace(
+        _snapshot(),
+        task_status="starting",
+        task_status_source="property",
+        task_status_event_at=10.0,
+    )
+    status_blob = SimpleNamespace(
+        task_status="starting",
+        source="realtime",
+        received_at=None,
+        mowing_session_active=True,
+        task_resumable=False,
+        heartbeat_docked=False,
+        candidate_runtime_task_id=None,
+    )
+
+    reconciled = snapshot_with_heartbeat_task_state(property_snapshot, status_blob)
+
+    assert reconciled.task_status_source == "heartbeat_realtime"
+    assert reconciled.task_status_event_at is None
+
+
 def test_idle_in_station_heartbeat_preserves_bare_active_error() -> None:
     status_blob = decode_mower_status_blob(
         [206, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128, 87, 113, 255, 0, 0, 128, 206, 186, 206]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 from .models import DreameLawnMowerSnapshot, DreameLawnMowerStatusBlob
@@ -32,6 +33,7 @@ def snapshot_with_heartbeat_task_state(
             task_status=task_status,
             task_status_name=task_status.replace("_", " ").title(),
             task_status_source=f"heartbeat_{status_blob.source or 'unknown'}",
+            task_status_event_at=_heartbeat_event_at(status_blob),
             mowing_session_active=status_blob.mowing_session_active,
             task_resumable=status_blob.task_resumable,
         )
@@ -59,6 +61,22 @@ def snapshot_with_heartbeat_task_state(
     if not changes:
         return snapshot
     return replace(snapshot, **changes)
+
+
+def _heartbeat_event_at(status_blob: DreameLawnMowerStatusBlob) -> float | None:
+    """Return the heartbeat property's own reception time when available."""
+    received_at = getattr(status_blob, "received_at", None)
+    if isinstance(received_at, int | float) and not isinstance(received_at, bool):
+        return float(received_at)
+    if not isinstance(received_at, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(received_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.timestamp()
 
 
 def snapshot_with_cloud_presence(
