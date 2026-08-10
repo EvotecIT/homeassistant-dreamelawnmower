@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import nullcontext
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
@@ -68,6 +69,30 @@ from .runtime_state import (
 _MUTATION_CONFIRMATION_DELAYS_SECONDS = (0.5, 1.5, 3.0)
 
 
+def _device_start_session_identity(device: Any) -> bool | None:
+    """Return the cached start-versus-resume branch used by the device."""
+    from .device_types import DreameMowerTaskStatus
+
+    status = device.status
+    resumes_special_task = bool(
+        getattr(status, "fast_mapping_paused", False)
+        or getattr(status, "returning_paused", False)
+        or (
+            getattr(getattr(device, "capability", None), "cruising", False)
+            and getattr(status, "cruising_paused", False)
+        )
+    )
+    task_status = getattr(status, "task_status", None)
+    started = getattr(status, "started", None)
+    if resumes_special_task:
+        return False
+    if task_status is None or task_status is DreameMowerTaskStatus.UNKNOWN:
+        return None
+    if started is not None:
+        return not bool(started)
+    return None
+
+
 class _DreameLawnMowerClientCoreMixin:
     async def async_get_cached_snapshot(self) -> DreameLawnMowerSnapshot:
         """Return a snapshot from the latest in-memory device state."""
@@ -127,6 +152,50 @@ class _DreameLawnMowerClientCoreMixin:
                 connection_error,
                 predicate,
             )
+
+    async def _async_get_cached_start_mowing_session_identity(self) -> bool | None:
+        """Read the device's current start branch under its MQTT state lock."""
+        device = await asyncio.to_thread(self._ensure_device)
+
+        def read_session_identity() -> bool | None:
+            state_lock = getattr(device, "_state_lock", None)
+            state_context = state_lock if state_lock is not None else nullcontext()
+            with state_context:
+                return _device_start_session_identity(device)
+
+        return await asyncio.to_thread(read_session_identity)
+
+    async def _async_call_start_mowing_with_session_identity(self) -> bool | None:
+        """Invoke the fallback start and capture its cached-state decision."""
+        device = await asyncio.to_thread(self._ensure_device)
+        new_session: bool | None = None
+
+        def call_start_mowing() -> Any:
+            nonlocal new_session
+
+            state_lock = getattr(device, "_state_lock", None)
+            state_context = state_lock if state_lock is not None else nullcontext()
+            with state_context:
+                # Keep the identity decision and the device's own branch under
+                # the same lock used by MQTT state mutations.
+                new_session = _device_start_session_identity(device)
+                return device.start_mowing()
+
+        try:
+            await asyncio.to_thread(call_start_mowing)
+        except DeviceCommandRejectedException as err:
+            raise DreameLawnMowerCommandRejectedError(str(err)) from err
+        except DeviceException as err:
+            await self._async_reconcile_ambiguous_mutation(
+                "start mowing",
+                DreameLawnMowerConnectionError(str(err)),
+                lambda snapshot: bool(
+                    snapshot.started
+                    or snapshot.mowing
+                    or snapshot.mowing_session_active is True
+                ),
+            )
+        return new_session
 
     async def _async_reconcile_ambiguous_mutation(
         self,

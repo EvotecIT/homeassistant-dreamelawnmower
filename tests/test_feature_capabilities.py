@@ -61,6 +61,16 @@ def test_validated_a3_is_video_supported_before_metadata_arrives() -> None:
     assert capability.source == CAPABILITY_SOURCE_MODEL
 
 
+def test_field_confirmed_lidax_2000_video_is_available_before_metadata() -> None:
+    capability = resolve_feature_capability(
+        FEATURE_LIVE_VIDEO,
+        snapshot=_snapshot("mova.mower.g2529f"),
+    )
+
+    assert capability.state == CAPABILITY_SUPPORTED
+    assert capability.source == CAPABILITY_SOURCE_MODEL
+
+
 def test_unknown_model_without_evidence_remains_unknown() -> None:
     capability = resolve_feature_capability(
         FEATURE_LIVE_VIDEO,

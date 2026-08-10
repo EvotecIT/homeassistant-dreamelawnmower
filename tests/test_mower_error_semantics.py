@@ -147,6 +147,21 @@ def test_a2_3000_uses_a2_maintenance_point_notice_catalog() -> None:
     assert snapshot.status_notice_display == "Maintenance point reached"
 
 
+def test_realtime_start_notice_retains_event_time_for_session_identity() -> None:
+    snapshot = _snapshot(
+        53,
+        "unknown",
+        realtime_error_code=53,
+        realtime_error_last_seen=123.5,
+        realtime_state_last_seen=120.0,
+        state="MOWING",
+    )
+
+    assert snapshot.status_notice_name == "scheduled_mowing_started"
+    assert snapshot.status_notice_event_at == 123.5
+    assert snapshot.state_event_at == 120.0
+
+
 @pytest.mark.parametrize(
     ("code", "inherited_name", "state", "expected_activity", "expected_notice"),
     [
@@ -561,6 +576,11 @@ def test_model_overrides_prevent_cross_model_code_guesses() -> None:
         == "robot_lifted"
     )
     assert mower_fault_active(0, model="mova.mower.g2529c") is True
+    for model in ("mova.mower.g2529f", "g2529f"):
+        assert mower_device_code_name(0, model=model) == "robot_lifted"
+        assert mower_fault_active(0, model=model) is True
+        assert mower_device_code_name(55, model=model) == "cannot_start_low_battery"
+        assert mower_fault_active(55, model=model) is True
     assert (
         mower_device_code_name(0, model="mova.mower.x1234")
         == "no_device_code"

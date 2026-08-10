@@ -193,6 +193,7 @@ from .sensor_runtime import (  # noqa: F401
     _runtime_progress_available_for_snapshot,
     _runtime_session_attributes,
     _runtime_session_blob,
+    _runtime_session_completion_confirmed,
     _runtime_status_blob_current_area_sqm,
     _runtime_status_blob_heading_deg,
     _runtime_status_blob_pose_x,

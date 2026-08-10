@@ -21,6 +21,7 @@ MIN_REMOTE_CONTROL_BATTERY_LEVEL = 20
 REMOTE_CONTROL_STATES = {"remote_control"}
 REALTIME_STATE_PROPERTY_KEY = "2.1"
 REALTIME_ERROR_PROPERTY_KEY = "2.2"
+REALTIME_TASK_STATUS_PROPERTY_KEY = "4.7"
 OPERATIONAL_HUMAN_DETECTION_NOTICE_MODELS = frozenset(
     {"dreame.mower.q2501a", "q2501a"}
 )
@@ -33,6 +34,7 @@ MODEL_NAME_MAP = {
     "dreame.mower.g2541e": "A3 AWD Pro 3500",
     "dreame.mower.q2501a": "A3 AWD 1000",
     "mova.mower.g2529c": "LiDAX Ultra 1000",
+    "mova.mower.g2529f": "LiDAX Ultra 2000",
 }
 
 DISPLAY_NAME_ALIASES = {
@@ -45,6 +47,7 @@ DISPLAY_NAME_ALIASES = {
     "lidax ultra 800": "LiDAX Ultra 800",
     "lidax ultra 1000": "LiDAX Ultra 1000",
     "lidax ultra 1200": "LiDAX Ultra 1200",
+    "lidax ultra 2000": "LiDAX Ultra 2000",
     "viax 300": "Viax 300",
     "vivax 250": "Vivax 250",
 }
@@ -348,9 +351,19 @@ class DreameLawnMowerSnapshot:
     state_name: str
     activity: str
     battery_level: int | None = None
+    state_event_at: float | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
     task_status: str | None = None
     task_status_name: str | None = None
     task_status_source: str | None = None
+    task_status_event_at: float | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
     mowing_session_active: bool | None = None
     task_resumable: bool | None = None
     error_code: int | None = None
@@ -363,6 +376,16 @@ class DreameLawnMowerSnapshot:
     status_notice_display: str | None = None
     status_notice_tier: str | None = None
     status_notice_source: str | None = None
+    status_notice_event_at: float | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
+    mission_task_id: int | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
     raw_error_code: int | None = None
     realtime_error_code: int | None = None
     _error_suppression_active: bool = field(
@@ -1319,8 +1342,16 @@ def snapshot_from_device(
         state_name=state_name,
         activity=activity,
         battery_level=getattr(device.status, "battery_level", None),
+        state_event_at=_realtime_property_last_seen(
+            device,
+            REALTIME_STATE_PROPERTY_KEY,
+        ),
         task_status=task_obj.name.lower() if task_obj is not None else None,
         task_status_name=getattr(device.status, "task_status_name", None),
+        task_status_event_at=_realtime_property_last_seen(
+            device,
+            REALTIME_TASK_STATUS_PROPERTY_KEY,
+        ),
         error_code=error_code,
         error_name=error_name,
         error_text=error_text,
@@ -1362,6 +1393,14 @@ def snapshot_from_device(
             )
         ),
         status_notice_source=status_notice_source,
+        status_notice_event_at=(
+            _realtime_property_last_seen(device, REALTIME_ERROR_PROPERTY_KEY)
+            if (
+                status_notice_code is not None
+                and status_notice_code == realtime_error_code
+            )
+            else None
+        ),
         raw_error_code=raw_error_code,
         realtime_error_code=realtime_error_code,
         _error_suppression_active=error_suppression_active,

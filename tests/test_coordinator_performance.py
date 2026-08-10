@@ -34,6 +34,9 @@ from custom_components.dreame_lawn_mower.coordinator import (
 from custom_components.dreame_lawn_mower.performance import (
     DreameLawnMowerPerformanceTracker,
 )
+from custom_components.dreame_lawn_mower.runtime_cache import (
+    DreameLawnMowerRuntimeTelemetryCache,
+)
 from custom_components.dreame_lawn_mower.schedule_cache import (
     ScheduleActionReadBackoff,
     merge_app_schedule_payload,
@@ -226,6 +229,43 @@ def test_video_safety_refresh_retries_snapshot_that_is_already_stale() -> None:
     asyncio.run(scenario())
 
 
+def test_video_safety_refresh_applies_replacement_mission_boundary() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        previous = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+        cache = DreameLawnMowerRuntimeTelemetryCache()
+        assert cache.update(previous, active_session=True) is True
+        replacement = SimpleNamespace(
+            available=True,
+            mowing_session_active=True,
+            activity="mowing",
+            state="mowing",
+            docked=False,
+            task_status="mowing",
+            task_resumable=False,
+            status_notice_name="mowing_task_started",
+            status_notice_event_at=2.0,
+            mission_task_id=None,
+        )
+        coordinator._device_refresh_lock = asyncio.Lock()
+        coordinator._device_snapshot_generation = 0
+        coordinator._published_device_snapshot_generation = 0
+        coordinator._device_snapshot_generations = {}
+        coordinator.runtime_telemetry_cache = cache
+        coordinator.client = SimpleNamespace(
+            async_refresh_authoritative_snapshot=AsyncMock(return_value=replacement),
+        )
+
+        with patch.object(DataUpdateCoordinator, "async_set_updated_data") as publish:
+            result = await coordinator.async_refresh_video_safety_state()
+
+        assert result is replacement
+        assert cache.blob is None
+        publish.assert_called_once_with(replacement)
+
+    asyncio.run(scenario())
+
+
 def test_newer_video_safety_snapshot_blocks_foreground_runtime_side_effects() -> None:
     async def scenario() -> None:
         coordinator = object.__new__(DreameLawnMowerCoordinator)
@@ -246,6 +286,14 @@ def test_newer_video_safety_snapshot_blocks_foreground_runtime_side_effects() ->
         runtime_started = asyncio.Event()
         release_runtime = asyncio.Event()
         retained_runtime = SimpleNamespace(source="newer-state")
+        completed_blob = SimpleNamespace(
+            candidate_runtime_area_progress_percent=100.0
+        )
+        runtime_cache = DreameLawnMowerRuntimeTelemetryCache()
+        assert runtime_cache.update(
+            completed_blob,
+            completion_confirmed=True,
+        ) is True
 
         async def refresh_snapshot() -> object:
             return next(snapshots)
@@ -276,7 +324,7 @@ def test_newer_video_safety_snapshot_blocks_foreground_runtime_side_effects() ->
         coordinator.app_maps_refresh_succeeded = False
         coordinator.selected_map_index = 2
         coordinator.runtime_status_blob = retained_runtime
-        coordinator.runtime_telemetry_cache = SimpleNamespace(update=Mock())
+        coordinator.runtime_telemetry_cache = runtime_cache
         coordinator.client = SimpleNamespace(
             async_refresh=refresh_snapshot,
             async_refresh_authoritative_snapshot=refresh_snapshot,
@@ -307,9 +355,58 @@ def test_newer_video_safety_snapshot_blocks_foreground_runtime_side_effects() ->
         publish.assert_called_with(video_snapshots[-1])
         assert coordinator.runtime_status_blob is retained_runtime
         assert coordinator._runtime_map_identity_verified is False
-        coordinator.runtime_telemetry_cache.update.assert_not_called()
+        assert runtime_cache.blob is completed_blob
+        assert runtime_cache.completion_confirmed is True
         coordinator.client.update_runtime_live_tracking.assert_not_called()
         coordinator._schedule_metadata_refresh.assert_not_called()
+
+    asyncio.run(scenario())
+
+
+def test_command_boundary_blocks_delayed_foreground_runtime_side_effects() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        snapshot = SimpleNamespace(
+            mowing_session_active=False,
+            activity="idle",
+        )
+        runtime_started = asyncio.Event()
+        release_runtime = asyncio.Event()
+        retained_runtime = SimpleNamespace(source="retained")
+        stale_runtime = SimpleNamespace(
+            candidate_runtime_area_progress_percent=100.0
+        )
+        cache = DreameLawnMowerRuntimeTelemetryCache()
+        assert cache.update(stale_runtime, completion_confirmed=True) is True
+
+        async def refresh_runtime(*, refresh: bool, include_cloud: bool) -> object:
+            assert refresh is False
+            assert include_cloud is True
+            runtime_started.set()
+            await release_runtime.wait()
+            return stale_runtime
+
+        coordinator.runtime_status_blob = retained_runtime
+        coordinator.runtime_telemetry_cache = cache
+        coordinator.client = SimpleNamespace(
+            async_get_runtime_status_blob=refresh_runtime,
+            update_runtime_live_tracking=Mock(),
+        )
+
+        refresh_task = asyncio.create_task(
+            coordinator._async_refresh_runtime_status(
+                snapshot,
+                runtime_map_index=2,
+            )
+        )
+        await asyncio.wait_for(runtime_started.wait(), timeout=1)
+        cache.begin_new_session(session_started_at=20.0)
+        release_runtime.set()
+
+        assert await refresh_task is False
+        assert cache.blob is None
+        assert coordinator.runtime_status_blob is retained_runtime
+        coordinator.client.update_runtime_live_tracking.assert_not_called()
 
     asyncio.run(scenario())
 

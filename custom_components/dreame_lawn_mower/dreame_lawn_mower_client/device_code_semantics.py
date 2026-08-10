@@ -219,7 +219,12 @@ _A1_MODELS: Final[frozenset[str]] = frozenset(
     }
 )
 _MOVA_MODELS: Final[frozenset[str]] = frozenset(
-    {"mova.mower.g2529c", "g2529c"}
+    {
+        "mova.mower.g2529c",
+        "mova.mower.g2529f",
+        "g2529c",
+        "g2529f",
+    }
 )
 
 

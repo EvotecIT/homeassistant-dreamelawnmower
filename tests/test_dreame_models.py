@@ -208,6 +208,23 @@ def test_descriptor_maps_lidax_ultra_1000_model_name() -> None:
     assert descriptor.title == "Mowercedes (LiDAX Ultra 1000)"
 
 
+def test_descriptor_maps_lidax_ultra_2000_model_name() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-6",
+            "model": "mova.mower.g2529f",
+            "customName": "Back Lawn",
+            "deviceInfo": {"displayName": "Lidax Ultra 2000"},
+        },
+        account_type="mova",
+        country="us",
+    )
+
+    assert descriptor is not None
+    assert descriptor.display_model == "LiDAX Ultra 2000"
+    assert descriptor.title == "Back Lawn (LiDAX Ultra 2000)"
+
+
 def test_descriptor_maps_a3_awd_pro_3500_model_name() -> None:
     descriptor = descriptor_from_cloud_record(
         {

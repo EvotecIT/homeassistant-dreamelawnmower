@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from homeassistant.components.lawn_mower import LawnMowerActivity
@@ -21,6 +21,10 @@ from custom_components.dreame_lawn_mower.control_options import (
 )
 from custom_components.dreame_lawn_mower.coordinator import DreameLawnMowerCoordinator
 from custom_components.dreame_lawn_mower.lawn_mower import DreameLawnMower
+from custom_components.dreame_lawn_mower.runtime_cache import (
+    DreameLawnMowerRuntimeTelemetryCache,
+    runtime_mission_session_started_at,
+)
 from custom_components.dreame_lawn_mower.select import (
     DreameLawnMowerEdgeSelect,
     DreameLawnMowerMapSelect,
@@ -924,6 +928,9 @@ def test_lawn_mower_start_uses_selected_edge() -> None:
         async_start_mowing=AsyncMock(),
     )
     entity = object.__new__(DreameLawnMower)
+    previous_blob = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(previous_blob, active_session=True) is True
     entity.coordinator = SimpleNamespace(
         client=client,
         selected_mowing_action=MOWING_ACTION_EDGE,
@@ -934,6 +941,7 @@ def test_lawn_mower_start_uses_selected_edge() -> None:
         vector_map_details=_vector_map_details(),
         batch_device_data=_batch_device_data(),
         app_maps=_app_maps(),
+        runtime_telemetry_cache=cache,
         async_request_refresh=AsyncMock(),
     )
 
@@ -943,7 +951,91 @@ def test_lawn_mower_start_uses_selected_edge() -> None:
     client.async_start_zone_mowing.assert_not_called()
     client.async_start_spot_mowing.assert_not_called()
     client.async_start_mowing.assert_not_called()
+    assert cache.blob is None
+    assert runtime_mission_session_started_at(cache) is not None
     entity.coordinator.async_request_refresh.assert_awaited_once()
+
+
+@pytest.mark.parametrize("start_result", (False, None))
+def test_lawn_mower_resume_or_unknown_preserves_runtime_session_cache(
+    start_result: bool | None,
+) -> None:
+    client = SimpleNamespace(async_start_mowing=AsyncMock(return_value=start_result))
+    previous_blob = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(previous_blob, active_session=True) is True
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = SimpleNamespace(
+        client=client,
+        selected_mowing_action="all_area",
+        runtime_telemetry_cache=cache,
+        async_request_refresh=AsyncMock(),
+    )
+
+    asyncio.run(entity.async_start_mowing())
+
+    assert cache.blob is previous_blob
+    entity.coordinator.async_request_refresh.assert_awaited_once()
+
+
+def test_lawn_mower_start_preserves_callback_telemetry_before_command_return() -> None:
+    """Command acceptance cannot erase a mission already observed by MQTT."""
+    previous_blob = SimpleNamespace(candidate_runtime_area_progress_percent=100.0)
+    current_blob = SimpleNamespace(candidate_runtime_area_progress_percent=3.0)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(previous_blob, completion_confirmed=True) is True
+
+    async def accept_after_callback() -> bool:
+        cache.observe_session_state(active_session=True)
+        assert cache.update(current_blob, active_session=True) is True
+        return True
+
+    client = SimpleNamespace(
+        async_start_mowing=AsyncMock(side_effect=accept_after_callback)
+    )
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = SimpleNamespace(
+        client=client,
+        selected_mowing_action="all_area",
+        runtime_telemetry_cache=cache,
+        async_request_refresh=AsyncMock(),
+    )
+
+    asyncio.run(entity.async_start_mowing())
+
+    assert cache.blob is current_blob
+    entity.coordinator.async_request_refresh.assert_awaited_once()
+
+
+def test_lawn_mower_records_command_boundary_after_acceptance() -> None:
+    """A delayed prior notice cannot postdate the accepted mission boundary."""
+    command_accepted = False
+
+    async def accept_start() -> bool:
+        nonlocal command_accepted
+        command_accepted = True
+        return True
+
+    def accepted_at() -> float:
+        assert command_accepted is True
+        return 20.0
+
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = SimpleNamespace(
+        client=SimpleNamespace(async_start_mowing=AsyncMock(side_effect=accept_start)),
+        selected_mowing_action="all_area",
+        runtime_telemetry_cache=cache,
+        async_request_refresh=AsyncMock(),
+    )
+
+    with patch(
+        "custom_components.dreame_lawn_mower.lawn_mower.time",
+        side_effect=accepted_at,
+    ):
+        asyncio.run(entity.async_start_mowing())
+
+    assert runtime_mission_session_started_at(cache) == 20.0
 
 
 def test_lawn_mower_start_edge_service_uses_explicit_contours() -> None:

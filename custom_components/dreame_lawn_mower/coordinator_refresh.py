@@ -26,6 +26,18 @@ from .performance import (
     DreameLawnMowerPerformanceTracker,
     format_performance_sample,
 )
+from .runtime_cache import (
+    runtime_mission_cached_session_identity,
+    runtime_mission_completion_confirmed,
+    runtime_mission_completion_rejected,
+    runtime_mission_new_session,
+    runtime_mission_new_session_evidence,
+    runtime_mission_session_active,
+    runtime_mission_session_event_at,
+    runtime_mission_session_generation,
+    runtime_mission_session_identity,
+    runtime_mission_session_started_at,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -153,6 +165,10 @@ class DreameLawnMowerRefreshMixin:
                 self._runtime_map_identity_verified = False
                 self.client.update_runtime_live_tracking(None, active=False)
 
+            # Active runtime hydration yields to app-map and telemetry reads.
+            # Commit the authoritative mission boundary only after those awaits
+            # confirm that this foreground snapshot is still current.
+            self._observe_runtime_mission_boundary(snapshot)
             self._schedule_metadata_refresh(
                 refresh_map_and_runtime=not runtime_active,
             )
@@ -229,6 +245,21 @@ class DreameLawnMowerRefreshMixin:
     ) -> bool:
         """Refresh optional runtime telemetry without failing the main snapshot."""
         runtime_active = runtime_tracking_active(snapshot)
+        session_started_at = runtime_mission_session_started_at(
+            self.runtime_telemetry_cache
+        )
+        session_identity = runtime_mission_cached_session_identity(
+            self.runtime_telemetry_cache
+        )
+        observed_mission_generation = runtime_mission_session_generation(
+            self.runtime_telemetry_cache
+        )
+        mission_active = runtime_mission_session_active(
+            snapshot,
+            tracking_active=runtime_active,
+            session_started_at=session_started_at,
+            session_identity=session_identity,
+        )
         if runtime_map_index is None and not runtime_active:
             runtime_map_index = self._runtime_map_index()
         try:
@@ -236,13 +267,41 @@ class DreameLawnMowerRefreshMixin:
                 refresh=False,
                 include_cloud=True,
             )
-            if self._snapshot_is_stale(snapshot):
+            if self._snapshot_is_stale(snapshot) or (
+                observed_mission_generation is not None
+                and runtime_mission_session_generation(
+                    self.runtime_telemetry_cache
+                )
+                != observed_mission_generation
+            ):
                 return False
             self.runtime_status_blob = runtime_status_blob
             self.runtime_telemetry_cache.update(
                 self.runtime_status_blob,
                 allow_zero=runtime_active,
-                active_session=runtime_active,
+                active_session=mission_active,
+                completion_confirmed=runtime_mission_completion_confirmed(
+                    snapshot,
+                    tracking_active=mission_active,
+                    session_started_at=session_started_at,
+                    session_identity=session_identity,
+                ),
+                completion_rejected=runtime_mission_completion_rejected(
+                    snapshot,
+                    session_started_at=session_started_at,
+                    session_identity=session_identity,
+                ),
+                new_session=runtime_mission_new_session(snapshot),
+                new_session_event_at=runtime_mission_session_event_at(
+                    snapshot,
+                    active_session=mission_active,
+                ),
+                new_session_evidence=runtime_mission_new_session_evidence(snapshot),
+                session_identity=runtime_mission_session_identity(
+                    snapshot,
+                    session_started_at=session_started_at,
+                    cached_session_identity=session_identity,
+                ),
             )
             self.client.update_runtime_live_tracking(
                 self.runtime_status_blob,
@@ -251,7 +310,13 @@ class DreameLawnMowerRefreshMixin:
             )
             return True
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
-            if self._snapshot_is_stale(snapshot):
+            if self._snapshot_is_stale(snapshot) or (
+                observed_mission_generation is not None
+                and runtime_mission_session_generation(
+                    self.runtime_telemetry_cache
+                )
+                != observed_mission_generation
+            ):
                 return False
             _LOGGER.debug("Failed to refresh runtime status blob: %s", err)
             self.runtime_status_blob = None

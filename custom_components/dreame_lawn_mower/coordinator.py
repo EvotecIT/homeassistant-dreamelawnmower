@@ -53,7 +53,20 @@ from .dreame_lawn_mower_client.schedule import (
     encode_schedule_payload_text,
 )
 from .performance import DreameLawnMowerPerformanceTracker
-from .runtime_cache import DreameLawnMowerRuntimeTelemetryCache
+from .runtime_cache import (
+    DreameLawnMowerRuntimeTelemetryCache,
+    observe_runtime_session_state,
+    runtime_mission_cached_session_identity,
+    runtime_mission_completion_confirmed,
+    runtime_mission_completion_rejected,
+    runtime_mission_new_session,
+    runtime_mission_new_session_evidence,
+    runtime_mission_session_active,
+    runtime_mission_session_event_at,
+    runtime_mission_session_generation,
+    runtime_mission_session_identity,
+    runtime_mission_session_started_at,
+)
 from .schedule_cache import (
     ScheduleActionReadBackoff,
     has_complete_schedule_cache,
@@ -298,7 +311,52 @@ class DreameLawnMowerCoordinator(
         )
         if generation is not None:
             self._published_device_snapshot_generation = generation
+        if getattr(data, "available", True):
+            self._observe_runtime_mission_boundary(data)
         super().async_set_updated_data(data)
+
+    def _observe_runtime_mission_boundary(
+        self,
+        snapshot: DreameLawnMowerSnapshot,
+    ) -> bool | None:
+        """Apply one authoritative snapshot to the integration-owned cache."""
+        runtime_active = runtime_tracking_active(snapshot)
+        cache = getattr(self, "runtime_telemetry_cache", None)
+        session_started_at = runtime_mission_session_started_at(cache)
+        session_identity = runtime_mission_cached_session_identity(cache)
+        mission_active = runtime_mission_session_active(
+            snapshot,
+            tracking_active=runtime_active,
+            session_started_at=session_started_at,
+            session_identity=session_identity,
+        )
+        observe_runtime_session_state(
+            cache,
+            active_session=mission_active,
+            completion_confirmed=runtime_mission_completion_confirmed(
+                snapshot,
+                tracking_active=mission_active,
+                session_started_at=session_started_at,
+                session_identity=session_identity,
+            ),
+            completion_rejected=runtime_mission_completion_rejected(
+                snapshot,
+                session_started_at=session_started_at,
+                session_identity=session_identity,
+            ),
+            new_session=runtime_mission_new_session(snapshot),
+            new_session_event_at=runtime_mission_session_event_at(
+                snapshot,
+                active_session=mission_active,
+            ),
+            new_session_evidence=runtime_mission_new_session_evidence(snapshot),
+            session_identity=runtime_mission_session_identity(
+                snapshot,
+                session_started_at=session_started_at,
+                cached_session_identity=session_identity,
+            ),
+        )
+        return mission_active
 
     def _retain_feature_capability_evidence(
         self,
@@ -412,6 +470,21 @@ class DreameLawnMowerCoordinator(
                 self.async_set_updated_data(snapshot)
                 return
             runtime_active = runtime_tracking_active(snapshot)
+            observed_mission_generation = runtime_mission_session_generation(
+                self.runtime_telemetry_cache
+            )
+            session_started_at = runtime_mission_session_started_at(
+                self.runtime_telemetry_cache
+            )
+            session_identity = runtime_mission_cached_session_identity(
+                self.runtime_telemetry_cache
+            )
+            mission_active = runtime_mission_session_active(
+                snapshot,
+                tracking_active=runtime_active,
+                session_started_at=session_started_at,
+                session_identity=session_identity,
+            )
             runtime_map_index = (
                 self._runtime_map_index()
                 if not runtime_active
@@ -441,16 +514,47 @@ class DreameLawnMowerCoordinator(
             # Both optional reads can yield while a newer authoritative fetch
             # publishes. Commit no runtime or Bluetooth side effects until the
             # cached snapshot is still current after every await.
-            if self._device_snapshot_is_stale(snapshot):
+            if self._device_snapshot_is_stale(snapshot) or (
+                observed_mission_generation is not None
+                and runtime_mission_session_generation(
+                    self.runtime_telemetry_cache
+                )
+                != observed_mission_generation
+            ):
                 return
 
+            self._observe_runtime_mission_boundary(snapshot)
             if runtime_status_error is None:
                 try:
                     self.runtime_status_blob = runtime_status_blob
                     self.runtime_telemetry_cache.update(
                         self.runtime_status_blob,
                         allow_zero=runtime_active,
-                        active_session=runtime_active,
+                        active_session=mission_active,
+                        completion_confirmed=runtime_mission_completion_confirmed(
+                            snapshot,
+                            tracking_active=mission_active,
+                            session_started_at=session_started_at,
+                            session_identity=session_identity,
+                        ),
+                        completion_rejected=runtime_mission_completion_rejected(
+                            snapshot,
+                            session_started_at=session_started_at,
+                            session_identity=session_identity,
+                        ),
+                        new_session=runtime_mission_new_session(snapshot),
+                        new_session_event_at=runtime_mission_session_event_at(
+                            snapshot,
+                            active_session=mission_active,
+                        ),
+                        new_session_evidence=runtime_mission_new_session_evidence(
+                            snapshot
+                        ),
+                        session_identity=runtime_mission_session_identity(
+                            snapshot,
+                            session_started_at=session_started_at,
+                            cached_session_identity=session_identity,
+                        ),
                     )
                     self.client.update_runtime_live_tracking(
                         self.runtime_status_blob,
