@@ -456,6 +456,36 @@ def test_recoverable_fault_pause_preserves_active_session_boundary() -> None:
     assert cache.blob is current
 
 
+def test_newer_recoverable_fault_supersedes_retained_completion_notice() -> None:
+    """An old completion notice cannot end a newer fault-paused mission."""
+    current = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    assert cache.update(current, active_session=True) is True
+    generation = runtime_mission_session_generation(cache)
+    faulted = SimpleNamespace(
+        mowing_session_active=None,
+        activity="error",
+        state="paused",
+        state_event_at=20.0,
+        started=True,
+        task_status="unknown",
+        task_resumable=None,
+        status_notice_name="mowing_task_completed",
+        status_notice_event_at=10.0,
+    )
+
+    mission_active = runtime_mission_session_active(
+        faulted,
+        tracking_active=False,
+    )
+    cache.observe_session_state(active_session=mission_active)
+    cache.observe_session_state(active_session=True)
+
+    assert mission_active is None
+    assert runtime_mission_session_generation(cache) == generation
+    assert cache.blob is current
+
+
 def test_stale_resume_notice_cannot_override_newer_idle_state() -> None:
     """A retained property 2.2 notice cannot keep an ended mission active."""
     idle = SimpleNamespace(
@@ -584,6 +614,53 @@ def test_command_start_ignores_retained_prior_start_evidence() -> None:
     assert runtime_mission_cached_session_identity(cache) == 101
     assert runtime_mission_session_started_at(cache) == 30.0
     assert cache.blob is current
+
+
+def test_command_start_accepts_timestamp_less_cloud_task_identity() -> None:
+    """A refreshed cloud task id can settle a command-owned start latch."""
+    current = SimpleNamespace(candidate_runtime_area_progress_percent=12.5)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    cache.begin_new_session(session_started_at=20.0)
+    generation = runtime_mission_session_generation(cache)
+    active = SimpleNamespace(
+        mowing_session_active=True,
+        task_status="mowing",
+        task_status_event_at=None,
+        status_notice_name="mowing_task_started",
+        status_notice_event_at=None,
+        mission_task_id=101,
+    )
+
+    cache.observe_session_state(
+        active_session=True,
+        new_session=runtime_mission_new_session(active),
+        new_session_evidence=runtime_mission_new_session_evidence(active),
+        new_session_event_at=runtime_mission_new_session_event_at(active),
+        session_identity=runtime_mission_session_identity(active),
+    )
+    assert cache.update(current, active_session=True, session_identity=101) is True
+
+    finished = SimpleNamespace(
+        mowing_session_active=False,
+        task_status="finished",
+        task_status_event_at=None,
+        status_notice_name=None,
+        mission_task_id=101,
+    )
+    session_started_at = runtime_mission_session_started_at(cache)
+    session_identity = runtime_mission_cached_session_identity(cache)
+
+    assert runtime_mission_session_generation(cache) == generation
+    assert session_identity == 101
+    assert (
+        runtime_mission_completion_confirmed(
+            finished,
+            tracking_active=False,
+            session_started_at=session_started_at,
+            session_identity=session_identity,
+        )
+        is True
+    )
 
 
 def test_coalesced_replacement_start_advances_mission_identity() -> None:
@@ -897,6 +974,7 @@ def test_new_session_evidence_prefers_stable_heartbeat_task_identity() -> None:
     """Task identity deduplicates repeated snapshots and separates missions."""
     snapshot = SimpleNamespace(
         task_status="mowing",
+        task_status_event_at=20.0,
         status_notice_name="mowing_task_started",
         status_notice_event_at=20.0,
         mission_task_id=101,
@@ -904,6 +982,52 @@ def test_new_session_evidence_prefers_stable_heartbeat_task_identity() -> None:
 
     assert runtime_mission_session_identity(snapshot) == 101
     assert runtime_mission_new_session_evidence(snapshot) == ("task", 101)
+
+
+def test_newer_start_notice_rejects_superseded_inactive_heartbeat_identity() -> None:
+    """A retained prior task id cannot identify a newer replacement start."""
+    prior = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
+    current = SimpleNamespace(candidate_runtime_area_progress_percent=1.0)
+    snapshot = SimpleNamespace(
+        mowing_session_active=False,
+        state="idle",
+        state_event_at=30.0,
+        task_status="idle",
+        task_status_event_at=30.0,
+        status_notice_name="mowing_task_started",
+        status_notice_event_at=40.0,
+        mission_task_id=100,
+    )
+
+    assert runtime_mission_new_session(snapshot) is True
+    assert runtime_mission_session_identity(snapshot) is None
+    assert runtime_mission_new_session_evidence(snapshot) == (
+        "notice",
+        "mowing_task_started",
+        40.0,
+    )
+
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    cache.observe_session_state(active_session=True, session_identity=100)
+    assert cache.update(prior, active_session=True, session_identity=100) is True
+    generation = runtime_mission_session_generation(cache)
+    cache.observe_session_state(
+        active_session=False,
+        new_session=True,
+        new_session_evidence=runtime_mission_new_session_evidence(snapshot),
+        new_session_event_at=runtime_mission_new_session_event_at(snapshot),
+        session_identity=runtime_mission_session_identity(snapshot),
+    )
+    replacement_generation = runtime_mission_session_generation(cache)
+    assert replacement_generation == generation + 1
+    assert cache.blob is None
+
+    cache.observe_session_state(active_session=True, session_identity=101)
+    assert cache.update(current, active_session=True, session_identity=101) is True
+
+    assert runtime_mission_session_generation(cache) == replacement_generation
+    assert runtime_mission_cached_session_identity(cache) == 101
+    assert cache.blob is current
 
 
 def test_new_session_evidence_uses_starting_property_event_without_task_id() -> None:

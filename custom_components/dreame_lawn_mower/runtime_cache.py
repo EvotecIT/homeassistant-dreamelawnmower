@@ -179,12 +179,15 @@ def runtime_mission_session_active(
             and notice_event_at > state_event_at
         ):
             return True
+    fault_event_at = _event_timestamp(getattr(snapshot, "state_event_at", None))
     if (
-        terminal_event_at is None
-        and getattr(snapshot, "activity", None) == "error"
+        getattr(snapshot, "activity", None) == "error"
         and getattr(snapshot, "started", False)
-        and getattr(snapshot, "state", None)
-        in {"error", "monitoring_paused", "paused"}
+        and getattr(snapshot, "state", None) in {"error", "monitoring_paused", "paused"}
+        and (
+            terminal_event_at is None
+            or (fault_event_at is not None and fault_event_at > terminal_event_at)
+        )
     ):
         return None
     if task_status in _COMPLETED_TASK_STATUSES:
@@ -321,6 +324,12 @@ def runtime_mission_session_identity(
 ) -> int | None:
     """Return a heartbeat task id only when it can belong to this mission."""
     task_id = _snapshot_mission_session_identity(snapshot)
+    if task_id is None:
+        return None
+    if runtime_mission_new_session(
+        snapshot
+    ) and not _runtime_start_task_identity_is_current(snapshot):
+        return None
     if (
         getattr(snapshot, "task_status", None) in _TERMINAL_TASK_STATUSES
         and (session_started_at is not None or cached_session_identity is not None)
@@ -332,6 +341,38 @@ def runtime_mission_session_identity(
     ):
         return None
     return task_id
+
+
+def _runtime_start_task_identity_is_current(snapshot: Any) -> bool:
+    """Return whether a heartbeat task id belongs to announced start evidence."""
+    notice_name = getattr(snapshot, "status_notice_name", None)
+    if notice_name not in _NEW_SESSION_STATUS_NOTICES:
+        return True
+    task_status = getattr(snapshot, "task_status", None)
+    if (
+        getattr(snapshot, "mowing_session_active", None) is False
+        or task_status in _TERMINAL_TASK_STATUSES
+        or task_status == "idle"
+    ):
+        return False
+    notice_event_at = _event_timestamp(
+        getattr(snapshot, "status_notice_event_at", None)
+    )
+    if notice_event_at is None:
+        # Timestamp-less cloud snapshots are still useful after a command when
+        # their heartbeat itself reports an active/startable task.
+        return (
+            task_status
+            in {
+                "mowing",
+                "paused",
+                "returning_to_dock",
+                "starting",
+            }
+            or getattr(snapshot, "mowing_session_active", None) is True
+        )
+    task_event_at = _event_timestamp(getattr(snapshot, "task_status_event_at", None))
+    return task_event_at is not None and task_event_at >= notice_event_at
 
 
 def _snapshot_mission_session_identity(snapshot: Any) -> int | None:
@@ -493,6 +534,18 @@ class DreameLawnMowerRuntimeTelemetryCache:
                 new_session_event_at is not None
                 and new_session_event_at > self._new_session_evidence_after
             )
+        )
+        timestamp_less_command_identity_is_current = bool(
+            self._new_session_evidence_pending
+            and self._new_session_evidence_after is not None
+            and active_session is True
+            and new_session
+            and new_session_event_at is None
+            and session_identity is not None
+            and new_session_evidence == ("task", session_identity)
+        )
+        ordered_evidence_is_current = bool(
+            ordered_evidence_is_current or timestamp_less_command_identity_is_current
         )
         if (
             active_session
