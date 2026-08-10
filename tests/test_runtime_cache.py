@@ -423,6 +423,48 @@ def test_command_start_deduplicates_noncontiguous_start_notice() -> None:
     assert cache.blob is None
 
 
+def test_command_start_ignores_retained_prior_start_evidence() -> None:
+    """Only start evidence newer than command acceptance consumes its latch."""
+    current = SimpleNamespace(candidate_runtime_area_progress_percent=12.5)
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    cache.begin_new_session(session_started_at=20.0)
+    generation = runtime_mission_session_generation(cache)
+
+    assert (
+        cache.update(
+            current,
+            active_session=True,
+            new_session=True,
+            new_session_evidence=("task", 100),
+            new_session_event_at=10.0,
+            session_identity=100,
+        )
+        is True
+    )
+    assert runtime_mission_cached_session_identity(cache) is None
+    assert runtime_mission_session_started_at(cache) == 20.0
+
+    cache.observe_session_state(
+        active_session=True,
+        new_session=True,
+        new_session_evidence=("task", 101),
+        new_session_event_at=30.0,
+        session_identity=101,
+    )
+    cache.observe_session_state(
+        active_session=True,
+        new_session=True,
+        new_session_evidence=("task", 101),
+        new_session_event_at=30.0,
+        session_identity=101,
+    )
+
+    assert runtime_mission_session_generation(cache) == generation
+    assert runtime_mission_cached_session_identity(cache) == 101
+    assert runtime_mission_session_started_at(cache) == 30.0
+    assert cache.blob is current
+
+
 def test_coalesced_replacement_start_advances_mission_identity() -> None:
     """A replacement task id resets cache without an inactive snapshot."""
     prior = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
@@ -490,6 +532,12 @@ def test_command_acceptance_preserves_callback_telemetry_from_new_generation() -
     cache.begin_new_session(
         observed_generation=observed_generation,
         session_started_at=20.0,
+    )
+    cache.observe_session_state(
+        active_session=True,
+        new_session=True,
+        new_session_evidence=("task_status", "starting", 30.0),
+        new_session_event_at=30.0,
     )
 
     assert cache.blob is current
@@ -602,6 +650,59 @@ def test_retained_start_notice_cannot_override_explicit_inactive_heartbeat() -> 
     assert runtime_mission_new_session(snapshot) is False
     assert runtime_mission_new_session_event_at(snapshot) is None
     assert runtime_mission_session_active(snapshot, tracking_active=False) is False
+
+
+def test_newer_idle_state_supersedes_retained_active_heartbeat() -> None:
+    """A newer physical stop wins over independently retained heartbeat state."""
+    snapshot = SimpleNamespace(
+        mowing_session_active=True,
+        task_resumable=False,
+        task_status="mowing",
+        task_status_event_at=10.0,
+        state="idle",
+        state_event_at=20.0,
+        status_notice_name=None,
+        status_notice_event_at=None,
+    )
+
+    assert runtime_mission_new_session(snapshot) is False
+    assert runtime_mission_session_active(snapshot, tracking_active=False) is False
+
+
+def test_newer_completion_notice_supersedes_retained_active_heartbeat() -> None:
+    """A current completion property wins over a stale active heartbeat."""
+    snapshot = SimpleNamespace(
+        mowing_session_active=True,
+        task_resumable=False,
+        task_status="mowing",
+        task_status_event_at=10.0,
+        state="mowing",
+        state_event_at=5.0,
+        status_notice_name="mowing_task_completed",
+        status_notice_event_at=20.0,
+    )
+
+    assert runtime_mission_session_active(snapshot, tracking_active=True) is False
+    assert runtime_mission_completion_confirmed(snapshot, tracking_active=True) is True
+
+
+def test_older_terminal_property_does_not_supersede_active_heartbeat() -> None:
+    """Fresh heartbeat activity remains authoritative over retained properties."""
+    snapshot = SimpleNamespace(
+        mowing_session_active=True,
+        task_resumable=False,
+        task_status="mowing",
+        task_status_event_at=20.0,
+        state="idle",
+        state_event_at=10.0,
+        status_notice_name="mowing_task_completed",
+        status_notice_event_at=10.0,
+    )
+
+    assert runtime_mission_session_active(snapshot, tracking_active=False) is True
+    assert (
+        runtime_mission_completion_confirmed(snapshot, tracking_active=False) is False
+    )
 
 
 def test_newer_start_notice_can_precede_lagging_inactive_heartbeat() -> None:

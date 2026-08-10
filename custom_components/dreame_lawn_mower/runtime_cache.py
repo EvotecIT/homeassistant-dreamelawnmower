@@ -24,6 +24,9 @@ _RESUMABLE_TASK_STATUSES = frozenset({"paused"})
 _RESUME_STATUS_NOTICES = frozenset(
     {"mowing_resumed_after_charging", "resuming_unfinished_task"}
 )
+_INACTIVE_PHYSICAL_STATES = frozenset(
+    {"error", "idle", "standby", "waiting_for_task", "water_tank_drying"}
+)
 
 
 def _session_metric_signature(blob: Any) -> tuple[Any, ...]:
@@ -134,15 +137,27 @@ def runtime_mission_session_active(
     ):
         return True
     session_active = getattr(snapshot, "mowing_session_active", None)
-    if session_active is not None:
+    terminal_event_at = _runtime_terminal_evidence_event_at(snapshot)
+    heartbeat_event_at = _event_timestamp(
+        getattr(snapshot, "task_status_event_at", None)
+    )
+    active_heartbeat_superseded = bool(
+        session_active is True
+        and terminal_event_at is not None
+        and (heartbeat_event_at is None or terminal_event_at > heartbeat_event_at)
+    )
+    if session_active is not None and not active_heartbeat_superseded:
         return bool(session_active)
-    if getattr(snapshot, "task_resumable", None) is True:
+    if (
+        getattr(snapshot, "task_resumable", None) is True
+        and not active_heartbeat_superseded
+    ):
         return True
-    if task_status in _RESUMABLE_TASK_STATUSES:
+    if task_status in _RESUMABLE_TASK_STATUSES and not active_heartbeat_superseded:
         return True
     if runtime_mission_new_session(snapshot):
         return True
-    if tracking_active:
+    if tracking_active and not active_heartbeat_superseded:
         return True
     if getattr(snapshot, "status_notice_name", None) in _RESUME_STATUS_NOTICES:
         notice_event_at = getattr(snapshot, "status_notice_event_at", None)
@@ -169,15 +184,29 @@ def runtime_mission_new_session(snapshot: Any) -> bool:
     """Return whether a snapshot explicitly announces a fresh mower mission."""
     if snapshot is None:
         return False
-    if getattr(snapshot, "task_status", None) in _NEW_SESSION_TASK_STATUSES:
+    terminal_event_at = _runtime_terminal_evidence_event_at(snapshot)
+    task_status = getattr(snapshot, "task_status", None)
+    task_status_event_at = _event_timestamp(
+        getattr(snapshot, "task_status_event_at", None)
+    )
+    if task_status in _NEW_SESSION_TASK_STATUSES and (
+        terminal_event_at is None
+        or (
+            task_status_event_at is not None
+            and task_status_event_at > terminal_event_at
+        )
+    ):
         return True
     if getattr(snapshot, "status_notice_name", None) not in _NEW_SESSION_STATUS_NOTICES:
         return False
-    if getattr(snapshot, "mowing_session_active", None) is not False:
-        return True
     notice_event_at = _event_timestamp(
         getattr(snapshot, "status_notice_event_at", None)
     )
+    if getattr(snapshot, "mowing_session_active", None) is not False:
+        return bool(
+            terminal_event_at is None
+            or (notice_event_at is not None and notice_event_at > terminal_event_at)
+        )
     physical_event_at = max(
         (
             event_at
@@ -201,6 +230,22 @@ def _event_timestamp(value: Any) -> float | None:
     if isinstance(value, int | float) and not isinstance(value, bool):
         return float(value)
     return None
+
+
+def _runtime_terminal_evidence_event_at(snapshot: Any) -> float | None:
+    """Return the newest ordered non-heartbeat evidence that a mission ended."""
+    candidates: list[float] = []
+    if getattr(snapshot, "state", None) in _INACTIVE_PHYSICAL_STATES:
+        state_event_at = _event_timestamp(getattr(snapshot, "state_event_at", None))
+        if state_event_at is not None:
+            candidates.append(state_event_at)
+    if getattr(snapshot, "status_notice_name", None) in _COMPLETED_STATUS_NOTICES:
+        notice_event_at = _event_timestamp(
+            getattr(snapshot, "status_notice_event_at", None)
+        )
+        if notice_event_at is not None:
+            candidates.append(notice_event_at)
+    return max(candidates, default=None)
 
 
 def runtime_mission_new_session_event_at(snapshot: Any) -> float | None:
@@ -348,6 +393,7 @@ class DreameLawnMowerRuntimeTelemetryCache:
     _new_session_signal_seen: bool = False
     _new_session_evidence: tuple[Any, ...] | None = None
     _new_session_evidence_pending: bool = False
+    _new_session_evidence_after: float | None = None
     _new_session_pending_activation: bool = False
 
     def _invalidate_for_new_session(
@@ -367,6 +413,7 @@ class DreameLawnMowerRuntimeTelemetryCache:
         self._new_session_signal_seen = False
         self._new_session_evidence = None
         self._new_session_evidence_pending = False
+        self._new_session_evidence_after = None
         self._new_session_pending_activation = False
 
     def begin_new_session(
@@ -385,6 +432,9 @@ class DreameLawnMowerRuntimeTelemetryCache:
             # telemetry that callback captured instead of resetting it again.
             self._new_session_signal_seen = True
             self._new_session_evidence_pending = self._new_session_evidence is None
+            self._new_session_evidence_after = (
+                session_started_at if self._new_session_evidence_pending else None
+            )
             self._new_session_pending_activation = False
             if self._session_started_at is None:
                 self._session_started_at = session_started_at
@@ -392,6 +442,7 @@ class DreameLawnMowerRuntimeTelemetryCache:
         self._invalidate_for_new_session(session_started_at=session_started_at)
         self._new_session_signal_seen = True
         self._new_session_evidence_pending = True
+        self._new_session_evidence_after = session_started_at
         self._new_session_pending_activation = True
 
     def observe_session_state(
@@ -407,8 +458,17 @@ class DreameLawnMowerRuntimeTelemetryCache:
     ) -> None:
         """Apply authoritative mission state before optional telemetry work."""
         invalidated = False
+        ordered_evidence_is_current = bool(
+            not self._new_session_evidence_pending
+            or self._new_session_evidence_after is None
+            or (
+                new_session_event_at is not None
+                and new_session_event_at > self._new_session_evidence_after
+            )
+        )
         if (
             active_session
+            and ordered_evidence_is_current
             and session_identity is not None
             and self._session_identity is not None
             and session_identity != self._session_identity
@@ -423,17 +483,19 @@ class DreameLawnMowerRuntimeTelemetryCache:
                 new_session_evidence is not None
                 and new_session_evidence != self._new_session_evidence
             ):
-                if self._new_session_evidence_pending:
+                if self._new_session_evidence_pending and ordered_evidence_is_current:
                     self._new_session_evidence_pending = False
-                elif not invalidated:
+                    self._new_session_evidence_after = None
+                elif not self._new_session_evidence_pending and not invalidated:
                     self._invalidate_for_new_session(
                         session_identity=session_identity,
                         session_started_at=new_session_event_at,
                     )
                     invalidated = True
-                self._new_session_evidence = new_session_evidence
-                if new_session_event_at is not None:
-                    self._session_started_at = new_session_event_at
+                if not self._new_session_evidence_pending:
+                    self._new_session_evidence = new_session_evidence
+                    if new_session_event_at is not None:
+                        self._session_started_at = new_session_event_at
             elif (
                 new_session_evidence is None
                 and not self._new_session_signal_seen
@@ -455,7 +517,7 @@ class DreameLawnMowerRuntimeTelemetryCache:
                     session_identity=session_identity,
                     session_started_at=new_session_event_at,
                 )
-            elif session_identity is not None:
+            elif session_identity is not None and ordered_evidence_is_current:
                 self._session_identity = session_identity
             self.completion_confirmed = False
             self._session_active = True
@@ -470,6 +532,7 @@ class DreameLawnMowerRuntimeTelemetryCache:
         self._new_session_signal_seen = False
         self._new_session_evidence = None
         self._new_session_evidence_pending = False
+        self._new_session_evidence_after = None
         self._new_session_pending_activation = False
         if completion_rejected:
             self.completion_confirmed = False
