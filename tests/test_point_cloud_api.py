@@ -699,7 +699,7 @@ def test_point_cloud_api_purges_unloaded_entry() -> None:
 def test_point_cloud_api_throttles_retryable_failures_until_retry_after(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls = 0
+    calls: list[int] = []
     clock = [100.0]
     monkeypatch.setattr(
         point_cloud_api_module.time,
@@ -708,9 +708,7 @@ def test_point_cloud_api_throttles_retryable_failures_until_retry_after(
     )
 
     async def download(**kwargs: Any) -> None:
-        nonlocal calls
-        del kwargs
-        calls += 1
+        calls.append(kwargs["map_index"])
         raise DreameLawnMowerPointCloudError(
             "private cloud timeout detail",
             code="point_cloud_timeout",
@@ -738,18 +736,18 @@ def test_point_cloud_api_throttles_retryable_failures_until_retry_after(
             await api.async_get("entry-1", 0, refresh=True)
         clock[0] = 109.2
         with pytest.raises(DreameLawnMowerPointCloudError) as cached:
-            await api.async_get("entry-1", 0, refresh=True)
+            await api.async_get("entry-1", 1, refresh=True)
         assert cached.value.code == "point_cloud_timeout"
         assert cached.value.stage == "mower_request"
         assert cached.value.retry_after_seconds == 1
         assert "private cloud timeout detail" not in str(cached.value)
         clock[0] = 110.0
         with pytest.raises(DreameLawnMowerPointCloudError):
-            await api.async_get("entry-1", 0, refresh=True)
+            await api.async_get("entry-1", 1, refresh=True)
 
     asyncio.run(run())
 
-    assert calls == 2
+    assert calls == [0, 1]
 
 
 def test_point_cloud_api_purge_clears_retryable_failure_backoff() -> None:

@@ -3075,6 +3075,16 @@ def test_point_cloud_generation_deadline_includes_executor_queue_time(
 ) -> None:
     client = _client()
     queued = asyncio.Event()
+    monkeypatch.setattr(
+        _internal_client_facade_module,
+        "_POINT_CLOUD_GENERATION_PREFLIGHT_BUDGET_SECONDS",
+        0.0,
+    )
+    monkeypatch.setattr(
+        _internal_client_facade_module,
+        "_POINT_CLOUD_CLOUD_SETUP_TIMEOUT_SECONDS",
+        0.0,
+    )
 
     async def wait_in_executor_queue(
         function: Any,
@@ -3130,8 +3140,59 @@ def test_async_point_cloud_normalizes_requests_timeout(
     asyncio.run(run())
 
 
-def test_stored_point_cloud_preflight_has_a_separate_time_budget(
+def test_public_point_cloud_generation_remains_singleflight_after_cancel() -> None:
+    client = _client()
+    started = threading.Event()
+    release = threading.Event()
+    calls: list[int] = []
+
+    def download(
+        map_index: int,
+        *args: Any,
+        **kwargs: Any,
+    ) -> SimpleNamespace:
+        del args, kwargs
+        calls.append(map_index)
+        if len(calls) == 1:
+            started.set()
+            assert release.wait(2)
+        return SimpleNamespace(content=b"pcd")
+
+    client._sync_download_app_map_point_cloud = download
+
+    async def run() -> None:
+        first = asyncio.create_task(
+            client.async_download_app_map_point_cloud(map_index=0)
+        )
+        assert await asyncio.to_thread(started.wait, 1)
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+
+        with pytest.raises(DreameLawnMowerPointCloudError) as concurrent:
+            await client.async_download_app_map_point_cloud(map_index=1)
+        assert concurrent.value.code == "point_cloud_generation_in_progress"
+        assert concurrent.value.stage == "queue"
+
+        release.set()
+        while client._point_cloud_generation_lock.locked():
+            await asyncio.sleep(0)
+        result = await client.async_download_app_map_point_cloud(map_index=1)
+        assert result.content == b"pcd"
+
+    asyncio.run(run())
+
+    assert calls == [0, 1]
+
+
+@pytest.mark.parametrize(
+    ("allow_stored", "expected_operation_timeout"),
+    [(False, 52.0), (True, 62.0)],
+)
+def test_point_cloud_preflight_has_a_separate_time_budget(
     monkeypatch: pytest.MonkeyPatch,
+    allow_stored: bool,
+    expected_operation_timeout: float,
 ) -> None:
     client = _client()
     captured: dict[str, Any] = {}
@@ -3150,19 +3211,23 @@ def test_stored_point_cloud_preflight_has_a_separate_time_budget(
     async def run() -> None:
         result = await client.async_download_app_map_point_cloud(
             timeout=5,
-            allow_stored=True,
+            allow_stored=allow_stored,
         )
         assert result.content
 
     started = time.monotonic()
     asyncio.run(run())
 
-    assert captured["function"] == client._sync_download_app_map_point_cloud
-    assert captured["args"][-1] is True
-    # 5 seconds of mower generation plus all sequential stored preflights:
-    # announcement and OBJ probes, three stored downloads, and the stable
-    # announcement's content-identity download.
-    assert captured["args"][-2] - started == pytest.approx(29, abs=0.25)
+    assert (
+        captured["function"]
+        == client._sync_download_app_map_point_cloud_singleflight
+    )
+    assert captured["args"][-2] is allow_stored
+    assert captured["args"][-3] - started == pytest.approx(
+        expected_operation_timeout,
+        abs=0.25,
+    )
+    assert isinstance(captured["args"][-1], threading.Event)
 
 
 def test_stored_point_cloud_fallback_receives_full_generation_window(
@@ -3180,7 +3245,7 @@ def test_stored_point_cloud_fallback_receives_full_generation_window(
 
     def capture_generation(payload: dict[str, Any], **kwargs: Any) -> Any:
         if payload.get("m") == "g":
-            assert kwargs["deadline"] == 108.0
+            assert kwargs["deadline"] == 126.0
             clock[0] = 108.0
             return None
         generation_deadlines.append(kwargs["deadline"])
@@ -3237,7 +3302,7 @@ def test_failed_cached_point_cloud_preserves_full_generation_window(
 
     def capture_generation(payload: dict[str, Any], **kwargs: Any) -> Any:
         if payload.get("m") == "g":
-            assert kwargs["deadline"] == 109.0
+            assert kwargs["deadline"] == 127.0
             clock[0] = 109.0
             return None
         generation_deadlines.append(kwargs["deadline"])
@@ -3306,6 +3371,93 @@ def test_stable_announcement_preflight_preserves_full_generation_window(
     assert generation_deadlines == [115.0]
 
 
+def test_forced_stable_announcement_preflight_preserves_generation_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+    generation_deadlines: list[float] = []
+    cloud = SimpleNamespace(get_interim_file_url=lambda name, **options: None)
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+
+    def probe(*args: Any, **kwargs: Any) -> tuple[bool, str, tuple[str, int]]:
+        clock[0] = 102.0
+        return True, "private/stable-map.bin", ("private/stable-map.bin", 1)
+
+    def call_action(payload: dict[str, Any], **kwargs: Any) -> Any:
+        generation_deadlines.append(kwargs["deadline"])
+        raise RuntimeError("stop after generation deadline capture")
+
+    def signer(*args: Any, **kwargs: Any) -> None:
+        assert kwargs["require_response"] is True
+        clock[0] = 107.0
+        return None
+
+    client._sync_get_announced_point_cloud_object = probe
+    client._sync_call_point_cloud_action = call_action
+    client._sync_get_point_cloud_download_url = signer
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
+
+    with pytest.raises(RuntimeError, match="generation deadline capture"):
+        client._sync_download_app_map_point_cloud(
+            0,
+            5,
+            0.1,
+            10,
+            1024,
+            deadline=132.0,
+            allow_stored=False,
+        )
+
+    assert generation_deadlines == [112.0]
+
+
+def test_cold_cloud_setup_preserves_forced_generation_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+    generation_deadlines: list[float] = []
+    cloud = SimpleNamespace(get_interim_file_url=lambda name, **options: None)
+
+    def cloud_setup(**kwargs: Any) -> Any:
+        assert kwargs["deadline"] == 120.0
+        clock[0] = 120.0
+        return cloud
+
+    def probe(*args: Any, **kwargs: Any) -> tuple[bool, str, tuple[str, int]]:
+        clock[0] = 122.0
+        return True, "private/stable-map.bin", ("private/stable-map.bin", 1)
+
+    def call_action(payload: dict[str, Any], **kwargs: Any) -> Any:
+        generation_deadlines.append(kwargs["deadline"])
+        raise RuntimeError("stop after generation deadline capture")
+
+    def signer(*args: Any, **kwargs: Any) -> None:
+        assert kwargs["require_response"] is True
+        clock[0] = 127.0
+        return None
+
+    client._sync_get_cloud_protocol = cloud_setup
+    client._sync_get_announced_point_cloud_object = probe
+    client._sync_call_point_cloud_action = call_action
+    client._sync_get_point_cloud_download_url = signer
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
+
+    with pytest.raises(RuntimeError, match="generation deadline capture"):
+        client._sync_download_app_map_point_cloud(
+            0,
+            5,
+            0.1,
+            10,
+            1024,
+            deadline=152.0,
+            allow_stored=False,
+        )
+
+    assert generation_deadlines == [132.0]
+
+
 def test_legacy_baseline_preflight_is_bounded_before_generation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3322,8 +3474,8 @@ def test_legacy_baseline_preflight_is_bounded_before_generation(
 
     def call_action(payload: dict[str, Any], **kwargs: Any) -> Any:
         if payload.get("m") == "g":
-            assert kwargs["deadline"] == 104.0
-            clock[0] = 104.0
+            assert kwargs["deadline"] == 122.0
+            clock[0] = 110.0
             return {"name": ["private/stable-map.bin"]}
         generation_deadlines.append(kwargs["deadline"])
         raise RuntimeError("stop after generation deadline capture")
@@ -3347,12 +3499,12 @@ def test_legacy_baseline_preflight_is_bounded_before_generation(
             0.1,
             10,
             1024,
-            deadline=129.0,
+            deadline=142.0,
             allow_stored=True,
         )
 
-    assert object_deadlines == [(109.0, 5.0), (114.0, 5.0)]
-    assert generation_deadlines == [119.0]
+    assert object_deadlines == [(115.0, 5.0), (120.0, 5.0)]
+    assert generation_deadlines == [125.0]
 
 
 def test_point_cloud_url_lookup_uses_and_enforces_remaining_deadline(

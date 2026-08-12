@@ -108,16 +108,24 @@ _POINT_CLOUD_ANNOUNCEMENT_INITIAL_BUDGET_FRACTION = 0.05
 _POINT_CLOUD_ANNOUNCEMENT_REPROBE_TIMEOUT_SECONDS = 0.5
 _POINT_CLOUD_ANNOUNCEMENT_REPROBE_ATTEMPTS = 3
 _POINT_CLOUD_ANNOUNCEMENT_RETRY_MAX_SECONDS = 8.0
+_POINT_CLOUD_CLOUD_SETUP_TIMEOUT_SECONDS = 20.0
 _POINT_CLOUD_LEGACY_POLL_TIMEOUT_SECONDS = 2.0
+_POINT_CLOUD_LEGACY_BASELINE_TIMEOUT_SECONDS = 20.0
 _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS = 5.0
-# A stored request can sequentially try a cached object, the announced object,
-# and the live indexed OBJ result before probing the stable announcement's
-# pre-generation content identity. Reserve every bounded attempt outside the
-# advertised mower-generation window.
+# Forced generation can read a dedicated announcement or a legacy OBJ baseline,
+# then download a fixed-key baseline identity before dispatching o:10.
+_POINT_CLOUD_GENERATION_PREFLIGHT_BUDGET_SECONDS = (
+    _POINT_CLOUD_ANNOUNCEMENT_PROBE_TIMEOUT_SECONDS
+    + _POINT_CLOUD_LEGACY_BASELINE_TIMEOUT_SECONDS
+    + _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS
+)
+# A stored request can additionally try a cached object and a stored legacy
+# baseline before downloading that baseline again for fixed-key identity.
+# This legacy path is longer than the dedicated-announcement path.
 _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS = (
     _POINT_CLOUD_ANNOUNCEMENT_PROBE_TIMEOUT_SECONDS
-    + _POINT_CLOUD_LEGACY_POLL_TIMEOUT_SECONDS
-    + (4 * _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS)
+    + _POINT_CLOUD_LEGACY_BASELINE_TIMEOUT_SECONDS
+    + (3 * _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS)
 )
 
 
@@ -806,7 +814,12 @@ class _DreameLawnMowerClientMapsMixin:
                 retry_after_seconds=10,
             )
         try:
-            cloud = self._sync_get_cloud_protocol(deadline=deadline)
+            cloud = self._sync_get_cloud_protocol(
+                deadline=min(
+                    deadline,
+                    time.monotonic() + _POINT_CLOUD_CLOUD_SETUP_TIMEOUT_SECONDS,
+                )
+            )
         except RequestsTimeout as err:
             raise DreameLawnMowerPointCloudError(
                 "Point-cloud cloud setup timed out.",
@@ -926,9 +939,14 @@ class _DreameLawnMowerClientMapsMixin:
         baseline_name = None
         baseline_known = use_announcement_path
         if not use_announcement_path:
+            baseline_timeout = (
+                _POINT_CLOUD_LEGACY_POLL_TIMEOUT_SECONDS
+                if announcement_probe_pending
+                else _POINT_CLOUD_LEGACY_BASELINE_TIMEOUT_SECONDS
+            )
             baseline_deadline = min(
                 deadline,
-                time.monotonic() + _POINT_CLOUD_LEGACY_POLL_TIMEOUT_SECONDS,
+                time.monotonic() + baseline_timeout,
             )
             try:
                 baseline_result = self._sync_call_point_cloud_action(
@@ -1045,11 +1063,10 @@ class _DreameLawnMowerClientMapsMixin:
                         else:
                             stable_announcement_baseline_known = True
 
-        if allow_stored:
-            # Stored-object and stable-baseline validation are preflight work.
-            # Give the mower the caller's complete generation window after
-            # those optional reads, matching the other stored fallbacks.
-            deadline = min(request_deadline, time.monotonic() + timeout)
+        # Object baselines are preflight work for both forced and stored
+        # requests. Give o:10 the complete advertised generation window after
+        # those bounded reads finish.
+        deadline = min(request_deadline, time.monotonic() + timeout)
 
         generation_requested_at_ms: int | None = None
 

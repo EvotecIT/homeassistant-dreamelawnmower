@@ -135,7 +135,7 @@ class DreameLawnMowerPointCloudAPI:
         self._cache_expiry_handles: dict[
             tuple[str, int], asyncio.TimerHandle
         ] = {}
-        self._failures: OrderedDict[tuple[str, int], _FailureEntry] = OrderedDict()
+        self._failures: OrderedDict[str, _FailureEntry] = OrderedDict()
         self._inflight: dict[tuple[str, int], _InflightGeneration] = {}
         self._entry_epochs: dict[str, int] = {}
 
@@ -279,8 +279,7 @@ class DreameLawnMowerPointCloudAPI:
         """Discard private cache state for one unloaded entry."""
         for key in [key for key in self._cache if key[0] == entry_id]:
             self._remove_cache_entry(key)
-        for key in [key for key in self._failures if key[0] == entry_id]:
-            self._failures.pop(key, None)
+        self._failures.pop(entry_id, None)
         self._entry_epochs[entry_id] = self._entry_epochs.get(entry_id, 0) + 1
 
     async def _async_generate(
@@ -388,7 +387,7 @@ class DreameLawnMowerPointCloudAPI:
             )
 
         created_at = time.monotonic()
-        self._failures.pop(key, None)
+        self._failures.pop(key[0], None)
         self._remove_cache_entry(key)
         self._cache[key] = _CacheEntry(
             created_at=created_at,
@@ -549,15 +548,16 @@ class DreameLawnMowerPointCloudAPI:
         epoch: int,
     ) -> DreameLawnMowerPointCloudError | None:
         """Return a failure with the remaining safe backoff when still active."""
-        failed = self._failures.get(key)
+        entry_id = key[0]
+        failed = self._failures.get(entry_id)
         if failed is None:
             return None
         retry_after = failed.error.retry_after_seconds or 0
         elapsed = now - failed.created_at
         if failed.epoch != epoch or elapsed >= retry_after:
-            self._failures.pop(key, None)
+            self._failures.pop(entry_id, None)
             return None
-        self._failures.move_to_end(key)
+        self._failures.move_to_end(entry_id)
         return _copy_point_cloud_error(
             failed.error,
             retry_after_seconds=max(1, math.ceil(retry_after - elapsed)),
@@ -578,12 +578,13 @@ class DreameLawnMowerPointCloudAPI:
             or self._entry_epochs.get(key[0], 0) != epoch
         ):
             return
-        self._failures[key] = _FailureEntry(
+        entry_id = key[0]
+        self._failures[entry_id] = _FailureEntry(
             created_at=time.monotonic(),
             epoch=epoch,
             error=_copy_point_cloud_error(error),
         )
-        self._failures.move_to_end(key)
+        self._failures.move_to_end(entry_id)
         while len(self._failures) > self._cache_max_entries:
             self._failures.popitem(last=False)
 
