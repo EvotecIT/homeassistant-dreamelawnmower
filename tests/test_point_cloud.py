@@ -3159,7 +3159,10 @@ def test_stored_point_cloud_preflight_has_a_separate_time_budget(
 
     assert captured["function"] == client._sync_download_app_map_point_cloud
     assert captured["args"][-1] is True
-    assert captured["args"][-2] - started == pytest.approx(17, abs=0.25)
+    # 5 seconds of mower generation plus all sequential stored preflights:
+    # announcement and OBJ probes, three stored downloads, and the stable
+    # announcement's content-identity download.
+    assert captured["args"][-2] - started == pytest.approx(29, abs=0.25)
 
 
 def test_stored_point_cloud_fallback_receives_full_generation_window(
@@ -3167,7 +3170,7 @@ def test_stored_point_cloud_fallback_receives_full_generation_window(
 ) -> None:
     client = _client()
     clock = [100.0]
-    captured_deadlines: list[float] = []
+    generation_deadlines: list[float] = []
     cloud = SimpleNamespace(get_interim_file_url=lambda name: None)
     client._sync_get_cloud_protocol = lambda **kwargs: cloud
 
@@ -3175,26 +3178,30 @@ def test_stored_point_cloud_fallback_receives_full_generation_window(
         clock[0] = 106.0
         return False, None, None
 
-    def stop_at_baseline(payload: dict[str, Any], **kwargs: Any) -> Any:
-        captured_deadlines.append(kwargs["deadline"])
-        raise RuntimeError("stop after deadline capture")
+    def capture_generation(payload: dict[str, Any], **kwargs: Any) -> Any:
+        if payload.get("m") == "g":
+            assert kwargs["deadline"] == 108.0
+            clock[0] = 108.0
+            return None
+        generation_deadlines.append(kwargs["deadline"])
+        raise RuntimeError("stop after generation deadline capture")
 
     client._sync_get_announced_point_cloud_object = probe
-    client._sync_call_point_cloud_action = stop_at_baseline
+    client._sync_call_point_cloud_action = capture_generation
     monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
 
-    with pytest.raises(RuntimeError, match="deadline capture"):
+    with pytest.raises(RuntimeError, match="generation deadline capture"):
         client._sync_download_app_map_point_cloud(
             0,
             5,
             0.1,
             10,
             1024,
-            deadline=112.0,
+            deadline=129.0,
             allow_stored=True,
         )
 
-    assert captured_deadlines == [111.0]
+    assert generation_deadlines == [113.0]
 
 
 def test_failed_cached_point_cloud_preserves_full_generation_window(
@@ -3202,7 +3209,7 @@ def test_failed_cached_point_cloud_preserves_full_generation_window(
 ) -> None:
     client = _client()
     clock = [100.0]
-    captured_deadlines: list[float] = []
+    generation_deadlines: list[float] = []
     cloud = SimpleNamespace(get_interim_file_url=lambda name: None)
     client._sync_get_cloud_protocol = lambda **kwargs: cloud
     client._sync_update_app_map_inventory_identity(
@@ -3228,27 +3235,31 @@ def test_failed_cached_point_cloud_preserves_full_generation_window(
         clock[0] = 107.0
         return False, None, None
 
-    def stop_at_baseline(payload: dict[str, Any], **kwargs: Any) -> Any:
-        captured_deadlines.append(kwargs["deadline"])
-        raise RuntimeError("stop after deadline capture")
+    def capture_generation(payload: dict[str, Any], **kwargs: Any) -> Any:
+        if payload.get("m") == "g":
+            assert kwargs["deadline"] == 109.0
+            clock[0] = 109.0
+            return None
+        generation_deadlines.append(kwargs["deadline"])
+        raise RuntimeError("stop after generation deadline capture")
 
     client._sync_try_download_stored_point_cloud = fail_cached_download
     client._sync_get_announced_point_cloud_object = probe
-    client._sync_call_point_cloud_action = stop_at_baseline
+    client._sync_call_point_cloud_action = capture_generation
     monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
 
-    with pytest.raises(RuntimeError, match="deadline capture"):
+    with pytest.raises(RuntimeError, match="generation deadline capture"):
         client._sync_download_app_map_point_cloud(
             0,
             5,
             0.1,
             10,
             1024,
-            deadline=117.0,
+            deadline=129.0,
             allow_stored=True,
         )
 
-    assert captured_deadlines == [112.0]
+    assert generation_deadlines == [114.0]
 
 
 def test_stable_announcement_preflight_preserves_full_generation_window(
@@ -3293,6 +3304,55 @@ def test_stable_announcement_preflight_preserves_full_generation_window(
         )
 
     assert generation_deadlines == [115.0]
+
+
+def test_legacy_baseline_preflight_is_bounded_before_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+    object_deadlines: list[tuple[float, float]] = []
+    generation_deadlines: list[float] = []
+    cloud = SimpleNamespace(get_interim_file_url=lambda name, **options: None)
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+
+    def probe(*args: Any, **kwargs: Any) -> tuple[bool, None, None]:
+        clock[0] = 102.0
+        return False, None, None
+
+    def call_action(payload: dict[str, Any], **kwargs: Any) -> Any:
+        if payload.get("m") == "g":
+            assert kwargs["deadline"] == 104.0
+            clock[0] = 104.0
+            return {"name": ["private/stable-map.bin"]}
+        generation_deadlines.append(kwargs["deadline"])
+        raise RuntimeError("stop after generation deadline capture")
+
+    def fail_object_download(*args: Any, **kwargs: Any) -> None:
+        object_deadlines.append(
+            (kwargs["deadline"], kwargs["download_timeout"])
+        )
+        clock[0] += 5.0
+        raise DreameLawnMowerPointCloudError("not ready")
+
+    client._sync_get_announced_point_cloud_object = probe
+    client._sync_call_point_cloud_action = call_action
+    client._sync_download_point_cloud_object = fail_object_download
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
+
+    with pytest.raises(RuntimeError, match="generation deadline capture"):
+        client._sync_download_app_map_point_cloud(
+            0,
+            5,
+            0.1,
+            10,
+            1024,
+            deadline=129.0,
+            allow_stored=True,
+        )
+
+    assert object_deadlines == [(109.0, 5.0), (114.0, 5.0)]
+    assert generation_deadlines == [119.0]
 
 
 def test_point_cloud_url_lookup_uses_and_enforces_remaining_deadline(

@@ -110,9 +110,14 @@ _POINT_CLOUD_ANNOUNCEMENT_REPROBE_ATTEMPTS = 3
 _POINT_CLOUD_ANNOUNCEMENT_RETRY_MAX_SECONDS = 8.0
 _POINT_CLOUD_LEGACY_POLL_TIMEOUT_SECONDS = 2.0
 _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS = 5.0
+# A stored request can sequentially try a cached object, the announced object,
+# and the live indexed OBJ result before probing the stable announcement's
+# pre-generation content identity. Reserve every bounded attempt outside the
+# advertised mower-generation window.
 _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS = (
     _POINT_CLOUD_ANNOUNCEMENT_PROBE_TIMEOUT_SECONDS
-    + (2 * _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS)
+    + _POINT_CLOUD_LEGACY_POLL_TIMEOUT_SECONDS
+    + (4 * _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS)
 )
 
 
@@ -918,17 +923,13 @@ class _DreameLawnMowerClientMapsMixin:
                 )
                 if stored is not None:
                     return stored
-        if allow_stored:
-            deadline = min(deadline, time.monotonic() + timeout)
         baseline_name = None
         baseline_known = use_announcement_path
         if not use_announcement_path:
-            baseline_deadline = deadline
-            if announcement_probe_pending:
-                baseline_deadline = min(
-                    deadline,
-                    time.monotonic() + _POINT_CLOUD_LEGACY_POLL_TIMEOUT_SECONDS,
-                )
+            baseline_deadline = min(
+                deadline,
+                time.monotonic() + _POINT_CLOUD_LEGACY_POLL_TIMEOUT_SECONDS,
+            )
             try:
                 baseline_result = self._sync_call_point_cloud_action(
                     {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
@@ -937,14 +938,10 @@ class _DreameLawnMowerClientMapsMixin:
                     require_data=True,
                 )
             except DreameLawnMowerPointCloudError as err:
-                if not (
-                    announcement_probe_pending
-                    and err.code
-                    in {
-                        "point_cloud_timeout",
-                        "point_cloud_mower_request_failed",
-                    }
-                ):
+                if err.code not in {
+                    "point_cloud_timeout",
+                    "point_cloud_mower_request_failed",
+                }:
                     raise
                 baseline_result = None
             else:
@@ -980,12 +977,19 @@ class _DreameLawnMowerClientMapsMixin:
             and baseline_extension.casefold() == "bin"
         )
         if fixed_object_baseline:
+            fixed_baseline_deadline = min(
+                deadline,
+                time.monotonic() + _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
+            )
             try:
                 _, _, baseline_identity = self._sync_download_point_cloud_object(
                     cloud,
                     baseline_name,
-                    deadline=deadline,
-                    download_timeout=download_timeout,
+                    deadline=fixed_baseline_deadline,
+                    download_timeout=min(
+                        download_timeout,
+                        _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
+                    ),
                     max_bytes=max_bytes,
                 )
             except (DeviceException, DreameLawnMowerPointCloudError):
