@@ -34,6 +34,9 @@ MODEL_FEATURE_CAPABILITIES: Final[dict[str, dict[str, str]]] = {
     "mova.mower.g2529f": {
         FEATURE_LIVE_VIDEO: CAPABILITY_SUPPORTED,
     },
+    "mova.mower.g2584a": {
+        FEATURE_LIVE_VIDEO: CAPABILITY_SUPPORTED,
+    },
 }
 
 
