@@ -3589,6 +3589,11 @@ def test_interim_file_protocol_forwards_absolute_deadline() -> None:
     [
         None,
         {},
+        {"data": None},
+        {"code": None, "data": None},
+        {"code": "0", "data": None},
+        {"code": 0.0, "data": None},
+        {"code": False, "data": None},
         {"code": 50001},
     ],
 )
@@ -3643,6 +3648,31 @@ def test_interim_file_protocol_strict_response_preserves_explicit_absence() -> N
         )
         is None
     )
+
+
+def test_interim_file_protocol_strict_response_preserves_success() -> None:
+    protocol_type = _internal_protocol_module.DreameMowerDreameHomeCloudProtocol
+    cloud = object.__new__(protocol_type)
+    strings = [""] * 56
+    strings[21] = "country"
+    strings[23] = "iot"
+    strings[35] = "model"
+    strings[39] = "file"
+    strings[40] = "filename"
+    strings[55] = "download"
+    cloud._strings = strings
+    cloud._did = "device-1"
+    cloud._model = "dreame.mower.g2408"
+    cloud._country = "eu"
+    cloud._api_call = lambda *args, **kwargs: {
+        "code": 0,
+        "data": "https://downloads.example.invalid/object",
+    }
+
+    assert cloud.get_interim_file_url(
+        "private/generated-map.pcd",
+        require_response=True,
+    ) == "https://downloads.example.invalid/object"
 
 
 def test_interim_file_protocol_strict_response_classifies_unavailable_object() -> None:

@@ -1137,13 +1137,20 @@ class DreameMowerDreameHomeCloudProtocol:
                     "The interim-file signer did not return a response."
                 )
             response_code = api_response.get("code")
-            if response_code == _INTERIM_FILE_NOT_AVAILABLE_CODE:
-                return None
             if (
                 isinstance(response_code, int)
                 and not isinstance(response_code, bool)
-                and response_code != 0
+                and response_code == _INTERIM_FILE_NOT_AVAILABLE_CODE
             ):
+                return None
+            if not isinstance(response_code, int) or isinstance(
+                response_code,
+                bool,
+            ):
+                raise DeviceException(
+                    "The interim-file signer response had an invalid code."
+                )
+            if response_code != 0:
                 raise DreameLawnMowerCloudAPIError(response_code)
             if "data" not in api_response:
                 raise DeviceException(
