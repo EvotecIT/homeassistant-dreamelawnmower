@@ -787,6 +787,7 @@ class _DreameLawnMowerClientMapsMixin:
             )
 
         deadline = time.monotonic() + timeout if deadline is None else deadline
+        request_deadline = deadline
         if time.monotonic() >= deadline:
             raise DreameLawnMowerPointCloudError(
                 "Point-cloud generation timed out.",
@@ -1002,6 +1003,7 @@ class _DreameLawnMowerClientMapsMixin:
                     cloud,
                     announcement_baseline[0],
                     deadline=baseline_probe_deadline,
+                    require_response=True,
                 )
             except (
                 DeviceException,
@@ -1038,6 +1040,12 @@ class _DreameLawnMowerClientMapsMixin:
                             pass
                         else:
                             stable_announcement_baseline_known = True
+
+        if allow_stored:
+            # Stored-object and stable-baseline validation are preflight work.
+            # Give the mower the caller's complete generation window after
+            # those optional reads, matching the other stored fallbacks.
+            deadline = min(request_deadline, time.monotonic() + timeout)
 
         generation_requested_at_ms: int | None = None
 
@@ -1699,18 +1707,21 @@ class _DreameLawnMowerClientMapsMixin:
         object_name: str,
         *,
         deadline: float,
+        require_response: bool = False,
     ) -> str:
         """Resolve a signed point-cloud URL within the generation deadline."""
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise DreameLawnMowerPointCloudError("Point-cloud generation timed out.")
         try:
-            raw_url = cloud.get_interim_file_url(
-                object_name,
-                retry_count=0,
-                timeout=remaining,
-                deadline=deadline,
-            )
+            signer_options: dict[str, Any] = {
+                "retry_count": 0,
+                "timeout": remaining,
+                "deadline": deadline,
+            }
+            if require_response:
+                signer_options["require_response"] = True
+            raw_url = cloud.get_interim_file_url(object_name, **signer_options)
         except RequestsTimeout as err:
             raise DreameLawnMowerPointCloudError(
                 "Point-cloud download URL request timed out.",

@@ -3251,6 +3251,50 @@ def test_failed_cached_point_cloud_preserves_full_generation_window(
     assert captured_deadlines == [112.0]
 
 
+def test_stable_announcement_preflight_preserves_full_generation_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+    generation_deadlines: list[float] = []
+    cloud = SimpleNamespace(get_interim_file_url=lambda name, **options: None)
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    client._sync_try_download_stored_point_cloud = lambda *args, **kwargs: None
+
+    def probe(*args: Any, **kwargs: Any) -> tuple[bool, str, tuple[str, int]]:
+        clock[0] = 106.0
+        return True, "private/stable-map.bin", ("private/stable-map.bin", 1)
+
+    def call_action(payload: dict[str, Any], **kwargs: Any) -> Any:
+        if payload.get("m") == "g":
+            return None
+        generation_deadlines.append(kwargs["deadline"])
+        raise RuntimeError("stop after generation deadline capture")
+
+    def signer(*args: Any, **kwargs: Any) -> None:
+        assert kwargs["require_response"] is True
+        clock[0] = 110.0
+        return None
+
+    client._sync_get_announced_point_cloud_object = probe
+    client._sync_call_point_cloud_action = call_action
+    client._sync_get_point_cloud_download_url = signer
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
+
+    with pytest.raises(RuntimeError, match="generation deadline capture"):
+        client._sync_download_app_map_point_cloud(
+            0,
+            5,
+            0.1,
+            10,
+            1024,
+            deadline=117.0,
+            allow_stored=True,
+        )
+
+    assert generation_deadlines == [115.0]
+
+
 def test_point_cloud_url_lookup_uses_and_enforces_remaining_deadline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3326,6 +3370,92 @@ def test_interim_file_protocol_forwards_absolute_deadline() -> None:
             "deadline": 101.0,
         }
     ]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        None,
+        {},
+        {"code": 50001},
+    ],
+)
+def test_interim_file_protocol_strict_response_rejects_cloud_failures(
+    response: Any,
+) -> None:
+    protocol_type = _internal_protocol_module.DreameMowerDreameHomeCloudProtocol
+    cloud = object.__new__(protocol_type)
+    strings = [""] * 56
+    strings[21] = "country"
+    strings[23] = "iot"
+    strings[35] = "model"
+    strings[39] = "file"
+    strings[40] = "filename"
+    strings[55] = "download"
+    cloud._strings = strings
+    cloud._did = "device-1"
+    cloud._model = "dreame.mower.g2408"
+    cloud._country = "eu"
+    cloud._api_call = lambda *args, **kwargs: response
+
+    with pytest.raises(_internal_exceptions_module.DeviceException):
+        cloud.get_interim_file_url(
+            "private/generated-map.pcd",
+            retry_count=0,
+            timeout=0.8,
+            deadline=101.0,
+            require_response=True,
+        )
+
+
+def test_interim_file_protocol_strict_response_preserves_explicit_absence() -> None:
+    protocol_type = _internal_protocol_module.DreameMowerDreameHomeCloudProtocol
+    cloud = object.__new__(protocol_type)
+    strings = [""] * 56
+    strings[21] = "country"
+    strings[23] = "iot"
+    strings[35] = "model"
+    strings[39] = "file"
+    strings[40] = "filename"
+    strings[55] = "download"
+    cloud._strings = strings
+    cloud._did = "device-1"
+    cloud._model = "dreame.mower.g2408"
+    cloud._country = "eu"
+    cloud._api_call = lambda *args, **kwargs: {"code": 0, "data": None}
+
+    assert (
+        cloud.get_interim_file_url(
+            "private/generated-map.pcd",
+            require_response=True,
+        )
+        is None
+    )
+
+
+def test_interim_file_protocol_strict_response_classifies_unavailable_object() -> None:
+    protocol_type = _internal_protocol_module.DreameMowerDreameHomeCloudProtocol
+    cloud = object.__new__(protocol_type)
+    strings = [""] * 56
+    strings[21] = "country"
+    strings[23] = "iot"
+    strings[35] = "model"
+    strings[39] = "file"
+    strings[40] = "filename"
+    strings[55] = "download"
+    cloud._strings = strings
+    cloud._did = "device-1"
+    cloud._model = "dreame.mower.g2408"
+    cloud._country = "eu"
+    cloud._api_call = lambda *args, **kwargs: {"code": 10007, "data": None}
+
+    assert (
+        cloud.get_interim_file_url(
+            "private/generated-map.pcd",
+            require_response=True,
+        )
+        is None
+    )
 
 
 def test_cloud_property_lookup_forwards_absolute_deadline() -> None:
