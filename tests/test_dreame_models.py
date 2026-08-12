@@ -82,6 +82,28 @@ class _FakeDevice:
         return None
 
 
+def test_snapshot_tracks_mowing_preference_announcement_timestamp() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "customName": "Garden mower",
+            "model": "dreame.mower.g2408",
+        },
+        account_type="dreame",
+        country="eu",
+    )
+    assert descriptor is not None
+    device = _FakeDevice()
+    device.realtime_properties["2.52"] = {
+        "value": {},
+        "last_seen": 456.0,
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.mowing_preferences_event_at == 456.0
+
+
 class _FakeErrorStatus(_FakeStatus):
     def __init__(self) -> None:
         super().__init__()
@@ -887,9 +909,7 @@ def test_snapshot_keeps_bare_has_error_when_no_error_details_exist() -> None:
     device.status.error_name = None
     device.status.has_error = True
     device.status.attributes = {
-        key: value
-        for key, value in device.status.attributes.items()
-        if key != "error"
+        key: value for key, value in device.status.attributes.items() if key != "error"
     }
 
     snapshot = snapshot_from_device(descriptor, device)
@@ -967,19 +987,26 @@ def test_firmware_update_support_preserves_evidence_without_guessing_ota() -> No
     assert support.latest_status == 13
     assert support.update_available is None
     assert support.candidate_update_fields["info.ver"] == "4.3.6_0320"
-    assert support.candidate_update_fields["info.updateTime"] == (
-        "2025-04-22 10:03:44"
-    )
+    assert support.candidate_update_fields["info.updateTime"] == ("2025-04-22 10:03:44")
     assert support.candidate_update_fields["deviceInfo.pluginForceUpdate"] is True
-    assert support.candidate_update_fields[
-        "cloud_device_info.deviceInfo.pluginForceUpdate"
-    ] is False
-    assert support.candidate_update_fields[
-        "cloud_device_list_page.page.records[0].latestStatus"
-    ] == 13
-    assert support.candidate_update_fields[
-        "cloud_device_list_page.page.records[0].deviceInfo.firmwareDevelopType"
-    ] == "SINGLE_PLATFORM"
+    assert (
+        support.candidate_update_fields[
+            "cloud_device_info.deviceInfo.pluginForceUpdate"
+        ]
+        is False
+    )
+    assert (
+        support.candidate_update_fields[
+            "cloud_device_list_page.page.records[0].latestStatus"
+        ]
+        == 13
+    )
+    assert (
+        support.candidate_update_fields[
+            "cloud_device_list_page.page.records[0].deviceInfo.firmwareDevelopType"
+        ]
+        == "SINGLE_PLATFORM"
+    )
     assert support.warnings == ("plugin_force_update_conflict",)
     assert "differs across cloud metadata sources" in support.reason
     assert support.evidence["info"]["latestStatus"] == 13
@@ -1028,12 +1055,18 @@ def test_firmware_update_support_tracks_live_like_plugin_sources() -> None:
     }
     assert support.warnings == ("plugin_force_update_conflict",)
     assert support.update_available is None
-    assert support.candidate_update_fields[
-        "cloud_device_list_page.records[0].deviceInfo.pluginForceUpdate"
-    ] is True
-    assert support.candidate_update_fields[
-        "cloud_device_list_page.records[0].deviceInfo.firmwareDevelopType"
-    ] == "SINGLE_PLATFORM"
+    assert (
+        support.candidate_update_fields[
+            "cloud_device_list_page.records[0].deviceInfo.pluginForceUpdate"
+        ]
+        is True
+    )
+    assert (
+        support.candidate_update_fields[
+            "cloud_device_list_page.records[0].deviceInfo.firmwareDevelopType"
+        ]
+        == "SINGLE_PLATFORM"
+    )
 
 
 def test_firmware_update_support_marks_update_state() -> None:
@@ -1099,8 +1132,7 @@ def test_firmware_update_support_uses_verified_batch_ota_signal() -> None:
     )
     assert support.candidate_update_fields["batch_ota_info.update_available"] is True
     assert (
-        support.candidate_update_fields["batch_ota_info.auto_upgrade_enabled"]
-        is False
+        support.candidate_update_fields["batch_ota_info.auto_upgrade_enabled"] is False
     )
     assert support.candidate_update_fields["batch_ota_info.ota_status"] == 0
     assert support.evidence["batch_ota_info"] == {
@@ -1271,6 +1303,9 @@ def test_firmware_update_support_summarizes_root_records() -> None:
         "records": [{"latestStatus": 13}],
     }
     assert "cloud_device_list_page.total" not in support.candidate_update_fields
-    assert support.candidate_update_fields[
-        "cloud_device_list_page.records[0].latestStatus"
-    ] == 13
+    assert (
+        support.candidate_update_fields[
+            "cloud_device_list_page.records[0].latestStatus"
+        ]
+        == 13
+    )

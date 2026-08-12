@@ -13,7 +13,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -497,7 +497,6 @@ async def async_setup_entry(
         + [DreameLawnMowerPreferenceMapCountSensor(coordinator)]
         + [DreameLawnMowerWeatherProtectionStatusSensor(coordinator)]
         + [DreameLawnMowerRainProtectionDurationSensor(coordinator)]
-        + [DreameLawnMowerRainDelayEndTimeSensor(coordinator)]
         + [
             DreameLawnMowerMaintenanceRemainingSensor(coordinator, item)
             for item in MAINTENANCE_ITEMS
@@ -511,6 +510,23 @@ async def async_setup_entry(
         + [DreameLawnMowerLastPreferenceProbeSensor(coordinator)]
         + [DreameLawnMowerLastWeatherProbeSensor(coordinator)]
     )
+    rain_delay_end_added = False
+
+    @callback
+    def async_add_rain_delay_end() -> None:
+        nonlocal rain_delay_end_added
+        settings = coordinator.device_settings
+        if (
+            rain_delay_end_added
+            or not isinstance(settings, dict)
+            or not settings.get("rain_settings_available")
+        ):
+            return
+        rain_delay_end_added = True
+        async_add_entities([DreameLawnMowerRainDelayEndTimeSensor(coordinator)])
+
+    async_add_rain_delay_end()
+    entry.async_on_unload(coordinator.async_add_listener(async_add_rain_delay_end))
 
 
 class DreameLawnMowerSensor(DreameLawnMowerEntity, SensorEntity):

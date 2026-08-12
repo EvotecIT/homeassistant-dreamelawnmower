@@ -13,6 +13,7 @@ from .device_code_semantics import (
     mower_fault_code,
     mower_status_notice_code,
 )
+from .mowing_preferences import MOWING_PREFERENCE_PROPERTY_KEY
 from .video_provisioning_status import classify_xp2p_provisioning_issue
 
 SUPPORTED_ACCOUNT_TYPES = ("dreame", "mova")
@@ -23,9 +24,7 @@ REALTIME_STATE_PROPERTY_KEY = "2.1"
 REALTIME_ERROR_PROPERTY_KEY = "2.2"
 REALTIME_TASK_STATUS_PROPERTY_KEY = "4.7"
 REALTIME_SETTINGS_PROPERTY_KEY = "2.51"
-OPERATIONAL_HUMAN_DETECTION_NOTICE_MODELS = frozenset(
-    {"dreame.mower.q2501a", "q2501a"}
-)
+OPERATIONAL_HUMAN_DETECTION_NOTICE_MODELS = frozenset({"dreame.mower.q2501a", "q2501a"})
 
 MODEL_NAME_MAP = {
     "dreame.mower.p2255": "A1",
@@ -372,6 +371,11 @@ class DreameLawnMowerSnapshot:
         repr=False,
         compare=False,
     )
+    mowing_preferences_event_at: float | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
     mowing_session_active: bool | None = None
     task_resumable: bool | None = None
     error_code: int | None = None
@@ -509,9 +513,7 @@ def camera_metadata_advertises_video(
 ) -> bool:
     """Return whether normalized device metadata advertises camera/video support."""
     permit_tokens = {
-        item.strip().casefold()
-        for item in str(permit or "").split(",")
-        if item.strip()
+        item.strip().casefold() for item in str(permit or "").split(",") if item.strip()
     }
     return bool(
         camera_streaming
@@ -594,9 +596,7 @@ class DreameLawnMowerStatusBlob:
 
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-safe status blob payload."""
-        return {
-            key: value for key, value in asdict(self).items() if value is not None
-        }
+        return {key: value for key, value in asdict(self).items() if value is not None}
 
 
 @dataclass(slots=True, frozen=True)
@@ -1002,10 +1002,7 @@ def camera_stream_block_reason(snapshot: Any) -> str | None:
         bool(getattr(snapshot, "returning", False))
         or state == "returning"
         or activity == "returning"
-        or (
-            bool(raw_attributes.get("returning"))
-            and not known_video_activity
-        )
+        or (bool(raw_attributes.get("returning")) and not known_video_activity)
     ):
         return "Camera stream handshake probe is blocked while returning to dock."
 
@@ -1085,10 +1082,13 @@ def snapshot_from_device(
     task_obj = getattr(device.status, "task_status", None)
     error_obj = getattr(device.status, "error", None)
     state = state_obj.name.lower() if state_obj is not None else "unknown"
-    state_name = getattr(device.status, "state_name", None) or state.replace(
-        "_",
-        " ",
-    ).title()
+    state_name = (
+        getattr(device.status, "state_name", None)
+        or state.replace(
+            "_",
+            " ",
+        ).title()
+    )
     status_attributes = dict(getattr(device.status, "attributes", {}) or {})
     if "fast_mapping" not in status_attributes:
         fast_mapping = getattr(device.status, "fast_mapping", None)
@@ -1134,10 +1134,7 @@ def snapshot_from_device(
         # Unknown numeric overlap with a vacuum code is not a hard fault.
         error_name = None
         error_text = None
-        has_error = bool(
-            raw_code_definition is None
-            and state == "error"
-        )
+        has_error = bool(raw_code_definition is None and state == "error")
         if has_error:
             error_code = raw_error_code
             error_name = mower_device_code_name(
@@ -1154,11 +1151,7 @@ def snapshot_from_device(
         # code exists. An explicit mower state of ERROR is stronger evidence.
         has_error = bool(
             state == "error"
-            or (
-                status_has_error
-                and error_name is None
-                and error_text is None
-            )
+            or (status_has_error and error_name is None and error_text is None)
         )
 
     error_source: str | None = "status" if has_error else None
@@ -1228,9 +1221,7 @@ def snapshot_from_device(
         "charging",
         getattr(device.status, "charging", None),
     )
-    raw_charging = (
-        None if raw_charging_source is None else bool(raw_charging_source)
-    )
+    raw_charging = None if raw_charging_source is None else bool(raw_charging_source)
     confirmed_at_station = bool(raw_docked or raw_charging)
 
     suppressed_error_code: int | None = None
@@ -1364,6 +1355,10 @@ def snapshot_from_device(
             device,
             REALTIME_SETTINGS_PROPERTY_KEY,
         ),
+        mowing_preferences_event_at=_realtime_property_last_seen(
+            device,
+            MOWING_PREFERENCE_PROPERTY_KEY,
+        ),
         error_code=error_code,
         error_name=error_name,
         error_text=error_text,
@@ -1417,9 +1412,7 @@ def snapshot_from_device(
         realtime_error_code=realtime_error_code,
         _error_suppression_active=error_suppression_active,
         _suppressed_error_code=suppressed_error_code,
-        _suppressed_realtime_error_last_seen=(
-            suppressed_realtime_error_last_seen
-        ),
+        _suppressed_realtime_error_last_seen=(suppressed_realtime_error_last_seen),
         firmware_version=getattr(
             getattr(device, "info", None),
             "firmware_version",
@@ -1724,9 +1717,7 @@ def firmware_update_support_from_device(
         plugin_force_update=plugin_force_update,
         plugin_force_update_sources=plugin_force_update_sources,
         plugin_status=_as_optional_str(device_info.get("status")),
-        firmware_develop_type=_as_optional_str(
-            device_info.get("firmwareDevelopType")
-        ),
+        firmware_develop_type=_as_optional_str(device_info.get("firmwareDevelopType")),
         device_info_release_at=_as_optional_str(device_info.get("releaseAt")),
         device_info_updated_at=_as_optional_str(device_info.get("updatedAt")),
         cloud_check_available=cloud_check_available,

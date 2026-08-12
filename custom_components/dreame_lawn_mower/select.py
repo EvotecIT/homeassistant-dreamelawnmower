@@ -6,7 +6,7 @@ from typing import Any
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -67,7 +67,6 @@ async def async_setup_entry(
     async_add_entities(
         [
             DreameLawnMowerVoiceLanguageSelect(coordinator),
-            DreameLawnMowerRainDelaySelect(coordinator),
             DreameLawnMowerMapSelect(coordinator),
             DreameLawnMowerSelectedMapRotationSelect(coordinator),
             DreameLawnMowerMowingActionSelect(coordinator),
@@ -82,6 +81,23 @@ async def async_setup_entry(
             DreameLawnMowerSpotSelect(coordinator),
         ]
     )
+    rain_delay_added = False
+
+    @callback
+    def async_add_rain_delay() -> None:
+        nonlocal rain_delay_added
+        settings = device_settings_section(coordinator.device_settings)
+        if (
+            rain_delay_added
+            or settings is None
+            or not settings.get("rain_settings_available")
+        ):
+            return
+        rain_delay_added = True
+        async_add_entities([DreameLawnMowerRainDelaySelect(coordinator)])
+
+    async_add_rain_delay()
+    entry.async_on_unload(coordinator.async_add_listener(async_add_rain_delay))
 
 
 class DreameLawnMowerSelectEntity(DreameLawnMowerEntity, SelectEntity):

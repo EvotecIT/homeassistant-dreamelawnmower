@@ -24,6 +24,12 @@ RAIN_SETTING_DELAY_INDEX = 1
 RAIN_SETTING_SENSITIVITY_INDEX = 2
 RAIN_SETTING_DEFAULT_SENSITIVITY = 0
 
+ANTI_THEFT_SETTING_MINIMUM_LENGTH = 3
+ANTI_THEFT_LIFT_ALARM_INDEX = 0
+ANTI_THEFT_OFF_MAP_ALARM_INDEX = 1
+ANTI_THEFT_REAL_TIME_LOCATION_INDEX = 2
+ANTI_THEFT_PIN_CHECK_INDEX = 3
+
 
 def _integer_record(
     value: Any,
@@ -64,9 +70,7 @@ def decode_charging_settings(config: Mapping[str, Any]) -> dict[str, Any] | None
         "charging_settings_available": True,
         "recharge_battery_level": record[BATTERY_RECHARGE_LEVEL_INDEX],
         "resume_battery_level": record[BATTERY_RESUME_LEVEL_INDEX],
-        "resume_after_charging": bool(
-            record[BATTERY_RESUME_AFTER_CHARGING_INDEX]
-        ),
+        "resume_after_charging": bool(record[BATTERY_RESUME_AFTER_CHARGING_INDEX]),
         "charging_period_enabled": bool(record[CHARGING_PERIOD_ENABLED_INDEX]),
         "charging_period_start_minutes": record[CHARGING_PERIOD_START_INDEX],
         "charging_period_end_minutes": record[CHARGING_PERIOD_END_INDEX],
@@ -93,6 +97,37 @@ def decode_rain_settings(config: Mapping[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def decode_anti_theft_settings(
+    config: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Decode the ATA flags reported by the mower without inventing fields."""
+    record = _integer_record(
+        config.get("ATA"),
+        minimum_length=ANTI_THEFT_SETTING_MINIMUM_LENGTH,
+    )
+    if record is None:
+        return None
+    supported_settings = [
+        "lift_alarm_enabled",
+        "off_map_alarm_enabled",
+        "real_time_location_enabled",
+    ]
+    result: dict[str, Any] = {
+        "anti_theft_settings_available": True,
+        "anti_theft_supported_settings": supported_settings,
+        "lift_alarm_enabled": bool(record[ANTI_THEFT_LIFT_ALARM_INDEX]),
+        "off_map_alarm_enabled": bool(record[ANTI_THEFT_OFF_MAP_ALARM_INDEX]),
+        "real_time_location_enabled": bool(record[ANTI_THEFT_REAL_TIME_LOCATION_INDEX]),
+        "anti_theft_settings_raw": record,
+    }
+    if len(record) > ANTI_THEFT_PIN_CHECK_INDEX:
+        supported_settings.append("pin_check_before_power_off_enabled")
+        result["pin_check_before_power_off_enabled"] = bool(
+            record[ANTI_THEFT_PIN_CHECK_INDEX]
+        )
+    return result
+
+
 def decode_device_settings(config: Mapping[str, Any]) -> dict[str, Any]:
     """Decode the CFG settings this integration owns."""
     result: dict[str, Any] = {}
@@ -102,6 +137,9 @@ def decode_device_settings(config: Mapping[str, Any]) -> dict[str, Any]:
     rain = decode_rain_settings(config)
     if rain is not None:
         result.update(rain)
+    anti_theft = decode_anti_theft_settings(config)
+    if anti_theft is not None:
+        result.update(anti_theft)
     if "WRF" in config:
         try:
             result["weather_switch_enabled"] = bool(int(config["WRF"]))
@@ -178,3 +216,35 @@ def build_rain_protection_request(
             "sen": int(sensitivity),
         },
     }
+
+
+def build_anti_theft_settings_request(
+    current_record: Sequence[int],
+    *,
+    lift_alarm_enabled: bool | None = None,
+    off_map_alarm_enabled: bool | None = None,
+    real_time_location_enabled: bool | None = None,
+    pin_check_before_power_off_enabled: bool | None = None,
+) -> dict[str, Any]:
+    """Build one full ATA record while preserving unsupported future slots."""
+    record = _integer_record(
+        current_record,
+        minimum_length=ANTI_THEFT_SETTING_MINIMUM_LENGTH,
+    )
+    if record is None:
+        raise ValueError("Anti-theft settings require at least three values.")
+    changes = (
+        (ANTI_THEFT_LIFT_ALARM_INDEX, lift_alarm_enabled),
+        (ANTI_THEFT_OFF_MAP_ALARM_INDEX, off_map_alarm_enabled),
+        (ANTI_THEFT_REAL_TIME_LOCATION_INDEX, real_time_location_enabled),
+        (ANTI_THEFT_PIN_CHECK_INDEX, pin_check_before_power_off_enabled),
+    )
+    for index, value in changes:
+        if value is None:
+            continue
+        if index >= len(record):
+            raise ValueError(
+                "PIN check before power-off is not reported by this mower."
+            )
+        record[index] = int(bool(value))
+    return {"m": "s", "t": "ATA", "d": {"value": record}}

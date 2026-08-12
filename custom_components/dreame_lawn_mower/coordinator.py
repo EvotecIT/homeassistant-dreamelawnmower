@@ -112,6 +112,13 @@ def _device_settings_read_succeeded(settings: Mapping[str, Any]) -> bool:
     )
 
 
+def _batch_mowing_preferences_read_succeeded(
+    settings: Mapping[str, Any],
+) -> bool:
+    """Return whether a batch preference payload decoded successfully."""
+    return bool(settings.get("available")) and not settings.get("errors")
+
+
 class DreameLawnMowerCoordinator(
     DreameLawnMowerConnectivityMixin,
     DreameLawnMowerRefreshMixin,
@@ -217,6 +224,7 @@ class DreameLawnMowerCoordinator(
         self._client_update_task: asyncio.Task[None] | None = None
         self._client_update_pending = False
         self._last_device_settings_event_at: float | None = None
+        self._last_mowing_preferences_event_at: float | None = None
         self._metadata_refresh_task: asyncio.Task[None] | None = None
         self._metadata_shutdown_close_task: asyncio.Task[None] | None = None
         self._metadata_refresh_semaphore = asyncio.Semaphore(
@@ -254,9 +262,7 @@ class DreameLawnMowerCoordinator(
         for _attempt in range(2):
             async with self._device_refresh_lock:
                 try:
-                    snapshot = (
-                        await self.client.async_refresh_authoritative_snapshot()
-                    )
+                    snapshot = await self.client.async_refresh_authoritative_snapshot()
                 except Exception as err:
                     self._record_connectivity_failure(err)
                     raise
@@ -293,8 +299,7 @@ class DreameLawnMowerCoordinator(
         if retain:
             self._retained_device_snapshot_ids.add(snapshot_id)
         while (
-            len(self._device_snapshot_generations)
-            > DEVICE_SNAPSHOT_GENERATION_HISTORY
+            len(self._device_snapshot_generations) > DEVICE_SNAPSHOT_GENERATION_HISTORY
         ):
             evictable = (
                 snapshot_id
@@ -303,9 +308,9 @@ class DreameLawnMowerCoordinator(
             )
             oldest = min(
                 evictable,
-                key=lambda snapshot_id: self._device_snapshot_generations[
-                    snapshot_id
-                ][1],
+                key=lambda snapshot_id: self._device_snapshot_generations[snapshot_id][
+                    1
+                ],
                 default=None,
             )
             if oldest is None:
@@ -326,9 +331,7 @@ class DreameLawnMowerCoordinator(
         generations = getattr(self, "_device_snapshot_generations", None)
         recorded = generations.get(id(data)) if generations else None
         generation = (
-            recorded[1]
-            if recorded is not None and recorded[0] is data
-            else None
+            recorded[1] if recorded is not None and recorded[0] is data else None
         )
         if generation is not None:
             self._published_device_snapshot_generation = generation
@@ -537,9 +540,7 @@ class DreameLawnMowerCoordinator(
             # cached snapshot is still current after every await.
             if self._device_snapshot_is_stale(snapshot) or (
                 observed_mission_generation is not None
-                and runtime_mission_session_generation(
-                    self.runtime_telemetry_cache
-                )
+                and runtime_mission_session_generation(self.runtime_telemetry_cache)
                 != observed_mission_generation
             ):
                 return
@@ -605,13 +606,25 @@ class DreameLawnMowerCoordinator(
                 )
             self.async_set_updated_data(snapshot)
             settings_event_at = getattr(snapshot, "device_settings_event_at", None)
-            if (
+            preferences_event_at = getattr(
+                snapshot,
+                "mowing_preferences_event_at",
+                None,
+            )
+            settings_changed = (
                 settings_event_at is not None
                 and settings_event_at != self._last_device_settings_event_at
-            ):
-                # Property 2:51 identifies that some CFG value changed but not
-                # which one. Let the mower finish applying it, then read CFG once.
+            )
+            preferences_changed = (
+                preferences_event_at is not None
+                and preferences_event_at
+                != getattr(self, "_last_mowing_preferences_event_at", None)
+            )
+            if settings_changed or preferences_changed:
+                # These announcements identify the changed record, but the
+                # mower may publish them just before its read model catches up.
                 await asyncio.sleep(1)
+            if settings_changed:
                 refreshed = await self.async_refresh_device_settings(
                     force=True,
                     source="device_settings_realtime",
@@ -619,15 +632,21 @@ class DreameLawnMowerCoordinator(
                 if refreshed is not None:
                     self._last_device_settings_event_at = settings_event_at
                     self.async_update_listeners()
+            if preferences_changed:
+                refreshed = await self.async_refresh_mowing_preferences(
+                    source="mowing_preferences_realtime",
+                )
+                if refreshed is not None:
+                    self._last_mowing_preferences_event_at = preferences_event_at
+                    self.async_update_listeners()
         except Exception as err:  # noqa: BLE001 - callback must not escape HA task
             _LOGGER.debug("Failed to process cached mower update: %s", err)
         finally:
             if snapshot is not None:
                 self._release_device_snapshot(snapshot)
             self._client_update_task = None
-            if (
-                getattr(self, "_client_update_pending", False)
-                and not getattr(self, "_shutting_down", False)
+            if getattr(self, "_client_update_pending", False) and not getattr(
+                self, "_shutting_down", False
             ):
                 self._client_update_pending = False
                 self._schedule_client_update()
@@ -705,9 +724,8 @@ class DreameLawnMowerCoordinator(
                     succeeded=action_read_succeeded,
                     generation=action_read_generation,
                 )
-                if (
-                    action_read_succeeded
-                    and not self._schedule_read_can_publish(action_read_generation)
+                if action_read_succeeded and not self._schedule_read_can_publish(
+                    action_read_generation
                 ):
                     return self.schedules
         app_maps = getattr(self, "app_maps", None)
@@ -873,12 +891,9 @@ class DreameLawnMowerCoordinator(
         ):
             return False
         known_map_indices = _app_map_index_hints(getattr(self, "app_maps", None))
-        if (
-            not isinstance(self.schedules, Mapping)
-            or (
-                not allow_incomplete
-                and not self._has_complete_schedule_cache(known_map_indices)
-            )
+        if not isinstance(self.schedules, Mapping) or (
+            not allow_incomplete
+            and not self._has_complete_schedule_cache(known_map_indices)
         ):
             return False
         normalized = merge_batch_schedule_payload(
@@ -1071,9 +1086,7 @@ class DreameLawnMowerCoordinator(
         )
         if pending_contradictions is None:
             pending_contradictions = {}
-            self._pending_schedule_plan_state_contradictions = (
-                pending_contradictions
-            )
+            self._pending_schedule_plan_state_contradictions = pending_contradictions
         for key, (version, enabled) in tuple(pending_states.items()):
             map_index, plan_id = key
             schedule = next(
@@ -1106,10 +1119,7 @@ class DreameLawnMowerCoordinator(
                 pending_contradictions.pop(key, None)
                 continue
             contradictory_reads = pending_contradictions.get(key, 0) + 1
-            if (
-                contradictory_reads
-                > PENDING_SCHEDULE_PLAN_MAX_CONTRADICTORY_READS
-            ):
+            if contradictory_reads > PENDING_SCHEDULE_PLAN_MAX_CONTRADICTORY_READS:
                 pending_states.pop(key, None)
                 pending_contradictions.pop(key, None)
             else:
@@ -1135,8 +1145,7 @@ class DreameLawnMowerCoordinator(
                 and not isinstance(schedule.get("idx"), bool)
             }
             unknown_slot_is_unambiguous = (
-                not matching_numeric_indices
-                or matching_numeric_indices == {map_index}
+                not matching_numeric_indices or matching_numeric_indices == {map_index}
             )
             for schedule in schedules:
                 if not isinstance(schedule, dict) or not (
@@ -1240,8 +1249,7 @@ class DreameLawnMowerCoordinator(
             (
                 schedule
                 for schedule in schedules or []
-                if isinstance(schedule, Mapping)
-                and schedule.get("idx") == map_index
+                if isinstance(schedule, Mapping) and schedule.get("idx") == map_index
             ),
             None,
         )
@@ -1348,9 +1356,8 @@ class DreameLawnMowerCoordinator(
                 pending_active_indices.discard(map_index)
                 continue
             if schedule.get("plans") == pending_schedule.get("plans"):
-                if (
-                    map_index in pending_active_indices
-                    and isinstance(self.schedules, dict)
+                if map_index in pending_active_indices and isinstance(
+                    self.schedules, dict
                 ):
                     self.schedules["active_schedule_version"] = pending_version
                     self.schedules["active_schedule_index"] = map_index
@@ -1360,10 +1367,7 @@ class DreameLawnMowerCoordinator(
                 pending_active_indices.discard(map_index)
                 continue
             contradictory_reads = pending_contradictions.get(map_index, 0) + 1
-            if (
-                contradictory_reads
-                > PENDING_SCHEDULE_PLAN_MAX_CONTRADICTORY_READS
-            ):
+            if contradictory_reads > PENDING_SCHEDULE_PLAN_MAX_CONTRADICTORY_READS:
                 pending_uploads.pop(map_index, None)
                 pending_contradictions.pop(map_index, None)
                 pending_active_indices.discard(map_index)
@@ -1512,9 +1516,8 @@ class DreameLawnMowerCoordinator(
         }
         self.batch_device_data = payload
         self.batch_device_data_refreshed_at = now
-        if (
-            batch_schedule is not self.schedules
-            and self._schedule_refresh_is_current(schedule_generation)
+        if batch_schedule is not self.schedules and self._schedule_refresh_is_current(
+            schedule_generation
         ):
             self._cache_batch_schedules(
                 batch_schedule,
@@ -1555,6 +1558,32 @@ class DreameLawnMowerCoordinator(
             else:
                 self.async_update_listeners()
             return result
+
+    async def async_refresh_mowing_preferences(
+        self,
+        *,
+        source: str,
+    ) -> dict[str, Any] | None:
+        """Refresh only SETTINGS.* after the mower announces a change."""
+        async with self._preference_write_lock:
+            try:
+                preferences = await self.client.async_get_batch_mowing_preferences(
+                    include_raw=False,
+                    map_index_hints=_app_map_index_hints(self.app_maps),
+                )
+            except Exception as err:  # noqa: BLE001 - retry on the next event pass
+                _LOGGER.debug("Failed to refresh mowing preferences: %s", err)
+                return None
+            if not _batch_mowing_preferences_read_succeeded(preferences):
+                _LOGGER.debug("Mowing preference refresh returned no usable maps")
+                return None
+
+            payload = dict(self.batch_device_data or {})
+            payload["captured_at"] = datetime.now(UTC).isoformat()
+            payload["source"] = source
+            payload["batch_mowing_preferences"] = preferences
+            self.batch_device_data = payload
+            return preferences
 
     async def _async_fetch_batch_device_data(
         self,
@@ -1638,9 +1667,7 @@ class DreameLawnMowerCoordinator(
                 # App-map discovery already ran in this metadata cycle. Batch
                 # decoding can safely retain an explicit unknown slot.
                 options["discover_map_index"] = False
-            task = asyncio.create_task(
-                self.client.async_get_batch_schedules(**options)
-            )
+            task = asyncio.create_task(self.client.async_get_batch_schedules(**options))
             self._batch_schedule_read_task = task
             batch_tasks = getattr(self, "_batch_schedule_read_tasks", None)
             if batch_tasks is None:
@@ -1823,12 +1850,9 @@ class DreameLawnMowerCoordinator(
             payload,
             refresh_succeeded=True,
         )
-        if (
-            map_hints_authoritative
-            and (
-                not previous_map_hints_authoritative
-                or known_map_indices != previous_map_indices
-            )
+        if map_hints_authoritative and (
+            not previous_map_hints_authoritative
+            or known_map_indices != previous_map_indices
         ):
             self._invalidate_schedule_map_hint()
         if current_idx is not None:
@@ -1995,6 +2019,27 @@ class DreameLawnMowerCoordinator(
             return self._cache_device_settings(
                 settings,
                 source="rain_protection_write",
+            )
+
+    async def async_set_anti_theft_settings(
+        self,
+        *,
+        lift_alarm_enabled: bool | None = None,
+        off_map_alarm_enabled: bool | None = None,
+        real_time_location_enabled: bool | None = None,
+        pin_check_before_power_off_enabled: bool | None = None,
+    ) -> dict[str, Any]:
+        """Persist and publish one confirmed anti-theft update."""
+        async with self._device_settings_write_lock:
+            settings = await self.client.async_set_anti_theft_settings(
+                lift_alarm_enabled=lift_alarm_enabled,
+                off_map_alarm_enabled=off_map_alarm_enabled,
+                real_time_location_enabled=real_time_location_enabled,
+                pin_check_before_power_off_enabled=pin_check_before_power_off_enabled,
+            )
+            return self._cache_device_settings(
+                settings,
+                source="anti_theft_settings_write",
             )
 
     async def async_refresh_maintenance_status(
@@ -2279,7 +2324,5 @@ def _schedule_write_version(result: Mapping[str, Any]) -> int | None:
     """Return the writable version confirmed by a schedule write."""
     version = result.get("version")
     return (
-        version
-        if isinstance(version, int) and not isinstance(version, bool)
-        else None
+        version if isinstance(version, int) and not isinstance(version, bool) else None
     )
