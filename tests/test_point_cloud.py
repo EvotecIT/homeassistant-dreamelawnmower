@@ -435,7 +435,10 @@ def test_download_point_cloud_uses_action_dispatch_as_freshness_boundary(
     result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
 
     assert actions == [{"m": "a", "p": 0, "o": 10, "d": {"idx": 0}}]
-    assert signed_names == ["private/generated-map.bin"]
+    assert signed_names == [
+        "private/baseline-map.bin",
+        "private/generated-map.bin",
+    ]
     assert result.source == "generated"
 
 
@@ -711,7 +714,7 @@ def test_download_point_cloud_regenerates_when_stored_object_is_invalid(
         return next(responses)
 
     now_ms = int(time.time() * 1000)
-    update_dates = iter([now_ms - 1_000, now_ms - 1_000, now_ms + 1_000])
+    update_dates = iter([now_ms - 1_000, now_ms + 1_000])
 
     def get_properties(key: str, **options: Any) -> list[dict[str, Any]]:
         updated_at = next(update_dates)
@@ -736,7 +739,14 @@ def test_download_point_cloud_regenerates_when_stored_object_is_invalid(
     client._sync_call_app_action = call_app_action
     client._sync_get_cloud_protocol = lambda **kwargs: cloud
     fresh_content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
-    downloads = iter([b"not a pcd", b"still not a pcd", fresh_content])
+    downloads = iter(
+        [
+            b"not a pcd",
+            b"still not a pcd",
+            b"pre-generation object",
+            fresh_content,
+        ]
+    )
     monkeypatch.setattr(
         _internal_client_module,
         "_open_point_cloud_response",
@@ -859,8 +869,27 @@ def test_download_point_cloud_does_not_fallback_from_stale_announcement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _client()
+    client._sync_update_app_map_inventory_identity(
+        [
+            {
+                "idx": 0,
+                "current": True,
+                "created": True,
+                "info": {"hash": "map-hash-1", "size": 123},
+            }
+        ]
+    )
+    client._latest_app_map_object_names = ("private/stale-map.bin",)
+    client._latest_app_map_object_inventory_identity = (
+        client._latest_app_map_inventory_identity
+    )
     calls: list[dict[str, Any]] = []
-    responses = iter([{"r": 0}])
+    responses = iter(
+        [
+            {"r": 0},
+            {"r": 0, "d": {"name": ["private/other-map.bin"]}},
+        ]
+    )
 
     def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         calls.append(payload)
@@ -880,6 +909,15 @@ def test_download_point_cloud_does_not_fallback_from_stale_announcement(
     )
     client._sync_call_app_action = call_app_action
     client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
     with pytest.raises(DreameLawnMowerPointCloudError):
         client._sync_download_app_map_point_cloud(
             0,
@@ -891,7 +929,154 @@ def test_download_point_cloud_does_not_fallback_from_stale_announcement(
 
     assert calls == [
         {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
     ]
+
+
+def test_download_point_cloud_accepts_indexed_stable_announcement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    calls: list[dict[str, Any]] = []
+    responses = iter(
+        [
+            {"r": 0},
+            {"r": 0, "d": {"name": ["private/stable-map.bin"]}},
+        ]
+    )
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        calls.append(payload)
+        return next(responses)
+
+    signed_urls = iter([None, "https://downloads.example.invalid/object"])
+    cloud = SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {
+                "key": key,
+                "value": "private/stable-map.bin",
+                "updateDate": 1,
+            }
+        ],
+        get_interim_file_url=lambda name, **options: next(signed_urls),
+    )
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert calls == [
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+    ]
+    assert result.source == "generated"
+    assert result.content == content
+
+
+def test_download_point_cloud_rejects_unchanged_signable_stable_announcement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    responses = iter(
+        [
+            {"r": 0},
+            {"r": 0, "d": {"name": ["private/stable-map.bin"]}},
+        ]
+    )
+    client._sync_call_app_action = lambda payload, **kwargs: next(responses)
+    cloud = SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {
+                "key": key,
+                "value": "private/stable-map.bin",
+                "updateDate": 1,
+            }
+        ],
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+        client._sync_download_app_map_point_cloud(0, 0.05, 0.001, 10, 1024)
+
+    assert captured.value.code == "point_cloud_not_published"
+
+
+def test_download_point_cloud_retries_stable_announcement_index_verification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    calls: list[dict[str, Any]] = []
+    verification_attempts = 0
+
+    def call_point_cloud_action(
+        payload: dict[str, Any],
+        *,
+        operation: str,
+        deadline: float,
+        require_data: bool,
+        on_dispatch: Any = None,
+    ) -> Any:
+        nonlocal verification_attempts
+        calls.append(payload)
+        if payload.get("m") == "a":
+            on_dispatch()
+            return None
+        verification_attempts += 1
+        if verification_attempts == 1:
+            raise DreameLawnMowerPointCloudError(
+                "transient routed timeout",
+                code="point_cloud_timeout",
+            )
+        return {"name": ["private/stable-map.bin"]}
+
+    signed_urls = iter([None, "https://downloads.example.invalid/object"])
+    client._sync_call_point_cloud_action = call_point_cloud_action
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {
+                "key": key,
+                "value": "private/stable-map.bin",
+                "updateDate": 1,
+            }
+        ],
+        get_interim_file_url=lambda name, **options: next(signed_urls),
+    )
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 2, 0.01, 10, 1024)
+
+    assert verification_attempts == 2
+    assert calls.count({"m": "g", "t": "OBJ", "d": {"type": "3dmap"}}) == 2
+    assert result.source == "generated"
 
 
 def test_download_point_cloud_caps_optional_announcement_probe(
@@ -1713,7 +1898,7 @@ def test_download_point_cloud_bounds_invalid_announced_object_downloads(
         )
 
     assert captured.value.code == "point_cloud_download_invalid"
-    assert download_count == 1
+    assert download_count == 2
 
 
 def test_download_point_cloud_waits_for_changed_mova_fixed_object(

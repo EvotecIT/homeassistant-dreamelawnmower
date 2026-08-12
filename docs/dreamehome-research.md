@@ -382,6 +382,15 @@ The successful map path is the app action bridge described above. On
   updated. Capturing the fresh announcement directly returned the same
   2,437,272-byte PCD through the public API in 12.5 seconds without changing
   the mower's activity.
+- On 2026-08-12, firmware `4.3.6_0625` accepted `o:10` with `r:0` but kept the
+  existing `99.20` object name, its `updateDate`, and `2.54=100` unchanged. The
+  request instead made that stable object signable within 0.36 seconds. Its
+  name matched indexed `OBJ` map `0` and not map `1`. The client therefore
+  accepts an unchanged announcement only after bounded indexed-object evidence
+  proves that it belongs to the requested map and pre/post object evidence
+  proves that the generation refreshed it. With stored fallback disabled, the
+  hardened primary path downloaded and validated the 152,318-point PCD in 1.5
+  seconds.
 - `async_download_app_map_point_cloud()` now owns the generation, transient
   object capture, bounded HTTPS download, and PCD validation. It returns bytes
   plus coordinate-free metadata and deliberately omits the vendor filename and
