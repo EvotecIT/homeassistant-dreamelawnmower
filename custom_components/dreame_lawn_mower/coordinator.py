@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
@@ -211,6 +211,7 @@ class DreameLawnMowerCoordinator(
         self._advertised_feature_capabilities: set[str] = set()
         self._observed_feature_capabilities: set[str] = set()
         self.diagnostic_events = DreameLawnMowerDiagnosticEventStore()
+        self.video_diagnostics_provider: Callable[[], Mapping[str, Any]] | None = None
         self.performance = DreameLawnMowerPerformanceTracker()
         self.last_batch_device_data_probe_result: dict[str, Any] | None = None
         self.last_map_probe_result: dict[str, Any] | None = None

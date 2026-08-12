@@ -74,13 +74,7 @@ def test_downloaded_diagnostics_combines_report_entities_and_recent_events(
         last_exception=None,
         update_interval=timedelta(seconds=30),
         async_request_refresh=_refresh,
-    )
-    state = SimpleNamespace(
-        state="idle",
-        attributes={
-            "anonymous_feature": _AnonymousFeature(0),
-            "last_stream_error_code": "video_cloud_start_failed",
-            "last_stream_error": "accessToken=secret failed",
+        video_diagnostics_provider=lambda: {
             "last_runtime_input_diagnostics": {
                 "operation": "camera_stream_inputs",
                 "stages": [
@@ -110,6 +104,14 @@ def test_downloaded_diagnostics_combines_report_entities_and_recent_events(
                     }
                 ],
             },
+        },
+    )
+    state = SimpleNamespace(
+        state="idle",
+        attributes={
+            "anonymous_feature": _AnonymousFeature(0),
+            "last_stream_error_code": "video_cloud_start_failed",
+            "last_stream_error": "accessToken=secret failed",
         },
     )
     hass = SimpleNamespace(
@@ -166,7 +168,7 @@ def test_downloaded_diagnostics_combines_report_entities_and_recent_events(
         diagnostics_module.async_get_config_entry_diagnostics(hass, entry)
     )
 
-    assert payload["diagnostic_schema_version"] == 8
+    assert payload["diagnostic_schema_version"] == 9
     assert payload["report_context"]["integration_version"] == "0.3.0"
     assert payload["report_context"]["home_assistant"]["arch"] == "aarch64"
     assert "user" not in payload["report_context"]["home_assistant"]
@@ -177,7 +179,10 @@ def test_downloaded_diagnostics_combines_report_entities_and_recent_events(
         "accessToken=**REDACTED** failed"
     )
     assert payload["entities"][0]["attributes"]["anonymous_feature"] == 0
-    operation = payload["entities"][0]["attributes"][
+    assert "last_runtime_input_diagnostics" not in payload["entities"][0][
+        "attributes"
+    ]
+    operation = payload["coordinator"]["video_runtime"][
         "last_runtime_input_diagnostics"
     ]
     assert operation["stages"][0]["stage"] == "cloud_device_identity"

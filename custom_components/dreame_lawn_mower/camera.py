@@ -12,6 +12,7 @@ from typing import Any
 
 from homeassistant.components.camera import Camera
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import MATCH_ALL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -118,20 +119,9 @@ class DreameLawnMowerMapCamera(
     _requires_map_capability = True
     _prewarm_map_image = True
     _refresh_cached_view_on_coordinator_update = True
-    _unrecorded_attributes = frozenset(
-        {
-            "runtime_pose_x",
-            "runtime_pose_y",
-            "runtime_heading_deg",
-            "runtime_region_id",
-            "runtime_position_updated_at",
-            "position_x",
-            "position_y",
-            "position_heading",
-            "position_segment",
-            "position_updated_at",
-        }
-    )
+    # Camera attributes describe the current rendered/diagnostic view. Persisting
+    # their large map payloads on every refresh creates unbounded recorder churn.
+    _unrecorded_attributes = frozenset({MATCH_ALL})
 
     def __init__(
         self,

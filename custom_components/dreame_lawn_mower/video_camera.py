@@ -22,6 +22,7 @@ from homeassistant.components.stream.const import (
     DOMAIN as STREAM_DOMAIN,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import MATCH_ALL
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import video_stream_helpers as video_helpers
@@ -121,6 +122,9 @@ class DreameLawnMowerVideoCamera(
     _attr_icon = "mdi:video-wireless-outline"
     _attr_entity_registry_enabled_default = True
     _attr_supported_features = CameraEntityFeature.STREAM | CameraEntityFeature.ON_OFF
+    # Runtime diagnostics can change for every media packet. They remain visible
+    # in downloaded diagnostics but must never be persisted by the recorder.
+    _unrecorded_attributes = frozenset({MATCH_ALL})
 
     # Preserve the historical method surface while focused mixins own the
     # implementations. Reading from ``__dict__`` retains property and
@@ -135,6 +139,9 @@ class DreameLawnMowerVideoCamera(
     device_info = DreameLawnMowerVideoStateMixin.__dict__["device_info"]
     extra_state_attributes = DreameLawnMowerVideoStateMixin.__dict__[
         "extra_state_attributes"
+    ]
+    video_runtime_diagnostics = DreameLawnMowerVideoStateMixin.__dict__[
+        "video_runtime_diagnostics"
     ]
     _async_start_stream = DreameLawnMowerVideoStartupMixin.__dict__[
         "_async_start_stream"
@@ -292,6 +299,7 @@ class DreameLawnMowerVideoCamera(
     async def async_added_to_hass(self) -> None:
         """Schedule managed runtime preparation without blocking entity setup."""
         await super().async_added_to_hass()
+        self.coordinator.video_diagnostics_provider = self.video_runtime_diagnostics
         if not self._lan_cache.loaded:
             try:
                 await self._lan_cache.async_load()
@@ -938,6 +946,9 @@ class DreameLawnMowerVideoCamera(
 
     async def async_will_remove_from_hass(self) -> None:
         """Stop XP2P video when Home Assistant unloads the camera."""
+        provider = getattr(self.coordinator, "video_diagnostics_provider", None)
+        if provider == self.video_runtime_diagnostics:
+            self.coordinator.video_diagnostics_provider = None
         prepare_task = self._runtime_prepare_task
         self._runtime_prepare_task = None
         if prepare_task is not None and not prepare_task.done():

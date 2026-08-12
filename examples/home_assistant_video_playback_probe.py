@@ -24,6 +24,7 @@ import shutil
 import socket
 import sys
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
@@ -293,6 +294,17 @@ def _find_video_camera(hass: HomeAssistant) -> Any:
     return entities[0]
 
 
+def _video_runtime_diagnostics(camera: Any) -> dict[str, Any]:
+    """Read volatile video telemetry from its diagnostics-only owner."""
+    provider = getattr(camera, "video_runtime_diagnostics", None)
+    if not callable(provider):
+        raise RuntimeError("Dreame live-video diagnostics provider is unavailable.")
+    diagnostics = provider()
+    if not isinstance(diagnostics, Mapping):
+        raise RuntimeError("Dreame live-video diagnostics returned an invalid value.")
+    return dict(diagnostics)
+
+
 def _find_mower_entity(hass: HomeAssistant) -> Any:
     component = hass.data[lawn_mower_component.DATA_COMPONENT]
     entities = [
@@ -463,7 +475,7 @@ async def _verify_cached_xp2p_after_reload(
         ha_stream = await camera.async_create_stream()
         if ha_stream is None:
             raise RuntimeError(
-                camera.extra_state_attributes.get("last_stream_error")
+                _video_runtime_diagnostics(camera).get("last_stream_error")
                 or "Cached XP2P restart returned no stream."
             )
         hls_output = ha_stream.add_provider("hls")
@@ -477,7 +489,7 @@ async def _verify_cached_xp2p_after_reload(
             None,
         )
         status, playlist = await _fetch_hls_playlist(port, endpoint)
-        attributes = camera.extra_state_attributes
+        diagnostics = _video_runtime_diagnostics(camera)
     finally:
         if client_type is not None:
             client_type.async_get_camera_stream_runtime_inputs = original_inputs
@@ -485,8 +497,8 @@ async def _verify_cached_xp2p_after_reload(
 
     result = {
         "blocked_dreame_video_calls": blocked_calls,
-        "stream_session": attributes["last_stream_session"],
-        "last_video_transport": attributes["last_video_transport"],
+        "stream_session": diagnostics["last_stream_session"],
+        "last_video_transport": diagnostics["last_video_transport"],
         "hls_endpoint_status": status,
         "hls_playlist_present": "#EXTM3U" in playlist,
         "decoded_frame_count": frame["decoded_frame_count"],
@@ -494,7 +506,7 @@ async def _verify_cached_xp2p_after_reload(
         "height": frame["height"],
         "verified": bool(
             blocked_calls == []
-            and attributes["last_video_transport"] == "cached_xp2p"
+            and diagnostics["last_video_transport"] == "cached_xp2p"
             and status == 200
             and "#EXTM3U" in playlist
             and frame["decoded_frame_count"] > 1
@@ -538,27 +550,25 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             camera = _find_video_camera(hass)
             mower = _find_mower_entity(hass)
             snapshot = await client.async_refresh()
+            camera_attributes = camera.extra_state_attributes
+            camera_diagnostics = _video_runtime_diagnostics(camera)
             output["before"] = _snapshot_summary(snapshot)
             output["camera_entity"] = {
                 "entity_id": camera.entity_id,
                 "available": camera.available,
-                "runtime_mode": camera.extra_state_attributes[
-                    "video_runtime_mode"
-                ],
-                "transport_policy": camera.extra_state_attributes[
-                    "video_transport_policy"
-                ],
-                "block_reason": camera.extra_state_attributes["video_block_reason"],
-                "lan_identity_cached": camera.extra_state_attributes[
+                "runtime_mode": camera_attributes["video_runtime_mode"],
+                "transport_policy": camera_attributes["video_transport_policy"],
+                "block_reason": camera_attributes["video_block_reason"],
+                "lan_identity_cached": camera_diagnostics[
                     "lan_video_identity_cached"
                 ],
-                "lan_endpoint_cached": camera.extra_state_attributes[
+                "lan_endpoint_cached": camera_diagnostics[
                     "lan_video_endpoint_cached"
                 ],
-                "xp2p_provisioning_cached": camera.extra_state_attributes[
+                "xp2p_provisioning_cached": camera_diagnostics[
                     "xp2p_provisioning_cached"
                 ],
-                "runtime_preparation_error": camera.extra_state_attributes[
+                "runtime_preparation_error": camera_diagnostics[
                     "video_runtime_preparation_error"
                 ],
             }
@@ -586,16 +596,17 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                 )
                 output["coordinator_after_start"] = _snapshot_summary(coordinator.data)
                 camera_attributes = camera.extra_state_attributes
+                camera_diagnostics = _video_runtime_diagnostics(camera)
                 output["camera_entity"].update(
                     available_after_start=camera_available,
                     block_reason_after_start=camera_attributes["video_block_reason"],
-                    lan_identity_cached_after_start=camera_attributes[
+                    lan_identity_cached_after_start=camera_diagnostics[
                         "lan_video_identity_cached"
                     ],
-                    lan_endpoint_cached_after_start=camera_attributes[
+                    lan_endpoint_cached_after_start=camera_diagnostics[
                         "lan_video_endpoint_cached"
                     ],
-                    xp2p_provisioning_cached_after_start=camera_attributes[
+                    xp2p_provisioning_cached_after_start=camera_diagnostics[
                         "xp2p_provisioning_cached"
                     ],
                 )
@@ -611,7 +622,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             ha_stream = await camera.async_create_stream()
             if ha_stream is None:
                 raise RuntimeError(
-                    camera.extra_state_attributes.get("last_stream_error")
+                    _video_runtime_diagnostics(camera).get("last_stream_error")
                     or "Home Assistant camera returned no stream."
                 )
             hls_output = ha_stream.add_provider("hls")
@@ -650,9 +661,9 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
                 "camera_image": camera_image,
                 "decoded_frame": frame,
             }
-            camera_attributes = camera.extra_state_attributes
-            output["stream_session"] = camera_attributes["last_stream_session"]
-            output["last_video_transport"] = camera_attributes[
+            camera_diagnostics = _video_runtime_diagnostics(camera)
+            output["stream_session"] = camera_diagnostics["last_stream_session"]
+            output["last_video_transport"] = camera_diagnostics[
                 "last_video_transport"
             ]
             output["visual_frame_verified"] = bool(

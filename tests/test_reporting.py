@@ -123,7 +123,33 @@ def test_coordinator_diagnostics_sanitize_last_failure() -> None:
             "vector_maps": [],
         },
         "work_log_totals": None,
+        "video_runtime": None,
         "last_maintenance_point_probe": None,
+    }
+
+
+def test_coordinator_diagnostics_collect_video_runtime_privately() -> None:
+    diagnostics = build_coordinator_diagnostics(
+        SimpleNamespace(
+            last_update_success=True,
+            last_exception=None,
+            update_interval=timedelta(seconds=30),
+            video_diagnostics_provider=lambda: {
+                "video_delivery": {"relay_packet_count": 42},
+                "last_runtime_input_diagnostics": {
+                    "access_token": "secret",
+                    "operation": "camera_stream_inputs",
+                },
+            },
+        )
+    )
+
+    assert diagnostics["video_runtime"] == {
+        "video_delivery": {"relay_packet_count": 42},
+        "last_runtime_input_diagnostics": {
+            "access_token": "**REDACTED**",
+            "operation": "camera_stream_inputs",
+        },
     }
 
 

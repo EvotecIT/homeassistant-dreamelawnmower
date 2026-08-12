@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+from homeassistant.const import MATCH_ALL
 
 from custom_components.dreame_lawn_mower import camera as camera_module
 from custom_components.dreame_lawn_mower.camera import (
@@ -44,6 +45,21 @@ def test_optional_map_cameras_refresh_only_when_requested() -> None:
     assert DreameLawnMowerLivePathMapCamera.__dict__[refresh_policy] is False
     assert DreameLawnMowerAllMapsCamera.__dict__[refresh_policy] is False
     assert DreameLawnMowerMapDataCamera.__dict__[refresh_policy] is False
+
+
+def test_map_camera_attributes_are_excluded_from_recorder() -> None:
+    """Large current-map payloads belong in live state, not recorder history."""
+    assert DreameLawnMowerMapCamera._unrecorded_attributes == frozenset({MATCH_ALL})
+    assert (
+        DreameLawnMowerLivePathMapCamera._unrecorded_attributes
+        == frozenset({MATCH_ALL})
+    )
+    assert DreameLawnMowerAllMapsCamera._unrecorded_attributes == frozenset(
+        {MATCH_ALL}
+    )
+    assert DreameLawnMowerMapDataCamera._unrecorded_attributes == frozenset(
+        {MATCH_ALL}
+    )
 
 
 @pytest.mark.parametrize(

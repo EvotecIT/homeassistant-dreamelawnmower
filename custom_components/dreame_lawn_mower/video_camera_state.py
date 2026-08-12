@@ -150,22 +150,29 @@ class DreameLawnMowerVideoStateMixin:
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose stream readiness without leaking runtime credentials."""
+        """Expose compact stream readiness without recorder-heavy telemetry."""
         capability = self._resolved_video_capability()
         return {
             "video_runtime_configured": self._runtime_configured,
             "video_runtime_mode": self._runtime_mode,
             "video_transport_policy": self._video_transport,
             "video_retention_mode": self._video_retention_mode,
-            "video_live_view_seen": self._video_live_view_seen,
             "video_block_reason": camera_stream_block_reason(self.coordinator.data),
+            "video_capability": capability.state,
+            "video_capability_source": capability.source,
+            "last_video_transport": self._last_video_transport,
+            "stream_session_active": self._session is not None,
+        }
+
+    def video_runtime_diagnostics(self) -> dict[str, Any]:
+        """Return detailed runtime telemetry for downloaded diagnostics only."""
+        return {
+            **self.extra_state_attributes,
+            "video_live_view_seen": self._video_live_view_seen,
             "video_capability_advertised": snapshot_advertises_video(
                 self.coordinator.data
             ),
             "video_capability_observed": self._video_capability_observed,
-            "video_capability": capability.state,
-            "video_capability_source": capability.source,
-            "last_video_transport": self._last_video_transport,
             "last_video_transport_attempted": self._last_video_transport_attempted,
             "lan_video_identity_cached": self._lan_cache.inputs is not None,
             "lan_video_endpoint_cached": self._lan_cache.endpoint is not None,
@@ -184,7 +191,6 @@ class DreameLawnMowerVideoStateMixin:
                 video_helpers.managed_runtime_environment()
             ),
             "video_runtime_preparation_error": self._runtime_preparation_error,
-            "stream_session_active": self._session is not None,
             "video_recovery_pending": self._video_recovery_pending,
             "video_recovery_failure_count": self._video_recovery_failure_count,
             "video_recovery_success_count": self._video_recovery_success_count,

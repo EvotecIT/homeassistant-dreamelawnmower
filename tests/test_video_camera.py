@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import pytest
 from homeassistant.components.camera import CameraEntityFeature
+from homeassistant.const import MATCH_ALL
 
 import custom_components.dreame_lawn_mower.video_camera as video_camera_module
 import custom_components.dreame_lawn_mower.video_stream_helpers as video_helpers_module
@@ -314,6 +315,7 @@ def test_video_camera_facade_preserves_split_method_surface() -> None:
             "available",
             "device_info",
             "extra_state_attributes",
+            "video_runtime_diagnostics",
         ),
         video_camera_startup_module.DreameLawnMowerVideoStartupMixin: (
             "_async_start_stream",
@@ -643,6 +645,53 @@ def test_known_a1_video_camera_reports_unsupported_after_registry_restore() -> N
     assert entity.extra_state_attributes["video_capability_source"] == "model"
 
 
+def test_live_video_attributes_are_small_stable_and_unrecorded() -> None:
+    """Media counters and diagnostic blobs must not churn recorder state."""
+    entity = _uninitialized_entity()
+    entity._last_runtime_input_diagnostics = {"payload": "x" * 4096}
+    entity._last_native_runtime_diagnostics = {"ready": True}
+    entity._last_managed_runtime_diagnostics = {"ready": True}
+    entity._flv_relay = SimpleNamespace(
+        diagnostics={"relay_packet_count": 1},
+        direct_subscriber_count=0,
+    )
+
+    with patch.object(video_camera_state_module, "monotonic", return_value=10.0):
+        first = entity.extra_state_attributes
+    entity._video_retry_not_before = 60.0
+    entity._flv_relay.diagnostics["relay_packet_count"] = 2
+    with patch.object(video_camera_state_module, "monotonic", return_value=20.0):
+        second = entity.extra_state_attributes
+
+    assert first == second
+    assert set(first) == {
+        "last_video_transport",
+        "stream_session_active",
+        "video_block_reason",
+        "video_capability",
+        "video_capability_source",
+        "video_retention_mode",
+        "video_runtime_configured",
+        "video_runtime_mode",
+        "video_transport_policy",
+    }
+    assert len(json.dumps(first, separators=(",", ":"))) < 512
+    assert "video_recovery_retry_after_seconds" not in first
+    assert "video_delivery" not in first
+    assert "last_runtime_input_diagnostics" not in first
+    assert DreameLawnMowerVideoCamera._unrecorded_attributes == frozenset(
+        {MATCH_ALL}
+    )
+
+    with patch.object(video_camera_state_module, "monotonic", return_value=20.0):
+        diagnostics = entity.video_runtime_diagnostics()
+    assert diagnostics["video_recovery_retry_after_seconds"] == 40.0
+    assert diagnostics["video_delivery"]["relay_packet_count"] == 2
+    assert diagnostics["last_runtime_input_diagnostics"] == {
+        "payload": "x" * 4096
+    }
+
+
 def test_video_camera_unavailable_without_video_metadata() -> None:
     snapshot = SimpleNamespace(
         capabilities=("map", "lidar_navigation"),
@@ -756,8 +805,9 @@ def test_video_camera_remembers_support_when_metadata_disappears() -> None:
         entity._handle_coordinator_update()
 
     assert entity.available is True
-    assert entity.extra_state_attributes["video_capability_advertised"] is False
-    assert entity.extra_state_attributes["video_capability_observed"] is False
+    diagnostics = entity.video_runtime_diagnostics()
+    assert diagnostics["video_capability_advertised"] is False
+    assert diagnostics["video_capability_observed"] is False
     assert entity.extra_state_attributes["video_capability"] == "supported"
     assert entity.extra_state_attributes["video_capability_source"] == "advertised"
 
