@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from typing import Any
 
 from .control_options import (
@@ -566,6 +567,24 @@ def _current_app_map_zone_count(
         return None
     value = summary.get("map_area_count")
     return value if isinstance(value, int) else None
+
+
+def _current_vector_map_zone_count(
+    result: dict[str, Any] | None,
+    app_maps: dict[str, Any] | None = None,
+    batch_device_data: dict[str, Any] | None = None,
+) -> int | None:
+    """Return the parsed zone count instead of the app map's mixed area count."""
+    summary = _current_vector_map_summary(result, app_maps, batch_device_data)
+    if not isinstance(summary, dict):
+        return None
+    zone_ids = summary.get("zone_ids")
+    if not isinstance(zone_ids, Sequence) or isinstance(
+        zone_ids,
+        str | bytes | bytearray,
+    ):
+        return None
+    return len(zone_ids)
 
 
 def _current_app_map_spot_count(

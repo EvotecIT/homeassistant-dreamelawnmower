@@ -117,6 +117,7 @@ from .sensor_map_data import (  # noqa: F401
     _current_vector_map_runtime_track_point_count,
     _current_vector_map_runtime_track_segment_count,
     _current_vector_map_summary,
+    _current_vector_map_zone_count,
     _selected_contour_id,
     _selected_map_index,
     _selected_map_label,
@@ -179,6 +180,8 @@ from .sensor_operations import (  # noqa: F401
     schedule_write_result_attributes,
 )
 from .sensor_runtime import (  # noqa: F401
+    DreameLawnMowerCurrentMowedAreaSensor,
+    DreameLawnMowerCurrentZoneSensor,
     DreameLawnMowerMowingProgressSensor,
     DreameLawnMowerRuntimeCurrentAreaSensor,
     DreameLawnMowerRuntimeHeadingSensor,
@@ -189,7 +192,10 @@ from .sensor_runtime import (  # noqa: F401
     DreameLawnMowerRuntimeTrackLengthSensor,
     DreameLawnMowerRuntimeTrackPointCountSensor,
     DreameLawnMowerRuntimeTrackSegmentCountSensor,
+    _current_mowed_area,
     _current_zone_label,
+    _current_zone_label_for_coordinator,
+    _live_runtime_status_blob,
     _runtime_progress_available_for_snapshot,
     _runtime_session_attributes,
     _runtime_session_blob,
@@ -427,6 +433,8 @@ SENSORS = [
     ),
 ]
 
+_SPECIALIZED_SENSOR_KEYS = frozenset({"current_cleaned_area", "current_zone"})
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -436,7 +444,11 @@ async def async_setup_entry(
     """Set up mower sensors."""
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
-        [DreameLawnMowerSensor(coordinator, description) for description in SENSORS]
+        [
+            DreameLawnMowerSensor(coordinator, description)
+            for description in SENSORS
+            if description.key not in _SPECIALIZED_SENSOR_KEYS
+        ]
         + [DreameLawnMowerAppMapCountSensor(coordinator)]
         + [DreameLawnMowerAvailableVectorMapCountSensor(coordinator)]
         + [DreameLawnMowerSelectedMowingActionSensor(coordinator)]
@@ -473,6 +485,8 @@ async def async_setup_entry(
         + [DreameLawnMowerRuntimeTrackPointCountSensor(coordinator)]
         + [DreameLawnMowerRuntimeTrackLengthSensor(coordinator)]
         + [DreameLawnMowerRuntimeTrackSegmentCountSensor(coordinator)]
+        + [DreameLawnMowerCurrentMowedAreaSensor(coordinator)]
+        + [DreameLawnMowerCurrentZoneSensor(coordinator)]
         + [DreameLawnMowerMowingProgressSensor(coordinator)]
         + [DreameLawnMowerTotalMowedAreaSensor(coordinator)]
         + [DreameLawnMowerTotalMowingTimeSensor(coordinator)]

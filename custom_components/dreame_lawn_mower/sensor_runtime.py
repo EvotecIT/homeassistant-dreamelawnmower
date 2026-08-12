@@ -7,10 +7,12 @@ from typing import Any
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.helpers.entity import EntityCategory
 
+from .control_options import current_zone_entries
 from .coordinator import DreameLawnMowerCoordinator, runtime_tracking_active
 from .entity import DreameLawnMowerEntity
 from .runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,
+    runtime_blob_matches_active_session,
     runtime_mission_cached_session_identity,
     runtime_mission_completion_confirmed,
     runtime_mission_progress_percent,
@@ -40,6 +42,104 @@ def _current_zone_label(snapshot: Any) -> str | None:
     return None
 
 
+def _live_runtime_status_blob(coordinator: Any) -> Any:
+    """Return runtime telemetry only while it belongs to the active mission."""
+    snapshot = getattr(coordinator, "data", None)
+    if snapshot is None or not runtime_tracking_active(snapshot):
+        return None
+    blob = getattr(coordinator, "runtime_status_blob", None)
+    if not runtime_blob_matches_active_session(
+        getattr(coordinator, "runtime_telemetry_cache", None),
+        blob,
+    ):
+        return None
+    return blob
+
+
+def _current_mowed_area(coordinator: Any) -> float | int | None:
+    """Return the legacy session area with live runtime telemetry as fallback."""
+    snapshot = getattr(coordinator, "data", None)
+    value = getattr(snapshot, "mowed_area", None)
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return value
+    return _runtime_status_blob_current_area_sqm(_live_runtime_status_blob(coordinator))
+
+
+def _current_zone_label_for_coordinator(coordinator: Any) -> str | None:
+    """Return the snapshot zone or resolve the live runtime region id."""
+    snapshot = getattr(coordinator, "data", None)
+    label = _current_zone_label(snapshot)
+    if label is not None:
+        return label
+
+    region_id = getattr(
+        _live_runtime_status_blob(coordinator),
+        "candidate_runtime_region_id",
+        None,
+    )
+    if not isinstance(region_id, int) or isinstance(region_id, bool) or region_id <= 0:
+        return None
+    for entry in current_zone_entries(
+        getattr(coordinator, "batch_device_data", None),
+        getattr(coordinator, "app_maps", None),
+        getattr(coordinator, "vector_map_details", None),
+    ):
+        if entry.get("area_id") == region_id:
+            entry_label = entry.get("label")
+            if isinstance(entry_label, str) and entry_label:
+                return entry_label
+    return f"Zone {region_id}"
+
+
+class DreameLawnMowerCurrentMowedAreaSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose current task area across legacy and runtime mower protocols."""
+
+    _attr_name = "Current Mowed Area"
+    _attr_icon = "mdi:texture-box"
+    _attr_native_unit_of_measurement = "m²"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_current_cleaned_area"
+
+    @property
+    def native_value(self) -> float | int | None:
+        """Return the current task area from the best live source."""
+        return _current_mowed_area(self.coordinator)
+
+    @property
+    def available(self) -> bool:
+        """Return whether a current task area is available."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+
+class DreameLawnMowerCurrentZoneSensor(
+    DreameLawnMowerEntity,
+    SensorEntity,
+):
+    """Expose the current zone across legacy and runtime mower protocols."""
+
+    _attr_name = "Current Zone"
+    _attr_icon = "mdi:map-marker-outline"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_current_zone"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the current zone from the best live source."""
+        return _current_zone_label_for_coordinator(self.coordinator)
+
+    @property
+    def available(self) -> bool:
+        """Return whether current-zone telemetry is available."""
+        return self.coordinator.data is not None and self.native_value is not None
+
+
 class DreameLawnMowerMowingProgressSensor(
     DreameLawnMowerEntity,
     SensorEntity,
@@ -63,10 +163,13 @@ class DreameLawnMowerMowingProgressSensor(
             self.coordinator.app_maps,
             self.coordinator.batch_device_data,
         )
-        if mowed_area is None or current_map_area in (None, 0):
-            return None
-        progress = (float(mowed_area) / float(current_map_area)) * 100
-        return round(max(0.0, min(progress, 100.0)), 1)
+        if mowed_area is not None and current_map_area not in (None, 0):
+            progress = (float(mowed_area) / float(current_map_area)) * 100
+            return round(max(0.0, min(progress, 100.0)), 1)
+        return runtime_mission_progress_percent(
+            _live_runtime_status_blob(self.coordinator),
+            completion_confirmed=False,
+        )
 
     @property
     def available(self) -> bool:
@@ -79,13 +182,14 @@ class DreameLawnMowerMowingProgressSensor(
         snapshot = self.coordinator.data
         if snapshot is None:
             return {}
+        mowed_area = _current_mowed_area(self.coordinator)
         attributes: dict[str, Any] = {
-            "mowed_area": snapshot.mowed_area,
+            "mowed_area": mowed_area,
             "mowing_time": snapshot.mowing_time,
             # Compatibility aliases for existing dashboards and automations.
-            "cleaned_area": snapshot.cleaned_area,
+            "cleaned_area": mowed_area,
             "cleaning_time": snapshot.cleaning_time,
-            "current_zone": _current_zone_label(snapshot),
+            "current_zone": _current_zone_label_for_coordinator(self.coordinator),
             "active_segment_count": getattr(snapshot, "active_segment_count", None),
         }
         current_map = _current_app_map_summary(

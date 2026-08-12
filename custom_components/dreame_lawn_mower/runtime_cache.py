@@ -54,6 +54,50 @@ def runtime_blob_has_nonzero_session_metrics(blob: Any) -> bool:
     )
 
 
+def runtime_blob_matches_active_session(cache: Any, blob: Any) -> bool:
+    """Return whether live telemetry is safe to expose for the active mission.
+
+    The mower can retain property ``1.4`` from the preceding mission while a
+    replacement mission is already active.  Prefer ordered reception evidence,
+    with the task id as a safe fallback when the vendor omitted a timestamp.
+    Test doubles and older coordinator shapes without the integration-owned
+    cache retain the previous active-state behavior.
+    """
+    if not isinstance(cache, DreameLawnMowerRuntimeTelemetryCache):
+        return True
+    if blob is None or not cache._session_active or cache.blob is not blob:
+        return False
+
+    session_identity = cache._session_identity
+    blob_identity = getattr(blob, "candidate_runtime_task_id", None)
+    if (
+        session_identity is not None
+        and blob_identity is not None
+        and blob_identity != session_identity
+    ):
+        return False
+
+    session_started_at = cache._session_started_at
+    if session_started_at is None:
+        return True
+
+    received_at = getattr(blob, "received_at", None)
+    if isinstance(received_at, str):
+        try:
+            parsed = datetime.fromisoformat(received_at.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed.timestamp() >= session_started_at
+        except ValueError:
+            pass
+
+    return bool(
+        session_identity is not None
+        and blob_identity is not None
+        and blob_identity == session_identity
+    )
+
+
 def runtime_mission_completion_confirmed(
     snapshot: Any,
     *,

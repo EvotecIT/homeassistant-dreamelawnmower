@@ -576,7 +576,12 @@ def test_model_overrides_prevent_cross_model_code_guesses() -> None:
         == "robot_lifted"
     )
     assert mower_fault_active(0, model="mova.mower.g2529c") is True
-    for model in ("mova.mower.g2529f", "g2529f"):
+    for model in (
+        "mova.mower.g2529f",
+        "g2529f",
+        "mova.mower.g2584a",
+        "g2584a",
+    ):
         assert mower_device_code_name(0, model=model) == "robot_lifted"
         assert mower_fault_active(0, model=model) is True
         assert mower_device_code_name(55, model=model) == "cannot_start_low_battery"

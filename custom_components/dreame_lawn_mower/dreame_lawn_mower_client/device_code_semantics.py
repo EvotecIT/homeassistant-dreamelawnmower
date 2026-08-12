@@ -222,8 +222,10 @@ _MOVA_MODELS: Final[frozenset[str]] = frozenset(
     {
         "mova.mower.g2529c",
         "mova.mower.g2529f",
+        "mova.mower.g2584a",
         "g2529c",
         "g2529f",
+        "g2584a",
     }
 )
 

@@ -25,6 +25,7 @@ from .sensor_map_data import (
     _current_vector_map_mow_path_length_m,
     _current_vector_map_mow_path_point_count,
     _current_vector_map_name,
+    _current_vector_map_zone_count,
     _selected_map_label,
     _selected_map_preference_summary,
     _selected_map_preference_value,
@@ -738,6 +739,13 @@ class DreameLawnMowerCurrentAppMapZoneCountSensor(
     @property
     def native_value(self) -> int | None:
         """Return the zone count of the current app map."""
+        vector_count = _current_vector_map_zone_count(
+            getattr(self.coordinator, "vector_map_details", None),
+            self.coordinator.app_maps,
+            self.coordinator.batch_device_data,
+        )
+        if vector_count is not None:
+            return vector_count
         return _current_app_map_zone_count(
             self.coordinator.app_maps,
             self.coordinator.batch_device_data,
@@ -751,10 +759,29 @@ class DreameLawnMowerCurrentAppMapZoneCountSensor(
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return safe cached current-map attributes."""
-        return current_app_map_attributes(
+        attributes = current_app_map_attributes(
             self.coordinator.app_maps,
             self.coordinator.batch_device_data,
         )
+        if (
+            _current_vector_map_zone_count(
+                getattr(self.coordinator, "vector_map_details", None),
+                self.coordinator.app_maps,
+                self.coordinator.batch_device_data,
+            )
+            is not None
+        ):
+            vector_attributes = current_vector_map_attributes(
+                self.coordinator.vector_map_details,
+                self.coordinator.app_maps,
+                self.coordinator.batch_device_data,
+            )
+            attributes["zone_count_source"] = "vector_map"
+            if "current_vector_map" in vector_attributes:
+                attributes["current_vector_map"] = vector_attributes[
+                    "current_vector_map"
+                ]
+        return attributes
 
 
 class DreameLawnMowerCurrentAppMapSpotCountSensor(

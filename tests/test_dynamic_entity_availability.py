@@ -47,8 +47,10 @@ from custom_components.dreame_lawn_mower.sensor import (
     DreameLawnMowerCurrentAppMapTrajectoryLengthSensor,
     DreameLawnMowerCurrentAppMapTrajectoryPointCountSensor,
     DreameLawnMowerCurrentAppMapZoneCountSensor,
+    DreameLawnMowerCurrentMowedAreaSensor,
     DreameLawnMowerCurrentVectorMapIdSensor,
     DreameLawnMowerCurrentVectorMapNameSensor,
+    DreameLawnMowerCurrentZoneSensor,
     DreameLawnMowerLastMaintenanceResetSensor,
     DreameLawnMowerLastPreferenceProbeSensor,
     DreameLawnMowerLastScheduleProbeSensor,
@@ -131,21 +133,21 @@ def test_activity_sensor_exposes_normalized_client_activity() -> None:
 
 
 def test_current_mowed_area_sensor_can_become_available_after_startup() -> None:
-    entity = object.__new__(DreameLawnMowerSensor)
+    entity = object.__new__(DreameLawnMowerCurrentMowedAreaSensor)
     entity.coordinator = SimpleNamespace(
         data=SimpleNamespace(
+            activity="docked",
             mowed_area=None,
-            raw_attributes={},
-        )
+        ),
+        runtime_status_blob=None,
     )
-    entity.entity_description = _sensor_description("current_cleaned_area")
 
     assert entity.available is False
     assert entity.native_value is None
 
     entity.coordinator.data = SimpleNamespace(
+        activity="mowing",
         mowed_area=42,
-        raw_attributes={},
     )
 
     assert entity.available is True
@@ -175,18 +177,63 @@ def test_current_mowing_time_sensor_can_become_available_after_startup() -> None
 
 
 def test_current_zone_sensor_prefers_zone_name() -> None:
-    entity = object.__new__(DreameLawnMowerSensor)
+    entity = object.__new__(DreameLawnMowerCurrentZoneSensor)
     entity.coordinator = SimpleNamespace(
         data=SimpleNamespace(
+            activity="mowing",
             current_zone_id=7,
             current_zone_name="Front Lawn",
-            raw_attributes={},
-        )
+        ),
+        runtime_status_blob=None,
     )
-    entity.entity_description = _sensor_description("current_zone")
 
     assert entity.available is True
     assert entity.native_value == "Front Lawn"
+
+
+def test_session_entities_use_live_runtime_fallbacks_for_sparse_models() -> None:
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            activity="mowing",
+            mowed_area=None,
+            current_zone_id=None,
+            current_zone_name=None,
+        ),
+        runtime_status_blob=SimpleNamespace(
+            candidate_runtime_current_area_sqm=72.95,
+            candidate_runtime_region_id=1,
+        ),
+        batch_device_data=None,
+        app_maps={"current_map_index": 0, "maps": [{"idx": 0, "current": True}]},
+        vector_map_details={
+            "maps": [
+                {
+                    "map_index": 0,
+                    "zone_ids": [1, 2, 3],
+                    "zone_names": ["Front Lawn", "Side Lawn", "Back Lawn"],
+                }
+            ]
+        },
+    )
+    current_area = object.__new__(DreameLawnMowerCurrentMowedAreaSensor)
+    current_area.coordinator = coordinator
+    current_zone = object.__new__(DreameLawnMowerCurrentZoneSensor)
+    current_zone.coordinator = coordinator
+
+    assert current_area.available is True
+    assert current_area.native_value == 72.95
+    assert current_zone.available is True
+    assert current_zone.native_value == "Front Lawn (#1)"
+
+    coordinator.data = SimpleNamespace(
+        activity="docked",
+        mowed_area=None,
+        current_zone_id=None,
+        current_zone_name=None,
+    )
+
+    assert current_area.available is False
+    assert current_zone.available is False
 
 
 def test_active_segment_count_sensor_uses_snapshot_count() -> None:
@@ -1408,6 +1455,126 @@ def test_current_app_map_sensors_use_cached_current_map_state() -> None:
     }
 
 
+def test_current_app_map_zone_count_prefers_parsed_zones_over_mixed_areas() -> None:
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(),
+        batch_device_data=None,
+        app_maps={
+            "source": "app_maps_auto",
+            "available": True,
+            "current_map_index": 0,
+            "maps": [
+                {
+                    "idx": 0,
+                    "current": True,
+                    "available": True,
+                    "created": True,
+                    "summary": {"map_area_count": 6},
+                }
+            ],
+        },
+        vector_map_details={
+            "source": "vector_map_auto",
+            "maps": [
+                {
+                    "map_id": 1,
+                    "map_index": 0,
+                    "zone_ids": [1, 2, 3],
+                    "zone_names": ["Zone1", "Zone2", "Zone3"],
+                    "contour_ids": [[1, 0], [2, 0], [3, 0]],
+                    "contour_count": 3,
+                }
+            ],
+        },
+    )
+    entity = object.__new__(DreameLawnMowerCurrentAppMapZoneCountSensor)
+    entity.coordinator = coordinator
+
+    assert entity.native_value == 3
+    assert entity.extra_state_attributes["source"] == "app_maps_auto"
+    assert entity.extra_state_attributes["current_app_map"]["map_area_count"] == 6
+    assert entity.extra_state_attributes["zone_count_source"] == "vector_map"
+    assert entity.extra_state_attributes["current_vector_map"]["zone_ids"] == [
+        1,
+        2,
+        3,
+    ]
+
+
+def test_session_fallback_rejects_runtime_blob_from_previous_mission() -> None:
+    """A retained property 1.4 frame must not populate a replacement session."""
+    stale_blob = SimpleNamespace(
+        received_at="2026-08-12T10:00:00+00:00",
+        candidate_runtime_task_id=100,
+        candidate_runtime_area_progress_percent=88.0,
+        candidate_runtime_current_area_sqm=440.0,
+        candidate_runtime_region_id=3,
+    )
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    cache.begin_new_session(session_started_at=1_786_528_900.0)
+    assert cache.update(stale_blob, active_session=True) is True
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            activity="mowing",
+            mowed_area=None,
+            mowing_time=None,
+            cleaned_area=None,
+            cleaning_time=None,
+            current_zone_id=None,
+            current_zone_name=None,
+            active_segment_count=None,
+        ),
+        runtime_status_blob=stale_blob,
+        runtime_telemetry_cache=cache,
+        batch_device_data=None,
+        app_maps=None,
+        vector_map_details=None,
+    )
+    current_area = object.__new__(DreameLawnMowerCurrentMowedAreaSensor)
+    current_area.coordinator = coordinator
+    progress = object.__new__(DreameLawnMowerMowingProgressSensor)
+    progress.coordinator = coordinator
+    current_zone = object.__new__(DreameLawnMowerCurrentZoneSensor)
+    current_zone.coordinator = coordinator
+
+    assert current_area.native_value is None
+    assert progress.native_value is None
+    assert current_zone.native_value is None
+
+
+def test_session_fallback_accepts_runtime_blob_received_after_mission_start() -> None:
+    fresh_blob = SimpleNamespace(
+        received_at="2026-08-12T10:02:00+00:00",
+        candidate_runtime_task_id=101,
+        candidate_runtime_area_progress_percent=2.0,
+        candidate_runtime_current_area_sqm=10.0,
+        candidate_runtime_region_id=1,
+    )
+    cache = DreameLawnMowerRuntimeTelemetryCache()
+    cache.begin_new_session(session_started_at=1_786_528_900.0)
+    assert cache.update(fresh_blob, active_session=True) is True
+    coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            activity="mowing",
+            mowed_area=None,
+            current_zone_id=None,
+            current_zone_name=None,
+        ),
+        runtime_status_blob=fresh_blob,
+        runtime_telemetry_cache=cache,
+        batch_device_data=None,
+        app_maps=None,
+        vector_map_details=None,
+    )
+    current_area = object.__new__(DreameLawnMowerCurrentMowedAreaSensor)
+    current_area.coordinator = coordinator
+    current_zone = object.__new__(DreameLawnMowerCurrentZoneSensor)
+    current_zone.coordinator = coordinator
+
+    assert current_area.native_value == 10.0
+    assert current_zone.native_value == "Zone 1"
+
+
 def test_current_vector_map_sensors_follow_active_map() -> None:
     coordinator = SimpleNamespace(
         data=SimpleNamespace(),
@@ -1700,6 +1867,50 @@ def test_runtime_mission_progress_sensor_uses_runtime_blob_area_ratio() -> None:
         "track_length_m": 52.64,
         "notes": ["unexpected_length", "unexpected_runtime_progress_value"],
     }
+
+
+def test_mowing_progress_uses_runtime_when_legacy_area_is_absent() -> None:
+    entity = object.__new__(DreameLawnMowerMowingProgressSensor)
+    entity.coordinator = SimpleNamespace(
+        data=SimpleNamespace(
+            activity="mowing",
+            mowed_area=None,
+            mowing_time=None,
+            cleaned_area=None,
+            cleaning_time=None,
+            current_zone_id=None,
+            current_zone_name=None,
+            active_segment_count=None,
+        ),
+        batch_device_data=None,
+        app_maps={
+            "current_map_index": 0,
+            "maps": [
+                {
+                    "idx": 0,
+                    "current": True,
+                    "summary": {"total_area": 827.85},
+                }
+            ],
+        },
+        vector_map_details=None,
+        runtime_status_blob=SimpleNamespace(
+            source="realtime",
+            candidate_runtime_area_progress_percent=13.7,
+            candidate_runtime_progress_percent=None,
+            candidate_runtime_current_area_sqm=72.95,
+            candidate_runtime_total_area_sqm=531.0,
+            candidate_runtime_region_id=1,
+            candidate_runtime_track_segments=(),
+            notes=(),
+        ),
+    )
+
+    assert entity.available is True
+    assert entity.native_value == 13.7
+    assert entity.extra_state_attributes["mowed_area"] == 72.95
+    assert entity.extra_state_attributes["cleaned_area"] == 72.95
+    assert entity.extra_state_attributes["current_zone"] == "Zone 1"
 
 
 def test_runtime_mission_sensors_preserve_last_session_after_docking() -> None:
