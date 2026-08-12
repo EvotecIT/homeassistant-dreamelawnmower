@@ -76,6 +76,19 @@ def build_coordinator_diagnostics(coordinator: object) -> dict[str, Any]:
     last_exception = getattr(coordinator, "last_exception", None)
     performance = getattr(coordinator, "performance", None)
     last_map_probe = getattr(coordinator, "last_map_probe_result", None)
+    video_diagnostics_provider = getattr(
+        coordinator,
+        "video_diagnostics_provider",
+        None,
+    )
+    video_diagnostics = None
+    if callable(video_diagnostics_provider):
+        try:
+            video_diagnostics = video_diagnostics_provider()
+        except Exception as err:  # noqa: BLE001 - diagnostics must remain downloadable.
+            video_diagnostics = {
+                "collection_error": sanitize_diagnostic_text(err),
+            }
     return {
         "last_update_success": getattr(coordinator, "last_update_success", None),
         "last_exception_type": (
@@ -96,6 +109,7 @@ def build_coordinator_diagnostics(coordinator: object) -> dict[str, Any]:
         ),
         "maintenance_points": build_maintenance_point_diagnostics(coordinator),
         "work_log_totals": _work_log_totals_diagnostics(coordinator),
+        "video_runtime": sanitize_debug_data(video_diagnostics),
         "last_maintenance_point_probe": (
             dict(last_map_probe) if isinstance(last_map_probe, Mapping) else None
         ),

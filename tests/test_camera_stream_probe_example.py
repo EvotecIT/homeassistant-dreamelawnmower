@@ -104,6 +104,37 @@ def test_ha_playback_probe_starts_snapshot_consumer_with_hls() -> None:
     assert image == b"jpeg"
 
 
+def test_ha_playback_probe_reads_volatile_state_from_diagnostics() -> None:
+    module = _load_ha_playback_probe_module()
+    camera = SimpleNamespace(
+        extra_state_attributes={
+            "video_runtime_mode": "managed",
+            "video_transport_policy": "auto",
+            "video_block_reason": None,
+        },
+        video_runtime_diagnostics=lambda: {
+            "lan_video_identity_cached": True,
+            "lan_video_endpoint_cached": True,
+            "xp2p_provisioning_cached": True,
+            "video_runtime_preparation_error": None,
+            "last_stream_session": {"transport": "lan"},
+            "last_stream_error": None,
+        },
+    )
+
+    diagnostics = module._video_runtime_diagnostics(camera)
+
+    assert diagnostics == {
+        "lan_video_identity_cached": True,
+        "lan_video_endpoint_cached": True,
+        "xp2p_provisioning_cached": True,
+        "video_runtime_preparation_error": None,
+        "last_stream_session": {"transport": "lan"},
+        "last_stream_error": None,
+    }
+    assert "lan_video_identity_cached" not in camera.extra_state_attributes
+
+
 def test_probe_help_uses_standalone_client_package(tmp_path) -> None:
     (tmp_path / "sitecustomize.py").write_text(
         "\n".join(

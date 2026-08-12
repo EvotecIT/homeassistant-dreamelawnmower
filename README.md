@@ -246,11 +246,13 @@ lets Tencent negotiate the available network route. The explicit cloud policy
 always refreshes Dreame/Tencent inputs first. `Auto` also probes Tencent's
 separate same-LAN service when mower firmware advertises one.
 The tested A2 production firmware does not advertise that service, so the
-integration does not offer a LAN-only policy. The camera's
-`last_stream_session` attribute reports `stream_route` as `direct` only when
-the separate LAN service was selected; otherwise it stays `unknown`. Tencent's
-misleadingly named `getStreamLinkMode` API returns a network/NAT-type bitmask,
-exposed as `sdk_stream_network_type`, rather than a direct-versus-relay result.
+integration does not offer a LAN-only policy. Downloaded integration
+diagnostics report `coordinator.video_runtime.last_stream_session.stream_route`
+as `direct` only when the separate LAN service was selected; otherwise it stays
+`unknown`. This runtime detail is excluded from camera state and Recorder
+history. Tencent's misleadingly named `getStreamLinkMode` API returns a
+network/NAT-type bitmask, exposed as `sdk_stream_network_type`, rather than a
+direct-versus-relay result.
 
 After valid FLV media reaches the relay, `Auto` privately caches the minimum
 XP2P identity, P2P material, QCloud/app credentials, and resolved device
