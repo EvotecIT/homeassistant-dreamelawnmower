@@ -129,12 +129,8 @@ def test_client_module_preserves_camera_exports() -> None:
 def test_public_package_exports_map_helpers() -> None:
     assert DreameLawnMowerMapSummary is MapSummaryFromModule
     assert DreameLawnMowerMapView is MapViewFromModule
-    assert DreameLawnMowerCameraFeatureSupport.__name__.endswith(
-        "CameraFeatureSupport"
-    )
-    assert DreameLawnMowerRemoteControlSupport.__name__.endswith(
-        "RemoteControlSupport"
-    )
+    assert DreameLawnMowerCameraFeatureSupport.__name__.endswith("CameraFeatureSupport")
+    assert DreameLawnMowerRemoteControlSupport.__name__.endswith("RemoteControlSupport")
     assert DreameLawnMowerFirmwareUpdateSupport.__name__.endswith(
         "FirmwareUpdateSupport"
     )
@@ -165,10 +161,7 @@ def test_public_package_exports_map_helpers() -> None:
     assert callable(remote_control_block_reason)
     assert callable(remote_control_state_safe)
     assert callable(classify_xp2p_provisioning_issue)
-    assert (
-        XP2P_PROVISIONING_DEVICE_TRIPLE_MISSING
-        == "device_triple_missing"
-    )
+    assert XP2P_PROVISIONING_DEVICE_TRIPLE_MISSING == "device_triple_missing"
     assert callable(key_definition_label)
     assert callable(analyze_decompiled_sources)
     assert callable(analyze_dreamehome_assets)
@@ -286,8 +279,10 @@ def test_public_package_exports_app_protocol_helpers() -> None:
     assert MOWER_PROPERTY_HINTS["1.53"] == "bluetooth_connected"
     assert MOWER_PROPERTY_HINTS["2.50"] == "task_status"
     assert MOWER_PROPERTY_HINTS["2.51"] == "device_time"
+    assert MOWER_PROPERTY_HINTS["2.52"] == "mowing_preferences"
     assert MOWER_PROPERTY_HINTS["3.1"] == "battery_level"
     assert mower_property_hint("2.51") == "device_time"
+    assert mower_property_hint("2.52") == "mowing_preferences"
     assert mower_property_hint("9.4") is None
     assert mower_realtime_property_name("2.51", "UNKNOWN_REALTIME_2.51") == (
         "device_time"

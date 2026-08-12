@@ -6,7 +6,7 @@ from datetime import time
 
 from homeassistant.components.time import TimeEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -27,12 +27,28 @@ async def async_setup_entry(
 ) -> None:
     """Set up charging-period time entities."""
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        [
-            DreameLawnMowerChargingPeriodStartTime(coordinator),
-            DreameLawnMowerChargingPeriodEndTime(coordinator),
-        ]
-    )
+    entities_added = False
+
+    @callback
+    def async_add_supported_entities() -> None:
+        nonlocal entities_added
+        settings = device_settings_section(coordinator.device_settings)
+        if (
+            entities_added
+            or settings is None
+            or not settings.get("charging_settings_available")
+        ):
+            return
+        entities_added = True
+        async_add_entities(
+            [
+                DreameLawnMowerChargingPeriodStartTime(coordinator),
+                DreameLawnMowerChargingPeriodEndTime(coordinator),
+            ]
+        )
+
+    async_add_supported_entities()
+    entry.async_on_unload(coordinator.async_add_listener(async_add_supported_entities))
 
 
 class DreameLawnMowerChargingPeriodTime(DreameLawnMowerEntity, TimeEntity):

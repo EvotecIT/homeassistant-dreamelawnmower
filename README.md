@@ -28,7 +28,7 @@ schedules, or build automations around live mower state.
 | Maps and targeted mowing | View the active map and live cut path, switch maps, and start all-area, zone, spot, or edge runs |
 | Schedules | Read mower-native schedules through a calendar, use per-plan switches, and make guarded enable/disable changes |
 | Mowing preferences | Control supported map-wide or per-zone cutting height, mowing efficiency, edge behavior, and obstacle avoidance |
-| Monitoring | Track battery, charging, mower state, active and resumable tasks, progress, errors, maintenance, firmware, and rain protection |
+| Monitoring and protection | Track battery, charging, mower state, active and resumable tasks, progress, errors, maintenance, firmware, rain protection, and reported anti-theft settings |
 | Cameras and 3D | Use the map camera, optional live video on supported Linux hosts, and authenticated 3D point-cloud downloads where validated |
 | Home Assistant automation | Build automations from normal entities and use guarded services for map, schedule, preference, and supervised remote-control workflows |
 
@@ -135,9 +135,10 @@ operations behind clear boundaries:
   mower families still need reports.
 - Map rendering and map selection are supported, but editing no-go areas,
   virtual walls, and garden geometry is not.
-- Charging-period and rain-protection controls are field-validated on the
-  Dreame A2. Other models expose them only when their native `CFG` record
-  reports the matching setting.
+- Charging-period, rain-protection, and three-field anti-theft controls are
+  field-validated on the Dreame A2. Other models expose each group only when
+  their native `CFG` record reports the matching setting. PIN check before
+  power-off appears only on mowers that report the fourth anti-theft field.
 - Mowing-preference writes use guarded paths and have the strongest live proof
   on the A2. Other models and firmware need broader confirmation.
 - Firmware updates use the app-approved target and confirmation flow. Release
@@ -435,20 +436,28 @@ can use them when explicitly configured; automatic discovery support is tracked
 in the card project. The guarded service remains available when you need to
 inspect the complete candidate preference payload before sending it.
 
-## Charging And Rain Protection
+## Charging, Rain, And Anti-Theft Settings
 
-Models that report the mower-native `BAT` and `WRP` settings expose normal
-Home Assistant configuration entities. The charging-period switch keeps the
-configured start and end times; its two time entities can define a window that
-crosses midnight. Rain protection has a switch and a whole-hour delay select.
-The zero-hour delay means the mower stays docked until it is manually started.
+Models that report the mower-native `BAT`, `WRP`, and `ATA` records expose only
+the matching Home Assistant configuration entities. The charging-period switch
+keeps the configured start and end times; its two time entities can define a
+window that crosses midnight. Rain protection has a switch and a whole-hour
+delay select. The zero-hour delay means the mower stays docked until it is
+manually started.
+
+Anti-theft settings use ordinary switches for Lift Alarm, Off-Map Alarm, and
+Real-Time Location. PIN Check Before Power-Off is optional: Home Assistant adds
+it only when the mower reports that fourth field. Unknown future fields in the
+same record are preserved during updates.
 
 Every setting change first reads the current `CFG` record, writes only the
 setting-specific payload, and reads `CFG` again. Home Assistant updates only
 after the mower reports the requested value. Battery thresholds and rain-sensor
-sensitivity are preserved. The mower's `2:51` settings-change announcement also
-causes one coalesced refresh, so changes made in the Dreame app appear without
-waiting for the normal metadata interval.
+sensitivity and untouched anti-theft flags are preserved. The mower's `2:51`
+settings-change announcement causes one coalesced `CFG` refresh. Its separate
+`2:52` preference announcement refreshes only mowing preferences. Changes made
+in the Dreamehome or MOVAhome app therefore appear without waiting for the
+normal metadata interval.
 
 ## Maps
 

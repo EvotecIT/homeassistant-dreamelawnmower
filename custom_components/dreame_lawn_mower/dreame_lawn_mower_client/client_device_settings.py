@@ -9,6 +9,7 @@ from typing import Any
 from .client_settings_helpers import _weather_protection_active_summary
 from .client_shared_helpers import _app_action_data, _ensure_app_write_succeeded
 from .device_settings import (
+    build_anti_theft_settings_request,
     build_charging_period_request,
     build_rain_protection_request,
     decode_device_settings,
@@ -32,7 +33,7 @@ class _DreameLawnMowerClientDeviceSettingsMixin:
         result: dict[str, Any] = {
             "source": "app_action_device_settings",
             "available": False,
-            "config_keys": ["BAT", "WRF", "WRP"],
+            "config_keys": ["ATA", "BAT", "WRF", "WRP"],
             "fault_hint": "INFO_BAD_WEATHER_PROTECTING",
             "rain_end_time_command": "RPET",
             "errors": [],
@@ -210,6 +211,37 @@ class _DreameLawnMowerClientDeviceSettingsMixin:
             )
         return refreshed
 
+    def _sync_set_anti_theft_settings(
+        self,
+        *,
+        lift_alarm_enabled: bool | None = None,
+        off_map_alarm_enabled: bool | None = None,
+        real_time_location_enabled: bool | None = None,
+        pin_check_before_power_off_enabled: bool | None = None,
+    ) -> dict[str, Any]:
+        """Update ATA flags and require an exact CFG readback."""
+        current = self._sync_get_device_settings(include_rain_end_time=False)
+        if not current.get("anti_theft_settings_available"):
+            raise DreameLawnMowerConnectionError(
+                "The mower did not report anti-theft settings."
+            )
+        request = build_anti_theft_settings_request(
+            current["anti_theft_settings_raw"],
+            lift_alarm_enabled=lift_alarm_enabled,
+            off_map_alarm_enabled=off_map_alarm_enabled,
+            real_time_location_enabled=real_time_location_enabled,
+            pin_check_before_power_off_enabled=pin_check_before_power_off_enabled,
+        )
+        response = self._sync_call_app_action(request)
+        _ensure_app_write_succeeded(response, operation="Anti-theft settings update")
+        refreshed = self._sync_get_device_settings(include_rain_end_time=False)
+        if refreshed.get("anti_theft_settings_raw") != request["d"]["value"]:
+            raise DreameLawnMowerCommandRejectedError(
+                "The mower acknowledged the anti-theft update but CFG did not "
+                "confirm the requested values."
+            )
+        return refreshed
+
     async def async_get_device_settings(
         self,
         *,
@@ -252,4 +284,21 @@ class _DreameLawnMowerClientDeviceSettingsMixin:
             self._sync_set_rain_protection,
             enabled=enabled,
             delay_hours=delay_hours,
+        )
+
+    async def async_set_anti_theft_settings(
+        self,
+        *,
+        lift_alarm_enabled: bool | None = None,
+        off_map_alarm_enabled: bool | None = None,
+        real_time_location_enabled: bool | None = None,
+        pin_check_before_power_off_enabled: bool | None = None,
+    ) -> dict[str, Any]:
+        """Set and confirm the mower-native anti-theft flags."""
+        return await asyncio.to_thread(
+            self._sync_set_anti_theft_settings,
+            lift_alarm_enabled=lift_alarm_enabled,
+            off_map_alarm_enabled=off_map_alarm_enabled,
+            real_time_location_enabled=real_time_location_enabled,
+            pin_check_before_power_off_enabled=pin_check_before_power_off_enabled,
         )

@@ -49,6 +49,29 @@ VOICE_PROMPT_SWITCHES = (
     ),
 )
 
+ANTI_THEFT_SWITCHES = (
+    (
+        "lift_alarm_enabled",
+        "Lift Alarm",
+        "mdi:alarm-light-outline",
+    ),
+    (
+        "off_map_alarm_enabled",
+        "Off-Map Alarm",
+        "mdi:map-marker-alert-outline",
+    ),
+    (
+        "real_time_location_enabled",
+        "Real-Time Location",
+        "mdi:crosshairs-gps",
+    ),
+    (
+        "pin_check_before_power_off_enabled",
+        "PIN Check Before Power-Off",
+        "mdi:shield-key-outline",
+    ),
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -60,14 +83,6 @@ async def async_setup_entry(
     async_add_entities(
         [
             *(
-                DreameLawnMowerPreferenceSwitch(coordinator, description)
-                for description in PREFERENCE_SWITCHES
-            ),
-            *(
-                DreameLawnMowerPreferenceAiClassSwitch(coordinator, description)
-                for description in AI_CLASS_SWITCHES
-            ),
-            *(
                 DreameLawnMowerVoicePromptSwitch(
                     coordinator,
                     key=key,
@@ -77,11 +92,11 @@ async def async_setup_entry(
                 )
                 for key, name, index, icon in VOICE_PROMPT_SWITCHES
             ),
-            DreameLawnMowerChargingPeriodSwitch(coordinator),
-            DreameLawnMowerRainProtectionSwitch(coordinator),
         ]
     )
     known_schedule_plans: set[tuple[int, int]] = set()
+    known_setting_switches: set[str] = set()
+    known_preference_switches: set[str] = set()
 
     @callback
     def async_add_schedule_switches() -> None:
@@ -101,8 +116,76 @@ async def async_setup_entry(
         if new_entities:
             async_add_entities(new_entities)
 
+    @callback
+    def async_add_setting_switches() -> None:
+        settings = device_settings_section(coordinator.device_settings)
+        if settings is None:
+            return
+        new_entities: list[SwitchEntity] = []
+        if (
+            settings.get("charging_settings_available")
+            and "charging_period" not in known_setting_switches
+        ):
+            known_setting_switches.add("charging_period")
+            new_entities.append(DreameLawnMowerChargingPeriodSwitch(coordinator))
+        if (
+            settings.get("rain_settings_available")
+            and "rain_protection" not in known_setting_switches
+        ):
+            known_setting_switches.add("rain_protection")
+            new_entities.append(DreameLawnMowerRainProtectionSwitch(coordinator))
+        supported = settings.get("anti_theft_supported_settings")
+        supported_keys = set(supported) if isinstance(supported, list) else set()
+        for key, name, icon in ANTI_THEFT_SWITCHES:
+            if key not in supported_keys or key in known_setting_switches:
+                continue
+            known_setting_switches.add(key)
+            new_entities.append(
+                DreameLawnMowerAntiTheftSwitch(
+                    coordinator,
+                    key=key,
+                    name=name,
+                    icon=icon,
+                )
+            )
+        if new_entities:
+            async_add_entities(new_entities)
+
+    @callback
+    def async_add_preference_switches() -> None:
+        supported_keys = reported_preference_switch_keys(coordinator.batch_device_data)
+        new_entities: list[SwitchEntity] = []
+        for description in PREFERENCE_SWITCHES:
+            if (
+                description.key not in supported_keys
+                or description.key in known_preference_switches
+            ):
+                continue
+            known_preference_switches.add(description.key)
+            new_entities.append(
+                DreameLawnMowerPreferenceSwitch(coordinator, description)
+            )
+        if "obstacle_avoidance_ai" in supported_keys:
+            for description in AI_CLASS_SWITCHES:
+                unique_key = f"obstacle_avoidance_ai:{description.key}"
+                if unique_key in known_preference_switches:
+                    continue
+                known_preference_switches.add(unique_key)
+                new_entities.append(
+                    DreameLawnMowerPreferenceAiClassSwitch(
+                        coordinator,
+                        description,
+                    )
+                )
+        if new_entities:
+            async_add_entities(new_entities)
+
     async_add_schedule_switches()
+    async_add_setting_switches()
+    async_add_preference_switches()
     entry.async_on_unload(coordinator.async_add_listener(async_add_schedule_switches))
+    entry.async_on_unload(coordinator.async_add_listener(async_add_setting_switches))
+    entry.async_on_unload(coordinator.async_add_listener(async_add_preference_switches))
 
 
 class DreameLawnMowerVoicePromptSwitch(DreameLawnMowerEntity, SwitchEntity):
@@ -230,6 +313,57 @@ class DreameLawnMowerRainProtectionSwitch(DreameLawnMowerEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self.coordinator.async_set_rain_protection(enabled=False)
+
+
+class DreameLawnMowerAntiTheftSwitch(DreameLawnMowerEntity, SwitchEntity):
+    """Expose one anti-theft flag explicitly reported by the mower."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(
+        self,
+        coordinator: DreameLawnMowerCoordinator,
+        *,
+        key: str,
+        name: str,
+        icon: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._setting_key = key
+        self._attr_name = name
+        self._attr_icon = icon
+        self._attr_unique_id = f"{self._descriptor.unique_id}_{key}"
+
+    @property
+    def available(self) -> bool:
+        """Return whether this exact ATA field remains reported."""
+        settings = device_settings_section(self.coordinator.device_settings)
+        supported = settings.get("anti_theft_supported_settings") if settings else None
+        return bool(
+            self.coordinator.data is not None
+            and isinstance(supported, list)
+            and self._setting_key in supported
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return the confirmed cached ATA value."""
+        settings = device_settings_section(self.coordinator.device_settings)
+        value = settings.get(self._setting_key) if settings else None
+        return value if isinstance(value, bool) else None
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable this anti-theft setting."""
+        await self._async_set_state(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disable this anti-theft setting."""
+        await self._async_set_state(False)
+
+    async def _async_set_state(self, enabled: bool) -> None:
+        await self.coordinator.async_set_anti_theft_settings(
+            **{self._setting_key: enabled}
+        )
 
 
 class DreameLawnMowerSchedulePlanSwitch(DreameLawnMowerEntity, SwitchEntity):
@@ -360,6 +494,35 @@ def schedule_plan_entries(value: Mapping[str, Any] | None) -> list[dict[str, Any
                     "task_count": task_count,
                 }
             )
+    return result
+
+
+def reported_preference_switch_keys(
+    value: Mapping[str, Any] | None,
+) -> set[str]:
+    """Return boolean preference fields actually reported by at least one map."""
+    preferences = (
+        value.get("batch_mowing_preferences") if isinstance(value, Mapping) else None
+    )
+    maps = preferences.get("maps") if isinstance(preferences, Mapping) else None
+    result: set[str] = set()
+    if not isinstance(maps, list):
+        return result
+    switch_keys = {description.key for description in PREFERENCE_SWITCHES}
+    for map_entry in maps:
+        entries = (
+            map_entry.get("preferences") if isinstance(map_entry, Mapping) else None
+        )
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, Mapping):
+                continue
+            result.update(
+                key for key in switch_keys if isinstance(entry.get(key), bool)
+            )
+            if isinstance(entry.get("obstacle_avoidance_ai"), int):
+                result.add("obstacle_avoidance_ai")
     return result
 
 

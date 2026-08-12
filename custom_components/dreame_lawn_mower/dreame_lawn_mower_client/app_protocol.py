@@ -8,6 +8,7 @@ from typing import Final
 
 from .device_code_semantics import mower_device_code_name
 from .models import DreameLawnMowerStatusBlob
+from .mowing_preferences import MOWING_PREFERENCE_PROPERTY_KEY
 
 MOWER_RAW_STATUS_PROPERTY_KEY: Final[str] = "1.1"
 MOWER_RUNTIME_STATUS_PROPERTY_KEY: Final[str] = "1.4"
@@ -25,6 +26,7 @@ MOWER_PROPERTY_HINTS: Final[dict[str, str]] = {
     MOWER_ERROR_PROPERTY_KEY: "mower_error",
     MOWER_TASK_PROPERTY_KEY: "task_status",
     MOWER_TIME_PROPERTY_KEY: "device_time",
+    MOWING_PREFERENCE_PROPERTY_KEY: "mowing_preferences",
     MOWER_BATTERY_PROPERTY_KEY: "battery_level",
 }
 MOWER_STATE_LABELS: Final[dict[str, dict[str, str]]] = {
@@ -277,9 +279,7 @@ def decode_mower_status_blob(
         candidate_runtime_area_progress_percent=runtime_telemetry.get(
             "area_progress_percent"
         ),
-        candidate_runtime_current_area_sqm=runtime_telemetry.get(
-            "current_area_sqm"
-        ),
+        candidate_runtime_current_area_sqm=runtime_telemetry.get("current_area_sqm"),
         candidate_runtime_total_area_sqm=runtime_telemetry.get("total_area_sqm"),
         candidate_runtime_pose_x=runtime_telemetry.get("pose_x"),
         candidate_runtime_pose_y=runtime_telemetry.get("pose_y"),
@@ -309,9 +309,7 @@ _HEARTBEAT_TASK_STATUSES = {
     6: "exit",
     7: "returning_to_dock",
 }
-_INACTIVE_HEARTBEAT_TASK_STATUSES = frozenset(
-    {"idle", "finished", "failed", "exit"}
-)
+_INACTIVE_HEARTBEAT_TASK_STATUSES = frozenset({"idle", "finished", "failed", "exit"})
 
 
 def _decode_heartbeat_task_state(

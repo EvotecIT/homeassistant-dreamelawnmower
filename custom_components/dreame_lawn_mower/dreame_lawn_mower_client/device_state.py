@@ -148,6 +148,7 @@ from .exceptions import (
 from .protocol import DreameMowerProtocol
 from .map_manager import DreameMapMowerMapManager
 from .map_decoder import DreameMowerMapDecoder
+from .mowing_preferences import MOWING_PREFERENCE_PROPERTY_KEY
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -156,6 +157,12 @@ _EXTERNAL_REALTIME_UPDATE_KEYS = frozenset(
         MOWER_RUNTIME_STATUS_PROPERTY_KEY,
         MOWER_BLUETOOTH_PROPERTY_KEY,
         MOWER_TIME_PROPERTY_KEY,
+    }
+)
+_EXTERNAL_REALTIME_ANNOUNCEMENT_KEYS = frozenset(
+    {
+        MOWER_TIME_PROPERTY_KEY,
+        MOWING_PREFERENCE_PROPERTY_KEY,
     }
 )
 
@@ -448,7 +455,9 @@ class _DreameMowerDeviceStateMixin:
                 else time.time()
             ),
         }
-        return key in _EXTERNAL_REALTIME_UPDATE_KEYS and previous_value != value
+        return key in _EXTERNAL_REALTIME_ANNOUNCEMENT_KEYS or (
+            key in _EXTERNAL_REALTIME_UPDATE_KEYS and previous_value != value
+        )
 
     def _request_properties(self, properties: list[DreameMowerProperty] = None) -> bool:
         """Request properties from the device."""

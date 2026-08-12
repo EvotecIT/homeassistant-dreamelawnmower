@@ -170,12 +170,9 @@ def test_message_callback_tracks_realtime_properties_and_unmapped_pairs() -> Non
     assert device.realtime_properties["9.4"]["value"] == {"blob": 123}
     assert device.last_realtime_message is not None
     assert device.last_realtime_message["message"]["method"] == "properties_changed"
-    assert len(
-        {
-            entry["last_seen"]
-            for entry in device.realtime_properties.values()
-        }
-    ) == 1
+    assert (
+        len({entry["last_seen"] for entry in device.realtime_properties.values()}) == 1
+    )
 
 
 @pytest.mark.parametrize("piid", [4, 53])
@@ -207,6 +204,21 @@ def test_message_callback_publishes_external_realtime_property_changes(
     )
 
     assert updates == ["changed", "changed"]
+
+
+@pytest.mark.parametrize("piid", [51, 52])
+def test_message_callback_publishes_each_settings_announcement(piid: int) -> None:
+    device, updates = _device_stub()
+    message = {
+        "method": "properties_changed",
+        "params": [{"siid": 2, "piid": piid, "value": {}}],
+    }
+
+    DreameMowerDevice._message_callback(device, message)
+    DreameMowerDevice._message_callback(device, message)
+
+    assert updates == ["changed", "changed"]
+    assert device.realtime_properties[f"2.{piid}"]["value"] == {}
 
 
 def test_message_callback_does_not_publish_raw_heartbeat_as_pose() -> None:
