@@ -1022,6 +1022,57 @@ def test_download_point_cloud_rejects_unchanged_signable_stable_announcement(
     assert captured.value.code == "point_cloud_not_published"
 
 
+def test_download_point_cloud_keeps_failed_signable_baseline_inconclusive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    responses = iter(
+        [
+            {"r": 0},
+            {"r": 0, "d": {"name": ["private/stable-map.bin"]}},
+        ]
+    )
+    client._sync_call_app_action = lambda payload, **kwargs: next(responses)
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {
+                "key": key,
+                "value": "private/stable-map.bin",
+                "updateDate": 1,
+            }
+        ],
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    download_attempts = 0
+
+    def open_response(
+        request: Any,
+        *,
+        timeout: float,
+        deadline: float,
+    ) -> _FakeResponse:
+        nonlocal download_attempts
+        download_attempts += 1
+        if download_attempts == 1:
+            raise urllib.error.URLError("transient baseline failure")
+        return _FakeResponse(content, request.full_url)
+
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        open_response,
+    )
+
+    with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+        client._sync_download_app_map_point_cloud(0, 0.05, 0.001, 10, 1024)
+
+    assert captured.value.code == "point_cloud_not_published"
+    assert download_attempts >= 2
+
+
 def test_download_point_cloud_retries_stable_announcement_index_verification(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
