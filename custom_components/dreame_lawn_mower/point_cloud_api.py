@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
@@ -100,6 +101,15 @@ class _CacheEntry:
 
 
 @dataclass(frozen=True, slots=True)
+class _FailureEntry:
+    """Remember one retryable failure for its advertised backoff window."""
+
+    created_at: float
+    epoch: int
+    error: DreameLawnMowerPointCloudError
+
+
+@dataclass(frozen=True, slots=True)
 class _InflightGeneration:
     """Track one generation and the config-entry lifetime that started it."""
 
@@ -125,6 +135,7 @@ class DreameLawnMowerPointCloudAPI:
         self._cache_expiry_handles: dict[
             tuple[str, int], asyncio.TimerHandle
         ] = {}
+        self._failures: OrderedDict[str, _FailureEntry] = OrderedDict()
         self._inflight: dict[tuple[str, int], _InflightGeneration] = {}
         self._entry_epochs: dict[str, int] = {}
 
@@ -144,6 +155,10 @@ class DreameLawnMowerPointCloudAPI:
             return cached.download
 
         epoch = self._entry_epochs.get(entry_id, 0)
+        failed = self._fresh_failure_error(key, requested_at, epoch=epoch)
+        if failed is not None:
+            raise failed
+
         inflight = self._inflight.get(key)
         if inflight is not None:
             if inflight.epoch == epoch:
@@ -264,6 +279,7 @@ class DreameLawnMowerPointCloudAPI:
         """Discard private cache state for one unloaded entry."""
         for key in [key for key in self._cache if key[0] == entry_id]:
             self._remove_cache_entry(key)
+        self._failures.pop(entry_id, None)
         self._entry_epochs[entry_id] = self._entry_epochs.get(entry_id, 0) + 1
 
     async def _async_generate(
@@ -329,6 +345,7 @@ class DreameLawnMowerPointCloudAPI:
                 map_index=key[1],
                 allow_stored=allow_stored,
             )
+            self._remember_failure(key, epoch, err)
             raise
         except Exception as err:
             public_error = DreameLawnMowerPointCloudError(
@@ -351,6 +368,7 @@ class DreameLawnMowerPointCloudAPI:
                 allow_stored=allow_stored,
                 unexpected_error=err,
             )
+            self._remember_failure(key, epoch, public_error)
             raise public_error from err
         else:
             if cycle is not None:
@@ -369,6 +387,7 @@ class DreameLawnMowerPointCloudAPI:
             )
 
         created_at = time.monotonic()
+        self._failures.pop(key[0], None)
         self._remove_cache_entry(key)
         self._cache[key] = _CacheEntry(
             created_at=created_at,
@@ -521,6 +540,54 @@ class DreameLawnMowerPointCloudAPI:
         self._cache.move_to_end(key)
         return cached
 
+    def _fresh_failure_error(
+        self,
+        key: tuple[str, int],
+        now: float,
+        *,
+        epoch: int,
+    ) -> DreameLawnMowerPointCloudError | None:
+        """Return a failure with the remaining safe backoff when still active."""
+        entry_id = key[0]
+        failed = self._failures.get(entry_id)
+        if failed is None:
+            return None
+        retry_after = failed.error.retry_after_seconds or 0
+        elapsed = now - failed.created_at
+        if failed.epoch != epoch or elapsed >= retry_after:
+            self._failures.pop(entry_id, None)
+            return None
+        self._failures.move_to_end(entry_id)
+        return _copy_point_cloud_error(
+            failed.error,
+            retry_after_seconds=max(1, math.ceil(retry_after - elapsed)),
+        )
+
+    @callback
+    def _remember_failure(
+        self,
+        key: tuple[str, int],
+        epoch: int,
+        error: DreameLawnMowerPointCloudError,
+    ) -> None:
+        """Throttle retries without retaining private exception details."""
+        retry_after = error.retry_after_seconds or 0
+        if (
+            not error.retryable
+            or retry_after <= 0
+            or self._entry_epochs.get(key[0], 0) != epoch
+        ):
+            return
+        entry_id = key[0]
+        self._failures[entry_id] = _FailureEntry(
+            created_at=time.monotonic(),
+            epoch=epoch,
+            error=_copy_point_cloud_error(error),
+        )
+        self._failures.move_to_end(entry_id)
+        while len(self._failures) > self._cache_max_entries:
+            self._failures.popitem(last=False)
+
     @callback
     def _expire_cache_entry(
         self,
@@ -539,6 +606,28 @@ class DreameLawnMowerPointCloudAPI:
         handle = self._cache_expiry_handles.pop(key, None)
         if handle is not None:
             handle.cancel()
+
+
+def _copy_point_cloud_error(
+    error: DreameLawnMowerPointCloudError,
+    *,
+    retry_after_seconds: int | None = None,
+) -> DreameLawnMowerPointCloudError:
+    """Copy public failure metadata without retaining private exception text."""
+    return DreameLawnMowerPointCloudError(
+        "A recent point-cloud generation attempt failed.",
+        code=error.code,
+        stage=error.stage,
+        retryable=error.retryable,
+        public_message=error.public_message,
+        timeout_seconds=error.timeout_seconds,
+        retry_after_seconds=(
+            error.retry_after_seconds
+            if retry_after_seconds is None
+            else retry_after_seconds
+        ),
+        vendor_error_code=error.vendor_error_code,
+    )
 
 
 def _stored_point_cloud_active_map_index(

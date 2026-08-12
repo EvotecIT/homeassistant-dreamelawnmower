@@ -94,6 +94,23 @@ def _client() -> DreameLawnMowerClient:
     )
 
 
+def _point_cloud_protocol() -> Any:
+    protocol_type = _internal_protocol_module.DreameMowerDreameHomeCloudProtocol
+    cloud = protocol_type(
+        "user@example.invalid",
+        "secret",
+        country="eu",
+        did="device-1",
+    )
+    cloud._strings = [f"value-{index}" for index in range(57)]
+    cloud._host = "host.example.invalid"
+    cloud._model = "dreame.mower.g2408"
+    cloud._ti = "ti"
+    cloud._key = "key"
+    cloud._connected = True
+    return cloud
+
+
 def _mova_client() -> DreameLawnMowerClient:
     return DreameLawnMowerClient(
         username="user@example.invalid",
@@ -418,7 +435,10 @@ def test_download_point_cloud_uses_action_dispatch_as_freshness_boundary(
     result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
 
     assert actions == [{"m": "a", "p": 0, "o": 10, "d": {"idx": 0}}]
-    assert signed_names == ["private/generated-map.bin"]
+    assert signed_names == [
+        "private/baseline-map.bin",
+        "private/generated-map.bin",
+    ]
     assert result.source == "generated"
 
 
@@ -694,7 +714,7 @@ def test_download_point_cloud_regenerates_when_stored_object_is_invalid(
         return next(responses)
 
     now_ms = int(time.time() * 1000)
-    update_dates = iter([now_ms - 1_000, now_ms - 1_000, now_ms + 1_000])
+    update_dates = iter([now_ms - 1_000, now_ms + 1_000])
 
     def get_properties(key: str, **options: Any) -> list[dict[str, Any]]:
         updated_at = next(update_dates)
@@ -719,7 +739,14 @@ def test_download_point_cloud_regenerates_when_stored_object_is_invalid(
     client._sync_call_app_action = call_app_action
     client._sync_get_cloud_protocol = lambda **kwargs: cloud
     fresh_content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
-    downloads = iter([b"not a pcd", b"still not a pcd", fresh_content])
+    downloads = iter(
+        [
+            b"not a pcd",
+            b"still not a pcd",
+            b"pre-generation object",
+            fresh_content,
+        ]
+    )
     monkeypatch.setattr(
         _internal_client_module,
         "_open_point_cloud_response",
@@ -842,8 +869,27 @@ def test_download_point_cloud_does_not_fallback_from_stale_announcement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _client()
+    client._sync_update_app_map_inventory_identity(
+        [
+            {
+                "idx": 0,
+                "current": True,
+                "created": True,
+                "info": {"hash": "map-hash-1", "size": 123},
+            }
+        ]
+    )
+    client._latest_app_map_object_names = ("private/stale-map.bin",)
+    client._latest_app_map_object_inventory_identity = (
+        client._latest_app_map_inventory_identity
+    )
     calls: list[dict[str, Any]] = []
-    responses = iter([{"r": 0}])
+    responses = iter(
+        [
+            {"r": 0},
+            {"r": 0, "d": {"name": ["private/other-map.bin"]}},
+        ]
+    )
 
     def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         calls.append(payload)
@@ -863,6 +909,15 @@ def test_download_point_cloud_does_not_fallback_from_stale_announcement(
     )
     client._sync_call_app_action = call_app_action
     client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
     with pytest.raises(DreameLawnMowerPointCloudError):
         client._sync_download_app_map_point_cloud(
             0,
@@ -874,7 +929,205 @@ def test_download_point_cloud_does_not_fallback_from_stale_announcement(
 
     assert calls == [
         {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
     ]
+
+
+def test_download_point_cloud_accepts_indexed_stable_announcement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    calls: list[dict[str, Any]] = []
+    responses = iter(
+        [
+            {"r": 0},
+            {"r": 0, "d": {"name": ["private/stable-map.bin"]}},
+        ]
+    )
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        calls.append(payload)
+        return next(responses)
+
+    signed_urls = iter([None, "https://downloads.example.invalid/object"])
+    cloud = SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {
+                "key": key,
+                "value": "private/stable-map.bin",
+                "updateDate": 1,
+            }
+        ],
+        get_interim_file_url=lambda name, **options: next(signed_urls),
+    )
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert calls == [
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+    ]
+    assert result.source == "generated"
+    assert result.content == content
+
+
+def test_download_point_cloud_rejects_unchanged_signable_stable_announcement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    responses = iter(
+        [
+            {"r": 0},
+            {"r": 0, "d": {"name": ["private/stable-map.bin"]}},
+        ]
+    )
+    client._sync_call_app_action = lambda payload, **kwargs: next(responses)
+    cloud = SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {
+                "key": key,
+                "value": "private/stable-map.bin",
+                "updateDate": 1,
+            }
+        ],
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+        client._sync_download_app_map_point_cloud(0, 0.05, 0.001, 10, 1024)
+
+    assert captured.value.code == "point_cloud_not_published"
+
+
+def test_download_point_cloud_keeps_failed_signable_baseline_inconclusive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    responses = iter(
+        [
+            {"r": 0},
+            {"r": 0, "d": {"name": ["private/stable-map.bin"]}},
+        ]
+    )
+    client._sync_call_app_action = lambda payload, **kwargs: next(responses)
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {
+                "key": key,
+                "value": "private/stable-map.bin",
+                "updateDate": 1,
+            }
+        ],
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    download_attempts = 0
+
+    def open_response(
+        request: Any,
+        *,
+        timeout: float,
+        deadline: float,
+    ) -> _FakeResponse:
+        nonlocal download_attempts
+        download_attempts += 1
+        if download_attempts == 1:
+            raise urllib.error.URLError("transient baseline failure")
+        return _FakeResponse(content, request.full_url)
+
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        open_response,
+    )
+
+    with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+        client._sync_download_app_map_point_cloud(0, 0.05, 0.001, 10, 1024)
+
+    assert captured.value.code == "point_cloud_not_published"
+    assert download_attempts >= 2
+
+
+def test_download_point_cloud_retries_stable_announcement_index_verification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    calls: list[dict[str, Any]] = []
+    verification_attempts = 0
+
+    def call_point_cloud_action(
+        payload: dict[str, Any],
+        *,
+        operation: str,
+        deadline: float,
+        require_data: bool,
+        on_dispatch: Any = None,
+    ) -> Any:
+        nonlocal verification_attempts
+        calls.append(payload)
+        if payload.get("m") == "a":
+            on_dispatch()
+            return None
+        verification_attempts += 1
+        if verification_attempts == 1:
+            raise DreameLawnMowerPointCloudError(
+                "transient routed timeout",
+                code="point_cloud_timeout",
+            )
+        return {"name": ["private/stable-map.bin"]}
+
+    signed_urls = iter([None, "https://downloads.example.invalid/object"])
+    client._sync_call_point_cloud_action = call_point_cloud_action
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {
+                "key": key,
+                "value": "private/stable-map.bin",
+                "updateDate": 1,
+            }
+        ],
+        get_interim_file_url=lambda name, **options: next(signed_urls),
+    )
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 2, 0.01, 10, 1024)
+
+    assert verification_attempts == 2
+    assert calls.count({"m": "g", "t": "OBJ", "d": {"type": "3dmap"}}) == 2
+    assert result.source == "generated"
 
 
 def test_download_point_cloud_caps_optional_announcement_probe(
@@ -985,6 +1238,76 @@ def test_download_point_cloud_recovers_from_transient_announcement_probe(
     ]
     assert result.content == content
     assert result.metadata.points == 1
+
+
+def test_download_point_cloud_falls_back_when_announcement_probe_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    actions: list[dict[str, Any]] = []
+    responses = iter(
+        [
+            {"r": 0, "d": {"name": ["private/previous-map.pcd"]}},
+            {"r": 0},
+            {"r": 0, "d": {"name": ["private/generated-map.pcd"]}},
+        ]
+    )
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        del kwargs
+        actions.append(payload)
+        return next(responses)
+
+    property_calls = 0
+
+    def get_properties(key: str, **options: Any) -> None:
+        nonlocal property_calls
+        del key, options
+        property_calls += 1
+        raise requests.exceptions.Timeout("private cloud timeout detail")
+
+    cloud = SimpleNamespace(
+        get_properties=get_properties,
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert property_calls >= 1
+    assert actions == [
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+    ]
+    assert result.content == content
+
+
+def test_download_point_cloud_normalizes_cloud_setup_timeout() -> None:
+    client = _client()
+    client._sync_get_cloud_protocol = lambda **kwargs: (_ for _ in ()).throw(
+        requests.exceptions.Timeout("private login timeout detail")
+    )
+
+    with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+        client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert captured.value.code == "point_cloud_timeout"
+    assert captured.value.stage == "cloud"
+    assert captured.value.retry_after_seconds == 10
+    assert "private login timeout detail" not in captured.value.public_message
 
 
 def test_download_point_cloud_rejoins_after_generation_reply_is_lost(
@@ -1626,7 +1949,7 @@ def test_download_point_cloud_bounds_invalid_announced_object_downloads(
         )
 
     assert captured.value.code == "point_cloud_download_invalid"
-    assert download_count == 1
+    assert download_count == 2
 
 
 def test_download_point_cloud_waits_for_changed_mova_fixed_object(
@@ -2085,6 +2408,126 @@ def test_point_cloud_app_action_uses_and_enforces_remaining_deadline(
                 "raise_on_api_error": True,
             }
         ]
+
+
+def test_point_cloud_app_action_normalizes_requests_timeout() -> None:
+    client = _client()
+
+    def call_app_action(*args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        raise requests.exceptions.Timeout("private cloud timeout detail")
+
+    client._sync_call_app_action = call_app_action
+
+    with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+        client._sync_call_point_cloud_action(
+            {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+            operation="read the generated point-cloud object state",
+            deadline=time.monotonic() + 5,
+            require_data=True,
+        )
+
+    assert captured.value.code == "point_cloud_timeout"
+    assert captured.value.stage == "mower_request"
+    assert captured.value.retry_after_seconds == 10
+    assert "private cloud timeout detail" not in captured.value.public_message
+
+
+def test_point_cloud_action_normalizes_real_protocol_transport_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    cloud = _point_cloud_protocol()
+    client._sync_call_app_action = cloud.call_app_action
+    monkeypatch.setattr(
+        _internal_protocol_module,
+        "_post_cloud_response",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            requests.exceptions.Timeout("private transport timeout detail")
+        ),
+    )
+
+    with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+        client._sync_call_point_cloud_action(
+            {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+            operation="read the generated point-cloud object state",
+            deadline=time.monotonic() + 5,
+            require_data=True,
+        )
+
+    assert captured.value.code == "point_cloud_timeout"
+    assert captured.value.stage == "mower_request"
+    assert "private transport timeout detail" not in captured.value.public_message
+
+
+def test_point_cloud_signer_normalizes_requests_timeout() -> None:
+    client = _client()
+    cloud = SimpleNamespace(
+        get_interim_file_url=lambda *args, **kwargs: (_ for _ in ()).throw(
+            requests.exceptions.Timeout("private signer timeout detail")
+        )
+    )
+
+    with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+        client._sync_get_point_cloud_download_url(
+            cloud,
+            "private/map.pcd",
+            deadline=time.monotonic() + 5,
+        )
+
+    assert captured.value.code == "point_cloud_timeout"
+    assert captured.value.stage == "download"
+    assert captured.value.retry_after_seconds == 10
+    assert "private signer timeout detail" not in captured.value.public_message
+
+
+def test_point_cloud_signer_normalizes_real_protocol_transport_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    cloud = _point_cloud_protocol()
+    monkeypatch.setattr(
+        _internal_protocol_module,
+        "_post_cloud_response",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            requests.exceptions.Timeout("private signer timeout detail")
+        ),
+    )
+
+    with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+        client._sync_get_point_cloud_download_url(
+            cloud,
+            "private/map.pcd",
+            deadline=time.monotonic() + 5,
+        )
+
+    assert captured.value.code == "point_cloud_timeout"
+    assert captured.value.stage == "download"
+    assert "private signer timeout detail" not in captured.value.public_message
+
+
+def test_deadline_aware_real_protocol_login_preserves_transport_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cloud = _point_cloud_protocol()
+    cloud._secondary_key = "refresh-token"
+    monkeypatch.setattr(
+        _internal_protocol_module.requests,
+        "session",
+        lambda: SimpleNamespace(close=lambda: None),
+    )
+    monkeypatch.setattr(
+        _internal_protocol_module,
+        "_post_cloud_response",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            requests.exceptions.Timeout("private login timeout detail")
+        ),
+    )
+
+    with pytest.raises(requests.exceptions.Timeout) as captured:
+        cloud.login(timeout=5, deadline=time.monotonic() + 5)
+
+    assert str(captured.value) == "The cloud login timed out."
 
 
 def test_point_cloud_action_response_enforces_overall_deadline(
@@ -2632,6 +3075,16 @@ def test_point_cloud_generation_deadline_includes_executor_queue_time(
 ) -> None:
     client = _client()
     queued = asyncio.Event()
+    monkeypatch.setattr(
+        _internal_client_facade_module,
+        "_POINT_CLOUD_GENERATION_PREFLIGHT_BUDGET_SECONDS",
+        0.0,
+    )
+    monkeypatch.setattr(
+        _internal_client_facade_module,
+        "_POINT_CLOUD_CLOUD_SETUP_TIMEOUT_SECONDS",
+        0.0,
+    )
 
     async def wait_in_executor_queue(
         function: Any,
@@ -2661,8 +3114,85 @@ def test_point_cloud_generation_deadline_includes_executor_queue_time(
     asyncio.run(run())
 
 
-def test_stored_point_cloud_preflight_has_a_separate_time_budget(
+def test_async_point_cloud_normalizes_requests_timeout(
     monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+
+    async def timeout_in_executor(function: Any, *args: Any) -> Any:
+        del function, args
+        raise requests.exceptions.Timeout("private executor timeout detail")
+
+    monkeypatch.setattr(
+        _internal_client_facade_module.asyncio,
+        "to_thread",
+        timeout_in_executor,
+    )
+
+    async def run() -> None:
+        with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+            await client.async_download_app_map_point_cloud(timeout=5)
+        assert captured.value.code == "point_cloud_timeout"
+        assert captured.value.stage == "generation"
+        assert captured.value.retry_after_seconds == 10
+        assert "private executor timeout detail" not in captured.value.public_message
+
+    asyncio.run(run())
+
+
+def test_public_point_cloud_generation_remains_singleflight_after_cancel() -> None:
+    client = _client()
+    started = threading.Event()
+    release = threading.Event()
+    calls: list[int] = []
+
+    def download(
+        map_index: int,
+        *args: Any,
+        **kwargs: Any,
+    ) -> SimpleNamespace:
+        del args, kwargs
+        calls.append(map_index)
+        if len(calls) == 1:
+            started.set()
+            assert release.wait(2)
+        return SimpleNamespace(content=b"pcd")
+
+    client._sync_download_app_map_point_cloud = download
+
+    async def run() -> None:
+        first = asyncio.create_task(
+            client.async_download_app_map_point_cloud(map_index=0)
+        )
+        assert await asyncio.to_thread(started.wait, 1)
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+
+        with pytest.raises(DreameLawnMowerPointCloudError) as concurrent:
+            await client.async_download_app_map_point_cloud(map_index=1)
+        assert concurrent.value.code == "point_cloud_generation_in_progress"
+        assert concurrent.value.stage == "queue"
+
+        release.set()
+        while client._point_cloud_generation_lock.locked():
+            await asyncio.sleep(0)
+        result = await client.async_download_app_map_point_cloud(map_index=1)
+        assert result.content == b"pcd"
+
+    asyncio.run(run())
+
+    assert calls == [0, 1]
+
+
+@pytest.mark.parametrize(
+    ("allow_stored", "expected_operation_timeout"),
+    [(False, 52.0), (True, 62.0)],
+)
+def test_point_cloud_preflight_has_a_separate_time_budget(
+    monkeypatch: pytest.MonkeyPatch,
+    allow_stored: bool,
+    expected_operation_timeout: float,
 ) -> None:
     client = _client()
     captured: dict[str, Any] = {}
@@ -2681,16 +3211,23 @@ def test_stored_point_cloud_preflight_has_a_separate_time_budget(
     async def run() -> None:
         result = await client.async_download_app_map_point_cloud(
             timeout=5,
-            allow_stored=True,
+            allow_stored=allow_stored,
         )
         assert result.content
 
     started = time.monotonic()
     asyncio.run(run())
 
-    assert captured["function"] == client._sync_download_app_map_point_cloud
-    assert captured["args"][-1] is True
-    assert captured["args"][-2] - started == pytest.approx(17, abs=0.25)
+    assert (
+        captured["function"]
+        == client._sync_download_app_map_point_cloud_singleflight
+    )
+    assert captured["args"][-2] is allow_stored
+    assert captured["args"][-3] - started == pytest.approx(
+        expected_operation_timeout,
+        abs=0.25,
+    )
+    assert isinstance(captured["args"][-1], threading.Event)
 
 
 def test_stored_point_cloud_fallback_receives_full_generation_window(
@@ -2698,7 +3235,7 @@ def test_stored_point_cloud_fallback_receives_full_generation_window(
 ) -> None:
     client = _client()
     clock = [100.0]
-    captured_deadlines: list[float] = []
+    generation_deadlines: list[float] = []
     cloud = SimpleNamespace(get_interim_file_url=lambda name: None)
     client._sync_get_cloud_protocol = lambda **kwargs: cloud
 
@@ -2706,26 +3243,30 @@ def test_stored_point_cloud_fallback_receives_full_generation_window(
         clock[0] = 106.0
         return False, None, None
 
-    def stop_at_baseline(payload: dict[str, Any], **kwargs: Any) -> Any:
-        captured_deadlines.append(kwargs["deadline"])
-        raise RuntimeError("stop after deadline capture")
+    def capture_generation(payload: dict[str, Any], **kwargs: Any) -> Any:
+        if payload.get("m") == "g":
+            assert kwargs["deadline"] == 126.0
+            clock[0] = 108.0
+            return None
+        generation_deadlines.append(kwargs["deadline"])
+        raise RuntimeError("stop after generation deadline capture")
 
     client._sync_get_announced_point_cloud_object = probe
-    client._sync_call_point_cloud_action = stop_at_baseline
+    client._sync_call_point_cloud_action = capture_generation
     monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
 
-    with pytest.raises(RuntimeError, match="deadline capture"):
+    with pytest.raises(RuntimeError, match="generation deadline capture"):
         client._sync_download_app_map_point_cloud(
             0,
             5,
             0.1,
             10,
             1024,
-            deadline=112.0,
+            deadline=129.0,
             allow_stored=True,
         )
 
-    assert captured_deadlines == [111.0]
+    assert generation_deadlines == [113.0]
 
 
 def test_failed_cached_point_cloud_preserves_full_generation_window(
@@ -2733,7 +3274,7 @@ def test_failed_cached_point_cloud_preserves_full_generation_window(
 ) -> None:
     client = _client()
     clock = [100.0]
-    captured_deadlines: list[float] = []
+    generation_deadlines: list[float] = []
     cloud = SimpleNamespace(get_interim_file_url=lambda name: None)
     client._sync_get_cloud_protocol = lambda **kwargs: cloud
     client._sync_update_app_map_inventory_identity(
@@ -2759,16 +3300,64 @@ def test_failed_cached_point_cloud_preserves_full_generation_window(
         clock[0] = 107.0
         return False, None, None
 
-    def stop_at_baseline(payload: dict[str, Any], **kwargs: Any) -> Any:
-        captured_deadlines.append(kwargs["deadline"])
-        raise RuntimeError("stop after deadline capture")
+    def capture_generation(payload: dict[str, Any], **kwargs: Any) -> Any:
+        if payload.get("m") == "g":
+            assert kwargs["deadline"] == 127.0
+            clock[0] = 109.0
+            return None
+        generation_deadlines.append(kwargs["deadline"])
+        raise RuntimeError("stop after generation deadline capture")
 
     client._sync_try_download_stored_point_cloud = fail_cached_download
     client._sync_get_announced_point_cloud_object = probe
-    client._sync_call_point_cloud_action = stop_at_baseline
+    client._sync_call_point_cloud_action = capture_generation
     monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
 
-    with pytest.raises(RuntimeError, match="deadline capture"):
+    with pytest.raises(RuntimeError, match="generation deadline capture"):
+        client._sync_download_app_map_point_cloud(
+            0,
+            5,
+            0.1,
+            10,
+            1024,
+            deadline=129.0,
+            allow_stored=True,
+        )
+
+    assert generation_deadlines == [114.0]
+
+
+def test_stable_announcement_preflight_preserves_full_generation_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+    generation_deadlines: list[float] = []
+    cloud = SimpleNamespace(get_interim_file_url=lambda name, **options: None)
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+    client._sync_try_download_stored_point_cloud = lambda *args, **kwargs: None
+
+    def probe(*args: Any, **kwargs: Any) -> tuple[bool, str, tuple[str, int]]:
+        clock[0] = 106.0
+        return True, "private/stable-map.bin", ("private/stable-map.bin", 1)
+
+    def call_action(payload: dict[str, Any], **kwargs: Any) -> Any:
+        if payload.get("m") == "g":
+            return None
+        generation_deadlines.append(kwargs["deadline"])
+        raise RuntimeError("stop after generation deadline capture")
+
+    def signer(*args: Any, **kwargs: Any) -> None:
+        assert kwargs["require_response"] is True
+        clock[0] = 110.0
+        return None
+
+    client._sync_get_announced_point_cloud_object = probe
+    client._sync_call_point_cloud_action = call_action
+    client._sync_get_point_cloud_download_url = signer
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
+
+    with pytest.raises(RuntimeError, match="generation deadline capture"):
         client._sync_download_app_map_point_cloud(
             0,
             5,
@@ -2779,7 +3368,143 @@ def test_failed_cached_point_cloud_preserves_full_generation_window(
             allow_stored=True,
         )
 
-    assert captured_deadlines == [112.0]
+    assert generation_deadlines == [115.0]
+
+
+def test_forced_stable_announcement_preflight_preserves_generation_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+    generation_deadlines: list[float] = []
+    cloud = SimpleNamespace(get_interim_file_url=lambda name, **options: None)
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+
+    def probe(*args: Any, **kwargs: Any) -> tuple[bool, str, tuple[str, int]]:
+        clock[0] = 102.0
+        return True, "private/stable-map.bin", ("private/stable-map.bin", 1)
+
+    def call_action(payload: dict[str, Any], **kwargs: Any) -> Any:
+        generation_deadlines.append(kwargs["deadline"])
+        raise RuntimeError("stop after generation deadline capture")
+
+    def signer(*args: Any, **kwargs: Any) -> None:
+        assert kwargs["require_response"] is True
+        clock[0] = 107.0
+        return None
+
+    client._sync_get_announced_point_cloud_object = probe
+    client._sync_call_point_cloud_action = call_action
+    client._sync_get_point_cloud_download_url = signer
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
+
+    with pytest.raises(RuntimeError, match="generation deadline capture"):
+        client._sync_download_app_map_point_cloud(
+            0,
+            5,
+            0.1,
+            10,
+            1024,
+            deadline=132.0,
+            allow_stored=False,
+        )
+
+    assert generation_deadlines == [112.0]
+
+
+def test_cold_cloud_setup_preserves_forced_generation_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+    generation_deadlines: list[float] = []
+    cloud = SimpleNamespace(get_interim_file_url=lambda name, **options: None)
+
+    def cloud_setup(**kwargs: Any) -> Any:
+        assert kwargs["deadline"] == 120.0
+        clock[0] = 120.0
+        return cloud
+
+    def probe(*args: Any, **kwargs: Any) -> tuple[bool, str, tuple[str, int]]:
+        clock[0] = 122.0
+        return True, "private/stable-map.bin", ("private/stable-map.bin", 1)
+
+    def call_action(payload: dict[str, Any], **kwargs: Any) -> Any:
+        generation_deadlines.append(kwargs["deadline"])
+        raise RuntimeError("stop after generation deadline capture")
+
+    def signer(*args: Any, **kwargs: Any) -> None:
+        assert kwargs["require_response"] is True
+        clock[0] = 127.0
+        return None
+
+    client._sync_get_cloud_protocol = cloud_setup
+    client._sync_get_announced_point_cloud_object = probe
+    client._sync_call_point_cloud_action = call_action
+    client._sync_get_point_cloud_download_url = signer
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
+
+    with pytest.raises(RuntimeError, match="generation deadline capture"):
+        client._sync_download_app_map_point_cloud(
+            0,
+            5,
+            0.1,
+            10,
+            1024,
+            deadline=152.0,
+            allow_stored=False,
+        )
+
+    assert generation_deadlines == [132.0]
+
+
+def test_legacy_baseline_preflight_is_bounded_before_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    clock = [100.0]
+    object_deadlines: list[tuple[float, float]] = []
+    generation_deadlines: list[float] = []
+    cloud = SimpleNamespace(get_interim_file_url=lambda name, **options: None)
+    client._sync_get_cloud_protocol = lambda **kwargs: cloud
+
+    def probe(*args: Any, **kwargs: Any) -> tuple[bool, None, None]:
+        clock[0] = 102.0
+        return False, None, None
+
+    def call_action(payload: dict[str, Any], **kwargs: Any) -> Any:
+        if payload.get("m") == "g":
+            assert kwargs["deadline"] == 122.0
+            clock[0] = 110.0
+            return {"name": ["private/stable-map.bin"]}
+        generation_deadlines.append(kwargs["deadline"])
+        raise RuntimeError("stop after generation deadline capture")
+
+    def fail_object_download(*args: Any, **kwargs: Any) -> None:
+        object_deadlines.append(
+            (kwargs["deadline"], kwargs["download_timeout"])
+        )
+        clock[0] += 5.0
+        raise DreameLawnMowerPointCloudError("not ready")
+
+    client._sync_get_announced_point_cloud_object = probe
+    client._sync_call_point_cloud_action = call_action
+    client._sync_download_point_cloud_object = fail_object_download
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: clock[0])
+
+    with pytest.raises(RuntimeError, match="generation deadline capture"):
+        client._sync_download_app_map_point_cloud(
+            0,
+            5,
+            0.1,
+            10,
+            1024,
+            deadline=142.0,
+            allow_stored=True,
+        )
+
+    assert object_deadlines == [(115.0, 5.0), (120.0, 5.0)]
+    assert generation_deadlines == [125.0]
 
 
 def test_point_cloud_url_lookup_uses_and_enforces_remaining_deadline(
@@ -2857,6 +3582,122 @@ def test_interim_file_protocol_forwards_absolute_deadline() -> None:
             "deadline": 101.0,
         }
     ]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        None,
+        {},
+        {"data": None},
+        {"code": None, "data": None},
+        {"code": "0", "data": None},
+        {"code": 0.0, "data": None},
+        {"code": False, "data": None},
+        {"code": 50001},
+    ],
+)
+def test_interim_file_protocol_strict_response_rejects_cloud_failures(
+    response: Any,
+) -> None:
+    protocol_type = _internal_protocol_module.DreameMowerDreameHomeCloudProtocol
+    cloud = object.__new__(protocol_type)
+    strings = [""] * 56
+    strings[21] = "country"
+    strings[23] = "iot"
+    strings[35] = "model"
+    strings[39] = "file"
+    strings[40] = "filename"
+    strings[55] = "download"
+    cloud._strings = strings
+    cloud._did = "device-1"
+    cloud._model = "dreame.mower.g2408"
+    cloud._country = "eu"
+    cloud._api_call = lambda *args, **kwargs: response
+
+    with pytest.raises(_internal_exceptions_module.DeviceException):
+        cloud.get_interim_file_url(
+            "private/generated-map.pcd",
+            retry_count=0,
+            timeout=0.8,
+            deadline=101.0,
+            require_response=True,
+        )
+
+
+def test_interim_file_protocol_strict_response_preserves_explicit_absence() -> None:
+    protocol_type = _internal_protocol_module.DreameMowerDreameHomeCloudProtocol
+    cloud = object.__new__(protocol_type)
+    strings = [""] * 56
+    strings[21] = "country"
+    strings[23] = "iot"
+    strings[35] = "model"
+    strings[39] = "file"
+    strings[40] = "filename"
+    strings[55] = "download"
+    cloud._strings = strings
+    cloud._did = "device-1"
+    cloud._model = "dreame.mower.g2408"
+    cloud._country = "eu"
+    cloud._api_call = lambda *args, **kwargs: {"code": 0, "data": None}
+
+    assert (
+        cloud.get_interim_file_url(
+            "private/generated-map.pcd",
+            require_response=True,
+        )
+        is None
+    )
+
+
+def test_interim_file_protocol_strict_response_preserves_success() -> None:
+    protocol_type = _internal_protocol_module.DreameMowerDreameHomeCloudProtocol
+    cloud = object.__new__(protocol_type)
+    strings = [""] * 56
+    strings[21] = "country"
+    strings[23] = "iot"
+    strings[35] = "model"
+    strings[39] = "file"
+    strings[40] = "filename"
+    strings[55] = "download"
+    cloud._strings = strings
+    cloud._did = "device-1"
+    cloud._model = "dreame.mower.g2408"
+    cloud._country = "eu"
+    cloud._api_call = lambda *args, **kwargs: {
+        "code": 0,
+        "data": "https://downloads.example.invalid/object",
+    }
+
+    assert cloud.get_interim_file_url(
+        "private/generated-map.pcd",
+        require_response=True,
+    ) == "https://downloads.example.invalid/object"
+
+
+def test_interim_file_protocol_strict_response_classifies_unavailable_object() -> None:
+    protocol_type = _internal_protocol_module.DreameMowerDreameHomeCloudProtocol
+    cloud = object.__new__(protocol_type)
+    strings = [""] * 56
+    strings[21] = "country"
+    strings[23] = "iot"
+    strings[35] = "model"
+    strings[39] = "file"
+    strings[40] = "filename"
+    strings[55] = "download"
+    cloud._strings = strings
+    cloud._did = "device-1"
+    cloud._model = "dreame.mower.g2408"
+    cloud._country = "eu"
+    cloud._api_call = lambda *args, **kwargs: {"code": 10007, "data": None}
+
+    assert (
+        cloud.get_interim_file_url(
+            "private/generated-map.pcd",
+            require_response=True,
+        )
+        is None
+    )
 
 
 def test_cloud_property_lookup_forwards_absolute_deadline() -> None:

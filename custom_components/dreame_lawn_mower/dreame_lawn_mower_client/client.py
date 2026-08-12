@@ -19,6 +19,8 @@ from datetime import datetime as datetime
 from io import BytesIO as BytesIO
 from typing import Any
 
+from requests.exceptions import Timeout as _RequestsTimeout
+
 from . import client_camera as _client_camera
 from . import client_constants as _client_constants
 from . import client_helpers as _client_helpers
@@ -78,6 +80,8 @@ from .client_core_helpers import (
 )
 from .client_device_settings import _DreameLawnMowerClientDeviceSettingsMixin
 from .client_maps import (
+    _POINT_CLOUD_CLOUD_SETUP_TIMEOUT_SECONDS,
+    _POINT_CLOUD_GENERATION_PREFLIGHT_BUDGET_SECONDS,
     _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS,
     _DreameLawnMowerClientMapsMixin,
 )
@@ -398,6 +402,7 @@ class DreameLawnMowerClient(
         self._cloud_device_info_refreshed_at = 0.0
         self._last_camera_stream_diagnostics: Mapping[str, Any] = {}
         self._app_map_object_cache_lock = _threading.Lock()
+        self._point_cloud_generation_lock = _threading.Lock()
         self._latest_app_map_inventory_identity: str | None = None
         self._latest_app_map_object_inventory_identity: str | None = None
         self._latest_app_map_object_names: tuple[str | None, ...] = ()
@@ -1252,23 +1257,41 @@ class DreameLawnMowerClient(
     ) -> DreameLawnMowerPointCloudDownload:
         """Download a stored or freshly generated mower app-map point cloud."""
         timeout = _validate_positive_number(timeout, "generation timeout")
-        operation_timeout = timeout + (
-            _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS if allow_stored else 0.0
+        preflight_timeout = (
+            _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS
+            if allow_stored
+            else _POINT_CLOUD_GENERATION_PREFLIGHT_BUDGET_SECONDS
+        )
+        operation_timeout = (
+            timeout
+            + _POINT_CLOUD_CLOUD_SETUP_TIMEOUT_SECONDS
+            + preflight_timeout
         )
         deadline = time.monotonic() + operation_timeout
+        abandoned = _threading.Event()
         try:
             async with asyncio.timeout(operation_timeout):
-                return await asyncio.to_thread(
-                    self._sync_download_app_map_point_cloud,
-                    map_index,
-                    timeout,
-                    poll_interval,
-                    download_timeout,
-                    max_bytes,
-                    deadline,
-                    allow_stored,
+                worker = asyncio.create_task(
+                    asyncio.to_thread(
+                        self._sync_download_app_map_point_cloud_singleflight,
+                        map_index,
+                        timeout,
+                        poll_interval,
+                        download_timeout,
+                        max_bytes,
+                        deadline,
+                        allow_stored,
+                        abandoned,
+                    )
                 )
-        except TimeoutError as err:
+                worker.add_done_callback(
+                    lambda completed: (
+                        completed.exception() if not completed.cancelled() else None
+                    )
+                )
+                return await asyncio.shield(worker)
+        except (TimeoutError, _RequestsTimeout) as err:
+            abandoned.set()
             raise DreameLawnMowerPointCloudError(
                 "Point-cloud generation timed out.",
                 code="point_cloud_timeout",
@@ -1280,6 +1303,62 @@ class DreameLawnMowerClient(
                 timeout_seconds=timeout,
                 retry_after_seconds=10,
             ) from err
+        except asyncio.CancelledError:
+            abandoned.set()
+            raise
+
+    def _sync_download_app_map_point_cloud_singleflight(
+        self,
+        map_index: int,
+        timeout: float,
+        poll_interval: float,
+        download_timeout: float,
+        max_bytes: int,
+        deadline: float,
+        allow_stored: bool,
+        abandoned: _threading.Event,
+    ) -> DreameLawnMowerPointCloudDownload:
+        """Run one mower-wide generation while retaining ownership after cancel."""
+        if abandoned.is_set() or time.monotonic() >= deadline:
+            raise DreameLawnMowerPointCloudError(
+                "Point-cloud request ended before generation started.",
+                code="point_cloud_timeout",
+                stage="queue",
+                public_message="The mower point-cloud request timed out in the queue.",
+                timeout_seconds=timeout,
+                retry_after_seconds=2,
+            )
+        if not self._point_cloud_generation_lock.acquire(blocking=False):
+            raise DreameLawnMowerPointCloudError(
+                "Another point-cloud generation is already in progress.",
+                code="point_cloud_generation_in_progress",
+                stage="queue",
+                public_message="A 3D map is already being generated for this mower.",
+                retry_after_seconds=5,
+            )
+        try:
+            if abandoned.is_set():
+                raise DreameLawnMowerPointCloudError(
+                    "Point-cloud request ended before generation started.",
+                    code="point_cloud_timeout",
+                    stage="queue",
+                    public_message=(
+                        "The mower point-cloud request timed out in the queue."
+                    ),
+                    timeout_seconds=timeout,
+                    retry_after_seconds=2,
+                )
+            return self._sync_download_app_map_point_cloud(
+                map_index,
+                timeout,
+                poll_interval,
+                download_timeout,
+                max_bytes,
+                deadline,
+                allow_stored,
+            )
+        finally:
+            self._point_cloud_generation_lock.release()
 
     async def async_get_cloud_properties(
         self,

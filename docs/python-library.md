@@ -139,8 +139,12 @@ announced through cloud property `99.20`. Callers should enable this only when
 the requested index is the mower's sole known map, because the announcement
 does not identify its map. If that object is absent, expired, or invalid, the
 client triggers app action `o:10`, captures the fresh LiDAR object, and resolves
-its short-lived download immediately. Firmware without that announcement
-continues through the transient `OBJ` 3D-map fallback. Every path enforces
+its short-lived download immediately. Some A2 firmware refreshes a stable
+announcement name without changing its property timestamp; the client accepts
+that object only after a live post-request indexed-object read proves it belongs
+to the requested map and pre/post object evidence proves it was refreshed.
+Firmware without the announcement continues through the transient `OBJ` 3D-map
+fallback. Every path enforces
 HTTPS, time, and size limits and validates PCD 0.7 before returning. The result
 deliberately does not expose the vendor filename or cloud-signed URL.
 

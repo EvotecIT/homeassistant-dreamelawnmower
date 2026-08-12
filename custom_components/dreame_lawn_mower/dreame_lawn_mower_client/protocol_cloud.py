@@ -27,6 +27,7 @@ from .deadline import DeadlineExceededError, run_with_deadline
 from .mqtt_tls import create_cloud_mqtt_ssl_context
 
 _LOGGER = logging.getLogger(__name__)
+_INTERIM_FILE_NOT_AVAILABLE_CODE = 10007
 _TX_VIDEO_API_PATH = "/dreame-third-video/tx/"
 _REDACTED_TX_VIDEO_PAYLOAD = "<redacted TX video payload>"
 _INTERIM_FILE_API_PATH = "/dreame-user-iot/iotfile/getDownloadUrl"
@@ -560,12 +561,16 @@ class DreameMowerDreameHomeCloudProtocol:
                     pass
                 _LOGGER.error("Login failed: %s => %s -- %s -- %s", response_text,
                               self.get_api_url() + self._strings[17], headers, data)
-        except requests.exceptions.Timeout:
+        except requests.exceptions.Timeout as err:
             response = None
             _LOGGER.warning(
                 "Login Failed: Read timed out. (read timeout=%s)",
                 timeout,
             )
+            if deadline is not None:
+                raise requests.exceptions.Timeout(
+                    "The cloud login timed out."
+                ) from err
         except Exception as ex:
             response = None
             _LOGGER.error("Login failed: %s", str(ex))
@@ -1112,6 +1117,7 @@ class DreameMowerDreameHomeCloudProtocol:
         timeout: float = 20,
         *,
         deadline: float | None = None,
+        require_response: bool = False,
     ) -> str:
         api_response = self._api_call(
             f"{self._strings[23]}/{self._strings[39]}/{self._strings[55]}",
@@ -1125,6 +1131,31 @@ class DreameMowerDreameHomeCloudProtocol:
             timeout=timeout,
             deadline=deadline,
         )
+        if require_response:
+            if not isinstance(api_response, Mapping):
+                raise DeviceException(
+                    "The interim-file signer did not return a response."
+                )
+            response_code = api_response.get("code")
+            if (
+                isinstance(response_code, int)
+                and not isinstance(response_code, bool)
+                and response_code == _INTERIM_FILE_NOT_AVAILABLE_CODE
+            ):
+                return None
+            if not isinstance(response_code, int) or isinstance(
+                response_code,
+                bool,
+            ):
+                raise DeviceException(
+                    "The interim-file signer response had an invalid code."
+                )
+            if response_code != 0:
+                raise DreameLawnMowerCloudAPIError(response_code)
+            if "data" not in api_response:
+                raise DeviceException(
+                    "The interim-file signer response did not contain data."
+                )
         if api_response is None or "data" not in api_response:
             return None
 
@@ -1251,6 +1282,7 @@ class DreameMowerDreameHomeCloudProtocol:
         )
 
         retries = 0
+        last_timeout: requests.exceptions.Timeout | None = None
         if not retry_count or retry_count < 0:
             retry_count = 0
         response_text = None
@@ -1321,10 +1353,12 @@ class DreameMowerDreameHomeCloudProtocol:
                         response.close()
                 else:
                     response_text = response.text
+                last_timeout = None
                 break
-            except requests.exceptions.Timeout:
+            except requests.exceptions.Timeout as err:
                 retries = retries + 1
                 response = None
+                last_timeout = err
                 if self._connected:
                     _LOGGER.debug(
                         "DreameMowerDreameHomeCloudProtocol.request: Read timed out. (read timeout=%s): %s",
@@ -1339,6 +1373,7 @@ class DreameMowerDreameHomeCloudProtocol:
             except Exception as ex:
                 retries = retries + 1
                 response = None
+                last_timeout = None
                 if self._connected:
                     _LOGGER.warning(
                         "Error while executing request: %s", str(ex))
@@ -1388,6 +1423,10 @@ class DreameMowerDreameHomeCloudProtocol:
             self._connected = False
         else:
             self._fail_count = self._fail_count + 1
+        if deadline is not None and last_timeout is not None:
+            raise requests.exceptions.Timeout(
+                "The cloud operation timed out."
+            ) from last_timeout
         return None
 
     @staticmethod

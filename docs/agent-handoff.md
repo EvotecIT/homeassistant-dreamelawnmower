@@ -157,6 +157,13 @@ Last updated: 2026-04-21
   mowing. Capturing fresh property `99.20` instead of waiting on `OBJ` returned
   the same validated 2,437,272-byte PCD through the public API in 12.5 seconds,
   without pausing or docking the mower.
+- A 2026-08-12 A2 run on firmware `4.3.6_0625` exposed a second announcement
+  contract: `o:10` returned `r:0` and made the existing `99.20` object signable
+  in 0.36 seconds without changing its name, `updateDate`, or `2.54` progress.
+  The client now accepts that stable primary object only when a live indexed
+  `OBJ` read maps the same name to the requested map and pre/post object
+  evidence proves a refresh. A live run with stored fallback disabled returned
+  `source=generated` and validated 152,318 points in 1.5 seconds.
 - `examples/point_cloud_probe.py` prints coordinate-free PCD metadata and writes
   geometry only when `--out` is explicitly supplied. The older
   `app_map_probe.py --probe-object-downloads` path remains useful only for
