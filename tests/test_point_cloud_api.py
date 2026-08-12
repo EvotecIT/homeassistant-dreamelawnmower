@@ -11,6 +11,9 @@ from typing import Any
 import pytest
 from homeassistant.exceptions import Unauthorized
 
+from custom_components.dreame_lawn_mower import (
+    point_cloud_api as point_cloud_api_module,
+)
 from custom_components.dreame_lawn_mower.const import DOMAIN
 from custom_components.dreame_lawn_mower.diagnostic_events import (
     DreameLawnMowerDiagnosticEventStore,
@@ -687,6 +690,100 @@ def test_point_cloud_api_purges_unloaded_entry() -> None:
         await api.async_get("entry-1", 0)
         api.purge_entry("entry-1")
         await api.async_get("entry-1", 0)
+
+    asyncio.run(run())
+
+    assert calls == 2
+
+
+def test_point_cloud_api_throttles_retryable_failures_until_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+    clock = [100.0]
+    monkeypatch.setattr(
+        point_cloud_api_module.time,
+        "monotonic",
+        lambda: clock[0],
+    )
+
+    async def download(**kwargs: Any) -> None:
+        nonlocal calls
+        del kwargs
+        calls += 1
+        raise DreameLawnMowerPointCloudError(
+            "private cloud timeout detail",
+            code="point_cloud_timeout",
+            stage="mower_request",
+            public_message="The mower did not finish the 3D map request in time.",
+            timeout_seconds=45,
+            retry_after_seconds=10,
+        )
+
+    hass = SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry-1": SimpleNamespace(
+                    client=SimpleNamespace(
+                        async_download_app_map_point_cloud=download,
+                    )
+                )
+            }
+        }
+    )
+    api = DreameLawnMowerPointCloudAPI(hass)
+
+    async def run() -> None:
+        with pytest.raises(DreameLawnMowerPointCloudError):
+            await api.async_get("entry-1", 0, refresh=True)
+        clock[0] = 109.2
+        with pytest.raises(DreameLawnMowerPointCloudError) as cached:
+            await api.async_get("entry-1", 0, refresh=True)
+        assert cached.value.code == "point_cloud_timeout"
+        assert cached.value.stage == "mower_request"
+        assert cached.value.retry_after_seconds == 1
+        assert "private cloud timeout detail" not in str(cached.value)
+        clock[0] = 110.0
+        with pytest.raises(DreameLawnMowerPointCloudError):
+            await api.async_get("entry-1", 0, refresh=True)
+
+    asyncio.run(run())
+
+    assert calls == 2
+
+
+def test_point_cloud_api_purge_clears_retryable_failure_backoff() -> None:
+    calls = 0
+
+    async def download(**kwargs: Any) -> None:
+        nonlocal calls
+        del kwargs
+        calls += 1
+        raise DreameLawnMowerPointCloudError(
+            "timeout",
+            code="point_cloud_timeout",
+            retry_after_seconds=10,
+        )
+
+    hass = SimpleNamespace(
+        data={
+            DOMAIN: {
+                "entry-1": SimpleNamespace(
+                    client=SimpleNamespace(
+                        async_download_app_map_point_cloud=download,
+                    )
+                )
+            }
+        }
+    )
+    api = DreameLawnMowerPointCloudAPI(hass)
+
+    async def run() -> None:
+        with pytest.raises(DreameLawnMowerPointCloudError):
+            await api.async_get("entry-1", 0)
+        api.purge_entry("entry-1")
+        with pytest.raises(DreameLawnMowerPointCloudError):
+            await api.async_get("entry-1", 0)
 
     asyncio.run(run())
 

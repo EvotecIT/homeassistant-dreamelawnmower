@@ -9,6 +9,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
+from requests.exceptions import Timeout as RequestsTimeout
+
 from .app_protocol import (
     MOWER_ERROR_PROPERTY_KEY,
     MOWER_PROPERTY_HINTS,
@@ -797,7 +799,20 @@ class _DreameLawnMowerClientMapsMixin:
                 timeout_seconds=timeout,
                 retry_after_seconds=10,
             )
-        cloud = self._sync_get_cloud_protocol(deadline=deadline)
+        try:
+            cloud = self._sync_get_cloud_protocol(deadline=deadline)
+        except RequestsTimeout as err:
+            raise DreameLawnMowerPointCloudError(
+                "Point-cloud cloud setup timed out.",
+                code="point_cloud_timeout",
+                stage="cloud",
+                public_message=(
+                    "The mower cloud connection timed out while preparing the "
+                    "3D map request."
+                ),
+                timeout_seconds=timeout,
+                retry_after_seconds=10,
+            ) from err
         if not hasattr(cloud, "get_interim_file_url"):
             raise DreameLawnMowerPointCloudError(
                 "The configured cloud protocol cannot download interim files.",
@@ -1359,7 +1374,7 @@ class _DreameLawnMowerClientMapsMixin:
                 timeout=probe_timeout,
                 deadline=probe_deadline,
             )
-        except (DeviceException, json.JSONDecodeError):
+        except (DeviceException, RequestsTimeout, json.JSONDecodeError):
             return None, None, None
         if payload is None:
             return None, None, None
@@ -1489,6 +1504,14 @@ class _DreameLawnMowerClientMapsMixin:
                 retry_after_seconds=10,
                 vendor_error_code=err.code,
             ) from err
+        except RequestsTimeout as err:
+            raise DreameLawnMowerPointCloudError(
+                f"The mower timed out while trying to {operation}.",
+                code="point_cloud_timeout",
+                stage="mower_request",
+                public_message="The mower did not finish the 3D map request in time.",
+                retry_after_seconds=10,
+            ) from err
         except DreameLawnMowerConnectionError as err:
             if time.monotonic() >= deadline:
                 raise DreameLawnMowerPointCloudError(
@@ -1545,12 +1568,24 @@ class _DreameLawnMowerClientMapsMixin:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise DreameLawnMowerPointCloudError("Point-cloud generation timed out.")
-        raw_url = cloud.get_interim_file_url(
-            object_name,
-            retry_count=0,
-            timeout=remaining,
-            deadline=deadline,
-        )
+        try:
+            raw_url = cloud.get_interim_file_url(
+                object_name,
+                retry_count=0,
+                timeout=remaining,
+                deadline=deadline,
+            )
+        except RequestsTimeout as err:
+            raise DreameLawnMowerPointCloudError(
+                "Point-cloud download URL request timed out.",
+                code="point_cloud_timeout",
+                stage="download",
+                public_message=(
+                    "The mower cloud timed out while preparing the generated "
+                    "3D map download."
+                ),
+                retry_after_seconds=10,
+            ) from err
         if time.monotonic() >= deadline:
             raise DreameLawnMowerPointCloudError("Point-cloud generation timed out.")
         return raw_url

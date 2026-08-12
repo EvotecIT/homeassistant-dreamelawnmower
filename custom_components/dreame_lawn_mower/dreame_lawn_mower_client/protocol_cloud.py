@@ -560,12 +560,16 @@ class DreameMowerDreameHomeCloudProtocol:
                     pass
                 _LOGGER.error("Login failed: %s => %s -- %s -- %s", response_text,
                               self.get_api_url() + self._strings[17], headers, data)
-        except requests.exceptions.Timeout:
+        except requests.exceptions.Timeout as err:
             response = None
             _LOGGER.warning(
                 "Login Failed: Read timed out. (read timeout=%s)",
                 timeout,
             )
+            if deadline is not None:
+                raise requests.exceptions.Timeout(
+                    "The cloud login timed out."
+                ) from err
         except Exception as ex:
             response = None
             _LOGGER.error("Login failed: %s", str(ex))
@@ -1251,6 +1255,7 @@ class DreameMowerDreameHomeCloudProtocol:
         )
 
         retries = 0
+        last_timeout: requests.exceptions.Timeout | None = None
         if not retry_count or retry_count < 0:
             retry_count = 0
         response_text = None
@@ -1321,10 +1326,12 @@ class DreameMowerDreameHomeCloudProtocol:
                         response.close()
                 else:
                     response_text = response.text
+                last_timeout = None
                 break
-            except requests.exceptions.Timeout:
+            except requests.exceptions.Timeout as err:
                 retries = retries + 1
                 response = None
+                last_timeout = err
                 if self._connected:
                     _LOGGER.debug(
                         "DreameMowerDreameHomeCloudProtocol.request: Read timed out. (read timeout=%s): %s",
@@ -1339,6 +1346,7 @@ class DreameMowerDreameHomeCloudProtocol:
             except Exception as ex:
                 retries = retries + 1
                 response = None
+                last_timeout = None
                 if self._connected:
                     _LOGGER.warning(
                         "Error while executing request: %s", str(ex))
@@ -1388,6 +1396,10 @@ class DreameMowerDreameHomeCloudProtocol:
             self._connected = False
         else:
             self._fail_count = self._fail_count + 1
+        if deadline is not None and last_timeout is not None:
+            raise requests.exceptions.Timeout(
+                "The cloud operation timed out."
+            ) from last_timeout
         return None
 
     @staticmethod

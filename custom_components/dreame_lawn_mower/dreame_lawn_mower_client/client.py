@@ -19,6 +19,8 @@ from datetime import datetime as datetime
 from io import BytesIO as BytesIO
 from typing import Any
 
+from requests.exceptions import Timeout as _RequestsTimeout
+
 from . import client_camera as _client_camera
 from . import client_constants as _client_constants
 from . import client_helpers as _client_helpers
@@ -1268,7 +1270,7 @@ class DreameLawnMowerClient(
                     deadline,
                     allow_stored,
                 )
-        except TimeoutError as err:
+        except (TimeoutError, _RequestsTimeout) as err:
             raise DreameLawnMowerPointCloudError(
                 "Point-cloud generation timed out.",
                 code="point_cloud_timeout",
