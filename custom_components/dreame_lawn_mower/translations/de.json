@@ -1,33 +1,35 @@
 {
-  "entity": {
-    "sensor": {
-      "state_name": {
-        "name": "Status",
-        "state": {
-          "unknown": "Unbekannt",
-          "mowing": "Mähen",
-          "idle": "Inaktiv",
-          "paused": "Pausiert",
-          "error": "Fehler",
-          "returning": "Rückkehr zur Ladestation",
-          "charging": "Wird geladen",
-          "building": "Kartierung",
-          "charging_completed": "Ladevorgang abgeschlossen",
-          "upgrading": "Wird aktualisiert",
-          "mow_summon": "Mähen auf Abruf",
-          "station_reset": "Station wird zurückgesetzt",
-          "remote_control": "Fernsteuerung",
-          "smart_charging": "Intelligentes Laden",
-          "second_mowing": "Zweiter Mähdurchgang",
-          "human_following": "Folgt einer Person",
-          "spot_mowing": "Punktuelles Mähen",
-          "waiting_for_task": "Wartet auf Aufgabe",
-          "station_cleaning": "Stationsreinigung",
-          "shortcut": "Verknüpfung",
-          "monitoring": "Überwachung",
-          "monitoring_paused": "Überwachung pausiert"
-        }
-      }
+  "config": {
+    "step": {
+      "user": {"title": "Dreame-Mähroboter verbinden", "description": "Melde dich mit deinem Dreamehome- oder MOVAhome-Konto an, um Mähroboter zu finden.", "data": {"account_type": "Kontotyp", "username": "Benutzername", "password": "Passwort", "country": "Region"}},
+      "device": {"title": "Mähroboter auswählen", "description": "Wähle einen Mähroboter zum Hinzufügen aus. Starte die Einrichtung erneut, um einen weiteren Mähroboter desselben Kontos hinzuzufügen.", "data": {"device": "Gefundener Mähroboter"}},
+      "reauth": {"title": "Konto erneut verbinden", "description": "Aktualisiere deine Dreamehome- oder MOVAhome-Zugangsdaten.", "data": {"username": "Benutzername", "password": "Passwort", "country": "Region"}}
+    },
+    "error": {
+      "2fa_required": "Die Zwei-Faktor-Authentifizierung muss in der Hersteller-App oder auf der Hersteller-Website abgeschlossen werden, bevor die Einrichtung fortgesetzt werden kann.",
+      "cannot_auth": "Die Anmeldung ist fehlgeschlagen. Prüfe Benutzername, Passwort, Kontotyp und Region.",
+      "cannot_connect": "Home Assistant konnte die Dreame- oder MOVA-Cloud nicht erreichen. Prüfe den Netzwerkzugriff und versuche es erneut.",
+      "invalid_account_type": "Der ausgewählte Kontotyp wird von dieser Integration nicht unterstützt.",
+      "invalid_region": "Die ausgewählte Region wurde von der Cloud abgelehnt. Prüfe die in der Hersteller-App verwendete Kontoregion.",
+      "no_devices": "Für dieses Konto wurden keine unterstützten Mähroboter gefunden. Prüfe, ob Region und Kontotyp mit der Hersteller-App übereinstimmen."
+    },
+    "abort": {"already_configured": "Alle unterstützten Mähroboter dieses Kontos sind bereits eingerichtet."}
+  },
+  "options": {"step": {"init": {
+    "title": "Optionen für Dreame-Mähroboter",
+    "data": {"scan_interval": "Abfrageintervall in Sekunden", "map_label_scale": "Skalierung der Kartenbeschriftung", "map_rotation": "Kartenausrichtung", "map_theme": "Kartendesign", "map_stroke_scale": "Linienstärke der Karte", "map_marker_scale": "Größe der Kartenmarkierungen", "map_marker_image": "Eigene Mäher-Markierung", "video_retention": "Vorhaltezeit für Live-Video", "video_transport": "Übertragungsweg für Live-Video", "xp2p_library_path": "Pfad zur nativen XP2P-Bibliothek", "xp2p_runner_command": "Befehl für den XP2P-Runner", "xp2p_runner_mode": "Betriebsart des XP2P-Runners"},
+    "data_description": {
+      "map_rotation": "Standardausrichtung für Karten ohne eigene Auswahl. Verwende für einzelne Karten die Entität zur Kartenausrichtung.",
+      "map_theme": "Wähle für alle lokal gerenderten Karten ein abgestimmtes helles, dunkles, mitternächtliches oder kontrastreiches Farbschema.",
+      "map_stroke_scale": "Skaliert Kartengrenzen und Pfade von 0,5 bis 3.",
+      "map_marker_scale": "Skaliert Kartenpunkte und die aktuelle Mäher-Markierung von 0,5 bis 3.",
+      "map_marker_image": "Optionale PNG-, JPEG- oder WebP-Datei im Home-Assistant-Ordner config/www, zum Beispiel mower/marker.png oder /local/mower/marker.png. Dateien außerhalb dieses Ordners und Dateien über 1 MB werden ignoriert.",
+      "video_retention": "Ausgeglichen hält die Verbindung für Vorschaubilder 60 Sekunden bereit und lässt XP2P während des aktuellen Mähvorgangs aktiv, nachdem Live-Video geöffnet wurde. Energiesparen beendet die Verbindung kurz nach dem letzten Zugriff. Videopriorität hält sie während des Mähens auch für Vorschaubilder bereit. Alle Modi starten erst bei einem Medienabruf und stoppen, sobald der Mäherzustand Video sperrt.",
+      "video_transport": "Automatisch ist die schnelle Voreinstellung: Nur der Sicherheitszustand des Mähers wird aktualisiert, anschließend werden geprüfte Zugangsdaten wiederverwendet und eine bestätigte LAN-Verbindung bevorzugt. Cloud bleibt der Kompatibilitätsmodus. Die getestete A2-Firmware stellt Tencents separaten LAN-Dienst nicht bereit; daher garantiert keiner der Modi einen Start ohne Internet.",
+      "xp2p_library_path": "Erweiterte Videooption. Verwende eine dynamische XP2P-Bibliothek für Betriebssystem und CPU dieses Home-Assistant-Hosts. Android-APK-/AAR-Bibliotheken und iOS-Frameworks sind keine Host-Laufzeit.",
+      "xp2p_runner_command": "Erweiterte Videooption. Verwende nur einen lokalen Host-Runner mit kompatibler XP2P-Laufzeit, der eine lokale FLV-URL zurückgibt. Android-Hilfsprogramme sind nicht als Home-Assistant-Laufzeit vorgesehen.",
+      "xp2p_runner_mode": "Verwende den Prozessmodus für einen Runner, der während des Home-Assistant-Streams aktiv bleibt."
     }
-  }
+  }}},
+  "entity": {"sensor": {"state_name": {"name": "Status", "state": {"unknown": "Unbekannt", "mowing": "Mähen", "idle": "Inaktiv", "paused": "Pausiert", "error": "Fehler", "returning": "Rückkehr zur Ladestation", "charging": "Wird geladen", "building": "Kartierung", "charging_completed": "Ladevorgang abgeschlossen", "upgrading": "Wird aktualisiert", "mow_summon": "Mähen auf Abruf", "station_reset": "Station wird zurückgesetzt", "remote_control": "Fernsteuerung", "smart_charging": "Intelligentes Laden", "second_mowing": "Zweiter Mähdurchgang", "human_following": "Folgt einer Person", "spot_mowing": "Punktuelles Mähen", "waiting_for_task": "Wartet auf Aufgabe", "station_cleaning": "Stationsreinigung", "shortcut": "Verknüpfung", "monitoring": "Überwachung", "monitoring_paused": "Überwachung pausiert"}}}}
 }
