@@ -23,7 +23,9 @@ from custom_components.dreame_lawn_mower.const import (
     CONF_MAP_LABEL_SCALE,
     CONF_MAP_MARKER_IMAGE,
     CONF_MAP_MARKER_SCALE,
+    CONF_MAP_MOWING_PATH_STYLE,
     CONF_MAP_ROTATION,
+    CONF_MAP_SPOT_AREA_STYLE,
     CONF_MAP_STROKE_SCALE,
     CONF_MAP_THEME,
     CONF_MODEL,
@@ -37,6 +39,8 @@ from custom_components.dreame_lawn_mower.const import (
     CONF_XP2P_RUNNER_COMMAND,
     CONF_XP2P_RUNNER_MODE,
     DEFAULT_MAP_MARKER_SCALE,
+    DEFAULT_MAP_MOWING_PATH_STYLE,
+    DEFAULT_MAP_SPOT_AREA_STYLE,
     DEFAULT_MAP_STROKE_SCALE,
     DEFAULT_MAP_THEME,
     DEFAULT_VIDEO_RETENTION,
@@ -347,11 +351,15 @@ def test_options_flow_accepts_map_label_scale() -> None:
             CONF_SCAN_INTERVAL: "45",
             CONF_MAP_LABEL_SCALE: "2.5",
             CONF_MAP_ROTATION: 90,
+            CONF_MAP_SPOT_AREA_STYLE: "outline",
+            CONF_MAP_MOWING_PATH_STYLE: "hidden",
         }
     )
     assert validated[CONF_SCAN_INTERVAL] == 45
     assert validated[CONF_MAP_LABEL_SCALE] == 2.5
     assert validated[CONF_MAP_ROTATION] == 90
+    assert validated[CONF_MAP_SPOT_AREA_STYLE] == "outline"
+    assert validated[CONF_MAP_MOWING_PATH_STYLE] == "hidden"
 
     result = asyncio.run(flow.async_step_init(validated))
 
@@ -364,12 +372,24 @@ def test_options_flow_accepts_map_label_scale() -> None:
         CONF_MAP_STROKE_SCALE: DEFAULT_MAP_STROKE_SCALE,
         CONF_MAP_MARKER_SCALE: DEFAULT_MAP_MARKER_SCALE,
         CONF_MAP_MARKER_IMAGE: "",
+        CONF_MAP_SPOT_AREA_STYLE: "outline",
+        CONF_MAP_MOWING_PATH_STYLE: "hidden",
         CONF_VIDEO_RETENTION: DEFAULT_VIDEO_RETENTION,
         CONF_VIDEO_TRANSPORT: DEFAULT_VIDEO_TRANSPORT,
         CONF_XP2P_LIBRARY_PATH: "",
         CONF_XP2P_RUNNER_COMMAND: "",
         CONF_XP2P_RUNNER_MODE: XP2P_RUNNER_MODE_PROCESS,
     }
+
+
+def test_options_flow_defaults_to_clean_vector_map_layers() -> None:
+    flow = DreameLawnMowerOptionsFlow(SimpleNamespace(options={}))
+
+    result = asyncio.run(flow.async_step_init())
+    validated = result["data_schema"]({})
+
+    assert validated[CONF_MAP_SPOT_AREA_STYLE] == DEFAULT_MAP_SPOT_AREA_STYLE
+    assert validated[CONF_MAP_MOWING_PATH_STYLE] == DEFAULT_MAP_MOWING_PATH_STYLE
 
 
 def test_options_flow_replaces_prerelease_lan_only_default() -> None:

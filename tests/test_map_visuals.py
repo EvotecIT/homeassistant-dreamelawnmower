@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from io import BytesIO
+
+from PIL import Image
+
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_visuals import (
     load_map_marker,
     map_font,
@@ -10,9 +14,11 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_visuals im
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.vector_map import (
     DreameLawnMowerVectorBoundary,
     DreameLawnMowerVectorMap,
+    DreameLawnMowerVectorMowPath,
     DreameLawnMowerVectorZone,
     render_vector_map_png,
 )
+from custom_components.dreame_lawn_mower.image import png_bytes_to_jpeg
 
 
 def test_bundled_map_font_supports_unicode_labels() -> None:
@@ -60,6 +66,114 @@ def test_user_scales_compose_with_theme_accessibility_defaults() -> None:
 
     assert style.stroke_scale == 2.7
     assert style.marker_scale == 2.4
+
+
+def test_vector_layer_styles_offer_clean_and_diagnostic_presentations() -> None:
+    vector_map = DreameLawnMowerVectorMap(
+        boundary=DreameLawnMowerVectorBoundary(0, 0, 100, 100),
+        zones=(
+            DreameLawnMowerVectorZone(
+                zone_id=1,
+                name="Garden",
+                points=((0, 0), (100, 0), (100, 100), (0, 100)),
+            ),
+        ),
+        spot_areas=(
+            DreameLawnMowerVectorZone(
+                zone_id=9,
+                points=((20, 20), (80, 20), (80, 80), (20, 80)),
+            ),
+        ),
+        mow_paths=(
+            DreameLawnMowerVectorMowPath(
+                zone_id=1,
+                segments=(((10, 50), (90, 50)),),
+            ),
+        ),
+    )
+
+    clean = render_vector_map_png(
+        vector_map,
+        style=map_render_style(
+            spot_area_style="hidden",
+            mowing_path_style="subtle",
+        ),
+    )
+    outlined = render_vector_map_png(
+        vector_map,
+        style=map_render_style(
+            spot_area_style="outline",
+            mowing_path_style="hidden",
+        ),
+    )
+    diagnostic = render_vector_map_png(
+        vector_map,
+        style=map_render_style(
+            spot_area_style="filled",
+            mowing_path_style="detailed",
+        ),
+    )
+
+    assert clean is not None
+    assert outlined is not None
+    assert diagnostic is not None
+    assert len({clean, outlined, diagnostic}) == 3
+
+
+def test_invalid_vector_layer_styles_use_backward_compatible_defaults() -> None:
+    style = map_render_style(
+        spot_area_style="unsupported",
+        mowing_path_style="unsupported",
+    )
+
+    assert style.spot_area_style == "filled"
+    assert style.mowing_path_style == "detailed"
+
+
+def test_subtle_mowing_path_remains_subtle_after_camera_jpeg_conversion() -> None:
+    vector_map = DreameLawnMowerVectorMap(
+        boundary=DreameLawnMowerVectorBoundary(0, 0, 100, 100),
+        zones=(
+            DreameLawnMowerVectorZone(
+                zone_id=1,
+                points=((0, 0), (100, 0), (100, 100), (0, 100)),
+            ),
+        ),
+        mow_paths=(
+            DreameLawnMowerVectorMowPath(
+                zone_id=1,
+                segments=(((10, 50), (90, 50)),),
+            ),
+        ),
+    )
+
+    rendered = {
+        name: render_vector_map_png(
+            vector_map,
+            style=map_render_style(mowing_path_style=name),
+        )
+        for name in ("hidden", "subtle", "detailed")
+    }
+    assert all(image is not None for image in rendered.values())
+
+    pixels: dict[str, tuple[int, int, int]] = {}
+    for name, png in rendered.items():
+        assert png is not None
+        with Image.open(BytesIO(png_bytes_to_jpeg(png))) as image:
+            pixels[name] = image.getpixel((image.width // 2, image.height // 2))
+
+    hidden = pixels["hidden"]
+    subtle_distance = sum(
+        abs(channel - hidden[index])
+        for index, channel in enumerate(pixels["subtle"])
+    )
+    detailed_distance = sum(
+        abs(channel - hidden[index])
+        for index, channel in enumerate(pixels["detailed"])
+    )
+
+    assert subtle_distance > 0
+    assert detailed_distance > subtle_distance
 
 
 def test_custom_map_marker_is_limited_to_config_www(tmp_path) -> None:

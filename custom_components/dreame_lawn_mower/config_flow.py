@@ -27,8 +27,10 @@ from .const import (
     CONF_MAP_LABEL_SCALE,
     CONF_MAP_MARKER_IMAGE,
     CONF_MAP_MARKER_SCALE,
+    CONF_MAP_MOWING_PATH_STYLE,
     CONF_MAP_ROTATION,
     CONF_MAP_ROTATIONS,
+    CONF_MAP_SPOT_AREA_STYLE,
     CONF_MAP_STROKE_SCALE,
     CONF_MAP_THEME,
     CONF_MODEL,
@@ -48,14 +50,18 @@ from .const import (
     DEFAULT_COUNTRY,
     DEFAULT_MAP_LABEL_SCALE,
     DEFAULT_MAP_MARKER_SCALE,
+    DEFAULT_MAP_MOWING_PATH_STYLE,
     DEFAULT_MAP_ROTATION,
+    DEFAULT_MAP_SPOT_AREA_STYLE,
     DEFAULT_MAP_STROKE_SCALE,
     DEFAULT_MAP_THEME,
     DEFAULT_SCAN_INTERVAL_SECONDS,
     DEFAULT_VIDEO_RETENTION,
     DEFAULT_VIDEO_TRANSPORT,
     DOMAIN,
+    MAP_MOWING_PATH_STYLE_OPTIONS,
     MAP_ROTATION_OPTIONS,
+    MAP_SPOT_AREA_STYLE_OPTIONS,
     MAP_THEME_OPTIONS,
     MAX_MAP_LABEL_SCALE,
     MAX_SCAN_INTERVAL_SECONDS,
@@ -397,6 +403,32 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                     ): selector.TextSelector(
                         selector.TextSelectorConfig(
                             type=selector.TextSelectorType.TEXT,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_MAP_SPOT_AREA_STYLE,
+                        default=self._entry_options.get(
+                            CONF_MAP_SPOT_AREA_STYLE,
+                            DEFAULT_MAP_SPOT_AREA_STYLE,
+                        ),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=list(MAP_SPOT_AREA_STYLE_OPTIONS),
+                            translation_key=CONF_MAP_SPOT_AREA_STYLE,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_MAP_MOWING_PATH_STYLE,
+                        default=self._entry_options.get(
+                            CONF_MAP_MOWING_PATH_STYLE,
+                            DEFAULT_MAP_MOWING_PATH_STYLE,
+                        ),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=list(MAP_MOWING_PATH_STYLE_OPTIONS),
+                            translation_key=CONF_MAP_MOWING_PATH_STYLE,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
                         )
                     ),
                     vol.Optional(

@@ -472,6 +472,11 @@ session, including the mower position and live path when the device reports
 them. `Live Path Map`, `All Maps`, and `Map Diagnostics` remain optional,
 disabled-by-default cameras for troubleshooting or specialized dashboards.
 
+Locally rendered vector maps hide saved spot-mowing rectangles by default and
+draw completed mowing passes subtly. This keeps the everyday map close to the
+vendor app while preserving the live route and mower marker. The source spot
+and path data remains available in map diagnostics.
+
 Enabled map cameras warm their first image in the background during entity
 startup. While a mowing session is active, coordinator updates also refresh the
 map source without waiting for a browser request. The camera still returns the
@@ -488,7 +493,11 @@ inactive.
 
 Under **Settings → Devices & services → Dreame Lawn Mower → Configure**, choose
 an Emerald, Dark, Midnight, or High contrast theme and adjust label, line, and
-marker scale. Use **Selected Map Display Rotation** to store a different
+marker scale. **Saved spot area display** can hide spot rectangles, show only
+their outlines, or restore the filled diagnostic overlay. **Completed mowing
+path display** can hide previous passes, render them subtly, or show every pass
+in full detail. These two settings affect locally rendered vector maps. Use
+**Selected Map Display Rotation** to store a different
 rotation for each map. To use a custom mower marker, place a PNG, JPEG, or WebP
 under `/config/www` and enter its relative path, such as
 `mower/my-marker.png`. The integration ignores absolute paths, traversal,

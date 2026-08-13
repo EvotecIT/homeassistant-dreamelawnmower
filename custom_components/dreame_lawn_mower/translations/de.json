@@ -17,13 +17,15 @@
   },
   "options": {"step": {"init": {
     "title": "Optionen für Dreame-Mähroboter",
-    "data": {"scan_interval": "Abfrageintervall in Sekunden", "map_label_scale": "Skalierung der Kartenbeschriftung", "map_rotation": "Kartenausrichtung", "map_theme": "Kartendesign", "map_stroke_scale": "Linienstärke der Karte", "map_marker_scale": "Größe der Kartenmarkierungen", "map_marker_image": "Eigene Mäher-Markierung", "video_retention": "Vorhaltezeit für Live-Video", "video_transport": "Übertragungsweg für Live-Video", "xp2p_library_path": "Pfad zur nativen XP2P-Bibliothek", "xp2p_runner_command": "Befehl für den XP2P-Runner", "xp2p_runner_mode": "Betriebsart des XP2P-Runners"},
+    "data": {"scan_interval": "Abfrageintervall in Sekunden", "map_label_scale": "Skalierung der Kartenbeschriftung", "map_rotation": "Kartenausrichtung", "map_theme": "Kartendesign", "map_stroke_scale": "Linienstärke der Karte", "map_marker_scale": "Größe der Kartenmarkierungen", "map_marker_image": "Eigene Mäher-Markierung", "map_spot_area_style": "Anzeige gespeicherter Punktmähflächen", "map_mowing_path_style": "Anzeige abgeschlossener Mähspuren", "video_retention": "Vorhaltezeit für Live-Video", "video_transport": "Übertragungsweg für Live-Video", "xp2p_library_path": "Pfad zur nativen XP2P-Bibliothek", "xp2p_runner_command": "Befehl für den XP2P-Runner", "xp2p_runner_mode": "Betriebsart des XP2P-Runners"},
     "data_description": {
       "map_rotation": "Standardausrichtung für Karten ohne eigene Auswahl. Verwende für einzelne Karten die Entität zur Kartenausrichtung.",
       "map_theme": "Wähle für alle lokal gerenderten Karten ein abgestimmtes helles, dunkles, mitternächtliches oder kontrastreiches Farbschema.",
       "map_stroke_scale": "Skaliert Kartengrenzen und Pfade von 0,5 bis 3.",
       "map_marker_scale": "Skaliert Kartenpunkte und die aktuelle Mäher-Markierung von 0,5 bis 3.",
       "map_marker_image": "Optionale PNG-, JPEG- oder WebP-Datei im Home-Assistant-Ordner config/www, zum Beispiel mower/marker.png oder /local/mower/marker.png. Dateien außerhalb dieses Ordners und Dateien über 1 MB werden ignoriert.",
+      "map_spot_area_style": "Blendet gespeicherte Rechtecke für punktuelles Mähen für eine übersichtliche, Dreame-ähnliche Karte aus, zeigt nur deren Umrisse oder stellt die gefüllte Diagnoseebene wieder her. Dies betrifft nur lokal gerenderte Vektorkarten.",
+      "map_mowing_path_style": "Blendet abgeschlossene Mähbahnen aus, stellt sie dezent dar oder zeigt jeden Durchgang vollständig. Die Live-Route und die Mäher-Markierung bleiben sichtbar.",
       "video_retention": "Ausgeglichen hält die Verbindung für Vorschaubilder 60 Sekunden bereit und lässt XP2P während des aktuellen Mähvorgangs aktiv, nachdem Live-Video geöffnet wurde. Energiesparen beendet die Verbindung kurz nach dem letzten Zugriff. Videopriorität hält sie während des Mähens auch für Vorschaubilder bereit. Alle Modi starten erst bei einem Medienabruf und stoppen, sobald der Mäherzustand Video sperrt.",
       "video_transport": "Automatisch ist die schnelle Voreinstellung: Nur der Sicherheitszustand des Mähers wird aktualisiert, anschließend werden geprüfte Zugangsdaten wiederverwendet und eine bestätigte LAN-Verbindung bevorzugt. Cloud bleibt der Kompatibilitätsmodus. Die getestete A2-Firmware stellt Tencents separaten LAN-Dienst nicht bereit; daher garantiert keiner der Modi einen Start ohne Internet.",
       "xp2p_library_path": "Erweiterte Videooption. Verwende eine dynamische XP2P-Bibliothek für Betriebssystem und CPU dieses Home-Assistant-Hosts. Android-APK-/AAR-Bibliotheken und iOS-Frameworks sind keine Host-Laufzeit.",
@@ -31,5 +33,9 @@
       "xp2p_runner_mode": "Verwende den Prozessmodus für einen Runner, der während des Home-Assistant-Streams aktiv bleibt."
     }
   }}},
+  "selector": {
+    "map_spot_area_style": {"options": {"hidden": "Ausgeblendet (empfohlen)", "outline": "Nur Umriss", "filled": "Gefüllt"}},
+    "map_mowing_path_style": {"options": {"hidden": "Ausgeblendet", "subtle": "Dezent (empfohlen)", "detailed": "Detailliert"}}
+  },
   "entity": {"sensor": {"state_name": {"name": "Status", "state": {"unknown": "Unbekannt", "mowing": "Mähen", "idle": "Inaktiv", "paused": "Pausiert", "error": "Fehler", "returning": "Rückkehr zur Ladestation", "charging": "Wird geladen", "building": "Kartierung", "charging_completed": "Ladevorgang abgeschlossen", "upgrading": "Wird aktualisiert", "mow_summon": "Mähen auf Abruf", "station_reset": "Station wird zurückgesetzt", "remote_control": "Fernsteuerung", "smart_charging": "Intelligentes Laden", "second_mowing": "Zweiter Mähdurchgang", "human_following": "Folgt einer Person", "spot_mowing": "Punktuelles Mähen", "waiting_for_task": "Wartet auf Aufgabe", "station_cleaning": "Stationsreinigung", "shortcut": "Verknüpfung", "monitoring": "Überwachung", "monitoring_paused": "Überwachung pausiert"}}}}
 }
