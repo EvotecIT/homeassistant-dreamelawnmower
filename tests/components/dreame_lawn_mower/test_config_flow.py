@@ -81,6 +81,8 @@ class _FakeDevice:
 
 
 async def _start_user_flow(hass):
+    # Config-flow tests do not exercise Home Assistant's external stream stack.
+    hass.config.components.add("stream")
     return await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": config_entries.SOURCE_USER},

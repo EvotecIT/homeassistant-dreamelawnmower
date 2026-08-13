@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+from io import BytesIO
 
+from PIL import Image
+
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_visuals import (
+    map_render_style,
+)
 from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
     DreameLawnMowerConnectionError,
@@ -155,6 +161,52 @@ def test_app_map_renderer_labels_areas_and_spots_with_scale() -> None:
     assert large_png
     assert (normal_width, normal_height) == (large_width, large_height)
     assert normal_png != large_png
+
+
+def test_app_map_renderer_applies_saved_spot_presentation() -> None:
+    payload = {
+        "map": [
+            {
+                "id": 7,
+                "data": [[0, 0], [100, 0], [100, 100], [0, 100]],
+            }
+        ],
+        "spot": [
+            {
+                "id": 2,
+                "data": [[30, 30], [70, 30], [70, 70], [30, 70]],
+            }
+        ],
+    }
+
+    rendered = {
+        name: render_app_map_payload_png(
+            payload,
+            style=map_render_style(spot_area_style=name),
+        )
+        for name in ("hidden", "outline", "filled")
+    }
+    assert len({image[0] for image in rendered.values()}) == 3
+
+    pixels = {
+        name: Image.open(BytesIO(image[0])).convert("RGB")
+        for name, image in rendered.items()
+    }
+    width, height = rendered["hidden"][1:]
+    scale = (width - 96) / 100
+    spot_edge = (round(30 * scale + 48), round(50 * scale + 48))
+    spot_interior = (round(50 * scale + 48), round(65 * scale + 48))
+
+    assert pixels["outline"].getpixel(spot_edge) != pixels["hidden"].getpixel(
+        spot_edge
+    )
+    assert pixels["outline"].getpixel(spot_interior) == pixels["hidden"].getpixel(
+        spot_interior
+    )
+    assert pixels["filled"].getpixel(spot_interior) != pixels["hidden"].getpixel(
+        spot_interior
+    )
+    assert all(image.size == (width, height) for image in pixels.values())
 
 
 def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
