@@ -1,4 +1,142 @@
 {
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connecter un robot tondeuse Dreame",
+        "description": "Connectez-vous à votre compte Dreamehome ou MOVAhome pour rechercher vos robots tondeuses.",
+        "data": {
+          "account_type": "Type de compte",
+          "username": "Nom d’utilisateur",
+          "password": "Mot de passe",
+          "country": "Région"
+        }
+      },
+      "device": {
+        "title": "Sélectionner le robot tondeuse",
+        "description": "Choisissez le robot tondeuse à ajouter. Relancez la configuration pour en ajouter un autre associé au même compte.",
+        "data": {
+          "device": "Robot tondeuse détecté"
+        }
+      },
+      "reauth": {
+        "title": "Reconnecter le compte",
+        "description": "Mettez à jour vos identifiants Dreamehome ou MOVAhome.",
+        "data": {
+          "username": "Nom d’utilisateur",
+          "password": "Mot de passe",
+          "country": "Région"
+        }
+      }
+    },
+    "error": {
+      "2fa_required": "Vous devez terminer l’authentification à deux facteurs dans l’application ou sur le site du fabricant avant de poursuivre la configuration.",
+      "cannot_auth": "La connexion au compte a échoué. Vérifiez le nom d’utilisateur, le mot de passe, le type de compte et la région.",
+      "cannot_connect": "Home Assistant n’a pas pu joindre le cloud Dreame ou MOVA. Vérifiez l’accès au réseau et réessayez.",
+      "invalid_account_type": "Le type de compte sélectionné n’est pas pris en charge par cette intégration.",
+      "invalid_region": "Le cloud a refusé la région sélectionnée. Vérifiez la région du compte utilisée dans l’application du fabricant.",
+      "no_devices": "Aucun robot tondeuse compatible n’a été trouvé pour ce compte. Vérifiez que la région et le type de compte sélectionnés correspondent à ceux de l’application du fabricant."
+    },
+    "abort": {
+      "already_configured": "Tous les robots tondeuses compatibles de ce compte sont déjà configurés."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Options du robot tondeuse Dreame",
+        "data": {
+          "scan_interval": "Intervalle d’interrogation en secondes",
+          "map_label_scale": "Échelle des libellés de la carte",
+          "map_rotation": "Rotation de la carte",
+          "map_theme": "Thème de la carte",
+          "map_stroke_scale": "Épaisseur des lignes de la carte",
+          "map_marker_scale": "Taille des marqueurs de la carte",
+          "map_marker_image": "Marqueur personnalisé du robot tondeuse",
+          "map_spot_area_style": "Affichage des zones de tonte ponctuelle enregistrées",
+          "map_mowing_path_style": "Affichage des passages de tonte terminés",
+          "video_retention": "Maintien de la connexion vidéo en direct",
+          "video_transport": "Mode de connexion de la vidéo en direct",
+          "xp2p_library_path": "Chemin de la bibliothèque native XP2P de l’hôte",
+          "xp2p_runner_command": "Commande du processus auxiliaire XP2P de l’hôte",
+          "xp2p_runner_mode": "Mode du processus auxiliaire XP2P de l’hôte"
+        },
+        "data_description": {
+          "map_rotation": "Rotation utilisée pour les cartes sans réglage individuel. Pour chaque carte, utilisez l’entité Rotation d’affichage de la carte sélectionnée.",
+          "map_theme": "Choisissez une palette claire, sombre, nocturne ou à contraste élevé cohérente pour toutes les cartes rendues localement.",
+          "map_stroke_scale": "Ajustez l’épaisseur des limites et des trajectoires de la carte entre 0,5 et 3.",
+          "map_marker_scale": "Ajustez la taille des points de la carte et du marqueur de position du robot tondeuse entre 0,5 et 3.",
+          "map_marker_image": "Fichier PNG, JPEG ou WebP facultatif placé dans le dossier config/www de Home Assistant, par exemple mower/marker.png ou /local/mower/marker.png. Les fichiers situés hors de ce dossier ou dépassant 1 Mo sont ignorés.",
+          "map_spot_area_style": "Masquez les rectangles enregistrés pour la tonte ponctuelle afin d’obtenir une carte claire proche de l’application Dreame, affichez seulement leur contour ou rétablissez le calque de diagnostic rempli. Ce réglage concerne uniquement les cartes vectorielles rendues localement.",
+          "map_mowing_path_style": "Masquez les passages de tonte terminés, affichez-les discrètement ou montrez chaque passage en détail. L’itinéraire en direct et le marqueur du robot tondeuse restent visibles.",
+          "video_retention": "Le mode Équilibré conserve une fenêtre de reconnexion de 60 secondes pour les aperçus et maintient XP2P prêt pendant la tonte en cours après l’ouverture de la vidéo en direct. Économie d’énergie libère toujours la connexion peu après le dernier accès. Priorité vidéo considère aussi l’accès aux aperçus comme une raison de maintenir la connexion pendant la tonte. Tous les modes attendent une demande de média avant de démarrer et s’arrêtent lorsque l’état du robot interdit la vidéo.",
+          "video_transport": "Automatique est le réglage rapide par défaut : il actualise uniquement l’état de sécurité du robot, réutilise des données de connexion vérifiées et privilégie un chemin LAN confirmé lorsque le micrologiciel le permet. Cloud reste le mode de compatibilité. Le micrologiciel A2 testé n’expose pas le service LAN distinct de Tencent ; aucun mode ne garantit donc un démarrage sans Internet.",
+          "xp2p_library_path": "Option vidéo avancée. Utilisez une bibliothèque dynamique XP2P compilée pour le système d’exploitation et le processeur de l’hôte Home Assistant. Les bibliothèques Android APK/AAR et les frameworks iOS ne peuvent pas servir d’environnement d’exécution sur l’hôte.",
+          "xp2p_runner_command": "Option vidéo avancée. Utilisez uniquement un processus auxiliaire local qui possède un environnement XP2P compatible et renvoie une URL FLV locale. Les outils Android ne sont pas conçus pour s’exécuter sur l’hôte Home Assistant.",
+          "xp2p_runner_mode": "Choisissez le mode processus si le processus auxiliaire doit rester actif pendant toute la diffusion par Home Assistant."
+        }
+      }
+    }
+  },
+  "selector": {
+    "country": {
+      "options": {
+        "cn": "Chine",
+        "eu": "Europe",
+        "us": "États-Unis",
+        "ru": "Russie",
+        "sg": "Singapour"
+      }
+    },
+    "map_rotation": {
+      "options": {
+        "0": "0° (aucune rotation)",
+        "90": "90° dans le sens horaire",
+        "180": "180°",
+        "270": "270° dans le sens horaire"
+      }
+    },
+    "map_theme": {
+      "options": {
+        "emerald": "Émeraude",
+        "dark": "Sombre",
+        "midnight": "Minuit",
+        "high_contrast": "Contraste élevé"
+      }
+    },
+    "map_spot_area_style": {
+      "options": {
+        "hidden": "Masquées (recommandées)",
+        "outline": "Contour uniquement",
+        "filled": "Remplies"
+      }
+    },
+    "map_mowing_path_style": {
+      "options": {
+        "hidden": "Masqués",
+        "subtle": "Discrets (recommandés)",
+        "detailed": "Détaillés"
+      }
+    },
+    "video_retention": {
+      "options": {
+        "balanced": "Équilibré (la vidéo en direct reste disponible)",
+        "battery_saver": "Économie d’énergie (arrêt lorsque plus personne ne regarde)",
+        "video_priority": "Priorité à la vidéo (les instantanés maintiennent aussi la connexion)"
+      }
+    },
+    "video_transport": {
+      "options": {
+        "auto": "XP2P automatique avec reconnexion rapide",
+        "cloud": "XP2P (provisionnement par le cloud)"
+      }
+    },
+    "xp2p_runner_mode": {
+      "options": {
+        "process": "Processus persistant",
+        "one-shot": "Commande unique"
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "state_name": {

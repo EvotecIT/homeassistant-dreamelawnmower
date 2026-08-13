@@ -805,19 +805,24 @@ def _render_app_map_payload_png(
                 width=line_width(style, 4),
             )
 
-    for polygon in spot_polygons:
-        projected = [project(point) for point in polygon]
-        if len(projected) >= 3:
-            draw.polygon(
-                projected,
-                fill=style.spot_fill,
-                outline=style.spot_outline,
-            )
-            draw.line(
-                projected + [projected[0]],
-                fill=style.spot_outline,
-                width=line_width(style, 3),
-            )
+    if style.spot_area_style != "hidden":
+        for polygon in spot_polygons:
+            projected = [project(point) for point in polygon]
+            if len(projected) >= 3:
+                draw.polygon(
+                    projected,
+                    fill=(
+                        style.spot_fill
+                        if style.spot_area_style == "filled"
+                        else None
+                    ),
+                    outline=style.spot_outline,
+                )
+                draw.line(
+                    projected + [projected[0]],
+                    fill=style.spot_outline,
+                    width=line_width(style, 3),
+                )
 
     for trajectory in trajectories:
         projected = [project(point) for point in trajectory]
@@ -838,7 +843,10 @@ def _render_app_map_payload_png(
         )
 
     font = _app_map_label_font(label_scale)
-    for entry in [*map_entries, *spot_entries]:
+    visible_spot_entries = (
+        spot_entries if style.spot_area_style != "hidden" else []
+    )
+    for entry in [*map_entries, *visible_spot_entries]:
         label = entry.get("label")
         polygon = entry.get("points")
         if not isinstance(label, str) or not polygon:

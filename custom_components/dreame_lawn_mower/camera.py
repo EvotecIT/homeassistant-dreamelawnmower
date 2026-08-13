@@ -22,13 +22,17 @@ from .const import (
     CONF_MAP_LABEL_SCALE,
     CONF_MAP_MARKER_IMAGE,
     CONF_MAP_MARKER_SCALE,
+    CONF_MAP_MOWING_PATH_STYLE,
     CONF_MAP_ROTATION,
     CONF_MAP_ROTATIONS,
+    CONF_MAP_SPOT_AREA_STYLE,
     CONF_MAP_STROKE_SCALE,
     CONF_MAP_THEME,
     DEFAULT_MAP_LABEL_SCALE,
     DEFAULT_MAP_MARKER_SCALE,
+    DEFAULT_MAP_MOWING_PATH_STYLE,
     DEFAULT_MAP_ROTATION,
+    DEFAULT_MAP_SPOT_AREA_STYLE,
     DEFAULT_MAP_STROKE_SCALE,
     DEFAULT_MAP_THEME,
     DOMAIN,
@@ -410,6 +414,14 @@ class DreameLawnMowerMapCamera(
                 DEFAULT_MAP_MARKER_SCALE,
             ),
             marker_image=self._map_marker_image,
+            spot_area_style=options.get(
+                CONF_MAP_SPOT_AREA_STYLE,
+                DEFAULT_MAP_SPOT_AREA_STYLE,
+            ),
+            mowing_path_style=options.get(
+                CONF_MAP_MOWING_PATH_STYLE,
+                DEFAULT_MAP_MOWING_PATH_STYLE,
+            ),
         )
 
     @property
@@ -431,6 +443,8 @@ class DreameLawnMowerMapCamera(
             options.get(CONF_MAP_STROKE_SCALE, DEFAULT_MAP_STROKE_SCALE),
             options.get(CONF_MAP_MARKER_SCALE, DEFAULT_MAP_MARKER_SCALE),
             options.get(CONF_MAP_MARKER_IMAGE, ""),
+            options.get(CONF_MAP_SPOT_AREA_STYLE, DEFAULT_MAP_SPOT_AREA_STYLE),
+            options.get(CONF_MAP_MOWING_PATH_STYLE, DEFAULT_MAP_MOWING_PATH_STYLE),
             self._map_rotation,
         )
 

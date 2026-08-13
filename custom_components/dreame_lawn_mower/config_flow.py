@@ -27,8 +27,10 @@ from .const import (
     CONF_MAP_LABEL_SCALE,
     CONF_MAP_MARKER_IMAGE,
     CONF_MAP_MARKER_SCALE,
+    CONF_MAP_MOWING_PATH_STYLE,
     CONF_MAP_ROTATION,
     CONF_MAP_ROTATIONS,
+    CONF_MAP_SPOT_AREA_STYLE,
     CONF_MAP_STROKE_SCALE,
     CONF_MAP_THEME,
     CONF_MODEL,
@@ -48,14 +50,18 @@ from .const import (
     DEFAULT_COUNTRY,
     DEFAULT_MAP_LABEL_SCALE,
     DEFAULT_MAP_MARKER_SCALE,
+    DEFAULT_MAP_MOWING_PATH_STYLE,
     DEFAULT_MAP_ROTATION,
+    DEFAULT_MAP_SPOT_AREA_STYLE,
     DEFAULT_MAP_STROKE_SCALE,
     DEFAULT_MAP_THEME,
     DEFAULT_SCAN_INTERVAL_SECONDS,
     DEFAULT_VIDEO_RETENTION,
     DEFAULT_VIDEO_TRANSPORT,
     DOMAIN,
+    MAP_MOWING_PATH_STYLE_OPTIONS,
     MAP_ROTATION_OPTIONS,
+    MAP_SPOT_AREA_STYLE_OPTIONS,
     MAP_THEME_OPTIONS,
     MAX_MAP_LABEL_SCALE,
     MAX_SCAN_INTERVAL_SECONDS,
@@ -182,8 +188,15 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
                     ),
                     vol.Required(CONF_USERNAME, default=self._username): str,
                     vol.Required(CONF_PASSWORD, default=self._password): str,
-                    vol.Required(CONF_COUNTRY, default=self._country): vol.In(
-                        COUNTRY_OPTIONS
+                    vol.Required(
+                        CONF_COUNTRY,
+                        default=self._country,
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=COUNTRY_OPTIONS,
+                            translation_key=CONF_COUNTRY,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
                     ),
                 }
             ),
@@ -275,7 +288,13 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Required(
                         CONF_COUNTRY,
                         default=entry.data[CONF_COUNTRY],
-                    ): vol.In(COUNTRY_OPTIONS),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=COUNTRY_OPTIONS,
+                            translation_key=CONF_COUNTRY,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
                 }
             ),
             errors=self._errors,
@@ -316,6 +335,8 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
     ) -> FlowResult:
         if user_input is not None:
             options = dict(user_input)
+            if CONF_MAP_ROTATION in options:
+                options[CONF_MAP_ROTATION] = int(options[CONF_MAP_ROTATION])
             if CONF_MAP_ROTATIONS in self._entry_options:
                 options[CONF_MAP_ROTATIONS] = self._entry_options[CONF_MAP_ROTATIONS]
             return self.async_create_entry(title="", data=options)
@@ -365,18 +386,32 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                     ),
                     vol.Optional(
                         CONF_MAP_ROTATION,
-                        default=self._entry_options.get(
-                            CONF_MAP_ROTATION,
-                            DEFAULT_MAP_ROTATION,
+                        default=str(
+                            self._entry_options.get(
+                                CONF_MAP_ROTATION,
+                                DEFAULT_MAP_ROTATION,
+                            )
                         ),
-                    ): vol.In(MAP_ROTATION_OPTIONS),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[str(value) for value in MAP_ROTATION_OPTIONS],
+                            translation_key=CONF_MAP_ROTATION,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
                     vol.Optional(
                         CONF_MAP_THEME,
                         default=self._entry_options.get(
                             CONF_MAP_THEME,
                             DEFAULT_MAP_THEME,
                         ),
-                    ): vol.In(MAP_THEME_OPTIONS),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=list(MAP_THEME_OPTIONS),
+                            translation_key=CONF_MAP_THEME,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
                     vol.Optional(
                         CONF_MAP_STROKE_SCALE,
                         default=self._entry_options.get(
@@ -400,13 +435,51 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                         )
                     ),
                     vol.Optional(
+                        CONF_MAP_SPOT_AREA_STYLE,
+                        default=self._entry_options.get(
+                            CONF_MAP_SPOT_AREA_STYLE,
+                            DEFAULT_MAP_SPOT_AREA_STYLE,
+                        ),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=list(MAP_SPOT_AREA_STYLE_OPTIONS),
+                            translation_key=CONF_MAP_SPOT_AREA_STYLE,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_MAP_MOWING_PATH_STYLE,
+                        default=self._entry_options.get(
+                            CONF_MAP_MOWING_PATH_STYLE,
+                            DEFAULT_MAP_MOWING_PATH_STYLE,
+                        ),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=list(MAP_MOWING_PATH_STYLE_OPTIONS),
+                            translation_key=CONF_MAP_MOWING_PATH_STYLE,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
                         CONF_VIDEO_RETENTION,
                         default=video_retention,
-                    ): vol.In(VIDEO_RETENTION_OPTIONS),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=list(VIDEO_RETENTION_OPTIONS),
+                            translation_key=CONF_VIDEO_RETENTION,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
                     vol.Optional(
                         CONF_VIDEO_TRANSPORT,
                         default=video_transport,
-                    ): vol.In(VIDEO_TRANSPORT_OPTIONS),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=list(VIDEO_TRANSPORT_OPTIONS),
+                            translation_key=CONF_VIDEO_TRANSPORT,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
                     vol.Optional(
                         CONF_XP2P_LIBRARY_PATH,
                         default=self._entry_options.get(
@@ -427,7 +500,13 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                             CONF_XP2P_RUNNER_MODE,
                             XP2P_RUNNER_MODE_PROCESS,
                         ),
-                    ): vol.In(XP2P_RUNNER_MODE_OPTIONS),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=list(XP2P_RUNNER_MODE_OPTIONS),
+                            translation_key=CONF_XP2P_RUNNER_MODE,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
                 }
             ),
         )

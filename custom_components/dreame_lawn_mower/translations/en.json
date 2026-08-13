@@ -52,6 +52,8 @@
           "map_stroke_scale": "Map line thickness",
           "map_marker_scale": "Map marker size",
           "map_marker_image": "Custom mower marker",
+          "map_spot_area_style": "Saved spot area display",
+          "map_mowing_path_style": "Completed mowing path display",
           "video_retention": "Live video retention",
           "video_transport": "Live video transport",
           "xp2p_library_path": "Host XP2P native library path",
@@ -64,12 +66,74 @@
           "map_stroke_scale": "Scale map boundaries and paths from 0.5 to 3.",
           "map_marker_scale": "Scale map points and the live mower marker from 0.5 to 3.",
           "map_marker_image": "Optional PNG, JPEG, or WebP inside Home Assistant's config/www folder, for example mower/marker.png or /local/mower/marker.png. Files outside that folder and files larger than 1 MB are ignored.",
+          "map_spot_area_style": "Hide saved spot-mowing rectangles for a clean Dreame-like map, show only their outlines, or restore the filled diagnostic overlay. This affects locally rendered vector maps only.",
+          "map_mowing_path_style": "Hide completed mowing passes, render them subtly, or show every pass in full detail. The live route and mower marker remain visible.",
           "video_retention": "Balanced gives snapshot previews a 60-second reconnect window and keeps XP2P ready for the current mowing run after someone opens live video. Battery saver always releases it shortly after the last consumer. Video priority also treats snapshot access as a reason to stay ready while mowing. All modes remain lazy until media is requested and stop when mower state blocks video.",
           "video_transport": "Auto is the fast default: it refreshes only mower safety state, then reuses health-checked provisioning and prefers a proven LAN route when firmware exposes one. Cloud remains the compatibility fallback. The tested A2 firmware does not expose Tencent's separate LAN service, so neither mode promises internet-independent startup.",
           "xp2p_library_path": "Advanced video option. Use a dynamic XP2P library built for this Home Assistant host OS and CPU. Android APK/AAR libraries and iOS frameworks are not host runtimes.",
           "xp2p_runner_command": "Advanced video option. Use only a local host runner that owns a compatible XP2P runtime and returns a local FLV URL. Android helpers are not the intended Home Assistant runtime.",
           "xp2p_runner_mode": "Use process mode for a runner that stays alive while Home Assistant streams."
         }
+      }
+    }
+  },
+  "selector": {
+    "country": {
+      "options": {
+        "cn": "China",
+        "eu": "Europe",
+        "us": "United States",
+        "ru": "Russia",
+        "sg": "Singapore"
+      }
+    },
+    "map_rotation": {
+      "options": {
+        "0": "0° (no rotation)",
+        "90": "90° clockwise",
+        "180": "180°",
+        "270": "270° clockwise"
+      }
+    },
+    "map_theme": {
+      "options": {
+        "emerald": "Emerald",
+        "dark": "Dark",
+        "midnight": "Midnight",
+        "high_contrast": "High contrast"
+      }
+    },
+    "map_spot_area_style": {
+      "options": {
+        "hidden": "Hidden (recommended)",
+        "outline": "Outline only",
+        "filled": "Filled"
+      }
+    },
+    "map_mowing_path_style": {
+      "options": {
+        "hidden": "Hidden",
+        "subtle": "Subtle (recommended)",
+        "detailed": "Detailed"
+      }
+    },
+    "video_retention": {
+      "options": {
+        "balanced": "Balanced (live viewing stays ready)",
+        "battery_saver": "Battery saver (stop after viewers leave)",
+        "video_priority": "Video priority (snapshots also stay ready)"
+      }
+    },
+    "video_transport": {
+      "options": {
+        "auto": "Automatic XP2P with fast reconnect",
+        "cloud": "XP2P (cloud provisioned)"
+      }
+    },
+    "xp2p_runner_mode": {
+      "options": {
+        "process": "Persistent process",
+        "one-shot": "One-shot command"
       }
     }
   },

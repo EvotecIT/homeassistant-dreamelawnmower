@@ -1,4 +1,142 @@
 {
+  "config": {
+    "step": {
+      "user": {
+        "title": "Połącz kosiarkę Dreame",
+        "description": "Zaloguj się do konta Dreamehome lub MOVAhome, aby wyszukać kosiarki.",
+        "data": {
+          "account_type": "Typ konta",
+          "username": "Nazwa użytkownika",
+          "password": "Hasło",
+          "country": "Region"
+        }
+      },
+      "device": {
+        "title": "Wybierz kosiarkę",
+        "description": "Wybierz kosiarkę, którą chcesz dodać. Aby dodać kolejną kosiarkę z tego samego konta, uruchom konfigurację ponownie.",
+        "data": {
+          "device": "Wykryta kosiarka"
+        }
+      },
+      "reauth": {
+        "title": "Połącz konto ponownie",
+        "description": "Zaktualizuj dane logowania do konta Dreamehome lub MOVAhome.",
+        "data": {
+          "username": "Nazwa użytkownika",
+          "password": "Hasło",
+          "country": "Region"
+        }
+      }
+    },
+    "error": {
+      "2fa_required": "Przed kontynuowaniem konfiguracji ukończ uwierzytelnianie dwuskładnikowe w aplikacji lub witrynie producenta.",
+      "cannot_auth": "Logowanie nie powiodło się. Sprawdź nazwę użytkownika, hasło, typ konta i region.",
+      "cannot_connect": "Home Assistant nie może połączyć się z chmurą Dreame lub MOVA. Sprawdź połączenie sieciowe i spróbuj ponownie.",
+      "invalid_account_type": "Wybrany typ konta nie jest obsługiwany przez tę integrację.",
+      "invalid_region": "Chmura odrzuciła wybrany region. Sprawdź region konta ustawiony w aplikacji producenta.",
+      "no_devices": "Na tym koncie nie znaleziono obsługiwanych kosiarek. Sprawdź, czy wybrany region i typ konta są zgodne z ustawieniami w aplikacji producenta."
+    },
+    "abort": {
+      "already_configured": "Wszystkie obsługiwane kosiarki z tego konta są już skonfigurowane."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opcje kosiarki Dreame",
+        "data": {
+          "scan_interval": "Interwał odpytywania (sekundy)",
+          "map_label_scale": "Skala etykiet mapy",
+          "map_rotation": "Obrót mapy",
+          "map_theme": "Motyw mapy",
+          "map_stroke_scale": "Grubość linii mapy",
+          "map_marker_scale": "Rozmiar znaczników mapy",
+          "map_marker_image": "Niestandardowy znacznik kosiarki",
+          "map_spot_area_style": "Wyświetlanie zapisanych obszarów koszenia punktowego",
+          "map_mowing_path_style": "Wyświetlanie ukończonych przejazdów",
+          "video_retention": "Utrzymywanie połączenia wideo na żywo",
+          "video_transport": "Sposób połączenia wideo na żywo",
+          "xp2p_library_path": "Ścieżka do natywnej biblioteki XP2P hosta",
+          "xp2p_runner_command": "Polecenie procesu pomocniczego XP2P hosta",
+          "xp2p_runner_mode": "Tryb procesu pomocniczego XP2P hosta"
+        },
+        "data_description": {
+          "map_rotation": "Domyślny obrót map, które nie mają własnego ustawienia. Dla konkretnej mapy użyj encji Obrót wyświetlania wybranej mapy.",
+          "map_theme": "Wybierz spójny jasny, ciemny, nocny lub kontrastowy zestaw kolorów dla wszystkich map renderowanych lokalnie.",
+          "map_stroke_scale": "Skaluj granice i ścieżki mapy w zakresie od 0,5 do 3.",
+          "map_marker_scale": "Skaluj punkty mapy i znacznik bieżącej pozycji kosiarki w zakresie od 0,5 do 3.",
+          "map_marker_image": "Opcjonalny plik PNG, JPEG lub WebP w katalogu config/www Home Assistanta, na przykład mower/marker.png albo /local/mower/marker.png. Pliki spoza tego katalogu oraz większe niż 1 MB są ignorowane.",
+          "map_spot_area_style": "Ukryj zapisane prostokąty koszenia punktowego, aby uzyskać przejrzystą mapę podobną do aplikacji Dreame, pokaż tylko ich obrys albo przywróć wypełnioną warstwę diagnostyczną. To ustawienie dotyczy wyłącznie map wektorowych renderowanych lokalnie.",
+          "map_mowing_path_style": "Ukryj ukończone przejazdy, pokaż je w stonowany sposób albo wyświetl każdy przejazd szczegółowo. Trasa na żywo i znacznik kosiarki pozostają widoczne.",
+          "video_retention": "Tryb zrównoważony utrzymuje możliwość szybkiego ponownego połączenia przez 60 sekund dla podglądów i pozostawia XP2P w gotowości podczas bieżącego koszenia po otwarciu wideo na żywo. Oszczędzanie energii zwalnia połączenie krótko po zakończeniu ostatniego użycia. Priorytet wideo utrzymuje je także po wyświetleniu podglądu podczas koszenia. Każdy tryb uruchamia połączenie dopiero po żądaniu obrazu i zatrzymuje je, gdy stan kosiarki blokuje wideo.",
+          "video_transport": "Tryb automatyczny jest szybkim ustawieniem domyślnym: odświeża tylko stan bezpieczeństwa kosiarki, ponownie używa sprawdzonych danych połączenia i wybiera potwierdzoną trasę LAN, jeżeli oprogramowanie kosiarki ją udostępnia. Chmura pozostaje trybem zgodności. Testowane oprogramowanie A2 nie udostępnia osobnej usługi LAN Tencent, dlatego żaden tryb nie gwarantuje uruchomienia bez Internetu.",
+          "xp2p_library_path": "Zaawansowana opcja wideo. Użyj dynamicznej biblioteki XP2P skompilowanej dla systemu operacyjnego i procesora hosta Home Assistanta. Biblioteki z pakietów Android APK/AAR oraz frameworki iOS nie działają jako biblioteki hosta.",
+          "xp2p_runner_command": "Zaawansowana opcja wideo. Użyj wyłącznie lokalnego procesu pomocniczego, który ma zgodne środowisko XP2P i zwraca lokalny adres URL strumienia FLV. Narzędzia pomocnicze dla Androida nie są przeznaczone do uruchamiania na hoście Home Assistanta.",
+          "xp2p_runner_mode": "Wybierz tryb procesu, jeśli proces pomocniczy ma działać przez cały czas przesyłania strumienia przez Home Assistanta."
+        }
+      }
+    }
+  },
+  "selector": {
+    "country": {
+      "options": {
+        "cn": "Chiny",
+        "eu": "Europa",
+        "us": "Stany Zjednoczone",
+        "ru": "Rosja",
+        "sg": "Singapur"
+      }
+    },
+    "map_rotation": {
+      "options": {
+        "0": "0° (bez obrotu)",
+        "90": "90° zgodnie z ruchem wskazówek zegara",
+        "180": "180°",
+        "270": "270° zgodnie z ruchem wskazówek zegara"
+      }
+    },
+    "map_theme": {
+      "options": {
+        "emerald": "Szmaragdowy",
+        "dark": "Ciemny",
+        "midnight": "Nocny",
+        "high_contrast": "Wysoki kontrast"
+      }
+    },
+    "map_spot_area_style": {
+      "options": {
+        "hidden": "Ukryte (zalecane)",
+        "outline": "Tylko obrys",
+        "filled": "Wypełnione"
+      }
+    },
+    "map_mowing_path_style": {
+      "options": {
+        "hidden": "Ukryte",
+        "subtle": "Stonowane (zalecane)",
+        "detailed": "Szczegółowe"
+      }
+    },
+    "video_retention": {
+      "options": {
+        "balanced": "Zrównoważony (podgląd na żywo pozostaje w gotowości)",
+        "battery_saver": "Oszczędzanie energii (połączenie jest zamykane po zakończeniu oglądania)",
+        "video_priority": "Priorytet wideo (podglądy także utrzymują gotowość)"
+      }
+    },
+    "video_transport": {
+      "options": {
+        "auto": "Automatyczny XP2P z szybkim ponownym połączeniem",
+        "cloud": "XP2P (konfiguracja przez chmurę)"
+      }
+    },
+    "xp2p_runner_mode": {
+      "options": {
+        "process": "Stały proces",
+        "one-shot": "Polecenie jednorazowe"
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "state_name": {
@@ -6,8 +144,8 @@
         "state": {
           "unknown": "Nieznany",
           "mowing": "Koszenie",
-          "idle": "Bezczynny",
-          "paused": "Wstrzymany",
+          "idle": "Bezczynność",
+          "paused": "Wstrzymano",
           "error": "Błąd",
           "returning": "Powrót do stacji",
           "charging": "Ładowanie",

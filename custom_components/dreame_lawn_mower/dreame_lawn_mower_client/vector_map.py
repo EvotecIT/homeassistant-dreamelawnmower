@@ -289,26 +289,43 @@ def render_vector_map_png(
             width=line_width(style, 2),
         )
 
-    for area in vector_map.spot_areas:
-        if len(area.points) < 3:
-            continue
-        polygon = [to_pixel(x, y) for x, y in area.points]
-        draw.polygon(
-            polygon,
-            fill=style.spot_fill,
-            outline=style.spot_outline,
-            width=line_width(style, 2),
-        )
-
-    for mow_path in vector_map.mow_paths:
-        for segment in mow_path.segments:
-            if len(segment) < 2:
+    if style.spot_area_style != "hidden":
+        for area in vector_map.spot_areas:
+            if len(area.points) < 3:
                 continue
-            draw.line(
-                [to_pixel(x, y) for x, y in segment],
-                fill=style.mow_path,
+            polygon = [to_pixel(x, y) for x, y in area.points]
+            draw.polygon(
+                polygon,
+                fill=(
+                    style.spot_fill
+                    if style.spot_area_style == "filled"
+                    else None
+                ),
+                outline=style.spot_outline,
                 width=line_width(style, 2),
             )
+
+    if style.mowing_path_style != "hidden":
+        path_color = style.mow_path
+        path_width = 2
+        path_draw = draw
+        path_overlay: Image.Image | None = None
+        if style.mowing_path_style == "subtle":
+            path_color = (*style.mow_path[:3], min(style.mow_path[3], 72))
+            path_width = 1
+            path_overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+            path_draw = ImageDraw.Draw(path_overlay)
+        for mow_path in vector_map.mow_paths:
+            for segment in mow_path.segments:
+                if len(segment) < 2:
+                    continue
+                path_draw.line(
+                    [to_pixel(x, y) for x, y in segment],
+                    fill=path_color,
+                    width=line_width(style, path_width),
+                )
+        if path_overlay is not None:
+            image.alpha_composite(path_overlay)
 
     for segment in runtime_track_segments or ():
         if len(segment) < 2:

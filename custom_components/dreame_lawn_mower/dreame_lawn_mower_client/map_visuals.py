@@ -41,6 +41,8 @@ class MapRenderStyle:
     stroke_scale: float = 1.0
     marker_scale: float = 1.0
     marker_image: bytes | None = None
+    spot_area_style: str = "filled"
+    mowing_path_style: str = "detailed"
 
 
 _EMERALD = MapRenderStyle(
@@ -125,6 +127,8 @@ def map_render_style(
     stroke_scale: float = 1.0,
     marker_scale: float = 1.0,
     marker_image: bytes | None = None,
+    spot_area_style: str = "filled",
+    mowing_path_style: str = "detailed",
 ) -> MapRenderStyle:
     """Return a normalized preset with optional safe presentation overrides."""
     preset = MAP_RENDER_STYLES.get(str(name or "").lower(), _EMERALD)
@@ -141,6 +145,16 @@ def map_render_style(
             3.0,
         ),
         marker_image=marker_image,
+        spot_area_style=_choice(
+            spot_area_style,
+            {"hidden", "outline", "filled"},
+            "filled",
+        ),
+        mowing_path_style=_choice(
+            mowing_path_style,
+            {"hidden", "subtle", "detailed"},
+            "detailed",
+        ),
     )
 
 
@@ -245,3 +259,9 @@ def _finite_scale(value: Any, minimum: float, maximum: float) -> float:
     if not math.isfinite(result):
         result = 1.0
     return min(max(result, minimum), maximum)
+
+
+def _choice(value: Any, choices: set[str], fallback: str) -> str:
+    """Return a supported presentation choice or its safe fallback."""
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in choices else fallback

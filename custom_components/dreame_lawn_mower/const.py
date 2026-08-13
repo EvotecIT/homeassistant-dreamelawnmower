@@ -23,6 +23,8 @@ CONF_MAP_THEME = "map_theme"
 CONF_MAP_STROKE_SCALE = "map_stroke_scale"
 CONF_MAP_MARKER_SCALE = "map_marker_scale"
 CONF_MAP_MARKER_IMAGE = "map_marker_image"
+CONF_MAP_SPOT_AREA_STYLE = "map_spot_area_style"
+CONF_MAP_MOWING_PATH_STYLE = "map_mowing_path_style"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_TOKEN = "token"
 CONF_USERNAME = "username"
@@ -38,6 +40,8 @@ DEFAULT_MAP_ROTATION = 0
 DEFAULT_MAP_THEME = "emerald"
 DEFAULT_MAP_STROKE_SCALE = 1.0
 DEFAULT_MAP_MARKER_SCALE = 1.0
+DEFAULT_MAP_SPOT_AREA_STYLE = "hidden"
+DEFAULT_MAP_MOWING_PATH_STYLE = "subtle"
 DEFAULT_SCAN_INTERVAL_SECONDS = 60
 MIN_MAP_LABEL_SCALE = 0.5
 MAX_MAP_LABEL_SCALE = 4.0
@@ -54,6 +58,16 @@ MAP_THEME_OPTIONS = {
     "dark": "Dark",
     "midnight": "Midnight",
     "high_contrast": "High contrast",
+}
+MAP_SPOT_AREA_STYLE_OPTIONS = {
+    "hidden": "Hidden (recommended)",
+    "outline": "Outline only",
+    "filled": "Filled",
+}
+MAP_MOWING_PATH_STYLE_OPTIONS = {
+    "hidden": "Hidden",
+    "subtle": "Subtle (recommended)",
+    "detailed": "Detailed",
 }
 
 ACCOUNT_TYPE_DREAME = "dreame"
