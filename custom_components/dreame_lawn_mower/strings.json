@@ -78,6 +78,31 @@
     }
   },
   "selector": {
+    "country": {
+      "options": {
+        "cn": "China",
+        "eu": "Europe",
+        "us": "United States",
+        "ru": "Russia",
+        "sg": "Singapore"
+      }
+    },
+    "map_rotation": {
+      "options": {
+        "0": "0° (no rotation)",
+        "90": "90° clockwise",
+        "180": "180°",
+        "270": "270° clockwise"
+      }
+    },
+    "map_theme": {
+      "options": {
+        "emerald": "Emerald",
+        "dark": "Dark",
+        "midnight": "Midnight",
+        "high_contrast": "High contrast"
+      }
+    },
     "map_spot_area_style": {
       "options": {
         "hidden": "Hidden (recommended)",
@@ -90,6 +115,25 @@
         "hidden": "Hidden",
         "subtle": "Subtle (recommended)",
         "detailed": "Detailed"
+      }
+    },
+    "video_retention": {
+      "options": {
+        "balanced": "Balanced (live viewing stays ready)",
+        "battery_saver": "Battery saver (stop after viewers leave)",
+        "video_priority": "Video priority (snapshots also stay ready)"
+      }
+    },
+    "video_transport": {
+      "options": {
+        "auto": "Automatic XP2P with fast reconnect",
+        "cloud": "XP2P (cloud provisioned)"
+      }
+    },
+    "xp2p_runner_mode": {
+      "options": {
+        "process": "Persistent process",
+        "one-shot": "One-shot command"
       }
     }
   },

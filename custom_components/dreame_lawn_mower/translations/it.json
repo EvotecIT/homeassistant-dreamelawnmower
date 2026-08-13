@@ -1,4 +1,142 @@
 {
+  "config": {
+    "step": {
+      "user": {
+        "title": "Collega il robot tagliaerba Dreame",
+        "description": "Accedi al tuo account Dreamehome o MOVAhome per cercare i robot tagliaerba.",
+        "data": {
+          "account_type": "Tipo di account",
+          "username": "Nome utente",
+          "password": "Password",
+          "country": "Regione"
+        }
+      },
+      "device": {
+        "title": "Seleziona il robot tagliaerba",
+        "description": "Scegli il robot tagliaerba da aggiungere. Ripeti la configurazione per aggiungerne un altro dallo stesso account.",
+        "data": {
+          "device": "Robot tagliaerba rilevato"
+        }
+      },
+      "reauth": {
+        "title": "Ricollega l’account",
+        "description": "Aggiorna le credenziali Dreamehome o MOVAhome.",
+        "data": {
+          "username": "Nome utente",
+          "password": "Password",
+          "country": "Regione"
+        }
+      }
+    },
+    "error": {
+      "2fa_required": "Completa l’autenticazione a due fattori nell’app o nel sito del produttore prima di continuare la configurazione.",
+      "cannot_auth": "Accesso all’account non riuscito. Controlla nome utente, password, tipo di account e regione.",
+      "cannot_connect": "Home Assistant non riesce a raggiungere il cloud Dreame o MOVA. Controlla la connessione di rete e riprova.",
+      "invalid_account_type": "Il tipo di account selezionato non è supportato da questa integrazione.",
+      "invalid_region": "Il cloud ha rifiutato la regione selezionata. Controlla la regione dell’account impostata nell’app del produttore.",
+      "no_devices": "Non sono stati trovati robot tagliaerba supportati per questo account. Controlla che la regione e il tipo di account corrispondano a quelli usati nell’app del produttore."
+    },
+    "abort": {
+      "already_configured": "Tutti i robot tagliaerba supportati di questo account sono già configurati."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opzioni del robot tagliaerba Dreame",
+        "data": {
+          "scan_interval": "Intervallo di aggiornamento in secondi",
+          "map_label_scale": "Scala delle etichette della mappa",
+          "map_rotation": "Rotazione della mappa",
+          "map_theme": "Tema della mappa",
+          "map_stroke_scale": "Spessore delle linee della mappa",
+          "map_marker_scale": "Dimensione degli indicatori sulla mappa",
+          "map_marker_image": "Indicatore personalizzato del robot tagliaerba",
+          "map_spot_area_style": "Visualizzazione delle aree di taglio localizzato salvate",
+          "map_mowing_path_style": "Visualizzazione dei passaggi di taglio completati",
+          "video_retention": "Mantenimento della connessione video in diretta",
+          "video_transport": "Modalità di connessione del video in diretta",
+          "xp2p_library_path": "Percorso della libreria nativa XP2P dell’host",
+          "xp2p_runner_command": "Comando del processo ausiliario XP2P dell’host",
+          "xp2p_runner_mode": "Modalità del processo ausiliario XP2P dell’host"
+        },
+        "data_description": {
+          "map_rotation": "Rotazione predefinita per le mappe senza un’impostazione specifica. Per le singole mappe usa l’entità Rotazione della mappa selezionata.",
+          "map_theme": "Scegli una combinazione di colori chiara, scura, notturna o ad alto contrasto per tutte le mappe generate localmente.",
+          "map_stroke_scale": "Regola lo spessore dei confini e dei percorsi della mappa da 0,5 a 3.",
+          "map_marker_scale": "Regola la dimensione dei punti sulla mappa e dell’indicatore della posizione attuale del robot tagliaerba da 0,5 a 3.",
+          "map_marker_image": "File PNG, JPEG o WebP facoltativo nella cartella config/www di Home Assistant, ad esempio mower/marker.png o /local/mower/marker.png. I file esterni a questa cartella e quelli più grandi di 1 MB vengono ignorati.",
+          "map_spot_area_style": "Nascondi i rettangoli salvati per il taglio localizzato per ottenere una mappa pulita simile a quella dell’app Dreame, mostra solo il contorno oppure ripristina il livello diagnostico pieno. Questa impostazione riguarda solo le mappe vettoriali generate localmente.",
+          "map_mowing_path_style": "Nascondi i passaggi di taglio completati, mostrali in modo discreto oppure visualizza ogni passaggio in dettaglio. Il percorso in diretta e l’indicatore del robot tagliaerba restano visibili.",
+          "video_retention": "La modalità Bilanciata mantiene una finestra di riconnessione di 60 secondi per le anteprime e lascia XP2P pronto durante il taglio in corso dopo l’apertura del video in diretta. Risparmio energetico libera sempre la connessione poco dopo l’ultimo utilizzo. Priorità video considera anche l’accesso alle anteprime un motivo per mantenere pronta la connessione durante il taglio. Tutte le modalità attendono una richiesta multimediale prima di avviarsi e si arrestano quando lo stato del robot blocca il video.",
+          "video_transport": "Automatica è l’impostazione rapida predefinita: aggiorna solo lo stato di sicurezza del robot, riutilizza i dati di connessione verificati e preferisce un percorso LAN confermato quando il firmware lo rende disponibile. Cloud rimane la modalità di compatibilità. Il firmware A2 testato non espone il servizio LAN separato di Tencent, quindi nessuna modalità garantisce l’avvio senza Internet.",
+          "xp2p_library_path": "Opzione video avanzata. Usa una libreria dinamica XP2P compilata per il sistema operativo e la CPU dell’host Home Assistant. Le librerie Android APK/AAR e i framework iOS non possono essere usati come runtime dell’host.",
+          "xp2p_runner_command": "Opzione video avanzata. Usa solo un processo ausiliario locale con un runtime XP2P compatibile che restituisca un URL FLV locale. Gli strumenti Android non sono progettati per essere eseguiti sull’host Home Assistant.",
+          "xp2p_runner_mode": "Scegli la modalità processo se il processo ausiliario deve restare attivo durante l’intero streaming di Home Assistant."
+        }
+      }
+    }
+  },
+  "selector": {
+    "country": {
+      "options": {
+        "cn": "Cina",
+        "eu": "Europa",
+        "us": "Stati Uniti",
+        "ru": "Russia",
+        "sg": "Singapore"
+      }
+    },
+    "map_rotation": {
+      "options": {
+        "0": "0° (nessuna rotazione)",
+        "90": "90° in senso orario",
+        "180": "180°",
+        "270": "270° in senso orario"
+      }
+    },
+    "map_theme": {
+      "options": {
+        "emerald": "Smeraldo",
+        "dark": "Scuro",
+        "midnight": "Mezzanotte",
+        "high_contrast": "Contrasto elevato"
+      }
+    },
+    "map_spot_area_style": {
+      "options": {
+        "hidden": "Nascoste (consigliate)",
+        "outline": "Solo contorno",
+        "filled": "Piene"
+      }
+    },
+    "map_mowing_path_style": {
+      "options": {
+        "hidden": "Nascosti",
+        "subtle": "Discreti (consigliati)",
+        "detailed": "Dettagliati"
+      }
+    },
+    "video_retention": {
+      "options": {
+        "balanced": "Bilanciato (la visualizzazione in diretta resta pronta)",
+        "battery_saver": "Risparmio energetico (arresto quando non ci sono spettatori)",
+        "video_priority": "Priorità video (anche le istantanee mantengono pronta la connessione)"
+      }
+    },
+    "video_transport": {
+      "options": {
+        "auto": "XP2P automatico con riconnessione rapida",
+        "cloud": "XP2P (predisposto tramite cloud)"
+      }
+    },
+    "xp2p_runner_mode": {
+      "options": {
+        "process": "Processo persistente",
+        "one-shot": "Comando singolo"
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "state_name": {
