@@ -49,6 +49,7 @@ from .debug_ota_catalog import (
     normalize_debug_ota_catalog_payload,
 )
 from .exceptions import (
+    DreameLawnMowerCommandRejectedError,
     DreameLawnMowerConnectionError,
 )
 from .exceptions import (
@@ -658,14 +659,37 @@ class _DreameLawnMowerClientSettingsMixin:
         if execute:
             responses: list[Any] = []
             response_payloads: list[Any] = []
+            preference_readback_required = False
             for request in request_sequence:
                 response = self._sync_call_app_action(request)
+                is_preference_settings_write = request.get("t") == "PRE"
+                missing_response_data = (
+                    is_preference_settings_write
+                    and isinstance(response, Mapping)
+                    and "d" not in response
+                )
                 response_data = _ensure_app_write_succeeded(
                     response,
                     operation="Preference write",
+                    allow_missing_data=is_preference_settings_write,
                 )
+                preference_readback_required |= missing_response_data
                 responses.append(_json_safe(response, max_depth=4))
                 response_payloads.append(_json_safe(response_data, max_depth=4))
+            if preference_readback_required:
+                result["readback"] = self._sync_verify_mowing_preference_readback(
+                    map_index=map_index,
+                    area_id=area_id,
+                    setting_changes=setting_changes,
+                    requested_mode=requested_mode,
+                )
+                result["verification_source"] = "preference_readback"
+                result["notes"].append(
+                    "The PRE response omitted data; the requested values were "
+                    "confirmed through mower preference readback."
+                )
+            else:
+                result["verification_source"] = "response_data"
             result["executed"] = True
             result["request_verified"] = True
             if len(responses) == 1:
@@ -675,6 +699,85 @@ class _DreameLawnMowerClientSettingsMixin:
                 result["responses"] = responses
                 result["response_data"] = response_payloads
         return result
+
+    def _sync_verify_mowing_preference_readback(
+        self,
+        *,
+        map_index: int,
+        area_id: int | None,
+        setting_changes: Mapping[str, Any],
+        requested_mode: int | None,
+    ) -> dict[str, Any]:
+        """Require exact PRE/PREI readback after a data-less success response."""
+        preferences = self._sync_get_mowing_preferences(map_indices=[map_index])
+        maps = preferences.get("maps")
+        preference_map = (
+            next(
+                (
+                    item
+                    for item in maps
+                    if isinstance(item, Mapping) and item.get("idx") == map_index
+                ),
+                None,
+            )
+            if isinstance(maps, list)
+            else None
+        )
+        if not isinstance(preference_map, Mapping):
+            raise DreameLawnMowerConnectionError(
+                "Preference write returned success without response data, but the "
+                "mower did not return the target map for readback. Refresh the mower "
+                "before trying again."
+            )
+
+        unconfirmed_fields: list[str] = []
+        if (
+            requested_mode is not None
+            and _positive_int(preference_map.get("mode")) != requested_mode
+        ):
+            unconfirmed_fields.append(MOWING_PREFERENCE_MODE_FIELD)
+
+        readback_preference: Mapping[str, Any] | None = None
+        if setting_changes:
+            raw_preferences = preference_map.get("preferences")
+            if isinstance(raw_preferences, list):
+                readback_preference = next(
+                    (
+                        item
+                        for item in raw_preferences
+                        if isinstance(item, Mapping)
+                        and _positive_int(item.get("area_id")) == area_id
+                    ),
+                    None,
+                )
+            if readback_preference is None:
+                raise DreameLawnMowerConnectionError(
+                    "Preference write returned success without response data, but the "
+                    "mower did not return the target area for readback. Refresh the "
+                    "mower before trying again."
+                )
+            _, remaining_changes = apply_mowing_preference_changes(
+                readback_preference,
+                setting_changes,
+            )
+            unconfirmed_fields.extend(remaining_changes)
+
+        if unconfirmed_fields:
+            fields = ", ".join(dict.fromkeys(unconfirmed_fields))
+            raise DreameLawnMowerCommandRejectedError(
+                "The mower returned success without response data, but preference "
+                f"readback did not confirm the requested fields: {fields}."
+            )
+
+        return {
+            "source": "app_action_mowing_preference_readback",
+            "map": _mowing_preference_map_overview(preference_map),
+            "preference": (
+                _mowing_preference_overview(readback_preference)
+                if readback_preference is not None
+                else None
+            ),
+        }
 
     def _sync_get_batch_schedules(
         self,
@@ -803,7 +906,17 @@ class _DreameLawnMowerClientSettingsMixin:
                             f"area {area_id}."
                         )
                     preference = decode_mowing_preference_payload(preference_data)
-                    preference["area_id"] = area_id
+                    reported_map_index = _positive_int(preference.get("map_index"))
+                    reported_area_id = _positive_int(preference.get("area_id"))
+                    if (
+                        reported_map_index != map_index
+                        or reported_area_id != area_id
+                    ):
+                        raise DreameLawnMowerConnectionError(
+                            "PRE returned mismatched preference identity for requested "
+                            f"map {map_index} area {area_id}: payload map "
+                            f"{reported_map_index} area {reported_area_id}."
+                        )
                     preference["reported_version"] = area.get("version")
                     if include_raw:
                         preference["raw_response"] = _json_safe(
