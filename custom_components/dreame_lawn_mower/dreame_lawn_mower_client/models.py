@@ -225,16 +225,24 @@ def _realtime_property_last_seen(device: Any, key: str) -> float | None:
         return None
 
 
-def _realtime_property_changed_at(device: Any, key: str) -> float | None:
-    """Return when a realtime property's value last changed, if known."""
+def _realtime_active_session_started_at(device: Any) -> float | None:
+    """Return when the current active mower session began, if known."""
     realtime_properties = getattr(device, "realtime_properties", {}) or {}
-    entry = realtime_properties.get(key)
+    entry = realtime_properties.get(REALTIME_STATE_PROPERTY_KEY)
     if not isinstance(entry, Mapping):
         return None
-    try:
-        return float(entry.get("changed_at", entry.get("last_seen")))
-    except (TypeError, ValueError):
-        return None
+    for timestamp_field in (
+        "active_session_started_at",
+        "changed_at",
+        "last_seen",
+    ):
+        try:
+            value = entry.get(timestamp_field)
+            if value is not None:
+                return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def _active_task_region_ids(device: Any, *, activity: str) -> tuple[int, ...] | None:
@@ -248,12 +256,9 @@ def _active_task_region_ids(device: Any, *, activity: str) -> tuple[int, ...] | 
 
     entry = realtime_properties.get(MOWER_TASK_PROPERTY_KEY)
     task_last_seen = _realtime_property_last_seen(device, MOWER_TASK_PROPERTY_KEY)
-    state_changed_at = _realtime_property_changed_at(
-        device,
-        REALTIME_STATE_PROPERTY_KEY,
-    )
-    if state_changed_at is not None and (
-        task_last_seen is None or task_last_seen < state_changed_at
+    active_session_started_at = _realtime_active_session_started_at(device)
+    if active_session_started_at is not None and (
+        task_last_seen is None or task_last_seen < active_session_started_at
     ):
         return None
     value = entry.get("value") if isinstance(entry, Mapping) else entry

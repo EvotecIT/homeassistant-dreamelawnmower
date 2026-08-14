@@ -825,7 +825,7 @@ def test_snapshot_counts_active_task_regions_from_mova_task_payload() -> None:
             '{"d":{"area_id":[],"estimate_time":4841,"exe":true,"o":102,'
             '"region_id":[1,3],"status":true,"time":21257},"t":"TASK"}'
         ),
-        "last_seen": 123.0,
+        "last_seen": 122.0,
     }
 
     snapshot = snapshot_from_device(descriptor, device)
@@ -877,6 +877,52 @@ def test_snapshot_rejects_task_regions_older_than_active_state() -> None:
 
     assert snapshot.activity == "mowing"
     assert snapshot.active_segment_count == 4
+
+
+def test_snapshot_preserves_task_regions_across_active_state_transitions() -> None:
+    """Pause/resume transitions must not invalidate the current task frame."""
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "mova.mower.g2584a",
+            "customName": "MOVA mower",
+        },
+        account_type="mova",
+        country="us",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.state = SimpleNamespace(name="PAUSED")
+    device.status.state_name = "paused"
+    device.status.paused = True
+    device.status.attributes = {
+        **device.status.attributes,
+        "charging": False,
+        "mower_state": "paused",
+        "running": False,
+        "started": True,
+    }
+    device.status.current_map = SimpleNamespace(active_segments=[1, 2, 3, 4])
+    device.realtime_properties["2.1"] = {
+        "value": 3,
+        "last_seen": 124.0,
+        "changed_at": 124.0,
+        "active_session_started_at": 122.0,
+    }
+    device.realtime_properties["2.50"] = {
+        "value": (
+            '{"d":{"exe":true,"o":102,"region_id":[1,3],"status":true},'
+            '"t":"TASK"}'
+        ),
+        "last_seen": 123.0,
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == "paused"
+    assert snapshot.active_segment_count == 2
 
 
 def test_snapshot_falls_back_when_active_task_has_no_regions() -> None:
