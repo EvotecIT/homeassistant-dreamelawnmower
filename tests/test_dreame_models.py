@@ -694,6 +694,7 @@ def test_snapshot_treats_returning_state_as_returning_without_raw_flag() -> None
         "running": False,
         "started": True,
     }
+    device.status.current_map = SimpleNamespace(active_segments=[1, 2, 3])
 
     snapshot = snapshot_from_device(descriptor, device)
 
@@ -784,6 +785,222 @@ def test_snapshot_exposes_live_session_metrics_and_current_zone() -> None:
     assert snapshot.active_segment_count == 2
     assert snapshot.current_zone_id == 7
     assert snapshot.current_zone_name == "Front Lawn"
+
+
+def test_snapshot_counts_active_task_regions_from_mova_task_payload() -> None:
+    """MOVA publishes active zone ids in realtime property 2.50."""
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "mova.mower.g2584a",
+            "customName": "MOVA mower",
+        },
+        account_type="mova",
+        country="us",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.state = SimpleNamespace(name="MOWING")
+    device.status.state_name = "mowing"
+    device.status.running = True
+    device.status.attributes = {
+        **device.status.attributes,
+        "charging": False,
+        "mower_state": "mowing",
+        "running": True,
+        "started": True,
+    }
+    # The inherited status layer can synthesize every map segment when it
+    # cannot classify the MOVA task. The verified task payload must win.
+    device.status.current_map = SimpleNamespace(active_segments=[1, 2, 3, 4])
+    device.realtime_properties["2.1"] = {
+        "value": 1,
+        "last_seen": 124.0,
+        "changed_at": 122.0,
+    }
+    device.realtime_properties["2.50"] = {
+        "value": (
+            '{"d":{"area_id":[],"estimate_time":4841,"exe":true,"o":102,'
+            '"region_id":[1,3],"status":true,"time":21257},"t":"TASK"}'
+        ),
+        "last_seen": 122.0,
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == "mowing"
+    assert snapshot.active_segment_count == 2
+
+
+def test_snapshot_rejects_task_regions_older_than_active_state() -> None:
+    """A previous session's retained task must not override the current map."""
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "mova.mower.g2584a",
+            "customName": "MOVA mower",
+        },
+        account_type="mova",
+        country="us",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.state = SimpleNamespace(name="MOWING")
+    device.status.state_name = "mowing"
+    device.status.running = True
+    device.status.attributes = {
+        **device.status.attributes,
+        "charging": False,
+        "mower_state": "mowing",
+        "running": True,
+        "started": True,
+    }
+    device.status.current_map = SimpleNamespace(active_segments=[1, 2, 3, 4])
+    device.realtime_properties["2.1"] = {
+        "value": 1,
+        "last_seen": 124.0,
+        "changed_at": 124.0,
+    }
+    device.realtime_properties["2.50"] = {
+        "value": (
+            '{"d":{"exe":true,"o":102,"region_id":[1],"status":true},'
+            '"t":"TASK"}'
+        ),
+        "last_seen": 123.0,
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == "mowing"
+    assert snapshot.active_segment_count == 4
+
+
+def test_snapshot_preserves_task_regions_across_active_state_transitions() -> None:
+    """Pause/resume transitions must not invalidate the current task frame."""
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "mova.mower.g2584a",
+            "customName": "MOVA mower",
+        },
+        account_type="mova",
+        country="us",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.state = SimpleNamespace(name="PAUSED")
+    device.status.state_name = "paused"
+    device.status.paused = True
+    device.status.attributes = {
+        **device.status.attributes,
+        "charging": False,
+        "mower_state": "paused",
+        "running": False,
+        "started": True,
+    }
+    device.status.current_map = SimpleNamespace(active_segments=[1, 2, 3, 4])
+    device.realtime_properties["2.1"] = {
+        "value": 3,
+        "last_seen": 124.0,
+        "changed_at": 124.0,
+        "active_session_started_at": 122.0,
+    }
+    device.realtime_properties["2.50"] = {
+        "value": (
+            '{"d":{"exe":true,"o":102,"region_id":[1,3],"status":true},'
+            '"t":"TASK"}'
+        ),
+        "last_seen": 123.0,
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == "paused"
+    assert snapshot.active_segment_count == 2
+
+
+def test_snapshot_falls_back_when_active_task_has_no_regions() -> None:
+    """Whole-lawn task payloads leave map segments as the active source."""
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "mova.mower.g2584a",
+            "customName": "MOVA mower",
+        },
+        account_type="mova",
+        country="us",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.state = SimpleNamespace(name="MOWING")
+    device.status.state_name = "mowing"
+    device.status.running = True
+    device.status.attributes = {
+        **device.status.attributes,
+        "charging": False,
+        "mower_state": "mowing",
+        "running": True,
+        "started": True,
+    }
+    device.status.current_map = SimpleNamespace(active_segments=[1, 2, 3])
+    device.realtime_properties["2.50"] = {
+        "value": (
+            '{"d":{"exe":true,"o":102,"region_id":[],"status":true},'
+            '"t":"TASK"}'
+        ),
+        "last_seen": 123.0,
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == "mowing"
+    assert snapshot.active_segment_count == 3
+
+
+def test_snapshot_rejects_retained_task_regions_while_docked() -> None:
+    """A retained 2.50 task frame must not look active after docking."""
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "dreame.mower.g2408",
+            "customName": "Garage Mower",
+        },
+        account_type="dreame",
+        country="eu",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.state = SimpleNamespace(name="CHARGING_COMPLETED")
+    device.status.state_name = "charging_completed"
+    device.status.docked = True
+    device.status.attributes = {
+        **device.status.attributes,
+        "charging": False,
+        "started": False,
+    }
+    device.status.current_map = SimpleNamespace(active_segments=[1, 2, 3])
+    device.realtime_properties["2.50"] = {
+        "value": (
+            '{"d":{"exe":true,"o":3,"region_id":[1],"status":true},'
+            '"t":"TASK"}'
+        ),
+        "last_seen": 123.0,
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == "docked"
+    assert snapshot.active_segment_count is None
 
 
 def test_field_trip_returning_fixture_matches_normalized_state() -> None:

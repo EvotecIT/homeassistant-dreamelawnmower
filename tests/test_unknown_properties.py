@@ -206,6 +206,130 @@ def test_message_callback_publishes_external_realtime_property_changes(
     assert updates == ["changed", "changed"]
 
 
+def test_message_callback_publishes_task_region_changes() -> None:
+    device, updates = _device_stub()
+    first_task = '{"d":{"exe":true,"region_id":[1],"status":true},"t":"TASK"}'
+    second_task = (
+        '{"d":{"exe":true,"region_id":[1,2],"status":true},"t":"TASK"}'
+    )
+
+    for task in (first_task, second_task, second_task):
+        DreameMowerDevice._message_callback(
+            device,
+            {
+                "method": "properties_changed",
+                "params": [{"siid": 2, "piid": 50, "value": task}],
+            },
+        )
+
+    assert updates == ["changed", "changed"]
+
+
+def test_realtime_property_preserves_value_change_timestamp() -> None:
+    device, _ = _device_stub()
+
+    device.last_realtime_message = {"received_at": 100.0}
+    DreameMowerDevice._remember_realtime_property(
+        device,
+        {"siid": 2, "piid": 1, "value": 1},
+        None,
+    )
+    device.last_realtime_message = {"received_at": 101.0}
+    DreameMowerDevice._remember_realtime_property(
+        device,
+        {"siid": 2, "piid": 1, "value": 1},
+        None,
+    )
+
+    assert device.realtime_properties["2.1"]["last_seen"] == 101.0
+    assert device.realtime_properties["2.1"]["changed_at"] == 100.0
+
+    device.last_realtime_message = {"received_at": 102.0}
+    DreameMowerDevice._remember_realtime_property(
+        device,
+        {"siid": 2, "piid": 1, "value": 2},
+        None,
+    )
+
+    assert device.realtime_properties["2.1"]["changed_at"] == 102.0
+
+
+def test_realtime_state_tracks_continuous_active_session_boundary() -> None:
+    """Mowing and paused state changes remain within one active session."""
+    device, _ = _device_stub()
+
+    for received_at, value in (
+        (100.0, 1),
+        (101.0, 1),
+        (102.0, 3),
+        (103.0, 4),
+        (104.0, 1),
+    ):
+        device.last_realtime_message = {"received_at": received_at}
+        DreameMowerDevice._remember_realtime_property(
+            device,
+            {"siid": 2, "piid": 1, "value": value},
+            None,
+        )
+        assert (
+            device.realtime_properties["2.1"]["active_session_started_at"]
+            == 100.0
+        )
+
+    device.last_realtime_message = {"received_at": 105.0}
+    DreameMowerDevice._remember_realtime_property(
+        device,
+        {"siid": 2, "piid": 1, "value": 2},
+        None,
+    )
+    assert device.realtime_properties["2.1"]["active_session_started_at"] is None
+
+    device.last_realtime_message = {"received_at": 106.0}
+    DreameMowerDevice._remember_realtime_property(
+        device,
+        {"siid": 2, "piid": 1, "value": 3},
+        None,
+    )
+    assert (
+        device.realtime_properties["2.1"]["active_session_started_at"] == 106.0
+    )
+
+
+def test_reconnect_starts_a_new_realtime_ordering_epoch() -> None:
+    """Cross-property timestamps from before reconnect must not be reused."""
+    device, _ = _device_stub()
+    scheduled_updates: list[tuple[int, bool]] = []
+    device.schedule_update = lambda delay, force: scheduled_updates.append(
+        (delay, force)
+    )
+    device.realtime_properties = {
+        "2.1": {
+            "value": 1,
+            "last_seen": 101.0,
+            "changed_at": 100.0,
+            "active_session_started_at": 100.0,
+        },
+        "2.50": {"value": "old task", "last_seen": 101.0},
+    }
+    device.last_realtime_message = {"received_at": 101.0}
+
+    DreameMowerDevice._connected_callback(device)
+
+    assert device.realtime_properties == {}
+    assert device.last_realtime_message is None
+    assert scheduled_updates == [(2, True)]
+
+    device.last_realtime_message = {"received_at": 200.0}
+    DreameMowerDevice._remember_realtime_property(
+        device,
+        {"siid": 2, "piid": 1, "value": 1},
+        None,
+    )
+    assert (
+        device.realtime_properties["2.1"]["active_session_started_at"] == 200.0
+    )
+
+
 @pytest.mark.parametrize("piid", [51, 52])
 def test_message_callback_publishes_each_settings_announcement(piid: int) -> None:
     device, updates = _device_stub()

@@ -28,6 +28,9 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions imp
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
     DreameLawnMowerDescriptor,
 )
+from custom_components.dreame_lawn_mower.preference_switch import (
+    DreameLawnMowerPreferenceAiClassSwitch,
+)
 from custom_components.dreame_lawn_mower.select import (
     DreameLawnMowerRainDelaySelect,
 )
@@ -510,6 +513,52 @@ def test_reported_preference_switch_keys_omit_missing_optional_fields() -> None:
         "edge_mowing_safe",
         "obstacle_avoidance_ai",
     }
+
+
+def test_mova_awd_switch_platform_omits_locked_ai_classes() -> None:
+    descriptor = DreameLawnMowerDescriptor(
+        did="device-1",
+        name="MOVA mower",
+        model="mova.mower.g2584a",
+        display_model="LiDAX Ultra 2000 AWD",
+        account_type="mova",
+        country="us",
+    )
+    coordinator = SimpleNamespace(
+        client=SimpleNamespace(descriptor=descriptor),
+        data=SimpleNamespace(),
+        device_settings=None,
+        batch_device_data={
+            "batch_mowing_preferences": {
+                "maps": [
+                    {
+                        "preferences": [
+                            {
+                                "obstacle_avoidance_enabled": True,
+                                "obstacle_avoidance_ai": 4,
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        schedules=None,
+        async_add_listener=lambda listener: Mock(),  # noqa: ARG005
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", async_on_unload=Mock())
+    added: list[object] = []
+
+    asyncio.run(async_setup_switch_entry(hass, entry, added.extend))
+
+    ai_switches = [
+        entity
+        for entity in added
+        if isinstance(entity, DreameLawnMowerPreferenceAiClassSwitch)
+    ]
+    assert [entity._preference_description.key for entity in ai_switches] == [
+        "objects"
+    ]
 
 
 def test_setting_platforms_add_only_reported_entities_and_follow_late_discovery() -> (

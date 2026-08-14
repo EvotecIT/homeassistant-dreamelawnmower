@@ -155,6 +155,29 @@ def decode_mower_task_status(value: object) -> dict[str, object] | None:
         result["status"] = bool(data.get("status"))
     if "o" in data:
         result["operation"] = data.get("o")
+    for source_key, result_key in (
+        ("area_id", "area_ids"),
+        ("region_id", "region_ids"),
+    ):
+        identifiers = data.get(source_key)
+        if isinstance(identifiers, Sequence) and not isinstance(
+            identifiers,
+            str | bytes | bytearray,
+        ):
+            result[result_key] = [
+                identifier
+                for identifier in identifiers
+                if isinstance(identifier, int) and not isinstance(identifier, bool)
+            ]
+    for source_key, result_key in (
+        ("estimate_time", "estimate_time_raw"),
+        ("time", "time_raw"),
+    ):
+        timing = data.get(source_key)
+        if isinstance(timing, int | float) and not isinstance(timing, bool):
+            # The firmware units and direction are not established. Preserve
+            # the values for diagnostics without presenting them as duration.
+            result[result_key] = timing
     return result or None
 
 

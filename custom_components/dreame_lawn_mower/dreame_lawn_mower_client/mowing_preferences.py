@@ -56,6 +56,12 @@ OBSTACLE_AI_CLASS_BITS = {
     for bit, name in OBSTACLE_AI_CLASSES
 }
 
+# MOVAhome exposes only the master obstacle-recognition control for these
+# classes on this model. Objects remains independently writable.
+MODEL_NON_WRITABLE_OBSTACLE_AI_CLASSES = {
+    "mova.mower.g2584a": frozenset({"people", "animals"}),
+}
+
 MOWING_PREFERENCE_UPDATE_FIELDS = (
     "efficient_mode",
     "mowing_height_cm",
@@ -229,6 +235,8 @@ def encode_mowing_preference_payload(preference: Mapping[str, Any]) -> list[int]
 def apply_mowing_preference_changes(
     preference: Mapping[str, Any],
     changes: Mapping[str, Any],
+    *,
+    model: str | None = None,
 ) -> tuple[dict[str, Any], list[str]]:
     """Apply validated preference field changes and report changed field names."""
     updated = dict(preference)
@@ -238,6 +246,13 @@ def apply_mowing_preference_changes(
         previous_value = _current_preference_value(updated, normalized_field)
         if previous_value == normalized_value:
             continue
+
+        if normalized_field == "obstacle_avoidance_ai":
+            _ensure_obstacle_ai_change_is_writable(
+                model,
+                previous_mask=previous_value,
+                updated_mask=normalized_value,
+            )
 
         changed_fields.append(field)
         if normalized_field == "obstacle_avoidance_ai":
@@ -249,6 +264,42 @@ def apply_mowing_preference_changes(
 
     _refresh_preference_labels(updated)
     return updated, changed_fields
+
+
+def individually_writable_obstacle_ai_classes(model: str | None) -> tuple[str, ...]:
+    """Return obstacle classes that the model can change independently."""
+    normalized_model = str(model or "").strip().casefold()
+    locked = MODEL_NON_WRITABLE_OBSTACLE_AI_CLASSES.get(
+        normalized_model,
+        frozenset(),
+    )
+    return tuple(name for _, name in OBSTACLE_AI_CLASSES if name not in locked)
+
+
+def _ensure_obstacle_ai_change_is_writable(
+    model: str | None,
+    *,
+    previous_mask: Any,
+    updated_mask: Any,
+) -> None:
+    """Reject model-known class changes that the vendor app does not expose."""
+    normalized_model = str(model or "").strip().casefold()
+    locked = MODEL_NON_WRITABLE_OBSTACLE_AI_CLASSES.get(normalized_model)
+    if (
+        not locked
+        or not isinstance(previous_mask, int)
+        or not isinstance(updated_mask, int)
+    ):
+        return
+    locked_mask = sum(OBSTACLE_AI_CLASS_BITS[name] for name in locked)
+    if (previous_mask ^ updated_mask) & locked_mask:
+        names = " or ".join(
+            name for _, name in OBSTACLE_AI_CLASSES if name in locked
+        )
+        raise ValueError(
+            f"{normalized_model} does not support changing {names} independently; "
+            "use the master obstacle-recognition control instead."
+        )
 
 
 def _preference_version_entries(value: Any) -> list[dict[str, int | None]]:

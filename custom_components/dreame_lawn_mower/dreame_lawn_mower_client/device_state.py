@@ -17,8 +17,11 @@ from typing import Any, Optional
 from .app_protocol import (
     MOWER_BLUETOOTH_PROPERTY_KEY,
     MOWER_RUNTIME_STATUS_PROPERTY_KEY,
+    MOWER_STATE_PROPERTY_KEY,
+    MOWER_TASK_PROPERTY_KEY,
     MOWER_TIME_PROPERTY_KEY,
     mower_realtime_property_name,
+    mower_state_key,
 )
 from .device_code_semantics import (
     MowerDeviceCodeTier,
@@ -156,6 +159,7 @@ _EXTERNAL_REALTIME_UPDATE_KEYS = frozenset(
     {
         MOWER_RUNTIME_STATUS_PROPERTY_KEY,
         MOWER_BLUETOOTH_PROPERTY_KEY,
+        MOWER_TASK_PROPERTY_KEY,
         MOWER_TIME_PROPERTY_KEY,
     }
 )
@@ -171,6 +175,13 @@ class _DreameMowerDeviceStateMixin:
     def _connected_callback(self):
         if not self._ready:
             return
+        with self._state_lock:
+            # A clean-session MQTT reconnect is a new ordering epoch. The
+            # mower can complete one task and start another while disconnected,
+            # so timestamps from the prior transport session cannot establish
+            # freshness between state, task, and settings properties.
+            self.realtime_properties.clear()
+            self.last_realtime_message = None
         _LOGGER.info("Requesting properties after connect")
         self.schedule_update(2, True)
 
@@ -442,19 +453,57 @@ class _DreameMowerDeviceStateMixin:
             if isinstance(self.last_realtime_message, dict)
             else None
         )
-        self.realtime_properties[key] = {
+        received_at = (
+            received_at
+            if isinstance(received_at, (int, float))
+            else time.time()
+        )
+        previous_changed_at = (
+            previous_entry.get("changed_at", previous_entry.get("last_seen"))
+            if isinstance(previous_entry, dict)
+            else None
+        )
+        changed_at = (
+            previous_changed_at
+            if previous_value == value
+            and isinstance(previous_changed_at, (int, float))
+            else received_at
+        )
+        entry = {
             "siid": siid,
             "piid": piid,
             "did": payload.get("did"),
             "code": payload.get("code"),
             "value": value,
             "property_name": property_name,
-            "last_seen": (
-                received_at
-                if isinstance(received_at, (int, float))
-                else time.time()
-            ),
+            "last_seen": received_at,
+            "changed_at": changed_at,
         }
+        if key == MOWER_STATE_PROPERTY_KEY:
+            active_states = {"mowing", "paused"}
+            current_state = mower_state_key(value)
+            previous_state = mower_state_key(previous_value)
+            active_session_started_at = None
+            if current_state in active_states:
+                previous_session_started_at = (
+                    previous_entry.get(
+                        "active_session_started_at",
+                        previous_entry.get(
+                            "changed_at",
+                            previous_entry.get("last_seen"),
+                        ),
+                    )
+                    if isinstance(previous_entry, dict)
+                    else None
+                )
+                active_session_started_at = (
+                    previous_session_started_at
+                    if previous_state in active_states
+                    and isinstance(previous_session_started_at, (int, float))
+                    else received_at
+                )
+            entry["active_session_started_at"] = active_session_started_at
+        self.realtime_properties[key] = entry
         return key in _EXTERNAL_REALTIME_ANNOUNCEMENT_KEYS or (
             key in _EXTERNAL_REALTIME_UPDATE_KEYS and previous_value != value
         )

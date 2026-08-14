@@ -14,6 +14,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .device_settings_control import device_settings_section
+from .dreame_lawn_mower_client.mowing_preferences import (
+    individually_writable_obstacle_ai_classes,
+)
 from .entity import DreameLawnMowerEntity
 from .preference_switch import (
     AI_CLASS_SWITCHES,
@@ -166,7 +169,14 @@ async def async_setup_entry(
                 DreameLawnMowerPreferenceSwitch(coordinator, description)
             )
         if "obstacle_avoidance_ai" in supported_keys:
+            writable_ai_classes = set(
+                individually_writable_obstacle_ai_classes(
+                    getattr(coordinator.client.descriptor, "model", None)
+                )
+            )
             for description in AI_CLASS_SWITCHES:
+                if description.key not in writable_ai_classes:
+                    continue
                 unique_key = f"obstacle_avoidance_ai:{description.key}"
                 if unique_key in known_preference_switches:
                     continue

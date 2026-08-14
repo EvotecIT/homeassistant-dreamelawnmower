@@ -11,6 +11,7 @@ from dreame_lawn_mower_client import (
     apply_mowing_preference_changes,
     decode_mowing_preference_payload,
     encode_mowing_preference_payload,
+    individually_writable_obstacle_ai_classes,
     normalize_mowing_preference_mode,
     summarize_mowing_preference_info,
 )
@@ -363,6 +364,42 @@ def test_apply_mowing_preference_changes_updates_labels_and_ai_classes() -> None
     assert updated["efficient_mode_name"] == "standard"
     assert updated["obstacle_avoidance_ai"] == 2
     assert updated["obstacle_avoidance_ai_classes"] == ["animals"]
+
+
+def test_lidax_2000_awd_exposes_only_individually_writable_ai_class() -> None:
+    assert individually_writable_obstacle_ai_classes("mova.mower.g2584a") == (
+        "objects",
+    )
+    assert individually_writable_obstacle_ai_classes("dreame.mower.g2408") == (
+        "people",
+        "animals",
+        "objects",
+    )
+
+
+def test_lidax_2000_awd_rejects_individual_people_or_animals_change() -> None:
+    current = decode_mowing_preference_payload(
+        [8, 0, 0, 1, 40, 2, 90, 1, 0, 1, 1, 2, 1, 15, 20, 4, 1]
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="does not support changing people or animals independently",
+    ):
+        apply_mowing_preference_changes(
+            current,
+            {"obstacle_avoidance_ai_classes": ["people", "objects"]},
+            model="mova.mower.g2584a",
+        )
+
+    updated, changed_fields = apply_mowing_preference_changes(
+        current,
+        {"obstacle_avoidance_ai_classes": []},
+        model="mova.mower.g2584a",
+    )
+
+    assert changed_fields == ["obstacle_avoidance_ai_classes"]
+    assert updated["obstacle_avoidance_ai_classes"] == []
 
 
 @pytest.mark.parametrize(
