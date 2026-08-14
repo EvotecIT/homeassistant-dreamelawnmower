@@ -17,6 +17,7 @@ from typing import Any, Optional
 from .app_protocol import (
     MOWER_BLUETOOTH_PROPERTY_KEY,
     MOWER_RUNTIME_STATUS_PROPERTY_KEY,
+    MOWER_TASK_PROPERTY_KEY,
     MOWER_TIME_PROPERTY_KEY,
     mower_realtime_property_name,
 )
@@ -156,6 +157,7 @@ _EXTERNAL_REALTIME_UPDATE_KEYS = frozenset(
     {
         MOWER_RUNTIME_STATUS_PROPERTY_KEY,
         MOWER_BLUETOOTH_PROPERTY_KEY,
+        MOWER_TASK_PROPERTY_KEY,
         MOWER_TIME_PROPERTY_KEY,
     }
 )

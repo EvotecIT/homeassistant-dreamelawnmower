@@ -235,6 +235,15 @@ def _active_task_region_ids(device: Any, *, activity: str) -> tuple[int, ...] | 
     from .app_protocol import MOWER_TASK_PROPERTY_KEY, decode_mower_task_status
 
     entry = realtime_properties.get(MOWER_TASK_PROPERTY_KEY)
+    task_last_seen = _realtime_property_last_seen(device, MOWER_TASK_PROPERTY_KEY)
+    state_last_seen = _realtime_property_last_seen(
+        device,
+        REALTIME_STATE_PROPERTY_KEY,
+    )
+    if state_last_seen is not None and (
+        task_last_seen is None or task_last_seen < state_last_seen
+    ):
+        return None
     value = entry.get("value") if isinstance(entry, Mapping) else entry
     task = decode_mower_task_status(value)
     if not isinstance(task, Mapping):
@@ -244,9 +253,10 @@ def _active_task_region_ids(device: Any, *, activity: str) -> tuple[int, ...] | 
     region_ids = task.get("region_ids")
     if not isinstance(region_ids, list):
         return None
-    return tuple(
+    active_region_ids = tuple(
         dict.fromkeys(region_id for region_id in region_ids if region_id > 0)
     )
+    return active_region_ids or None
 
 
 def _fault_recovery_confirmed(

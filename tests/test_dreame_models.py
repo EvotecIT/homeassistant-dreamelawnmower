@@ -815,6 +815,10 @@ def test_snapshot_counts_active_task_regions_from_mova_task_payload() -> None:
     # The inherited status layer can synthesize every map segment when it
     # cannot classify the MOVA task. The verified task payload must win.
     device.status.current_map = SimpleNamespace(active_segments=[1, 2, 3, 4])
+    device.realtime_properties["2.1"] = {
+        "value": 1,
+        "last_seen": 122.0,
+    }
     device.realtime_properties["2.50"] = {
         "value": (
             '{"d":{"area_id":[],"estimate_time":4841,"exe":true,"o":102,'
@@ -827,6 +831,90 @@ def test_snapshot_counts_active_task_regions_from_mova_task_payload() -> None:
 
     assert snapshot.activity == "mowing"
     assert snapshot.active_segment_count == 2
+
+
+def test_snapshot_rejects_task_regions_older_than_active_state() -> None:
+    """A previous session's retained task must not override the current map."""
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "mova.mower.g2584a",
+            "customName": "MOVA mower",
+        },
+        account_type="mova",
+        country="us",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.state = SimpleNamespace(name="MOWING")
+    device.status.state_name = "mowing"
+    device.status.running = True
+    device.status.attributes = {
+        **device.status.attributes,
+        "charging": False,
+        "mower_state": "mowing",
+        "running": True,
+        "started": True,
+    }
+    device.status.current_map = SimpleNamespace(active_segments=[1, 2, 3, 4])
+    device.realtime_properties["2.1"] = {
+        "value": 1,
+        "last_seen": 124.0,
+    }
+    device.realtime_properties["2.50"] = {
+        "value": (
+            '{"d":{"exe":true,"o":102,"region_id":[1],"status":true},'
+            '"t":"TASK"}'
+        ),
+        "last_seen": 123.0,
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == "mowing"
+    assert snapshot.active_segment_count == 4
+
+
+def test_snapshot_falls_back_when_active_task_has_no_regions() -> None:
+    """Whole-lawn task payloads leave map segments as the active source."""
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "mova.mower.g2584a",
+            "customName": "MOVA mower",
+        },
+        account_type="mova",
+        country="us",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.state = SimpleNamespace(name="MOWING")
+    device.status.state_name = "mowing"
+    device.status.running = True
+    device.status.attributes = {
+        **device.status.attributes,
+        "charging": False,
+        "mower_state": "mowing",
+        "running": True,
+        "started": True,
+    }
+    device.status.current_map = SimpleNamespace(active_segments=[1, 2, 3])
+    device.realtime_properties["2.50"] = {
+        "value": (
+            '{"d":{"exe":true,"o":102,"region_id":[],"status":true},'
+            '"t":"TASK"}'
+        ),
+        "last_seen": 123.0,
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == "mowing"
+    assert snapshot.active_segment_count == 3
 
 
 def test_snapshot_rejects_retained_task_regions_while_docked() -> None:

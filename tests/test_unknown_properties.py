@@ -206,6 +206,25 @@ def test_message_callback_publishes_external_realtime_property_changes(
     assert updates == ["changed", "changed"]
 
 
+def test_message_callback_publishes_task_region_changes() -> None:
+    device, updates = _device_stub()
+    first_task = '{"d":{"exe":true,"region_id":[1],"status":true},"t":"TASK"}'
+    second_task = (
+        '{"d":{"exe":true,"region_id":[1,2],"status":true},"t":"TASK"}'
+    )
+
+    for task in (first_task, second_task, second_task):
+        DreameMowerDevice._message_callback(
+            device,
+            {
+                "method": "properties_changed",
+                "params": [{"siid": 2, "piid": 50, "value": task}],
+            },
+        )
+
+    assert updates == ["changed", "changed"]
+
+
 @pytest.mark.parametrize("piid", [51, 52])
 def test_message_callback_publishes_each_settings_announcement(piid: int) -> None:
     device, updates = _device_stub()
