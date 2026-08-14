@@ -225,6 +225,18 @@ def _realtime_property_last_seen(device: Any, key: str) -> float | None:
         return None
 
 
+def _realtime_property_changed_at(device: Any, key: str) -> float | None:
+    """Return when a realtime property's value last changed, if known."""
+    realtime_properties = getattr(device, "realtime_properties", {}) or {}
+    entry = realtime_properties.get(key)
+    if not isinstance(entry, Mapping):
+        return None
+    try:
+        return float(entry.get("changed_at", entry.get("last_seen")))
+    except (TypeError, ValueError):
+        return None
+
+
 def _active_task_region_ids(device: Any, *, activity: str) -> tuple[int, ...] | None:
     """Return current task regions only while active device state confirms them."""
     if activity not in {"mowing", "paused"}:
@@ -236,12 +248,12 @@ def _active_task_region_ids(device: Any, *, activity: str) -> tuple[int, ...] | 
 
     entry = realtime_properties.get(MOWER_TASK_PROPERTY_KEY)
     task_last_seen = _realtime_property_last_seen(device, MOWER_TASK_PROPERTY_KEY)
-    state_last_seen = _realtime_property_last_seen(
+    state_changed_at = _realtime_property_changed_at(
         device,
         REALTIME_STATE_PROPERTY_KEY,
     )
-    if state_last_seen is not None and (
-        task_last_seen is None or task_last_seen < state_last_seen
+    if state_changed_at is not None and (
+        task_last_seen is None or task_last_seen < state_changed_at
     ):
         return None
     value = entry.get("value") if isinstance(entry, Mapping) else entry

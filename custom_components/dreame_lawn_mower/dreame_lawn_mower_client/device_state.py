@@ -444,6 +444,22 @@ class _DreameMowerDeviceStateMixin:
             if isinstance(self.last_realtime_message, dict)
             else None
         )
+        received_at = (
+            received_at
+            if isinstance(received_at, (int, float))
+            else time.time()
+        )
+        previous_changed_at = (
+            previous_entry.get("changed_at", previous_entry.get("last_seen"))
+            if isinstance(previous_entry, dict)
+            else None
+        )
+        changed_at = (
+            previous_changed_at
+            if previous_value == value
+            and isinstance(previous_changed_at, (int, float))
+            else received_at
+        )
         self.realtime_properties[key] = {
             "siid": siid,
             "piid": piid,
@@ -451,11 +467,8 @@ class _DreameMowerDeviceStateMixin:
             "code": payload.get("code"),
             "value": value,
             "property_name": property_name,
-            "last_seen": (
-                received_at
-                if isinstance(received_at, (int, float))
-                else time.time()
-            ),
+            "last_seen": received_at,
+            "changed_at": changed_at,
         }
         return key in _EXTERNAL_REALTIME_ANNOUNCEMENT_KEYS or (
             key in _EXTERNAL_REALTIME_UPDATE_KEYS and previous_value != value

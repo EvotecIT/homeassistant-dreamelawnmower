@@ -817,7 +817,8 @@ def test_snapshot_counts_active_task_regions_from_mova_task_payload() -> None:
     device.status.current_map = SimpleNamespace(active_segments=[1, 2, 3, 4])
     device.realtime_properties["2.1"] = {
         "value": 1,
-        "last_seen": 122.0,
+        "last_seen": 124.0,
+        "changed_at": 122.0,
     }
     device.realtime_properties["2.50"] = {
         "value": (
@@ -862,6 +863,7 @@ def test_snapshot_rejects_task_regions_older_than_active_state() -> None:
     device.realtime_properties["2.1"] = {
         "value": 1,
         "last_seen": 124.0,
+        "changed_at": 124.0,
     }
     device.realtime_properties["2.50"] = {
         "value": (

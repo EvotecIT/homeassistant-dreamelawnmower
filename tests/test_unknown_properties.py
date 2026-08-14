@@ -225,6 +225,35 @@ def test_message_callback_publishes_task_region_changes() -> None:
     assert updates == ["changed", "changed"]
 
 
+def test_realtime_property_preserves_value_change_timestamp() -> None:
+    device, _ = _device_stub()
+
+    device.last_realtime_message = {"received_at": 100.0}
+    DreameMowerDevice._remember_realtime_property(
+        device,
+        {"siid": 2, "piid": 1, "value": 1},
+        None,
+    )
+    device.last_realtime_message = {"received_at": 101.0}
+    DreameMowerDevice._remember_realtime_property(
+        device,
+        {"siid": 2, "piid": 1, "value": 1},
+        None,
+    )
+
+    assert device.realtime_properties["2.1"]["last_seen"] == 101.0
+    assert device.realtime_properties["2.1"]["changed_at"] == 100.0
+
+    device.last_realtime_message = {"received_at": 102.0}
+    DreameMowerDevice._remember_realtime_property(
+        device,
+        {"siid": 2, "piid": 1, "value": 2},
+        None,
+    )
+
+    assert device.realtime_properties["2.1"]["changed_at"] == 102.0
+
+
 @pytest.mark.parametrize("piid", [51, 52])
 def test_message_callback_publishes_each_settings_announcement(piid: int) -> None:
     device, updates = _device_stub()
