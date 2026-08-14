@@ -225,6 +225,30 @@ def _realtime_property_last_seen(device: Any, key: str) -> float | None:
         return None
 
 
+def _active_task_region_ids(device: Any, *, activity: str) -> tuple[int, ...] | None:
+    """Return current task regions only while active device state confirms them."""
+    if activity not in {"mowing", "paused"}:
+        return None
+    realtime_properties = getattr(device, "realtime_properties", {}) or {}
+    # Local import avoids a module cycle: app_protocol owns this wire decoder
+    # and also constructs the status-blob model defined in this module.
+    from .app_protocol import MOWER_TASK_PROPERTY_KEY, decode_mower_task_status
+
+    entry = realtime_properties.get(MOWER_TASK_PROPERTY_KEY)
+    value = entry.get("value") if isinstance(entry, Mapping) else entry
+    task = decode_mower_task_status(value)
+    if not isinstance(task, Mapping):
+        return None
+    if task.get("executing") is not True or task.get("status") is not True:
+        return None
+    region_ids = task.get("region_ids")
+    if not isinstance(region_ids, list):
+        return None
+    return tuple(
+        dict.fromkeys(region_id for region_id in region_ids if region_id > 0)
+    )
+
+
 def _fault_recovery_confirmed(
     previous_snapshot: DreameLawnMowerSnapshot | None,
     *,
@@ -1321,11 +1345,14 @@ def snapshot_from_device(
         getattr(device.status, "cleaning_time", None),
         getattr(current_map, "cleaning_time", None),
     )
-    active_segments = _coerce_sequence(
-        status_attributes.get("active_segments"),
-        getattr(device.status, "active_segments", None),
-        getattr(current_map, "active_segments", None),
-    )
+    active_task_regions = _active_task_region_ids(device, activity=activity)
+    active_segments = active_task_regions
+    if active_segments is None and activity in {"mowing", "paused"}:
+        active_segments = _coerce_sequence(
+            status_attributes.get("active_segments"),
+            getattr(device.status, "active_segments", None),
+            getattr(current_map, "active_segments", None),
+        )
     active_segment_count = len(active_segments) if active_segments is not None else None
     current_zone_id = _first_int(
         status_attributes.get("current_segment"),

@@ -629,14 +629,19 @@ def test_client_bluetooth_connected_reads_cloud_property_strings() -> None:
 
 def test_task_status_decoder_keeps_obvious_task_fields() -> None:
     decoded = decode_mower_task_status(
-        '{"d":{"exe":true,"o":6,"status":true},"t":"TASK"}'
+        '{"d":{"area_id":[],"estimate_time":4841,"exe":true,"o":102,'
+        '"region_id":[1],"status":true,"time":21257},"t":"TASK"}'
     )
 
     assert decoded == {
         "type": "TASK",
         "executing": True,
         "status": True,
-        "operation": 6,
+        "operation": 102,
+        "area_ids": [],
+        "region_ids": [1],
+        "estimate_time_raw": 4841,
+        "time_raw": 21257,
     }
 
 

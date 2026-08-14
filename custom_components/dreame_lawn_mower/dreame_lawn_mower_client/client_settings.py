@@ -565,6 +565,7 @@ class _DreameLawnMowerClientSettingsMixin:
             updated_preference, changed_fields = apply_mowing_preference_changes(
                 current_preference,
                 setting_changes,
+                model=getattr(self.descriptor, "model", None),
             )
             payload = encode_mowing_preference_payload(updated_preference)
             settings_request = {
@@ -759,6 +760,7 @@ class _DreameLawnMowerClientSettingsMixin:
             _, remaining_changes = apply_mowing_preference_changes(
                 readback_preference,
                 setting_changes,
+                model=getattr(self.descriptor, "model", None),
             )
             unconfirmed_fields.extend(remaining_changes)
 
