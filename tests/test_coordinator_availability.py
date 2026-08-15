@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -198,6 +199,61 @@ def test_home_assistant_stop_wins_concurrent_config_entry_unload() -> None:
 
         metadata_release.set()
         await metadata_task
+
+    asyncio.run(scenario())
+
+
+def test_home_assistant_stop_cancels_existing_metadata_shutdown_cleanup() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        metadata_cancelled = asyncio.Event()
+        metadata_release = asyncio.Event()
+
+        async def cancellation_resistant_metadata() -> None:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                metadata_cancelled.set()
+                await metadata_release.wait()
+                raise
+
+        metadata_task = asyncio.create_task(cancellation_resistant_metadata())
+        await asyncio.sleep(0)
+        metadata_task.cancel()
+        await metadata_cancelled.wait()
+
+        coordinator._shutting_down = False
+        coordinator._home_assistant_stopping = False
+        coordinator._owned_tasks_shutdown_lock = asyncio.Lock()
+        coordinator._initialize_connectivity_recovery()
+        coordinator._client_update_pending = False
+        coordinator._client_update_task = None
+        coordinator._metadata_refresh_task = metadata_task
+        coordinator._batch_schedule_read_task = None
+        coordinator._batch_schedule_read_tasks = set()
+        coordinator.client = SimpleNamespace(
+            set_update_callback=Mock(),
+            async_close=AsyncMock(),
+        )
+        cleanup = asyncio.create_task(
+            coordinator._async_close_after_metadata(metadata_task)
+        )
+        coordinator._metadata_shutdown_close_task = cleanup
+        await asyncio.sleep(0)
+
+        await asyncio.wait_for(
+            coordinator.async_shutdown_for_home_assistant_stop(),
+            timeout=1,
+        )
+
+        assert cleanup.cancelled()
+        assert coordinator._metadata_shutdown_close_task is None
+        assert not metadata_task.done()
+        coordinator.client.async_close.assert_not_awaited()
+
+        metadata_release.set()
+        with suppress(asyncio.CancelledError):
+            await metadata_task
 
     asyncio.run(scenario())
 

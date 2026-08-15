@@ -2210,6 +2210,7 @@ class DreameLawnMowerCoordinator(
     async def async_shutdown_for_home_assistant_stop(self) -> None:
         """Stop owned tasks without scheduling unload-oriented metadata drains."""
         self._home_assistant_stopping = True
+        await self._async_cancel_metadata_shutdown_close()
         await self._async_stop_owned_tasks_serialized()
 
     async def async_shutdown(self) -> None:

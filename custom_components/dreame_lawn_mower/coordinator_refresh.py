@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from contextlib import suppress
 from functools import partial
 from typing import Any
 
@@ -644,6 +643,16 @@ class DreameLawnMowerRefreshMixin:
         self._metadata_refresh_pending = False
         self._metadata_refresh_publish = False
 
+    async def _async_cancel_metadata_shutdown_close(self) -> None:
+        """Cancel an unload cleanup that Home Assistant would otherwise track."""
+        close_task = getattr(self, "_metadata_shutdown_close_task", None)
+        if close_task is None or close_task is asyncio.current_task():
+            return
+        close_task.cancel()
+        await asyncio.gather(close_task, return_exceptions=True)
+        if self._metadata_shutdown_close_task is close_task:
+            self._metadata_shutdown_close_task = None
+
     async def _async_drain_metadata_for_shutdown(self) -> bool:
         """Cancel queued metadata and bound the wait for an in-flight request."""
         if getattr(self, "_home_assistant_stopping", False):
@@ -737,11 +746,19 @@ class DreameLawnMowerRefreshMixin:
     ) -> None:
         """Close the shared client once a cancellation-resistant request drains."""
         try:
-            with suppress(asyncio.CancelledError, Exception):
-                await metadata_task
-        finally:
-            await self._async_wait_batch_schedule_reads()
-            await self.client.async_close()
+            await asyncio.shield(metadata_task)
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
+        except Exception:  # noqa: BLE001 - deferred cleanup is best effort
+            pass
+        if getattr(self, "_home_assistant_stopping", False):
+            return
+        await self._async_wait_batch_schedule_reads()
+        if getattr(self, "_home_assistant_stopping", False):
+            return
+        await self.client.async_close()
 
     @staticmethod
     def _log_performance_sample(
