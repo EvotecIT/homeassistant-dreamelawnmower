@@ -106,6 +106,46 @@ def test_connectivity_shutdown_cancels_delayed_retry() -> None:
     asyncio.run(scenario())
 
 
+def test_home_assistant_stop_does_not_start_metadata_drain() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        created_tasks: list[asyncio.Task[None]] = []
+
+        def create_task(coroutine, _name):
+            task = asyncio.create_task(coroutine)
+            created_tasks.append(task)
+            return task
+
+        metadata_release = asyncio.Event()
+        metadata_task = asyncio.create_task(metadata_release.wait())
+        coordinator._shutting_down = False
+        coordinator.hass = SimpleNamespace(async_create_task=create_task)
+        coordinator._initialize_connectivity_recovery()
+        coordinator._schedule_connectivity_retry(60)
+        retry_task = coordinator._connectivity_retry_task
+        coordinator._client_update_pending = False
+        coordinator._client_update_task = None
+        coordinator._metadata_refresh_task = metadata_task
+        coordinator._metadata_shutdown_close_task = None
+        coordinator.client = SimpleNamespace(
+            set_update_callback=Mock(),
+            async_close=AsyncMock(),
+        )
+
+        assert retry_task is not None
+        await coordinator.async_shutdown_for_home_assistant_stop()
+
+        assert retry_task.cancelled()
+        assert not metadata_task.done()
+        assert created_tasks == [retry_task]
+        coordinator.client.async_close.assert_not_awaited()
+
+        metadata_release.set()
+        await metadata_task
+
+    asyncio.run(scenario())
+
+
 def test_short_offline_snapshot_retains_last_good_state() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     good_snapshot = SimpleNamespace(available=True, state="mowing")

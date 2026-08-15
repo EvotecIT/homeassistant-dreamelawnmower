@@ -3282,6 +3282,7 @@ def test_successful_setup_shuts_down_coordinator_on_home_assistant_stop() -> Non
             performance=performance,
             client=SimpleNamespace(descriptor=SimpleNamespace(did="device-1")),
             async_config_entry_first_refresh=AsyncMock(),
+            async_shutdown_for_home_assistant_stop=AsyncMock(),
             async_shutdown=AsyncMock(),
             _metadata_refresh_task=None,
         )
@@ -3338,7 +3339,8 @@ def test_successful_setup_shuts_down_coordinator_on_home_assistant_stop() -> Non
         assert stop_listener is not None
         assert remove_stop_listener in unload_callbacks
         await stop_listener(SimpleNamespace())
-        coordinator.async_shutdown.assert_awaited_once_with()
+        coordinator.async_shutdown_for_home_assistant_stop.assert_awaited_once_with()
+        coordinator.async_shutdown.assert_not_awaited()
 
     asyncio.run(scenario())
 

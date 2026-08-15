@@ -121,7 +121,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         async def _async_shutdown_on_stop(_: Event) -> None:
             """Release integration resources before Home Assistant waits for tasks."""
-            await coordinator.async_shutdown()
+            await coordinator.async_shutdown_for_home_assistant_stop()
 
         entry.async_on_unload(
             hass.bus.async_listen_once(

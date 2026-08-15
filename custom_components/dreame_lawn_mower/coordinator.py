@@ -2184,8 +2184,8 @@ class DreameLawnMowerCoordinator(
         if pending_active_indices is not None:
             pending_active_indices.clear()
 
-    async def async_shutdown(self) -> None:
-        """Disconnect client resources."""
+    async def _async_stop_owned_tasks(self) -> None:
+        """Stop coordinator-owned work without draining vendor metadata."""
         self._shutting_down = True
         await self._async_shutdown_connectivity_recovery()
         self._client_update_pending = False
@@ -2195,6 +2195,14 @@ class DreameLawnMowerCoordinator(
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
+
+    async def async_shutdown_for_home_assistant_stop(self) -> None:
+        """Stop owned tasks without scheduling unload-oriented metadata drains."""
+        await self._async_stop_owned_tasks()
+
+    async def async_shutdown(self) -> None:
+        """Disconnect client resources."""
+        await self._async_stop_owned_tasks()
         if await self._async_drain_metadata_for_shutdown():
             await self.client.async_close()
 
