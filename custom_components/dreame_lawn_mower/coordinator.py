@@ -237,6 +237,8 @@ class DreameLawnMowerCoordinator(
         self._foreground_refresh_count = 0
         self._metadata_refresh_count = 0
         self._shutting_down = False
+        self._home_assistant_stopping = False
+        self._owned_tasks_shutdown_lock = asyncio.Lock()
         self._initialize_connectivity_recovery()
 
         super().__init__(
@@ -2196,14 +2198,30 @@ class DreameLawnMowerCoordinator(
             with suppress(asyncio.CancelledError):
                 await task
 
+    async def _async_stop_owned_tasks_serialized(self) -> None:
+        """Serialize shutdown ownership across stop and config-entry unload."""
+        lock = getattr(self, "_owned_tasks_shutdown_lock", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._owned_tasks_shutdown_lock = lock
+        async with lock:
+            await self._async_stop_owned_tasks()
+
     async def async_shutdown_for_home_assistant_stop(self) -> None:
         """Stop owned tasks without scheduling unload-oriented metadata drains."""
-        await self._async_stop_owned_tasks()
+        self._home_assistant_stopping = True
+        await self._async_stop_owned_tasks_serialized()
 
     async def async_shutdown(self) -> None:
         """Disconnect client resources."""
-        await self._async_stop_owned_tasks()
-        if await self._async_drain_metadata_for_shutdown():
+        await self._async_stop_owned_tasks_serialized()
+        if getattr(self, "_home_assistant_stopping", False):
+            return
+        if await self._async_drain_metadata_for_shutdown() and not getattr(
+            self,
+            "_home_assistant_stopping",
+            False,
+        ):
             await self.client.async_close()
 
 

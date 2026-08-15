@@ -646,6 +646,8 @@ class DreameLawnMowerRefreshMixin:
 
     async def _async_drain_metadata_for_shutdown(self) -> bool:
         """Cancel queued metadata and bound the wait for an in-flight request."""
+        if getattr(self, "_home_assistant_stopping", False):
+            return False
         metadata_task = self._metadata_refresh_task
         if metadata_task is None or metadata_task is asyncio.current_task():
             return await self._async_drain_batch_schedule_for_shutdown()
@@ -662,6 +664,8 @@ class DreameLawnMowerRefreshMixin:
             if not metadata_task.done():
                 raise
         except TimeoutError:
+            if getattr(self, "_home_assistant_stopping", False):
+                return False
             self._metadata_shutdown_close_task = self.hass.async_create_task(
                 self._async_close_after_metadata(metadata_task),
                 f"{DOMAIN}-metadata-shutdown",
@@ -671,6 +675,8 @@ class DreameLawnMowerRefreshMixin:
 
     async def _async_drain_batch_schedule_for_shutdown(self) -> bool:
         """Wait for shared batch reads without cancelling their worker threads."""
+        if getattr(self, "_home_assistant_stopping", False):
+            return False
         tasks = set(getattr(self, "_batch_schedule_read_tasks", set()))
         latest = getattr(self, "_batch_schedule_read_task", None)
         if latest is not None:
@@ -687,6 +693,8 @@ class DreameLawnMowerRefreshMixin:
             if not drain_task.done():
                 raise
         except TimeoutError:
+            if getattr(self, "_home_assistant_stopping", False):
+                return False
             self._metadata_shutdown_close_task = self.hass.async_create_task(
                 self._async_close_after_metadata(drain_task),
                 f"{DOMAIN}-batch-schedule-shutdown",
