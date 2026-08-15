@@ -6,8 +6,8 @@ import asyncio
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
+from homeassistant.core import Event, HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from .const import (
@@ -117,6 +117,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await setup_cycle.measure(
             "platforms",
             lambda: hass.config_entries.async_forward_entry_setups(entry, platforms),
+        )
+
+        async def _async_shutdown_on_stop(_: Event) -> None:
+            """Release integration resources before Home Assistant waits for tasks."""
+            await coordinator.async_shutdown()
+
+        entry.async_on_unload(
+            hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_STOP,
+                _async_shutdown_on_stop,
+            )
         )
         entry.async_on_unload(entry.add_update_listener(_async_update_listener))
         return True

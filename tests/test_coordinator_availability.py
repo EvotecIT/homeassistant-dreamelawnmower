@@ -83,6 +83,29 @@ def test_offline_snapshot_returns_normally_so_entities_remain_loaded() -> None:
     assert tracking_updates == [(None, False)]
 
 
+def test_connectivity_shutdown_cancels_delayed_retry() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        coordinator._shutting_down = False
+        coordinator.hass = SimpleNamespace(
+            async_create_task=lambda coroutine, _name: asyncio.create_task(coroutine)
+        )
+        coordinator._initialize_connectivity_recovery()
+        coordinator._schedule_connectivity_retry(60)
+        retry_task = coordinator._connectivity_retry_task
+
+        assert retry_task is not None
+        assert not retry_task.done()
+
+        await coordinator._async_shutdown_connectivity_recovery()
+
+        assert retry_task.cancelled()
+        assert coordinator._connectivity_retry_task is None
+        assert coordinator._connectivity_retry_inflight_task is None
+
+    asyncio.run(scenario())
+
+
 def test_short_offline_snapshot_retains_last_good_state() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     good_snapshot = SimpleNamespace(available=True, state="mowing")
