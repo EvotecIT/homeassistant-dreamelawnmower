@@ -6,8 +6,8 @@ import asyncio
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
+from homeassistant.core import Event, HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from .const import (
@@ -70,6 +70,15 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Dreame lawn mower from a config entry."""
     coordinator = DreameLawnMowerCoordinator(hass, entry)
+
+    async def _async_shutdown_on_stop(_: Event) -> None:
+        """Release integration resources before Home Assistant waits for tasks."""
+        await coordinator.async_shutdown_for_home_assistant_stop()
+
+    remove_stop_listener = hass.bus.async_listen_once(
+        EVENT_HOMEASSISTANT_STOP,
+        _async_shutdown_on_stop,
+    )
     setup_cycle = coordinator.performance.start("setup")
     setup_outcome = "completed"
     lan_cache = DreameLawnMowerVideoLanCache(
@@ -118,14 +127,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "platforms",
             lambda: hass.config_entries.async_forward_entry_setups(entry, platforms),
         )
+
+        entry.async_on_unload(remove_stop_listener)
         entry.async_on_unload(entry.add_update_listener(_async_update_listener))
         return True
     except asyncio.CancelledError:
         setup_outcome = "cancelled"
+        remove_stop_listener()
         await _async_cleanup_failed_setup(hass, entry, coordinator)
         raise
     except Exception as err:  # noqa: BLE001 - retain setup failure behavior
         setup_outcome = type(err).__name__
+        remove_stop_listener()
         await _async_cleanup_failed_setup(hass, entry, coordinator)
         raise
     finally:

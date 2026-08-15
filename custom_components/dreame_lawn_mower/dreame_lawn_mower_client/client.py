@@ -6,6 +6,7 @@ import asyncio
 import hashlib as hashlib
 import html as html
 import json as json
+import logging as _logging
 import math as math
 import re as re
 import threading as _threading
@@ -215,6 +216,8 @@ if _typing.TYPE_CHECKING:
     from .work_log import DreameLawnMowerWorkLogTotals
 
 _CLOUD_PRESENCE_REFRESH_INTERVAL = _client_constants.CLOUD_PRESENCE_REFRESH_INTERVAL
+_DEVICE_DISCONNECT_TIMEOUT_SECONDS = 2.0
+_LOGGER = _logging.getLogger(__name__)
 
 _app_action_data = _client_helpers._app_action_data
 _app_map_area_label = _client_helpers._app_map_area_label
@@ -387,6 +390,8 @@ class DreameLawnMowerClient(
         self._account_type = account_type
         self._descriptor = descriptor
         self._device: Any | None = None
+        self._device_ownership_lock = _threading.Lock()
+        self._closing = False
         self._update_callback: _typing.Callable[[], None] | None = None
         self._latest_snapshot: DreameLawnMowerSnapshot | None = None
         self._latest_runtime_status_blob: DreameLawnMowerStatusBlob | None = None
@@ -1440,7 +1445,59 @@ class DreameLawnMowerClient(
 
     async def async_close(self) -> None:
         """Disconnect long-lived device resources."""
-        if self._device is not None:
-            self._device.listen(None)
-            await asyncio.to_thread(self._device.disconnect)
+        with self._device_ownership_lock:
+            self._closing = True
+            device = self._device
             self._device = None
+        if device is not None:
+            try:
+                device.listen(None)
+                await self._async_disconnect_device(device)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                with self._device_ownership_lock:
+                    if self._device is None:
+                        self._device = device
+                raise
+
+    async def _async_disconnect_device(self, device: Any) -> None:
+        """Bound device disconnect without retaining HA's default executor."""
+        loop = asyncio.get_running_loop()
+        completed: asyncio.Future[None] = loop.create_future()
+
+        def settle(error: Exception | None) -> None:
+            if completed.done():
+                return
+            if error is None:
+                completed.set_result(None)
+            else:
+                completed.set_exception(error)
+
+        def disconnect() -> None:
+            error: Exception | None = None
+            try:
+                device.disconnect()
+            except Exception as err:  # noqa: BLE001 - return on the event loop
+                error = err
+            try:
+                loop.call_soon_threadsafe(settle, error)
+            except RuntimeError:
+                pass
+
+        worker = _threading.Thread(
+            target=disconnect,
+            name="dreame-device-disconnect",
+            daemon=True,
+        )
+        worker.start()
+        try:
+            async with asyncio.timeout(_DEVICE_DISCONNECT_TIMEOUT_SECONDS):
+                await completed
+        except TimeoutError:
+            completed.cancel()
+            _LOGGER.warning(
+                "Device disconnect did not finish within %.1f seconds; "
+                "continuing shutdown while its daemon worker drains.",
+                _DEVICE_DISCONNECT_TIMEOUT_SECONDS,
+            )

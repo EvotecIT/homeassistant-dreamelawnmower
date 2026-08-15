@@ -922,23 +922,28 @@ class _DreameLawnMowerClientCoreMixin:
         return cloud
 
     def _ensure_device(self):
-        if self._device is not None:
+        with self._device_ownership_lock:
+            if self._closing:
+                raise DreameLawnMowerConnectionError(
+                    "The mower client is shutting down."
+                )
+            if self._device is not None:
+                return self._device
+
+            from .device import DreameMowerDevice
+
+            self._device = DreameMowerDevice(
+                self._descriptor.name,
+                self._descriptor.host,
+                self._descriptor.token or " ",
+                self._descriptor.mac,
+                self._username,
+                self._password,
+                self._country,
+                True,
+                self._account_type,
+                self._descriptor.did,
+            )
+            if self._update_callback is not None:
+                self._device.listen(self._update_callback)
             return self._device
-
-        from .device import DreameMowerDevice
-
-        self._device = DreameMowerDevice(
-            self._descriptor.name,
-            self._descriptor.host,
-            self._descriptor.token or " ",
-            self._descriptor.mac,
-            self._username,
-            self._password,
-            self._country,
-            True,
-            self._account_type,
-            self._descriptor.did,
-        )
-        if self._update_callback is not None:
-            self._device.listen(self._update_callback)
-        return self._device

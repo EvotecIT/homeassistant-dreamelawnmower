@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
@@ -2955,6 +2956,7 @@ def test_shutdown_drains_metadata_before_closing_shared_client() -> None:
             close_calls.append("close")
 
         coordinator._shutting_down = False
+        coordinator._base_shutdown_complete = True
         coordinator._client_update_pending = False
         coordinator._client_update_task = None
         coordinator._metadata_refresh_task = asyncio.create_task(metadata())
@@ -3005,6 +3007,7 @@ def test_shutdown_waits_for_shielded_batch_worker_before_close() -> None:
             close_calls.append("close")
 
         coordinator._shutting_down = False
+        coordinator._base_shutdown_complete = True
         coordinator._client_update_pending = False
         coordinator._client_update_task = None
         coordinator._batch_schedule_read_task = asyncio.create_task(batch_schedule())
@@ -3059,6 +3062,7 @@ def test_shutdown_defers_close_until_batch_thread_finishes_after_grace() -> None
             close_calls.append("close")
 
         coordinator._shutting_down = False
+        coordinator._base_shutdown_complete = True
         coordinator._client_update_pending = False
         coordinator._client_update_task = None
         coordinator._batch_schedule_read_task = asyncio.create_task(batch_schedule())
@@ -3179,6 +3183,7 @@ def test_shutdown_defers_client_close_after_metadata_grace_expires() -> None:
             close_calls.append("close")
 
         coordinator._shutting_down = False
+        coordinator._base_shutdown_complete = True
         coordinator._client_update_pending = False
         coordinator._client_update_task = None
         coordinator._metadata_refresh_task = asyncio.create_task(metadata())
@@ -3224,6 +3229,7 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
         )
         cache = SimpleNamespace(async_load=AsyncMock())
         hass = SimpleNamespace(
+            bus=SimpleNamespace(async_listen_once=Mock(return_value=Mock())),
             data={},
             config_entries=SimpleNamespace(
                 async_forward_entry_setups=AsyncMock(
@@ -3274,6 +3280,80 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
     asyncio.run(scenario())
 
 
+def test_successful_setup_shuts_down_coordinator_on_home_assistant_stop() -> None:
+    async def scenario() -> None:
+        performance = DreameLawnMowerPerformanceTracker()
+        stop_listener = None
+
+        async def first_refresh() -> None:
+            assert stop_listener is not None
+
+        coordinator = SimpleNamespace(
+            performance=performance,
+            client=SimpleNamespace(descriptor=SimpleNamespace(did="device-1")),
+            async_config_entry_first_refresh=AsyncMock(side_effect=first_refresh),
+            async_shutdown_for_home_assistant_stop=AsyncMock(),
+            async_shutdown=AsyncMock(),
+            _metadata_refresh_task=None,
+        )
+        cache = SimpleNamespace(async_load=AsyncMock())
+        remove_stop_listener = Mock()
+        unload_callbacks: list[object] = []
+
+        def async_listen_once(event_type, listener):
+            nonlocal stop_listener
+            assert event_type == EVENT_HOMEASSISTANT_STOP
+            stop_listener = listener
+            return remove_stop_listener
+
+        entry = SimpleNamespace(
+            entry_id="entry-1",
+            options={},
+            async_on_unload=unload_callbacks.append,
+            add_update_listener=Mock(return_value=Mock()),
+        )
+        hass = SimpleNamespace(
+            bus=SimpleNamespace(async_listen_once=async_listen_once),
+            data={},
+            config_entries=SimpleNamespace(
+                async_forward_entry_setups=AsyncMock(),
+            ),
+        )
+
+        with (
+            patch.object(
+                integration_module,
+                "DreameLawnMowerCoordinator",
+                return_value=coordinator,
+            ),
+            patch.object(
+                integration_module,
+                "DreameLawnMowerVideoLanCache",
+                return_value=cache,
+            ),
+            patch.object(
+                integration_module,
+                "DreameLawnMowerVideoProvisioningCache",
+                return_value=cache,
+            ),
+            patch.object(integration_module, "async_setup_point_cloud_api"),
+            patch.object(
+                integration_module,
+                "async_setup_services",
+                new=AsyncMock(),
+            ),
+        ):
+            assert await async_setup_entry(hass, entry) is True
+
+        assert stop_listener is not None
+        assert remove_stop_listener in unload_callbacks
+        await stop_listener(SimpleNamespace())
+        coordinator.async_shutdown_for_home_assistant_stop.assert_awaited_once_with()
+        coordinator.async_shutdown.assert_not_awaited()
+
+    asyncio.run(scenario())
+
+
 def test_initial_connection_failure_keeps_complete_platform_setup_pending() -> None:
     async def scenario() -> None:
         performance = DreameLawnMowerPerformanceTracker()
@@ -3294,6 +3374,7 @@ def test_initial_connection_failure_keeps_complete_platform_setup_pending() -> N
         )
         forward = AsyncMock()
         hass = SimpleNamespace(
+            bus=SimpleNamespace(async_listen_once=Mock(return_value=Mock())),
             data={},
             config_entries=SimpleNamespace(async_forward_entry_setups=forward),
         )

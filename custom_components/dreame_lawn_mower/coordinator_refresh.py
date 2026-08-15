@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from contextlib import suppress
 from functools import partial
 from typing import Any
 
@@ -101,6 +100,11 @@ class DreameLawnMowerRefreshMixin:
 
     async def _async_update_data(self) -> DreameLawnMowerSnapshot:
         """Fetch essential state and hydrate optional metadata in the background."""
+        if getattr(self, "_shutting_down", False):
+            current = getattr(self, "data", None)
+            if current is not None:
+                return current
+            raise UpdateFailed("The mower coordinator is shutting down.")
         if not hasattr(self, "performance"):
             self.performance = DreameLawnMowerPerformanceTracker()
         if not hasattr(self, "_device_refresh_lock"):
@@ -129,6 +133,8 @@ class DreameLawnMowerRefreshMixin:
                     )
                     if callable(record_snapshot):
                         record_snapshot(snapshot, retain=True)
+                if getattr(self, "_shutting_down", False):
+                    return snapshot
             except DreameLawnMowerConnectionError as err:
                 outcome = type(err).__name__
                 safe_error = sanitize_diagnostic_text(err)
@@ -644,8 +650,20 @@ class DreameLawnMowerRefreshMixin:
         self._metadata_refresh_pending = False
         self._metadata_refresh_publish = False
 
+    async def _async_cancel_metadata_shutdown_close(self) -> None:
+        """Cancel an unload cleanup that Home Assistant would otherwise track."""
+        close_task = getattr(self, "_metadata_shutdown_close_task", None)
+        if close_task is None or close_task is asyncio.current_task():
+            return
+        close_task.cancel()
+        await asyncio.gather(close_task, return_exceptions=True)
+        if self._metadata_shutdown_close_task is close_task:
+            self._metadata_shutdown_close_task = None
+
     async def _async_drain_metadata_for_shutdown(self) -> bool:
         """Cancel queued metadata and bound the wait for an in-flight request."""
+        if getattr(self, "_home_assistant_stopping", False):
+            return False
         metadata_task = self._metadata_refresh_task
         if metadata_task is None or metadata_task is asyncio.current_task():
             return await self._async_drain_batch_schedule_for_shutdown()
@@ -662,6 +680,8 @@ class DreameLawnMowerRefreshMixin:
             if not metadata_task.done():
                 raise
         except TimeoutError:
+            if getattr(self, "_home_assistant_stopping", False):
+                return False
             self._metadata_shutdown_close_task = self.hass.async_create_task(
                 self._async_close_after_metadata(metadata_task),
                 f"{DOMAIN}-metadata-shutdown",
@@ -671,6 +691,8 @@ class DreameLawnMowerRefreshMixin:
 
     async def _async_drain_batch_schedule_for_shutdown(self) -> bool:
         """Wait for shared batch reads without cancelling their worker threads."""
+        if getattr(self, "_home_assistant_stopping", False):
+            return False
         tasks = set(getattr(self, "_batch_schedule_read_tasks", set()))
         latest = getattr(self, "_batch_schedule_read_task", None)
         if latest is not None:
@@ -687,6 +709,8 @@ class DreameLawnMowerRefreshMixin:
             if not drain_task.done():
                 raise
         except TimeoutError:
+            if getattr(self, "_home_assistant_stopping", False):
+                return False
             self._metadata_shutdown_close_task = self.hass.async_create_task(
                 self._async_close_after_metadata(drain_task),
                 f"{DOMAIN}-batch-schedule-shutdown",
@@ -729,11 +753,19 @@ class DreameLawnMowerRefreshMixin:
     ) -> None:
         """Close the shared client once a cancellation-resistant request drains."""
         try:
-            with suppress(asyncio.CancelledError, Exception):
-                await metadata_task
-        finally:
-            await self._async_wait_batch_schedule_reads()
-            await self.client.async_close()
+            await asyncio.shield(metadata_task)
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
+        except Exception:  # noqa: BLE001 - deferred cleanup is best effort
+            pass
+        if getattr(self, "_home_assistant_stopping", False):
+            return
+        await self._async_wait_batch_schedule_reads()
+        if getattr(self, "_home_assistant_stopping", False):
+            return
+        await self._async_close_client_for_unload()
 
     @staticmethod
     def _log_performance_sample(

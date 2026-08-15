@@ -80,3 +80,24 @@ def test_background_map_failure_still_schedules_next_refresh(monkeypatch) -> Non
 
     update_timer.cancel.assert_called_once_with()
     manager.schedule_update.assert_called_once_with(29.0)
+
+
+def test_disconnect_quiesces_map_before_protocol_teardown() -> None:
+    """A blocked protocol close must not leave the map timer alive."""
+    order: list[str] = []
+    mower = SimpleNamespace(
+        disconnected=False,
+        schedule_update=Mock(side_effect=lambda _wait: order.append("device")),
+        _map_manager=SimpleNamespace(
+            disconnect=Mock(side_effect=lambda: order.append("map")),
+        ),
+        _protocol=SimpleNamespace(
+            disconnect=Mock(side_effect=lambda: order.append("protocol")),
+        ),
+        _property_changed=Mock(side_effect=lambda: order.append("property")),
+    )
+
+    DreameMowerDevice.disconnect(mower)
+
+    assert mower.disconnected is True
+    assert order == ["device", "map", "protocol", "property"]
