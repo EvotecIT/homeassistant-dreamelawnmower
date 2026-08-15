@@ -49,107 +49,116 @@ def _client() -> DreameLawnMowerClient:
     )
 
 
-async def test_async_close_bounds_device_disconnect_on_daemon_thread(
+def test_async_close_bounds_device_disconnect_on_daemon_thread(
     monkeypatch,
 ) -> None:
-    client = _client()
-    started = threading.Event()
-    release = threading.Event()
-    finished = threading.Event()
-    daemon_values: list[bool] = []
+    async def scenario() -> None:
+        client = _client()
+        started = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+        daemon_values: list[bool] = []
 
-    class _BlockingDevice:
-        def listen(self, callback) -> None:
-            assert callback is None
+        class _BlockingDevice:
+            def listen(self, callback) -> None:
+                assert callback is None
 
-        def disconnect(self) -> None:
-            daemon_values.append(threading.current_thread().daemon)
-            started.set()
-            release.wait()
-            finished.set()
+            def disconnect(self) -> None:
+                daemon_values.append(threading.current_thread().daemon)
+                started.set()
+                release.wait()
+                finished.set()
 
-    client._device = _BlockingDevice()  # type: ignore[assignment]
-    client_module = import_module(DreameLawnMowerClient.__module__)
-    monkeypatch.setattr(
-        client_module,
-        "_DEVICE_DISCONNECT_TIMEOUT_SECONDS",
-        0.01,
-    )
+        client._device = _BlockingDevice()  # type: ignore[assignment]
+        client_module = import_module(DreameLawnMowerClient.__module__)
+        monkeypatch.setattr(
+            client_module,
+            "_DEVICE_DISCONNECT_TIMEOUT_SECONDS",
+            0.01,
+        )
 
-    await asyncio.wait_for(client.async_close(), timeout=1)
+        await asyncio.wait_for(client.async_close(), timeout=1)
 
-    assert started.is_set()
-    assert daemon_values == [True]
-    assert not finished.is_set()
-    assert client._device is None
+        assert started.is_set()
+        assert daemon_values == [True]
+        assert not finished.is_set()
+        assert client._device is None
 
-    release.set()
-    for _ in range(100):
-        if finished.is_set():
-            break
-        await asyncio.sleep(0.001)
-    assert finished.is_set()
+        release.set()
+        for _ in range(100):
+            if finished.is_set():
+                break
+            await asyncio.sleep(0.001)
+        assert finished.is_set()
 
-
-async def test_async_close_blocks_replacement_device_creation(monkeypatch) -> None:
-    client = _client()
-    started = threading.Event()
-    release = threading.Event()
-
-    class _BlockingDevice:
-        def listen(self, callback) -> None:
-            assert callback is None
-
-        def disconnect(self) -> None:
-            started.set()
-            release.wait()
-
-    client._device = _BlockingDevice()  # type: ignore[assignment]
-    client_module = import_module(DreameLawnMowerClient.__module__)
-    monkeypatch.setattr(
-        client_module,
-        "_DEVICE_DISCONNECT_TIMEOUT_SECONDS",
-        1.0,
-    )
-
-    closing = asyncio.create_task(client.async_close())
-    for _ in range(100):
-        if started.is_set():
-            break
-        await asyncio.sleep(0.001)
-    assert started.is_set()
-
-    with pytest.raises(
-        DreameLawnMowerConnectionError,
-        match="shutting down",
-    ):
-        client._ensure_device()
-
-    release.set()
-    await asyncio.wait_for(closing, timeout=1)
-    assert client._device is None
+    asyncio.run(scenario())
 
 
-async def test_async_close_restores_device_when_listener_detach_fails() -> None:
-    client = _client()
+def test_async_close_blocks_replacement_device_creation(monkeypatch) -> None:
+    async def scenario() -> None:
+        client = _client()
+        started = threading.Event()
+        release = threading.Event()
 
-    class _FailingDevice:
-        def listen(self, callback) -> None:
-            del callback
-            raise RuntimeError("listener detach failed")
+        class _BlockingDevice:
+            def listen(self, callback) -> None:
+                assert callback is None
 
-    device = _FailingDevice()
-    client._device = device  # type: ignore[assignment]
+            def disconnect(self) -> None:
+                started.set()
+                release.wait()
 
-    with pytest.raises(RuntimeError, match="listener detach failed"):
-        await client.async_close()
+        client._device = _BlockingDevice()  # type: ignore[assignment]
+        client_module = import_module(DreameLawnMowerClient.__module__)
+        monkeypatch.setattr(
+            client_module,
+            "_DEVICE_DISCONNECT_TIMEOUT_SECONDS",
+            1.0,
+        )
 
-    assert client._device is device
-    with pytest.raises(
-        DreameLawnMowerConnectionError,
-        match="shutting down",
-    ):
-        client._ensure_device()
+        closing = asyncio.create_task(client.async_close())
+        for _ in range(100):
+            if started.is_set():
+                break
+            await asyncio.sleep(0.001)
+        assert started.is_set()
+
+        with pytest.raises(
+            DreameLawnMowerConnectionError,
+            match="shutting down",
+        ):
+            client._ensure_device()
+
+        release.set()
+        await asyncio.wait_for(closing, timeout=1)
+        assert client._device is None
+
+    asyncio.run(scenario())
+
+
+def test_async_close_restores_device_when_listener_detach_fails() -> None:
+    async def scenario() -> None:
+        client = _client()
+
+        class _FailingDevice:
+            def listen(self, callback) -> None:
+                del callback
+                raise RuntimeError("listener detach failed")
+
+        device = _FailingDevice()
+        client._device = device  # type: ignore[assignment]
+
+        with pytest.raises(RuntimeError, match="listener detach failed"):
+            await client.async_close()
+
+        assert client._device is device
+        with pytest.raises(
+            DreameLawnMowerConnectionError,
+            match="shutting down",
+        ):
+            client._ensure_device()
+
+    asyncio.run(scenario())
 
 
 def test_device_creation_without_external_listener_preserves_internal_callbacks(
