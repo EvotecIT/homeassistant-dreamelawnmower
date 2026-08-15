@@ -472,9 +472,9 @@ class DreameMowerDevice(
         _LOGGER.info("Disconnect")
         self.disconnected = True
         self.schedule_update(-1)
-        self._protocol.disconnect()
         if self._map_manager:
             self._map_manager.disconnect()
+        self._protocol.disconnect()
         self._property_changed()
 
     def listen(self, callback, property: DreameMowerProperty = None) -> None:

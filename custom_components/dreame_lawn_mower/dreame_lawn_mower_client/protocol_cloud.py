@@ -329,10 +329,10 @@ class DreameMowerDreameHomeCloudProtocol:
         return self._connected and self._client_connected
 
     def _reconnect_timer_cancel(self):
-        if self._reconnect_timer is not None:
-            self._reconnect_timer.cancel()
-            del self._reconnect_timer
-            self._reconnect_timer = None
+        reconnect_timer = getattr(self, "_reconnect_timer", None)
+        if reconnect_timer is not None:
+            reconnect_timer.cancel()
+        self._reconnect_timer = None
 
     def _reconnect_timer_task(self):
         self._reconnect_timer_cancel()
@@ -369,6 +369,11 @@ class DreameMowerDreameHomeCloudProtocol:
 
     @staticmethod
     def _on_client_disconnect(client, self, rc):
+        if getattr(self, "_shutdown_requested", False):
+            self._reconnect_timer_cancel()
+            self._client_connected = False
+            self._client_connecting = False
+            return
         if rc != 0 and not self._set_client_key():
             if rc == 5 and self._key_expire:
                 self.login()
@@ -1539,6 +1544,7 @@ class DreameMowerDreameHomeCloudProtocol:
 
     def disconnect(self, timeout: float = _CLOUD_DISCONNECT_TIMEOUT_SECONDS):
         self._shutdown_requested = True
+        self._reconnect_timer_cancel()
         self._disconnect_pending = True
         deadline = time.monotonic() + max(0.0, timeout)
         try:

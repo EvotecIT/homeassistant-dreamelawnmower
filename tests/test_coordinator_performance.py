@@ -2956,6 +2956,7 @@ def test_shutdown_drains_metadata_before_closing_shared_client() -> None:
             close_calls.append("close")
 
         coordinator._shutting_down = False
+        coordinator._base_shutdown_complete = True
         coordinator._client_update_pending = False
         coordinator._client_update_task = None
         coordinator._metadata_refresh_task = asyncio.create_task(metadata())
@@ -3006,6 +3007,7 @@ def test_shutdown_waits_for_shielded_batch_worker_before_close() -> None:
             close_calls.append("close")
 
         coordinator._shutting_down = False
+        coordinator._base_shutdown_complete = True
         coordinator._client_update_pending = False
         coordinator._client_update_task = None
         coordinator._batch_schedule_read_task = asyncio.create_task(batch_schedule())
@@ -3060,6 +3062,7 @@ def test_shutdown_defers_close_until_batch_thread_finishes_after_grace() -> None
             close_calls.append("close")
 
         coordinator._shutting_down = False
+        coordinator._base_shutdown_complete = True
         coordinator._client_update_pending = False
         coordinator._client_update_task = None
         coordinator._batch_schedule_read_task = asyncio.create_task(batch_schedule())
@@ -3180,6 +3183,7 @@ def test_shutdown_defers_client_close_after_metadata_grace_expires() -> None:
             close_calls.append("close")
 
         coordinator._shutting_down = False
+        coordinator._base_shutdown_complete = True
         coordinator._client_update_pending = False
         coordinator._client_update_task = None
         coordinator._metadata_refresh_task = asyncio.create_task(metadata())
@@ -3225,6 +3229,7 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
         )
         cache = SimpleNamespace(async_load=AsyncMock())
         hass = SimpleNamespace(
+            bus=SimpleNamespace(async_listen_once=Mock(return_value=Mock())),
             data={},
             config_entries=SimpleNamespace(
                 async_forward_entry_setups=AsyncMock(
@@ -3278,16 +3283,20 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
 def test_successful_setup_shuts_down_coordinator_on_home_assistant_stop() -> None:
     async def scenario() -> None:
         performance = DreameLawnMowerPerformanceTracker()
+        stop_listener = None
+
+        async def first_refresh() -> None:
+            assert stop_listener is not None
+
         coordinator = SimpleNamespace(
             performance=performance,
             client=SimpleNamespace(descriptor=SimpleNamespace(did="device-1")),
-            async_config_entry_first_refresh=AsyncMock(),
+            async_config_entry_first_refresh=AsyncMock(side_effect=first_refresh),
             async_shutdown_for_home_assistant_stop=AsyncMock(),
             async_shutdown=AsyncMock(),
             _metadata_refresh_task=None,
         )
         cache = SimpleNamespace(async_load=AsyncMock())
-        stop_listener = None
         remove_stop_listener = Mock()
         unload_callbacks: list[object] = []
 
@@ -3365,6 +3374,7 @@ def test_initial_connection_failure_keeps_complete_platform_setup_pending() -> N
         )
         forward = AsyncMock()
         hass = SimpleNamespace(
+            bus=SimpleNamespace(async_listen_once=Mock(return_value=Mock())),
             data={},
             config_entries=SimpleNamespace(async_forward_entry_setups=forward),
         )

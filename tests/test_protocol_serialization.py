@@ -142,6 +142,8 @@ def test_cloud_disconnect_does_not_wait_forever_for_deadline_worker() -> None:
     cloud._client = mqtt_client
     cloud._client_connected = True
     cloud._client_connecting = True
+    reconnect_timer = Mock()
+    cloud._reconnect_timer = reconnect_timer
     lock_held = Event()
     release_lock = Event()
 
@@ -172,8 +174,28 @@ def test_cloud_disconnect_does_not_wait_forever_for_deadline_worker() -> None:
     assert cloud._client is None
     assert cloud._client_connected is False
     assert cloud._client_connecting is False
+    reconnect_timer.cancel.assert_called_once_with()
+    assert cloud._reconnect_timer is None
     mqtt_client.loop_stop.assert_called_once_with()
     mqtt_client.disconnect.assert_called_once_with()
+
+
+def test_cloud_disconnect_callback_does_not_rearm_during_shutdown() -> None:
+    cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
+    cloud._shutdown_requested = True
+    cloud._reconnect_timer = None
+    cloud._client_connected = True
+    cloud._client_connecting = True
+
+    protocol_cloud.DreameMowerDreameHomeCloudProtocol._on_client_disconnect(
+        Mock(),
+        cloud,
+        1,
+    )
+
+    assert cloud._reconnect_timer is None
+    assert cloud._client_connected is False
+    assert cloud._client_connecting is False
 
 
 def test_late_deadline_worker_cannot_restore_state_after_disconnect() -> None:

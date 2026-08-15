@@ -16,6 +16,7 @@ _LOGGER = logging.getLogger(__name__)
 
 CONNECTIVITY_STALE_GRACE_SECONDS = 180.0
 CONNECTIVITY_RETRY_DELAYS_SECONDS = (1.0, 2.0, 5.0, 10.0, 30.0)
+CONNECTIVITY_SHUTDOWN_GRACE_SECONDS = 1.0
 
 
 class DreameLawnMowerConnectivityMixin:
@@ -123,7 +124,8 @@ class DreameLawnMowerConnectivityMixin:
         task = getattr(self, "_connectivity_retry_task", None)
         if task is not None and not task.done():
             return
-        self._connectivity_retry_task = self.hass.async_create_task(
+        self._connectivity_retry_task = self.entry.async_create_background_task(
+            self.hass,
             self._async_connectivity_retry(delay),
             f"{DOMAIN}-connectivity-retry",
         )
@@ -171,10 +173,24 @@ class DreameLawnMowerConnectivityMixin:
             )
             if task is not None and task is not current
         }
-        self._connectivity_retry_task = None
-        self._connectivity_retry_inflight_task = None
         for task in tasks:
             task.cancel()
-        for task in tasks:
+        if not tasks:
+            return
+        done, pending = await asyncio.wait(
+            tasks,
+            timeout=CONNECTIVITY_SHUTDOWN_GRACE_SECONDS,
+        )
+        for task in done:
             with suppress(asyncio.CancelledError):
-                await task
+                task.result()
+            if getattr(self, "_connectivity_retry_task", None) is task:
+                self._connectivity_retry_task = None
+            if getattr(self, "_connectivity_retry_inflight_task", None) is task:
+                self._connectivity_retry_inflight_task = None
+        if pending:
+            _LOGGER.warning(
+                "Continuing mower shutdown while %s cancelled connectivity "
+                "task(s) finish in the background.",
+                len(pending),
+            )

@@ -100,6 +100,11 @@ class DreameLawnMowerRefreshMixin:
 
     async def _async_update_data(self) -> DreameLawnMowerSnapshot:
         """Fetch essential state and hydrate optional metadata in the background."""
+        if getattr(self, "_shutting_down", False):
+            current = getattr(self, "data", None)
+            if current is not None:
+                return current
+            raise UpdateFailed("The mower coordinator is shutting down.")
         if not hasattr(self, "performance"):
             self.performance = DreameLawnMowerPerformanceTracker()
         if not hasattr(self, "_device_refresh_lock"):
@@ -128,6 +133,8 @@ class DreameLawnMowerRefreshMixin:
                     )
                     if callable(record_snapshot):
                         record_snapshot(snapshot, retain=True)
+                if getattr(self, "_shutting_down", False):
+                    return snapshot
             except DreameLawnMowerConnectionError as err:
                 outcome = type(err).__name__
                 safe_error = sanitize_diagnostic_text(err)

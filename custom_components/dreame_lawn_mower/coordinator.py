@@ -78,6 +78,8 @@ from .schedule_cache import (
     schedule_payload_has_usable_data,
 )
 
+CLIENT_UPDATE_SHUTDOWN_GRACE_SECONDS = 1.0
+
 _LOGGER = logging.getLogger(__name__)
 
 BATCH_DEVICE_DATA_REFRESH_INTERVAL = timedelta(minutes=15)
@@ -239,6 +241,7 @@ class DreameLawnMowerCoordinator(
         self._metadata_refresh_count = 0
         self._shutting_down = False
         self._home_assistant_stopping = False
+        self._base_shutdown_complete = False
         self._owned_tasks_shutdown_lock = asyncio.Lock()
         self._initialize_connectivity_recovery()
 
@@ -2196,8 +2199,20 @@ class DreameLawnMowerCoordinator(
         task = self._client_update_task
         if task is not None and task is not asyncio.current_task():
             task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
+            done, pending = await asyncio.wait(
+                {task},
+                timeout=CLIENT_UPDATE_SHUTDOWN_GRACE_SECONDS,
+            )
+            if done:
+                with suppress(asyncio.CancelledError):
+                    task.result()
+                if self._client_update_task is task:
+                    self._client_update_task = None
+            if pending:
+                _LOGGER.warning(
+                    "Continuing mower shutdown while a cancelled realtime "
+                    "update finishes in the background."
+                )
 
     async def _async_stop_owned_tasks_serialized(self) -> None:
         """Serialize shutdown ownership across stop and config-entry unload."""
@@ -2206,29 +2221,20 @@ class DreameLawnMowerCoordinator(
             lock = asyncio.Lock()
             self._owned_tasks_shutdown_lock = lock
         async with lock:
+            if not getattr(self, "_base_shutdown_complete", False):
+                await super().async_shutdown()
+                self._base_shutdown_complete = True
             await self._async_stop_owned_tasks()
 
     async def async_shutdown_for_home_assistant_stop(self) -> None:
-        """Stop owned tasks without scheduling unload-oriented metadata drains."""
+        """Stop owned work and close the client without draining metadata."""
         self._home_assistant_stopping = True
         await self._async_cancel_metadata_shutdown_close()
-        await self._async_cancel_client_close()
         await self._async_stop_owned_tasks_serialized()
+        await self._async_close_client()
 
-    async def _async_cancel_client_close(self) -> None:
-        """Cancel the async owner of a disconnect already running for unload."""
-        close_task = getattr(self, "_client_close_task", None)
-        if close_task is None or close_task is asyncio.current_task():
-            return
-        close_task.cancel()
-        await asyncio.gather(close_task, return_exceptions=True)
-        if self._client_close_task is close_task:
-            self._client_close_task = None
-
-    async def _async_close_client_for_unload(self) -> None:
-        """Close the client through an owner the HA stop path can cancel."""
-        if getattr(self, "_home_assistant_stopping", False):
-            return
+    async def _async_close_client(self) -> None:
+        """Close the client through one shared shutdown owner."""
         close_task = getattr(self, "_client_close_task", None)
         if close_task is None or close_task.done():
             close_task = asyncio.create_task(
@@ -2238,19 +2244,15 @@ class DreameLawnMowerCoordinator(
             self._client_close_task = close_task
         try:
             await asyncio.shield(close_task)
-        except asyncio.CancelledError:
-            current = asyncio.current_task()
-            if (
-                current is not None
-                and not current.cancelling()
-                and close_task.cancelled()
-                and getattr(self, "_home_assistant_stopping", False)
-            ):
-                return
-            raise
         finally:
             if self._client_close_task is close_task and close_task.done():
                 self._client_close_task = None
+
+    async def _async_close_client_for_unload(self) -> None:
+        """Close the client unless the Home Assistant stop path owns shutdown."""
+        if getattr(self, "_home_assistant_stopping", False):
+            return
+        await self._async_close_client()
 
     async def async_shutdown(self) -> None:
         """Disconnect client resources."""
