@@ -758,7 +758,7 @@ class DreameLawnMowerRefreshMixin:
         await self._async_wait_batch_schedule_reads()
         if getattr(self, "_home_assistant_stopping", False):
             return
-        await self.client.async_close()
+        await self._async_close_client_for_unload()
 
     @staticmethod
     def _log_performance_sample(

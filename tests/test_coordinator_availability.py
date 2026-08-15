@@ -258,6 +258,84 @@ def test_home_assistant_stop_cancels_existing_metadata_shutdown_cleanup() -> Non
     asyncio.run(scenario())
 
 
+def test_home_assistant_stop_cancels_concurrent_unload_client_close() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        close_started = asyncio.Event()
+        close_cancelled = asyncio.Event()
+
+        async def close() -> None:
+            close_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                close_cancelled.set()
+
+        coordinator._shutting_down = False
+        coordinator._home_assistant_stopping = False
+        coordinator._owned_tasks_shutdown_lock = asyncio.Lock()
+        coordinator._initialize_connectivity_recovery()
+        coordinator._client_update_pending = False
+        coordinator._client_update_task = None
+        coordinator._client_close_task = None
+        coordinator._metadata_refresh_task = None
+        coordinator._metadata_shutdown_close_task = None
+        coordinator._batch_schedule_read_task = None
+        coordinator._batch_schedule_read_tasks = set()
+        coordinator.client = SimpleNamespace(
+            set_update_callback=Mock(),
+            async_close=close,
+        )
+
+        unload = asyncio.create_task(coordinator.async_shutdown())
+        await close_started.wait()
+        await asyncio.wait_for(
+            coordinator.async_shutdown_for_home_assistant_stop(),
+            timeout=1,
+        )
+        await asyncio.wait_for(unload, timeout=1)
+
+        assert coordinator._client_close_task is None
+        assert close_cancelled.is_set()
+
+    asyncio.run(scenario())
+
+
+def test_cancelled_unload_waiter_does_not_cancel_shared_client_close() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        close_started = asyncio.Event()
+        close_release = asyncio.Event()
+
+        async def close() -> None:
+            close_started.set()
+            await close_release.wait()
+
+        coordinator._home_assistant_stopping = False
+        coordinator._client_close_task = None
+        coordinator.client = SimpleNamespace(async_close=AsyncMock(side_effect=close))
+
+        first = asyncio.create_task(coordinator._async_close_client_for_unload())
+        second = asyncio.create_task(coordinator._async_close_client_for_unload())
+        await close_started.wait()
+
+        first.cancel()
+        with suppress(asyncio.CancelledError):
+            await first
+
+        close_task = coordinator._client_close_task
+        assert close_task is not None
+        assert not close_task.done()
+
+        close_release.set()
+        await asyncio.wait_for(second, timeout=1)
+
+        coordinator.client.async_close.assert_awaited_once_with()
+        assert coordinator._client_close_task is None
+
+    asyncio.run(scenario())
+
+
 def test_short_offline_snapshot_retains_last_good_state() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     good_snapshot = SimpleNamespace(available=True, state="mowing")
