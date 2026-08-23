@@ -516,16 +516,15 @@ need source, counts, and parser evidence.
 
 The map camera also advertises a local `point_cloud_api_path` attribute. A
 Home Assistant administrator can sign that path for a short-lived download.
-When the mower has exactly one created map and that map is authoritative, the
-integration first tries its stored LiDAR object so an existing 3D map can
-display without another upload. The vendor's stored-object announcement does
-not identify which map it belongs to, so multi-map mowers always generate the
-requested map rather than risk showing a previous garden. If the stored object
-is absent, expired, or invalid, the integration asks the mower to upload the
-selected app map, immediately captures the new announcement, and validates the
-returned PCD file. Firmware without the announcement retains the older
-transient-object lookup as a fallback. Responses use `private, no-store`
-caching.
+For the active map, the integration first tries a stored LiDAR object whose map
+index is confirmed by the app inventory or mower `OBJ` response. A mower with
+exactly one created map may also reuse the vendor's `99.20` stored-object
+announcement. That announcement has no map identity, so it is never reused on
+a multi-map mower. If no safely attributed stored object is available, the
+integration asks the mower to upload the selected app map, captures the new
+announcement, and validates the returned PCD file. Firmware without the
+announcement retains the older indexed-object lookup as a fallback. Responses
+use short-lived private caching; forced refreshes use `private, no-store`.
 Vendor filenames, cloud-signed URLs, and point coordinates are never written to
 entity state or logs.
 
@@ -535,8 +534,8 @@ this attribute and offers an on-demand 3D viewer. It does not generate or
 download garden geometry during an ordinary dashboard render. Select the Hero
 layout's **3D** tab or press **Load 3D map** in another layout when you want to
 fetch it. Point-cloud access is currently restricted to Home Assistant admins.
-A stored single-map file normally avoids mower generation; otherwise the mower
-has up to 45 seconds to publish a fresh file. A failed request returns a
+A safely attributed stored file normally avoids mower generation; otherwise the
+mower has up to 45 seconds to publish a fresh file. A failed request returns a
 privacy-safe problem code and stage instead of exposing the vendor object name
 or signed download URL.
 

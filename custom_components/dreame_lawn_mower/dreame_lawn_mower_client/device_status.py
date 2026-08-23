@@ -146,6 +146,32 @@ from .map_decoder import DreameMowerMapDecoder
 
 _LOGGER = logging.getLogger(__name__)
 
+_RUNNING_STATUSES = frozenset(
+    {
+        DreameMowerStatus.CLEANING,
+        DreameMowerStatus.BACK_HOME,
+        DreameMowerStatus.PART_CLEANING,
+        DreameMowerStatus.FOLLOW_WALL,
+        DreameMowerStatus.REMOTE_CONTROL,
+        DreameMowerStatus.SEGMENT_CLEANING,
+        DreameMowerStatus.ZONE_CLEANING,
+        DreameMowerStatus.SPOT_CLEANING,
+        DreameMowerStatus.FAST_MAPPING,
+        DreameMowerStatus.CRUISING_PATH,
+        DreameMowerStatus.CRUISING_POINT,
+        DreameMowerStatus.SUMMON_CLEAN,
+        DreameMowerStatus.SHORTCUT,
+        DreameMowerStatus.PERSON_FOLLOW,
+    }
+)
+_ACTIVE_TASK_STATUSES = (_RUNNING_STATUSES - {DreameMowerStatus.BACK_HOME}) | {
+    DreameMowerStatus.PAUSED
+}
+_UNKNOWN_TASK_INACTIVE_STATUSES = {
+    DreameMowerStatus.IDLE,
+    DreameMowerStatus.STANDBY,
+}
+
 
 
 class DreameMowerDeviceStatus:
@@ -765,21 +791,18 @@ class DreameMowerDeviceStatus:
         Used for preventing updates on settings that relates to currently performing task.
         """
         status = self.status
+        task_status = self.task_status
         return bool(
             (
-                self.task_status is not DreameMowerTaskStatus.COMPLETED
-                and self.task_status is not DreameMowerTaskStatus.DOCKING_PAUSED
+                task_status is not DreameMowerTaskStatus.COMPLETED
+                and task_status is not DreameMowerTaskStatus.DOCKING_PAUSED
+                and (
+                    task_status is not DreameMowerTaskStatus.UNKNOWN
+                    or status not in _UNKNOWN_TASK_INACTIVE_STATUSES
+                )
             )
             or self.cleaning_paused
-            or status is DreameMowerStatus.CLEANING
-            or status is DreameMowerStatus.SEGMENT_CLEANING
-            or status is DreameMowerStatus.ZONE_CLEANING
-            or status is DreameMowerStatus.SPOT_CLEANING
-            or status is DreameMowerStatus.PART_CLEANING
-            or status is DreameMowerStatus.FAST_MAPPING
-            or status is DreameMowerStatus.CRUISING_PATH
-            or status is DreameMowerStatus.CRUISING_POINT
-            or status is DreameMowerStatus.SHORTCUT
+            or status in _ACTIVE_TASK_STATUSES
         )
 
     @property
@@ -814,23 +837,7 @@ class DreameMowerDeviceStatus:
                 self.charging
                 or self.charging_status is DreameMowerChargingStatus.CHARGING_COMPLETED
             )
-            and (
-                status is DreameMowerStatus.CLEANING
-                or status is DreameMowerStatus.BACK_HOME
-                or status is DreameMowerStatus.PART_CLEANING
-                or status is DreameMowerStatus.FOLLOW_WALL
-                or status is DreameMowerStatus.REMOTE_CONTROL
-                or status is DreameMowerStatus.SEGMENT_CLEANING
-                or status is DreameMowerStatus.ZONE_CLEANING
-                or status is DreameMowerStatus.SPOT_CLEANING
-                or status is DreameMowerStatus.PART_CLEANING
-                or status is DreameMowerStatus.FAST_MAPPING
-                or status is DreameMowerStatus.CRUISING_PATH
-                or status is DreameMowerStatus.CRUISING_POINT
-                or status is DreameMowerStatus.SUMMON_CLEAN
-                or status is DreameMowerStatus.SHORTCUT
-                or status is DreameMowerStatus.PERSON_FOLLOW
-            )
+            and status in _RUNNING_STATUSES
         )
 
     @property

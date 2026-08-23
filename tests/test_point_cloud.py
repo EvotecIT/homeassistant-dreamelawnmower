@@ -531,6 +531,65 @@ def test_download_point_cloud_uses_legacy_stored_bin_after_property_timeout(
     assert result.source == "stored"
 
 
+def test_download_point_cloud_uses_indexed_object_for_multi_map_stored_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    actions: list[dict[str, Any]] = []
+    client._sync_call_app_action = lambda payload, **kwargs: (
+        actions.append(payload)
+        or {
+            "r": 0,
+            "d": {
+                "name": [
+                    "private/front-map.bin",
+                    "private/back-map.bin",
+                ]
+            },
+        }
+    )
+    signed_names: list[str] = []
+
+    def get_interim_file_url(name: str, **options: Any) -> str:
+        signed_names.append(name)
+        return "https://downloads.example.invalid/stored"
+
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {
+                "key": key,
+                "value": "private/ambiguous-map.bin",
+                "updateDate": 1_000,
+            }
+        ],
+        get_interim_file_url=get_interim_file_url,
+    )
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(
+        0,
+        45,
+        1,
+        10,
+        1024,
+        allow_stored=True,
+        allow_unscoped_stored=False,
+    )
+
+    assert actions == [{"m": "g", "t": "OBJ", "d": {"type": "3dmap"}}]
+    assert signed_names == ["private/front-map.bin"]
+    assert result.content == content
+    assert result.source == "stored"
+
+
 def test_download_point_cloud_uses_legacy_stored_bin_after_stale_announcement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3222,8 +3281,9 @@ def test_point_cloud_preflight_has_a_separate_time_budget(
         captured["function"]
         == client._sync_download_app_map_point_cloud_singleflight
     )
+    assert captured["args"][-3] is allow_stored
     assert captured["args"][-2] is allow_stored
-    assert captured["args"][-3] - started == pytest.approx(
+    assert captured["args"][-4] - started == pytest.approx(
         expected_operation_timeout,
         abs=0.25,
     )

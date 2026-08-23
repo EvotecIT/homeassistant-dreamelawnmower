@@ -1255,12 +1255,17 @@ class DreameLawnMowerClient(
         *,
         map_index: int = 0,
         allow_stored: bool = False,
+        allow_unscoped_stored: bool | None = None,
         timeout: float = 45.0,
         poll_interval: float = 2.0,
         download_timeout: float = 60.0,
         max_bytes: int = DEFAULT_POINT_CLOUD_MAX_BYTES,
     ) -> DreameLawnMowerPointCloudDownload:
         """Download a stored or freshly generated mower app-map point cloud."""
+        if allow_unscoped_stored is None:
+            allow_unscoped_stored = allow_stored
+        else:
+            allow_unscoped_stored = allow_stored and allow_unscoped_stored
         timeout = _validate_positive_number(timeout, "generation timeout")
         preflight_timeout = (
             _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS
@@ -1286,6 +1291,7 @@ class DreameLawnMowerClient(
                         max_bytes,
                         deadline,
                         allow_stored,
+                        allow_unscoped_stored,
                         abandoned,
                     )
                 )
@@ -1321,6 +1327,7 @@ class DreameLawnMowerClient(
         max_bytes: int,
         deadline: float,
         allow_stored: bool,
+        allow_unscoped_stored: bool,
         abandoned: _threading.Event,
     ) -> DreameLawnMowerPointCloudDownload:
         """Run one mower-wide generation while retaining ownership after cancel."""
@@ -1361,6 +1368,7 @@ class DreameLawnMowerClient(
                 max_bytes,
                 deadline,
                 allow_stored,
+                allow_unscoped_stored,
             )
         finally:
             self._point_cloud_generation_lock.release()
