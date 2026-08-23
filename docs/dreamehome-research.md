@@ -369,9 +369,11 @@ The successful map path is the app action bridge described above. On
 - Property `99.20` can keep the last generated object signable after the upload.
   A read-only A2 check on 2026-07-25 resolved that stored object in 0.03 seconds
   and downloaded and validated the 2,437,272-byte PCD in another 0.38 seconds.
-  Home Assistant uses this stored path only when the mower has exactly one
-  verified map because the property does not carry a map index; absent, expired,
-  invalid, and multi-map requests retain fresh generation.
+  Home Assistant uses this unscoped stored path only when the mower has exactly
+  one verified map because the property does not carry a map index. Multi-map
+  mowers can still reuse stored objects attributed to the active map by the app
+  inventory or mower `OBJ` response; absent, expired, or invalid objects retain
+  fresh generation.
 - The generated file was a standard PCD 0.7 binary with fields `x y z rgb`,
   152,318 finite points, 991 observed colors, and 2,437,272 total bytes.
   Repeating the flow through the new public client returned the same validated

@@ -126,7 +126,8 @@ from pathlib import Path
 
 download = await client.async_download_app_map_point_cloud(
     map_index=0,
-    allow_stored=True,  # Only when map 0 is the mower's sole known map.
+    allow_stored=True,  # Reuse only objects attributed to map 0.
+    allow_unscoped_stored=False,  # Keep the unindexed 99.20 object out.
 )
 print(download.metadata.as_dict())
 
@@ -134,15 +135,18 @@ print(download.metadata.as_dict())
 Path("garden-map.pcd").write_bytes(download.content)
 ```
 
-With `allow_stored=True`, the method first validates the object currently
-announced through cloud property `99.20`. Callers should enable this only when
-the requested index is the mower's sole known map, because the announcement
-does not identify its map. If that object is absent, expired, or invalid, the
-client triggers app action `o:10`, captures the fresh LiDAR object, and resolves
-its short-lived download immediately. Some A2 firmware refreshes a stable
-announcement name without changing its property timestamp; the client accepts
-that object only after a live post-request indexed-object read proves it belongs
-to the requested map and pre/post object evidence proves it was refreshed.
+With `allow_stored=True`, the method first tries stored objects whose map index
+is confirmed by the app inventory or the mower's `OBJ` response. The separate
+`allow_unscoped_stored` option controls the object announced through cloud
+property `99.20`; keep it false when more than one map exists because that
+announcement has no map identity. Its default is `None`, which follows
+`allow_stored` for compatibility with single-map callers. If no safely
+attributed object is available, the client triggers app action `o:10`, captures
+the fresh LiDAR object, and resolves its short-lived download immediately. Some
+A2 firmware refreshes a stable announcement name without changing its property
+timestamp; the client accepts that object only after a live post-request
+indexed-object read proves it belongs to the requested map and pre/post object
+evidence proves it was refreshed.
 Firmware without the announcement continues through the transient `OBJ` 3D-map
 fallback. Every path enforces
 HTTPS, time, and size limits and validates PCD 0.7 before returning. The result

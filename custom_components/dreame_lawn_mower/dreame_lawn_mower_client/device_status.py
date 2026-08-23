@@ -765,10 +765,12 @@ class DreameMowerDeviceStatus:
         Used for preventing updates on settings that relates to currently performing task.
         """
         status = self.status
+        task_status = self.task_status
         return bool(
             (
-                self.task_status is not DreameMowerTaskStatus.COMPLETED
-                and self.task_status is not DreameMowerTaskStatus.DOCKING_PAUSED
+                task_status is not DreameMowerTaskStatus.UNKNOWN
+                and task_status is not DreameMowerTaskStatus.COMPLETED
+                and task_status is not DreameMowerTaskStatus.DOCKING_PAUSED
             )
             or self.cleaning_paused
             or status is DreameMowerStatus.CLEANING
