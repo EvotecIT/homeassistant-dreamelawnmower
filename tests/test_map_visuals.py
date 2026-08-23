@@ -19,6 +19,31 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.vector_map imp
     render_vector_map_png,
 )
 from custom_components.dreame_lawn_mower.image import png_bytes_to_jpeg
+from dreame_lawn_mower_client import render_app_map_payload_png
+
+
+def _blue_layer_center(image_bytes: bytes) -> tuple[float, float]:
+    """Return the normalized center of the blue spot-area layer."""
+    with Image.open(BytesIO(image_bytes)) as image:
+        rgb = image.convert("RGB")
+        pixels = rgb.load()
+        blue_pixels = [
+            (x, y)
+            for y in range(rgb.height)
+            for x in range(rgb.width)
+            for red, green, blue in (pixels[x, y],)
+            if blue > red + 20 and blue > green + 20
+        ]
+
+    assert blue_pixels
+    min_x = min(point[0] for point in blue_pixels)
+    max_x = max(point[0] for point in blue_pixels)
+    min_y = min(point[1] for point in blue_pixels)
+    max_y = max(point[1] for point in blue_pixels)
+    return (
+        ((min_x + max_x) / 2) / (rgb.width - 1),
+        ((min_y + max_y) / 2) / (rgb.height - 1),
+    )
 
 
 def test_bundled_map_font_supports_unicode_labels() -> None:
@@ -28,6 +53,37 @@ def test_bundled_map_font_supports_unicode_labels() -> None:
 
     assert bounds[2] > bounds[0]
     assert bounds[3] > bounds[1]
+
+
+def test_app_and_vector_maps_share_the_same_coordinate_orientation() -> None:
+    boundary = ((0, 0), (1000, 0), (1000, 100), (0, 100))
+    upper_right_spot = ((750, 60), (900, 60), (900, 90), (750, 90))
+    app_png, _, _ = render_app_map_payload_png(
+        {
+            "map": [{"data": boundary}],
+            "spot": [{"data": upper_right_spot}],
+        }
+    )
+    vector_png = render_vector_map_png(
+        DreameLawnMowerVectorMap(
+            boundary=DreameLawnMowerVectorBoundary(0, 0, 1000, 100),
+            zones=(
+                DreameLawnMowerVectorZone(zone_id=1, points=boundary),
+            ),
+            spot_areas=(
+                DreameLawnMowerVectorZone(zone_id=2, points=upper_right_spot),
+            ),
+        )
+    )
+
+    assert vector_png is not None
+    app_center = _blue_layer_center(app_png)
+    vector_center = _blue_layer_center(vector_png)
+
+    assert app_center[0] > 0.5
+    assert app_center[1] < 0.5
+    assert vector_center[0] > 0.5
+    assert vector_center[1] < 0.5
 
 
 def test_map_theme_changes_the_complete_render_without_geometry_changes() -> None:
