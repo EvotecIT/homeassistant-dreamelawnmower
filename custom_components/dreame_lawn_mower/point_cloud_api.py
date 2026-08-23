@@ -118,6 +118,14 @@ class _InflightGeneration:
     task: asyncio.Task[DreameLawnMowerPointCloudDownload]
 
 
+@dataclass(frozen=True, slots=True)
+class _StoredPointCloudPolicy:
+    """Describe which stored object-discovery routes are safe for one map."""
+
+    allow_indexed: bool = False
+    allow_unscoped: bool = False
+
+
 class DreameLawnMowerPointCloudAPI:
     """Coordinate bounded, de-duplicated point-cloud downloads."""
 
@@ -205,15 +213,15 @@ class DreameLawnMowerPointCloudAPI:
                 ),
             )
 
-        allow_stored = (
-            not refresh
-            and _stored_point_cloud_active_map_index(coordinator) == map_index
-        )
+        stored_policy = _stored_point_cloud_policy(coordinator, map_index)
+        allow_stored = not refresh and stored_policy.allow_indexed
+        allow_unscoped_stored = not refresh and stored_policy.allow_unscoped
         generation = self._async_generate(
             key,
             coordinator,
             epoch=epoch,
             allow_stored=allow_stored,
+            allow_unscoped_stored=allow_unscoped_stored,
         )
         create_task = getattr(self._hass, "async_create_task", None)
         if callable(create_task):
@@ -289,6 +297,7 @@ class DreameLawnMowerPointCloudAPI:
         *,
         epoch: int,
         allow_stored: bool,
+        allow_unscoped_stored: bool,
     ) -> DreameLawnMowerPointCloudDownload:
         """Run and cache one generation independently of HTTP waiters."""
         performance = getattr(coordinator, "performance", None)
@@ -297,6 +306,12 @@ class DreameLawnMowerPointCloudAPI:
             if hasattr(performance, "start")
             else None
         )
+        download_options = {
+            "map_index": key[1],
+            "allow_stored": allow_stored,
+        }
+        if allow_unscoped_stored != allow_stored:
+            download_options["allow_unscoped_stored"] = allow_unscoped_stored
         sample = None
         try:
             if self._entry_epochs.get(key[0], 0) != epoch:
@@ -314,15 +329,13 @@ class DreameLawnMowerPointCloudAPI:
                 download = await cycle.measure(
                     "generate_download_validate",
                     lambda: coordinator.client.async_download_app_map_point_cloud(
-                        map_index=key[1],
-                        allow_stored=allow_stored,
+                        **download_options,
                     ),
                 )
             else:
                 download = (
                     await coordinator.client.async_download_app_map_point_cloud(
-                        map_index=key[1],
-                        allow_stored=allow_stored,
+                        **download_options,
                     )
                 )
             if self._entry_epochs.get(key[0], 0) != epoch:
@@ -344,6 +357,7 @@ class DreameLawnMowerPointCloudAPI:
                 sample,
                 map_index=key[1],
                 allow_stored=allow_stored,
+                allow_unscoped_stored=allow_unscoped_stored,
             )
             self._remember_failure(key, epoch, err)
             raise
@@ -366,6 +380,7 @@ class DreameLawnMowerPointCloudAPI:
                 sample,
                 map_index=key[1],
                 allow_stored=allow_stored,
+                allow_unscoped_stored=allow_unscoped_stored,
                 unexpected_error=err,
             )
             self._remember_failure(key, epoch, public_error)
@@ -463,6 +478,7 @@ class DreameLawnMowerPointCloudAPI:
         *,
         map_index: int,
         allow_stored: bool,
+        allow_unscoped_stored: bool,
         unexpected_error: Exception | None = None,
     ) -> None:
         """Keep one privacy-safe failure event and benchmark sample."""
@@ -474,6 +490,7 @@ class DreameLawnMowerPointCloudAPI:
             "vendor_error_code": error.vendor_error_code,
             "map_index": map_index,
             "allow_stored": allow_stored,
+            "allow_unscoped_stored": allow_unscoped_stored,
         }
         exception_type = None
         if unexpected_error is not None:
@@ -630,19 +647,20 @@ def _copy_point_cloud_error(
     )
 
 
-def _stored_point_cloud_active_map_index(
+def _stored_point_cloud_policy(
     coordinator: DreameLawnMowerCoordinator,
-) -> int | None:
-    """Return the authoritative active map eligible for stored-object reuse."""
+    map_index: int,
+) -> _StoredPointCloudPolicy:
+    """Return safe stored-object routes for the requested active map."""
     app_maps = getattr(coordinator, "app_maps", None)
     if not isinstance(app_maps, Mapping):
-        return None
+        return _StoredPointCloudPolicy()
     maps = app_maps.get("maps")
     if not isinstance(maps, Sequence) or isinstance(
         maps,
         str | bytes | bytearray,
     ):
-        return None
+        return _StoredPointCloudPolicy()
     indices = {
         entry.get("idx")
         for entry in maps
@@ -652,10 +670,6 @@ def _stored_point_cloud_active_map_index(
         and entry["idx"] >= 0
         and entry.get("created") is not False
     }
-    # The 99.20 stored-object announcement has no map identity. Reusing it is
-    # safe only when exactly one created map can own that object.
-    if len(indices) != 1:
-        return None
     active_index = active_map_index(
         app_maps,
         selected_map_index=getattr(
@@ -664,7 +678,16 @@ def _stored_point_cloud_active_map_index(
             None,
         ),
     )
-    return active_index if active_index in indices else None
+    if active_index != map_index or active_index not in indices:
+        return _StoredPointCloudPolicy()
+
+    # Cached app-object inventories and OBJ responses are indexed by map, so
+    # they remain safe with multiple maps. The 99.20 announcement has no map
+    # identity and may be reused only when one created map can own it.
+    return _StoredPointCloudPolicy(
+        allow_indexed=True,
+        allow_unscoped=len(indices) == 1,
+    )
 
 
 class DreameLawnMowerPointCloudView(HomeAssistantView):

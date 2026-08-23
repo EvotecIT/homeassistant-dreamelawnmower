@@ -778,7 +778,12 @@ class _DreameLawnMowerClientMapsMixin:
         max_bytes: int,
         deadline: float | None = None,
         allow_stored: bool = False,
+        allow_unscoped_stored: bool | None = None,
     ) -> DreameLawnMowerPointCloudDownload:
+        if allow_unscoped_stored is None:
+            allow_unscoped_stored = allow_stored
+        else:
+            allow_unscoped_stored = allow_stored and allow_unscoped_stored
         map_index = _validate_point_cloud_map_index(map_index)
         timeout = _validate_positive_number(timeout, "generation timeout")
         poll_interval = _validate_positive_number(poll_interval, "poll interval")
@@ -888,7 +893,7 @@ class _DreameLawnMowerClientMapsMixin:
         use_announcement_path = announcement_capability is True
         announcement_probe_pending = announcement_capability is None
         if (
-            allow_stored
+            allow_unscoped_stored
             and stored_name is not None
             and stored_name != cached_name
         ):
