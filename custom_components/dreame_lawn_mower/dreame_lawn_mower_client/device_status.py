@@ -167,6 +167,10 @@ _RUNNING_STATUSES = frozenset(
 _ACTIVE_TASK_STATUSES = (_RUNNING_STATUSES - {DreameMowerStatus.BACK_HOME}) | {
     DreameMowerStatus.PAUSED
 }
+_UNKNOWN_TASK_INACTIVE_STATUSES = {
+    DreameMowerStatus.IDLE,
+    DreameMowerStatus.STANDBY,
+}
 
 
 
@@ -790,9 +794,12 @@ class DreameMowerDeviceStatus:
         task_status = self.task_status
         return bool(
             (
-                task_status is not DreameMowerTaskStatus.UNKNOWN
-                and task_status is not DreameMowerTaskStatus.COMPLETED
+                task_status is not DreameMowerTaskStatus.COMPLETED
                 and task_status is not DreameMowerTaskStatus.DOCKING_PAUSED
+                and (
+                    task_status is not DreameMowerTaskStatus.UNKNOWN
+                    or status not in _UNKNOWN_TASK_INACTIVE_STATUSES
+                )
             )
             or self.cleaning_paused
             or status in _ACTIVE_TASK_STATUSES

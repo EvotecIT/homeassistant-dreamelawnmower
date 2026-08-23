@@ -16,7 +16,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device_types i
     DreameMowerTaskStatus,
 )
 
-_UNKNOWN_TASK_ACTIVE_STATUSES = frozenset(
+_EXPLICIT_ACTIVE_TASK_STATUSES = frozenset(
     {
         DreameMowerStatus.PAUSED,
         DreameMowerStatus.CLEANING,
@@ -34,6 +34,10 @@ _UNKNOWN_TASK_ACTIVE_STATUSES = frozenset(
         DreameMowerStatus.PERSON_FOLLOW,
     }
 )
+_UNKNOWN_TASK_INACTIVE_STATUSES = {
+    DreameMowerStatus.IDLE,
+    DreameMowerStatus.STANDBY,
+}
 
 
 def _status(
@@ -94,12 +98,14 @@ def test_unknown_task_requires_definitive_active_status(
         task_status=None,
     )
 
-    assert status.started is (reported_status in _UNKNOWN_TASK_ACTIVE_STATUSES)
+    assert status.started is (
+        status.status not in _UNKNOWN_TASK_INACTIVE_STATUSES
+    )
 
 
 @pytest.mark.parametrize(
     "reported_status",
-    sorted(_UNKNOWN_TASK_ACTIVE_STATUSES - {DreameMowerStatus.PAUSED}),
+    sorted(_EXPLICIT_ACTIVE_TASK_STATUSES - {DreameMowerStatus.PAUSED}),
 )
 def test_unknown_task_keeps_explicit_running_status_active(
     reported_status: DreameMowerStatus,
@@ -116,14 +122,14 @@ def test_unknown_task_keeps_explicit_running_status_active(
     assert status.state is DreameMowerState.MOWING
 
 
-def test_unknown_task_keeps_returning_separate_from_started_task() -> None:
+def test_unknown_task_keeps_returning_active_and_separately_identified() -> None:
     status = _status(
         status=DreameMowerStatus.BACK_HOME,
         state=DreameMowerState.RETURNING,
         task_status=None,
     )
 
-    assert status.started is False
+    assert status.started is True
     assert status.returning is True
     assert status.running is True
 
@@ -138,6 +144,18 @@ def test_unknown_task_keeps_explicit_paused_state_active() -> None:
     assert status.started is True
     assert status.paused is True
     assert status.state is DreameMowerState.PAUSED
+
+
+def test_unknown_task_keeps_sleeping_interruption_active_and_paused() -> None:
+    status = _status(
+        status=DreameMowerStatus.SLEEPING,
+        state=DreameMowerState.IDLE,
+        task_status=None,
+    )
+
+    assert status.started is True
+    assert status.running is False
+    assert status.paused is True
 
 
 def test_explicit_paused_task_remains_active_and_paused() -> None:
