@@ -261,8 +261,8 @@ def render_vector_map_png(
     label_halo_width = max(1, int(round(_normalize_label_scale(label_scale) * 2)))
 
     def to_pixel(x: int, y: int) -> tuple[int, int]:
-        px = image_width - (int((x - boundary.x1) * scale) + _PADDING)
-        py = int((y - boundary.y1) * scale) + _PADDING
+        px = int((x - boundary.x1) * scale) + _PADDING
+        py = int((boundary.y2 - y) * scale) + _PADDING
         return px, py
 
     for index, zone in enumerate(vector_map.zones):
