@@ -77,6 +77,18 @@ def test_unknown_task_keeps_explicit_mowing_state_active() -> None:
     assert status.state is DreameMowerState.MOWING
 
 
+def test_unknown_task_keeps_explicit_paused_state_active() -> None:
+    status = _status(
+        status=DreameMowerStatus.PAUSED,
+        state=DreameMowerState.PAUSED,
+        task_status=None,
+    )
+
+    assert status.started is True
+    assert status.paused is True
+    assert status.state is DreameMowerState.PAUSED
+
+
 def test_explicit_paused_task_remains_active_and_paused() -> None:
     status = _status(
         status=DreameMowerStatus.IDLE,

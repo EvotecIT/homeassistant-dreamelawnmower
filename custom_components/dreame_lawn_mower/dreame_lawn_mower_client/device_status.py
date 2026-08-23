@@ -773,6 +773,7 @@ class DreameMowerDeviceStatus:
                 and task_status is not DreameMowerTaskStatus.DOCKING_PAUSED
             )
             or self.cleaning_paused
+            or status is DreameMowerStatus.PAUSED
             or status is DreameMowerStatus.CLEANING
             or status is DreameMowerStatus.SEGMENT_CLEANING
             or status is DreameMowerStatus.ZONE_CLEANING
