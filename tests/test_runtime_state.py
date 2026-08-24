@@ -28,7 +28,7 @@ DreameLawnMowerCommandRejectedError = load_internal_module(
     "exceptions"
 ).DreameLawnMowerCommandRejectedError
 
-_A3_STANDBY_0X61_FRAME = (
+_A3_STANDBY_FRAME = (
     206,
     0,
     0,
@@ -36,17 +36,17 @@ _A3_STANDBY_0X61_FRAME = (
     0,
     0,
     0,
+    5,
     0,
     0,
     0,
-    0,
-    99,
-    97,
+    50,
+    177,
     255,
     0,
     0,
     128,
-    204,
+    200,
     186,
     0,
     128,
@@ -207,7 +207,7 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
         _state_lock=RLock(),
         realtime_properties={
             MOWER_RAW_STATUS_PROPERTY_KEY: {
-                "value": list(_A3_STANDBY_0X61_FRAME),
+                "value": list(_A3_STANDBY_FRAME),
                 "last_seen": first_heartbeat_received_at,
             }
         },
@@ -245,13 +245,16 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
     device.realtime_properties[MOWER_RAW_STATUS_PROPERTY_KEY]["last_seen"] = (
         heartbeat_received_at
     )
+    # The reporter's unchanged A3 standby frame arrived every five minutes.
+    # At diagnostic capture it was 154 seconds old, beyond the generic
+    # two-refresh freshness window but still the current supervised frame.
     with (
         patch.object(
             client_core_module,
             "snapshot_from_device",
             return_value=raw_snapshot,
         ),
-        patch.object(client_core_module.time, "time", return_value=103.0),
+        patch.object(client_core_module.time, "time", return_value=256.0),
     ):
         reconciled = asyncio.run(client.async_get_cached_snapshot())
         switch_result = asyncio.run(client.async_switch_current_map(1))
@@ -290,7 +293,7 @@ def test_fresh_inactive_heartbeat_cannot_weaken_new_untimestamped_active_state(
 ) -> None:
     """A first local active observation outranks an older cached heartbeat."""
     status_blob = decode_mower_status_blob(
-        _A3_STANDBY_0X61_FRAME,
+        _A3_STANDBY_FRAME,
         source="realtime",
         property_key=MOWER_RAW_STATUS_PROPERTY_KEY,
     )
@@ -330,7 +333,7 @@ def test_refresh_keeps_new_untimestamped_active_observation() -> None:
         display_model="A3 AWD Pro 3500",
     )
     status_blob = decode_mower_status_blob(
-        _A3_STANDBY_0X61_FRAME,
+        _A3_STANDBY_FRAME,
         source="realtime",
         property_key=MOWER_RAW_STATUS_PROPERTY_KEY,
     )
@@ -348,7 +351,7 @@ def test_refresh_keeps_new_untimestamped_active_observation() -> None:
         token=None,
         realtime_properties={
             MOWER_RAW_STATUS_PROPERTY_KEY: {
-                "value": list(_A3_STANDBY_0X61_FRAME),
+                "value": list(_A3_STANDBY_FRAME),
                 "last_seen": 100.0,
             }
         },
@@ -393,7 +396,7 @@ def test_unproven_inactive_heartbeat_does_not_clear_paused_state(
     observed_at: float,
 ) -> None:
     status_blob = decode_mower_status_blob(
-        _A3_STANDBY_0X61_FRAME,
+        _A3_STANDBY_FRAME,
         source="realtime",
         property_key=MOWER_RAW_STATUS_PROPERTY_KEY,
     )
@@ -421,7 +424,7 @@ def test_unproven_inactive_heartbeat_does_not_clear_paused_state(
 
 def test_submicrosecond_same_message_heartbeat_remains_current() -> None:
     status_blob = decode_mower_status_blob(
-        _A3_STANDBY_0X61_FRAME,
+        _A3_STANDBY_FRAME,
         source="realtime",
         property_key=MOWER_RAW_STATUS_PROPERTY_KEY,
     )
@@ -451,7 +454,7 @@ def test_submicrosecond_same_message_heartbeat_remains_current() -> None:
 
 def test_genuinely_newer_subsecond_state_still_blocks_inactive_heartbeat() -> None:
     status_blob = decode_mower_status_blob(
-        _A3_STANDBY_0X61_FRAME,
+        _A3_STANDBY_FRAME,
         source="realtime",
         property_key=MOWER_RAW_STATUS_PROPERTY_KEY,
     )
@@ -475,7 +478,7 @@ def test_genuinely_newer_subsecond_state_still_blocks_inactive_heartbeat() -> No
     assert reconciled is paused_snapshot
 
 
-def test_stale_a3_heartbeat_cannot_bypass_map_switch_guard() -> None:
+def test_expired_a3_heartbeat_cannot_bypass_map_switch_guard() -> None:
     raw_snapshot = _snapshot(
         model="dreame.mower.g2541e",
         display_model="A3 AWD Pro 3500",
@@ -484,8 +487,8 @@ def test_stale_a3_heartbeat_cannot_bypass_map_switch_guard() -> None:
         _state_lock=RLock(),
         realtime_properties={
             MOWER_RAW_STATUS_PROPERTY_KEY: {
-                "value": list(_A3_STANDBY_0X61_FRAME),
-                "last_seen": time.time() - 131.0,
+                "value": list(_A3_STANDBY_FRAME),
+                "last_seen": time.time() - 366.0,
             }
         },
     )
@@ -507,6 +510,51 @@ def test_stale_a3_heartbeat_cannot_bypass_map_switch_guard() -> None:
             asyncio.run(client.async_switch_current_map(1))
 
     client._sync_switch_current_map.assert_not_called()
+
+
+def test_standard_inactive_heartbeat_keeps_short_freshness_window() -> None:
+    """The A3 cadence allowance must not weaken generic heartbeat safety."""
+    status_blob = decode_mower_status_blob(
+        [
+            206,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            128,
+            87,
+            113,
+            255,
+            0,
+            0,
+            128,
+            206,
+            186,
+            206,
+        ],
+        source="realtime",
+        property_key=MOWER_RAW_STATUS_PROPERTY_KEY,
+    )
+
+    assert status_blob is not None
+    status_blob = replace(status_blob, received_at="1970-01-01T00:00:20+00:00")
+    paused_snapshot = _snapshot()
+
+    reconciled = snapshot_with_heartbeat_task_state(
+        paused_snapshot,
+        status_blob,
+        observed_at=151.0,
+        active_state_observed_at=19.0,
+    )
+
+    assert reconciled is paused_snapshot
+    assert reconciled.state == "paused"
+    assert reconciled.activity == "paused"
 
 
 def test_active_paused_session_keeps_task_activity_while_recording_dock() -> None:
