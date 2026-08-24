@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from dreame_lawn_mower_client import (
     MOWER_RAW_STATUS_PROPERTY_KEY,
     MOWER_RUNTIME_STATUS_PROPERTY_KEY,
@@ -173,8 +175,8 @@ def test_client_status_blob_prefers_cached_realtime_payload() -> None:
                         0,
                         0,
                         0,
-                        100,
-                        193,
+                        99,
+                        161,
                         255,
                         0,
                         0,
@@ -196,7 +198,7 @@ def test_client_status_blob_prefers_cached_realtime_payload() -> None:
     assert decoded.source == "realtime"
     assert decoded.received_at == "2023-11-14T22:13:20+00:00"
     assert decoded.frame_valid is True
-    assert decoded.candidate_battery_level == 100
+    assert decoded.candidate_battery_level == 99
     assert decoded.heartbeat_docked is True
     assert decoded.task_status == "idle"
     assert decoded.mowing_session_active is False
@@ -238,7 +240,19 @@ def test_status_blob_decoder_exposes_candidate_battery_byte() -> None:
     assert decoded.task_resumable is False
 
 
-def test_status_blob_decoder_accepts_a3_awd_pro_22_byte_frame() -> None:
+@pytest.mark.parametrize(
+    ("battery_level", "main_state_byte", "tail_state_byte"),
+    [
+        (100, 0x41, 202),
+        (99, 0xA1, 204),
+        (100, 0xC1, 204),
+    ],
+)
+def test_status_blob_decoder_accepts_a3_awd_pro_22_byte_idle_frames(
+    battery_level: int,
+    main_state_byte: int,
+    tail_state_byte: int,
+) -> None:
     decoded = decode_mower_status_blob(
         [
             206,
@@ -252,13 +266,13 @@ def test_status_blob_decoder_accepts_a3_awd_pro_22_byte_frame() -> None:
             0,
             0,
             0,
-            100,
-            193,
+            battery_level,
+            main_state_byte,
             255,
             0,
             0,
             128,
-            204,
+            tail_state_byte,
             186,
             0,
             128,
@@ -270,7 +284,7 @@ def test_status_blob_decoder_accepts_a3_awd_pro_22_byte_frame() -> None:
     assert decoded is not None
     assert decoded.supported is True
     assert decoded.frame_valid is True
-    assert decoded.candidate_battery_level == 100
+    assert decoded.candidate_battery_level == battery_level
     assert decoded.candidate_runtime_pose_x == 0
     assert decoded.candidate_runtime_pose_y == 0
     assert decoded.heartbeat_docking_state == 0
@@ -339,8 +353,8 @@ def test_runtime_blob_collision_does_not_decode_a3_idle_heartbeat() -> None:
             0,
             0,
             0,
-            100,
-            193,
+            99,
+            161,
             255,
             0,
             0,
@@ -365,7 +379,7 @@ def test_runtime_blob_collision_does_not_decode_a3_idle_heartbeat() -> None:
     assert decoded.notes == ("unexpected_length",)
 
 
-def test_unconfirmed_a3_status_variant_remains_fail_closed() -> None:
+def test_a3_status_variant_with_different_main_state_remains_fail_closed() -> None:
     decoded = decode_mower_status_blob(
         [
             206,
@@ -380,7 +394,7 @@ def test_unconfirmed_a3_status_variant_remains_fail_closed() -> None:
             0,
             0,
             100,
-            65,
+            162,
             255,
             0,
             0,

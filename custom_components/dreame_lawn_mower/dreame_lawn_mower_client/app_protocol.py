@@ -225,7 +225,7 @@ def _first_mapping_value(
 
 _STANDARD_HEARTBEAT_LENGTH: Final[int] = 20
 _A3_IDLE_HEARTBEAT_LENGTH: Final[int] = 22
-_A3_IDLE_HEARTBEAT_MAIN_STATE_BYTE: Final[int] = 0xC1
+_A3_IDLE_HEARTBEAT_MAIN_STATE_NIBBLE: Final[int] = 1
 _A3_IDLE_HEARTBEAT_SUBSTATE: Final[int] = 0xFF
 _A3_IDLE_HEARTBEAT_DOCKING_STATE: Final[int] = 0
 
@@ -242,13 +242,15 @@ def _is_supported_heartbeat_frame(
     if len(raw) == _STANDARD_HEARTBEAT_LENGTH:
         return True
     # A3 firmware appends two tail bytes to raw status property 1.1. Only its
-    # exact observed idle-in-station fields are decoded until supervised
-    # captures prove other 22-byte states. Runtime property 1.4 shares this
-    # decoder but its payload bytes must never be interpreted as a heartbeat.
+    # observed idle-in-station fields are decoded until supervised captures
+    # prove other 22-byte states. The upper nibble at index 12 carries flags
+    # that vary between captures; the lower nibble carries the main state.
+    # Runtime property 1.4 shares this decoder but its payload bytes must never
+    # be interpreted as a heartbeat.
     return bool(
         len(raw) == _A3_IDLE_HEARTBEAT_LENGTH
         and property_key == MOWER_RAW_STATUS_PROPERTY_KEY
-        and raw[12] == _A3_IDLE_HEARTBEAT_MAIN_STATE_BYTE
+        and raw[12] & 0x0F == _A3_IDLE_HEARTBEAT_MAIN_STATE_NIBBLE
         and raw[13] == _A3_IDLE_HEARTBEAT_SUBSTATE
         and raw[14] == _A3_IDLE_HEARTBEAT_DOCKING_STATE
     )
