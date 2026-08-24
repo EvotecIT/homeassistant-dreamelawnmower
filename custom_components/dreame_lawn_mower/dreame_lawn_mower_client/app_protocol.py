@@ -223,10 +223,42 @@ def _first_mapping_value(
     return None
 
 
+_STANDARD_HEARTBEAT_LENGTH: Final[int] = 20
+_A3_IDLE_HEARTBEAT_LENGTH: Final[int] = 22
+_A3_IDLE_HEARTBEAT_MAIN_STATE_BYTE: Final[int] = 0xC1
+_A3_IDLE_HEARTBEAT_SUBSTATE: Final[int] = 0xFF
+_A3_IDLE_HEARTBEAT_DOCKING_STATE: Final[int] = 0
+
+
+def _is_supported_heartbeat_frame(
+    raw: Sequence[int],
+    *,
+    frame_valid: bool,
+    property_key: str | None,
+) -> bool:
+    """Return whether task/docking fields are proven for this frame shape."""
+    if not frame_valid:
+        return False
+    if len(raw) == _STANDARD_HEARTBEAT_LENGTH:
+        return True
+    # A3 firmware appends two tail bytes to raw status property 1.1. Only its
+    # exact observed idle-in-station fields are decoded until supervised
+    # captures prove other 22-byte states. Runtime property 1.4 shares this
+    # decoder but its payload bytes must never be interpreted as a heartbeat.
+    return bool(
+        len(raw) == _A3_IDLE_HEARTBEAT_LENGTH
+        and property_key == MOWER_RAW_STATUS_PROPERTY_KEY
+        and raw[12] == _A3_IDLE_HEARTBEAT_MAIN_STATE_BYTE
+        and raw[13] == _A3_IDLE_HEARTBEAT_SUBSTATE
+        and raw[14] == _A3_IDLE_HEARTBEAT_DOCKING_STATE
+    )
+
+
 def decode_mower_status_blob(
     value: object,
     *,
     source: str | None = None,
+    property_key: str | None = None,
 ) -> DreameLawnMowerStatusBlob | None:
     """Return a conservative structure for app realtime/status byte blobs.
 
@@ -239,13 +271,18 @@ def decode_mower_status_blob(
     if raw is None:
         return None
 
-    notes: list[str] = []
-    if len(raw) != 20:
-        notes.append("unexpected_length")
-
     frame_start = raw[0] if raw else None
     frame_end = raw[-1] if raw else None
     frame_valid = bool(len(raw) >= 2 and frame_start == 0xCE and frame_end == 0xCE)
+    supported_heartbeat = _is_supported_heartbeat_frame(
+        raw,
+        frame_valid=frame_valid,
+        property_key=property_key,
+    )
+
+    notes: list[str] = []
+    if len(raw) != _STANDARD_HEARTBEAT_LENGTH and not supported_heartbeat:
+        notes.append("unexpected_length")
     if not frame_valid:
         notes.append("invalid_frame_markers")
 
@@ -261,7 +298,7 @@ def decode_mower_status_blob(
     heartbeat_docking_state = None
     heartbeat_docking_state_name = None
     heartbeat_docked = None
-    if frame_valid and len(raw) == 20:
+    if supported_heartbeat:
         heartbeat_docking_state = (raw[14] & 0x1C) >> 2
         heartbeat_docking_state_name = _HEARTBEAT_DOCKING_STATES.get(
             heartbeat_docking_state
@@ -269,7 +306,11 @@ def decode_mower_status_blob(
         if heartbeat_docking_state_name is not None:
             heartbeat_docked = heartbeat_docking_state == 0
 
-    task_state = _decode_heartbeat_task_state(raw, frame_valid=frame_valid)
+    task_state = _decode_heartbeat_task_state(
+        raw,
+        frame_valid=frame_valid,
+        property_key=property_key,
+    )
     notes.extend(task_state.pop("notes", ()))
 
     runtime_telemetry = _decode_runtime_blob_candidates(raw, frame_valid=frame_valid)
@@ -339,9 +380,14 @@ def _decode_heartbeat_task_state(
     raw: Sequence[int],
     *,
     frame_valid: bool,
+    property_key: str | None,
 ) -> dict[str, object]:
-    """Decode the active mowing session state from a 20-byte heartbeat."""
-    if not frame_valid or len(raw) != 20:
+    """Decode the active mowing session state from a supported heartbeat."""
+    if not _is_supported_heartbeat_frame(
+        raw,
+        frame_valid=frame_valid,
+        property_key=property_key,
+    ):
         return {}
 
     main_state = (raw[12] & 0x0F) - 1

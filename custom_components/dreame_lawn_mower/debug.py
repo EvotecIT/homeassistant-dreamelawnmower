@@ -250,7 +250,11 @@ def _status_blob_summary(key: object, value: Any) -> dict[str, Any] | None:
     }
     if str(key) not in status_blob_keys:
         return None
-    decoded = decode_mower_status_blob(value, source="debug")
+    decoded = decode_mower_status_blob(
+        value,
+        source="debug",
+        property_key=str(key),
+    )
     if decoded is None:
         return None
     return {

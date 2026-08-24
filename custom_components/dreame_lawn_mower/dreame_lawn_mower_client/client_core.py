@@ -510,6 +510,7 @@ class _DreameLawnMowerClientCoreMixin:
             decoded = decode_mower_status_blob(
                 realtime_entry.get("value"),
                 source="realtime",
+                property_key=property_key,
             )
             if decoded is not None:
                 return replace(
@@ -526,6 +527,7 @@ class _DreameLawnMowerClientCoreMixin:
                 decoded = decode_mower_status_blob(
                     entry.get("value"),
                     source="cloud",
+                    property_key=property_key,
                 )
                 if decoded is not None:
                     return replace(

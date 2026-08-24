@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from dreame_lawn_mower_client import (
+    MOWER_RAW_STATUS_PROPERTY_KEY,
     DreameLawnMowerDescriptor,
     DreameLawnMowerSnapshot,
     decode_mower_status_blob,
@@ -83,6 +84,7 @@ def test_idle_in_station_heartbeat_corrects_stale_paused_snapshot(
             206,
         ],
         source="realtime",
+        property_key=MOWER_RAW_STATUS_PROPERTY_KEY,
     )
 
     assert status_blob is not None
@@ -103,6 +105,55 @@ def test_idle_in_station_heartbeat_corrects_stale_paused_snapshot(
     assert reconciled.task_status_source == "heartbeat_realtime"
     assert reconciled.mowing_session_active is False
     assert reconciled.mission_task_id == status_blob.candidate_runtime_task_id
+
+
+def test_a3_standby_heartbeat_corrects_stale_paused_snapshot() -> None:
+    status_blob = decode_mower_status_blob(
+        [
+            206,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            100,
+            193,
+            255,
+            0,
+            0,
+            128,
+            204,
+            186,
+            0,
+            128,
+            206,
+        ],
+        source="realtime",
+        property_key=MOWER_RAW_STATUS_PROPERTY_KEY,
+    )
+
+    assert status_blob is not None
+    reconciled = snapshot_with_heartbeat_task_state(
+        _snapshot(
+            model="dreame.mower.g2541e",
+            display_model="A3 AWD Pro 3500",
+        ),
+        status_blob,
+    )
+
+    assert reconciled.state == "idle"
+    assert reconciled.activity == "docked"
+    assert reconciled.docked is True
+    assert reconciled.raw_docked is True
+    assert reconciled.started is False
+    assert reconciled.task_status == "idle"
+    assert reconciled.mowing_session_active is False
+    assert reconciled.task_resumable is False
 
 
 def test_active_paused_session_keeps_task_activity_while_recording_dock() -> None:

@@ -2362,7 +2362,7 @@ class _DreameLawnMowerClientMapsMixin:
                 rendered["decoded_label"] = label
                 rendered["decoded_label_source"] = "bundled_mower_errors"
         elif key in {MOWER_RAW_STATUS_PROPERTY_KEY, MOWER_RUNTIME_STATUS_PROPERTY_KEY}:
-            status_blob = decode_mower_status_blob(value)
+            status_blob = decode_mower_status_blob(value, property_key=key)
             if status_blob is not None:
                 status_blob = replace(
                     status_blob,
