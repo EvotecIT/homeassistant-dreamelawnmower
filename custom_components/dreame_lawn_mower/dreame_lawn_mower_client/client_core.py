@@ -64,9 +64,33 @@ from .payload_utils import (
 )
 from .runtime_state import (
     RESUME_MOWING_REQUEST,
+    snapshot_with_heartbeat_task_state,
 )
 
 _MUTATION_CONFIRMATION_DELAYS_SECONDS = (0.5, 1.5, 3.0)
+
+
+def _decoded_realtime_status_blob(
+    device: Any,
+    property_key: str,
+) -> DreameLawnMowerStatusBlob | None:
+    """Decode one cached realtime status property with its own timestamp."""
+    realtime_entry = (getattr(device, "realtime_properties", {}) or {}).get(
+        property_key
+    )
+    if not isinstance(realtime_entry, Mapping):
+        return None
+    decoded = decode_mower_status_blob(
+        realtime_entry.get("value"),
+        source="realtime",
+        property_key=property_key,
+    )
+    if decoded is None:
+        return None
+    return replace(
+        decoded,
+        received_at=_property_entry_received_at(realtime_entry),
+    )
 
 
 def _device_start_session_identity(device: Any) -> bool | None:
@@ -239,19 +263,19 @@ class _DreameLawnMowerClientCoreMixin:
     def _snapshot_from_device(self, device: Any) -> DreameLawnMowerSnapshot:
         """Normalize one coherent device state and retain recovery context."""
         state_lock = getattr(device, "_state_lock", None)
-        if state_lock is None:
+        state_context = state_lock if state_lock is not None else nullcontext()
+        with state_context:
             snapshot = snapshot_from_device(
                 self._descriptor,
                 device,
                 previous_snapshot=getattr(self, "_latest_snapshot", None),
             )
-        else:
-            with state_lock:
-                snapshot = snapshot_from_device(
-                    self._descriptor,
-                    device,
-                    previous_snapshot=getattr(self, "_latest_snapshot", None),
-                )
+            status_blob = _decoded_realtime_status_blob(
+                device,
+                MOWER_RAW_STATUS_PROPERTY_KEY,
+            )
+            if status_blob is not None:
+                snapshot = snapshot_with_heartbeat_task_state(snapshot, status_blob)
         self._latest_snapshot = snapshot
         return snapshot
 
@@ -503,20 +527,9 @@ class _DreameLawnMowerClientCoreMixin:
         else:
             device = self._ensure_device()
 
-        realtime_entry = (getattr(device, "realtime_properties", {}) or {}).get(
-            property_key
-        )
-        if isinstance(realtime_entry, Mapping):
-            decoded = decode_mower_status_blob(
-                realtime_entry.get("value"),
-                source="realtime",
-                property_key=property_key,
-            )
-            if decoded is not None:
-                return replace(
-                    decoded,
-                    received_at=_property_entry_received_at(realtime_entry),
-                )
+        decoded = _decoded_realtime_status_blob(device, property_key)
+        if decoded is not None:
+            return decoded
 
         if not include_cloud:
             return None

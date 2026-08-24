@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
+from threading import RLock
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -18,6 +21,8 @@ from dreame_lawn_mower_client._loader import load_internal_module
 snapshot_with_heartbeat_task_state = load_internal_module(
     "runtime_state"
 ).snapshot_with_heartbeat_task_state
+client_core_module = load_internal_module("client_core")
+DreameLawnMowerClient = load_internal_module("client").DreameLawnMowerClient
 
 
 def _snapshot(
@@ -154,6 +159,75 @@ def test_a3_standby_heartbeat_corrects_stale_paused_snapshot() -> None:
     assert reconciled.task_status == "idle"
     assert reconciled.mowing_session_active is False
     assert reconciled.task_resumable is False
+
+
+def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
+    """MQTT publication and safety reads must share the reconciled state."""
+    raw_snapshot = _snapshot(
+        model="dreame.mower.g2541e",
+        display_model="A3 AWD Pro 3500",
+    )
+    device = SimpleNamespace(
+        _state_lock=RLock(),
+        realtime_properties={
+            MOWER_RAW_STATUS_PROPERTY_KEY: {
+                "value": [
+                    206,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    99,
+                    97,
+                    255,
+                    0,
+                    0,
+                    128,
+                    204,
+                    186,
+                    0,
+                    128,
+                    206,
+                ],
+                "last_seen": 1_787_575_147,
+            }
+        },
+    )
+    client = object.__new__(DreameLawnMowerClient)
+    client._descriptor = raw_snapshot.descriptor
+    client._latest_snapshot = None
+    client._ensure_device = lambda: device
+    client._sync_update_device = lambda force=False: device  # noqa: ARG005
+    client._sync_switch_current_map = lambda map_index: {"map_index": map_index}
+    client.async_get_current_app_map_index = AsyncMock(return_value=1)
+
+    with patch.object(
+        client_core_module,
+        "snapshot_from_device",
+        return_value=raw_snapshot,
+    ):
+        reconciled = asyncio.run(client.async_get_cached_snapshot())
+        switch_result = asyncio.run(client.async_switch_current_map(1))
+
+    assert reconciled.state == "idle"
+    assert reconciled.activity == "docked"
+    assert reconciled.docked is True
+    assert reconciled.started is False
+    assert reconciled.paused is False
+    assert reconciled.task_status == "idle"
+    assert reconciled.task_status_source == "heartbeat_realtime"
+    assert reconciled.task_status_event_at == 1_787_575_147.0
+    assert reconciled.mowing_session_active is False
+    assert client._latest_snapshot.state == "idle"
+    assert client._latest_snapshot.activity == "docked"
+    assert switch_result == {"map_index": 1}
+    client.async_get_current_app_map_index.assert_awaited_once_with()
 
 
 def test_active_paused_session_keeps_task_activity_while_recording_dock() -> None:
