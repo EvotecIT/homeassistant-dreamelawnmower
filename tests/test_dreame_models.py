@@ -832,6 +832,54 @@ def test_snapshot_counts_active_task_regions_from_mova_task_payload() -> None:
 
     assert snapshot.activity == "mowing"
     assert snapshot.active_segment_count == 2
+    assert snapshot.task_operation == 102
+    assert snapshot.task_region_ids == (1, 3)
+    assert snapshot.task_area_ids is None
+
+
+def test_snapshot_preserves_active_spot_area_ids_from_task_payload() -> None:
+    descriptor = descriptor_from_cloud_record(
+        {
+            "did": "device-1",
+            "model": "mova.mower.g2584a",
+            "customName": "MOVA mower",
+        },
+        account_type="mova",
+        country="us",
+    )
+
+    assert descriptor is not None
+
+    device = _FakeDevice()
+    device.status.state = SimpleNamespace(name="MOWING")
+    device.status.state_name = "mowing"
+    device.status.running = True
+    device.status.attributes = {
+        **device.status.attributes,
+        "charging": False,
+        "mower_state": "mowing",
+        "running": True,
+        "started": True,
+    }
+    device.realtime_properties["2.1"] = {
+        "value": 1,
+        "last_seen": 124.0,
+        "changed_at": 122.0,
+    }
+    device.realtime_properties["2.50"] = {
+        "value": (
+            '{"d":{"area_id":[4,6],"exe":true,"o":103,'
+            '"region_id":[],"status":true},"t":"TASK"}'
+        ),
+        "last_seen": 123.0,
+    }
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.activity == "mowing"
+    assert snapshot.task_operation == 103
+    assert snapshot.task_region_ids is None
+    assert snapshot.task_area_ids == (4, 6)
 
 
 def test_snapshot_rejects_task_regions_older_than_active_state() -> None:
@@ -877,6 +925,9 @@ def test_snapshot_rejects_task_regions_older_than_active_state() -> None:
 
     assert snapshot.activity == "mowing"
     assert snapshot.active_segment_count == 4
+    assert snapshot.task_operation is None
+    assert snapshot.task_region_ids is None
+    assert snapshot.task_area_ids is None
 
 
 def test_snapshot_preserves_task_regions_across_active_state_transitions() -> None:
@@ -923,6 +974,8 @@ def test_snapshot_preserves_task_regions_across_active_state_transitions() -> No
 
     assert snapshot.activity == "paused"
     assert snapshot.active_segment_count == 2
+    assert snapshot.task_operation == 102
+    assert snapshot.task_region_ids == (1, 3)
 
 
 def test_snapshot_falls_back_when_active_task_has_no_regions() -> None:
@@ -963,6 +1016,8 @@ def test_snapshot_falls_back_when_active_task_has_no_regions() -> None:
 
     assert snapshot.activity == "mowing"
     assert snapshot.active_segment_count == 3
+    assert snapshot.task_operation == 102
+    assert snapshot.task_region_ids is None
 
 
 def test_snapshot_rejects_retained_task_regions_while_docked() -> None:
@@ -1001,6 +1056,9 @@ def test_snapshot_rejects_retained_task_regions_while_docked() -> None:
 
     assert snapshot.activity == "docked"
     assert snapshot.active_segment_count is None
+    assert snapshot.task_operation is None
+    assert snapshot.task_region_ids is None
+    assert snapshot.task_area_ids is None
 
 
 def test_field_trip_returning_fixture_matches_normalized_state() -> None:

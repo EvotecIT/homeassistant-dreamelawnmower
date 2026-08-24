@@ -123,8 +123,13 @@ def test_idle_in_station_heartbeat_corrects_stale_paused_snapshot(
 
     assert status_blob is not None
     status_blob = replace(status_blob, received_at="1970-01-01T00:00:20+00:00")
-    reconciled = snapshot_with_heartbeat_task_state(
+    stale_task_snapshot = replace(
         _snapshot(model=model, display_model=display_model),
+        task_operation=102,
+        task_region_ids=(2,),
+    )
+    reconciled = snapshot_with_heartbeat_task_state(
+        stale_task_snapshot,
         status_blob,
         observed_at=20.0,
         active_state_observed_at=19.0,
@@ -141,6 +146,9 @@ def test_idle_in_station_heartbeat_corrects_stale_paused_snapshot(
     assert reconciled.task_status == "idle"
     assert reconciled.task_status_source == "heartbeat_realtime"
     assert reconciled.mowing_session_active is False
+    assert reconciled.task_operation is None
+    assert reconciled.task_region_ids is None
+    assert reconciled.task_area_ids is None
     assert reconciled.mission_task_id == status_blob.candidate_runtime_task_id
 
 
@@ -276,6 +284,63 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
     assert switch_result == {"map_index": 1}
     client._sync_switch_current_map.assert_called_once_with(1)
     client.async_get_current_app_map_index.assert_awaited_once_with()
+
+
+def test_authoritative_preflight_snapshot_applies_newer_idle_heartbeat() -> None:
+    """Safety refreshes share the same heartbeat reconciliation as HA updates."""
+    raw_snapshot = replace(
+        _snapshot(
+            model="dreame.mower.g2541e",
+            display_model="A3 AWD Pro 3500",
+        ),
+        task_operation=102,
+        task_region_ids=(2,),
+    )
+    device = SimpleNamespace(
+        _state_lock=RLock(),
+        update=Mock(),
+        realtime_properties={
+            MOWER_RAW_STATUS_PROPERTY_KEY: {
+                "value": list(_A3_STANDBY_FRAME),
+                "last_seen": 100.0,
+            }
+        },
+    )
+    client = object.__new__(DreameLawnMowerClient)
+    client._descriptor = raw_snapshot.descriptor
+    client._latest_snapshot = None
+    client._ensure_device = Mock(return_value=device)
+
+    with (
+        patch.object(
+            client_core_module,
+            "snapshot_from_device",
+            return_value=raw_snapshot,
+        ),
+        patch.object(client_core_module.time, "time", return_value=101.0),
+    ):
+        first_snapshot = asyncio.run(client._async_refresh_authoritative_snapshot())
+
+    assert first_snapshot.activity == "paused"
+    device.realtime_properties[MOWER_RAW_STATUS_PROPERTY_KEY]["last_seen"] = 102.0
+
+    with (
+        patch.object(
+            client_core_module,
+            "snapshot_from_device",
+            return_value=raw_snapshot,
+        ),
+        patch.object(client_core_module.time, "time", return_value=103.0),
+    ):
+        reconciled = asyncio.run(client._async_refresh_authoritative_snapshot())
+
+    assert reconciled.state == "idle"
+    assert reconciled.activity == "docked"
+    assert reconciled.mowing_session_active is False
+    assert reconciled.task_operation is None
+    assert reconciled.task_region_ids is None
+    device.update.assert_called_with(force_request_properties=True)
+    assert device.update.call_count == 2
 
 
 @pytest.mark.parametrize(

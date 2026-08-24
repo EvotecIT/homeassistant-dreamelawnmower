@@ -1049,12 +1049,20 @@ def test_lawn_mower_start_edge_service_uses_explicit_contours() -> None:
         batch_device_data=_batch_device_data(),
         vector_map_details=_vector_map_details(),
         selected_map_index=None,
+        selected_mowing_action="all_area",
+        selected_contour_id=None,
+        selected_zone_id=3,
+        selected_spot_id=2,
         async_request_refresh=AsyncMock(),
     )
 
     asyncio.run(entity.async_start_edge_mowing([[1, 0], ("3", "0")]))
 
     client.async_start_edge_mowing.assert_awaited_once_with([[1, 0], [3, 0]])
+    assert entity.coordinator.selected_mowing_action == MOWING_ACTION_EDGE
+    assert entity.coordinator.selected_contour_id is None
+    assert entity.coordinator.selected_zone_id is None
+    assert entity.coordinator.selected_spot_id is None
     entity.coordinator.async_request_refresh.assert_awaited_once()
 
 
@@ -1594,12 +1602,20 @@ def test_lawn_mower_zone_service_uses_validated_current_map_ids() -> None:
         vector_map_details=_vector_map_details(),
         batch_device_data=_batch_device_data(),
         app_maps=_app_maps(),
+        selected_mowing_action="all_area",
+        selected_contour_id=(3, 0),
+        selected_zone_id=1,
+        selected_spot_id=2,
         async_request_refresh=AsyncMock(),
     )
 
     asyncio.run(entity.async_start_zone_mowing([1, 3]))
 
     client.async_start_zone_mowing.assert_awaited_once_with([1, 3])
+    assert entity.coordinator.selected_mowing_action == MOWING_ACTION_ZONE
+    assert entity.coordinator.selected_zone_id is None
+    assert entity.coordinator.selected_contour_id is None
+    assert entity.coordinator.selected_spot_id is None
     entity.coordinator.async_request_refresh.assert_awaited_once()
 
 
@@ -1631,10 +1647,18 @@ def test_lawn_mower_spot_service_sends_saved_area_ids_not_coordinates() -> None:
         vector_map_details=_vector_map_details(),
         batch_device_data=_batch_device_data(),
         app_maps=_app_maps(),
+        selected_mowing_action="all_area",
+        selected_contour_id=(3, 0),
+        selected_zone_id=1,
+        selected_spot_id=None,
         async_request_refresh=AsyncMock(),
     )
 
     asyncio.run(entity.async_start_spot_mowing([2]))
 
     client.async_start_spot_mowing.assert_awaited_once_with([2])
+    assert entity.coordinator.selected_mowing_action == MOWING_ACTION_SPOT
+    assert entity.coordinator.selected_spot_id == 2
+    assert entity.coordinator.selected_zone_id is None
+    assert entity.coordinator.selected_contour_id is None
     entity.coordinator.async_request_refresh.assert_awaited_once()

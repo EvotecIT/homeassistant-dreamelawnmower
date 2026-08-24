@@ -1,7 +1,8 @@
 start_zone_mowing:
   name: Start zone mowing
   description: >-
-    Start mower-native mowing for one or more saved zones on the active map.
+    Start mower-native mowing for one or more saved zones on the active map and
+    confirm that the mower entered a zone task.
   target:
     entity:
       integration: dreame_lawn_mower
@@ -16,7 +17,8 @@ start_zone_mowing:
 start_spot_mowing:
   name: Start spot mowing
   description: >-
-    Start mower-native mowing for one or more saved spot areas on the active map.
+    Start mower-native mowing for one or more saved spot areas on the active map
+    and confirm that the mower entered a spot task.
   target:
     entity:
       integration: dreame_lawn_mower
@@ -31,8 +33,9 @@ start_spot_mowing:
 start_edge_mowing:
   name: Start edge mowing
   description: >-
-    Start mowing for one or more explicit current-map edge contour IDs. Each
-    contour ID is a two-item list in the form [edge_id, contour_index].
+    Start mowing for one or more explicit current-map edge contour IDs and
+    confirm that the mower entered an edge task. Each contour ID is a two-item
+    list in the form [edge_id, contour_index].
   target:
     entity:
       integration: dreame_lawn_mower

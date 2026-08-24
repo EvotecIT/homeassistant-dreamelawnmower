@@ -171,6 +171,9 @@ from .mowing_preferences import (
 from .mowing_preferences import (
     summarize_mowing_preference_info as summarize_mowing_preference_info,
 )
+from .mowing_tasks import MOWING_TASK_EDGE as _MOWING_TASK_EDGE
+from .mowing_tasks import MOWING_TASK_SPOT as _MOWING_TASK_SPOT
+from .mowing_tasks import MOWING_TASK_ZONE as _MOWING_TASK_ZONE
 from .mowing_tasks import MowingTaskResponseError as MowingTaskResponseError
 from .mowing_tasks import build_edge_mowing_request as build_edge_mowing_request
 from .mowing_tasks import build_spot_mowing_request as build_spot_mowing_request
@@ -314,23 +317,78 @@ camera_metadata_advertises_video = _client_camera.camera_metadata_advertises_vid
 camera_stream_block_reason = _client_camera.camera_stream_block_reason
 derive_tx_video_app_credentials = _client_camera.derive_tx_video_app_credentials
 
-_ZONE_TASK_CONFIRMATION_STATUSES = frozenset(
-    {"zone_cleaning", "segment_cleaning"}
+_GENERIC_ACTIVE_TASK_CONFIRMATION_STATUSES = frozenset(
+    {"starting", "mowing", "paused"}
 )
-_EDGE_TASK_CONFIRMATION_STATUSES = frozenset(
-    {"segment_cleaning", "zone_cleaning"}
-)
-_SPOT_TASK_CONFIRMATION_STATUSES = frozenset({"spot_cleaning"})
+_ZONE_TASK_CONFIRMATION_STATUSES = _GENERIC_ACTIVE_TASK_CONFIRMATION_STATUSES | {
+    "zone_cleaning",
+    "segment_cleaning",
+    "zone_cleaning_paused",
+    "segment_cleaning_paused",
+}
+_EDGE_TASK_CONFIRMATION_STATUSES = _GENERIC_ACTIVE_TASK_CONFIRMATION_STATUSES | {
+    "segment_cleaning",
+    "zone_cleaning",
+    "segment_cleaning_paused",
+    "zone_cleaning_paused",
+}
+_SPOT_TASK_CONFIRMATION_STATUSES = _GENERIC_ACTIVE_TASK_CONFIRMATION_STATUSES | {
+    "spot_cleaning",
+    "spot_cleaning_paused",
+}
+_TARGETED_TASK_CONFIRMATION_DELAYS_SECONDS = (0.5, 1.5, 3.0)
 
 
 def _task_confirmation_key(snapshot: DreameLawnMowerSnapshot) -> tuple[Any, ...]:
-    """Return state that must change when a new targeted task is accepted."""
+    """Return native task identity that must change for a new targeted task."""
     return (
         getattr(snapshot, "task_status", None),
-        getattr(snapshot, "state", None),
-        getattr(snapshot, "current_zone_id", None),
-        getattr(snapshot, "active_segment_count", None),
-        getattr(snapshot, "mowing_session_active", None),
+        getattr(snapshot, "task_operation", None),
+        getattr(snapshot, "task_region_ids", None),
+        getattr(snapshot, "task_area_ids", None),
+    )
+
+
+def _targeted_task_is_active(snapshot: DreameLawnMowerSnapshot) -> bool:
+    """Return whether session or physical evidence confirms an active task."""
+    return bool(
+        getattr(snapshot, "mowing_session_active", None) is True
+        or getattr(snapshot, "activity", None) in {"mowing", "paused"}
+        or getattr(snapshot, "started", False)
+        or getattr(snapshot, "mowing", False)
+        or getattr(snapshot, "paused", False)
+    )
+
+
+def _targeted_task_ids(
+    snapshot: DreameLawnMowerSnapshot,
+    expected_operation: int,
+) -> tuple[int, ...] | None:
+    """Return the native target ids owned by a targeted task operation."""
+    if expected_operation == _MOWING_TASK_ZONE:
+        return getattr(snapshot, "task_region_ids", None)
+    if expected_operation == _MOWING_TASK_SPOT:
+        return getattr(snapshot, "task_area_ids", None)
+    return None
+
+
+def _targeted_task_matches_preflight(
+    snapshot: DreameLawnMowerSnapshot,
+    expected_operation: int,
+    *,
+    requested_target_ids: frozenset[int] | None = None,
+) -> bool:
+    """Return whether an active snapshot already represents the requested task."""
+    if not _targeted_task_is_active(snapshot):
+        return False
+    if getattr(snapshot, "task_operation", None) != expected_operation:
+        return False
+    if requested_target_ids is None:
+        return True
+    task_target_ids = _targeted_task_ids(snapshot, expected_operation)
+    return (
+        task_target_ids is None
+        or frozenset(task_target_ids) == requested_target_ids
     )
 
 
@@ -339,26 +397,31 @@ def _targeted_task_confirmed(
     baseline: DreameLawnMowerSnapshot | None,
     expected_statuses: frozenset[str],
     *,
-    requested_zone_ids: frozenset[int] | None = None,
+    expected_operation: int,
+    requested_target_ids: frozenset[int] | None = None,
 ) -> bool:
     """Require requested task evidence and a transition from pre-command state."""
     if baseline is None:
         return False
+    if _targeted_task_matches_preflight(
+        baseline,
+        expected_operation,
+        requested_target_ids=requested_target_ids,
+    ):
+        return False
     task_status = str(getattr(snapshot, "task_status", "") or "").lower()
     if task_status not in expected_statuses:
         return False
-    if not (
-        getattr(snapshot, "mowing_session_active", None) is True
-        or getattr(snapshot, "started", False)
-        or getattr(snapshot, "mowing", False)
-    ):
+    if getattr(snapshot, "task_operation", None) != expected_operation:
         return False
-    current_zone_id = getattr(snapshot, "current_zone_id", None)
-    if (
-        requested_zone_ids
-        and current_zone_id is not None
-        and int(current_zone_id) not in requested_zone_ids
-    ):
+    if requested_target_ids:
+        task_target_ids = _targeted_task_ids(snapshot, expected_operation)
+        if (
+            task_target_ids is None
+            or frozenset(task_target_ids) != requested_target_ids
+        ):
+            return False
+    if not _targeted_task_is_active(snapshot):
         return False
     return _task_confirmation_key(snapshot) != _task_confirmation_key(baseline)
 
@@ -632,9 +695,16 @@ class DreameLawnMowerClient(
     async def async_start_zone_mowing(self, zone_ids: Sequence[int]) -> Any:
         """Start mower-native zone mowing for explicit map area ids."""
         normalized_zone_ids = [int(zone_id) for zone_id in zone_ids]
-        baseline = await self.async_get_cached_snapshot()
+        baseline = await self._async_refresh_authoritative_snapshot()
+        requested_zone_ids = frozenset(normalized_zone_ids)
+        self._require_targeted_task_preflight(
+            "zone mowing",
+            baseline,
+            _MOWING_TASK_ZONE,
+            requested_target_ids=requested_zone_ids,
+        )
         try:
-            return await asyncio.to_thread(
+            response = await asyncio.to_thread(
                 self._sync_start_zone_mowing,
                 normalized_zone_ids,
             )
@@ -648,9 +718,18 @@ class DreameLawnMowerClient(
                     snapshot,
                     baseline,
                     _ZONE_TASK_CONFIRMATION_STATUSES,
-                    requested_zone_ids=frozenset(normalized_zone_ids),
+                    expected_operation=_MOWING_TASK_ZONE,
+                    requested_target_ids=requested_zone_ids,
                 ),
             )
+        await self._async_require_targeted_task_confirmation(
+            "zone mowing",
+            baseline,
+            _ZONE_TASK_CONFIRMATION_STATUSES,
+            expected_operation=_MOWING_TASK_ZONE,
+            requested_target_ids=requested_zone_ids,
+        )
+        return response
 
     async def async_start_edge_mowing(
         self,
@@ -661,9 +740,14 @@ class DreameLawnMowerClient(
             [int(value) for value in contour_id[:2]]
             for contour_id in contour_ids
         ]
-        baseline = await self.async_get_cached_snapshot()
+        baseline = await self._async_refresh_authoritative_snapshot()
+        self._require_targeted_task_preflight(
+            "edge mowing",
+            baseline,
+            _MOWING_TASK_EDGE,
+        )
         try:
-            return await asyncio.to_thread(
+            response = await asyncio.to_thread(
                 self._sync_start_edge_mowing,
                 normalized_contour_ids,
             )
@@ -677,15 +761,30 @@ class DreameLawnMowerClient(
                     snapshot,
                     baseline,
                     _EDGE_TASK_CONFIRMATION_STATUSES,
+                    expected_operation=_MOWING_TASK_EDGE,
                 ),
             )
+        await self._async_require_targeted_task_confirmation(
+            "edge mowing",
+            baseline,
+            _EDGE_TASK_CONFIRMATION_STATUSES,
+            expected_operation=_MOWING_TASK_EDGE,
+        )
+        return response
 
     async def async_start_spot_mowing(self, spot_ids: Sequence[int]) -> Any:
         """Start mower-native spot mowing for explicit saved spot area ids."""
         normalized_spot_ids = [int(spot_id) for spot_id in spot_ids]
-        baseline = await self.async_get_cached_snapshot()
+        requested_spot_ids = frozenset(normalized_spot_ids)
+        baseline = await self._async_refresh_authoritative_snapshot()
+        self._require_targeted_task_preflight(
+            "spot mowing",
+            baseline,
+            _MOWING_TASK_SPOT,
+            requested_target_ids=requested_spot_ids,
+        )
         try:
-            return await asyncio.to_thread(
+            response = await asyncio.to_thread(
                 self._sync_start_spot_mowing,
                 normalized_spot_ids,
             )
@@ -699,8 +798,77 @@ class DreameLawnMowerClient(
                     snapshot,
                     baseline,
                     _SPOT_TASK_CONFIRMATION_STATUSES,
+                    expected_operation=_MOWING_TASK_SPOT,
+                    requested_target_ids=requested_spot_ids,
                 ),
             )
+        await self._async_require_targeted_task_confirmation(
+            "spot mowing",
+            baseline,
+            _SPOT_TASK_CONFIRMATION_STATUSES,
+            expected_operation=_MOWING_TASK_SPOT,
+            requested_target_ids=requested_spot_ids,
+        )
+        return response
+
+    @staticmethod
+    def _require_targeted_task_preflight(
+        label: str,
+        baseline: DreameLawnMowerSnapshot,
+        expected_operation: int,
+        *,
+        requested_target_ids: frozenset[int] | None = None,
+    ) -> None:
+        """Reject repeat targeted commands that lack new-task evidence."""
+        if _targeted_task_matches_preflight(
+            baseline,
+            expected_operation,
+            requested_target_ids=requested_target_ids,
+        ):
+            raise _DreameLawnMowerCommandRejectedError(
+                f"The mower is already executing a {label} task, so a new "
+                "targeted request cannot be verified. Wait for it to finish or "
+                "stop it before starting another task of this type."
+            )
+
+    async def _async_require_targeted_task_confirmation(
+        self,
+        label: str,
+        baseline: DreameLawnMowerSnapshot,
+        expected_statuses: frozenset[str],
+        *,
+        expected_operation: int,
+        requested_target_ids: frozenset[int] | None = None,
+    ) -> None:
+        """Require authoritative task-type evidence after a successful write."""
+        readable = False
+        for delay in _TARGETED_TASK_CONFIRMATION_DELAYS_SECONDS:
+            await asyncio.sleep(delay)
+            try:
+                snapshot = await self._async_refresh_authoritative_snapshot()
+            except DreameLawnMowerConnectionError:
+                continue
+            readable = True
+            if _targeted_task_confirmed(
+                snapshot,
+                baseline,
+                expected_statuses,
+                expected_operation=expected_operation,
+                requested_target_ids=requested_target_ids,
+            ):
+                return
+
+        if readable:
+            raise _DreameLawnMowerCommandRejectedError(
+                f"The mower acknowledged the {label} request but did not enter "
+                "the requested task. It may have started another mowing mode; "
+                "check the mower state and stop any incorrect task before retrying."
+            )
+        raise DreameLawnMowerConnectionError(
+            f"The mower acknowledged the {label} request, but its task type could "
+            "not be confirmed because every state readback failed. Check the mower "
+            "state before retrying."
+        )
 
     async def async_go_to_maintenance_point(self, point_id: int) -> Any:
         """Drive to one configured map maintenance point."""

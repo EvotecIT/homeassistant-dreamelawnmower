@@ -245,10 +245,14 @@ def _realtime_active_session_started_at(device: Any) -> float | None:
     return None
 
 
-def _active_task_region_ids(device: Any, *, activity: str) -> tuple[int, ...] | None:
-    """Return current task regions only while active device state confirms them."""
+def _active_task_metadata(
+    device: Any,
+    *,
+    activity: str,
+) -> tuple[int | None, tuple[int, ...] | None, tuple[int, ...] | None]:
+    """Return current task operation and targets while state confirms them."""
     if activity not in {"mowing", "paused"}:
-        return None
+        return None, None, None
     realtime_properties = getattr(device, "realtime_properties", {}) or {}
     # Local import avoids a module cycle: app_protocol owns this wire decoder
     # and also constructs the status-blob model defined in this module.
@@ -260,20 +264,33 @@ def _active_task_region_ids(device: Any, *, activity: str) -> tuple[int, ...] | 
     if active_session_started_at is not None and (
         task_last_seen is None or task_last_seen < active_session_started_at
     ):
-        return None
+        return None, None, None
     value = entry.get("value") if isinstance(entry, Mapping) else entry
     task = decode_mower_task_status(value)
     if not isinstance(task, Mapping):
-        return None
+        return None, None, None
     if task.get("executing") is not True or task.get("status") is not True:
-        return None
-    region_ids = task.get("region_ids")
-    if not isinstance(region_ids, list):
-        return None
-    active_region_ids = tuple(
-        dict.fromkeys(region_id for region_id in region_ids if region_id > 0)
+        return None, None, None
+    operation_value = task.get("operation")
+    operation = (
+        int(operation_value)
+        if isinstance(operation_value, int) and not isinstance(operation_value, bool)
+        else None
     )
-    return active_region_ids or None
+    active_target_ids: dict[str, tuple[int, ...] | None] = {}
+    for target_kind in ("region_ids", "area_ids"):
+        target_ids = task.get(target_kind)
+        active_target_ids[target_kind] = (
+            tuple(dict.fromkeys(target_id for target_id in target_ids if target_id > 0))
+            or None
+            if isinstance(target_ids, list)
+            else None
+        )
+    return (
+        operation,
+        active_target_ids["region_ids"],
+        active_target_ids["area_ids"],
+    )
 
 
 def _fault_recovery_confirmed(
@@ -412,6 +429,9 @@ class DreameLawnMowerSnapshot:
     task_status: str | None = None
     task_status_name: str | None = None
     task_status_source: str | None = None
+    task_operation: int | None = None
+    task_region_ids: tuple[int, ...] | None = None
+    task_area_ids: tuple[int, ...] | None = None
     task_status_event_at: float | None = field(
         default=None,
         repr=False,
@@ -1372,7 +1392,10 @@ def snapshot_from_device(
         getattr(device.status, "cleaning_time", None),
         getattr(current_map, "cleaning_time", None),
     )
-    active_task_regions = _active_task_region_ids(device, activity=activity)
+    task_operation, active_task_regions, active_task_areas = _active_task_metadata(
+        device,
+        activity=activity,
+    )
     active_segments = active_task_regions
     if active_segments is None and activity in {"mowing", "paused"}:
         active_segments = _coerce_sequence(
@@ -1401,6 +1424,9 @@ def snapshot_from_device(
         ),
         task_status=task_obj.name.lower() if task_obj is not None else None,
         task_status_name=getattr(device.status, "task_status_name", None),
+        task_operation=task_operation,
+        task_region_ids=active_task_regions,
+        task_area_ids=active_task_areas,
         task_status_event_at=_realtime_property_last_seen(
             device,
             REALTIME_TASK_STATUS_PROPERTY_KEY,
