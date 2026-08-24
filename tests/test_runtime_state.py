@@ -127,6 +127,7 @@ def test_idle_in_station_heartbeat_corrects_stale_paused_snapshot(
         _snapshot(model=model, display_model=display_model),
         status_blob,
         observed_at=20.0,
+        active_state_observed_at=19.0,
     )
 
     assert reconciled.state == "idle"
@@ -182,6 +183,7 @@ def test_a3_standby_heartbeat_corrects_stale_paused_snapshot() -> None:
         ),
         status_blob,
         observed_at=20.0,
+        active_state_observed_at=19.0,
     )
 
     assert reconciled.state == "idle"
@@ -200,13 +202,13 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
         model="dreame.mower.g2541e",
         display_model="A3 AWD Pro 3500",
     )
-    heartbeat_received_at = time.time()
+    first_heartbeat_received_at = 100.0
     device = SimpleNamespace(
         _state_lock=RLock(),
         realtime_properties={
             MOWER_RAW_STATUS_PROPERTY_KEY: {
                 "value": list(_A3_STANDBY_0X61_FRAME),
-                "last_seen": heartbeat_received_at,
+                "last_seen": first_heartbeat_received_at,
             }
         },
     )
@@ -215,13 +217,41 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
     client._latest_snapshot = None
     client._ensure_device = lambda: device
     client._sync_update_device = lambda force=False: device  # noqa: ARG005
-    client._sync_switch_current_map = lambda map_index: {"map_index": map_index}
+    client._sync_switch_current_map = Mock(
+        side_effect=lambda map_index: {"map_index": map_index}
+    )
     client.async_get_current_app_map_index = AsyncMock(return_value=1)
 
-    with patch.object(
-        client_core_module,
-        "snapshot_from_device",
-        return_value=raw_snapshot,
+    with (
+        patch.object(
+            client_core_module,
+            "snapshot_from_device",
+            return_value=raw_snapshot,
+        ),
+        patch.object(client_core_module.time, "time", return_value=101.0),
+    ):
+        first_snapshot = asyncio.run(client.async_get_cached_snapshot())
+        with pytest.raises(
+            DreameLawnMowerCommandRejectedError,
+            match="Finish or cancel",
+        ):
+            asyncio.run(client.async_switch_current_map(1))
+
+    assert first_snapshot.state == "paused"
+    assert first_snapshot.activity == "paused"
+    client._sync_switch_current_map.assert_not_called()
+
+    heartbeat_received_at = 102.0
+    device.realtime_properties[MOWER_RAW_STATUS_PROPERTY_KEY]["last_seen"] = (
+        heartbeat_received_at
+    )
+    with (
+        patch.object(
+            client_core_module,
+            "snapshot_from_device",
+            return_value=raw_snapshot,
+        ),
+        patch.object(client_core_module.time, "time", return_value=103.0),
     ):
         reconciled = asyncio.run(client.async_get_cached_snapshot())
         switch_result = asyncio.run(client.async_switch_current_map(1))
@@ -241,7 +271,108 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
     assert client._latest_snapshot.state == "idle"
     assert client._latest_snapshot.activity == "docked"
     assert switch_result == {"map_index": 1}
+    client._sync_switch_current_map.assert_called_once_with(1)
     client.async_get_current_app_map_index.assert_awaited_once_with()
+
+
+@pytest.mark.parametrize(
+    ("state", "activity", "paused", "mowing"),
+    [
+        ("paused", "paused", True, False),
+        ("mowing", "mowing", False, True),
+    ],
+)
+def test_fresh_inactive_heartbeat_cannot_weaken_new_untimestamped_active_state(
+    state: str,
+    activity: str,
+    paused: bool,
+    mowing: bool,
+) -> None:
+    """A first local active observation outranks an older cached heartbeat."""
+    status_blob = decode_mower_status_blob(
+        _A3_STANDBY_0X61_FRAME,
+        source="realtime",
+        property_key=MOWER_RAW_STATUS_PROPERTY_KEY,
+    )
+
+    assert status_blob is not None
+    status_blob = replace(
+        status_blob,
+        received_at="1970-01-01T00:01:40+00:00",
+    )
+    active_snapshot = replace(
+        _snapshot(),
+        state=state,
+        state_name=state,
+        activity=activity,
+        paused=paused,
+        mowing=mowing,
+        started=True,
+        state_event_at=None,
+        task_status_event_at=None,
+    )
+
+    reconciled = snapshot_with_heartbeat_task_state(
+        active_snapshot,
+        status_blob,
+        observed_at=101.0,
+        active_state_observed_at=101.0,
+    )
+
+    assert reconciled is active_snapshot
+    assert reconciled.activity == activity
+    assert reconciled.mowing_session_active is None
+
+
+def test_refresh_keeps_new_untimestamped_active_observation() -> None:
+    raw_snapshot = _snapshot(
+        model="dreame.mower.g2541e",
+        display_model="A3 AWD Pro 3500",
+    )
+    status_blob = decode_mower_status_blob(
+        _A3_STANDBY_0X61_FRAME,
+        source="realtime",
+        property_key=MOWER_RAW_STATUS_PROPERTY_KEY,
+    )
+    assert status_blob is not None
+    status_blob = replace(
+        status_blob,
+        received_at="1970-01-01T00:01:40+00:00",
+    )
+    device = SimpleNamespace(
+        _state_lock=RLock(),
+        info=SimpleNamespace(raw={}, model=raw_snapshot.descriptor.model),
+        name=raw_snapshot.descriptor.name,
+        host=None,
+        mac=None,
+        token=None,
+        realtime_properties={
+            MOWER_RAW_STATUS_PROPERTY_KEY: {
+                "value": list(_A3_STANDBY_0X61_FRAME),
+                "last_seen": 100.0,
+            }
+        },
+    )
+    client = object.__new__(DreameLawnMowerClient)
+    client._descriptor = raw_snapshot.descriptor
+    client._latest_snapshot = None
+    client._sync_update_device = lambda force=False: device  # noqa: ARG005
+    client._sync_get_status_blob = lambda include_cloud, refresh: status_blob  # noqa: ARG005
+    client._sync_get_cached_cloud_device_info = lambda: None
+
+    with (
+        patch.object(
+            client_core_module,
+            "snapshot_from_device",
+            return_value=raw_snapshot,
+        ),
+        patch.object(client_core_module.time, "time", return_value=101.0),
+    ):
+        refreshed = asyncio.run(client.async_refresh())
+
+    assert refreshed.state == "paused"
+    assert refreshed.activity == "paused"
+    assert refreshed.mowing_session_active is None
 
 
 @pytest.mark.parametrize(
@@ -288,7 +419,7 @@ def test_unproven_inactive_heartbeat_does_not_clear_paused_state(
     assert reconciled.mowing_session_active is None
 
 
-def test_same_message_fractional_timestamps_do_not_hide_current_heartbeat() -> None:
+def test_submicrosecond_same_message_heartbeat_remains_current() -> None:
     status_blob = decode_mower_status_blob(
         _A3_STANDBY_0X61_FRAME,
         source="realtime",
@@ -298,24 +429,50 @@ def test_same_message_fractional_timestamps_do_not_hide_current_heartbeat() -> N
     assert status_blob is not None
     status_blob = replace(
         status_blob,
-        received_at="1970-01-01T00:00:20.750000+00:00",
+        received_at="2023-11-14T22:13:20.750000+00:00",
     )
     paused_snapshot = replace(
         _snapshot(),
-        state_event_at=20.75,
-        task_status_event_at=20.75,
+        state_event_at=1_700_000_000.7500002,
+        task_status_event_at=1_700_000_000.7500002,
     )
 
     reconciled = snapshot_with_heartbeat_task_state(
         paused_snapshot,
         status_blob,
-        observed_at=21.0,
+        observed_at=1_700_000_001.0,
     )
 
     assert reconciled.state == "idle"
     assert reconciled.activity == "docked"
     assert reconciled.paused is False
     assert reconciled.mowing_session_active is False
+
+
+def test_genuinely_newer_subsecond_state_still_blocks_inactive_heartbeat() -> None:
+    status_blob = decode_mower_status_blob(
+        _A3_STANDBY_0X61_FRAME,
+        source="realtime",
+        property_key=MOWER_RAW_STATUS_PROPERTY_KEY,
+    )
+
+    assert status_blob is not None
+    status_blob = replace(
+        status_blob,
+        received_at="2023-11-14T22:13:20.750000+00:00",
+    )
+    paused_snapshot = replace(
+        _snapshot(),
+        state_event_at=1_700_000_000.750002,
+    )
+
+    reconciled = snapshot_with_heartbeat_task_state(
+        paused_snapshot,
+        status_blob,
+        observed_at=1_700_000_001.0,
+    )
+
+    assert reconciled is paused_snapshot
 
 
 def test_stale_a3_heartbeat_cannot_bypass_map_switch_guard() -> None:
@@ -444,6 +601,7 @@ def test_idle_in_station_heartbeat_preserves_bare_active_error() -> None:
         error_snapshot,
         status_blob,
         observed_at=20.0,
+        active_state_observed_at=19.0,
     )
 
     assert reconciled.state == "paused"

@@ -547,7 +547,16 @@ class DreameLawnMowerClient(
         except DreameLawnMowerConnectionError:
             status_blob = None
         if status_blob is not None:
-            snapshot = snapshot_with_heartbeat_task_state(snapshot, status_blob)
+            snapshot = snapshot_with_heartbeat_task_state(
+                snapshot,
+                status_blob,
+                observed_at=time.time(),
+                active_state_observed_at=getattr(
+                    self,
+                    "_raw_runtime_state_observed_at",
+                    None,
+                ),
+            )
 
         try:
             cloud_device_info = await asyncio.to_thread(

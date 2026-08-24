@@ -93,6 +93,28 @@ def _decoded_realtime_status_blob(
     )
 
 
+def _raw_runtime_state_signature(
+    snapshot: DreameLawnMowerSnapshot,
+) -> tuple[Any, ...]:
+    """Return the safety-relevant property state before heartbeat correction."""
+    return (
+        snapshot.state,
+        snapshot.activity,
+        snapshot.task_status,
+        snapshot.mowing_session_active,
+        snapshot.started,
+        snapshot.raw_started,
+        snapshot.paused,
+        snapshot.mowing,
+        snapshot.returning,
+        snapshot.raw_returning,
+        snapshot.docked,
+        snapshot.raw_docked,
+        snapshot.charging,
+        snapshot.raw_charging,
+    )
+
+
 def _device_start_session_identity(device: Any) -> bool | None:
     """Return the cached start-versus-resume branch used by the device."""
     from .device_types import DreameMowerTaskStatus
@@ -270,12 +292,27 @@ class _DreameLawnMowerClientCoreMixin:
                 device,
                 previous_snapshot=getattr(self, "_latest_snapshot", None),
             )
+            observed_at = time.time()
+            runtime_signature = _raw_runtime_state_signature(snapshot)
+            if getattr(self, "_raw_runtime_state_signature", None) != runtime_signature:
+                self._raw_runtime_state_signature = runtime_signature
+                self._raw_runtime_state_observed_at = observed_at
+            active_state_observed_at = getattr(
+                self,
+                "_raw_runtime_state_observed_at",
+                observed_at,
+            )
             status_blob = _decoded_realtime_status_blob(
                 device,
                 MOWER_RAW_STATUS_PROPERTY_KEY,
             )
             if status_blob is not None:
-                snapshot = snapshot_with_heartbeat_task_state(snapshot, status_blob)
+                snapshot = snapshot_with_heartbeat_task_state(
+                    snapshot,
+                    status_blob,
+                    observed_at=observed_at,
+                    active_state_observed_at=active_state_observed_at,
+                )
         self._latest_snapshot = snapshot
         return snapshot
 

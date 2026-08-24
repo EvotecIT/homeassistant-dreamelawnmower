@@ -237,7 +237,7 @@ def test_client_status_blob_preserves_fractional_reception_time() -> None:
         {
             "realtime_properties": {
                 "1.1": {
-                    "last_seen": 1_700_000_000.75,
+                    "last_seen": 1_700_000_000.7500002,
                     "value": list(_A3_STANDBY_STATUS_FRAME),
                 },
             }
