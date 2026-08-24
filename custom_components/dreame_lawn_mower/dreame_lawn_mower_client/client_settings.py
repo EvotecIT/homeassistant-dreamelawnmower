@@ -909,54 +909,71 @@ class _DreameLawnMowerClientSettingsMixin:
                     areas = []
 
                 preferences: list[dict[str, Any]] = []
+                area_errors: list[dict[str, Any]] = []
                 for area in areas:
                     if not isinstance(area, Mapping):
                         continue
                     area_id = _positive_int(area.get("area_id"))
                     if area_id is None:
                         continue
-                    preference_result = self._sync_call_app_action(
-                        {
-                            "m": "g",
-                            "t": "PRE",
-                            "d": {"idx": map_index, "region": area_id},
+                    try:
+                        preference_result = self._sync_call_app_action(
+                            {
+                                "m": "g",
+                                "t": "PRE",
+                                "d": {"idx": map_index, "region": area_id},
+                            }
+                        )
+                        preference_data = _app_action_data(preference_result)
+                        if not isinstance(preference_data, Sequence) or isinstance(
+                            preference_data,
+                            str | bytes | bytearray,
+                        ):
+                            raise DreameLawnMowerConnectionError(
+                                "PRE returned invalid preference data for map "
+                                f"{map_index} area {area_id}."
+                            )
+                        preference = decode_mowing_preference_payload(preference_data)
+                        reported_map_index = _positive_int(
+                            preference.get("map_index")
+                        )
+                        reported_area_id = _positive_int(preference.get("area_id"))
+                        if (
+                            reported_map_index != map_index
+                            or reported_area_id != area_id
+                        ):
+                            raise DreameLawnMowerConnectionError(
+                                "PRE returned mismatched preference identity for "
+                                f"requested map {map_index} area {area_id}: payload "
+                                f"map {reported_map_index} area {reported_area_id}."
+                            )
+                        preference["reported_version"] = area.get("version")
+                        if include_raw:
+                            preference["raw_response"] = _json_safe(
+                                preference_result,
+                                max_depth=4,
+                            )
+                            preference["raw_payload"] = _json_safe(
+                                list(preference_data),
+                                max_depth=2,
+                            )
+                        preferences.append(preference)
+                    except Exception as err:  # noqa: BLE001 - isolate each area
+                        area_error = {
+                            "idx": map_index,
+                            "area_id": area_id,
+                            "stage": "preference",
+                            "error": str(err),
                         }
-                    )
-                    preference_data = _app_action_data(preference_result)
-                    if not isinstance(preference_data, Sequence) or isinstance(
-                        preference_data,
-                        str | bytes | bytearray,
-                    ):
-                        raise DreameLawnMowerConnectionError(
-                            f"PRE returned invalid preference data for map {map_index} "
-                            f"area {area_id}."
-                        )
-                    preference = decode_mowing_preference_payload(preference_data)
-                    reported_map_index = _positive_int(preference.get("map_index"))
-                    reported_area_id = _positive_int(preference.get("area_id"))
-                    if (
-                        reported_map_index != map_index
-                        or reported_area_id != area_id
-                    ):
-                        raise DreameLawnMowerConnectionError(
-                            "PRE returned mismatched preference identity for requested "
-                            f"map {map_index} area {area_id}: payload map "
-                            f"{reported_map_index} area {reported_area_id}."
-                        )
-                    preference["reported_version"] = area.get("version")
-                    if include_raw:
-                        preference["raw_response"] = _json_safe(
-                            preference_result,
-                            max_depth=4,
-                        )
-                        preference["raw_payload"] = _json_safe(
-                            list(preference_data),
-                            max_depth=2,
-                        )
-                    preferences.append(preference)
+                        area_errors.append(area_error)
+                        result["errors"].append(area_error)
 
                 entry["preferences"] = preferences
                 entry["available"] = bool(preferences)
+                if area_errors:
+                    entry["errors"] = area_errors
+                    if not preferences:
+                        entry["error"] = area_errors[0]["error"]
                 if preferences:
                     result["available"] = True
             except Exception as err:  # noqa: BLE001 - keep probing other maps

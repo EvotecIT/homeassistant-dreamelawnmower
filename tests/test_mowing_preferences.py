@@ -265,6 +265,8 @@ def test_get_mowing_preferences_rejects_mismatched_payload_identity(
         aiid: int = 50,
     ) -> dict[str, object]:
         result = call_app_action(payload, siid=siid, aiid=aiid)
+        if payload.get("t") == "PREI" and payload.get("m") == "g":
+            result["out"][0]["d"]["ver"] = [[11, 8]]
         if payload.get("t") == "PRE" and payload.get("m") == "g":
             preference = result["out"][0]["d"]
             preference[1] = payload_map_index
@@ -279,6 +281,45 @@ def test_get_mowing_preferences_rejects_mismatched_payload_identity(
     assert result["available"] is False
     assert result["maps"][0]["preferences"] == []
     assert "mismatched preference identity" in result["maps"][0]["error"]
+
+
+def test_get_mowing_preferences_preserves_unaffected_areas() -> None:
+    client = _client()
+    cloud = _FakePreferenceCloud()
+    call_app_action = cloud.call_app_action
+
+    def fail_unrelated_area(
+        payload: dict[str, object],
+        *,
+        siid: int = 2,
+        aiid: int = 50,
+    ) -> dict[str, object]:
+        if (
+            payload.get("m") == "g"
+            and payload.get("t") == "PRE"
+            and payload.get("d") == {"idx": 0, "region": 12}
+        ):
+            cloud.calls.append(payload)
+            return {"out": [{"m": "r", "r": 0, "d": None}]}
+        return call_app_action(payload, siid=siid, aiid=aiid)
+
+    cloud.call_app_action = fail_unrelated_area  # type: ignore[method-assign]
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_get_mowing_preferences(map_indices=[0])
+
+    assert result["available"] is True
+    assert [item["area_id"] for item in result["maps"][0]["preferences"]] == [11]
+    assert result["maps"][0]["available"] is True
+    assert result["maps"][0]["errors"] == [
+        {
+            "idx": 0,
+            "area_id": 12,
+            "stage": "preference",
+            "error": "PRE returned invalid preference data for map 0 area 12.",
+        }
+    ]
+    assert result["errors"] == result["maps"][0]["errors"]
 
 
 def test_encode_mowing_preference_payload_round_trips_decoded_values() -> None:
@@ -638,6 +679,90 @@ def test_preference_write_retries_until_exact_readback_catches_up() -> None:
     assert result["request_verified"] is True
     assert result["readback"]["preference"]["version"] == 221
     sleep.assert_called_once_with(1.0)
+
+
+def test_preference_write_ignores_unrelated_area_readback_failure() -> None:
+    client = _client()
+    cloud = _FakePreferenceCloud()
+    call_app_action = cloud.call_app_action
+
+    def fail_unrelated_area(
+        payload: dict[str, object],
+        *,
+        siid: int = 2,
+        aiid: int = 50,
+    ) -> dict[str, object]:
+        if (
+            payload.get("m") == "g"
+            and payload.get("t") == "PRE"
+            and payload.get("d") == {"idx": 0, "region": 12}
+        ):
+            cloud.calls.append(payload)
+            return {"out": [{"m": "r", "r": 0, "d": None}]}
+        return call_app_action(payload, siid=siid, aiid=aiid)
+
+    cloud.call_app_action = fail_unrelated_area  # type: ignore[method-assign]
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_plan_app_mowing_preference_update(
+        map_index=0,
+        area_id=11,
+        changes={"mowing_height_cm": 5.0},
+        execute=True,
+        confirm_write=True,
+    )
+
+    assert result["executed"] is True
+    assert result["request_verified"] is True
+    assert result["readback"]["preference"]["area_id"] == 11
+    assert result["readback"]["preference"]["mowing_height_cm"] == 5.0
+
+
+def test_preference_write_fails_closed_when_target_area_readback_fails() -> None:
+    client = _client()
+    cloud = _FakePreferenceCloud()
+    call_app_action = cloud.call_app_action
+    write_started = False
+
+    def fail_target_after_write(
+        payload: dict[str, object],
+        *,
+        siid: int = 2,
+        aiid: int = 50,
+    ) -> dict[str, object]:
+        nonlocal write_started
+        if payload.get("m") == "s" and payload.get("t") == "PRE":
+            write_started = True
+        if (
+            write_started
+            and payload.get("m") == "g"
+            and payload.get("t") == "PRE"
+            and payload.get("d") == {"idx": 0, "region": 11}
+        ):
+            cloud.calls.append(payload)
+            return {"out": [{"m": "r", "r": 0, "d": None}]}
+        return call_app_action(payload, siid=siid, aiid=aiid)
+
+    cloud.call_app_action = fail_target_after_write  # type: ignore[method-assign]
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    with (
+        patch(
+            "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+            "client_settings.time.sleep"
+        ),
+        pytest.raises(
+            DreameLawnMowerConnectionError,
+            match="did not return the target area",
+        ),
+    ):
+        client._sync_plan_app_mowing_preference_update(
+            map_index=0,
+            area_id=11,
+            changes={"mowing_height_cm": 5.0},
+            execute=True,
+            confirm_write=True,
+        )
 
 
 def test_preference_write_still_rejects_failed_outer_response() -> None:
