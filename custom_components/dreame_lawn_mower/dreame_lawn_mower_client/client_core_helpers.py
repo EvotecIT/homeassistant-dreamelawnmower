@@ -461,7 +461,11 @@ def _operation_property_summary(
             MOWER_RUNTIME_STATUS_PROPERTY_KEY,
         }
         if key_text in status_blob_keys:
-            decoded = decode_mower_status_blob(property_value, source="operation")
+            decoded = decode_mower_status_blob(
+                property_value,
+                source="operation",
+                property_key=key_text,
+            )
             status_blob = decoded.as_dict() if decoded is not None else None
         task_status = None
         if key_text == MOWER_TASK_PROPERTY_KEY:

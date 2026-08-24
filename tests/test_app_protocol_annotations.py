@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dreame_lawn_mower_client import (
+    MOWER_RAW_STATUS_PROPERTY_KEY,
+    MOWER_RUNTIME_STATUS_PROPERTY_KEY,
     DreameLawnMowerClient,
     DreameLawnMowerDescriptor,
     decode_mower_status_blob,
@@ -146,8 +148,8 @@ def test_client_status_blob_prefers_cached_realtime_payload() -> None:
         descriptor=DreameLawnMowerDescriptor(
             did="1",
             name="Mower",
-            model="dreame.mower.g2408",
-            display_model="A2",
+            model="dreame.mower.g2541e",
+            display_model="A3 AWD Pro 3500",
             account_type="dreame",
             country="eu",
         ),
@@ -165,20 +167,22 @@ def test_client_status_blob_prefers_cached_realtime_payload() -> None:
                         0,
                         0,
                         0,
-                        16,
                         0,
-                        33,
+                        0,
+                        0,
                         0,
                         0,
                         0,
                         100,
-                        1,
+                        193,
                         255,
                         0,
                         0,
                         128,
-                        212,
-                        196,
+                        204,
+                        186,
+                        0,
+                        128,
                         206,
                     ],
                 },
@@ -193,6 +197,10 @@ def test_client_status_blob_prefers_cached_realtime_payload() -> None:
     assert decoded.received_at == "2023-11-14T22:13:20+00:00"
     assert decoded.frame_valid is True
     assert decoded.candidate_battery_level == 100
+    assert decoded.heartbeat_docked is True
+    assert decoded.task_status == "idle"
+    assert decoded.mowing_session_active is False
+    assert decoded.notes == ()
 
 
 def test_status_blob_decoder_exposes_candidate_battery_byte() -> None:
@@ -250,12 +258,13 @@ def test_status_blob_decoder_accepts_a3_awd_pro_22_byte_frame() -> None:
             0,
             0,
             128,
-            184,
-            196,
+            204,
+            186,
             0,
-            0,
+            128,
             206,
-        ]
+        ],
+        property_key=MOWER_RAW_STATUS_PROPERTY_KEY,
     )
 
     assert decoded is not None
@@ -264,9 +273,15 @@ def test_status_blob_decoder_accepts_a3_awd_pro_22_byte_frame() -> None:
     assert decoded.candidate_battery_level == 100
     assert decoded.candidate_runtime_pose_x == 0
     assert decoded.candidate_runtime_pose_y == 0
-    assert decoded.heartbeat_docking_state is None
-    assert decoded.heartbeat_docking_state_name is None
-    assert decoded.heartbeat_docked is None
+    assert decoded.heartbeat_docking_state == 0
+    assert decoded.heartbeat_docking_state_name == "in_station"
+    assert decoded.heartbeat_docked is True
+    assert decoded.main_state == 0
+    assert decoded.sub_state == 255
+    assert decoded.task_status == "idle"
+    assert decoded.mowing_session_active is False
+    assert decoded.task_resumable is False
+    assert decoded.notes == ()
 
 
 def test_status_blob_decoder_does_not_treat_heartbeat_bytes_as_pose() -> None:
@@ -306,6 +321,84 @@ def test_status_blob_decoder_does_not_treat_heartbeat_bytes_as_pose() -> None:
     assert decoded.sub_state is None
     assert decoded.task_status is None
     assert decoded.mowing_session_active is None
+    assert decoded.heartbeat_docked is None
+    assert decoded.notes == ("unexpected_length",)
+
+
+def test_runtime_blob_collision_does_not_decode_a3_idle_heartbeat() -> None:
+    decoded = decode_mower_status_blob(
+        [
+            206,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            100,
+            193,
+            255,
+            0,
+            0,
+            128,
+            204,
+            186,
+            0,
+            128,
+            206,
+        ],
+        property_key=MOWER_RUNTIME_STATUS_PROPERTY_KEY,
+    )
+
+    assert decoded is not None
+    assert decoded.heartbeat_docking_state is None
+    assert decoded.heartbeat_docked is None
+    assert decoded.main_state is None
+    assert decoded.sub_state is None
+    assert decoded.task_status is None
+    assert decoded.mowing_session_active is None
+    assert decoded.task_resumable is None
+    assert decoded.notes == ("unexpected_length",)
+
+
+def test_unconfirmed_a3_status_variant_remains_fail_closed() -> None:
+    decoded = decode_mower_status_blob(
+        [
+            206,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            100,
+            65,
+            255,
+            0,
+            0,
+            128,
+            202,
+            186,
+            0,
+            128,
+            206,
+        ],
+        property_key=MOWER_RAW_STATUS_PROPERTY_KEY,
+    )
+
+    assert decoded is not None
+    assert decoded.heartbeat_docked is None
+    assert decoded.task_status is None
+    assert decoded.mowing_session_active is None
+    assert decoded.notes == ("unexpected_length",)
 
 
 def test_status_blob_decoder_exposes_paused_resumable_session_at_dock() -> None:
