@@ -14,6 +14,10 @@ from .models import DreameLawnMowerSnapshot, DreameLawnMowerStatusBlob
 RESUME_MOWING_REQUEST = {"m": "a", "p": 0, "o": 5}
 
 _INACTIVE_HEARTBEAT_MAX_AGE_SECONDS = 130.0
+# Supervised A3 captures show unchanged 22-byte standby frames repeating every
+# five minutes. Keep one coordinator interval of delivery margin while newer
+# property/session evidence below remains authoritative.
+_A3_IDLE_HEARTBEAT_MAX_AGE_SECONDS = 365.0
 _HEARTBEAT_CLOCK_SKEW_SECONDS = 5.0
 # ISO timestamps retain microseconds while vendor reception clocks can expose
 # a slightly finer float. Treat only that serialization quantum as equal.
@@ -122,7 +126,12 @@ def _inactive_heartbeat_is_current(
     now = time.time() if observed_at is None else float(observed_at)
     if heartbeat_event_at > now + _HEARTBEAT_CLOCK_SKEW_SECONDS:
         return False
-    if now - heartbeat_event_at > _INACTIVE_HEARTBEAT_MAX_AGE_SECONDS:
+    heartbeat_max_age = (
+        _A3_IDLE_HEARTBEAT_MAX_AGE_SECONDS
+        if _is_a3_idle_heartbeat(status_blob)
+        else _INACTIVE_HEARTBEAT_MAX_AGE_SECONDS
+    )
+    if now - heartbeat_event_at > heartbeat_max_age:
         return False
 
     state_event_at = _numeric_event_at(snapshot.state_event_at)
@@ -156,6 +165,19 @@ def _inactive_heartbeat_is_current(
         ):
             return False
     return True
+
+
+def _is_a3_idle_heartbeat(status_blob: DreameLawnMowerStatusBlob) -> bool:
+    """Return whether this is the supervised 22-byte A3 standby frame."""
+    return bool(
+        status_blob.length == 22
+        and status_blob.frame_valid
+        and status_blob.main_state == 0
+        and status_blob.sub_state == 0xFF
+        and status_blob.task_status == "idle"
+        and status_blob.mowing_session_active is False
+        and status_blob.heartbeat_docked is True
+    )
 
 
 def _numeric_event_at(value: Any) -> float | None:
