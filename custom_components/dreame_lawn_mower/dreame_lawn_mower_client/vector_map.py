@@ -20,6 +20,7 @@ from .map_visuals import (
     map_font,
     map_render_style,
     marker_radius,
+    project_dreame_app_point,
 )
 from .models import DreameLawnMowerMapSummary
 
@@ -261,9 +262,15 @@ def render_vector_map_png(
     label_halo_width = max(1, int(round(_normalize_label_scale(label_scale) * 2)))
 
     def to_pixel(x: int, y: int) -> tuple[int, int]:
-        px = int((x - boundary.x1) * scale) + _PADDING
-        py = int((boundary.y2 - y) * scale) + _PADDING
-        return px, py
+        px, py = project_dreame_app_point(
+            x,
+            y,
+            max_x=boundary.x2,
+            min_y=boundary.y1,
+            scale=scale,
+            padding=_PADDING,
+        )
+        return int(px), int(py)
 
     for index, zone in enumerate(vector_map.zones):
         if len(zone.points) < 3:

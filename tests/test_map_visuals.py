@@ -55,23 +55,31 @@ def test_bundled_map_font_supports_unicode_labels() -> None:
     assert bounds[3] > bounds[1]
 
 
-def test_app_and_vector_maps_share_the_same_coordinate_orientation() -> None:
-    boundary = ((0, 0), (1000, 0), (1000, 100), (0, 100))
-    upper_right_spot = ((750, 60), (900, 60), (900, 90), (750, 90))
+def test_app_and_vector_maps_follow_the_dreame_app_orientation() -> None:
+    boundary = ((0, 0), (1000, 0), (1000, 1000), (0, 1000))
+    source_upper_right_spot = (
+        (750, 600),
+        (900, 600),
+        (900, 900),
+        (750, 900),
+    )
     app_png, _, _ = render_app_map_payload_png(
         {
             "map": [{"data": boundary}],
-            "spot": [{"data": upper_right_spot}],
+            "spot": [{"data": source_upper_right_spot}],
         }
     )
     vector_png = render_vector_map_png(
         DreameLawnMowerVectorMap(
-            boundary=DreameLawnMowerVectorBoundary(0, 0, 1000, 100),
+            boundary=DreameLawnMowerVectorBoundary(0, 0, 1000, 1000),
             zones=(
                 DreameLawnMowerVectorZone(zone_id=1, points=boundary),
             ),
             spot_areas=(
-                DreameLawnMowerVectorZone(zone_id=2, points=upper_right_spot),
+                DreameLawnMowerVectorZone(
+                    zone_id=2,
+                    points=source_upper_right_spot,
+                ),
             ),
         )
     )
@@ -80,10 +88,12 @@ def test_app_and_vector_maps_share_the_same_coordinate_orientation() -> None:
     app_center = _blue_layer_center(app_png)
     vector_center = _blue_layer_center(vector_png)
 
-    assert app_center[0] > 0.5
-    assert app_center[1] < 0.5
-    assert vector_center[0] > 0.5
-    assert vector_center[1] < 0.5
+    # Dreame's app presents this asymmetric source landmark in the bottom-left.
+    # Keep that external reference explicit so matching two wrong renderers cannot pass.
+    assert app_center[0] < 0.5
+    assert app_center[1] > 0.5
+    assert vector_center[0] < 0.5
+    assert vector_center[1] > 0.5
 
 
 def test_map_theme_changes_the_complete_render_without_geometry_changes() -> None:

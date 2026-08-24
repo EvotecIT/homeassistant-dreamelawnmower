@@ -34,6 +34,7 @@ from .map_visuals import (
     map_font,
     map_render_style,
     marker_radius,
+    project_dreame_app_point,
 )
 from .models import (
     DreameLawnMowerMapSummary,
@@ -777,9 +778,17 @@ def _render_app_map_payload_png(
 
     def project(point: tuple[float, float]) -> tuple[int, int]:
         x, y = point
+        px, py = project_dreame_app_point(
+            x,
+            y,
+            max_x=max_x,
+            min_y=min_y,
+            scale=scale,
+            padding=padding,
+        )
         return (
-            int(round((x - min_x) * scale + padding)),
-            int(round((max_y - y) * scale + padding)),
+            int(round(px)),
+            int(round(py)),
         )
 
     from PIL import Image, ImageDraw
