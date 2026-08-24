@@ -607,9 +607,15 @@ entity ID. The lawn mower entity exposes `available_zone_ids`, and zone selects
 use names saved in the Dreame app when vector-map metadata provides them. An
 unnamed zone retains the stable `Zone #<id>` fallback.
 
-Zone, spot, and edge actions are acknowledged by the mower before Home
-Assistant reports success. Unknown current-map IDs, map-scope mismatches, and
-device rejection responses are surfaced as failed actions.
+Zone, spot, and edge actions require both a mower acknowledgement and an
+authoritative task-type readback before Home Assistant reports success. If the
+mower acknowledges a zone request but starts whole-map mowing, the action fails
+instead of silently reporting the wrong job as successful. Explicit targeted
+services also update the local `Mowing Action` selection after confirmation.
+Unknown current-map IDs, map-scope mismatches, device rejection responses, and
+unconfirmed task types are surfaced as failed actions. A repeated targeted call
+is rejected before dispatch when the mower is already running the same task type
+and the integration cannot prove that a different target was requested.
 
 ## Troubleshooting
 

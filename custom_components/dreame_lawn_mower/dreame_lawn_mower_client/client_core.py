@@ -267,7 +267,7 @@ class _DreameLawnMowerClientCoreMixin:
     async def _async_refresh_authoritative_snapshot(
         self,
     ) -> DreameLawnMowerSnapshot:
-        """Force a device-property read before confirming an ambiguous write."""
+        """Force properties and apply heartbeat reconciliation before decisions."""
         device = await asyncio.to_thread(self._sync_update_device, True)
         return await asyncio.to_thread(self._snapshot_from_device, device)
 

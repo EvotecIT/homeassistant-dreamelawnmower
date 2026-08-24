@@ -549,6 +549,12 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
         observed_generation = runtime_mission_session_generation(runtime_cache)
         await self.coordinator.client.async_start_zone_mowing(normalized)
+        self.coordinator.selected_mowing_action = MOWING_ACTION_ZONE
+        self.coordinator.selected_zone_id = (
+            normalized[0] if len(normalized) == 1 else None
+        )
+        self.coordinator.selected_spot_id = None
+        self.coordinator.selected_contour_id = None
         begin_runtime_mission_session(
             runtime_cache,
             observed_generation=observed_generation,
@@ -575,6 +581,12 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
         observed_generation = runtime_mission_session_generation(runtime_cache)
         await self.coordinator.client.async_start_spot_mowing(normalized)
+        self.coordinator.selected_mowing_action = MOWING_ACTION_SPOT
+        self.coordinator.selected_spot_id = (
+            normalized[0] if len(normalized) == 1 else None
+        )
+        self.coordinator.selected_zone_id = None
+        self.coordinator.selected_contour_id = None
         begin_runtime_mission_session(
             runtime_cache,
             observed_generation=observed_generation,
@@ -614,6 +626,12 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
         observed_generation = runtime_mission_session_generation(runtime_cache)
         await self.coordinator.client.async_start_edge_mowing(normalized)
+        self.coordinator.selected_mowing_action = MOWING_ACTION_EDGE
+        self.coordinator.selected_contour_id = (
+            tuple(normalized[0]) if len(normalized) == 1 else None
+        )
+        self.coordinator.selected_zone_id = None
+        self.coordinator.selected_spot_id = None
         begin_runtime_mission_session(
             runtime_cache,
             observed_generation=observed_generation,

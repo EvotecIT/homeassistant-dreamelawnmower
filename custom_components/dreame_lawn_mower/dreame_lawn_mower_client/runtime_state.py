@@ -69,6 +69,11 @@ def snapshot_with_heartbeat_task_state(
             mowing_session_active=status_blob.mowing_session_active,
             task_resumable=status_blob.task_resumable,
         )
+    if status_blob.mowing_session_active is False:
+        # Native task metadata belongs only to the active mowing session that
+        # produced it. Do not let a retained TASK property make an idle mower
+        # look as though it is still executing the previous targeted request.
+        changes.update(task_operation=None, task_region_ids=None, task_area_ids=None)
 
     if status_blob.heartbeat_docked is True:
         changes.update(raw_docked=True, docked=True)
