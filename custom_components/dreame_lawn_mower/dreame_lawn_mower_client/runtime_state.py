@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -10,6 +11,9 @@ from typing import Any
 from .models import DreameLawnMowerSnapshot, DreameLawnMowerStatusBlob
 
 RESUME_MOWING_REQUEST = {"m": "a", "p": 0, "o": 5}
+
+_INACTIVE_HEARTBEAT_MAX_AGE_SECONDS = 130.0
+_HEARTBEAT_CLOCK_SKEW_SECONDS = 5.0
 
 _ACTIVE_TASK_CONTROL_STATES = {
     "starting": "mowing",
@@ -22,9 +26,27 @@ _ACTIVE_TASK_CONTROL_STATES = {
 def snapshot_with_heartbeat_task_state(
     snapshot: DreameLawnMowerSnapshot,
     status_blob: DreameLawnMowerStatusBlob,
+    *,
+    observed_at: float | None = None,
 ) -> DreameLawnMowerSnapshot:
     """Apply heartbeat-confirmed task and physical docking state."""
     task_status = status_blob.task_status
+    heartbeat_may_weaken_active_state = (
+        status_blob.mowing_session_active is False
+        or (
+            status_blob.heartbeat_docked is True
+            and status_blob.mowing_session_active is not True
+        )
+    )
+    if heartbeat_may_weaken_active_state and not _inactive_heartbeat_is_current(
+        snapshot,
+        status_blob,
+        observed_at=observed_at,
+    ):
+        # A cached inactive heartbeat must never clear newer or unorderable
+        # paused/running evidence. Active heartbeat evidence remains fail-closed.
+        return snapshot
+
     changes: dict[str, Any] = {}
     if status_blob.candidate_runtime_task_id is not None:
         changes["mission_task_id"] = status_blob.candidate_runtime_task_id
@@ -77,6 +99,33 @@ def _heartbeat_event_at(status_blob: DreameLawnMowerStatusBlob) -> float | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     return parsed.timestamp()
+
+
+def _inactive_heartbeat_is_current(
+    snapshot: DreameLawnMowerSnapshot,
+    status_blob: DreameLawnMowerStatusBlob,
+    *,
+    observed_at: float | None,
+) -> bool:
+    """Return whether inactive heartbeat evidence is fresh and correctly ordered."""
+    heartbeat_event_at = _heartbeat_event_at(status_blob)
+    if heartbeat_event_at is None:
+        return False
+
+    now = time.time() if observed_at is None else float(observed_at)
+    if heartbeat_event_at > now + _HEARTBEAT_CLOCK_SKEW_SECONDS:
+        return False
+    if now - heartbeat_event_at > _INACTIVE_HEARTBEAT_MAX_AGE_SECONDS:
+        return False
+
+    for event_at in (snapshot.state_event_at, snapshot.task_status_event_at):
+        if (
+            isinstance(event_at, int | float)
+            and not isinstance(event_at, bool)
+            and float(event_at) > heartbeat_event_at
+        ):
+            return False
+    return True
 
 
 def snapshot_with_cloud_presence(

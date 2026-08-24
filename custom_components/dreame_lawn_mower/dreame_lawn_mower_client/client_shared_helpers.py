@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
@@ -38,8 +39,13 @@ def _positive_int(value: Any) -> int | None:
 
 
 def _epoch_to_iso(value: Any) -> str | None:
-    parsed = _positive_int(value)
-    if parsed is None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed) or parsed < 0:
         return None
     timestamp = parsed / 1000 if parsed > 10_000_000_000 else parsed
     try:
