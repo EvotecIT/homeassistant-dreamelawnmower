@@ -254,7 +254,7 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
             "snapshot_from_device",
             return_value=raw_snapshot,
         ),
-        patch.object(client_core_module.time, "time", return_value=256.0),
+        patch.object(client_core_module.time, "time", return_value=256.614),
     ):
         reconciled = asyncio.run(client.async_get_cached_snapshot())
         switch_result = asyncio.run(client.async_switch_current_map(1))
@@ -510,6 +510,53 @@ def test_expired_a3_heartbeat_cannot_bypass_map_switch_guard() -> None:
             asyncio.run(client.async_switch_current_map(1))
 
     client._sync_switch_current_map.assert_not_called()
+
+
+@pytest.mark.parametrize("age_seconds", [154.614, 300.013, 365.0])
+def test_a3_idle_heartbeat_covers_observed_cadence_and_boundary(
+    age_seconds: float,
+) -> None:
+    """Supervised A3 standby evidence remains current through its full window."""
+    status_blob = decode_mower_status_blob(
+        _A3_STANDBY_FRAME,
+        source="realtime",
+        property_key=MOWER_RAW_STATUS_PROPERTY_KEY,
+    )
+
+    assert status_blob is not None
+    status_blob = replace(status_blob, received_at="1970-01-01T00:00:20+00:00")
+
+    reconciled = snapshot_with_heartbeat_task_state(
+        _snapshot(),
+        status_blob,
+        observed_at=20.0 + age_seconds,
+        active_state_observed_at=19.0,
+    )
+
+    assert reconciled.state == "idle"
+    assert reconciled.activity == "docked"
+    assert reconciled.mowing_session_active is False
+
+
+def test_a3_idle_heartbeat_expires_immediately_above_boundary() -> None:
+    status_blob = decode_mower_status_blob(
+        _A3_STANDBY_FRAME,
+        source="realtime",
+        property_key=MOWER_RAW_STATUS_PROPERTY_KEY,
+    )
+
+    assert status_blob is not None
+    status_blob = replace(status_blob, received_at="1970-01-01T00:00:20+00:00")
+    paused_snapshot = _snapshot()
+
+    reconciled = snapshot_with_heartbeat_task_state(
+        paused_snapshot,
+        status_blob,
+        observed_at=385.000001,
+        active_state_observed_at=19.0,
+    )
+
+    assert reconciled is paused_snapshot
 
 
 def test_standard_inactive_heartbeat_keeps_short_freshness_window() -> None:
