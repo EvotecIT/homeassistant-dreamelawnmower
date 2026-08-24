@@ -168,6 +168,22 @@ def marker_radius(style: MapRenderStyle, base: int) -> int:
     return max(2, int(round(base * style.marker_scale)))
 
 
+def project_dreame_app_point(
+    x: float,
+    y: float,
+    *,
+    max_x: float,
+    min_y: float,
+    scale: float,
+    padding: int,
+) -> tuple[float, float]:
+    """Project mower coordinates in the orientation shown by the Dreame app."""
+    return (
+        (max_x - x) * scale + padding,
+        (y - min_y) * scale + padding,
+    )
+
+
 @lru_cache(maxsize=2)
 def _font_bytes(*, bold: bool) -> bytes:
     encoded = MAP_FONT if bold else MAP_FONT_LIGHT
