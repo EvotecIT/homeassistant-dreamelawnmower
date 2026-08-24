@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from dreame_lawn_mower_client import (
@@ -23,6 +25,8 @@ class _FakePreferenceCloud:
 
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
+        self.modes = {0: 1, 1: 0}
+        self.preference_payloads: dict[tuple[int, int], list[int]] = {}
 
     def call_app_action(
         self,
@@ -48,39 +52,48 @@ class _FakePreferenceCloud:
         if command == "PREI":
             idx = int(payload["d"]["idx"])
             data = (
-                {"type": 1, "ver": [[11, 8], [12, 9]]}
+                {"type": self.modes[idx], "ver": [[11, 8], [12, 9]]}
                 if idx == 0
                 else {
-                    "type": 0,
+                    "type": self.modes[idx],
                     "ver": [],
                 }
             )
             return {"out": [{"m": "r", "r": 0, "d": data}]}
         if command == "PRE":
             if payload.get("m") == "s":
+                preference_payload = list(payload["d"])
+                self.preference_payloads[
+                    (int(preference_payload[1]), int(preference_payload[2]))
+                ] = preference_payload
                 return {"out": [{"m": "r", "r": 0, "d": {"r": 0, "ok": True}}]}
+            idx = int(payload["d"]["idx"])
             region = int(payload["d"]["region"])
-            payload_data = [
-                8,
-                0,
-                region,
-                1,
-                40,
-                2,
-                90,
-                1,
-                0,
-                1,
-                1,
-                2,
-                1,
-                15,
-                20,
-                7,
-                1,
-            ]
+            payload_data = self.preference_payloads.get(
+                (idx, region),
+                [
+                    8,
+                    idx,
+                    region,
+                    1,
+                    40,
+                    2,
+                    90,
+                    1,
+                    0,
+                    1,
+                    1,
+                    2,
+                    1,
+                    15,
+                    20,
+                    7,
+                    1,
+                ],
+            )
             return {"out": [{"m": "r", "r": 0, "d": payload_data}]}
         if command == "PREP":
+            self.modes[int(payload["d"]["idx"])] = int(payload["d"]["value"])
             return {"out": [{"m": "r", "r": 0, "d": {"r": 0, "ok": True}}]}
         raise AssertionError(f"Unexpected app command: {payload}")
 
@@ -252,6 +265,8 @@ def test_get_mowing_preferences_rejects_mismatched_payload_identity(
         aiid: int = 50,
     ) -> dict[str, object]:
         result = call_app_action(payload, siid=siid, aiid=aiid)
+        if payload.get("t") == "PREI" and payload.get("m") == "g":
+            result["out"][0]["d"]["ver"] = [[11, 8]]
         if payload.get("t") == "PRE" and payload.get("m") == "g":
             preference = result["out"][0]["d"]
             preference[1] = payload_map_index
@@ -266,6 +281,45 @@ def test_get_mowing_preferences_rejects_mismatched_payload_identity(
     assert result["available"] is False
     assert result["maps"][0]["preferences"] == []
     assert "mismatched preference identity" in result["maps"][0]["error"]
+
+
+def test_get_mowing_preferences_preserves_unaffected_areas() -> None:
+    client = _client()
+    cloud = _FakePreferenceCloud()
+    call_app_action = cloud.call_app_action
+
+    def fail_unrelated_area(
+        payload: dict[str, object],
+        *,
+        siid: int = 2,
+        aiid: int = 50,
+    ) -> dict[str, object]:
+        if (
+            payload.get("m") == "g"
+            and payload.get("t") == "PRE"
+            and payload.get("d") == {"idx": 0, "region": 12}
+        ):
+            cloud.calls.append(payload)
+            return {"out": [{"m": "r", "r": 0, "d": None}]}
+        return call_app_action(payload, siid=siid, aiid=aiid)
+
+    cloud.call_app_action = fail_unrelated_area  # type: ignore[method-assign]
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_get_mowing_preferences(map_indices=[0])
+
+    assert result["available"] is True
+    assert [item["area_id"] for item in result["maps"][0]["preferences"]] == [11]
+    assert result["maps"][0]["available"] is True
+    assert result["maps"][0]["errors"] == [
+        {
+            "idx": 0,
+            "area_id": 12,
+            "stage": "preference",
+            "error": "PRE returned invalid preference data for map 0 area 12.",
+        }
+    ]
+    assert result["errors"] == result["maps"][0]["errors"]
 
 
 def test_encode_mowing_preference_payload_round_trips_decoded_values() -> None:
@@ -493,8 +547,17 @@ def test_plan_app_mowing_preference_update_can_execute_confirmed_request() -> No
     assert result["executed"] is True
     assert result["execute_supported"] is True
     assert result["request_verified"] is True
+    assert result["verification_source"] == "preference_readback"
     assert result["response_data"] == {"r": 0, "ok": True}
-    assert [call["t"] for call in cloud.calls] == ["PREI", "PRE", "PRE", "PRE"]
+    assert [call["t"] for call in cloud.calls] == [
+        "PREI",
+        "PRE",
+        "PRE",
+        "PRE",
+        "PREI",
+        "PRE",
+        "PRE",
+    ]
 
 
 def test_preference_write_accepts_data_less_success_after_exact_readback() -> None:
@@ -543,7 +606,7 @@ def test_preference_write_accepts_data_less_success_after_exact_readback() -> No
     ]
 
 
-def test_preference_write_rejects_data_less_success_without_matching_readback() -> None:
+def test_preference_write_rejects_acknowledgement_without_matching_readback() -> None:
     client = _client()
     unchanged = decode_mowing_preference_payload(
         [220, 0, 0, 1, 40, 2, 90, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1]
@@ -554,16 +617,149 @@ def test_preference_write_rejects_data_less_success_without_matching_readback() 
     client._sync_call_app_action = lambda request: {  # type: ignore[method-assign]  # noqa: ARG005
         "m": "r",
         "r": 0,
+        "d": {"r": 0, "ok": True},
     }
 
-    with pytest.raises(
-        DreameLawnMowerCommandRejectedError,
-        match="did not confirm.*obstacle_avoidance_ai_classes",
+    with (
+        patch(
+            "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+            "client_settings.time.sleep"
+        ) as sleep,
+        pytest.raises(
+            DreameLawnMowerCommandRejectedError,
+            match="did not confirm.*obstacle_avoidance_ai_classes",
+        ),
     ):
         client._sync_plan_app_mowing_preference_update(
             map_index=0,
             area_id=0,
             changes={"obstacle_avoidance_ai_classes": ["people", "animals"]},
+            execute=True,
+            confirm_write=True,
+        )
+
+    assert [call.args[0] for call in sleep.call_args_list] == [1.0, 2.0]
+
+
+def test_preference_write_retries_until_exact_readback_catches_up() -> None:
+    client = _client()
+    before = decode_mowing_preference_payload(
+        [220, 0, 0, 1, 40, 2, 90, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1]
+    )
+    after = decode_mowing_preference_payload(
+        [221, 0, 0, 1, 40, 2, 90, 1, 0, 1, 1, 2, 1, 15, 20, 3, 1]
+    )
+    reads = iter(
+        [
+            _preference_result(before),
+            _preference_result(before),
+            _preference_result(after),
+        ]
+    )
+    client._sync_get_mowing_preferences = lambda **kwargs: next(reads)  # type: ignore[method-assign]  # noqa: ARG005
+    client._sync_call_app_action = lambda request: {  # type: ignore[method-assign]  # noqa: ARG005
+        "m": "r",
+        "r": 0,
+        "d": {"r": 0, "ok": True},
+    }
+
+    with patch(
+        "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+        "client_settings.time.sleep"
+    ) as sleep:
+        result = client._sync_plan_app_mowing_preference_update(
+            map_index=0,
+            area_id=0,
+            changes={"obstacle_avoidance_ai_classes": ["people", "animals"]},
+            execute=True,
+            confirm_write=True,
+        )
+
+    assert result["executed"] is True
+    assert result["request_verified"] is True
+    assert result["readback"]["preference"]["version"] == 221
+    sleep.assert_called_once_with(1.0)
+
+
+def test_preference_write_ignores_unrelated_area_readback_failure() -> None:
+    client = _client()
+    cloud = _FakePreferenceCloud()
+    call_app_action = cloud.call_app_action
+
+    def fail_unrelated_area(
+        payload: dict[str, object],
+        *,
+        siid: int = 2,
+        aiid: int = 50,
+    ) -> dict[str, object]:
+        if (
+            payload.get("m") == "g"
+            and payload.get("t") == "PRE"
+            and payload.get("d") == {"idx": 0, "region": 12}
+        ):
+            cloud.calls.append(payload)
+            return {"out": [{"m": "r", "r": 0, "d": None}]}
+        return call_app_action(payload, siid=siid, aiid=aiid)
+
+    cloud.call_app_action = fail_unrelated_area  # type: ignore[method-assign]
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_plan_app_mowing_preference_update(
+        map_index=0,
+        area_id=11,
+        changes={"mowing_height_cm": 5.0},
+        execute=True,
+        confirm_write=True,
+    )
+
+    assert result["executed"] is True
+    assert result["request_verified"] is True
+    assert result["readback"]["preference"]["area_id"] == 11
+    assert result["readback"]["preference"]["mowing_height_cm"] == 5.0
+
+
+def test_preference_write_fails_closed_when_target_area_readback_fails() -> None:
+    client = _client()
+    cloud = _FakePreferenceCloud()
+    call_app_action = cloud.call_app_action
+    write_started = False
+
+    def fail_target_after_write(
+        payload: dict[str, object],
+        *,
+        siid: int = 2,
+        aiid: int = 50,
+    ) -> dict[str, object]:
+        nonlocal write_started
+        if payload.get("m") == "s" and payload.get("t") == "PRE":
+            write_started = True
+        if (
+            write_started
+            and payload.get("m") == "g"
+            and payload.get("t") == "PRE"
+            and payload.get("d") == {"idx": 0, "region": 11}
+        ):
+            cloud.calls.append(payload)
+            return {"out": [{"m": "r", "r": 0, "d": None}]}
+        return call_app_action(payload, siid=siid, aiid=aiid)
+
+    cloud.call_app_action = fail_target_after_write  # type: ignore[method-assign]
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    with (
+        patch(
+            "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+            "client_settings.time.sleep"
+        ),
+        pytest.raises(
+            DreameLawnMowerConnectionError,
+            match="did not return the target area",
+        ),
+    ):
+        client._sync_plan_app_mowing_preference_update(
+            map_index=0,
+            area_id=11,
+            changes={"mowing_height_cm": 5.0},
             execute=True,
             confirm_write=True,
         )
@@ -638,8 +834,91 @@ def test_plan_app_mowing_preference_update_can_execute_mode_only_request() -> No
 
     assert result["executed"] is True
     assert result["request_verified"] is True
+    assert result["verification_source"] == "preference_readback"
     assert result["response_data"] == {"r": 0, "ok": True}
-    assert [call["t"] for call in cloud.calls] == ["PREI", "PRE", "PRE", "PREP"]
+    assert [call["t"] for call in cloud.calls] == [
+        "PREI",
+        "PRE",
+        "PRE",
+        "PREP",
+        "PREI",
+        "PRE",
+        "PRE",
+    ]
+
+
+def test_preference_write_accepts_data_less_mode_success_after_exact_readback() -> (
+    None
+):
+    client = _client()
+    before = _preference_result(
+        decode_mowing_preference_payload(
+            [220, 0, 0, 1, 40, 2, 90, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1]
+        )
+    )
+    after = _preference_result(
+        decode_mowing_preference_payload(
+            [220, 0, 0, 1, 40, 2, 90, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1]
+        )
+    )
+    after["maps"][0]["mode"] = 1
+    after["maps"][0]["mode_name"] = "custom"
+    reads = iter([before, after])
+    client._sync_get_mowing_preferences = lambda **kwargs: next(reads)  # type: ignore[method-assign]  # noqa: ARG005
+    client._sync_call_app_action = lambda request: {  # type: ignore[method-assign]  # noqa: ARG005
+        "m": "r",
+        "r": 0,
+    }
+
+    result = client._sync_plan_app_mowing_preference_update(
+        map_index=0,
+        area_id=None,
+        changes={"preference_mode": "custom"},
+        execute=True,
+        confirm_write=True,
+    )
+
+    assert result["executed"] is True
+    assert result["request_verified"] is True
+    assert result["verification_source"] == "preference_readback"
+    assert result["response_data"] is None
+
+
+def test_preference_write_rejects_acknowledged_mode_without_matching_readback() -> (
+    None
+):
+    client = _client()
+    unchanged = decode_mowing_preference_payload(
+        [220, 0, 0, 1, 40, 2, 90, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1]
+    )
+    client._sync_get_mowing_preferences = lambda **kwargs: _preference_result(  # type: ignore[method-assign]  # noqa: ARG005
+        unchanged
+    )
+    client._sync_call_app_action = lambda request: {  # type: ignore[method-assign]  # noqa: ARG005
+        "m": "r",
+        "r": 0,
+        "d": {"r": 0, "ok": True},
+    }
+
+    with (
+        patch(
+            "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+            "client_settings.time.sleep"
+        ) as sleep,
+        pytest.raises(
+            DreameLawnMowerCommandRejectedError,
+            match="readback did not confirm.*preference_mode",
+        ),
+    ):
+        client._sync_plan_app_mowing_preference_update(
+            map_index=0,
+            area_id=None,
+            changes={"preference_mode": "custom"},
+            execute=True,
+            confirm_write=True,
+        )
+
+    assert [call.args[0] for call in sleep.call_args_list] == [1.0, 2.0]
 
 
 def test_plan_app_mowing_preference_update_targets_global_area_zero() -> None:
@@ -697,46 +976,55 @@ def test_plan_app_mowing_preference_update_can_execute_mode_and_settings_sequenc
 ):
     client = _client()
     requests: list[dict[str, object]] = []
-    client._sync_get_mowing_preferences = lambda *args, **kwargs: {
-        "available": True,
-        "maps": [
-            {
-                "idx": 1,
-                "mode": 0,
-                "mode_name": "global",
-                "area_count": 1,
-                "preferences": [
-                    {
-                        "version": 10,
-                        "map_index": 1,
-                        "area_id": 5,
-                        "reported_version": 10,
-                        "efficient_mode": 1,
-                        "mowing_height_cm": 3.5,
-                        "mowing_direction_mode": 1,
-                        "mowing_direction_degrees": 10,
-                        "edge_mowing_auto": True,
-                        "edge_mowing_walk_mode": 0,
-                        "edge_mowing_obstacle_avoidance": True,
-                        "cutter_position": 0,
-                        "edge_mowing_num": 1,
-                        "obstacle_avoidance_enabled": True,
-                        "obstacle_avoidance_height_cm": 5,
-                        "obstacle_avoidance_distance_cm": 10,
-                        "obstacle_avoidance_ai": 7,
-                        "obstacle_avoidance_ai_classes": [
-                            "people",
-                            "animals",
-                            "objects",
-                        ],
-                        "edge_mowing_safe": True,
-                    }
-                ],
-            }
-        ],
+    preference = {
+        "version": 10,
+        "map_index": 1,
+        "area_id": 5,
+        "reported_version": 10,
+        "efficient_mode": 1,
+        "mowing_height_cm": 3.5,
+        "mowing_direction_mode": 1,
+        "mowing_direction_degrees": 10,
+        "edge_mowing_auto": True,
+        "edge_mowing_walk_mode": 0,
+        "edge_mowing_obstacle_avoidance": True,
+        "cutter_position": 0,
+        "edge_mowing_num": 1,
+        "obstacle_avoidance_enabled": True,
+        "obstacle_avoidance_height_cm": 5,
+        "obstacle_avoidance_distance_cm": 10,
+        "obstacle_avoidance_ai": 7,
+        "obstacle_avoidance_ai_classes": ["people", "animals", "objects"],
+        "edge_mowing_safe": True,
     }
+
+    def read_preferences(*args, **kwargs):  # noqa: ANN002, ANN003, ARG001
+        readback = dict(preference)
+        mode = 0
+        if requests:
+            mode = 1
+            readback["mowing_height_cm"] = 4.0
+        return {
+            "available": True,
+            "maps": [
+                {
+                    "idx": 1,
+                    "mode": mode,
+                    "mode_name": "custom" if mode == 1 else "global",
+                    "area_count": 1,
+                    "preferences": [readback],
+                }
+            ],
+        }
+
+    client._sync_get_mowing_preferences = read_preferences
     client._sync_call_app_action = lambda request: (
-        requests.append(request) or {"r": 0, "d": {"r": 0, "ok": True}}
+        requests.append(request)
+        or (
+            {"r": 0}
+            if request["t"] == "PREP"
+            else {"r": 0, "d": {"r": 0, "ok": True}}
+        )
     )
 
     result = client._sync_plan_app_mowing_preference_update(
@@ -748,6 +1036,7 @@ def test_plan_app_mowing_preference_update_can_execute_mode_and_settings_sequenc
     )
 
     assert result["executed"] is True
+    assert result["verification_source"] == "preference_readback"
     assert result["changed_fields"] == ["preference_mode", "mowing_height_cm"]
     assert result["request_candidate"] == {
         "sequence": [
@@ -767,7 +1056,7 @@ def test_plan_app_mowing_preference_update_can_execute_mode_and_settings_sequenc
             "d": [10, 1, 5, 1, 40, 1, 10, 1, 0, 1, 0, 1, 1, 5, 10, 7, 1],
         },
     ]
-    assert result["response_data"] == [{"r": 0, "ok": True}, {"r": 0, "ok": True}]
+    assert result["response_data"] == [None, {"r": 0, "ok": True}]
     assert [request["t"] for request in requests] == ["PREP", "PRE"]
 
 

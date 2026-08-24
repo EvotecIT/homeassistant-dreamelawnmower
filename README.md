@@ -403,7 +403,10 @@ the current app preference payload, applies the requested field changes
 locally, and exposes the candidate `PRE` request in a notification plus the
 disabled-by-default `Last Preference Write` diagnostic sensor. It sends a live
 preference write only when both `execute: true` and
-`confirm_preference_write: true` are provided.
+`confirm_preference_write: true` are provided. After every live `PRE` or `PREP`
+acknowledgement, the integration reads the selected map preferences again and
+requires the requested mode and field values to match. A generic success reply
+does not count as confirmation when the mower keeps its previous settings.
 
 The guarded preference fields include per-zone safe edge mowing through
 `edge_mowing_safe`, EdgeMaster through `edge_cutting_attachment`, and mowing
