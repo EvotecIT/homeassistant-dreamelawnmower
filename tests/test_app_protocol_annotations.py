@@ -14,6 +14,31 @@ from dreame_lawn_mower_client import (
     key_definition_label,
 )
 
+_A3_STANDBY_STATUS_FRAME = (
+    206,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    99,
+    97,
+    255,
+    0,
+    0,
+    128,
+    204,
+    186,
+    0,
+    128,
+    206,
+)
+
 
 def test_property_annotations_label_known_mower_state_and_error_keys() -> None:
     state_entry = DreameLawnMowerClient._annotate_cloud_property_entry(
@@ -191,7 +216,6 @@ def test_client_status_blob_prefers_cached_realtime_payload() -> None:
             }
         },
     )()
-
     decoded = client._sync_get_status_blob(include_cloud=False)
 
     assert decoded is not None
@@ -203,6 +227,28 @@ def test_client_status_blob_prefers_cached_realtime_payload() -> None:
     assert decoded.task_status == "idle"
     assert decoded.mowing_session_active is False
     assert decoded.notes == ()
+
+
+def test_client_status_blob_preserves_fractional_reception_time() -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    client._device = type(
+        "FakeDevice",
+        (),
+        {
+            "realtime_properties": {
+                "1.1": {
+                    "last_seen": 1_700_000_000.7500002,
+                    "value": list(_A3_STANDBY_STATUS_FRAME),
+                },
+            }
+        },
+    )()
+    client._ensure_device = lambda: client._device
+
+    decoded = client._sync_get_status_blob(include_cloud=False)
+
+    assert decoded is not None
+    assert decoded.received_at == "2023-11-14T22:13:20.750000+00:00"
 
 
 def test_status_blob_decoder_exposes_candidate_battery_byte() -> None:
