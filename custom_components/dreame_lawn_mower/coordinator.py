@@ -1544,27 +1544,63 @@ class DreameLawnMowerCoordinator(
     ) -> dict[str, Any]:
         """Serialize full-payload mowing preference reads and writes."""
         async with self._preference_write_lock:
-            result = await self.client.async_plan_app_mowing_preference_update(
-                map_index=map_index,
-                area_id=area_id,
-                changes=changes,
-                execute=execute,
-                confirm_write=confirm_write,
-            )
+            try:
+                result = await self.client.async_plan_app_mowing_preference_update(
+                    map_index=map_index,
+                    area_id=area_id,
+                    changes=changes,
+                    execute=execute,
+                    confirm_write=confirm_write,
+                )
+            except Exception:  # noqa: BLE001 - reconcile possibly applied writes
+                if execute:
+                    await self._async_reconcile_mowing_preference_write(
+                        suppress_errors=True,
+                    )
+                raise
             self.last_preference_write_result = result
             if execute:
-                self.batch_device_data_refreshed_at = None
-                try:
-                    await self.async_refresh_batch_device_data(
-                        force=True,
-                        source="mowing_preference_write",
-                    )
-                    await self.async_request_refresh()
-                finally:
-                    self.async_update_listeners()
+                await self._async_reconcile_mowing_preference_write()
             else:
                 self.async_update_listeners()
             return result
+
+    async def _async_reconcile_mowing_preference_write(
+        self,
+        *,
+        suppress_errors: bool = False,
+    ) -> None:
+        """Refresh coordinator state after a possibly applied preference write."""
+        self.batch_device_data_refreshed_at = None
+        if suppress_errors:
+            try:
+                await self.async_refresh_batch_device_data(
+                    force=True,
+                    source="mowing_preference_write",
+                )
+                await self.async_request_refresh()
+            except Exception as err:  # noqa: BLE001 - preserve write failure
+                _LOGGER.debug(
+                    "Failed to reconcile mower preferences after a write error: %s",
+                    err,
+                )
+            try:
+                self.async_update_listeners()
+            except Exception as err:  # noqa: BLE001 - preserve write failure
+                _LOGGER.debug(
+                    "Failed to notify preference listeners after a write error: %s",
+                    err,
+                )
+            return
+
+        try:
+            await self.async_refresh_batch_device_data(
+                force=True,
+                source="mowing_preference_write",
+            )
+            await self.async_request_refresh()
+        finally:
+            self.async_update_listeners()
 
     async def async_refresh_mowing_preferences(
         self,

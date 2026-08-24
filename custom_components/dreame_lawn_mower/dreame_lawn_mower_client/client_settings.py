@@ -91,6 +91,7 @@ from .work_log import (
     work_log_totals_from_app_data,
 )
 
+_MOWING_PREFERENCE_READBACK_DELAYS_SECONDS = (0.0, 1.0, 2.0)
 SCHEDULE_CURRENT_TASK_TIMEOUT_SECONDS = 5.0
 SCHEDULE_READ_DEADLINE_SECONDS = 10.0
 SCHEDULE_READ_TIMEOUT_SECONDS = 5.0
@@ -660,37 +661,27 @@ class _DreameLawnMowerClientSettingsMixin:
         if execute:
             responses: list[Any] = []
             response_payloads: list[Any] = []
-            preference_readback_required = False
             for request in request_sequence:
                 response = self._sync_call_app_action(request)
-                is_preference_settings_write = request.get("t") == "PRE"
-                missing_response_data = (
-                    is_preference_settings_write
-                    and isinstance(response, Mapping)
-                    and "d" not in response
-                )
+                is_preference_write = request.get("t") in {"PRE", "PREP"}
                 response_data = _ensure_app_write_succeeded(
                     response,
                     operation="Preference write",
-                    allow_missing_data=is_preference_settings_write,
+                    allow_missing_data=is_preference_write,
                 )
-                preference_readback_required |= missing_response_data
                 responses.append(_json_safe(response, max_depth=4))
                 response_payloads.append(_json_safe(response_data, max_depth=4))
-            if preference_readback_required:
-                result["readback"] = self._sync_verify_mowing_preference_readback(
-                    map_index=map_index,
-                    area_id=area_id,
-                    setting_changes=setting_changes,
-                    requested_mode=requested_mode,
-                )
-                result["verification_source"] = "preference_readback"
-                result["notes"].append(
-                    "The PRE response omitted data; the requested values were "
-                    "confirmed through mower preference readback."
-                )
-            else:
-                result["verification_source"] = "response_data"
+            result["readback"] = self._sync_verify_mowing_preference_readback(
+                map_index=map_index,
+                area_id=area_id,
+                setting_changes=setting_changes,
+                requested_mode=requested_mode,
+            )
+            result["verification_source"] = "preference_readback"
+            result["notes"].append(
+                "The requested values were confirmed through exact mower "
+                "preference readback."
+            )
             result["executed"] = True
             result["request_verified"] = True
             if len(responses) == 1:
@@ -709,7 +700,41 @@ class _DreameLawnMowerClientSettingsMixin:
         setting_changes: Mapping[str, Any],
         requested_mode: int | None,
     ) -> dict[str, Any]:
-        """Require exact PRE/PREI readback after a data-less success response."""
+        """Require bounded exact PRE/PREI readback after acknowledgement."""
+        last_error: (
+            DreameLawnMowerCommandRejectedError | DreameLawnMowerConnectionError | None
+        ) = None
+        for delay in _MOWING_PREFERENCE_READBACK_DELAYS_SECONDS:
+            if delay:
+                time.sleep(delay)
+            try:
+                return self._sync_read_mowing_preference_confirmation(
+                    map_index=map_index,
+                    area_id=area_id,
+                    setting_changes=setting_changes,
+                    requested_mode=requested_mode,
+                )
+            except (
+                DreameLawnMowerCommandRejectedError,
+                DreameLawnMowerConnectionError,
+            ) as err:
+                last_error = err
+
+        if last_error is not None:
+            raise last_error
+        raise DreameLawnMowerConnectionError(
+            "The mower preference readback could not be attempted."
+        )
+
+    def _sync_read_mowing_preference_confirmation(
+        self,
+        *,
+        map_index: int,
+        area_id: int | None,
+        setting_changes: Mapping[str, Any],
+        requested_mode: int | None,
+    ) -> dict[str, Any]:
+        """Perform one exact mower preference readback attempt."""
         preferences = self._sync_get_mowing_preferences(map_indices=[map_index])
         maps = preferences.get("maps")
         preference_map = (
@@ -726,9 +751,8 @@ class _DreameLawnMowerClientSettingsMixin:
         )
         if not isinstance(preference_map, Mapping):
             raise DreameLawnMowerConnectionError(
-                "Preference write returned success without response data, but the "
-                "mower did not return the target map for readback. Refresh the mower "
-                "before trying again."
+                "The mower acknowledged the preference write but did not return the "
+                "target map for readback. Refresh the mower before trying again."
             )
 
         unconfirmed_fields: list[str] = []
@@ -753,9 +777,9 @@ class _DreameLawnMowerClientSettingsMixin:
                 )
             if readback_preference is None:
                 raise DreameLawnMowerConnectionError(
-                    "Preference write returned success without response data, but the "
-                    "mower did not return the target area for readback. Refresh the "
-                    "mower before trying again."
+                    "The mower acknowledged the preference write but did not return "
+                    "the target area for readback. Refresh the mower before trying "
+                    "again."
                 )
             _, remaining_changes = apply_mowing_preference_changes(
                 readback_preference,
@@ -767,8 +791,8 @@ class _DreameLawnMowerClientSettingsMixin:
         if unconfirmed_fields:
             fields = ", ".join(dict.fromkeys(unconfirmed_fields))
             raise DreameLawnMowerCommandRejectedError(
-                "The mower returned success without response data, but preference "
-                f"readback did not confirm the requested fields: {fields}."
+                "The mower acknowledged the preference write, but readback did not "
+                f"confirm the requested fields: {fields}."
             )
 
         return {
