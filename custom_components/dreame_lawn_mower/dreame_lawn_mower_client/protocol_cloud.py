@@ -877,10 +877,19 @@ class DreameMowerDreameHomeCloudProtocol:
             return data
         return None
 
-    def get_info(self, mac: str) -> Tuple[Optional[str], Optional[str]]:
+    def get_info(
+        self,
+        mac: str,
+        *,
+        deadline: float | None = None,
+    ) -> tuple[str | None, str | None]:
         if self._did is not None:
             return " ", self._host
-        devices = self.get_devices()
+        devices = (
+            self.get_devices()
+            if deadline is None
+            else self.get_devices(deadline=deadline)
+        )
         if devices is not None:
             found = list(
                 filter(
