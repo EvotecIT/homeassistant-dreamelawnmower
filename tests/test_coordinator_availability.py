@@ -2088,6 +2088,45 @@ def test_later_exact_readback_retires_contradicted_confirmation() -> None:
     assert [item.field for item in pending] == ["obstacle_avoidance_sensitivity"]
 
 
+def test_noop_exact_readback_retires_contradicted_confirmation() -> None:
+    confirmed_at = datetime.now(UTC)
+    pending = retain_confirmed_preference_write(
+        [],
+        {
+            "executed": True,
+            "request_verified": True,
+            "verification_source": "preference_readback",
+            "map_index": 0,
+            "area_id": 1,
+            "changed_fields": ["mowing_height_cm"],
+            "readback": {
+                "map": {"idx": 0, "mode": 1, "mode_name": "custom"},
+                "preference": {"area_id": 1, "mowing_height_cm": 7.0},
+            },
+        },
+        confirmed_at=confirmed_at,
+    )
+
+    pending = retain_confirmed_preference_write(
+        pending,
+        {
+            "executed": True,
+            "request_verified": True,
+            "verification_source": "preference_readback",
+            "map_index": 0,
+            "area_id": 1,
+            "changed_fields": [],
+            "readback": {
+                "map": {"idx": 0, "mode": 1, "mode_name": "custom"},
+                "preference": {"area_id": 1, "mowing_height_cm": 6.0},
+            },
+        },
+        confirmed_at=confirmed_at + timedelta(seconds=10),
+    )
+
+    assert pending == []
+
+
 def test_batch_freshness_expires_with_pending_preference_confirmation() -> None:
     confirmed_at = datetime.now(UTC)
     coordinator = object.__new__(DreameLawnMowerCoordinator)

@@ -45,16 +45,21 @@ def retain_confirmed_preference_write(
 ) -> list[PendingPreferenceConfirmation]:
     """Retain the exact fields confirmed by a successful mower readback."""
     confirmations = _confirmations_from_write(write_result, confirmed_at=confirmed_at)
-    if not confirmations:
-        return list(pending)
-
-    replaced_keys = {_confirmation_key(item) for item in confirmations}
     retained = [
         item
         for item in pending
         if confirmed_at - item.confirmed_at <= CONFIRMED_PREFERENCE_RETENTION
-        and _confirmation_key(item) not in replaced_keys
-        and not _confirmation_contradicted_by_write(item, write_result)
+        and (
+            not _is_confirmed_write(write_result)
+            or not _confirmation_contradicted_by_write(item, write_result)
+        )
+    ]
+    if not confirmations:
+        return retained
+
+    replaced_keys = {_confirmation_key(item) for item in confirmations}
+    retained = [
+        item for item in retained if _confirmation_key(item) not in replaced_keys
     ]
     retained.extend(confirmations)
     return retained
