@@ -336,7 +336,7 @@ _SPOT_TASK_CONFIRMATION_STATUSES = _GENERIC_ACTIVE_TASK_CONFIRMATION_STATUSES | 
     "spot_cleaning",
     "spot_cleaning_paused",
 }
-_TARGETED_TASK_CONFIRMATION_DELAYS_SECONDS = (0.5, 1.5, 3.0)
+_TARGETED_TASK_CONFIRMATION_DELAYS_SECONDS = (0.5, 1.5, 3.0, 5.0, 5.0)
 
 
 def _task_confirmation_key(snapshot: DreameLawnMowerSnapshot) -> tuple[Any, ...]:

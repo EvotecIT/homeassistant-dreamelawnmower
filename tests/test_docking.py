@@ -775,7 +775,7 @@ def test_acknowledged_targeted_task_rejects_wrong_mowing_mode(
                     started=True,
                     mowing=True,
                 )
-                for _ in range(3)
+                for _ in range(5)
             ],
         ]
     )
@@ -794,7 +794,7 @@ def test_acknowledged_targeted_task_rejects_wrong_mowing_mode(
         asyncio.run(getattr(client, method_name)(*arguments))
 
     getattr(client, sync_name).assert_called_once()
-    assert client._async_refresh_authoritative_snapshot.await_count == 4
+    assert client._async_refresh_authoritative_snapshot.await_count == 6
 
 
 def test_acknowledged_zone_task_accepts_generic_heartbeat_while_transiting() -> None:
@@ -836,6 +836,57 @@ def test_acknowledged_zone_task_accepts_generic_heartbeat_while_transiting() -> 
     assert result is response
     client._sync_start_zone_mowing.assert_called_once_with([2])
     assert client._async_refresh_authoritative_snapshot.await_count == 2
+
+
+def test_acknowledged_zone_task_accepts_late_realtime_heartbeat() -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    baseline = SimpleNamespace(
+        state="charging",
+        task_status="idle",
+        task_operation=None,
+        task_region_ids=None,
+        current_zone_id=None,
+        active_segment_count=0,
+        mowing_session_active=False,
+    )
+    pending = SimpleNamespace(
+        state="mowing",
+        task_status="starting",
+        task_operation=None,
+        task_region_ids=None,
+        current_zone_id=None,
+        active_segment_count=0,
+        mowing_session_active=True,
+        started=True,
+        mowing=True,
+    )
+    confirmed = SimpleNamespace(
+        state="mowing",
+        task_status="zone_cleaning",
+        task_operation=102,
+        task_region_ids=(2,),
+        current_zone_id=2,
+        active_segment_count=1,
+        mowing_session_active=True,
+        started=True,
+        mowing=True,
+    )
+    response = {"r": 0, "d": {"r": 0}}
+    client._sync_start_zone_mowing = Mock(return_value=response)
+    client._async_refresh_authoritative_snapshot = AsyncMock(
+        side_effect=[baseline, pending, pending, pending, confirmed]
+    )
+
+    with patch(
+        "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+        "client.asyncio.sleep",
+        AsyncMock(),
+    ):
+        result = asyncio.run(client.async_start_zone_mowing([2]))
+
+    assert result is response
+    client._sync_start_zone_mowing.assert_called_once_with([2])
+    assert client._async_refresh_authoritative_snapshot.await_count == 5
 
 
 def test_zone_preflight_allows_different_region_target() -> None:
@@ -980,7 +1031,7 @@ def test_acknowledged_zone_task_fails_closed_when_readback_is_unavailable() -> N
     client._async_refresh_authoritative_snapshot = AsyncMock(
         side_effect=[
             baseline,
-            *[DreameLawnMowerConnectionError("offline") for _ in range(3)],
+            *[DreameLawnMowerConnectionError("offline") for _ in range(5)],
         ]
     )
 
@@ -998,7 +1049,7 @@ def test_acknowledged_zone_task_fails_closed_when_readback_is_unavailable() -> N
         asyncio.run(client.async_start_zone_mowing([2]))
 
     client._sync_start_zone_mowing.assert_called_once_with([2])
-    assert client._async_refresh_authoritative_snapshot.await_count == 4
+    assert client._async_refresh_authoritative_snapshot.await_count == 6
 
 
 def test_targeted_task_does_not_dispatch_without_authoritative_preflight() -> None:
@@ -1062,7 +1113,7 @@ def test_acknowledged_targeted_task_rejects_cross_target_operation(
     )
     setattr(client, sync_name, Mock(return_value={"r": 0}))
     client._async_refresh_authoritative_snapshot = AsyncMock(
-        side_effect=[baseline, wrong_task, wrong_task, wrong_task]
+        side_effect=[baseline, *[wrong_task for _ in range(5)]]
     )
 
     with (
@@ -1076,7 +1127,7 @@ def test_acknowledged_targeted_task_rejects_cross_target_operation(
         asyncio.run(getattr(client, method_name)(*arguments))
 
     getattr(client, sync_name).assert_called_once()
-    assert client._async_refresh_authoritative_snapshot.await_count == 4
+    assert client._async_refresh_authoritative_snapshot.await_count == 6
 
 
 @pytest.mark.parametrize(
@@ -1257,7 +1308,7 @@ def test_acknowledged_zone_task_rejects_different_region_ids() -> None:
     )
     client._sync_start_zone_mowing = Mock(return_value={"r": 0})
     client._async_refresh_authoritative_snapshot = AsyncMock(
-        side_effect=[baseline, wrong_zone_task, wrong_zone_task, wrong_zone_task]
+        side_effect=[baseline, *[wrong_zone_task for _ in range(5)]]
     )
 
     with (
@@ -1271,7 +1322,7 @@ def test_acknowledged_zone_task_rejects_different_region_ids() -> None:
         asyncio.run(client.async_start_zone_mowing([2]))
 
     client._sync_start_zone_mowing.assert_called_once_with([2])
-    assert client._async_refresh_authoritative_snapshot.await_count == 4
+    assert client._async_refresh_authoritative_snapshot.await_count == 6
 
 
 def test_acknowledged_spot_task_rejects_different_area_ids() -> None:
@@ -1296,7 +1347,7 @@ def test_acknowledged_spot_task_rejects_different_area_ids() -> None:
     )
     client._sync_start_spot_mowing = Mock(return_value={"r": 0})
     client._async_refresh_authoritative_snapshot = AsyncMock(
-        side_effect=[baseline, wrong_spot_task, wrong_spot_task, wrong_spot_task]
+        side_effect=[baseline, *[wrong_spot_task for _ in range(5)]]
     )
 
     with (
@@ -1310,7 +1361,7 @@ def test_acknowledged_spot_task_rejects_different_area_ids() -> None:
         asyncio.run(client.async_start_spot_mowing([4]))
 
     client._sync_start_spot_mowing.assert_called_once_with([4])
-    assert client._async_refresh_authoritative_snapshot.await_count == 4
+    assert client._async_refresh_authoritative_snapshot.await_count == 6
 
 
 def test_normal_dock_uses_heartbeat_session_state_at_base() -> None:
