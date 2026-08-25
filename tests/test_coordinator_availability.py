@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -26,6 +26,13 @@ from custom_components.dreame_lawn_mower.coordinator_connectivity import (
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     FEATURE_LIVE_VIDEO,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
+    mark_write_attempted,
+)
+from custom_components.dreame_lawn_mower.preference_cache import (
+    reconcile_pending_preference_readbacks,
+    retain_confirmed_preference_write,
 )
 from custom_components.dreame_lawn_mower.runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,
@@ -1412,14 +1419,32 @@ def test_preference_updates_are_serialized_around_full_payload_operation() -> No
 def test_failed_preference_verification_still_reconciles_coordinator_state() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator._preference_write_lock = asyncio.Lock()
+    coordinator._pending_preference_confirmations = retain_confirmed_preference_write(
+        [],
+        {
+            "executed": True,
+            "request_verified": True,
+            "verification_source": "preference_readback",
+            "map_index": 1,
+            "area_id": None,
+            "changed_fields": ["preference_mode"],
+            "readback": {
+                "map": {"idx": 1, "mode": 0, "mode_name": "global"},
+                "preference": None,
+            },
+        },
+        confirmed_at=datetime.now(UTC),
+    )
     coordinator.last_preference_write_result = None
     coordinator.batch_device_data_refreshed_at = datetime.now(UTC)
     coordinator.async_update_listeners = Mock()
     coordinator.async_refresh_batch_device_data = AsyncMock(return_value={})
     coordinator.async_request_refresh = AsyncMock()
+    attempted_error = RuntimeError("readback did not confirm")
+    mark_write_attempted(attempted_error, fields=["preference_mode"])
     coordinator.client = SimpleNamespace(
         async_plan_app_mowing_preference_update=AsyncMock(
-            side_effect=RuntimeError("readback did not confirm")
+            side_effect=attempted_error
         )
     )
 
@@ -1428,7 +1453,7 @@ def test_failed_preference_verification_still_reconciles_coordinator_state() -> 
             coordinator.async_plan_mowing_preference_update(
                 map_index=1,
                 area_id=None,
-                changes={"preference_mode": "global"},
+                changes={"preference_mode": "custom"},
                 execute=True,
                 confirm_write=True,
             )
@@ -1441,6 +1466,922 @@ def test_failed_preference_verification_still_reconciles_coordinator_state() -> 
     )
     coordinator.async_request_refresh.assert_awaited_once_with()
     coordinator.async_update_listeners.assert_called_once_with()
+    assert coordinator._pending_preference_confirmations == []
+
+
+def test_failed_preference_plan_preserves_confirmation_without_write_attempt() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._preference_write_lock = asyncio.Lock()
+    coordinator._pending_preference_confirmations = retain_confirmed_preference_write(
+        [],
+        {
+            "executed": True,
+            "request_verified": True,
+            "verification_source": "preference_readback",
+            "map_index": 1,
+            "area_id": None,
+            "changed_fields": ["preference_mode"],
+            "readback": {
+                "map": {"idx": 1, "mode": 0, "mode_name": "global"},
+                "preference": None,
+            },
+        },
+        confirmed_at=datetime.now(UTC),
+    )
+    original_confirmations = coordinator._pending_preference_confirmations
+    coordinator.last_preference_write_result = None
+    coordinator.async_update_listeners = Mock()
+    coordinator.async_refresh_batch_device_data = AsyncMock(return_value={})
+    coordinator.async_request_refresh = AsyncMock()
+    coordinator.client = SimpleNamespace(
+        async_plan_app_mowing_preference_update=AsyncMock(
+            side_effect=ValueError("invalid preference value")
+        )
+    )
+
+    with pytest.raises(ValueError, match="invalid preference value"):
+        asyncio.run(
+            coordinator.async_plan_mowing_preference_update(
+                map_index=1,
+                area_id=None,
+                changes={"preference_mode": "invalid"},
+                execute=True,
+                confirm_write=True,
+            )
+        )
+
+    assert coordinator._pending_preference_confirmations is original_confirmations
+    coordinator.async_refresh_batch_device_data.assert_not_awaited()
+    coordinator.async_request_refresh.assert_not_awaited()
+    coordinator.async_update_listeners.assert_not_called()
+
+
+def test_failed_preference_sequence_invalidates_only_attempted_fields() -> None:
+    confirmed_at = datetime.now(UTC)
+    pending = retain_confirmed_preference_write(
+        [],
+        {
+            "executed": True,
+            "request_verified": True,
+            "verification_source": "preference_readback",
+            "map_index": 0,
+            "area_id": None,
+            "changed_fields": ["preference_mode"],
+            "readback": {
+                "map": {"idx": 0, "mode": 0, "mode_name": "global"},
+                "preference": None,
+            },
+        },
+        confirmed_at=confirmed_at,
+    )
+    pending = retain_confirmed_preference_write(
+        pending,
+        {
+            "executed": True,
+            "request_verified": True,
+            "verification_source": "preference_readback",
+            "map_index": 0,
+            "area_id": 1,
+            "changed_fields": ["mowing_height_cm"],
+            "readback": {
+                "map": {"idx": 0, "mode": 0, "mode_name": "global"},
+                "preference": {"area_id": 1, "mowing_height_cm": 7.0},
+            },
+        },
+        confirmed_at=confirmed_at + timedelta(seconds=1),
+    )
+    attempted_error = RuntimeError("mode write failed")
+    mark_write_attempted(attempted_error, fields=["preference_mode"])
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._preference_write_lock = asyncio.Lock()
+    coordinator._pending_preference_confirmations = pending
+    coordinator.last_preference_write_result = None
+    coordinator.async_update_listeners = Mock()
+    coordinator.async_refresh_batch_device_data = AsyncMock(return_value={})
+    coordinator.async_request_refresh = AsyncMock()
+    coordinator.client = SimpleNamespace(
+        async_plan_app_mowing_preference_update=AsyncMock(
+            side_effect=attempted_error
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="mode write failed"):
+        asyncio.run(
+            coordinator.async_plan_mowing_preference_update(
+                map_index=0,
+                area_id=1,
+                changes={"preference_mode": "custom", "mowing_height_cm": 5.0},
+                execute=True,
+                confirm_write=True,
+            )
+        )
+
+    assert [item.field for item in coordinator._pending_preference_confirmations] == [
+        "mowing_height_cm"
+    ]
+    coordinator.async_refresh_batch_device_data.assert_awaited_once_with(
+        force=True,
+        source="mowing_preference_write",
+    )
+
+
+def _coordinator_for_confirmed_preference_write(
+    *,
+    batch_device_data,
+    confirmed,
+):
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._preference_write_lock = asyncio.Lock()
+    coordinator._pending_preference_confirmations = []
+    coordinator.last_preference_write_result = None
+    coordinator.batch_device_data = batch_device_data
+    coordinator.batch_device_data_refreshed_at = datetime.now(UTC)
+    coordinator.async_update_listeners = Mock()
+    coordinator.async_refresh_batch_device_data = AsyncMock(return_value={})
+    coordinator.async_request_refresh = AsyncMock()
+    coordinator.client = SimpleNamespace(
+        async_plan_app_mowing_preference_update=AsyncMock(return_value=confirmed)
+    )
+    return coordinator
+
+
+def test_confirmed_preference_mode_readback_wins_over_stale_batch_cache() -> None:
+    stale_batch = {
+        "captured_at": "before-write",
+        "source": "batch_device_data",
+        "batch_mowing_preferences": {
+            "available": True,
+            "maps": [
+                {
+                    "idx": 0,
+                    "mode": 1,
+                    "mode_name": "custom",
+                    "preferences": [{"area_id": 0, "mowing_height_cm": 6.0}],
+                }
+            ],
+        },
+    }
+    confirmed = {
+        "executed": True,
+        "request_verified": True,
+        "verification_source": "preference_readback",
+        "map_index": 0,
+        "area_id": None,
+        "changed_fields": ["preference_mode"],
+        "readback": {
+            "map": {"idx": 0, "mode": 0, "mode_name": "global"},
+            "preference": None,
+        },
+    }
+    coordinator = _coordinator_for_confirmed_preference_write(
+        batch_device_data=stale_batch,
+        confirmed=confirmed,
+    )
+
+    result = asyncio.run(
+        coordinator.async_plan_mowing_preference_update(
+            map_index=0,
+            area_id=None,
+            changes={"preference_mode": "global"},
+            execute=True,
+            confirm_write=True,
+        )
+    )
+
+    assert result is confirmed
+    assert coordinator.last_preference_write_result is confirmed
+    assert coordinator.batch_device_data is not stale_batch
+    assert stale_batch["batch_mowing_preferences"]["maps"][0]["mode"] == 1
+    assert coordinator.batch_device_data["source"] == (
+        "mowing_preference_write_readback"
+    )
+    reconciled_map = coordinator.batch_device_data["batch_mowing_preferences"]["maps"][
+        0
+    ]
+    assert reconciled_map["mode"] == 0
+    assert reconciled_map["mode_name"] == "global"
+    assert coordinator.batch_device_data_refreshed_at is None
+    coordinator.async_refresh_batch_device_data.assert_not_awaited()
+    coordinator.async_request_refresh.assert_awaited_once_with()
+    coordinator.async_update_listeners.assert_called_once_with()
+
+
+def test_confirmed_preference_setting_readback_updates_only_target_area() -> None:
+    batch_device_data = {
+        "batch_mowing_preferences": {
+            "available": True,
+            "maps": [
+                {
+                    "idx": 0,
+                    "available": True,
+                    "area_count": 2,
+                    "mode": 1,
+                    "mode_name": "custom",
+                    "preferences": [
+                        {
+                            "area_id": 1,
+                            "mowing_height_cm": 6.0,
+                            "obstacle_avoidance_sensitivity": 1,
+                        },
+                        {"area_id": 2, "mowing_height_cm": 5.0},
+                    ],
+                }
+            ],
+        }
+    }
+    confirmed = {
+        "executed": True,
+        "request_verified": True,
+        "verification_source": "preference_readback",
+        "map_index": 0,
+        "area_id": 1,
+        "changed_fields": [
+            "mowing_height_cm",
+            "obstacle_avoidance_sensitivity",
+        ],
+        "readback": {
+            "map": {"idx": 0, "mode": 1, "mode_name": "custom"},
+            "preference": {
+                "map_index": 0,
+                "area_id": 1,
+                "reported_version": 51,
+                "mowing_height_cm": 7.0,
+                "obstacle_avoidance_sensitivity": 2,
+            },
+        },
+    }
+    coordinator = _coordinator_for_confirmed_preference_write(
+        batch_device_data=batch_device_data,
+        confirmed=confirmed,
+    )
+
+    asyncio.run(
+        coordinator.async_plan_mowing_preference_update(
+            map_index=0,
+            area_id=1,
+            changes={
+                "mowing_height_cm": 7.0,
+                "obstacle_avoidance_sensitivity": 2,
+            },
+            execute=True,
+            confirm_write=True,
+        )
+    )
+
+    preferences = coordinator.batch_device_data["batch_mowing_preferences"]["maps"][0][
+        "preferences"
+    ]
+    assert preferences[0]["mowing_height_cm"] == 7.0
+    assert preferences[0]["obstacle_avoidance_sensitivity"] == 2
+    assert "reported_version" not in preferences[0]
+    assert preferences[1] == {"area_id": 2, "mowing_height_cm": 5.0}
+    coordinator.async_refresh_batch_device_data.assert_not_awaited()
+
+
+def test_inflight_batch_read_cannot_replace_confirmed_preference_cache() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        batch_schedule = {"available": True, "schedules": []}
+        coordinator.schedules = batch_schedule
+        coordinator.batch_device_data = None
+        coordinator.batch_device_data_refreshed_at = None
+        coordinator._schedule_cache_generation = 0
+        coordinator._pending_preference_confirmations = []
+        coordinator.async_request_refresh = AsyncMock()
+        coordinator.async_update_listeners = Mock()
+        read_started = asyncio.Event()
+        release_read = asyncio.Event()
+        read_count = 0
+
+        async def fetch_batch_device_data(**_kwargs):
+            nonlocal read_count
+            read_count += 1
+            if read_count == 1:
+                read_started.set()
+                await release_read.wait()
+            return (
+                batch_schedule,
+                {
+                    "available": True,
+                    "maps": [
+                        {
+                            "idx": 0,
+                            "mode": 1,
+                            "mode_name": "custom",
+                            "preferences": [],
+                        }
+                    ],
+                },
+                {"available": True},
+                0,
+            )
+
+        coordinator._async_fetch_batch_device_data = fetch_batch_device_data
+        refresh = asyncio.create_task(
+            coordinator.async_refresh_batch_device_data(
+                force=True,
+                source="background_before_write",
+            )
+        )
+        await read_started.wait()
+        confirmed = {
+            "executed": True,
+            "request_verified": True,
+            "verification_source": "preference_readback",
+            "map_index": 0,
+            "area_id": None,
+            "changed_fields": ["preference_mode"],
+            "readback": {
+                "map": {"idx": 0, "mode": 0, "mode_name": "global"},
+                "preference": None,
+            },
+        }
+        await coordinator._async_reconcile_mowing_preference_write(
+            confirmed_result=confirmed,
+        )
+        assert read_count == 2
+        release_read.set()
+
+        result = await refresh
+
+        assert result is not None
+        assert result["batch_mowing_preferences"]["maps"][0]["mode_name"] == (
+            "global"
+        )
+
+    asyncio.run(scenario())
+
+
+def test_matching_read_does_not_unprotect_older_inflight_batch() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        batch_schedule = {"available": True, "schedules": []}
+        coordinator.schedules = batch_schedule
+        coordinator.batch_device_data = None
+        coordinator.batch_device_data_refreshed_at = None
+        coordinator._schedule_cache_generation = 0
+        confirmed = {
+            "executed": True,
+            "request_verified": True,
+            "verification_source": "preference_readback",
+            "map_index": 0,
+            "area_id": None,
+            "changed_fields": ["preference_mode"],
+            "readback": {
+                "map": {"idx": 0, "mode": 0, "mode_name": "global"},
+                "preference": None,
+            },
+        }
+        coordinator._pending_preference_confirmations = (
+            retain_confirmed_preference_write(
+                [],
+                confirmed,
+                confirmed_at=datetime.now(UTC),
+            )
+        )
+        older_read_started = asyncio.Event()
+        release_older_read = asyncio.Event()
+        read_count = 0
+
+        async def fetch_batch_device_data(**_kwargs):
+            nonlocal read_count
+            read_count += 1
+            mode = 1
+            if read_count == 1:
+                older_read_started.set()
+                await release_older_read.wait()
+            else:
+                mode = 0
+            return (
+                batch_schedule,
+                {
+                    "available": True,
+                    "maps": [
+                        {
+                            "idx": 0,
+                            "mode": mode,
+                            "mode_name": "global" if mode == 0 else "custom",
+                            "preferences": [],
+                        }
+                    ],
+                },
+                {"available": True},
+                0,
+            )
+
+        coordinator._async_fetch_batch_device_data = fetch_batch_device_data
+        older = asyncio.create_task(
+            coordinator.async_refresh_batch_device_data(force=True)
+        )
+        await older_read_started.wait()
+        matching = await coordinator.async_refresh_batch_device_data(force=True)
+
+        assert matching is not None
+        assert matching["batch_mowing_preferences"]["maps"][0]["mode"] == 0
+        assert coordinator._pending_preference_confirmations
+
+        release_older_read.set()
+        older_result = await older
+
+        assert older_result is not None
+        assert older_result["batch_mowing_preferences"]["maps"][0]["mode"] == 0
+        assert coordinator._pending_preference_confirmations
+
+    asyncio.run(scenario())
+
+
+def test_confirmed_preference_readback_without_cache_uses_batch_fallback() -> None:
+    confirmed = {
+        "executed": True,
+        "request_verified": True,
+        "verification_source": "preference_readback",
+        "map_index": 0,
+        "area_id": None,
+        "changed_fields": ["preference_mode"],
+        "readback": {
+            "map": {"idx": 0, "mode": 0, "mode_name": "global"},
+            "preference": None,
+        },
+    }
+    coordinator = _coordinator_for_confirmed_preference_write(
+        batch_device_data=None,
+        confirmed=confirmed,
+    )
+
+    asyncio.run(
+        coordinator.async_plan_mowing_preference_update(
+            map_index=0,
+            area_id=None,
+            changes={"preference_mode": "global"},
+            execute=True,
+            confirm_write=True,
+        )
+    )
+
+    coordinator.async_refresh_batch_device_data.assert_awaited_once_with(
+        force=True,
+        source="mowing_preference_write",
+    )
+    coordinator.async_request_refresh.assert_awaited_once_with()
+    coordinator.async_update_listeners.assert_called_once_with()
+
+
+def test_confirmed_preference_readback_with_invalid_cache_uses_batch_fallback() -> None:
+    confirmed = {
+        "executed": True,
+        "request_verified": True,
+        "verification_source": "preference_readback",
+        "map_index": 0,
+        "area_id": None,
+        "changed_fields": ["preference_mode"],
+        "readback": {
+            "map": {"idx": 0, "mode": 0, "mode_name": "global"},
+            "preference": None,
+        },
+    }
+    coordinator = _coordinator_for_confirmed_preference_write(
+        batch_device_data={
+            "batch_mowing_preferences": {
+                "available": False,
+                "errors": ["partial read"],
+                "maps": [
+                    {
+                        "idx": 0,
+                        "mode": 1,
+                        "mode_name": "custom",
+                        "preferences": [],
+                    }
+                ],
+            }
+        },
+        confirmed=confirmed,
+    )
+
+    asyncio.run(
+        coordinator.async_plan_mowing_preference_update(
+            map_index=0,
+            area_id=None,
+            changes={"preference_mode": "global"},
+            execute=True,
+            confirm_write=True,
+        )
+    )
+
+    coordinator.async_refresh_batch_device_data.assert_awaited_once_with(
+        force=True,
+        source="mowing_preference_write",
+    )
+    assert coordinator._pending_preference_confirmations
+
+
+def test_confirmed_preference_readback_with_missing_map_uses_batch_fallback() -> None:
+    confirmed = {
+        "executed": True,
+        "request_verified": True,
+        "verification_source": "preference_readback",
+        "map_index": 0,
+        "area_id": None,
+        "changed_fields": ["preference_mode"],
+        "readback": {
+            "map": {"idx": 0, "mode": 0, "mode_name": "global"},
+            "preference": None,
+        },
+    }
+    coordinator = _coordinator_for_confirmed_preference_write(
+        batch_device_data={
+            "batch_mowing_preferences": {
+                "available": True,
+                "errors": [],
+                "maps": [
+                    {
+                        "idx": 1,
+                        "mode": 1,
+                        "mode_name": "custom",
+                        "preferences": [],
+                    }
+                ],
+            }
+        },
+        confirmed=confirmed,
+    )
+
+    asyncio.run(
+        coordinator.async_plan_mowing_preference_update(
+            map_index=0,
+            area_id=None,
+            changes={"preference_mode": "global"},
+            execute=True,
+            confirm_write=True,
+        )
+    )
+
+    coordinator.async_refresh_batch_device_data.assert_awaited_once_with(
+        force=True,
+        source="mowing_preference_write",
+    )
+
+
+def test_stale_batch_missing_area_retains_only_current_confirmed_target() -> None:
+    confirmed_at = datetime.now(UTC)
+    confirmed = {
+        "executed": True,
+        "request_verified": True,
+        "verification_source": "preference_readback",
+        "map_index": 0,
+        "area_id": 1,
+        "changed_fields": ["mowing_height_cm"],
+        "readback": {
+            "map": {"idx": 0, "mode": 1, "mode_name": "custom"},
+            "preference": {
+                "map_index": 0,
+                "area_id": 1,
+                "mowing_height_cm": 7.0,
+            },
+        },
+    }
+    pending = retain_confirmed_preference_write(
+        [],
+        confirmed,
+        confirmed_at=confirmed_at,
+    )
+    incoming = {
+        "available": True,
+        "maps": [
+            {
+                "idx": 0,
+                "available": True,
+                "area_count": 1,
+                "mode": 1,
+                "mode_name": "custom",
+                "preferences": [{"area_id": 2, "mowing_height_cm": 6.0}],
+            }
+        ],
+    }
+
+    result, remaining = reconcile_pending_preference_readbacks(
+        incoming,
+        pending,
+        now=confirmed_at + timedelta(seconds=5),
+    )
+
+    areas = result["maps"][0]["preferences"]
+    assert areas == [
+        {"area_id": 2, "mowing_height_cm": 6.0},
+        {"map_index": 0, "area_id": 1, "mowing_height_cm": 7.0},
+    ]
+    assert result["maps"][0]["area_count"] == 2
+    assert result["maps"][0]["available"] is True
+    assert remaining == pending
+
+
+def test_failed_preference_read_preserves_error_and_unrelated_map_evidence() -> None:
+    confirmed_at = datetime.now(UTC)
+    confirmed = {
+        "executed": True,
+        "request_verified": True,
+        "verification_source": "preference_readback",
+        "map_index": 0,
+        "area_id": None,
+        "changed_fields": ["preference_mode"],
+        "readback": {
+            "map": {"idx": 0, "mode": 0, "mode_name": "global"},
+            "preference": None,
+        },
+    }
+    pending = retain_confirmed_preference_write(
+        [],
+        confirmed,
+        confirmed_at=confirmed_at,
+    )
+    incoming = {
+        "available": False,
+        "errors": [{"stage": "settings", "error": "partial read"}],
+        "maps": [
+            {"idx": 0, "mode": 1, "mode_name": "custom", "preferences": []},
+            {
+                "idx": 1,
+                "mode": 1,
+                "mode_name": "custom",
+                "preferences": [{"area_id": 4, "mowing_height_cm": 5.0}],
+            },
+        ],
+    }
+
+    result, remaining = reconcile_pending_preference_readbacks(
+        incoming,
+        pending,
+        now=confirmed_at + timedelta(seconds=5),
+    )
+
+    assert result["available"] is False
+    assert result["errors"] == [{"stage": "settings", "error": "partial read"}]
+    assert result["maps"][0]["mode_name"] == "global"
+    assert result["maps"][1] is incoming["maps"][1]
+    assert remaining == pending
+
+
+def test_active_preference_confirmations_are_not_evicted_by_new_writes() -> None:
+    confirmed_at = datetime.now(UTC)
+    pending = []
+    for area_id in range(20):
+        pending = retain_confirmed_preference_write(
+            pending,
+            {
+                "executed": True,
+                "request_verified": True,
+                "verification_source": "preference_readback",
+                "map_index": 0,
+                "area_id": area_id,
+                "changed_fields": ["mowing_height_cm"],
+                "readback": {
+                    "map": {"idx": 0, "mode": 1, "mode_name": "custom"},
+                    "preference": {
+                        "area_id": area_id,
+                        "mowing_height_cm": 4.0,
+                    },
+                },
+            },
+            confirmed_at=confirmed_at + timedelta(seconds=area_id),
+        )
+
+    assert len(pending) == 20
+
+    pending = retain_confirmed_preference_write(
+        pending,
+        {
+            "executed": True,
+            "request_verified": True,
+            "verification_source": "preference_readback",
+            "map_index": 1,
+            "area_id": None,
+            "changed_fields": ["preference_mode"],
+            "readback": {
+                "map": {"idx": 1, "mode": 0, "mode_name": "global"},
+                "preference": None,
+            },
+        },
+        confirmed_at=confirmed_at + timedelta(minutes=3),
+    )
+
+    assert len(pending) == 1
+
+
+def test_later_exact_readback_retires_contradicted_confirmation() -> None:
+    confirmed_at = datetime.now(UTC)
+    pending = retain_confirmed_preference_write(
+        [],
+        {
+            "executed": True,
+            "request_verified": True,
+            "verification_source": "preference_readback",
+            "map_index": 0,
+            "area_id": 1,
+            "changed_fields": ["mowing_height_cm"],
+            "readback": {
+                "map": {"idx": 0, "mode": 1, "mode_name": "custom"},
+                "preference": {"area_id": 1, "mowing_height_cm": 7.0},
+            },
+        },
+        confirmed_at=confirmed_at,
+    )
+
+    pending = retain_confirmed_preference_write(
+        pending,
+        {
+            "executed": True,
+            "request_verified": True,
+            "verification_source": "preference_readback",
+            "map_index": 0,
+            "area_id": 1,
+            "changed_fields": ["obstacle_avoidance_sensitivity"],
+            "readback": {
+                "map": {"idx": 0, "mode": 1, "mode_name": "custom"},
+                "preference": {
+                    "area_id": 1,
+                    "mowing_height_cm": 6.0,
+                    "obstacle_avoidance_sensitivity": 2,
+                },
+            },
+        },
+        confirmed_at=confirmed_at + timedelta(seconds=10),
+    )
+
+    assert [item.field for item in pending] == ["obstacle_avoidance_sensitivity"]
+
+
+def test_noop_exact_readback_retires_contradicted_confirmation() -> None:
+    confirmed_at = datetime.now(UTC)
+    pending = retain_confirmed_preference_write(
+        [],
+        {
+            "executed": True,
+            "request_verified": True,
+            "verification_source": "preference_readback",
+            "map_index": 0,
+            "area_id": 1,
+            "changed_fields": ["mowing_height_cm"],
+            "readback": {
+                "map": {"idx": 0, "mode": 1, "mode_name": "custom"},
+                "preference": {"area_id": 1, "mowing_height_cm": 7.0},
+            },
+        },
+        confirmed_at=confirmed_at,
+    )
+
+    pending = retain_confirmed_preference_write(
+        pending,
+        {
+            "executed": True,
+            "request_verified": True,
+            "verification_source": "preference_readback",
+            "map_index": 0,
+            "area_id": 1,
+            "changed_fields": [],
+            "readback": {
+                "map": {"idx": 0, "mode": 1, "mode_name": "custom"},
+                "preference": {"area_id": 1, "mowing_height_cm": 6.0},
+            },
+        },
+        confirmed_at=confirmed_at + timedelta(seconds=10),
+    )
+
+    assert pending == []
+
+
+def test_batch_freshness_expires_with_pending_preference_confirmation() -> None:
+    confirmed_at = datetime.now(UTC)
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._pending_preference_confirmations = retain_confirmed_preference_write(
+        [],
+        {
+            "executed": True,
+            "request_verified": True,
+            "verification_source": "preference_readback",
+            "map_index": 0,
+            "area_id": None,
+            "changed_fields": ["preference_mode"],
+            "readback": {
+                "map": {"idx": 0, "mode": 0, "mode_name": "global"},
+                "preference": None,
+            },
+        },
+        confirmed_at=confirmed_at,
+    )
+
+    refreshed_at = coordinator._batch_device_data_refreshed_at_for_preferences(
+        confirmed_at + timedelta(seconds=30)
+    )
+
+    assert (
+        refreshed_at + coordinator_module.BATCH_DEVICE_DATA_REFRESH_INTERVAL
+        == confirmed_at + timedelta(minutes=2)
+    )
+
+
+def test_event_preference_refresh_preserves_recent_exact_confirmation() -> None:
+    stale_preferences = {
+        "available": True,
+        "errors": [],
+        "maps": [
+            {
+                "idx": 0,
+                "mode": 1,
+                "mode_name": "custom",
+                "preferences": [],
+            }
+        ],
+    }
+    confirmed = {
+        "executed": True,
+        "request_verified": True,
+        "verification_source": "preference_readback",
+        "map_index": 0,
+        "area_id": None,
+        "changed_fields": ["preference_mode"],
+        "readback": {
+            "map": {"idx": 0, "mode": 0, "mode_name": "global"},
+            "preference": None,
+        },
+    }
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._preference_write_lock = asyncio.Lock()
+    coordinator._pending_preference_confirmations = retain_confirmed_preference_write(
+        [],
+        confirmed,
+        confirmed_at=datetime.now(UTC),
+    )
+    coordinator.app_maps = {"maps": [{"idx": 0}]}
+    coordinator.batch_device_data = None
+    coordinator.client = SimpleNamespace(
+        async_get_batch_mowing_preferences=AsyncMock(return_value=stale_preferences)
+    )
+
+    result = asyncio.run(
+        coordinator.async_refresh_mowing_preferences(source="preference_event")
+    )
+
+    assert result is not None
+    assert result["maps"][0]["mode_name"] == "global"
+    assert coordinator.batch_device_data["batch_mowing_preferences"] is result
+
+
+def test_preference_confirmation_clears_on_convergence_and_expires() -> None:
+    confirmed_at = datetime.now(UTC)
+    confirmed = {
+        "executed": True,
+        "request_verified": True,
+        "verification_source": "preference_readback",
+        "map_index": 0,
+        "area_id": None,
+        "changed_fields": ["preference_mode"],
+        "readback": {
+            "map": {"idx": 0, "mode": 0, "mode_name": "global"},
+            "preference": None,
+        },
+    }
+    pending = retain_confirmed_preference_write(
+        [],
+        confirmed,
+        confirmed_at=confirmed_at,
+    )
+    converged = {
+        "available": True,
+        "maps": [
+            {
+                "idx": 0,
+                "mode": 0,
+                "mode_name": "global",
+                "preferences": [],
+            }
+        ],
+    }
+    stale = {
+        "available": True,
+        "maps": [
+            {
+                "idx": 0,
+                "mode": 1,
+                "mode_name": "custom",
+                "preferences": [],
+            }
+        ],
+    }
+
+    converged_result, converged_pending = reconcile_pending_preference_readbacks(
+        converged,
+        pending,
+        now=confirmed_at + timedelta(seconds=5),
+    )
+    expired_result, expired_pending = reconcile_pending_preference_readbacks(
+        stale,
+        pending,
+        now=confirmed_at + timedelta(minutes=2, seconds=1),
+    )
+
+    assert converged_result is converged
+    assert converged_pending == []
+    assert expired_result is stale
+    assert expired_pending == []
 
 
 def test_preference_reconciliation_listener_does_not_mask_write_error() -> None:
@@ -1453,9 +2394,11 @@ def test_preference_reconciliation_listener_does_not_mask_write_error() -> None:
     )
     coordinator.async_refresh_batch_device_data = AsyncMock(return_value={})
     coordinator.async_request_refresh = AsyncMock()
+    attempted_error = RuntimeError("readback did not confirm")
+    mark_write_attempted(attempted_error, fields=["preference_mode"])
     coordinator.client = SimpleNamespace(
         async_plan_app_mowing_preference_update=AsyncMock(
-            side_effect=RuntimeError("readback did not confirm")
+            side_effect=attempted_error
         )
     )
 

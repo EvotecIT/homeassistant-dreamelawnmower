@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .exceptions import (
+    DreameLawnMowerCommandRejectedError,
     DreameLawnMowerConnectionError,
 )
 from .exceptions import (
@@ -78,9 +79,13 @@ def _ensure_app_write_succeeded(
     allow_missing_data: bool = False,
 ) -> Any:
     """Require an explicit mower acknowledgement for a state-changing request."""
-    if not isinstance(value, Mapping) or value.get("r") != 0:
+    if not isinstance(value, Mapping) or value.get("r") is None:
         raise DreameLawnMowerConnectionError(
             f"{operation} failed: the mower did not acknowledge the request."
+        )
+    if value.get("r") != 0:
+        raise DreameLawnMowerCommandRejectedError(
+            f"{operation} failed: the mower rejected the request."
         )
     if "d" not in value and not allow_missing_data:
         raise DreameLawnMowerConnectionError(
@@ -88,8 +93,8 @@ def _ensure_app_write_succeeded(
         )
     data = value.get("d")
     if isinstance(data, Mapping) and data.get("r") not in (None, 0):
-        raise DreameLawnMowerConnectionError(
-            f"{operation} failed: the mower rejected the request: {value}"
+        raise DreameLawnMowerCommandRejectedError(
+            f"{operation} failed: the mower rejected the request."
         )
     return data
 

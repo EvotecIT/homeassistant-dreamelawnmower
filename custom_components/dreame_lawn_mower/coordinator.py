@@ -43,6 +43,7 @@ from .coordinator_refresh import (
     runtime_tracking_active,
 )
 from .diagnostic_events import DreameLawnMowerDiagnosticEventStore
+from .dreame_lawn_mower_client.exceptions import attempted_write_fields
 from .dreame_lawn_mower_client.feature_capabilities import FEATURE_LIVE_VIDEO
 from .dreame_lawn_mower_client.models import (
     DreameLawnMowerStatusBlob,
@@ -54,6 +55,14 @@ from .dreame_lawn_mower_client.schedule import (
     encode_schedule_payload_text,
 )
 from .performance import DreameLawnMowerPerformanceTracker
+from .preference_cache import (
+    CONFIRMED_PREFERENCE_RETENTION,
+    PendingPreferenceConfirmation,
+    invalidate_preference_confirmations,
+    merge_confirmed_preference_readback,
+    reconcile_pending_preference_readbacks,
+    retain_confirmed_preference_write,
+)
 from .runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,
     observe_runtime_session_state,
@@ -192,6 +201,11 @@ class DreameLawnMowerCoordinator(
         self._batch_schedule_read_completed_at: float | None = None
         self._schedule_write_lock = asyncio.Lock()
         self._preference_write_lock = asyncio.Lock()
+        self._pending_preference_confirmations: list[
+            PendingPreferenceConfirmation
+        ] = []
+        self._preference_read_generation = 0
+        self._active_preference_read_generations: set[int] = set()
         self._device_settings_write_lock = asyncio.Lock()
         self._device_refresh_lock = asyncio.Lock()
         self._device_snapshot_generation = 0
@@ -1503,35 +1517,50 @@ class DreameLawnMowerCoordinator(
             return self.batch_device_data
 
         schedule_generation = getattr(self, "_schedule_cache_generation", 0)
+        preference_read_generation = self._begin_preference_read()
         try:
-            (
-                batch_schedule,
-                batch_mowing_preferences,
-                batch_ota_info,
-                batch_schedule_generation,
-            ) = await self._async_fetch_batch_device_data(force=force)
-        except Exception as err:  # noqa: BLE001 - best-effort extra metadata
-            _LOGGER.debug("Failed to refresh batch device data: %s", err)
-            return self.batch_device_data
+            try:
+                (
+                    batch_schedule,
+                    batch_mowing_preferences,
+                    batch_ota_info,
+                    batch_schedule_generation,
+                ) = await self._async_fetch_batch_device_data(force=force)
+            except Exception as err:  # noqa: BLE001 - best-effort extra metadata
+                _LOGGER.debug("Failed to refresh batch device data: %s", err)
+                return self.batch_device_data
 
-        payload = {
-            "captured_at": now.isoformat(),
-            "source": source,
-            "batch_schedule": batch_schedule,
-            "batch_mowing_preferences": batch_mowing_preferences,
-            "batch_ota_info": batch_ota_info,
-        }
-        self.batch_device_data = payload
-        self.batch_device_data_refreshed_at = now
-        if batch_schedule is not self.schedules and self._schedule_refresh_is_current(
-            schedule_generation
-        ):
-            self._cache_batch_schedules(
-                batch_schedule,
-                now=now,
-                read_generation=batch_schedule_generation,
+            batch_mowing_preferences = self._reconcile_pending_preference_readbacks(
+                batch_mowing_preferences,
+                now=datetime.now(UTC),
+                allow_convergence=self._preference_read_can_converge(
+                    preference_read_generation
+                ),
             )
-        return payload
+
+            payload = {
+                "captured_at": now.isoformat(),
+                "source": source,
+                "batch_schedule": batch_schedule,
+                "batch_mowing_preferences": batch_mowing_preferences,
+                "batch_ota_info": batch_ota_info,
+            }
+            self.batch_device_data = payload
+            self.batch_device_data_refreshed_at = (
+                self._batch_device_data_refreshed_at_for_preferences(now)
+            )
+            if (
+                batch_schedule is not self.schedules
+                and self._schedule_refresh_is_current(schedule_generation)
+            ):
+                self._cache_batch_schedules(
+                    batch_schedule,
+                    now=now,
+                    read_generation=batch_schedule_generation,
+                )
+            return payload
+        finally:
+            self._finish_preference_read(preference_read_generation)
 
     async def async_plan_mowing_preference_update(
         self,
@@ -1552,15 +1581,26 @@ class DreameLawnMowerCoordinator(
                     execute=execute,
                     confirm_write=confirm_write,
                 )
-            except Exception:  # noqa: BLE001 - reconcile possibly applied writes
-                if execute:
+            except Exception as err:  # noqa: BLE001 - reconcile attempted writes
+                attempted_fields = attempted_write_fields(err)
+                if execute and attempted_fields:
+                    self._pending_preference_confirmations = (
+                        invalidate_preference_confirmations(
+                            getattr(self, "_pending_preference_confirmations", []),
+                            map_index=map_index,
+                            area_id=area_id,
+                            fields=attempted_fields,
+                        )
+                    )
                     await self._async_reconcile_mowing_preference_write(
                         suppress_errors=True,
                     )
                 raise
             self.last_preference_write_result = result
             if execute:
-                await self._async_reconcile_mowing_preference_write()
+                await self._async_reconcile_mowing_preference_write(
+                    confirmed_result=result,
+                )
             else:
                 self.async_update_listeners()
             return result
@@ -1568,6 +1608,7 @@ class DreameLawnMowerCoordinator(
     async def _async_reconcile_mowing_preference_write(
         self,
         *,
+        confirmed_result: Mapping[str, Any] | None = None,
         suppress_errors: bool = False,
     ) -> None:
         """Refresh coordinator state after a possibly applied preference write."""
@@ -1594,10 +1635,28 @@ class DreameLawnMowerCoordinator(
             return
 
         try:
-            await self.async_refresh_batch_device_data(
-                force=True,
-                source="mowing_preference_write",
+            confirmed_at = datetime.now(UTC)
+            self._pending_preference_confirmations = (
+                retain_confirmed_preference_write(
+                    getattr(self, "_pending_preference_confirmations", []),
+                    confirmed_result or {},
+                    confirmed_at=confirmed_at,
+                )
             )
+            reconciled = merge_confirmed_preference_readback(
+                self.batch_device_data,
+                confirmed_result or {},
+                confirmed_at=confirmed_at,
+            )
+            if reconciled is not None:
+                reconciled["captured_at"] = confirmed_at.isoformat()
+                reconciled["source"] = "mowing_preference_write_readback"
+                self.batch_device_data = reconciled
+            else:
+                await self.async_refresh_batch_device_data(
+                    force=True,
+                    source="mowing_preference_write",
+                )
             await self.async_request_refresh()
         finally:
             self.async_update_listeners()
@@ -1609,24 +1668,87 @@ class DreameLawnMowerCoordinator(
     ) -> dict[str, Any] | None:
         """Refresh only SETTINGS.* after the mower announces a change."""
         async with self._preference_write_lock:
+            preference_read_generation = self._begin_preference_read()
             try:
-                preferences = await self.client.async_get_batch_mowing_preferences(
-                    include_raw=False,
-                    map_index_hints=_app_map_index_hints(self.app_maps),
-                )
-            except Exception as err:  # noqa: BLE001 - retry on the next event pass
-                _LOGGER.debug("Failed to refresh mowing preferences: %s", err)
-                return None
-            if not _batch_mowing_preferences_read_succeeded(preferences):
-                _LOGGER.debug("Mowing preference refresh returned no usable maps")
-                return None
+                try:
+                    preferences = await self.client.async_get_batch_mowing_preferences(
+                        include_raw=False,
+                        map_index_hints=_app_map_index_hints(self.app_maps),
+                    )
+                except Exception as err:  # noqa: BLE001 - retry on next event pass
+                    _LOGGER.debug("Failed to refresh mowing preferences: %s", err)
+                    return None
+                if not _batch_mowing_preferences_read_succeeded(preferences):
+                    _LOGGER.debug("Mowing preference refresh returned no usable maps")
+                    return None
 
-            payload = dict(self.batch_device_data or {})
-            payload["captured_at"] = datetime.now(UTC).isoformat()
-            payload["source"] = source
-            payload["batch_mowing_preferences"] = preferences
-            self.batch_device_data = payload
-            return preferences
+                preferences = self._reconcile_pending_preference_readbacks(
+                    preferences,
+                    now=datetime.now(UTC),
+                    allow_convergence=self._preference_read_can_converge(
+                        preference_read_generation
+                    ),
+                )
+
+                payload = dict(self.batch_device_data or {})
+                payload["captured_at"] = datetime.now(UTC).isoformat()
+                payload["source"] = source
+                payload["batch_mowing_preferences"] = preferences
+                self.batch_device_data = payload
+                return preferences
+            finally:
+                self._finish_preference_read(preference_read_generation)
+
+    def _reconcile_pending_preference_readbacks(
+        self,
+        preferences: Mapping[str, Any],
+        *,
+        now: datetime,
+        allow_convergence: bool,
+    ) -> dict[str, Any]:
+        """Keep exact write fields until batch preference state catches up."""
+        reconciled, pending = reconcile_pending_preference_readbacks(
+            preferences,
+            getattr(self, "_pending_preference_confirmations", []),
+            now=now,
+            allow_convergence=allow_convergence,
+        )
+        self._pending_preference_confirmations = pending
+        return reconciled
+
+    def _batch_device_data_refreshed_at_for_preferences(
+        self,
+        now: datetime,
+    ) -> datetime:
+        """Schedule another batch read no later than confirmation expiry."""
+        pending = getattr(self, "_pending_preference_confirmations", [])
+        if not pending:
+            return now
+        earliest_expiry = min(
+            item.confirmed_at + CONFIRMED_PREFERENCE_RETENTION for item in pending
+        )
+        return min(now, earliest_expiry - BATCH_DEVICE_DATA_REFRESH_INTERVAL)
+
+    def _begin_preference_read(self) -> int:
+        """Track a preference read until its result can no longer publish."""
+        generation = getattr(self, "_preference_read_generation", 0) + 1
+        self._preference_read_generation = generation
+        active = getattr(self, "_active_preference_read_generations", None)
+        if active is None:
+            active = set()
+            self._active_preference_read_generations = active
+        active.add(generation)
+        return generation
+
+    def _preference_read_can_converge(self, generation: int) -> bool:
+        """Return whether no other preference read can publish after this one."""
+        return getattr(self, "_active_preference_read_generations", set()) == {
+            generation
+        }
+
+    def _finish_preference_read(self, generation: int) -> None:
+        """Mark a preference read as unable to publish further state."""
+        getattr(self, "_active_preference_read_generations", set()).discard(generation)
 
     async def _async_fetch_batch_device_data(
         self,
