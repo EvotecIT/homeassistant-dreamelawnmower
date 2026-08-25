@@ -34,6 +34,19 @@ class DreameLawnMowerCommandRejectedError(DreameLawnMowerConnectionError):
     """The mower explicitly rejected a state-changing app command."""
 
 
+_WRITE_ATTEMPTED_ATTRIBUTE = "_dreame_write_attempted"
+
+
+def mark_write_attempted(error: Exception) -> None:
+    """Record that a state-changing request may have reached the mower."""
+    setattr(error, _WRITE_ATTEMPTED_ATTRIBUTE, True)
+
+
+def write_was_attempted(error: BaseException) -> bool:
+    """Return whether an error followed a state-changing request attempt."""
+    return getattr(error, _WRITE_ATTEMPTED_ATTRIBUTE, False) is True
+
+
 class DreameLawnMowerCloudAPIError(DeviceException):
     """A privacy-safe numeric error returned by the Dreame cloud API."""
 

@@ -51,6 +51,7 @@ from .debug_ota_catalog import (
 from .exceptions import (
     DreameLawnMowerCommandRejectedError,
     DreameLawnMowerConnectionError,
+    mark_write_attempted,
 )
 from .exceptions import (
     DreameLawnMowerError as DreameLawnMowerError,
@@ -659,37 +660,44 @@ class _DreameLawnMowerClientSettingsMixin:
             ),
         }
         if execute:
-            responses: list[Any] = []
-            response_payloads: list[Any] = []
-            for request in request_sequence:
-                response = self._sync_call_app_action(request)
-                is_preference_write = request.get("t") in {"PRE", "PREP"}
-                response_data = _ensure_app_write_succeeded(
-                    response,
-                    operation="Preference write",
-                    allow_missing_data=is_preference_write,
+            write_attempted = False
+            try:
+                responses: list[Any] = []
+                response_payloads: list[Any] = []
+                for request in request_sequence:
+                    write_attempted = True
+                    response = self._sync_call_app_action(request)
+                    is_preference_write = request.get("t") in {"PRE", "PREP"}
+                    response_data = _ensure_app_write_succeeded(
+                        response,
+                        operation="Preference write",
+                        allow_missing_data=is_preference_write,
+                    )
+                    responses.append(_json_safe(response, max_depth=4))
+                    response_payloads.append(_json_safe(response_data, max_depth=4))
+                result["readback"] = self._sync_verify_mowing_preference_readback(
+                    map_index=map_index,
+                    area_id=area_id,
+                    setting_changes=setting_changes,
+                    requested_mode=requested_mode,
                 )
-                responses.append(_json_safe(response, max_depth=4))
-                response_payloads.append(_json_safe(response_data, max_depth=4))
-            result["readback"] = self._sync_verify_mowing_preference_readback(
-                map_index=map_index,
-                area_id=area_id,
-                setting_changes=setting_changes,
-                requested_mode=requested_mode,
-            )
-            result["verification_source"] = "preference_readback"
-            result["notes"].append(
-                "The requested values were confirmed through exact mower "
-                "preference readback."
-            )
-            result["executed"] = True
-            result["request_verified"] = True
-            if len(responses) == 1:
-                result["response"] = responses[0]
-                result["response_data"] = response_payloads[0]
-            else:
-                result["responses"] = responses
-                result["response_data"] = response_payloads
+                result["verification_source"] = "preference_readback"
+                result["notes"].append(
+                    "The requested values were confirmed through exact mower "
+                    "preference readback."
+                )
+                result["executed"] = True
+                result["request_verified"] = True
+                if len(responses) == 1:
+                    result["response"] = responses[0]
+                    result["response_data"] = response_payloads[0]
+                else:
+                    result["responses"] = responses
+                    result["response_data"] = response_payloads
+            except Exception as err:
+                if write_attempted:
+                    mark_write_attempted(err)
+                raise
         return result
 
     def _sync_verify_mowing_preference_readback(

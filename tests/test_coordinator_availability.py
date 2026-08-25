@@ -27,6 +27,9 @@ from custom_components.dreame_lawn_mower.coordinator_connectivity import (
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     FEATURE_LIVE_VIDEO,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
+    mark_write_attempted,
+)
 from custom_components.dreame_lawn_mower.preference_cache import (
     reconcile_pending_preference_readbacks,
     retain_confirmed_preference_write,
@@ -1437,9 +1440,11 @@ def test_failed_preference_verification_still_reconciles_coordinator_state() -> 
     coordinator.async_update_listeners = Mock()
     coordinator.async_refresh_batch_device_data = AsyncMock(return_value={})
     coordinator.async_request_refresh = AsyncMock()
+    attempted_error = RuntimeError("readback did not confirm")
+    mark_write_attempted(attempted_error)
     coordinator.client = SimpleNamespace(
         async_plan_app_mowing_preference_update=AsyncMock(
-            side_effect=RuntimeError("readback did not confirm")
+            side_effect=attempted_error
         )
     )
 
@@ -1462,6 +1467,53 @@ def test_failed_preference_verification_still_reconciles_coordinator_state() -> 
     coordinator.async_request_refresh.assert_awaited_once_with()
     coordinator.async_update_listeners.assert_called_once_with()
     assert coordinator._pending_preference_confirmations == []
+
+
+def test_failed_preference_plan_preserves_confirmation_without_write_attempt() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._preference_write_lock = asyncio.Lock()
+    coordinator._pending_preference_confirmations = retain_confirmed_preference_write(
+        [],
+        {
+            "executed": True,
+            "request_verified": True,
+            "verification_source": "preference_readback",
+            "map_index": 1,
+            "area_id": None,
+            "changed_fields": ["preference_mode"],
+            "readback": {
+                "map": {"idx": 1, "mode": 0, "mode_name": "global"},
+                "preference": None,
+            },
+        },
+        confirmed_at=datetime.now(UTC),
+    )
+    original_confirmations = coordinator._pending_preference_confirmations
+    coordinator.last_preference_write_result = None
+    coordinator.async_update_listeners = Mock()
+    coordinator.async_refresh_batch_device_data = AsyncMock(return_value={})
+    coordinator.async_request_refresh = AsyncMock()
+    coordinator.client = SimpleNamespace(
+        async_plan_app_mowing_preference_update=AsyncMock(
+            side_effect=ValueError("invalid preference value")
+        )
+    )
+
+    with pytest.raises(ValueError, match="invalid preference value"):
+        asyncio.run(
+            coordinator.async_plan_mowing_preference_update(
+                map_index=1,
+                area_id=None,
+                changes={"preference_mode": "invalid"},
+                execute=True,
+                confirm_write=True,
+            )
+        )
+
+    assert coordinator._pending_preference_confirmations is original_confirmations
+    coordinator.async_refresh_batch_device_data.assert_not_awaited()
+    coordinator.async_request_refresh.assert_not_awaited()
+    coordinator.async_update_listeners.assert_not_called()
 
 
 def _coordinator_for_confirmed_preference_write(
@@ -2273,9 +2325,11 @@ def test_preference_reconciliation_listener_does_not_mask_write_error() -> None:
     )
     coordinator.async_refresh_batch_device_data = AsyncMock(return_value={})
     coordinator.async_request_refresh = AsyncMock()
+    attempted_error = RuntimeError("readback did not confirm")
+    mark_write_attempted(attempted_error)
     coordinator.client = SimpleNamespace(
         async_plan_app_mowing_preference_update=AsyncMock(
-            side_effect=RuntimeError("readback did not confirm")
+            side_effect=attempted_error
         )
     )
 

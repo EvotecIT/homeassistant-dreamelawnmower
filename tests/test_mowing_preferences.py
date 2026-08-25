@@ -6,6 +6,9 @@ from unittest.mock import patch
 
 import pytest
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
+    write_was_attempted,
+)
 from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
     DreameLawnMowerCommandRejectedError,
@@ -933,7 +936,7 @@ def test_preference_write_rejects_acknowledged_mode_without_matching_readback() 
         pytest.raises(
             DreameLawnMowerCommandRejectedError,
             match="readback did not confirm.*preference_mode",
-        ),
+        ) as exc_info,
     ):
         client._sync_plan_app_mowing_preference_update(
             map_index=0,
@@ -944,6 +947,7 @@ def test_preference_write_rejects_acknowledged_mode_without_matching_readback() 
         )
 
     assert [call.args[0] for call in sleep.call_args_list] == [1.0, 2.0]
+    assert write_was_attempted(exc_info.value) is True
 
 
 def test_plan_app_mowing_preference_update_targets_global_area_zero() -> None:
@@ -1092,12 +1096,16 @@ def test_plan_app_mowing_preference_update_rejects_global_mode_with_zone_changes
     cloud = _FakePreferenceCloud()
     client._sync_get_cloud_protocol = lambda: cloud
 
-    with pytest.raises(ValueError, match="preference_mode=global"):
+    with pytest.raises(ValueError, match="preference_mode=global") as exc_info:
         client._sync_plan_app_mowing_preference_update(
             map_index=0,
             area_id=11,
             changes={"preference_mode": "global", "mowing_height_cm": 5},
+            execute=True,
+            confirm_write=True,
         )
+
+    assert write_was_attempted(exc_info.value) is False
 
 
 def test_plan_app_mowing_preference_update_rejects_unconfirmed_execute() -> None:
