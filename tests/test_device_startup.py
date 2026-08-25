@@ -5,11 +5,16 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
+
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     device as device_module,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device import (
     DreameMowerDevice,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
+    DeviceUpdateFailedException,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_manager import (
     DreameMapMowerMapManager,
@@ -61,6 +66,39 @@ def test_connect_device_defers_initial_map_request(monkeypatch) -> None:
     map_manager.update.assert_not_called()
     assert mower.available is True
     assert mower._ready is True
+
+
+def test_bounded_update_skips_reconnection_and_attempts_http_readback() -> None:
+    readback_error = RuntimeError("stop after bounded readback dispatch")
+    mower = SimpleNamespace(
+        _update_running=False,
+        _update_interval=10,
+        cloud_connected=False,
+        device_connected=False,
+        connect_cloud=Mock(),
+        connect_device=Mock(),
+        capability=SimpleNamespace(backup_map=False),
+        status=SimpleNamespace(active=False),
+        _consumable_change=False,
+        _last_settings_request=10**20,
+        _map_manager=None,
+        _protocol=SimpleNamespace(dreame_cloud=True),
+        _request_properties=Mock(side_effect=readback_error),
+    )
+
+    with pytest.raises(
+        DeviceUpdateFailedException,
+        match="stop after bounded readback dispatch",
+    ):
+        DreameMowerDevice.update(
+            mower,
+            force_request_properties=True,
+            deadline=123.0,
+        )
+
+    mower.connect_cloud.assert_not_called()
+    mower.connect_device.assert_not_called()
+    assert mower._request_properties.call_args.kwargs == {"deadline": 123.0}
 
 
 def test_background_map_failure_still_schedules_next_refresh(monkeypatch) -> None:

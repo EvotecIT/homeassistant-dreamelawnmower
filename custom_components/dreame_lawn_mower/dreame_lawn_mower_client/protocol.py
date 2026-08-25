@@ -176,34 +176,71 @@ class DreameMowerProtocol:
         self.device_cloud.send_async(
             cloud_callback, method, parameters=parameters, retry_count=retry_count)
 
-    def send(self, method, parameters: Any = None, retry_count: int = 0) -> Any:
+    def send(
+        self,
+        method,
+        parameters: Any = None,
+        retry_count: int = 0,
+        *,
+        deadline: float | None = None,
+    ) -> Any:
         if not self.device_cloud:
             raise DeviceException("Cloud connection missing") from None
 
         if not self.device_cloud.logged_in:
             _LOGGER.info("send: Not logged in over cloud. Try to log in.")
             # Use different session for device cloud
-            self.device_cloud.login()
+            if deadline is None:
+                self.device_cloud.login()
+            else:
+                self.device_cloud.login(deadline=deadline)
             if self.device_cloud.logged_in and not self.device_cloud.device_id:
                 if self.cloud.device_id:
                     _LOGGER.info("send: cloud device id")
                     self.device_cloud._did = self.cloud.device_id
                 elif self._mac:
                     _LOGGER.info("send: using _mac")
-                    self.device_cloud.get_info(self._mac)
+                    if deadline is None:
+                        self.device_cloud.get_info(self._mac)
+                    else:
+                        self.device_cloud.get_info(self._mac, deadline=deadline)
 
         if not self.device_cloud.logged_in:
             raise DeviceException(
                 "Unable to login to device over cloud") from None
 
         _LOGGER.debug("DreameMowerProtocol.send %s %s", method, parameters)
+        send_options = {}
+        if deadline is not None:
+            send_options["deadline"] = deadline
         response = self.device_cloud.send(
-            method, parameters=parameters, retry_count=retry_count)
+            method,
+            parameters=parameters,
+            retry_count=retry_count,
+            **send_options,
+        )
         _LOGGER.debug("DreameMowerProtocol.send response %s", response)
         return response
 
-    def get_properties(self, parameters: Any = None, retry_count: int = 1) -> Any:
-        return self.send("get_properties", parameters=parameters, retry_count=retry_count)
+    def get_properties(
+        self,
+        parameters: Any = None,
+        retry_count: int = 1,
+        *,
+        deadline: float | None = None,
+    ) -> Any:
+        if deadline is None:
+            return self.send(
+                "get_properties",
+                parameters=parameters,
+                retry_count=retry_count,
+            )
+        return self.send(
+            "get_properties",
+            parameters=parameters,
+            retry_count=retry_count,
+            deadline=deadline,
+        )
 
     def set_property(self, siid: int, piid: int, value: Any = None, retry_count: int = 0) -> Any:
         return self.set_properties(

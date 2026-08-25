@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from time import time
 from types import SimpleNamespace
 from typing import Any
@@ -43,6 +44,7 @@ from .control_options import (
     mowing_action_label,
 )
 from .coordinator import DreameLawnMowerCoordinator
+from .dreame_lawn_mower_client import DreameLawnMowerConnectionError
 from .dreame_lawn_mower_client.feature_capabilities import (
     resolved_feature_capabilities,
 )
@@ -73,6 +75,14 @@ ACTIVITY_MAP = {
     ACTIVITY_PAUSED: LawnMowerActivity.PAUSED,
     ACTIVITY_RETURNING: LawnMowerActivity.RETURNING,
 }
+
+
+async def _async_run_targeted_mowing_command(command: Awaitable[Any]) -> Any:
+    """Run a targeted command with Home Assistant service error semantics."""
+    try:
+        return await command
+    except DreameLawnMowerConnectionError as err:
+        raise HomeAssistantError(str(err)) from err
 
 
 def _normalize_contour_ids(contour_ids: Any) -> list[list[int]]:
@@ -492,7 +502,9 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
                 raise HomeAssistantError(
                     "No current-map edge contour is available to start."
                 )
-            await self.coordinator.client.async_start_edge_mowing([list(contour_id)])
+            await _async_run_targeted_mowing_command(
+                self.coordinator.client.async_start_edge_mowing([list(contour_id)])
+            )
             new_session = True
         elif action == MOWING_ACTION_ZONE:
             self._ensure_selected_map_matches_active()
@@ -505,7 +517,9 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             zone_id = self._selected_zone_id(zone_entries)
             if zone_id is None:
                 raise HomeAssistantError("No current-map zone is available to start.")
-            await self.coordinator.client.async_start_zone_mowing([zone_id])
+            await _async_run_targeted_mowing_command(
+                self.coordinator.client.async_start_zone_mowing([zone_id])
+            )
             new_session = True
         elif action == MOWING_ACTION_SPOT:
             self._ensure_selected_map_matches_active()
@@ -517,7 +531,9 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             spot_id = self._selected_spot_id(spot_entries)
             if spot_id is None:
                 raise HomeAssistantError("No current-map spot is available to start.")
-            await self.coordinator.client.async_start_spot_mowing([spot_id])
+            await _async_run_targeted_mowing_command(
+                self.coordinator.client.async_start_spot_mowing([spot_id])
+            )
             new_session = True
         else:
             new_session = await self.coordinator.client.async_start_mowing()
@@ -548,7 +564,9 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         )
         runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
         observed_generation = runtime_mission_session_generation(runtime_cache)
-        await self.coordinator.client.async_start_zone_mowing(normalized)
+        await _async_run_targeted_mowing_command(
+            self.coordinator.client.async_start_zone_mowing(normalized)
+        )
         self.coordinator.selected_mowing_action = MOWING_ACTION_ZONE
         self.coordinator.selected_zone_id = (
             normalized[0] if len(normalized) == 1 else None
@@ -580,7 +598,9 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         )
         runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
         observed_generation = runtime_mission_session_generation(runtime_cache)
-        await self.coordinator.client.async_start_spot_mowing(normalized)
+        await _async_run_targeted_mowing_command(
+            self.coordinator.client.async_start_spot_mowing(normalized)
+        )
         self.coordinator.selected_mowing_action = MOWING_ACTION_SPOT
         self.coordinator.selected_spot_id = (
             normalized[0] if len(normalized) == 1 else None
@@ -625,7 +645,9 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             )
         runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
         observed_generation = runtime_mission_session_generation(runtime_cache)
-        await self.coordinator.client.async_start_edge_mowing(normalized)
+        await _async_run_targeted_mowing_command(
+            self.coordinator.client.async_start_edge_mowing(normalized)
+        )
         self.coordinator.selected_mowing_action = MOWING_ACTION_EDGE
         self.coordinator.selected_contour_id = (
             tuple(normalized[0]) if len(normalized) == 1 else None

@@ -266,18 +266,46 @@ class _DreameLawnMowerClientCoreMixin:
 
     async def _async_refresh_authoritative_snapshot(
         self,
+        *,
+        deadline: float | None = None,
     ) -> DreameLawnMowerSnapshot:
         """Force properties and apply heartbeat reconciliation before decisions."""
-        device = await asyncio.to_thread(self._sync_update_device, True)
+        if deadline is None:
+            device = await asyncio.to_thread(self._sync_update_device, True)
+        else:
+            device = await asyncio.to_thread(
+                self._sync_update_device,
+                True,
+                deadline=deadline,
+            )
         return await asyncio.to_thread(self._snapshot_from_device, device)
 
-    def _sync_update_device(self, force_request_properties: bool = False):
+    async def _async_cached_authoritative_snapshot(self) -> DreameLawnMowerSnapshot:
+        """Apply heartbeat reconciliation to the current in-memory device state."""
+        device = await asyncio.to_thread(self._ensure_device)
+        return await asyncio.to_thread(self._snapshot_from_device, device)
+
+    def _sync_update_device(
+        self,
+        force_request_properties: bool = False,
+        *,
+        deadline: float | None = None,
+    ):
         device = self._ensure_device()
         try:
             if force_request_properties:
-                device.update(force_request_properties=True)
+                if deadline is None:
+                    device.update(force_request_properties=True)
+                else:
+                    device.update(
+                        force_request_properties=True,
+                        deadline=deadline,
+                    )
             else:
-                device.update()
+                if deadline is None:
+                    device.update()
+                else:
+                    device.update(deadline=deadline)
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
         return device

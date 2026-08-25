@@ -508,7 +508,12 @@ class _DreameMowerDeviceStateMixin:
             key in _EXTERNAL_REALTIME_UPDATE_KEYS and previous_value != value
         )
 
-    def _request_properties(self, properties: list[DreameMowerProperty] = None) -> bool:
+    def _request_properties(
+        self,
+        properties: list[DreameMowerProperty] = None,
+        *,
+        deadline: float | None = None,
+    ) -> bool:
         """Request properties from the device."""
         if not properties:
             properties = self._default_properties
@@ -521,7 +526,11 @@ class _DreameMowerDeviceStateMixin:
                 if "aiid" not in mapping and (not self._ready or prop.value in self.data):
                     property_list.append({"did": str(prop.value), **mapping})
 
-        results = self._protocol.get_properties(property_list)
+        results = (
+            self._protocol.get_properties(property_list)
+            if deadline is None
+            else self._protocol.get_properties(property_list, deadline=deadline)
+        )
         return self._handle_properties(results)
 
     def _update_status(self, task_status: DreameMowerTaskStatus, status: DreameMowerStatus) -> None:

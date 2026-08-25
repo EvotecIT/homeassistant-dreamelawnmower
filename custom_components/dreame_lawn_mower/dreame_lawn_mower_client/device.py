@@ -546,14 +546,19 @@ class DreameMowerDevice(
 
 
 
-    def update(self, force_request_properties=False) -> None:
+    def update(
+        self,
+        force_request_properties=False,
+        *,
+        deadline: float | None = None,
+    ) -> None:
         """Get properties from the device."""
         _LOGGER.debug("Device update: %s", self._update_interval)
 
         if self._update_running:
             return
 
-        if not self.cloud_connected:
+        if not self.cloud_connected and deadline is None:
             self.connect_cloud()
             self.connect_device()
 
@@ -644,11 +649,22 @@ class DreameMowerDevice(
                 force_request_properties = True
 
             if not self._protocol.dreame_cloud or force_request_properties:
-                self._request_properties(properties)
+                if deadline is None:
+                    self._request_properties(properties)
+                else:
+                    self._request_properties(properties, deadline=deadline)
             elif self.status.map_backup_status:
-                self._request_properties([DreameMowerProperty.MAP_BACKUP_STATUS])
+                properties = [DreameMowerProperty.MAP_BACKUP_STATUS]
+                if deadline is None:
+                    self._request_properties(properties)
+                else:
+                    self._request_properties(properties, deadline=deadline)
             elif self.status.map_recovery_status:
-                self._request_properties([DreameMowerProperty.MAP_RECOVERY_STATUS])
+                properties = [DreameMowerProperty.MAP_RECOVERY_STATUS]
+                if deadline is None:
+                    self._request_properties(properties)
+                else:
+                    self._request_properties(properties, deadline=deadline)
         except Exception as ex:
             self._update_running = False
             raise DeviceUpdateFailedException(ex) from None

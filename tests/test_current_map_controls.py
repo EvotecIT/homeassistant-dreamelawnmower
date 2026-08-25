@@ -20,6 +20,9 @@ from custom_components.dreame_lawn_mower.control_options import (
     current_zone_entries,
 )
 from custom_components.dreame_lawn_mower.coordinator import DreameLawnMowerCoordinator
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    DreameLawnMowerCommandRejectedError,
+)
 from custom_components.dreame_lawn_mower.lawn_mower import DreameLawnMower
 from custom_components.dreame_lawn_mower.runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,
@@ -1617,6 +1620,43 @@ def test_lawn_mower_zone_service_uses_validated_current_map_ids() -> None:
     assert entity.coordinator.selected_contour_id is None
     assert entity.coordinator.selected_spot_id is None
     entity.coordinator.async_request_refresh.assert_awaited_once()
+
+
+def test_lawn_mower_zone_service_raises_home_assistant_error_on_failed_confirmation(
+) -> None:
+    client = SimpleNamespace(
+        async_start_zone_mowing=AsyncMock(
+            side_effect=DreameLawnMowerCommandRejectedError(
+                "The mower task type could not be confirmed."
+            )
+        )
+    )
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = SimpleNamespace(
+        client=client,
+        selected_map_index=None,
+        vector_map_details=_vector_map_details(),
+        batch_device_data=_batch_device_data(),
+        app_maps=_app_maps(),
+        selected_mowing_action="all_area",
+        selected_contour_id=(3, 0),
+        selected_zone_id=1,
+        selected_spot_id=2,
+        async_request_refresh=AsyncMock(),
+    )
+
+    with pytest.raises(
+        HomeAssistantError,
+        match="task type could not be confirmed",
+    ):
+        asyncio.run(entity.async_start_zone_mowing([1]))
+
+    client.async_start_zone_mowing.assert_awaited_once_with([1])
+    assert entity.coordinator.selected_mowing_action == "all_area"
+    assert entity.coordinator.selected_zone_id == 1
+    assert entity.coordinator.selected_contour_id == (3, 0)
+    assert entity.coordinator.selected_spot_id == 2
+    entity.coordinator.async_request_refresh.assert_not_awaited()
 
 
 def test_lawn_mower_zone_service_rejects_unknown_active_map_id() -> None:

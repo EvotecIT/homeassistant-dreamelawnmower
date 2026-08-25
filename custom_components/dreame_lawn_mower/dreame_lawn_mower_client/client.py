@@ -336,7 +336,8 @@ _SPOT_TASK_CONFIRMATION_STATUSES = _GENERIC_ACTIVE_TASK_CONFIRMATION_STATUSES | 
     "spot_cleaning",
     "spot_cleaning_paused",
 }
-_TARGETED_TASK_CONFIRMATION_DELAYS_SECONDS = (0.5, 1.5, 3.0)
+_TARGETED_TASK_CONFIRMATION_OFFSETS_SECONDS = (0.5, 2.0, 5.0, 9.0, 12.0, 14.5)
+_TARGETED_TASK_CONFIRMATION_TIMEOUT_SECONDS = 15.0
 
 
 def _task_confirmation_key(snapshot: DreameLawnMowerSnapshot) -> tuple[Any, ...]:
@@ -711,17 +712,15 @@ class DreameLawnMowerClient(
         except _DreameLawnMowerCommandRejectedError:
             raise
         except DreameLawnMowerConnectionError as err:
-            return await self._async_reconcile_ambiguous_mutation(
-                "start zone mowing",
-                err,
-                lambda snapshot: _targeted_task_confirmed(
-                    snapshot,
-                    baseline,
-                    _ZONE_TASK_CONFIRMATION_STATUSES,
-                    expected_operation=_MOWING_TASK_ZONE,
-                    requested_target_ids=requested_zone_ids,
-                ),
+            await self._async_require_targeted_task_confirmation(
+                "zone mowing",
+                baseline,
+                _ZONE_TASK_CONFIRMATION_STATUSES,
+                expected_operation=_MOWING_TASK_ZONE,
+                requested_target_ids=requested_zone_ids,
+                original_error=err,
             )
+            return None
         await self._async_require_targeted_task_confirmation(
             "zone mowing",
             baseline,
@@ -754,16 +753,14 @@ class DreameLawnMowerClient(
         except _DreameLawnMowerCommandRejectedError:
             raise
         except DreameLawnMowerConnectionError as err:
-            return await self._async_reconcile_ambiguous_mutation(
-                "start edge mowing",
-                err,
-                lambda snapshot: _targeted_task_confirmed(
-                    snapshot,
-                    baseline,
-                    _EDGE_TASK_CONFIRMATION_STATUSES,
-                    expected_operation=_MOWING_TASK_EDGE,
-                ),
+            await self._async_require_targeted_task_confirmation(
+                "edge mowing",
+                baseline,
+                _EDGE_TASK_CONFIRMATION_STATUSES,
+                expected_operation=_MOWING_TASK_EDGE,
+                original_error=err,
             )
+            return None
         await self._async_require_targeted_task_confirmation(
             "edge mowing",
             baseline,
@@ -791,17 +788,15 @@ class DreameLawnMowerClient(
         except _DreameLawnMowerCommandRejectedError:
             raise
         except DreameLawnMowerConnectionError as err:
-            return await self._async_reconcile_ambiguous_mutation(
-                "start spot mowing",
-                err,
-                lambda snapshot: _targeted_task_confirmed(
-                    snapshot,
-                    baseline,
-                    _SPOT_TASK_CONFIRMATION_STATUSES,
-                    expected_operation=_MOWING_TASK_SPOT,
-                    requested_target_ids=requested_spot_ids,
-                ),
+            await self._async_require_targeted_task_confirmation(
+                "spot mowing",
+                baseline,
+                _SPOT_TASK_CONFIRMATION_STATUSES,
+                expected_operation=_MOWING_TASK_SPOT,
+                requested_target_ids=requested_spot_ids,
+                original_error=err,
             )
+            return None
         await self._async_require_targeted_task_confirmation(
             "spot mowing",
             baseline,
@@ -839,16 +834,38 @@ class DreameLawnMowerClient(
         *,
         expected_operation: int,
         requested_target_ids: frozenset[int] | None = None,
+        original_error: DreameLawnMowerConnectionError | None = None,
     ) -> None:
-        """Require authoritative task-type evidence after a successful write."""
+        """Require bounded task-type evidence after a targeted write attempt."""
         readable = False
-        for delay in _TARGETED_TASK_CONFIRMATION_DELAYS_SECONDS:
-            await asyncio.sleep(delay)
+        loop = asyncio.get_running_loop()
+        started_at = loop.time()
+        deadline = time.monotonic() + _TARGETED_TASK_CONFIRMATION_TIMEOUT_SECONDS
+        for offset in _TARGETED_TASK_CONFIRMATION_OFFSETS_SECONDS:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            delay = started_at + offset - loop.time()
+            if delay > 0:
+                await asyncio.sleep(min(delay, remaining))
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             try:
-                snapshot = await self._async_refresh_authoritative_snapshot()
+                snapshot = await self._async_refresh_authoritative_snapshot(
+                    deadline=deadline,
+                )
             except DreameLawnMowerConnectionError:
-                continue
-            readable = True
+                try:
+                    snapshot = await self._async_cached_authoritative_snapshot()
+                except DreameLawnMowerConnectionError:
+                    continue
+                readable = readable or (
+                    _task_confirmation_key(snapshot)
+                    != _task_confirmation_key(baseline)
+                )
+            else:
+                readable = True
             if _targeted_task_confirmed(
                 snapshot,
                 baseline,
@@ -858,6 +875,12 @@ class DreameLawnMowerClient(
             ):
                 return
 
+        if original_error is not None:
+            raise DreameLawnMowerConnectionError(
+                f"The mower may have received the {label} request, but its exact "
+                "targeted task could not be confirmed after the connection was "
+                "interrupted. Refresh the mower state before trying again."
+            ) from original_error
         if readable:
             raise _DreameLawnMowerCommandRejectedError(
                 f"The mower acknowledged the {label} request but did not enter "
