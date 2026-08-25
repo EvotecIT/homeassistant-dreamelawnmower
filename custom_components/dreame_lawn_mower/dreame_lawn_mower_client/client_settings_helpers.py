@@ -177,7 +177,12 @@ def _mowing_preference_overview(preference: Mapping[str, Any]) -> dict[str, Any]
             "obstacle_avoidance_ai_classes"
         ),
         "edge_mowing_safe": preference.get("edge_mowing_safe"),
+        "obstacle_avoidance_sensitivity": preference.get(
+            "obstacle_avoidance_sensitivity"
+        ),
         "edge_cutting_attachment": preference.get("edge_cutting_attachment"),
+        "steering_mode": preference.get("steering_mode"),
+        "cutter_position_height": preference.get("cutter_position_height"),
     }
 
 

@@ -563,10 +563,10 @@ def test_plan_app_mowing_preference_update_can_execute_confirmed_request() -> No
 def test_preference_write_accepts_data_less_success_after_exact_readback() -> None:
     client = _client()
     before = decode_mowing_preference_payload(
-        [220, 0, 0, 1, 40, 2, 90, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1, 2, 0, 1]
+        [220, 0, 0, 1, 40, 2, 90, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1, 2, 0, 1, 35]
     )
     after = decode_mowing_preference_payload(
-        [221, 0, 0, 1, 40, 2, 90, 1, 0, 1, 1, 2, 1, 15, 20, 3, 1, 2, 0, 1]
+        [221, 0, 0, 1, 40, 2, 90, 1, 0, 1, 1, 2, 1, 15, 20, 3, 1, 2, 0, 1, 35]
     )
     reads = iter(
         [
@@ -597,11 +597,36 @@ def test_preference_write_accepts_data_less_success_after_exact_readback() -> No
         "people",
         "animals",
     ]
+    assert result["readback"]["preference"]["obstacle_avoidance_sensitivity"] == 2
+    assert result["readback"]["preference"]["steering_mode"] == 1
+    assert result["readback"]["preference"]["cutter_position_height"] == 35
     assert requests == [
         {
             "m": "s",
             "t": "PRE",
-            "d": [220, 0, 0, 1, 40, 2, 90, 1, 0, 1, 1, 2, 1, 15, 20, 3, 1, 2, 0, 1],
+            "d": [
+                220,
+                0,
+                0,
+                1,
+                40,
+                2,
+                90,
+                1,
+                0,
+                1,
+                1,
+                2,
+                1,
+                15,
+                20,
+                3,
+                1,
+                2,
+                0,
+                1,
+                35,
+            ],
         }
     ]
 
