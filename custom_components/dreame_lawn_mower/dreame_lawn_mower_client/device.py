@@ -558,11 +558,7 @@ class DreameMowerDevice(
         if self._update_running:
             return
 
-        if not self.cloud_connected:
-            if deadline is not None:
-                raise DeviceUpdateFailedException(
-                    "The cloud connection is unavailable for the bounded update."
-                )
+        if not self.cloud_connected and deadline is None:
             self.connect_cloud()
             self.connect_device()
 

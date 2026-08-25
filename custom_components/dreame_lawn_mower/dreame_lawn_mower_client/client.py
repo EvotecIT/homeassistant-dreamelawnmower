@@ -336,7 +336,7 @@ _SPOT_TASK_CONFIRMATION_STATUSES = _GENERIC_ACTIVE_TASK_CONFIRMATION_STATUSES | 
     "spot_cleaning",
     "spot_cleaning_paused",
 }
-_TARGETED_TASK_CONFIRMATION_OFFSETS_SECONDS = (0.5, 2.0, 5.0, 9.0, 12.0)
+_TARGETED_TASK_CONFIRMATION_OFFSETS_SECONDS = (0.5, 2.0, 5.0, 9.0, 12.0, 14.5)
 _TARGETED_TASK_CONFIRMATION_TIMEOUT_SECONDS = 15.0
 
 
@@ -860,6 +860,10 @@ class DreameLawnMowerClient(
                     snapshot = await self._async_cached_authoritative_snapshot()
                 except DreameLawnMowerConnectionError:
                     continue
+                readable = readable or (
+                    _task_confirmation_key(snapshot)
+                    != _task_confirmation_key(baseline)
+                )
             else:
                 readable = True
             if _targeted_task_confirmed(
