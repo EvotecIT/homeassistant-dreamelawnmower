@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
-    write_was_attempted,
+    attempted_write_fields,
 )
 from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
@@ -806,7 +806,10 @@ def test_preference_write_still_rejects_failed_outer_response() -> None:
         "r": 5,
     }
 
-    with pytest.raises(DreameLawnMowerConnectionError, match="did not acknowledge"):
+    with pytest.raises(
+        DreameLawnMowerCommandRejectedError,
+        match="rejected",
+    ) as exc_info:
         client._sync_plan_app_mowing_preference_update(
             map_index=0,
             area_id=0,
@@ -814,6 +817,8 @@ def test_preference_write_still_rejects_failed_outer_response() -> None:
             execute=True,
             confirm_write=True,
         )
+
+    assert attempted_write_fields(exc_info.value) == ()
 
 
 def test_plan_app_mowing_preference_update_can_build_mode_only_request() -> None:
@@ -947,7 +952,7 @@ def test_preference_write_rejects_acknowledged_mode_without_matching_readback() 
         )
 
     assert [call.args[0] for call in sleep.call_args_list] == [1.0, 2.0]
-    assert write_was_attempted(exc_info.value) is True
+    assert attempted_write_fields(exc_info.value) == ("preference_mode",)
 
 
 def test_plan_app_mowing_preference_update_targets_global_area_zero() -> None:
@@ -1089,6 +1094,98 @@ def test_plan_app_mowing_preference_update_can_execute_mode_and_settings_sequenc
     assert [request["t"] for request in requests] == ["PREP", "PRE"]
 
 
+def test_preference_write_error_reports_only_attempted_command_fields() -> None:
+    client = _client()
+    preference = decode_mowing_preference_payload(
+        [8, 0, 11, 1, 40, 2, 35, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1]
+    )
+    client._sync_get_mowing_preferences = lambda **kwargs: _preference_result(  # type: ignore[method-assign]  # noqa: ARG005
+        preference
+    )
+    attempted_commands: list[str] = []
+
+    def fail_first_write(request):  # noqa: ANN001, ANN202
+        attempted_commands.append(request["t"])
+        raise RuntimeError("mode write failed")
+
+    client._sync_call_app_action = fail_first_write  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="mode write failed") as exc_info:
+        client._sync_plan_app_mowing_preference_update(
+            map_index=0,
+            area_id=11,
+            changes={"preference_mode": "custom", "mowing_height_cm": 4.5},
+            execute=True,
+            confirm_write=True,
+        )
+
+    assert attempted_commands == ["PREP"]
+    assert attempted_write_fields(exc_info.value) == ("preference_mode",)
+
+
+def test_preference_write_error_reports_full_attempted_area_payload() -> None:
+    client = _client()
+    preference = decode_mowing_preference_payload(
+        [8, 0, 11, 1, 40, 2, 35, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1]
+    )
+    client._sync_get_mowing_preferences = lambda **kwargs: _preference_result(  # type: ignore[method-assign]  # noqa: ARG005
+        preference
+    )
+    attempted_commands: list[str] = []
+
+    def fail_area_write(request):  # noqa: ANN001, ANN202
+        attempted_commands.append(request["t"])
+        if request["t"] == "PREP":
+            return {"r": 0}
+        raise RuntimeError("area write failed")
+
+    client._sync_call_app_action = fail_area_write  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="area write failed") as exc_info:
+        client._sync_plan_app_mowing_preference_update(
+            map_index=0,
+            area_id=11,
+            changes={"preference_mode": "custom", "mowing_height_cm": 4.5},
+            execute=True,
+            confirm_write=True,
+        )
+
+    attempted_fields = attempted_write_fields(exc_info.value)
+    assert attempted_commands == ["PREP", "PRE"]
+    assert "preference_mode" in attempted_fields
+    assert "mowing_height_cm" in attempted_fields
+    assert "efficient_mode" in attempted_fields
+
+
+def test_rejected_area_command_reports_only_prior_mode_write() -> None:
+    client = _client()
+    preference = decode_mowing_preference_payload(
+        [8, 0, 11, 1, 40, 2, 35, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1]
+    )
+    client._sync_get_mowing_preferences = lambda **kwargs: _preference_result(  # type: ignore[method-assign]  # noqa: ARG005
+        preference
+    )
+
+    def reject_area_write(request):  # noqa: ANN001, ANN202
+        return {"r": 0} if request["t"] == "PREP" else {"r": 5}
+
+    client._sync_call_app_action = reject_area_write  # type: ignore[method-assign]
+
+    with pytest.raises(
+        DreameLawnMowerCommandRejectedError,
+        match="rejected",
+    ) as exc_info:
+        client._sync_plan_app_mowing_preference_update(
+            map_index=0,
+            area_id=11,
+            changes={"preference_mode": "custom", "mowing_height_cm": 4.5},
+            execute=True,
+            confirm_write=True,
+        )
+
+    assert attempted_write_fields(exc_info.value) == ("preference_mode",)
+
+
 def test_plan_app_mowing_preference_update_rejects_global_mode_with_zone_changes() -> (
     None
 ):
@@ -1105,7 +1202,7 @@ def test_plan_app_mowing_preference_update_rejects_global_mode_with_zone_changes
             confirm_write=True,
         )
 
-    assert write_was_attempted(exc_info.value) is False
+    assert attempted_write_fields(exc_info.value) == ()
 
 
 def test_plan_app_mowing_preference_update_rejects_unconfirmed_execute() -> None:

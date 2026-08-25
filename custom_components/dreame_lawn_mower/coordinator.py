@@ -43,7 +43,7 @@ from .coordinator_refresh import (
     runtime_tracking_active,
 )
 from .diagnostic_events import DreameLawnMowerDiagnosticEventStore
-from .dreame_lawn_mower_client.exceptions import write_was_attempted
+from .dreame_lawn_mower_client.exceptions import attempted_write_fields
 from .dreame_lawn_mower_client.feature_capabilities import FEATURE_LIVE_VIDEO
 from .dreame_lawn_mower_client.models import (
     DreameLawnMowerStatusBlob,
@@ -1582,13 +1582,14 @@ class DreameLawnMowerCoordinator(
                     confirm_write=confirm_write,
                 )
             except Exception as err:  # noqa: BLE001 - reconcile attempted writes
-                if execute and write_was_attempted(err):
+                attempted_fields = attempted_write_fields(err)
+                if execute and attempted_fields:
                     self._pending_preference_confirmations = (
                         invalidate_preference_confirmations(
                             getattr(self, "_pending_preference_confirmations", []),
                             map_index=map_index,
                             area_id=area_id,
-                            fields=list(changes),
+                            fields=attempted_fields,
                         )
                     )
                     await self._async_reconcile_mowing_preference_write(

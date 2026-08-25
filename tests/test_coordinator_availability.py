@@ -1441,7 +1441,7 @@ def test_failed_preference_verification_still_reconciles_coordinator_state() -> 
     coordinator.async_refresh_batch_device_data = AsyncMock(return_value={})
     coordinator.async_request_refresh = AsyncMock()
     attempted_error = RuntimeError("readback did not confirm")
-    mark_write_attempted(attempted_error)
+    mark_write_attempted(attempted_error, fields=["preference_mode"])
     coordinator.client = SimpleNamespace(
         async_plan_app_mowing_preference_update=AsyncMock(
             side_effect=attempted_error
@@ -1514,6 +1514,75 @@ def test_failed_preference_plan_preserves_confirmation_without_write_attempt() -
     coordinator.async_refresh_batch_device_data.assert_not_awaited()
     coordinator.async_request_refresh.assert_not_awaited()
     coordinator.async_update_listeners.assert_not_called()
+
+
+def test_failed_preference_sequence_invalidates_only_attempted_fields() -> None:
+    confirmed_at = datetime.now(UTC)
+    pending = retain_confirmed_preference_write(
+        [],
+        {
+            "executed": True,
+            "request_verified": True,
+            "verification_source": "preference_readback",
+            "map_index": 0,
+            "area_id": None,
+            "changed_fields": ["preference_mode"],
+            "readback": {
+                "map": {"idx": 0, "mode": 0, "mode_name": "global"},
+                "preference": None,
+            },
+        },
+        confirmed_at=confirmed_at,
+    )
+    pending = retain_confirmed_preference_write(
+        pending,
+        {
+            "executed": True,
+            "request_verified": True,
+            "verification_source": "preference_readback",
+            "map_index": 0,
+            "area_id": 1,
+            "changed_fields": ["mowing_height_cm"],
+            "readback": {
+                "map": {"idx": 0, "mode": 0, "mode_name": "global"},
+                "preference": {"area_id": 1, "mowing_height_cm": 7.0},
+            },
+        },
+        confirmed_at=confirmed_at + timedelta(seconds=1),
+    )
+    attempted_error = RuntimeError("mode write failed")
+    mark_write_attempted(attempted_error, fields=["preference_mode"])
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._preference_write_lock = asyncio.Lock()
+    coordinator._pending_preference_confirmations = pending
+    coordinator.last_preference_write_result = None
+    coordinator.async_update_listeners = Mock()
+    coordinator.async_refresh_batch_device_data = AsyncMock(return_value={})
+    coordinator.async_request_refresh = AsyncMock()
+    coordinator.client = SimpleNamespace(
+        async_plan_app_mowing_preference_update=AsyncMock(
+            side_effect=attempted_error
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="mode write failed"):
+        asyncio.run(
+            coordinator.async_plan_mowing_preference_update(
+                map_index=0,
+                area_id=1,
+                changes={"preference_mode": "custom", "mowing_height_cm": 5.0},
+                execute=True,
+                confirm_write=True,
+            )
+        )
+
+    assert [item.field for item in coordinator._pending_preference_confirmations] == [
+        "mowing_height_cm"
+    ]
+    coordinator.async_refresh_batch_device_data.assert_awaited_once_with(
+        force=True,
+        source="mowing_preference_write",
+    )
 
 
 def _coordinator_for_confirmed_preference_write(
@@ -2326,7 +2395,7 @@ def test_preference_reconciliation_listener_does_not_mask_write_error() -> None:
     coordinator.async_refresh_batch_device_data = AsyncMock(return_value={})
     coordinator.async_request_refresh = AsyncMock()
     attempted_error = RuntimeError("readback did not confirm")
-    mark_write_attempted(attempted_error)
+    mark_write_attempted(attempted_error, fields=["preference_mode"])
     coordinator.client = SimpleNamespace(
         async_plan_app_mowing_preference_update=AsyncMock(
             side_effect=attempted_error

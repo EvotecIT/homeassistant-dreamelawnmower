@@ -660,12 +660,18 @@ class _DreameLawnMowerClientSettingsMixin:
             ),
         }
         if execute:
-            write_attempted = False
-            try:
-                responses: list[Any] = []
-                response_payloads: list[Any] = []
-                for request in request_sequence:
-                    write_attempted = True
+            possibly_applied_fields: list[str] = []
+            responses: list[Any] = []
+            response_payloads: list[Any] = []
+            for request in request_sequence:
+                request_fields = (
+                    [MOWING_PREFERENCE_MODE_FIELD]
+                    if request.get("t") == "PREP"
+                    else list(updated_preference)
+                    if isinstance(updated_preference, Mapping)
+                    else list(setting_changes)
+                )
+                try:
                     response = self._sync_call_app_action(request)
                     is_preference_write = request.get("t") in {"PRE", "PREP"}
                     response_data = _ensure_app_write_succeeded(
@@ -673,8 +679,24 @@ class _DreameLawnMowerClientSettingsMixin:
                         operation="Preference write",
                         allow_missing_data=is_preference_write,
                     )
+                except DreameLawnMowerCommandRejectedError as err:
+                    if possibly_applied_fields:
+                        mark_write_attempted(err, fields=possibly_applied_fields)
+                    raise
+                except Exception as err:
+                    mark_write_attempted(
+                        err,
+                        fields=(*possibly_applied_fields, *request_fields),
+                    )
+                    raise
+                possibly_applied_fields.extend(request_fields)
+                try:
                     responses.append(_json_safe(response, max_depth=4))
                     response_payloads.append(_json_safe(response_data, max_depth=4))
+                except Exception as err:
+                    mark_write_attempted(err, fields=possibly_applied_fields)
+                    raise
+            try:
                 result["readback"] = self._sync_verify_mowing_preference_readback(
                     map_index=map_index,
                     area_id=area_id,
@@ -695,8 +717,8 @@ class _DreameLawnMowerClientSettingsMixin:
                     result["responses"] = responses
                     result["response_data"] = response_payloads
             except Exception as err:
-                if write_attempted:
-                    mark_write_attempted(err)
+                if possibly_applied_fields:
+                    mark_write_attempted(err, fields=possibly_applied_fields)
                 raise
         return result
 
