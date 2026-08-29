@@ -213,6 +213,22 @@ def test_display_name_for_model_prefers_known_mapping_over_fallback_name() -> No
     )
 
 
+@pytest.mark.parametrize(
+    ("model", "expected_name"),
+    [
+        ("mova.mower.g2405a", "MOVA 600"),
+        ("mova.mower.g2405b", "MOVA 600 Kit"),
+        ("mova.mower.g2405c", "MOVA 1000"),
+        ("mova.mower.g2529b", "LiDAX Ultra 800"),
+    ],
+)
+def test_display_name_for_older_mova_models(
+    model: str,
+    expected_name: str,
+) -> None:
+    assert display_name_for_model(model) == expected_name
+
+
 def test_descriptor_maps_lidax_ultra_1000_model_name() -> None:
     descriptor = descriptor_from_cloud_record(
         {

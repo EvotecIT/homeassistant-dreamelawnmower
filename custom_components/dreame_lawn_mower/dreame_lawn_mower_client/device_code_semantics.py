@@ -220,6 +220,8 @@ _A1_MODELS: Final[frozenset[str]] = frozenset(
 )
 _MOVA_MODELS: Final[frozenset[str]] = frozenset(
     {
+        # Only models with captured alternate meanings for codes 0 and 55 belong
+        # here. Older MOVA models use the shared registry until verified.
         "mova.mower.g2529c",
         "mova.mower.g2529f",
         "mova.mower.g2584a",
