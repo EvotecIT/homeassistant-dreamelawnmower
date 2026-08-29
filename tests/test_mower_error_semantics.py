@@ -87,11 +87,12 @@ def _snapshot(
     realtime_state_last_seen: float | None = None,
     state: str = "PAUSED",
     model: str = "dreame.mower.g2408",
+    account_type: str = "dreame",
     previous_snapshot: DreameLawnMowerSnapshot | None = None,
 ) -> DreameLawnMowerSnapshot:
     descriptor = descriptor_from_cloud_record(
         {"did": "test", "model": model, "name": "Mower"},
-        account_type="dreame",
+        account_type=account_type,
         country="eu",
     )
     assert descriptor is not None
@@ -647,6 +648,43 @@ def test_attention_notices_do_not_override_mowing_for_model_variants(
     assert snapshot.status_notice_code == code
     assert snapshot.status_notice_name == expected_name
     assert snapshot.status_notice_tier == "attention"
+
+
+def test_mova_1000_station_brush_notice_matches_reported_device_code() -> None:
+    snapshot = _snapshot(
+        29,
+        "unknown",
+        realtime_error_code=29,
+        state="MOWING",
+        model="mova.mower.g2405c",
+        account_type="mova",
+    )
+
+    assert snapshot.state == "mowing"
+    assert snapshot.activity == "mowing"
+    assert snapshot.error_code is None
+    assert snapshot.error_display is None
+    assert snapshot.status_notice_code == 29
+    assert snapshot.status_notice_name == "station_brush_worn"
+    assert snapshot.status_notice_tier == "attention"
+
+
+def test_mova_1000_edge_mowing_start_uses_shared_lifecycle_code() -> None:
+    snapshot = _snapshot(
+        50,
+        "unknown",
+        realtime_error_code=50,
+        state="MOWING",
+        model="mova.mower.g2405c",
+        account_type="mova",
+    )
+
+    assert snapshot.state == "mowing"
+    assert snapshot.activity == "mowing"
+    assert snapshot.error_code is None
+    assert snapshot.status_notice_code == 50
+    assert snapshot.status_notice_name == "mowing_task_started"
+    assert snapshot.status_notice_tier == "info"
 
 
 def test_a2_catalog_has_a_meaning_for_every_observed_app_code() -> None:
