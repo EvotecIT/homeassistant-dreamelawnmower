@@ -35,6 +35,7 @@ from .const import (
     CONF_MAP_THEME,
     CONF_MODEL,
     CONF_NAME,
+    CONF_NOTIFICATION_MODE,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
     CONF_TOKEN,
@@ -55,6 +56,7 @@ from .const import (
     DEFAULT_MAP_SPOT_AREA_STYLE,
     DEFAULT_MAP_STROKE_SCALE,
     DEFAULT_MAP_THEME,
+    DEFAULT_NOTIFICATION_MODE,
     DEFAULT_SCAN_INTERVAL_SECONDS,
     DEFAULT_VIDEO_RETENTION,
     DEFAULT_VIDEO_TRANSPORT,
@@ -67,6 +69,7 @@ from .const import (
     MAX_SCAN_INTERVAL_SECONDS,
     MIN_MAP_LABEL_SCALE,
     MIN_SCAN_INTERVAL_SECONDS,
+    NOTIFICATION_MODE_OPTIONS,
     VIDEO_RETENTION_OPTIONS,
     VIDEO_TRANSPORT_OPTIONS,
     XP2P_RUNNER_MODE_OPTIONS,
@@ -353,6 +356,12 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
         )
         if video_retention not in VIDEO_RETENTION_OPTIONS:
             video_retention = DEFAULT_VIDEO_RETENTION
+        notification_mode = self._entry_options.get(
+            CONF_NOTIFICATION_MODE,
+            DEFAULT_NOTIFICATION_MODE,
+        )
+        if notification_mode not in NOTIFICATION_MODE_OPTIONS:
+            notification_mode = DEFAULT_NOTIFICATION_MODE
 
         return self.async_show_form(
             step_id="init",
@@ -457,6 +466,16 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                         selector.SelectSelectorConfig(
                             options=list(MAP_MOWING_PATH_STYLE_OPTIONS),
                             translation_key=CONF_MAP_MOWING_PATH_STYLE,
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_NOTIFICATION_MODE,
+                        default=notification_mode,
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=list(NOTIFICATION_MODE_OPTIONS),
+                            translation_key=CONF_NOTIFICATION_MODE,
                             mode=selector.SelectSelectorMode.DROPDOWN,
                         )
                     ),

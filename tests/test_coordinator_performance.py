@@ -3297,6 +3297,7 @@ def test_successful_setup_shuts_down_coordinator_on_home_assistant_stop() -> Non
             _metadata_refresh_task=None,
         )
         cache = SimpleNamespace(async_load=AsyncMock())
+        notification_manager = SimpleNamespace(async_start=AsyncMock(), stop=Mock())
         remove_stop_listener = Mock()
         unload_callbacks: list[object] = []
 
@@ -3342,10 +3343,17 @@ def test_successful_setup_shuts_down_coordinator_on_home_assistant_stop() -> Non
                 "async_setup_services",
                 new=AsyncMock(),
             ),
+            patch.object(
+                integration_module,
+                "DreameLawnMowerNotificationManager",
+                return_value=notification_manager,
+            ),
         ):
             assert await async_setup_entry(hass, entry) is True
 
         assert stop_listener is not None
+        notification_manager.async_start.assert_awaited_once_with()
+        assert notification_manager.stop in unload_callbacks
         assert remove_stop_listener in unload_callbacks
         await stop_listener(SimpleNamespace())
         coordinator.async_shutdown_for_home_assistant_stop.assert_awaited_once_with()

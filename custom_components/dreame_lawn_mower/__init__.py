@@ -18,6 +18,7 @@ from .const import (
     PLATFORMS,
 )
 from .coordinator import DreameLawnMowerCoordinator
+from .notifications import DreameLawnMowerNotificationManager
 from .performance import format_performance_sample
 from .point_cloud_api import (
     POINT_CLOUD_API_DATA_KEY,
@@ -128,7 +129,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             lambda: hass.config_entries.async_forward_entry_setups(entry, platforms),
         )
 
+        notification_manager = DreameLawnMowerNotificationManager(coordinator)
+        await notification_manager.async_start()
+
         entry.async_on_unload(remove_stop_listener)
+        entry.async_on_unload(notification_manager.stop)
         entry.async_on_unload(entry.add_update_listener(_async_update_listener))
         return True
     except asyncio.CancelledError:

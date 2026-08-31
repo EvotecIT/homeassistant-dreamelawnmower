@@ -381,6 +381,32 @@ them from the entity registry only when troubleshooting:
 - raw vendor flag sensors
 - manual-drive safety diagnostics
 
+## Notifications And Issue Automations
+
+The integration remains silent by default. To show mower conditions in Home
+Assistant, open the integration's **Configure** dialog and choose one of these
+**Home Assistant notifications** modes:
+
+- **Off** — no integration-created notifications (default)
+- **Hard faults** — one persistent notification for the mower's active fault
+- **Hard faults and warnings** — the fault notification plus a separate item
+  for actionable alert, attention, or unknown-tier status notices
+
+Each mower and condition uses a stable notification ID. The existing item is
+updated when its details change and dismissed when the condition clears. These
+notifications stay inside Home Assistant; they do not automatically send a
+mobile push notification.
+
+For mobile delivery, maintenance reminders, offline alerts, confirmation
+delays, repeated reminders, or custom Home Assistant actions, import the
+[Dreame mower condition notifications blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2FEvotecIT%2Fhomeassistant-dreamelawnmower%2Fmain%2Fblueprints%2Fautomation%2Fdreame_lawn_mower%2Fmower_condition_notifications.yaml).
+Choose all entities from the same mower. If the blueprint uses persistent
+delivery, leave the integration option off to avoid duplicate notifications.
+
+See [Notifications and issue automations](docs/notifications.md) for setup,
+delivery examples, restart behavior, and the safety boundary around automatic
+mower controls.
+
 ## Schedules And Multiple Maps
 
 Dreame A2 schedules can exist in more than one slot. Live captures have shown a

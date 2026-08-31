@@ -1,4 +1,13 @@
 {
+  "common": {
+    "notification_unknown_fault": "Nieznany błąd",
+    "notification_fault_title": "{name}: błąd kosiarki",
+    "notification_fault_message": "Kosiarka zgłasza **{display}**.",
+    "notification_error_code": "Kod błędu: `{code}`",
+    "notification_warning_title": "{name}: ostrzeżenie kosiarki",
+    "notification_warning_message": "Kosiarka zgłasza **{display}**.",
+    "notification_status_code": "Kod stanu: `{code}`"
+  },
   "config": {
     "step": {
       "user": {
@@ -54,6 +63,7 @@
           "map_marker_image": "Niestandardowy znacznik kosiarki",
           "map_spot_area_style": "Wyświetlanie zapisanych obszarów koszenia punktowego",
           "map_mowing_path_style": "Wyświetlanie ukończonych przejazdów",
+          "notification_mode": "Powiadomienia Home Assistant",
           "video_retention": "Utrzymywanie połączenia wideo na żywo",
           "video_transport": "Sposób połączenia wideo na żywo",
           "xp2p_library_path": "Ścieżka do natywnej biblioteki XP2P hosta",
@@ -68,6 +78,7 @@
           "map_marker_image": "Opcjonalny plik PNG, JPEG lub WebP w katalogu config/www Home Assistanta, na przykład mower/marker.png albo /local/mower/marker.png. Pliki spoza tego katalogu oraz większe niż 1 MB są ignorowane.",
           "map_spot_area_style": "Ukryj zapisane prostokąty koszenia punktowego, aby uzyskać przejrzystą mapę podobną do aplikacji Dreame, pokaż tylko ich obrys albo przywróć wypełnioną warstwę diagnostyczną. To ustawienie dotyczy wyłącznie map wektorowych renderowanych lokalnie.",
           "map_mowing_path_style": "Ukryj ukończone przejazdy, pokaż je w stonowany sposób albo wyświetl każdy przejazd szczegółowo. Trasa na żywo i znacznik kosiarki pozostają widoczne.",
+          "notification_mode": "Tworzy trwałe powiadomienia Home Assistant o stanie kosiarki. Dla każdej kosiarki i rodzaju zdarzenia używany jest jeden stały wpis, aktualizowany po zmianie szczegółów i usuwany po ustąpieniu problemu. Domyślnie wyłączone; blueprint powiadomień obsługuje urządzenia mobilne, konserwację, tryb offline, opóźnienia, powtórzenia i własne akcje.",
           "video_retention": "Tryb zrównoważony utrzymuje możliwość szybkiego ponownego połączenia przez 60 sekund dla podglądów i pozostawia XP2P w gotowości podczas bieżącego koszenia po otwarciu wideo na żywo. Oszczędzanie energii zwalnia połączenie krótko po zakończeniu ostatniego użycia. Priorytet wideo utrzymuje je także po wyświetleniu podglądu podczas koszenia. Każdy tryb uruchamia połączenie dopiero po żądaniu obrazu i zatrzymuje je, gdy stan kosiarki blokuje wideo.",
           "video_transport": "Tryb automatyczny jest szybkim ustawieniem domyślnym: odświeża tylko stan bezpieczeństwa kosiarki, ponownie używa sprawdzonych danych połączenia i wybiera potwierdzoną trasę LAN, jeżeli oprogramowanie kosiarki ją udostępnia. Chmura pozostaje trybem zgodności. Testowane oprogramowanie A2 nie udostępnia osobnej usługi LAN Tencent, dlatego żaden tryb nie gwarantuje uruchomienia bez Internetu.",
           "xp2p_library_path": "Zaawansowana opcja wideo. Użyj dynamicznej biblioteki XP2P skompilowanej dla systemu operacyjnego i procesora hosta Home Assistanta. Biblioteki z pakietów Android APK/AAR oraz frameworki iOS nie działają jako biblioteki hosta.",
@@ -115,6 +126,13 @@
         "hidden": "Ukryte",
         "subtle": "Stonowane (zalecane)",
         "detailed": "Szczegółowe"
+      }
+    },
+    "notification_mode": {
+      "options": {
+        "off": "Wyłączone",
+        "faults": "Poważne błędy",
+        "faults_and_warnings": "Poważne błędy i ostrzeżenia"
       }
     },
     "video_retention": {

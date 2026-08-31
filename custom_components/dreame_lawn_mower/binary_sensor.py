@@ -87,6 +87,7 @@ BINARY_SENSORS = [
         key="error_active",
         name="Error Active",
         value_fn=lambda snapshot: snapshot.activity == ACTIVITY_ERROR,
+        device_class=BinarySensorDeviceClass.PROBLEM,
         icon="mdi:alert-circle-outline",
     ),
     DreameBinarySensorDescription(

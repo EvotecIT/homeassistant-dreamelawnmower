@@ -1,0 +1,624 @@
+blueprint:
+  name: Dreame mower condition notifications
+  description: >-
+    Notify on hard faults, actionable status notices, maintenance warnings,
+    maintenance due states, and loss of mower connectivity. Choose a one-shot
+    custom action, a Home Assistant persistent notification, or a repeating
+    custom action. Persistent items are dismissed when a known condition clears.
+    This blueprint deliberately does not start, resume, or move the mower
+    automatically.
+  domain: automation
+  source_url: https://github.com/EvotecIT/homeassistant-dreamelawnmower/blob/main/blueprints/automation/dreame_lawn_mower/mower_condition_notifications.yaml
+  author: EvotecIT
+  input:
+    mower_entity:
+      name: Mower
+      selector:
+        entity:
+          filter:
+            integration: dreame_lawn_mower
+            domain: lawn_mower
+    fault_entity:
+      name: Error Active sensor
+      selector:
+        entity:
+          filter:
+            integration: dreame_lawn_mower
+            domain: binary_sensor
+            device_class: problem
+    error_entity:
+      name: Error detail sensor
+      selector:
+        entity:
+          filter:
+            integration: dreame_lawn_mower
+            domain: sensor
+    status_notice_entity:
+      name: Status Notice sensor
+      selector:
+        entity:
+          filter:
+            integration: dreame_lawn_mower
+            domain: sensor
+    online_entity:
+      name: Online sensor
+      selector:
+        entity:
+          filter:
+            integration: dreame_lawn_mower
+            domain: binary_sensor
+            device_class: connectivity
+    maintenance_warning_entity:
+      name: Maintenance Warning sensor
+      selector:
+        entity:
+          filter:
+            integration: dreame_lawn_mower
+            domain: binary_sensor
+    maintenance_due_entity:
+      name: Maintenance Due sensor
+      selector:
+        entity:
+          filter:
+            integration: dreame_lawn_mower
+            domain: binary_sensor
+    delivery_mode:
+      name: Delivery mode
+      default: persistent
+      selector:
+        select:
+          options:
+            - label: One-shot custom action
+              value: one_shot
+            - label: Home Assistant persistent notification
+              value: persistent
+            - label: Repeating custom action
+              value: repeat
+    onset_delay_seconds:
+      name: Confirmation delay
+      description: >-
+        Wait this long before reporting a new condition. Conditions that clear
+        during the delay are ignored, and a recurrence starts a fresh delay.
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 1800
+          step: 5
+          unit_of_measurement: seconds
+          mode: box
+    repeat_interval_minutes:
+      name: Repeat interval
+      description: Used only by Repeating custom action.
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 1440
+          step: 1
+          unit_of_measurement: minutes
+          mode: box
+    notify_actions:
+      name: Notification actions
+      description: >-
+        Actions for one-shot or repeating delivery. Templates can use
+        issue_title, issue_message, issue_kind, and issue_entity.
+      default: []
+      selector:
+        action: {}
+
+mode: parallel
+max: 20
+max_exceeded: silent
+
+triggers:
+  - trigger: state
+    entity_id: !input fault_entity
+    id: fault
+    from: "off"
+    to: "on"
+  - trigger: state
+    entity_id: !input error_entity
+    id: fault_detail
+  - trigger: state
+    entity_id: !input status_notice_entity
+    id: notice
+  - trigger: state
+    entity_id: !input online_entity
+    id: offline
+    from: "on"
+    to: "off"
+  - trigger: state
+    entity_id: !input maintenance_warning_entity
+    id: maintenance_warning
+    from: "off"
+    to: "on"
+  - trigger: state
+    entity_id: !input maintenance_due_entity
+    id: maintenance_due
+    from: "off"
+    to: "on"
+  - trigger: state
+    entity_id: !input fault_entity
+    id: restore_fault
+    from: "unknown"
+  - trigger: state
+    entity_id: !input fault_entity
+    id: restore_fault
+    from: "unavailable"
+  - trigger: state
+    entity_id: !input online_entity
+    id: restore_offline
+    from: "unknown"
+  - trigger: state
+    entity_id: !input online_entity
+    id: restore_offline
+    from: "unavailable"
+  - trigger: state
+    entity_id: !input maintenance_warning_entity
+    id: restore_maintenance_warning
+    from: "unknown"
+  - trigger: state
+    entity_id: !input maintenance_warning_entity
+    id: restore_maintenance_warning
+    from: "unavailable"
+  - trigger: state
+    entity_id: !input maintenance_due_entity
+    id: restore_maintenance_due
+    from: "unknown"
+  - trigger: state
+    entity_id: !input maintenance_due_entity
+    id: restore_maintenance_due
+    from: "unavailable"
+  - trigger: state
+    entity_id: !input fault_entity
+    id: clear_fault
+    from: "on"
+    to: "off"
+  - trigger: state
+    entity_id: !input online_entity
+    id: clear_offline
+    from: "off"
+    to: "on"
+  - trigger: state
+    entity_id: !input maintenance_warning_entity
+    id: clear_maintenance_warning
+    from: "on"
+    to: "off"
+  - trigger: state
+    entity_id: !input maintenance_due_entity
+    id: clear_maintenance_due
+    from: "on"
+    to: "off"
+  - trigger: homeassistant
+    event: start
+    id: reconcile_fault
+  - trigger: homeassistant
+    event: start
+    id: reconcile_notice
+  - trigger: homeassistant
+    event: start
+    id: reconcile_offline
+  - trigger: homeassistant
+    event: start
+    id: reconcile_maintenance_warning
+  - trigger: homeassistant
+    event: start
+    id: reconcile_maintenance_due
+  - trigger: event
+    event_type: automation_reloaded
+    id: reconcile_fault
+  - trigger: event
+    event_type: automation_reloaded
+    id: reconcile_notice
+  - trigger: event
+    event_type: automation_reloaded
+    id: reconcile_offline
+  - trigger: event
+    event_type: automation_reloaded
+    id: reconcile_maintenance_warning
+  - trigger: event
+    event_type: automation_reloaded
+    id: reconcile_maintenance_due
+
+variables:
+  mower_entity: !input mower_entity
+  fault_entity: !input fault_entity
+  error_entity: !input error_entity
+  status_notice_entity: !input status_notice_entity
+  online_entity: !input online_entity
+  maintenance_warning_entity: !input maintenance_warning_entity
+  maintenance_due_entity: !input maintenance_due_entity
+  delivery_mode: !input delivery_mode
+  repeat_interval_minutes: !input repeat_interval_minutes
+
+actions:
+  - alias: Classify the condition transition
+    variables:
+      issue_kind: >-
+        {% if trigger.id in ['fault', 'fault_detail', 'reconcile_fault', 'restore_fault', 'clear_fault'] %}
+          fault
+        {% elif trigger.id[:10] == 'reconcile_' %}
+          {{ trigger.id[10:] }}
+        {% elif trigger.id[:8] == 'restore_' %}
+          {{ trigger.id[8:] }}
+        {% elif trigger.id[:6] == 'clear_' %}
+          {{ trigger.id[6:] }}
+        {% else %}
+          {{ trigger.id }}
+        {% endif %}
+      is_reconcile: >-
+        {{ trigger.id[:10] == 'reconcile_' or trigger.id[:8] == 'restore_' }}
+
+  - alias: Capture the condition state
+    variables:
+      trigger_state: >-
+        {% if issue_kind == 'fault' %}
+          {{ states(error_entity) }}
+        {% elif issue_kind == 'notice' %}
+          {{ states(status_notice_entity) }}
+        {% elif issue_kind == 'offline' %}
+          {{ states(online_entity) }}
+        {% elif issue_kind == 'maintenance_warning' %}
+          {{ states(maintenance_warning_entity) }}
+        {% elif issue_kind == 'maintenance_due' %}
+          {{ states(maintenance_due_entity) }}
+        {% else %}
+          unknown
+        {% endif %}
+      initial_incident_value: >-
+        {% if issue_kind == 'fault' %}
+          {{ states(error_entity) }}
+        {% elif issue_kind == 'notice' %}
+          {{ states(status_notice_entity) }}
+        {% elif issue_kind == 'offline' %}
+          {{ states(online_entity) }}
+        {% elif issue_kind == 'maintenance_warning' %}
+          {{ states(maintenance_warning_entity) }}
+        {% elif issue_kind == 'maintenance_due' %}
+          {{ states(maintenance_due_entity) }}
+        {% else %}
+          unknown
+        {% endif %}
+      issue_available: >-
+        {% if issue_kind == 'fault' %}
+          {% if trigger.id == 'fault_detail' %}
+            {{ states(error_entity) not in ['unknown', 'unavailable']
+               and trigger.from_state is not none
+               and (trigger.from_state.state not in ['unknown', 'unavailable']
+                    or delivery_mode == 'persistent') }}
+          {% else %}
+            {{ states(fault_entity) not in ['unknown', 'unavailable'] }}
+          {% endif %}
+        {% elif issue_kind == 'notice' %}
+          {{ states(status_notice_entity) not in ['unknown', 'unavailable'] }}
+        {% elif issue_kind == 'offline' %}
+          {{ states(online_entity) not in ['unknown', 'unavailable'] }}
+        {% elif issue_kind == 'maintenance_warning' %}
+          {{ states(maintenance_warning_entity) not in ['unknown', 'unavailable'] }}
+        {% elif issue_kind == 'maintenance_due' %}
+          {{ states(maintenance_due_entity) not in ['unknown', 'unavailable'] }}
+        {% else %}
+          false
+        {% endif %}
+      issue_active: >-
+        {% if trigger.id == 'fault'
+              or ((is_reconcile | bool) and issue_kind == 'fault') %}
+          {{ is_state(fault_entity, 'on') }}
+        {% elif trigger.id == 'fault_detail' %}
+          {{ delivery_mode == 'persistent'
+             and is_state(fault_entity, 'on')
+             and trigger.from_state is not none
+             and trigger.to_state is not none
+             and trigger.to_state.state not in ['unknown', 'unavailable']
+             and trigger.from_state.state != trigger.to_state.state
+             and states(error_entity) == trigger.to_state.state }}
+        {% elif issue_kind == 'notice' %}
+          {% if is_reconcile | bool %}
+            {{ states(status_notice_entity) not in ['none', 'unknown', 'unavailable', '']
+               and ((state_attr(mower_entity, 'status_notice_tier') or 'unknown') | lower)
+                   in ['alert', 'attention', 'unknown'] }}
+          {% else %}
+            {{ states(status_notice_entity) == trigger.to_state.state
+               and states(status_notice_entity) not in ['none', 'unknown', 'unavailable', '']
+               and ((state_attr(mower_entity, 'status_notice_tier') or 'unknown') | lower)
+                   in ['alert', 'attention', 'unknown'] }}
+          {% endif %}
+        {% elif issue_kind == 'offline' %}
+          {{ is_state(online_entity, 'off') }}
+        {% elif issue_kind == 'maintenance_warning' %}
+          {{ is_state(maintenance_warning_entity, 'on') }}
+        {% elif issue_kind == 'maintenance_due' %}
+          {{ is_state(maintenance_due_entity, 'on') }}
+        {% else %}
+          false
+        {% endif %}
+      notification_id: >-
+        {% set mower_identity = device_id(mower_entity)
+           or (mower_entity | replace('.', '_')) %}
+        dreame_mower_{{ mower_identity }}_{{ issue_kind }}
+
+  - alias: Stop while the condition state is unavailable
+    choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ not (issue_available | bool) }}"
+        sequence:
+          - stop: Condition state is not available
+
+  - alias: Clear persistent items for known inactive conditions
+    choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ not (issue_active | bool) }}"
+        sequence:
+          - action: persistent_notification.dismiss
+            data:
+              notification_id: "{{ notification_id }}"
+          - stop: No active condition
+
+  - alias: Remember whether the transition can own an incident
+    variables:
+      transition_eligible: "{{ issue_active | bool }}"
+
+  - alias: Confirm that a new condition persists
+    choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ transition_eligible | bool }}"
+        sequence:
+          - wait_template: >-
+              {% if issue_kind == 'fault' %}
+                {% set expected = trigger_state
+                   if trigger.id == 'fault_detail' else initial_incident_value %}
+                {% if delivery_mode in ['one_shot', 'repeat']
+                      and trigger.id != 'fault_detail' %}
+                  {{ not is_state(fault_entity, 'on')
+                     or states(fault_entity) in ['unknown', 'unavailable'] }}
+                {% else %}
+                  {{ not is_state(fault_entity, 'on')
+                     or states(fault_entity) in ['unknown', 'unavailable']
+                     or (states(error_entity) not in ['none', 'unknown', 'unavailable', '']
+                         and expected not in ['none', 'unknown', 'unavailable', '']
+                         and states(error_entity) != expected) }}
+                {% endif %}
+              {% elif issue_kind == 'notice' %}
+                {{ states(status_notice_entity) != trigger_state
+                   or ((state_attr(mower_entity, 'status_notice_tier') or 'unknown') | lower)
+                      not in ['alert', 'attention', 'unknown'] }}
+              {% elif issue_kind == 'offline' %}
+                {{ not is_state(online_entity, 'off') }}
+              {% elif issue_kind == 'maintenance_warning' %}
+                {{ not is_state(maintenance_warning_entity, 'on') }}
+              {% elif issue_kind == 'maintenance_due' %}
+                {{ not is_state(maintenance_due_entity, 'on') }}
+              {% else %}
+                true
+              {% endif %}
+            timeout:
+              seconds: !input onset_delay_seconds
+            continue_on_timeout: true
+
+  - condition: template
+    value_template: "{{ not wait.completed }}"
+
+  - alias: Recheck after the confirmation delay
+    variables:
+      issue_active: >-
+        {% if issue_kind == 'fault' and trigger.id != 'fault_detail' %}
+          {% if delivery_mode in ['one_shot', 'repeat'] %}
+            {{ (transition_eligible | bool) and is_state(fault_entity, 'on') }}
+          {% else %}
+            {{ (transition_eligible | bool) and is_state(fault_entity, 'on')
+               and (states(error_entity) in ['none', 'unknown', 'unavailable', '']
+                    or initial_incident_value in ['none', 'unknown', 'unavailable', '']
+                    or states(error_entity) == initial_incident_value) }}
+          {% endif %}
+        {% elif trigger.id == 'fault_detail' %}
+          {{ (transition_eligible | bool)
+             and is_state(fault_entity, 'on')
+             and states(error_entity) == trigger_state }}
+        {% elif issue_kind == 'notice' %}
+          {{ (transition_eligible | bool)
+             and states(status_notice_entity) == trigger_state
+             and states(status_notice_entity) not in ['none', 'unknown', 'unavailable', '']
+             and ((state_attr(mower_entity, 'status_notice_tier') or 'unknown') | lower)
+                 in ['alert', 'attention', 'unknown'] }}
+        {% elif issue_kind == 'offline' %}
+          {{ (transition_eligible | bool) and is_state(online_entity, 'off') }}
+        {% elif issue_kind == 'maintenance_warning' %}
+          {{ (transition_eligible | bool)
+             and is_state(maintenance_warning_entity, 'on') }}
+        {% elif issue_kind == 'maintenance_due' %}
+          {{ (transition_eligible | bool)
+             and is_state(maintenance_due_entity, 'on') }}
+        {% else %}
+          false
+        {% endif %}
+
+  - condition: template
+    value_template: "{{ issue_active | bool }}"
+
+  - alias: Build user-facing notification content
+    variables:
+      issue_entity: >-
+        {% if issue_kind == 'fault' %}
+          {{ fault_entity }}
+        {% elif issue_kind == 'notice' %}
+          {{ status_notice_entity }}
+        {% elif issue_kind == 'offline' %}
+          {{ online_entity }}
+        {% elif issue_kind == 'maintenance_warning' %}
+          {{ maintenance_warning_entity }}
+        {% elif issue_kind == 'maintenance_due' %}
+          {{ maintenance_due_entity }}
+        {% else %}
+          {{ mower_entity }}
+        {% endif %}
+      incident_value: >-
+        {% if issue_kind == 'fault' %}
+          {{ states(error_entity) }}
+        {% elif issue_kind == 'notice' %}
+          {{ states(status_notice_entity) }}
+        {% else %}
+          {{ trigger_state }}
+        {% endif %}
+      issue_title: >-
+        {% set mower_name = state_attr(mower_entity, 'friendly_name') or 'Dreame mower' %}
+        {% if issue_kind == 'fault' %}
+          {{ mower_name }}: mower fault
+        {% elif issue_kind == 'notice' %}
+          {{ mower_name }}: mower warning
+        {% elif issue_kind == 'offline' %}
+          {{ mower_name }}: mower offline
+        {% elif issue_kind == 'maintenance_due' %}
+          {{ mower_name }}: maintenance due
+        {% else %}
+          {{ mower_name }}: maintenance warning
+        {% endif %}
+      issue_message: >-
+        {% if issue_kind == 'fault' %}
+          {{ states(error_entity)
+             if states(error_entity) not in ['none', 'unknown', 'unavailable', '']
+             else state_attr(mower_entity, 'error_display')
+                  or 'The mower reports an active fault.' }}
+        {% elif issue_kind == 'notice' %}
+          {{ states(status_notice_entity) }}
+        {% elif issue_kind == 'offline' %}
+          The mower is offline.
+        {% else %}
+          {{ state_attr(issue_entity, 'friendly_name') or issue_kind | replace('_', ' ') }} is active.
+        {% endif %}
+
+  - alias: Remove a persistent item before custom delivery
+    choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ delivery_mode != 'persistent' }}"
+        sequence:
+          - action: persistent_notification.dismiss
+            data:
+              notification_id: "{{ notification_id }}"
+
+  - alias: Deliver or clear the notification
+    choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ delivery_mode == 'persistent' }}"
+        sequence:
+          - action: persistent_notification.create
+            data:
+              title: "{{ issue_title }}"
+              message: "{{ issue_message }}"
+              notification_id: "{{ notification_id }}"
+      - conditions:
+          - condition: template
+            value_template: "{{ delivery_mode == 'one_shot' }}"
+        sequence:
+          - sequence: !input notify_actions
+          - stop: One-shot notification delivered
+      - conditions:
+          - condition: template
+            value_template: "{{ delivery_mode == 'repeat' }}"
+        sequence:
+          - repeat:
+              sequence:
+                - variables:
+                    issue_message: >-
+                      {% if issue_kind == 'fault' %}
+                        {{ states(error_entity)
+                           if states(error_entity) not in ['none', 'unknown', 'unavailable', '']
+                           else state_attr(mower_entity, 'error_display')
+                                or 'The mower reports an active fault.' }}
+                      {% elif issue_kind == 'notice' %}
+                        {{ states(status_notice_entity) }}
+                      {% elif issue_kind == 'offline' %}
+                        The mower is offline.
+                      {% else %}
+                        {{ state_attr(issue_entity, 'friendly_name')
+                           or issue_kind | replace('_', ' ') }} is active.
+                      {% endif %}
+                - sequence: !input notify_actions
+                - wait_template: >-
+                    {% if issue_kind == 'fault' %}
+                      {{ not is_state(fault_entity, 'on') }}
+                    {% elif issue_kind == 'notice' %}
+                      {{ states(status_notice_entity) != incident_value
+                         or ((state_attr(mower_entity, 'status_notice_tier') or 'unknown') | lower)
+                            not in ['alert', 'attention', 'unknown'] }}
+                    {% elif issue_kind == 'offline' %}
+                      {{ not is_state(online_entity, 'off') }}
+                    {% else %}
+                      {{ not is_state(issue_entity, 'on') }}
+                    {% endif %}
+                  timeout:
+                    minutes: "{{ repeat_interval_minutes }}"
+                  continue_on_timeout: true
+              until:
+                - condition: template
+                  value_template: >-
+                    {% if issue_kind == 'fault' %}
+                      {{ not is_state(fault_entity, 'on') }}
+                    {% elif issue_kind == 'notice' %}
+                      {{ states(status_notice_entity) != incident_value
+                         or ((state_attr(mower_entity, 'status_notice_tier') or 'unknown') | lower)
+                            not in ['alert', 'attention', 'unknown'] }}
+                    {% elif issue_kind == 'offline' %}
+                      {{ not is_state(online_entity, 'off') }}
+                    {% else %}
+                      {{ not is_state(issue_entity, 'on') }}
+                    {% endif %}
+
+  - alias: Finish a persistent fault-detail refresh
+    choose:
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ delivery_mode == 'persistent' and trigger.id == 'fault_detail' }}
+        sequence:
+          - stop: Persistent fault detail refreshed
+
+  - alias: Wait for a persistent incident to end
+    choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ delivery_mode == 'persistent' }}"
+        sequence:
+          - wait_template: >-
+              {% if issue_kind == 'fault' %}
+                {{ not is_state(fault_entity, 'on')
+                   or (states(error_entity) not in ['none', 'unknown', 'unavailable', '']
+                       and states(error_entity) != incident_value) }}
+              {% elif issue_kind == 'notice' %}
+                {{ states(status_notice_entity) != incident_value
+                   or ((state_attr(mower_entity, 'status_notice_tier') or 'unknown') | lower)
+                      not in ['alert', 'attention', 'unknown'] }}
+              {% elif issue_kind == 'offline' %}
+                {{ not is_state(online_entity, 'off') }}
+              {% else %}
+                {{ not is_state(issue_entity, 'on') }}
+              {% endif %}
+
+  - alias: Confirm that the reported condition cleared
+    variables:
+      issue_cleared: >-
+        {% if issue_kind == 'fault' %}
+          {{ is_state(fault_entity, 'off') }}
+        {% elif issue_kind == 'notice' %}
+          {{ states(status_notice_entity) not in ['unknown', 'unavailable']
+             and (states(status_notice_entity) in ['none', '']
+                  or ((state_attr(mower_entity, 'status_notice_tier') or 'unknown') | lower)
+                     not in ['alert', 'attention', 'unknown']) }}
+        {% elif issue_kind == 'offline' %}
+          {{ is_state(online_entity, 'on') }}
+        {% else %}
+          {{ is_state(issue_entity, 'off') }}
+        {% endif %}
+
+  - condition: template
+    value_template: "{{ issue_cleared }}"
+
+  - alias: Clear the persistent notification
+    action: persistent_notification.dismiss
+    data:
+      notification_id: "{{ notification_id }}"

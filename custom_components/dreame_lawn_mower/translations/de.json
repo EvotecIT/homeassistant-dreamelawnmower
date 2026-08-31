@@ -1,4 +1,5 @@
 {
+  "common": {"notification_unknown_fault": "Unbekannter Fehler", "notification_fault_title": "{name}: Mäherfehler", "notification_fault_message": "Der Mäher meldet **{display}**.", "notification_error_code": "Fehlercode: `{code}`", "notification_warning_title": "{name}: Mäherwarnung", "notification_warning_message": "Der Mäher meldet **{display}**.", "notification_status_code": "Statuscode: `{code}`"},
   "config": {
     "step": {
       "user": {"title": "Dreame-Mähroboter verbinden", "description": "Melde dich mit deinem Dreamehome- oder MOVAhome-Konto an, um Mähroboter zu finden.", "data": {"account_type": "Kontotyp", "username": "Benutzername", "password": "Passwort", "country": "Region"}},
@@ -17,7 +18,7 @@
   },
   "options": {"step": {"init": {
     "title": "Optionen für Dreame-Mähroboter",
-    "data": {"scan_interval": "Abfrageintervall in Sekunden", "map_label_scale": "Skalierung der Kartenbeschriftung", "map_rotation": "Kartenausrichtung", "map_theme": "Kartendesign", "map_stroke_scale": "Linienstärke der Karte", "map_marker_scale": "Größe der Kartenmarkierungen", "map_marker_image": "Eigene Mäher-Markierung", "map_spot_area_style": "Anzeige gespeicherter Punktmähflächen", "map_mowing_path_style": "Anzeige abgeschlossener Mähspuren", "video_retention": "Vorhaltezeit für Live-Video", "video_transport": "Übertragungsweg für Live-Video", "xp2p_library_path": "Pfad zur nativen XP2P-Bibliothek", "xp2p_runner_command": "Befehl für den XP2P-Runner", "xp2p_runner_mode": "Betriebsart des XP2P-Runners"},
+    "data": {"scan_interval": "Abfrageintervall in Sekunden", "map_label_scale": "Skalierung der Kartenbeschriftung", "map_rotation": "Kartenausrichtung", "map_theme": "Kartendesign", "map_stroke_scale": "Linienstärke der Karte", "map_marker_scale": "Größe der Kartenmarkierungen", "map_marker_image": "Eigene Mäher-Markierung", "map_spot_area_style": "Anzeige gespeicherter Punktmähflächen", "map_mowing_path_style": "Anzeige abgeschlossener Mähspuren", "notification_mode": "Home-Assistant-Benachrichtigungen", "video_retention": "Vorhaltezeit für Live-Video", "video_transport": "Übertragungsweg für Live-Video", "xp2p_library_path": "Pfad zur nativen XP2P-Bibliothek", "xp2p_runner_command": "Befehl für den XP2P-Runner", "xp2p_runner_mode": "Betriebsart des XP2P-Runners"},
     "data_description": {
       "map_rotation": "Standardausrichtung für Karten ohne eigene Auswahl. Verwende für einzelne Karten die Entität zur Kartenausrichtung.",
       "map_theme": "Wähle für alle lokal gerenderten Karten ein abgestimmtes helles, dunkles, mitternächtliches oder kontrastreiches Farbschema.",
@@ -26,6 +27,7 @@
       "map_marker_image": "Optionale PNG-, JPEG- oder WebP-Datei im Home-Assistant-Ordner config/www, zum Beispiel mower/marker.png oder /local/mower/marker.png. Dateien außerhalb dieses Ordners und Dateien über 1 MB werden ignoriert.",
       "map_spot_area_style": "Blendet gespeicherte Rechtecke für punktuelles Mähen für eine übersichtliche, Dreame-ähnliche Karte aus, zeigt nur deren Umrisse oder stellt die gefüllte Diagnoseebene wieder her. Dies betrifft nur lokal gerenderte Vektorkarten.",
       "map_mowing_path_style": "Blendet abgeschlossene Mähbahnen aus, stellt sie dezent dar oder zeigt jeden Durchgang vollständig. Die Live-Route und die Mäher-Markierung bleiben sichtbar.",
+      "notification_mode": "Erstellt dauerhafte Home-Assistant-Benachrichtigungen für Mäherzustände. Pro Mäher und Zustand wird ein stabiler Eintrag verwendet, bei Änderungen aktualisiert und nach Behebung entfernt. Standardmäßig deaktiviert; für mobile Zustellung, Wartung, Offline-Meldungen, Verzögerungen, Wiederholungen oder eigene Aktionen steht die Benachrichtigungs-Blueprint bereit.",
       "video_retention": "Ausgeglichen hält die Verbindung für Vorschaubilder 60 Sekunden bereit und lässt XP2P während des aktuellen Mähvorgangs aktiv, nachdem Live-Video geöffnet wurde. Energiesparen beendet die Verbindung kurz nach dem letzten Zugriff. Videopriorität hält sie während des Mähens auch für Vorschaubilder bereit. Alle Modi starten erst bei einem Medienabruf und stoppen, sobald der Mäherzustand Video sperrt.",
       "video_transport": "Automatisch ist die schnelle Voreinstellung: Nur der Sicherheitszustand des Mähers wird aktualisiert, anschließend werden geprüfte Zugangsdaten wiederverwendet und eine bestätigte LAN-Verbindung bevorzugt. Cloud bleibt der Kompatibilitätsmodus. Die getestete A2-Firmware stellt Tencents separaten LAN-Dienst nicht bereit; daher garantiert keiner der Modi einen Start ohne Internet.",
       "xp2p_library_path": "Erweiterte Videooption. Verwende eine dynamische XP2P-Bibliothek für Betriebssystem und CPU dieses Home-Assistant-Hosts. Android-APK-/AAR-Bibliotheken und iOS-Frameworks sind keine Host-Laufzeit.",
@@ -39,6 +41,7 @@
     "map_theme": {"options": {"emerald": "Smaragd", "dark": "Dunkel", "midnight": "Mitternacht", "high_contrast": "Hoher Kontrast"}},
     "map_spot_area_style": {"options": {"hidden": "Ausgeblendet (empfohlen)", "outline": "Nur Umriss", "filled": "Gefüllt"}},
     "map_mowing_path_style": {"options": {"hidden": "Ausgeblendet", "subtle": "Dezent (empfohlen)", "detailed": "Detailliert"}},
+    "notification_mode": {"options": {"off": "Aus", "faults": "Schwere Fehler", "faults_and_warnings": "Schwere Fehler und Warnungen"}},
     "video_retention": {"options": {"balanced": "Ausgewogen (Live-Ansicht bleibt bereit)", "battery_saver": "Energiesparmodus (nach Ende der Wiedergabe stoppen)", "video_priority": "Videopriorität (auch Schnappschüsse halten die Verbindung bereit)"}},
     "video_transport": {"options": {"auto": "Automatisches XP2P mit schneller Wiederverbindung", "cloud": "XP2P (Bereitstellung über die Cloud)"}},
     "xp2p_runner_mode": {"options": {"process": "Dauerhafter Prozess", "one-shot": "Einmaliger Befehl"}}
