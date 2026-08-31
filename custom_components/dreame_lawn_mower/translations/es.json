@@ -1,0 +1,171 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Conectar el cortacésped Dreame",
+        "description": "Inicia sesión con tu cuenta de Dreamehome o MOVAhome para detectar cortacéspedes.",
+        "data": {
+          "account_type": "Tipo de cuenta",
+          "username": "Nombre de usuario",
+          "password": "Contraseña",
+          "country": "Región"
+        }
+      },
+      "device": {
+        "title": "Seleccionar el cortacésped",
+        "description": "Elige un cortacésped para añadirlo. Repite la configuración para añadir otro de la misma cuenta.",
+        "data": {
+          "device": "Cortacésped detectado"
+        }
+      },
+      "reauth": {
+        "title": "Volver a conectar la cuenta",
+        "description": "Actualiza tus credenciales de Dreamehome o MOVAhome.",
+        "data": {
+          "username": "Nombre de usuario",
+          "password": "Contraseña",
+          "country": "Región"
+        }
+      }
+    },
+    "error": {
+      "2fa_required": "Completa la autenticación de dos factores en la aplicación o el sitio web del fabricante antes de continuar con la configuración.",
+      "cannot_auth": "No se pudo iniciar sesión. Comprueba el nombre de usuario, la contraseña, el tipo de cuenta y la región.",
+      "cannot_connect": "Home Assistant no pudo conectarse a la nube de Dreame o MOVA. Comprueba la conexión de red y vuelve a intentarlo.",
+      "invalid_account_type": "El tipo de cuenta seleccionado no es compatible con esta integración.",
+      "invalid_region": "La nube rechazó la región seleccionada. Comprueba la región de la cuenta utilizada en la aplicación del fabricante.",
+      "no_devices": "No se encontraron cortacéspedes compatibles en esta cuenta. Comprueba que la región y el tipo de cuenta coincidan con los de la aplicación del fabricante."
+    },
+    "abort": {
+      "already_configured": "Todos los cortacéspedes compatibles de esta cuenta ya están configurados."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opciones del cortacésped Dreame",
+        "data": {
+          "scan_interval": "Intervalo de sondeo en segundos",
+          "map_label_scale": "Escala de las etiquetas del mapa",
+          "map_rotation": "Rotación del mapa",
+          "map_theme": "Tema del mapa",
+          "map_stroke_scale": "Grosor de las líneas del mapa",
+          "map_marker_scale": "Tamaño de los marcadores del mapa",
+          "map_marker_image": "Marcador personalizado del cortacésped",
+          "map_spot_area_style": "Visualización de las áreas de corte puntual guardadas",
+          "map_mowing_path_style": "Visualización del recorrido de corte completado",
+          "video_retention": "Retención del vídeo en directo",
+          "video_transport": "Transporte del vídeo en directo",
+          "xp2p_library_path": "Ruta de la biblioteca nativa XP2P del host",
+          "xp2p_runner_command": "Comando del ejecutor XP2P del host",
+          "xp2p_runner_mode": "Modo del ejecutor XP2P del host"
+        },
+        "data_description": {
+          "map_rotation": "Rotación predeterminada para mapas sin una selección específica. Usa la entidad Rotación de visualización del mapa seleccionado para cada mapa.",
+          "map_theme": "Elige una paleta coordinada clara, oscura, nocturna o de alto contraste para todos los mapas renderizados localmente.",
+          "map_stroke_scale": "Ajusta los límites y los recorridos del mapa entre 0,5 y 3.",
+          "map_marker_scale": "Ajusta los puntos del mapa y el marcador en directo del cortacésped entre 0,5 y 3.",
+          "map_marker_image": "Archivo PNG, JPEG o WebP opcional dentro de la carpeta config/www de Home Assistant, por ejemplo mower/marker.png o /local/mower/marker.png. Se ignoran los archivos que estén fuera de esa carpeta y los que superen 1 MB.",
+          "map_spot_area_style": "Oculta los rectángulos de corte puntual guardados para obtener un mapa limpio similar al de la aplicación Dreame, muestra solo sus contornos o restaura la superposición de diagnóstico rellena. Solo afecta a los mapas vectoriales renderizados localmente.",
+          "map_mowing_path_style": "Oculta las pasadas de corte completadas, muéstralas de forma sutil o muestra todas las pasadas con detalle. La ruta en directo y el marcador del cortacésped permanecen visibles.",
+          "video_retention": "Equilibrado ofrece a las vistas previas una ventana de reconexión de 60 segundos y mantiene XP2P listo durante la sesión de corte actual después de abrir el vídeo en directo. Ahorro de batería siempre libera la conexión poco después de que se vaya el último espectador. Prioridad de vídeo también considera el acceso a las vistas previas como motivo para mantenerla lista durante el corte. Todos los modos permanecen inactivos hasta que se solicita contenido multimedia y se detienen cuando el estado del cortacésped bloquea el vídeo.",
+          "video_transport": "Automático es la opción rápida predeterminada: actualiza solo el estado de seguridad del cortacésped, reutiliza los datos de conexión verificados y prefiere una ruta LAN comprobada cuando el firmware la ofrece. La nube sigue siendo la alternativa de compatibilidad. El firmware A2 probado no ofrece el servicio LAN independiente de Tencent, por lo que ningún modo garantiza el inicio sin conexión a Internet.",
+          "xp2p_library_path": "Opción avanzada de vídeo. Usa una biblioteca XP2P dinámica compilada para el sistema operativo y la CPU del host de Home Assistant. Las bibliotecas APK/AAR de Android y los frameworks de iOS no son entornos de ejecución del host.",
+          "xp2p_runner_command": "Opción avanzada de vídeo. Usa únicamente un ejecutor local que gestione un entorno XP2P compatible y devuelva una URL FLV local. Las herramientas de Android no están diseñadas para ejecutarse en el host de Home Assistant.",
+          "xp2p_runner_mode": "Usa el modo de proceso para que el ejecutor permanezca activo mientras Home Assistant transmite vídeo."
+        }
+      }
+    }
+  },
+  "selector": {
+    "country": {
+      "options": {
+        "cn": "China",
+        "eu": "Europa",
+        "us": "Estados Unidos",
+        "ru": "Rusia",
+        "sg": "Singapur"
+      }
+    },
+    "map_rotation": {
+      "options": {
+        "0": "0° (sin rotación)",
+        "90": "90° en sentido horario",
+        "180": "180°",
+        "270": "270° en sentido horario"
+      }
+    },
+    "map_theme": {
+      "options": {
+        "emerald": "Esmeralda",
+        "dark": "Oscuro",
+        "midnight": "Medianoche",
+        "high_contrast": "Alto contraste"
+      }
+    },
+    "map_spot_area_style": {
+      "options": {
+        "hidden": "Oculto (recomendado)",
+        "outline": "Solo contorno",
+        "filled": "Relleno"
+      }
+    },
+    "map_mowing_path_style": {
+      "options": {
+        "hidden": "Oculto",
+        "subtle": "Sutil (recomendado)",
+        "detailed": "Detallado"
+      }
+    },
+    "video_retention": {
+      "options": {
+        "balanced": "Equilibrado (la visualización en directo permanece lista)",
+        "battery_saver": "Ahorro de batería (se detiene cuando no quedan espectadores)",
+        "video_priority": "Prioridad de vídeo (las vistas previas también mantienen la conexión lista)"
+      }
+    },
+    "video_transport": {
+      "options": {
+        "auto": "XP2P automático con reconexión rápida",
+        "cloud": "XP2P (aprovisionado desde la nube)"
+      }
+    },
+    "xp2p_runner_mode": {
+      "options": {
+        "process": "Proceso persistente",
+        "one-shot": "Comando de una sola ejecución"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "state_name": {
+        "name": "Estado",
+        "state": {
+          "unknown": "Desconocido",
+          "mowing": "Cortando el césped",
+          "idle": "Inactivo",
+          "paused": "En pausa",
+          "error": "Error",
+          "returning": "Volviendo a la base de carga",
+          "charging": "Cargando",
+          "building": "Creando el mapa",
+          "charging_completed": "Carga completada",
+          "upgrading": "Actualizando",
+          "mow_summon": "Corte bajo demanda",
+          "station_reset": "Reinicio de la estación",
+          "remote_control": "Control remoto",
+          "smart_charging": "Carga inteligente",
+          "second_mowing": "Segunda pasada de corte",
+          "human_following": "Siguiendo a una persona",
+          "spot_mowing": "Corte puntual",
+          "waiting_for_task": "Esperando una tarea",
+          "station_cleaning": "Limpieza de la estación",
+          "shortcut": "Acceso directo",
+          "monitoring": "Supervisión",
+          "monitoring_paused": "Supervisión en pausa"
+        }
+      }
+    }
+  }
+}
