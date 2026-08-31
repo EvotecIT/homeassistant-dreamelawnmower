@@ -1,4 +1,13 @@
 {
+  "common": {
+    "notification_unknown_fault": "Error desconocido",
+    "notification_fault_title": "{name}: error del cortacésped",
+    "notification_fault_message": "El cortacésped informa de **{display}**.",
+    "notification_error_code": "Código de error: `{code}`",
+    "notification_warning_title": "{name}: advertencia del cortacésped",
+    "notification_warning_message": "El cortacésped informa de **{display}**.",
+    "notification_status_code": "Código de estado: `{code}`"
+  },
   "config": {
     "step": {
       "user": {
@@ -54,6 +63,7 @@
           "map_marker_image": "Marcador personalizado del cortacésped",
           "map_spot_area_style": "Visualización de las áreas de corte puntual guardadas",
           "map_mowing_path_style": "Visualización del recorrido de corte completado",
+          "notification_mode": "Notificaciones de Home Assistant",
           "video_retention": "Retención del vídeo en directo",
           "video_transport": "Transporte del vídeo en directo",
           "xp2p_library_path": "Ruta de la biblioteca nativa XP2P del host",
@@ -68,6 +78,7 @@
           "map_marker_image": "Archivo PNG, JPEG o WebP opcional dentro de la carpeta config/www de Home Assistant, por ejemplo mower/marker.png o /local/mower/marker.png. Se ignoran los archivos que estén fuera de esa carpeta y los que superen 1 MB.",
           "map_spot_area_style": "Oculta los rectángulos de corte puntual guardados para obtener un mapa limpio similar al de la aplicación Dreame, muestra solo sus contornos o restaura la superposición de diagnóstico rellena. Solo afecta a los mapas vectoriales renderizados localmente.",
           "map_mowing_path_style": "Oculta las pasadas de corte completadas, muéstralas de forma sutil o muestra todas las pasadas con detalle. La ruta en directo y el marcador del cortacésped permanecen visibles.",
+          "notification_mode": "Crea notificaciones persistentes de Home Assistant para las condiciones del cortacésped. Usa un elemento estable por cortacésped y condición, lo actualiza cuando cambian los detalles y lo elimina cuando la condición se resuelve. Está desactivado de forma predeterminada; usa el blueprint de notificaciones para el envío móvil, el mantenimiento, los avisos sin conexión, los retrasos, las repeticiones o las acciones personalizadas.",
           "video_retention": "Equilibrado ofrece a las vistas previas una ventana de reconexión de 60 segundos y mantiene XP2P listo durante la sesión de corte actual después de abrir el vídeo en directo. Ahorro de batería siempre libera la conexión poco después de que se vaya el último espectador. Prioridad de vídeo también considera el acceso a las vistas previas como motivo para mantenerla lista durante el corte. Todos los modos permanecen inactivos hasta que se solicita contenido multimedia y se detienen cuando el estado del cortacésped bloquea el vídeo.",
           "video_transport": "Automático es la opción rápida predeterminada: actualiza solo el estado de seguridad del cortacésped, reutiliza los datos de conexión verificados y prefiere una ruta LAN comprobada cuando el firmware la ofrece. La nube sigue siendo la alternativa de compatibilidad. El firmware A2 probado no ofrece el servicio LAN independiente de Tencent, por lo que ningún modo garantiza el inicio sin conexión a Internet.",
           "xp2p_library_path": "Opción avanzada de vídeo. Usa una biblioteca XP2P dinámica compilada para el sistema operativo y la CPU del host de Home Assistant. Las bibliotecas APK/AAR de Android y los frameworks de iOS no son entornos de ejecución del host.",
@@ -115,6 +126,13 @@
         "hidden": "Oculto",
         "subtle": "Sutil (recomendado)",
         "detailed": "Detallado"
+      }
+    },
+    "notification_mode": {
+      "options": {
+        "off": "Desactivadas",
+        "faults": "Errores graves",
+        "faults_and_warnings": "Errores graves y advertencias"
       }
     },
     "video_retention": {

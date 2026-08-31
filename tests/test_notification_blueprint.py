@@ -89,3 +89,17 @@ def test_blueprint_reconciles_every_condition_on_start_and_reload() -> None:
             "event_type": "automation_reloaded",
             "id": trigger_id,
         } in triggers
+
+
+def test_fault_restoration_has_one_primary_condition_trigger_source() -> None:
+    triggers = _substituted_automation()["triggers"]
+    restore_fault = [trigger for trigger in triggers if trigger["id"] == "restore_fault"]
+
+    assert len(restore_fault) == 2
+    assert {trigger["entity_id"] for trigger in restore_fault} == {
+        EXAMPLE_INPUTS["fault_entity"]
+    }
+    assert {trigger["from"] for trigger in restore_fault} == {
+        "unknown",
+        "unavailable",
+    }
