@@ -286,7 +286,7 @@ actions:
             {{ states(error_entity) not in ['unknown', 'unavailable']
                and trigger.from_state is not none
                and (trigger.from_state.state not in ['unknown', 'unavailable']
-                    or delivery_mode == 'persistent') }}
+                    or delivery_mode in ['persistent', 'repeat']) }}
           {% else %}
             {{ states(fault_entity) not in ['unknown', 'unavailable'] }}
           {% endif %}
@@ -306,13 +306,11 @@ actions:
               or ((is_reconcile | bool) and issue_kind == 'fault') %}
           {{ is_state(fault_entity, 'on') }}
         {% elif trigger.id == 'fault_detail' %}
-          {{ is_state(fault_entity, 'on')
+          {{ delivery_mode in ['persistent', 'repeat']
+             and is_state(fault_entity, 'on')
              and trigger.from_state is not none
              and trigger.to_state is not none
-             and (delivery_mode == 'persistent'
-                  or trigger.from_state.state not in ['none', 'unknown', 'unavailable', ''])
-             and (delivery_mode == 'persistent'
-                  or trigger.to_state.state not in ['none', 'unknown', 'unavailable', ''])
+             and trigger.to_state.state not in ['unknown', 'unavailable']
              and trigger.from_state.state != trigger.to_state.state
              and states(error_entity) == trigger.to_state.state }}
         {% elif issue_kind == 'notice' %}
@@ -373,11 +371,20 @@ actions:
               {% if issue_kind == 'fault' %}
                 {% set expected = trigger_state
                    if trigger.id == 'fault_detail' else initial_incident_value %}
-                {{ not is_state(fault_entity, 'on')
-                   or states(fault_entity) in ['unknown', 'unavailable']
-                   or (states(error_entity) not in ['none', 'unknown', 'unavailable', '']
-                       and expected not in ['none', 'unknown', 'unavailable', '']
-                       and states(error_entity) != expected) }}
+                {% if delivery_mode == 'one_shot' and trigger.id != 'fault_detail' %}
+                  {{ not is_state(fault_entity, 'on')
+                     or states(fault_entity) in ['unknown', 'unavailable'] }}
+                {% elif trigger.id == 'fault_detail' and delivery_mode == 'repeat' %}
+                  {{ not is_state(fault_entity, 'on')
+                     or states(fault_entity) in ['unknown', 'unavailable']
+                     or states(error_entity) != expected }}
+                {% else %}
+                  {{ not is_state(fault_entity, 'on')
+                     or states(fault_entity) in ['unknown', 'unavailable']
+                     or (states(error_entity) not in ['none', 'unknown', 'unavailable', '']
+                         and expected not in ['none', 'unknown', 'unavailable', '']
+                         and states(error_entity) != expected) }}
+                {% endif %}
               {% elif issue_kind == 'notice' %}
                 {{ states(status_notice_entity) != trigger_state
                    or ((state_attr(mower_entity, 'status_notice_tier') or 'unknown') | lower)
@@ -402,10 +409,14 @@ actions:
     variables:
       issue_active: >-
         {% if issue_kind == 'fault' and trigger.id != 'fault_detail' %}
-          {{ (transition_eligible | bool) and is_state(fault_entity, 'on')
-             and (states(error_entity) in ['none', 'unknown', 'unavailable', '']
-                  or initial_incident_value in ['none', 'unknown', 'unavailable', '']
-                  or states(error_entity) == initial_incident_value) }}
+          {% if delivery_mode == 'one_shot' %}
+            {{ (transition_eligible | bool) and is_state(fault_entity, 'on') }}
+          {% else %}
+            {{ (transition_eligible | bool) and is_state(fault_entity, 'on')
+               and (states(error_entity) in ['none', 'unknown', 'unavailable', '']
+                    or initial_incident_value in ['none', 'unknown', 'unavailable', '']
+                    or states(error_entity) == initial_incident_value) }}
+          {% endif %}
         {% elif trigger.id == 'fault_detail' %}
           {{ (transition_eligible | bool)
              and is_state(fault_entity, 'on')
@@ -519,8 +530,7 @@ actions:
                 - wait_template: >-
                     {% if issue_kind == 'fault' %}
                       {{ not is_state(fault_entity, 'on')
-                         or (states(error_entity) not in ['none', 'unknown', 'unavailable', '']
-                             and states(error_entity) != incident_value) }}
+                         or states(error_entity) != incident_value }}
                     {% elif issue_kind == 'notice' %}
                       {{ states(status_notice_entity) != incident_value
                          or ((state_attr(mower_entity, 'status_notice_tier') or 'unknown') | lower)
