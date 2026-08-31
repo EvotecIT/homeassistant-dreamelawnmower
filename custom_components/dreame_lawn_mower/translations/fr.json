@@ -1,4 +1,15 @@
 {
+  "common": {
+    "notification": {
+      "unknown_fault": "Panne inconnue",
+      "fault_title": "{name} : panne du robot tondeuse",
+      "fault_message": "Le robot tondeuse signale **{display}**.",
+      "error_code": "Code d’erreur : `{code}`",
+      "warning_title": "{name} : avertissement du robot tondeuse",
+      "warning_message": "Le robot tondeuse signale **{display}**.",
+      "status_code": "Code d’état : `{code}`"
+    }
+  },
   "config": {
     "step": {
       "user": {
@@ -54,6 +65,7 @@
           "map_marker_image": "Marqueur personnalisé du robot tondeuse",
           "map_spot_area_style": "Affichage des zones de tonte ponctuelle enregistrées",
           "map_mowing_path_style": "Affichage des passages de tonte terminés",
+          "notification_mode": "Notifications Home Assistant",
           "video_retention": "Maintien de la connexion vidéo en direct",
           "video_transport": "Mode de connexion de la vidéo en direct",
           "xp2p_library_path": "Chemin de la bibliothèque native XP2P de l’hôte",
@@ -68,6 +80,7 @@
           "map_marker_image": "Fichier PNG, JPEG ou WebP facultatif placé dans le dossier config/www de Home Assistant, par exemple mower/marker.png ou /local/mower/marker.png. Les fichiers situés hors de ce dossier ou dépassant 1 Mo sont ignorés.",
           "map_spot_area_style": "Masquez les rectangles enregistrés pour la tonte ponctuelle afin d’obtenir une carte claire proche de l’application Dreame, affichez seulement leur contour ou rétablissez le calque de diagnostic rempli. Ce réglage concerne uniquement les cartes vectorielles rendues localement.",
           "map_mowing_path_style": "Masquez les passages de tonte terminés, affichez-les discrètement ou montrez chaque passage en détail. L’itinéraire en direct et le marqueur du robot tondeuse restent visibles.",
+          "notification_mode": "Crée des notifications persistantes Home Assistant pour les états du robot. Une notification stable par robot et par état est mise à jour lorsque les détails changent puis supprimée lorsque le problème disparaît. Le réglage est désactivé par défaut ; utilisez le blueprint pour les notifications mobiles, l’entretien, les alertes hors ligne, les délais, les répétitions ou les actions personnalisées.",
           "video_retention": "Le mode Équilibré conserve une fenêtre de reconnexion de 60 secondes pour les aperçus et maintient XP2P prêt pendant la tonte en cours après l’ouverture de la vidéo en direct. Économie d’énergie libère toujours la connexion peu après le dernier accès. Priorité vidéo considère aussi l’accès aux aperçus comme une raison de maintenir la connexion pendant la tonte. Tous les modes attendent une demande de média avant de démarrer et s’arrêtent lorsque l’état du robot interdit la vidéo.",
           "video_transport": "Automatique est le réglage rapide par défaut : il actualise uniquement l’état de sécurité du robot, réutilise des données de connexion vérifiées et privilégie un chemin LAN confirmé lorsque le micrologiciel le permet. Cloud reste le mode de compatibilité. Le micrologiciel A2 testé n’expose pas le service LAN distinct de Tencent ; aucun mode ne garantit donc un démarrage sans Internet.",
           "xp2p_library_path": "Option vidéo avancée. Utilisez une bibliothèque dynamique XP2P compilée pour le système d’exploitation et le processeur de l’hôte Home Assistant. Les bibliothèques Android APK/AAR et les frameworks iOS ne peuvent pas servir d’environnement d’exécution sur l’hôte.",
@@ -115,6 +128,13 @@
         "hidden": "Masqués",
         "subtle": "Discrets (recommandés)",
         "detailed": "Détaillés"
+      }
+    },
+    "notification_mode": {
+      "options": {
+        "off": "Désactivé",
+        "faults": "Pannes critiques",
+        "faults_and_warnings": "Pannes critiques et avertissements"
       }
     },
     "video_retention": {

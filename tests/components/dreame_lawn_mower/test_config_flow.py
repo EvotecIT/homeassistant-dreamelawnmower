@@ -33,6 +33,7 @@ from custom_components.dreame_lawn_mower.const import (
     CONF_MAP_THEME,
     CONF_MODEL,
     CONF_NAME,
+    CONF_NOTIFICATION_MODE,
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
     CONF_USERNAME,
@@ -46,6 +47,7 @@ from custom_components.dreame_lawn_mower.const import (
     DEFAULT_MAP_SPOT_AREA_STYLE,
     DEFAULT_MAP_STROKE_SCALE,
     DEFAULT_MAP_THEME,
+    DEFAULT_NOTIFICATION_MODE,
     DEFAULT_VIDEO_RETENTION,
     DEFAULT_VIDEO_TRANSPORT,
     DOMAIN,
@@ -393,6 +395,7 @@ def test_options_flow_accepts_map_label_scale() -> None:
         CONF_MAP_MARKER_IMAGE: "",
         CONF_MAP_SPOT_AREA_STYLE: "outline",
         CONF_MAP_MOWING_PATH_STYLE: "hidden",
+        CONF_NOTIFICATION_MODE: DEFAULT_NOTIFICATION_MODE,
         CONF_VIDEO_RETENTION: DEFAULT_VIDEO_RETENTION,
         CONF_VIDEO_TRANSPORT: DEFAULT_VIDEO_TRANSPORT,
         CONF_XP2P_LIBRARY_PATH: "",
@@ -436,6 +439,7 @@ async def test_every_localized_selector_is_wired_to_its_form(hass) -> None:
         CONF_MAP_THEME,
         CONF_MAP_SPOT_AREA_STYLE,
         CONF_MAP_MOWING_PATH_STYLE,
+        CONF_NOTIFICATION_MODE,
         CONF_VIDEO_RETENTION,
         CONF_VIDEO_TRANSPORT,
         CONF_XP2P_RUNNER_MODE,
@@ -486,3 +490,14 @@ def test_options_flow_replaces_unknown_video_retention_default() -> None:
     validated = result["data_schema"]({})
 
     assert validated[CONF_VIDEO_RETENTION] == DEFAULT_VIDEO_RETENTION
+
+
+def test_options_flow_replaces_unknown_notification_mode_default() -> None:
+    flow = DreameLawnMowerOptionsFlow(
+        SimpleNamespace(options={CONF_NOTIFICATION_MODE: "unknown"})
+    )
+
+    result = asyncio.run(flow.async_step_init())
+    validated = result["data_schema"]({})
+
+    assert validated[CONF_NOTIFICATION_MODE] == DEFAULT_NOTIFICATION_MODE

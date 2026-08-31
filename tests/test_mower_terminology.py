@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 
 from custom_components.dreame_lawn_mower.binary_sensor import BINARY_SENSORS
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.const import (
@@ -53,6 +54,13 @@ def _sensor(key: str):
 
 def _binary_sensor(key: str):
     return next(description for description in BINARY_SENSORS if description.key == key)
+
+
+def test_error_active_is_a_native_home_assistant_problem_sensor() -> None:
+    assert (
+        _binary_sensor("error_active").device_class
+        is BinarySensorDeviceClass.PROBLEM
+    )
 
 
 def test_snapshot_exposes_mower_names_without_removing_legacy_fields() -> None:

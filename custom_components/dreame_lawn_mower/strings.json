@@ -1,4 +1,15 @@
 {
+  "common": {
+    "notification": {
+      "unknown_fault": "Unknown fault",
+      "fault_title": "{name}: mower fault",
+      "fault_message": "The mower reports **{display}**.",
+      "error_code": "Error code: `{code}`",
+      "warning_title": "{name}: mower warning",
+      "warning_message": "The mower reports **{display}**.",
+      "status_code": "Status code: `{code}`"
+    }
+  },
   "config": {
     "step": {
       "user": {
@@ -54,6 +65,7 @@
           "map_marker_image": "Custom mower marker",
           "map_spot_area_style": "Saved spot area display",
           "map_mowing_path_style": "Completed mowing path display",
+          "notification_mode": "Home Assistant notifications",
           "video_retention": "Live video retention",
           "video_transport": "Live video transport",
           "xp2p_library_path": "Host XP2P native library path",
@@ -68,6 +80,7 @@
           "map_marker_image": "Optional PNG, JPEG, or WebP inside Home Assistant's config/www folder, for example mower/marker.png or /local/mower/marker.png. Files outside that folder and files larger than 1 MB are ignored.",
           "map_spot_area_style": "Hide saved spot-mowing rectangles for a clean Dreame-like map, show only their outlines, or restore the filled diagnostic overlay. This affects locally rendered vector maps only.",
           "map_mowing_path_style": "Hide completed mowing passes, render them subtly, or show every pass in full detail. The live route and mower marker remain visible.",
+          "notification_mode": "Create persistent Home Assistant notifications for mower conditions. Notifications use one stable item per mower and condition, update when details change, and disappear when the condition clears. Off is the default; use the notification blueprint for mobile delivery, maintenance reminders, offline alerts, delays, repeats, or custom actions.",
           "video_retention": "Balanced gives snapshot previews a 60-second reconnect window and keeps XP2P ready for the current mowing run after someone opens live video. Battery saver always releases it shortly after the last consumer. Video priority also treats snapshot access as a reason to stay ready while mowing. All modes remain lazy until media is requested and stop when mower state blocks video.",
           "video_transport": "Auto is the fast default: it refreshes only mower safety state, then reuses health-checked provisioning and prefers a proven LAN route when firmware exposes one. Cloud remains the compatibility fallback. The tested A2 firmware does not expose Tencent's separate LAN service, so neither mode promises internet-independent startup.",
           "xp2p_library_path": "Advanced video option. Use a dynamic XP2P library built for this Home Assistant host OS and CPU. Android APK/AAR libraries and iOS frameworks are not host runtimes.",
@@ -115,6 +128,13 @@
         "hidden": "Hidden",
         "subtle": "Subtle (recommended)",
         "detailed": "Detailed"
+      }
+    },
+    "notification_mode": {
+      "options": {
+        "off": "Off",
+        "faults": "Hard faults",
+        "faults_and_warnings": "Hard faults and warnings"
       }
     },
     "video_retention": {

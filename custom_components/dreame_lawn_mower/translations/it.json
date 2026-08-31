@@ -1,4 +1,15 @@
 {
+  "common": {
+    "notification": {
+      "unknown_fault": "Guasto sconosciuto",
+      "fault_title": "{name}: guasto del robot tagliaerba",
+      "fault_message": "Il robot tagliaerba segnala **{display}**.",
+      "error_code": "Codice errore: `{code}`",
+      "warning_title": "{name}: avviso del robot tagliaerba",
+      "warning_message": "Il robot tagliaerba segnala **{display}**.",
+      "status_code": "Codice stato: `{code}`"
+    }
+  },
   "config": {
     "step": {
       "user": {
@@ -54,6 +65,7 @@
           "map_marker_image": "Indicatore personalizzato del robot tagliaerba",
           "map_spot_area_style": "Visualizzazione delle aree di taglio localizzato salvate",
           "map_mowing_path_style": "Visualizzazione dei passaggi di taglio completati",
+          "notification_mode": "Notifiche di Home Assistant",
           "video_retention": "Mantenimento della connessione video in diretta",
           "video_transport": "Modalità di connessione del video in diretta",
           "xp2p_library_path": "Percorso della libreria nativa XP2P dell’host",
@@ -68,6 +80,7 @@
           "map_marker_image": "File PNG, JPEG o WebP facoltativo nella cartella config/www di Home Assistant, ad esempio mower/marker.png o /local/mower/marker.png. I file esterni a questa cartella e quelli più grandi di 1 MB vengono ignorati.",
           "map_spot_area_style": "Nascondi i rettangoli salvati per il taglio localizzato per ottenere una mappa pulita simile a quella dell’app Dreame, mostra solo il contorno oppure ripristina il livello diagnostico pieno. Questa impostazione riguarda solo le mappe vettoriali generate localmente.",
           "map_mowing_path_style": "Nascondi i passaggi di taglio completati, mostrali in modo discreto oppure visualizza ogni passaggio in dettaglio. Il percorso in diretta e l’indicatore del robot tagliaerba restano visibili.",
+          "notification_mode": "Crea notifiche persistenti di Home Assistant per le condizioni del robot. Una notifica stabile per robot e condizione viene aggiornata quando cambiano i dettagli e rimossa quando la condizione scompare. L'impostazione predefinita è Disattivato; usa il blueprint per notifiche mobili, manutenzione, avvisi offline, ritardi, ripetizioni o azioni personalizzate.",
           "video_retention": "La modalità Bilanciata mantiene una finestra di riconnessione di 60 secondi per le anteprime e lascia XP2P pronto durante il taglio in corso dopo l’apertura del video in diretta. Risparmio energetico libera sempre la connessione poco dopo l’ultimo utilizzo. Priorità video considera anche l’accesso alle anteprime un motivo per mantenere pronta la connessione durante il taglio. Tutte le modalità attendono una richiesta multimediale prima di avviarsi e si arrestano quando lo stato del robot blocca il video.",
           "video_transport": "Automatica è l’impostazione rapida predefinita: aggiorna solo lo stato di sicurezza del robot, riutilizza i dati di connessione verificati e preferisce un percorso LAN confermato quando il firmware lo rende disponibile. Cloud rimane la modalità di compatibilità. Il firmware A2 testato non espone il servizio LAN separato di Tencent, quindi nessuna modalità garantisce l’avvio senza Internet.",
           "xp2p_library_path": "Opzione video avanzata. Usa una libreria dinamica XP2P compilata per il sistema operativo e la CPU dell’host Home Assistant. Le librerie Android APK/AAR e i framework iOS non possono essere usati come runtime dell’host.",
@@ -115,6 +128,13 @@
         "hidden": "Nascosti",
         "subtle": "Discreti (consigliati)",
         "detailed": "Dettagliati"
+      }
+    },
+    "notification_mode": {
+      "options": {
+        "off": "Disattivato",
+        "faults": "Guasti critici",
+        "faults_and_warnings": "Guasti critici e avvisi"
       }
     },
     "video_retention": {
