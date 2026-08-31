@@ -1,14 +1,12 @@
 {
   "common": {
-    "notification": {
-      "unknown_fault": "Guasto sconosciuto",
-      "fault_title": "{name}: guasto del robot tagliaerba",
-      "fault_message": "Il robot tagliaerba segnala **{display}**.",
-      "error_code": "Codice errore: `{code}`",
-      "warning_title": "{name}: avviso del robot tagliaerba",
-      "warning_message": "Il robot tagliaerba segnala **{display}**.",
-      "status_code": "Codice stato: `{code}`"
-    }
+    "notification_unknown_fault": "Guasto sconosciuto",
+    "notification_fault_title": "{name}: guasto del robot tagliaerba",
+    "notification_fault_message": "Il robot tagliaerba segnala **{display}**.",
+    "notification_error_code": "Codice errore: `{code}`",
+    "notification_warning_title": "{name}: avviso del robot tagliaerba",
+    "notification_warning_message": "Il robot tagliaerba segnala **{display}**.",
+    "notification_status_code": "Codice stato: `{code}`"
   },
   "config": {
     "step": {

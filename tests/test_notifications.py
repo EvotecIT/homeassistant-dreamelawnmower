@@ -60,25 +60,25 @@ def notification_calls(monkeypatch):
     created = Mock()
     dismissed = Mock()
     translations = {
-        "component.dreame_lawn_mower.common.notification.unknown_fault": (
+        "component.dreame_lawn_mower.common.notification_unknown_fault": (
             "Unknown fault"
         ),
-        "component.dreame_lawn_mower.common.notification.fault_title": (
+        "component.dreame_lawn_mower.common.notification_fault_title": (
             "{name}: mower fault"
         ),
-        "component.dreame_lawn_mower.common.notification.fault_message": (
+        "component.dreame_lawn_mower.common.notification_fault_message": (
             "The mower reports **{display}**."
         ),
-        "component.dreame_lawn_mower.common.notification.error_code": (
+        "component.dreame_lawn_mower.common.notification_error_code": (
             "Error code: `{code}`"
         ),
-        "component.dreame_lawn_mower.common.notification.warning_title": (
+        "component.dreame_lawn_mower.common.notification_warning_title": (
             "{name}: mower warning"
         ),
-        "component.dreame_lawn_mower.common.notification.warning_message": (
+        "component.dreame_lawn_mower.common.notification_warning_message": (
             "The mower reports **{display}**."
         ),
-        "component.dreame_lawn_mower.common.notification.status_code": (
+        "component.dreame_lawn_mower.common.notification_status_code": (
             "Status code: `{code}`"
         ),
     }
@@ -224,13 +224,13 @@ def test_runtime_notification_text_uses_home_assistant_language(
     created, _, translated = notification_calls
     translated.return_value.update(
         {
-            "component.dreame_lawn_mower.common.notification.fault_title": (
+            "component.dreame_lawn_mower.common.notification_fault_title": (
                 "{name}: błąd kosiarki"
             ),
-            "component.dreame_lawn_mower.common.notification.fault_message": (
+            "component.dreame_lawn_mower.common.notification_fault_message": (
                 "Kosiarka zgłasza **{display}**."
             ),
-            "component.dreame_lawn_mower.common.notification.error_code": (
+            "component.dreame_lawn_mower.common.notification_error_code": (
                 "Kod błędu: `{code}`"
             ),
         }

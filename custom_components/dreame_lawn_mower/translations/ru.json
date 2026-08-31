@@ -1,14 +1,12 @@
 {
   "common": {
-    "notification": {
-      "unknown_fault": "Неизвестная ошибка",
-      "fault_title": "{name}: ошибка газонокосилки",
-      "fault_message": "Газонокосилка сообщает: **{display}**.",
-      "error_code": "Код ошибки: `{code}`",
-      "warning_title": "{name}: предупреждение газонокосилки",
-      "warning_message": "Газонокосилка сообщает: **{display}**.",
-      "status_code": "Код состояния: `{code}`"
-    }
+    "notification_unknown_fault": "Неизвестная ошибка",
+    "notification_fault_title": "{name}: ошибка газонокосилки",
+    "notification_fault_message": "Газонокосилка сообщает: **{display}**.",
+    "notification_error_code": "Код ошибки: `{code}`",
+    "notification_warning_title": "{name}: предупреждение газонокосилки",
+    "notification_warning_message": "Газонокосилка сообщает: **{display}**.",
+    "notification_status_code": "Код состояния: `{code}`"
   },
   "config": {
     "step": {

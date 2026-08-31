@@ -63,7 +63,7 @@ class DreameLawnMowerNotificationManager:
                 "common",
                 integrations={DOMAIN},
             )
-            prefix = f"component.{DOMAIN}.common.notification."
+            prefix = f"component.{DOMAIN}.common.notification_"
             self._text.update(
                 {
                     key: translations.get(f"{prefix}{key}", fallback)

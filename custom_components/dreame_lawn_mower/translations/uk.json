@@ -1,14 +1,12 @@
 {
   "common": {
-    "notification": {
-      "unknown_fault": "Невідома помилка",
-      "fault_title": "{name}: помилка газонокосарки",
-      "fault_message": "Газонокосарка повідомляє: **{display}**.",
-      "error_code": "Код помилки: `{code}`",
-      "warning_title": "{name}: попередження газонокосарки",
-      "warning_message": "Газонокосарка повідомляє: **{display}**.",
-      "status_code": "Код стану: `{code}`"
-    }
+    "notification_unknown_fault": "Невідома помилка",
+    "notification_fault_title": "{name}: помилка газонокосарки",
+    "notification_fault_message": "Газонокосарка повідомляє: **{display}**.",
+    "notification_error_code": "Код помилки: `{code}`",
+    "notification_warning_title": "{name}: попередження газонокосарки",
+    "notification_warning_message": "Газонокосарка повідомляє: **{display}**.",
+    "notification_status_code": "Код стану: `{code}`"
   },
   "config": {
     "step": {

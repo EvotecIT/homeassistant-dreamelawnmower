@@ -1,14 +1,12 @@
 {
   "common": {
-    "notification": {
-      "unknown_fault": "Nieznany błąd",
-      "fault_title": "{name}: błąd kosiarki",
-      "fault_message": "Kosiarka zgłasza **{display}**.",
-      "error_code": "Kod błędu: `{code}`",
-      "warning_title": "{name}: ostrzeżenie kosiarki",
-      "warning_message": "Kosiarka zgłasza **{display}**.",
-      "status_code": "Kod stanu: `{code}`"
-    }
+    "notification_unknown_fault": "Nieznany błąd",
+    "notification_fault_title": "{name}: błąd kosiarki",
+    "notification_fault_message": "Kosiarka zgłasza **{display}**.",
+    "notification_error_code": "Kod błędu: `{code}`",
+    "notification_warning_title": "{name}: ostrzeżenie kosiarki",
+    "notification_warning_message": "Kosiarka zgłasza **{display}**.",
+    "notification_status_code": "Kod stanu: `{code}`"
   },
   "config": {
     "step": {

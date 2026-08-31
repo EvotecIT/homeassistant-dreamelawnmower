@@ -1,14 +1,12 @@
 {
   "common": {
-    "notification": {
-      "unknown_fault": "Unknown fault",
-      "fault_title": "{name}: mower fault",
-      "fault_message": "The mower reports **{display}**.",
-      "error_code": "Error code: `{code}`",
-      "warning_title": "{name}: mower warning",
-      "warning_message": "The mower reports **{display}**.",
-      "status_code": "Status code: `{code}`"
-    }
+    "notification_unknown_fault": "Unknown fault",
+    "notification_fault_title": "{name}: mower fault",
+    "notification_fault_message": "The mower reports **{display}**.",
+    "notification_error_code": "Error code: `{code}`",
+    "notification_warning_title": "{name}: mower warning",
+    "notification_warning_message": "The mower reports **{display}**.",
+    "notification_status_code": "Status code: `{code}`"
   },
   "config": {
     "step": {

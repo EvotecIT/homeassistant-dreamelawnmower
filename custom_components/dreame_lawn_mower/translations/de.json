@@ -1,5 +1,5 @@
 {
-  "common": {"notification": {"unknown_fault": "Unbekannter Fehler", "fault_title": "{name}: Mäherfehler", "fault_message": "Der Mäher meldet **{display}**.", "error_code": "Fehlercode: `{code}`", "warning_title": "{name}: Mäherwarnung", "warning_message": "Der Mäher meldet **{display}**.", "status_code": "Statuscode: `{code}`"}},
+  "common": {"notification_unknown_fault": "Unbekannter Fehler", "notification_fault_title": "{name}: Mäherfehler", "notification_fault_message": "Der Mäher meldet **{display}**.", "notification_error_code": "Fehlercode: `{code}`", "notification_warning_title": "{name}: Mäherwarnung", "notification_warning_message": "Der Mäher meldet **{display}**.", "notification_status_code": "Statuscode: `{code}`"},
   "config": {
     "step": {
       "user": {"title": "Dreame-Mähroboter verbinden", "description": "Melde dich mit deinem Dreamehome- oder MOVAhome-Konto an, um Mähroboter zu finden.", "data": {"account_type": "Kontotyp", "username": "Benutzername", "password": "Passwort", "country": "Region"}},

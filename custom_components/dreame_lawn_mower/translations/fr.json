@@ -1,14 +1,12 @@
 {
   "common": {
-    "notification": {
-      "unknown_fault": "Panne inconnue",
-      "fault_title": "{name} : panne du robot tondeuse",
-      "fault_message": "Le robot tondeuse signale **{display}**.",
-      "error_code": "Code d’erreur : `{code}`",
-      "warning_title": "{name} : avertissement du robot tondeuse",
-      "warning_message": "Le robot tondeuse signale **{display}**.",
-      "status_code": "Code d’état : `{code}`"
-    }
+    "notification_unknown_fault": "Panne inconnue",
+    "notification_fault_title": "{name} : panne du robot tondeuse",
+    "notification_fault_message": "Le robot tondeuse signale **{display}**.",
+    "notification_error_code": "Code d’erreur : `{code}`",
+    "notification_warning_title": "{name} : avertissement du robot tondeuse",
+    "notification_warning_message": "Le robot tondeuse signale **{display}**.",
+    "notification_status_code": "Code d’état : `{code}`"
   },
   "config": {
     "step": {
