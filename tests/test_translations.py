@@ -13,9 +13,14 @@ from homeassistant.components.automation.config import (
     async_validate_config_item,
 )
 from homeassistant.core import State
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.script import Script
 from homeassistant.helpers.translation import async_get_translations
-from pytest_homeassistant_custom_component.common import async_mock_service
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_mock_service,
+)
 
 from custom_components.dreame_lawn_mower.const import (
     COUNTRY_OPTIONS,
@@ -357,10 +362,20 @@ async def test_blueprint_updates_persistent_notification_when_fault_changes(
     )
     await _wait_for_calls(create_calls, 2)
     assert "Right wheel blocked" in create_calls[-1].data["message"]
+    await asyncio.wait_for(second, timeout=1)
 
     hass.states.async_set("binary_sensor.garden_error_active", "off")
     hass.states.async_set("sensor.garden_error", "none")
-    await asyncio.wait_for(second, timeout=1)
+    clear_trigger = _state_trigger(
+        "clear_fault",
+        "binary_sensor.garden_error_active",
+        "on",
+        "off",
+    )
+    await asyncio.wait_for(
+        script.async_run({**variables, "trigger": clear_trigger}),
+        timeout=1,
+    )
     assert len(dismiss_calls) == 1
 
 
@@ -598,6 +613,74 @@ async def test_blueprint_reconciliation_dismisses_stale_persistent_item(hass) ->
     assert dismiss_calls[0].data["notification_id"].endswith("_fault")
 
 
+@pytest.mark.parametrize(
+    ("trigger_id", "entity_id", "from_state", "to_state", "issue_kind"),
+    [
+        (
+            "clear_fault",
+            "binary_sensor.garden_error_active",
+            "on",
+            "off",
+            "fault",
+        ),
+        (
+            "notice",
+            "sensor.garden_status_notice",
+            "Rain detected",
+            "none",
+            "notice",
+        ),
+        (
+            "clear_offline",
+            "binary_sensor.garden_online",
+            "off",
+            "on",
+            "offline",
+        ),
+        (
+            "clear_maintenance_warning",
+            "binary_sensor.garden_maintenance_warning",
+            "on",
+            "off",
+            "maintenance_warning",
+        ),
+        (
+            "clear_maintenance_due",
+            "binary_sensor.garden_maintenance_due",
+            "on",
+            "off",
+            "maintenance_due",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_blueprint_clear_transitions_dismiss_persistent_items(
+    hass,
+    trigger_id: str,
+    entity_id: str,
+    from_state: str,
+    to_state: str,
+    issue_kind: str,
+) -> None:
+    _set_blueprint_states(hass)
+    async_mock_service(hass, "persistent_notification", "create")
+    dismiss_calls = async_mock_service(hass, "persistent_notification", "dismiss")
+    script, variables = await _notification_blueprint_script(
+        hass,
+        delivery_mode="persistent",
+        onset_delay_seconds=0,
+    )
+    trigger = _state_trigger(trigger_id, entity_id, from_state, to_state)
+
+    await asyncio.wait_for(
+        script.async_run({**variables, "trigger": trigger}),
+        timeout=1,
+    )
+
+    assert len(dismiss_calls) == 1
+    assert dismiss_calls[0].data["notification_id"].endswith(f"_{issue_kind}")
+
+
 @pytest.mark.asyncio
 async def test_blueprint_restoration_reconciles_after_unavailable_startup_state(
     hass,
@@ -735,15 +818,154 @@ async def test_blueprint_fault_detail_unavailable_does_not_clear_active_fault(
         script.async_run({**variables, "trigger": restored})
     )
     await _wait_for_calls(create_calls, 2)
+    await asyncio.wait_for(restored_owner, timeout=1)
     assert dismiss_calls == []
     assert not owner.done()
-    assert not restored_owner.done()
+
+    for _ in range(3):
+        hass.states.async_set("sensor.garden_error", "unavailable")
+        unavailable = _state_trigger(
+            "fault_detail",
+            "sensor.garden_error",
+            "Left wheel blocked",
+            "unavailable",
+        )
+        await asyncio.wait_for(
+            script.async_run({**variables, "trigger": unavailable}),
+            timeout=1,
+        )
+        hass.states.async_set("sensor.garden_error", "Left wheel blocked")
+        restored = _state_trigger(
+            "fault_detail",
+            "sensor.garden_error",
+            "unavailable",
+            "Left wheel blocked",
+        )
+        await asyncio.wait_for(
+            script.async_run({**variables, "trigger": restored}),
+            timeout=1,
+        )
+
+    assert len(create_calls) == 5
+    assert not owner.done()
 
     hass.states.async_set("binary_sensor.garden_error_active", "off")
     hass.states.async_set("sensor.garden_error", "none")
     await asyncio.wait_for(owner, timeout=1)
-    await asyncio.wait_for(restored_owner, timeout=1)
-    assert len(dismiss_calls) == 2
+    assert len(dismiss_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_blueprint_empty_fault_detail_preserves_active_fault(hass) -> None:
+    _set_blueprint_states(hass)
+    create_calls = async_mock_service(hass, "persistent_notification", "create")
+    dismiss_calls = async_mock_service(hass, "persistent_notification", "dismiss")
+    script, variables = await _notification_blueprint_script(
+        hass,
+        delivery_mode="persistent",
+        onset_delay_seconds=0,
+    )
+    onset = _state_trigger(
+        "fault",
+        "binary_sensor.garden_error_active",
+        "off",
+        "on",
+    )
+    hass.states.async_set("sensor.garden_error", "Left wheel blocked")
+    hass.states.async_set("binary_sensor.garden_error_active", "on")
+    owner = asyncio.create_task(script.async_run({**variables, "trigger": onset}))
+    await _wait_for_calls(create_calls, 1)
+
+    hass.states.async_set("sensor.garden_error", "none")
+    detail_cleared = _state_trigger(
+        "fault_detail",
+        "sensor.garden_error",
+        "Left wheel blocked",
+        "none",
+    )
+    await asyncio.wait_for(
+        script.async_run({**variables, "trigger": detail_cleared}),
+        timeout=1,
+    )
+
+    assert len(create_calls) == 2
+    assert "active fault" in create_calls[-1].data["message"]
+    assert dismiss_calls == []
+    assert not owner.done()
+
+    hass.states.async_set("binary_sensor.garden_error_active", "off")
+    await asyncio.wait_for(owner, timeout=1)
+    assert len(dismiss_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_blueprint_notification_id_survives_mower_entity_rename(hass) -> None:
+    entry = MockConfigEntry(domain=DOMAIN)
+    entry.add_to_hass(hass)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, "test-mower")},
+    )
+    entity_registry = er.async_get(hass)
+    mower = entity_registry.async_get_or_create(
+        "lawn_mower",
+        DOMAIN,
+        "test-mower",
+        suggested_object_id="garden",
+        config_entry=entry,
+        device_id=device.id,
+    )
+    assert mower.entity_id == "lawn_mower.garden"
+    _set_blueprint_states(hass)
+    create_calls = async_mock_service(hass, "persistent_notification", "create")
+    async_mock_service(hass, "persistent_notification", "dismiss")
+    script, variables = await _notification_blueprint_script(
+        hass,
+        delivery_mode="persistent",
+        onset_delay_seconds=0,
+    )
+    hass.states.async_set("sensor.garden_error", "Left wheel blocked")
+    hass.states.async_set("binary_sensor.garden_error_active", "on")
+    detail = _state_trigger(
+        "fault_detail",
+        "sensor.garden_error",
+        "none",
+        "Left wheel blocked",
+    )
+
+    await asyncio.wait_for(
+        script.async_run({**variables, "trigger": detail}),
+        timeout=1,
+    )
+    first_id = create_calls[-1].data["notification_id"]
+
+    renamed = entity_registry.async_update_entity(
+        mower.entity_id,
+        new_entity_id="lawn_mower.back_garden",
+    )
+    hass.states.async_remove(mower.entity_id)
+    hass.states.async_set(
+        renamed.entity_id,
+        "idle",
+        {
+            "friendly_name": "Garden mower",
+            "error_display": None,
+            "status_notice_tier": None,
+        },
+    )
+    renamed_script, renamed_variables = await _notification_blueprint_script(
+        hass,
+        mower_entity=renamed.entity_id,
+        delivery_mode="persistent",
+        onset_delay_seconds=0,
+    )
+    await asyncio.wait_for(
+        renamed_script.async_run({**renamed_variables, "trigger": detail}),
+        timeout=1,
+    )
+
+    assert create_calls[-1].data["notification_id"] == first_id
+    assert device.id in first_id
 
 
 @pytest.mark.asyncio
