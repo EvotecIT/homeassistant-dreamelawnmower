@@ -322,7 +322,9 @@ async def test_blueprint_repeat_run_ends_before_a_later_recurrence(hass) -> None
 
 
 @pytest.mark.asyncio
-async def test_blueprint_repeat_fault_detail_transfers_single_owner(hass) -> None:
+async def test_blueprint_repeat_fault_keeps_one_owner_and_refreshes_message(
+    hass,
+) -> None:
     _set_blueprint_states(hass)
     notify_calls = async_mock_service(hass, "test", "notify")
     async_mock_service(hass, "persistent_notification", "dismiss")
@@ -330,8 +332,13 @@ async def test_blueprint_repeat_fault_detail_transfers_single_owner(hass) -> Non
         hass,
         delivery_mode="repeat",
         onset_delay_seconds=0,
-        repeat_interval_minutes=30,
-        notify_actions=[{"action": "test.notify"}],
+        repeat_interval_minutes=0.001,
+        notify_actions=[
+            {
+                "action": "test.notify",
+                "data": {"message": "{{ issue_message }}"},
+            }
+        ],
     )
     hass.states.async_set("binary_sensor.garden_error_active", "on")
     onset = _state_trigger(
@@ -343,11 +350,19 @@ async def test_blueprint_repeat_fault_detail_transfers_single_owner(hass) -> Non
     owner = asyncio.create_task(script.async_run({**variables, "trigger": onset}))
     await _wait_for_calls(notify_calls, 1)
 
+    assert "active fault" in notify_calls[-1].data["message"]
+
     transitions = [
-        ("none", "Left wheel blocked"),
-        ("Left wheel blocked", "none"),
+        ("none", "Left wheel blocked", "Left wheel blocked"),
+        ("Left wheel blocked", "none", "active fault"),
+        ("none", "unavailable", "active fault"),
+        ("unavailable", "Left wheel blocked", "Left wheel blocked"),
+        ("Left wheel blocked", "Right wheel blocked", "Right wheel blocked"),
     ]
-    for expected_count, (from_state, to_state) in enumerate(transitions, start=2):
+    for expected_count, (from_state, to_state, expected_message) in enumerate(
+        transitions,
+        start=2,
+    ):
         hass.states.async_set("sensor.garden_error", to_state)
         detail = _state_trigger(
             "fault_detail",
@@ -355,55 +370,78 @@ async def test_blueprint_repeat_fault_detail_transfers_single_owner(hass) -> Non
             from_state,
             to_state,
         )
-        replacement = asyncio.create_task(
-            script.async_run({**variables, "trigger": detail})
+        await asyncio.wait_for(
+            script.async_run({**variables, "trigger": detail}),
+            timeout=1,
         )
         await _wait_for_calls(notify_calls, expected_count)
-        await asyncio.wait_for(owner, timeout=1)
-        assert not replacement.done()
-        owner = replacement
-
-    hass.states.async_set("sensor.garden_error", "unavailable")
-    unavailable = _state_trigger(
-        "fault_detail",
-        "sensor.garden_error",
-        "none",
-        "unavailable",
-    )
-    await asyncio.gather(
-        owner,
-        script.async_run({**variables, "trigger": unavailable}),
-    )
-    assert len(notify_calls) == 3
-
-    hass.states.async_set("sensor.garden_error", "Left wheel blocked")
-    restored = _state_trigger(
-        "fault_detail",
-        "sensor.garden_error",
-        "unavailable",
-        "Left wheel blocked",
-    )
-    owner = asyncio.create_task(script.async_run({**variables, "trigger": restored}))
-    await _wait_for_calls(notify_calls, 4)
-    assert not owner.done()
-
-    hass.states.async_set("sensor.garden_error", "Right wheel blocked")
-    changed = _state_trigger(
-        "fault_detail",
-        "sensor.garden_error",
-        "Left wheel blocked",
-        "Right wheel blocked",
-    )
-    replacement = asyncio.create_task(
-        script.async_run({**variables, "trigger": changed})
-    )
-    await _wait_for_calls(notify_calls, 5)
-    await asyncio.wait_for(owner, timeout=1)
-    assert not replacement.done()
+        assert expected_message in notify_calls[-1].data["message"]
+        assert not owner.done()
 
     hass.states.async_set("binary_sensor.garden_error_active", "off")
-    await asyncio.wait_for(replacement, timeout=1)
-    assert len(notify_calls) == 5
+    await asyncio.wait_for(owner, timeout=1)
+    assert len(notify_calls) == 6
+
+
+@pytest.mark.parametrize(
+    ("initial_detail", "replacement_detail"),
+    [
+        ("none", "Left wheel blocked"),
+        ("unknown", "Left wheel blocked"),
+        ("unavailable", "Left wheel blocked"),
+        ("Left wheel blocked", "Right wheel blocked"),
+        ("Left wheel blocked", "none"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_blueprint_repeat_confirmation_keeps_the_condition_owner(
+    hass,
+    initial_detail: str,
+    replacement_detail: str,
+) -> None:
+    _set_blueprint_states(hass)
+    notify_calls = async_mock_service(hass, "test", "notify")
+    async_mock_service(hass, "persistent_notification", "dismiss")
+    script, variables = await _notification_blueprint_script(
+        hass,
+        delivery_mode="repeat",
+        onset_delay_seconds=0.05,
+        repeat_interval_minutes=30,
+        notify_actions=[{"action": "test.notify"}],
+    )
+    hass.states.async_set("sensor.garden_error", initial_detail)
+    hass.states.async_set("binary_sensor.garden_error_active", "on")
+    onset = _state_trigger(
+        "fault",
+        "binary_sensor.garden_error_active",
+        "off",
+        "on",
+    )
+    original = asyncio.create_task(script.async_run({**variables, "trigger": onset}))
+
+    await asyncio.sleep(0.01)
+    hass.states.async_set("sensor.garden_error", replacement_detail)
+    detail = _state_trigger(
+        "fault_detail",
+        "sensor.garden_error",
+        initial_detail,
+        replacement_detail,
+    )
+    await asyncio.wait_for(
+        script.async_run({**variables, "trigger": detail}),
+        timeout=1,
+    )
+
+    await asyncio.sleep(0.025)
+    assert notify_calls == []
+    assert not original.done()
+
+    await _wait_for_calls(notify_calls, 1)
+    assert not original.done()
+
+    hass.states.async_set("binary_sensor.garden_error_active", "off")
+    await asyncio.wait_for(original, timeout=1)
+    assert len(notify_calls) == 1
 
 
 @pytest.mark.asyncio

@@ -286,7 +286,7 @@ actions:
             {{ states(error_entity) not in ['unknown', 'unavailable']
                and trigger.from_state is not none
                and (trigger.from_state.state not in ['unknown', 'unavailable']
-                    or delivery_mode in ['persistent', 'repeat']) }}
+                    or delivery_mode == 'persistent') }}
           {% else %}
             {{ states(fault_entity) not in ['unknown', 'unavailable'] }}
           {% endif %}
@@ -306,7 +306,7 @@ actions:
               or ((is_reconcile | bool) and issue_kind == 'fault') %}
           {{ is_state(fault_entity, 'on') }}
         {% elif trigger.id == 'fault_detail' %}
-          {{ delivery_mode in ['persistent', 'repeat']
+          {{ delivery_mode == 'persistent'
              and is_state(fault_entity, 'on')
              and trigger.from_state is not none
              and trigger.to_state is not none
@@ -371,13 +371,10 @@ actions:
               {% if issue_kind == 'fault' %}
                 {% set expected = trigger_state
                    if trigger.id == 'fault_detail' else initial_incident_value %}
-                {% if delivery_mode == 'one_shot' and trigger.id != 'fault_detail' %}
+                {% if delivery_mode in ['one_shot', 'repeat']
+                      and trigger.id != 'fault_detail' %}
                   {{ not is_state(fault_entity, 'on')
                      or states(fault_entity) in ['unknown', 'unavailable'] }}
-                {% elif trigger.id == 'fault_detail' and delivery_mode == 'repeat' %}
-                  {{ not is_state(fault_entity, 'on')
-                     or states(fault_entity) in ['unknown', 'unavailable']
-                     or states(error_entity) != expected }}
                 {% else %}
                   {{ not is_state(fault_entity, 'on')
                      or states(fault_entity) in ['unknown', 'unavailable']
@@ -409,7 +406,7 @@ actions:
     variables:
       issue_active: >-
         {% if issue_kind == 'fault' and trigger.id != 'fault_detail' %}
-          {% if delivery_mode == 'one_shot' %}
+          {% if delivery_mode in ['one_shot', 'repeat'] %}
             {{ (transition_eligible | bool) and is_state(fault_entity, 'on') }}
           {% else %}
             {{ (transition_eligible | bool) and is_state(fault_entity, 'on')
@@ -526,11 +523,25 @@ actions:
         sequence:
           - repeat:
               sequence:
+                - variables:
+                    issue_message: >-
+                      {% if issue_kind == 'fault' %}
+                        {{ states(error_entity)
+                           if states(error_entity) not in ['none', 'unknown', 'unavailable', '']
+                           else state_attr(mower_entity, 'error_display')
+                                or 'The mower reports an active fault.' }}
+                      {% elif issue_kind == 'notice' %}
+                        {{ states(status_notice_entity) }}
+                      {% elif issue_kind == 'offline' %}
+                        The mower is offline.
+                      {% else %}
+                        {{ state_attr(issue_entity, 'friendly_name')
+                           or issue_kind | replace('_', ' ') }} is active.
+                      {% endif %}
                 - sequence: !input notify_actions
                 - wait_template: >-
                     {% if issue_kind == 'fault' %}
-                      {{ not is_state(fault_entity, 'on')
-                         or states(error_entity) != incident_value }}
+                      {{ not is_state(fault_entity, 'on') }}
                     {% elif issue_kind == 'notice' %}
                       {{ states(status_notice_entity) != incident_value
                          or ((state_attr(mower_entity, 'status_notice_tier') or 'unknown') | lower)
@@ -545,7 +556,18 @@ actions:
                   continue_on_timeout: true
               until:
                 - condition: template
-                  value_template: "{{ wait.completed }}"
+                  value_template: >-
+                    {% if issue_kind == 'fault' %}
+                      {{ not is_state(fault_entity, 'on') }}
+                    {% elif issue_kind == 'notice' %}
+                      {{ states(status_notice_entity) != incident_value
+                         or ((state_attr(mower_entity, 'status_notice_tier') or 'unknown') | lower)
+                            not in ['alert', 'attention', 'unknown'] }}
+                    {% elif issue_kind == 'offline' %}
+                      {{ not is_state(online_entity, 'off') }}
+                    {% else %}
+                      {{ not is_state(issue_entity, 'on') }}
+                    {% endif %}
 
   - alias: Finish a persistent fault-detail refresh
     choose:
