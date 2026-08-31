@@ -731,17 +731,19 @@ async def test_blueprint_fault_detail_unavailable_does_not_clear_active_fault(
         "unavailable",
         "Left wheel blocked",
     )
-    await asyncio.wait_for(
-        script.async_run({**variables, "trigger": restored}),
-        timeout=1,
+    restored_owner = asyncio.create_task(
+        script.async_run({**variables, "trigger": restored})
     )
+    await _wait_for_calls(create_calls, 2)
     assert dismiss_calls == []
     assert not owner.done()
+    assert not restored_owner.done()
 
     hass.states.async_set("binary_sensor.garden_error_active", "off")
     hass.states.async_set("sensor.garden_error", "none")
     await asyncio.wait_for(owner, timeout=1)
-    assert len(dismiss_calls) == 1
+    await asyncio.wait_for(restored_owner, timeout=1)
+    assert len(dismiss_calls) == 2
 
 
 @pytest.mark.asyncio

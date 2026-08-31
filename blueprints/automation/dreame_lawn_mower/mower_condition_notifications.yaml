@@ -285,7 +285,8 @@ actions:
           {% if trigger.id == 'fault_detail' %}
             {{ states(error_entity) not in ['unknown', 'unavailable']
                and trigger.from_state is not none
-               and trigger.from_state.state not in ['unknown', 'unavailable'] }}
+               and (trigger.from_state.state not in ['unknown', 'unavailable']
+                    or delivery_mode == 'persistent') }}
           {% else %}
             {{ states(fault_entity) not in ['unknown', 'unavailable'] }}
           {% endif %}
@@ -307,7 +308,8 @@ actions:
           {{ is_state(fault_entity, 'on')
              and trigger.from_state is not none
              and trigger.to_state is not none
-             and trigger.from_state.state not in ['none', 'unknown', 'unavailable', '']
+             and (trigger.from_state.state not in ['none', 'unknown', 'unavailable', '']
+                  or delivery_mode == 'persistent')
              and trigger.to_state.state not in ['none', 'unknown', 'unavailable', '']
              and trigger.from_state.state != trigger.to_state.state
              and states(error_entity) == trigger.to_state.state }}
