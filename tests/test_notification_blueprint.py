@@ -58,6 +58,7 @@ def test_blueprint_schema_and_defaults_are_importable() -> None:
 
     assert blueprint.domain == "automation"
     assert set(EXAMPLE_INPUTS) <= set(blueprint.inputs)
+    assert "recovery_actions" not in blueprint.inputs
     assert _substituted_automation()["mode"] == "parallel"
 
 

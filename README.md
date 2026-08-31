@@ -404,7 +404,7 @@ Choose all entities from the same mower. If the blueprint uses persistent
 delivery, leave the integration option off to avoid duplicate notifications.
 
 See [Notifications and issue automations](docs/notifications.md) for setup,
-delivery examples, recovery actions, and the safety boundary around automatic
+delivery examples, restart behavior, and the safety boundary around automatic
 mower controls.
 
 ## Schedules And Multiple Maps

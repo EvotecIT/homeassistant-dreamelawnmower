@@ -44,9 +44,9 @@ Select these entities from one mower:
 The blueprint ignores informational status notices. It reports only alert,
 attention, or unknown-tier notices, matching the integration option. Its
 confirmation delay suppresses brief conditions that clear on their own.
-Recovery immediately dismisses the blueprint's persistent item and can run
-optional recovery actions. Home Assistant startup and automation reloads also
-reconcile conditions that are already active and remove stale persistent items.
+A clear and recurrence restarts the full delay. Home Assistant startup and
+automation reloads wait for the selected entities to become available, then
+reconcile conditions that are already active or remove stale persistent items.
 
 Choose one delivery mode:
 
@@ -79,14 +79,12 @@ in your Home Assistant instance. The action can use these variables:
 - `issue_kind` (`fault`, `notice`, `offline`, `maintenance_warning`, or
   `maintenance_due`)
 - `issue_entity`
-- `is_recovery`
 
 ## Other Home Assistant actions
 
-Notification and recovery action lists can contain any normal Home Assistant
-action. Useful choices include turning on a warning light, making a local TTS
-announcement, writing to a logbook, or calling a user-owned script that routes
-alerts by time of day. For example:
+The notification action list can contain any normal Home Assistant action.
+Useful choices include making a local TTS announcement, writing to a logbook,
+or calling a user-owned script that routes alerts by time of day. For example:
 
 ```yaml
 - action: light.turn_on
@@ -96,13 +94,10 @@ alerts by time of day. For example:
     flash: long
 ```
 
-A matching recovery action could turn that light off:
-
-```yaml
-- action: light.turn_off
-  target:
-    entity_id: light.garden_warning
-```
+The blueprint does not persist arbitrary action state across Home Assistant
+restarts. For stateful effects such as warning lights, call a script that owns
+its timeout or cleanup, or use Home Assistant's Alert integration. Persistent
+delivery is the self-cleaning option provided directly by this blueprint.
 
 ## Safety boundary
 
