@@ -65,3 +65,26 @@ def test_blueprint_never_issues_automatic_mower_controls() -> None:
     source = BLUEPRINT_PATH.read_text(encoding="utf-8")
 
     assert "action: lawn_mower." not in source
+
+
+def test_blueprint_reconciles_every_condition_on_start_and_reload() -> None:
+    triggers = _substituted_automation()["triggers"]
+    reconcile_ids = {
+        "reconcile_fault",
+        "reconcile_notice",
+        "reconcile_offline",
+        "reconcile_maintenance_warning",
+        "reconcile_maintenance_due",
+    }
+
+    for trigger_id in reconcile_ids:
+        assert {
+            "trigger": "homeassistant",
+            "event": "start",
+            "id": trigger_id,
+        } in triggers
+        assert {
+            "trigger": "event",
+            "event_type": "automation_reloaded",
+            "id": trigger_id,
+        } in triggers

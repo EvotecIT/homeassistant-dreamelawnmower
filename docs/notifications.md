@@ -45,7 +45,8 @@ The blueprint ignores informational status notices. It reports only alert,
 attention, or unknown-tier notices, matching the integration option. Its
 confirmation delay suppresses brief conditions that clear on their own.
 Recovery immediately dismisses the blueprint's persistent item and can run
-optional recovery actions.
+optional recovery actions. Home Assistant startup and automation reloads also
+reconcile conditions that are already active and remove stale persistent items.
 
 Choose one delivery mode:
 

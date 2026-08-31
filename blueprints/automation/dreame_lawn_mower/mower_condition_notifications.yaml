@@ -146,6 +146,36 @@ triggers:
     id: maintenance_due
     from: "off"
     to: "on"
+  - trigger: homeassistant
+    event: start
+    id: reconcile_fault
+  - trigger: homeassistant
+    event: start
+    id: reconcile_notice
+  - trigger: homeassistant
+    event: start
+    id: reconcile_offline
+  - trigger: homeassistant
+    event: start
+    id: reconcile_maintenance_warning
+  - trigger: homeassistant
+    event: start
+    id: reconcile_maintenance_due
+  - trigger: event
+    event_type: automation_reloaded
+    id: reconcile_fault
+  - trigger: event
+    event_type: automation_reloaded
+    id: reconcile_notice
+  - trigger: event
+    event_type: automation_reloaded
+    id: reconcile_offline
+  - trigger: event
+    event_type: automation_reloaded
+    id: reconcile_maintenance_warning
+  - trigger: event
+    event_type: automation_reloaded
+    id: reconcile_maintenance_due
 
 variables:
   mower_entity: !input mower_entity
@@ -162,19 +192,47 @@ actions:
   - alias: Classify the condition transition
     variables:
       issue_kind: >-
-        {{ 'fault' if trigger.id in ['fault', 'fault_detail'] else trigger.id }}
-      trigger_state: >-
-        {{ trigger.to_state.state if trigger.to_state is not none else 'unknown' }}
-      initial_incident_value: >-
-        {% if trigger.id in ['fault', 'fault_detail'] %}
-          {{ states(error_entity) }}
-        {% elif trigger.id == 'notice' %}
-          {{ states(status_notice_entity) }}
+        {% if trigger.id in ['fault', 'fault_detail', 'reconcile_fault'] %}
+          fault
+        {% elif trigger.id[:10] == 'reconcile_' %}
+          {{ trigger.id[10:] }}
         {% else %}
-          {{ trigger.to_state.state if trigger.to_state is not none else 'unknown' }}
+          {{ trigger.id }}
+        {% endif %}
+      is_reconcile: "{{ trigger.id[:10] == 'reconcile_' }}"
+
+  - alias: Capture the condition state
+    variables:
+      trigger_state: >-
+        {% if issue_kind == 'fault' %}
+          {{ states(error_entity) }}
+        {% elif issue_kind == 'notice' %}
+          {{ states(status_notice_entity) }}
+        {% elif issue_kind == 'offline' %}
+          {{ states(online_entity) }}
+        {% elif issue_kind == 'maintenance_warning' %}
+          {{ states(maintenance_warning_entity) }}
+        {% elif issue_kind == 'maintenance_due' %}
+          {{ states(maintenance_due_entity) }}
+        {% else %}
+          unknown
+        {% endif %}
+      initial_incident_value: >-
+        {% if issue_kind == 'fault' %}
+          {{ states(error_entity) }}
+        {% elif issue_kind == 'notice' %}
+          {{ states(status_notice_entity) }}
+        {% elif issue_kind == 'offline' %}
+          {{ states(online_entity) }}
+        {% elif issue_kind == 'maintenance_warning' %}
+          {{ states(maintenance_warning_entity) }}
+        {% elif issue_kind == 'maintenance_due' %}
+          {{ states(maintenance_due_entity) }}
+        {% else %}
+          unknown
         {% endif %}
       issue_active: >-
-        {% if trigger.id == 'fault' %}
+        {% if trigger.id == 'fault' or (is_reconcile and issue_kind == 'fault') %}
           {{ is_state(fault_entity, 'on') }}
         {% elif trigger.id == 'fault_detail' %}
           {{ is_state(fault_entity, 'on')
@@ -184,18 +242,41 @@ actions:
              and trigger.to_state.state not in ['none', 'unknown', 'unavailable', '']
              and trigger.from_state.state != trigger.to_state.state
              and states(error_entity) == trigger.to_state.state }}
-        {% elif trigger.id == 'notice' %}
-          {{ states(status_notice_entity) == trigger.to_state.state
-             and (trigger.from_state is none
+        {% elif issue_kind == 'notice' %}
+          {% if is_reconcile %}
+            {{ states(status_notice_entity) not in ['none', 'unknown', 'unavailable', '']
+               and ((state_attr(mower_entity, 'status_notice_tier') or 'unknown') | lower)
+                   in ['alert', 'attention', 'unknown'] }}
+          {% else %}
+            {{ states(status_notice_entity) == trigger.to_state.state
+               and (trigger.from_state is none
                   or trigger.from_state.state not in ['unknown', 'unavailable'])
-             and states(status_notice_entity) not in ['none', 'unknown', 'unavailable', '']
-             and ((state_attr(mower_entity, 'status_notice_tier') or 'unknown') | lower)
-                 in ['alert', 'attention', 'unknown'] }}
-        {% elif trigger.id == 'offline' %}
+               and states(status_notice_entity) not in ['none', 'unknown', 'unavailable', '']
+               and ((state_attr(mower_entity, 'status_notice_tier') or 'unknown') | lower)
+                   in ['alert', 'attention', 'unknown'] }}
+          {% endif %}
+        {% elif issue_kind == 'offline' %}
           {{ is_state(online_entity, 'off') }}
+        {% elif issue_kind == 'maintenance_warning' %}
+          {{ is_state(maintenance_warning_entity, 'on') }}
+        {% elif issue_kind == 'maintenance_due' %}
+          {{ is_state(maintenance_due_entity, 'on') }}
         {% else %}
-          {{ is_state(trigger.entity_id, 'on') }}
+          false
         {% endif %}
+      notification_id: >-
+        dreame_mower_{{ mower_entity | replace('.', '_') }}_{{ issue_kind }}
+
+  - alias: Clear stale persistent items during reconciliation
+    choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ is_reconcile and not issue_active }}"
+        sequence:
+          - action: persistent_notification.dismiss
+            data:
+              notification_id: "{{ notification_id }}"
+          - stop: Reconciliation found no active condition
 
   - alias: Remember whether the transition can own an incident
     variables:
@@ -213,7 +294,7 @@ actions:
   - alias: Recheck after the confirmation delay
     variables:
       issue_active: >-
-        {% if trigger.id == 'fault' %}
+        {% if issue_kind == 'fault' and trigger.id != 'fault_detail' %}
           {{ transition_eligible and is_state(fault_entity, 'on')
              and (initial_incident_value in ['none', 'unknown', 'unavailable', '']
                   or states(error_entity) == initial_incident_value) }}
@@ -221,16 +302,20 @@ actions:
           {{ transition_eligible
              and is_state(fault_entity, 'on')
              and states(error_entity) == trigger_state }}
-        {% elif trigger.id == 'notice' %}
+        {% elif issue_kind == 'notice' %}
           {{ transition_eligible
              and states(status_notice_entity) == trigger_state
              and states(status_notice_entity) not in ['none', 'unknown', 'unavailable', '']
              and ((state_attr(mower_entity, 'status_notice_tier') or 'unknown') | lower)
                  in ['alert', 'attention', 'unknown'] }}
-        {% elif trigger.id == 'offline' %}
+        {% elif issue_kind == 'offline' %}
           {{ transition_eligible and is_state(online_entity, 'off') }}
+        {% elif issue_kind == 'maintenance_warning' %}
+          {{ transition_eligible and is_state(maintenance_warning_entity, 'on') }}
+        {% elif issue_kind == 'maintenance_due' %}
+          {{ transition_eligible and is_state(maintenance_due_entity, 'on') }}
         {% else %}
-          {{ transition_eligible and is_state(trigger.entity_id, 'on') }}
+          false
         {% endif %}
 
   - condition: template
@@ -246,8 +331,12 @@ actions:
           {{ status_notice_entity }}
         {% elif issue_kind == 'offline' %}
           {{ online_entity }}
+        {% elif issue_kind == 'maintenance_warning' %}
+          {{ maintenance_warning_entity }}
+        {% elif issue_kind == 'maintenance_due' %}
+          {{ maintenance_due_entity }}
         {% else %}
-          {{ trigger.entity_id }}
+          {{ mower_entity }}
         {% endif %}
       incident_value: >-
         {% if issue_kind == 'fault' %}
@@ -283,8 +372,6 @@ actions:
         {% else %}
           {{ state_attr(issue_entity, 'friendly_name') or issue_kind | replace('_', ' ') }} is active.
         {% endif %}
-      notification_id: >-
-        dreame_mower_{{ mower_entity | replace('.', '_') }}_{{ issue_kind }}
 
   - alias: Deliver or clear the notification
     choose:

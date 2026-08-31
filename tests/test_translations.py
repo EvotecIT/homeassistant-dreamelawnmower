@@ -510,6 +510,126 @@ async def test_blueprint_fault_change_during_onset_has_one_incident_owner(hass) 
     assert len(recovery_calls) == 1
 
 
+@pytest.mark.parametrize(
+    ("trigger_id", "active_states", "cleared_states", "notice_tier"),
+    [
+        (
+            "reconcile_fault",
+            {
+                "binary_sensor.garden_error_active": "on",
+                "sensor.garden_error": "Left wheel blocked",
+            },
+            {
+                "binary_sensor.garden_error_active": "off",
+                "sensor.garden_error": "none",
+            },
+            None,
+        ),
+        (
+            "reconcile_notice",
+            {"sensor.garden_status_notice": "Rain detected"},
+            {"sensor.garden_status_notice": "none"},
+            "attention",
+        ),
+        (
+            "reconcile_offline",
+            {"binary_sensor.garden_online": "off"},
+            {"binary_sensor.garden_online": "on"},
+            None,
+        ),
+        (
+            "reconcile_maintenance_warning",
+            {"binary_sensor.garden_maintenance_warning": "on"},
+            {"binary_sensor.garden_maintenance_warning": "off"},
+            None,
+        ),
+        (
+            "reconcile_maintenance_due",
+            {"binary_sensor.garden_maintenance_due": "on"},
+            {"binary_sensor.garden_maintenance_due": "off"},
+            None,
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_blueprint_reconciles_active_conditions_after_reload(
+    hass,
+    trigger_id: str,
+    active_states: dict[str, str],
+    cleared_states: dict[str, str],
+    notice_tier: str | None,
+) -> None:
+    _set_blueprint_states(hass)
+    if notice_tier is not None:
+        hass.states.async_set(
+            "lawn_mower.garden",
+            "idle",
+            {
+                "friendly_name": "Garden mower",
+                "error_display": None,
+                "status_notice_tier": notice_tier,
+            },
+        )
+    for entity_id, state in active_states.items():
+        hass.states.async_set(entity_id, state)
+
+    notify_calls = async_mock_service(hass, "test", "notify")
+    recovery_calls = async_mock_service(hass, "test", "recover")
+    async_mock_service(hass, "persistent_notification", "dismiss")
+    script, variables = await _notification_blueprint_script(
+        hass,
+        delivery_mode="one_shot",
+        onset_delay_seconds=0,
+        notify_actions=[{"action": "test.notify"}],
+        recovery_actions=[{"action": "test.recover"}],
+    )
+    trigger = SimpleNamespace(
+        id=trigger_id,
+        entity_id=None,
+        from_state=None,
+        to_state=None,
+    )
+
+    task = asyncio.create_task(script.async_run({**variables, "trigger": trigger}))
+    await _wait_for_calls(notify_calls, 1)
+    for entity_id, state in cleared_states.items():
+        hass.states.async_set(entity_id, state)
+    await asyncio.wait_for(task, timeout=1)
+
+    assert len(notify_calls) == 1
+    assert len(recovery_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_blueprint_reconciliation_dismisses_stale_persistent_item(hass) -> None:
+    _set_blueprint_states(hass)
+    create_calls = async_mock_service(hass, "persistent_notification", "create")
+    dismiss_calls = async_mock_service(hass, "persistent_notification", "dismiss")
+    recovery_calls = async_mock_service(hass, "test", "recover")
+    script, variables = await _notification_blueprint_script(
+        hass,
+        delivery_mode="persistent",
+        onset_delay_seconds=0,
+        recovery_actions=[{"action": "test.recover"}],
+    )
+    trigger = SimpleNamespace(
+        id="reconcile_fault",
+        entity_id=None,
+        from_state=None,
+        to_state=None,
+    )
+
+    await asyncio.wait_for(
+        script.async_run({**variables, "trigger": trigger}),
+        timeout=1,
+    )
+
+    assert create_calls == []
+    assert recovery_calls == []
+    assert len(dismiss_calls) == 1
+    assert dismiss_calls[0].data["notification_id"].endswith("_fault")
+
+
 @pytest.mark.parametrize("language", sorted(EXPECTED_LOCALES))
 @pytest.mark.asyncio
 async def test_home_assistant_loads_every_localized_ui_category(
