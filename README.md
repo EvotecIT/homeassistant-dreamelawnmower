@@ -64,6 +64,7 @@ brand name:
 | Dreame A3 AWD Pro 3500 | `dreame.mower.g2541e` | **Recognized** | Model mapping and diagnostics report; broader live confirmation is still needed |
 | Dreame A1 | `dreame.mower.p2255` | **Field-reported** | EU account setup, core state, battery, error state, map camera, docking state, and a real docked-to-mowing start are confirmed; live video is explicitly unsupported |
 | Dreame A1 Pro | `dreame.mower.g2422` | **Recognized** | Model mapping and mower-specific state semantics; needs fixtures and live validation |
+| Dreame A1 Pro 2000 | `dreame.mower.g2540d` | **Field-reported** | EU account setup, core state, maps, and app map selection on firmware `4.3.6_0623`; SETTINGS slot alignment has regression coverage, while write controls and model-specific device codes still need supervised live validation |
 | Newer A-series mower | `dreame.mower.g3255` | **Recognized** | Raw identifier observed; retail name and feature coverage are not yet confirmed |
 
 MOVAhome account login is supported. Other MOVA-branded mowers, rebadges,

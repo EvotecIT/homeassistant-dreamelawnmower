@@ -122,10 +122,92 @@ def test_coordinator_diagnostics_sanitize_last_failure() -> None:
             "app_maps": [],
             "vector_maps": [],
         },
+        "mowing_preferences": None,
         "work_log_totals": None,
         "video_runtime": None,
         "last_maintenance_point_probe": None,
     }
+
+
+def test_coordinator_diagnostics_report_preference_shape_without_values() -> None:
+    payload_shape = {
+        "chunk_indices": [0, 1],
+        "chunk_count": 2,
+        "declared_size": 512,
+        "received_size": 512,
+        "payload_type": "array",
+        "map_entry_count": 2,
+        "alignment": "app_map_slots",
+        "map_entries": [
+            {
+                "payload_index": 0,
+                "resolved_map_index": 0,
+                "entry_type": "object",
+                "entry_keys": ["mode", "settings"],
+                "settings_type": "object",
+                "settings_entry_count": 0,
+                "settings_value_types": [],
+                "preference_field_keys": [],
+            },
+            {
+                "payload_index": 1,
+                "resolved_map_index": 1,
+                "entry_type": "object",
+                "entry_keys": ["mode", "settings"],
+                "settings_type": "object",
+                "settings_entry_count": 1,
+                "settings_value_types": ["object"],
+                "preference_field_keys": ["id", "mowingHeight", "version"],
+            },
+        ],
+    }
+    diagnostics = build_coordinator_diagnostics(
+        SimpleNamespace(
+            batch_device_data={
+                "captured_at": "2026-09-01T09:33:05+00:00",
+                "batch_mowing_preferences": {
+                    "source": "batch_device_data_mowing_preferences",
+                    "available": True,
+                    "property_hint": "2.52",
+                    "payload_shape": payload_shape,
+                    "maps": [
+                        {
+                            "idx": 0,
+                            "available": False,
+                            "mode": 0,
+                            "mode_name": "global",
+                            "area_count": 0,
+                            "preferences": [],
+                        },
+                        {
+                            "idx": 1,
+                            "available": True,
+                            "mode": 0,
+                            "mode_name": "global",
+                            "area_count": 1,
+                            "preferences": [
+                                {
+                                    "area_id": 0,
+                                    "mowing_height_cm": 5.0,
+                                    "edge_mowing_auto": True,
+                                    "raw_setting": {"token": "secret"},
+                                }
+                            ],
+                        },
+                    ],
+                    "errors": [],
+                },
+            }
+        )
+    )
+
+    preferences = diagnostics["mowing_preferences"]
+    assert preferences["map_count"] == 2
+    assert [entry["idx"] for entry in preferences["maps"]] == [0, 1]
+    assert preferences["maps"][1]["preference_count"] == 1
+    assert preferences["payload_shape"] == payload_shape
+    assert "5.0" not in repr(preferences)
+    assert "secret" not in repr(preferences)
 
 
 def test_coordinator_diagnostics_collect_video_runtime_privately() -> None:

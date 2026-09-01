@@ -1671,9 +1671,13 @@ class DreameLawnMowerCoordinator(
             preference_read_generation = self._begin_preference_read()
             try:
                 try:
+                    map_index_hints, map_slot_index_hints = (
+                        _app_preference_map_index_hints(self.app_maps)
+                    )
                     preferences = await self.client.async_get_batch_mowing_preferences(
                         include_raw=False,
-                        map_index_hints=_app_map_index_hints(self.app_maps),
+                        map_index_hints=map_index_hints,
+                        map_slot_index_hints=map_slot_index_hints,
                     )
                 except Exception as err:  # noqa: BLE001 - retry on next event pass
                     _LOGGER.debug("Failed to refresh mowing preferences: %s", err)
@@ -1757,6 +1761,9 @@ class DreameLawnMowerCoordinator(
     ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], int]:
         """Fetch batch schedule, settings, and OTA payloads in parallel."""
         cached_schedule = None if force else self._fresh_batch_schedule()
+        map_index_hints, map_slot_index_hints = _app_preference_map_index_hints(
+            self.app_maps
+        )
         if cached_schedule is None:
             schedule_generation = self._begin_schedule_read()
             map_index_hint = self._schedule_map_index_hint()
@@ -1767,7 +1774,8 @@ class DreameLawnMowerCoordinator(
                 ),
                 self.client.async_get_batch_mowing_preferences(
                     include_raw=False,
-                    map_index_hints=_app_map_index_hints(self.app_maps),
+                    map_index_hints=map_index_hints,
+                    map_slot_index_hints=map_slot_index_hints,
                 ),
                 self.client.async_get_batch_ota_info(include_raw=False),
             )
@@ -1779,7 +1787,8 @@ class DreameLawnMowerCoordinator(
         batch_mowing_preferences, batch_ota_info = await asyncio.gather(
             self.client.async_get_batch_mowing_preferences(
                 include_raw=False,
-                map_index_hints=_app_map_index_hints(self.app_maps),
+                map_index_hints=map_index_hints,
+                map_slot_index_hints=map_slot_index_hints,
             ),
             self.client.async_get_batch_ota_info(include_raw=False),
         )
@@ -2442,6 +2451,48 @@ def _app_map_index_hints(app_maps: Mapping[str, Any] | None) -> list[int]:
             continue
         indices.append(index)
     return indices
+
+
+def _app_map_slot_index_hints(app_maps: Mapping[str, Any] | None) -> list[int]:
+    """Return every app map slot id for full SETTINGS-array alignment."""
+    if not isinstance(app_maps, Mapping) or app_maps.get("map_list_valid") is not True:
+        return []
+    maps = app_maps.get("maps") if isinstance(app_maps, Mapping) else None
+    if not isinstance(maps, Sequence) or isinstance(maps, str | bytes | bytearray):
+        return []
+
+    indices: list[int] = []
+    for entry in maps:
+        if not isinstance(entry, Mapping):
+            return []
+        index = entry.get("idx")
+        if (
+            not isinstance(index, int)
+            or isinstance(index, bool)
+            or index < 0
+            or index in indices
+        ):
+            return []
+        indices.append(index)
+    return indices
+
+
+def _app_preference_map_index_hints(
+    app_maps: Mapping[str, Any] | None,
+) -> tuple[list[int], list[int]]:
+    """Return created and full slot hints only from one authoritative MAPL."""
+    maps = app_maps.get("maps") if isinstance(app_maps, Mapping) else None
+    if not isinstance(maps, Sequence) or isinstance(maps, str | bytes | bytearray):
+        return [], []
+    slot_indices = _app_map_slot_index_hints(app_maps)
+    if len(slot_indices) != len(maps):
+        return [], []
+    created_indices = [
+        index
+        for index, entry in zip(slot_indices, maps, strict=True)
+        if isinstance(entry, Mapping) and entry.get("created") is not False
+    ]
+    return created_indices, slot_indices
 
 
 def _app_map_hints_are_authoritative(

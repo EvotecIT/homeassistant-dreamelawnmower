@@ -1407,6 +1407,7 @@ class DreameLawnMowerClient(
         include_raw: bool = False,
         map_indices: Sequence[int] | None = None,
         map_index_hints: Sequence[int] | None = None,
+        map_slot_index_hints: Sequence[int] | None = None,
     ) -> dict[str, Any]:
         """Fetch and decode mower preferences from batch device data."""
         return await asyncio.to_thread(
@@ -1414,6 +1415,7 @@ class DreameLawnMowerClient(
             include_raw,
             map_indices,
             map_index_hints,
+            map_slot_index_hints,
         )
 
     async def async_get_batch_ota_info(

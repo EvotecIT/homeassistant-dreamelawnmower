@@ -246,6 +246,13 @@ def test_decode_batch_mowing_preferences_decodes_map_settings() -> None:
         "objects",
     ]
     assert result["maps"][1]["preferences"][0]["mowing_height_cm"] == 3.5
+    assert result["payload_shape"]["alignment"] == "payload_order"
+    assert result["payload_shape"]["map_entry_count"] == 2
+    assert result["payload_shape"]["map_entries"][0]["settings_entry_count"] == 2
+    assert "mowingHeight" in result["payload_shape"]["map_entries"][0][
+        "preference_field_keys"
+    ]
+    assert "raw_setting" not in result["payload_shape"]["map_entries"][0]
 
 
 def test_decode_batch_mowing_preferences_aligns_with_app_map_index_hints() -> None:
@@ -259,6 +266,7 @@ def test_decode_batch_mowing_preferences_aligns_with_app_map_index_hints() -> No
             "SETTINGS.info": str(len(settings_text)),
         },
         map_index_hints=[1, 2],
+        map_slot_index_hints=[0, 1, 2],
     )
 
     assert [entry["idx"] for entry in result["maps"]] == [1, 2]
@@ -266,6 +274,7 @@ def test_decode_batch_mowing_preferences_aligns_with_app_map_index_hints() -> No
     assert result["maps"][0]["preferences"][0]["mowing_height_cm"] == 4.0
     assert result["maps"][1]["preferences"][0]["map_index"] == 2
     assert result["maps"][1]["preferences"][0]["mowing_height_cm"] == 3.5
+    assert result["payload_shape"]["alignment"] == "created_app_maps"
 
     filtered = decode_batch_mowing_preferences(
         {
@@ -276,10 +285,101 @@ def test_decode_batch_mowing_preferences_aligns_with_app_map_index_hints() -> No
         },
         map_indices=[1],
         map_index_hints=[1, 2],
+        map_slot_index_hints=[0, 1, 2],
     )
 
     assert [entry["idx"] for entry in filtered["maps"]] == [1]
     assert filtered["maps"][0]["preferences"][0]["mowing_height_cm"] == 4.0
+
+
+def test_decode_batch_mowing_preferences_preserves_uncreated_map_slots() -> None:
+    settings_text = json.dumps(
+        [
+            {"mode": 0, "settings": {}},
+            {
+                "mode": 0,
+                "settings": {
+                    "0": {
+                        "id": 0,
+                        "version": 78,
+                        "mowingHeight": 5,
+                        "efficientMode": 0,
+                    }
+                },
+            },
+        ],
+        separators=(",", ":"),
+    )
+
+    result = decode_batch_mowing_preferences(
+        {
+            "SETTINGS.0": settings_text,
+            "SETTINGS.info": str(len(settings_text)),
+        },
+        map_index_hints=[1],
+        map_slot_index_hints=[0, 1],
+    )
+
+    assert [entry["idx"] for entry in result["maps"]] == [0, 1]
+    assert result["maps"][0]["available"] is False
+    assert result["maps"][1]["available"] is True
+    assert result["maps"][1]["preferences"][0]["mowing_height_cm"] == 5.0
+    assert result["payload_shape"]["alignment"] == "app_map_slots"
+    assert [
+        entry["resolved_map_index"]
+        for entry in result["payload_shape"]["map_entries"]
+    ] == [0, 1]
+
+
+@pytest.mark.parametrize(
+    "slot_hints",
+    [
+        [1, 1, 2],
+        [True, 2],
+        [1, "invalid"],
+        [1, -1],
+    ],
+)
+def test_decode_batch_mowing_preferences_rejects_invalid_slot_hints(
+    slot_hints: list[object],
+) -> None:
+    settings_text = json.dumps(
+        [
+            {"mode": 0, "settings": {}},
+            {"mode": 0, "settings": {}},
+        ],
+        separators=(",", ":"),
+    )
+
+    result = decode_batch_mowing_preferences(
+        {"SETTINGS.0": settings_text},
+        map_index_hints=[8, 9],
+        map_slot_index_hints=slot_hints,  # type: ignore[arg-type]
+    )
+
+    assert [entry["idx"] for entry in result["maps"]] == [0, 1]
+    assert result["payload_shape"]["alignment"] == "payload_order"
+    assert (
+        result["payload_shape"]["alignment_warning"]
+        == "invalid_app_map_slot_hints"
+    )
+
+
+def test_explicit_batch_map_id_overrides_valid_slot_hint() -> None:
+    settings_text = json.dumps(
+        [{"idx": 7, "mode": 0, "settings": {}}],
+        separators=(",", ":"),
+    )
+
+    result = decode_batch_mowing_preferences(
+        {"SETTINGS.0": settings_text},
+        map_index_hints=[3],
+        map_slot_index_hints=[1],
+    )
+
+    assert [entry["idx"] for entry in result["maps"]] == [7]
+    assert result["payload_shape"]["alignment"] == "app_map_slots"
+    assert result["payload_shape"]["map_entries"][0]["resolved_map_index"] == 7
 
 
 def test_decode_batch_ota_info_decodes_flags() -> None:

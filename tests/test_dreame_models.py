@@ -216,13 +216,14 @@ def test_display_name_for_model_prefers_known_mapping_over_fallback_name() -> No
 @pytest.mark.parametrize(
     ("model", "expected_name"),
     [
+        ("dreame.mower.g2540d", "A1 Pro 2000"),
         ("mova.mower.g2405a", "MOVA 600"),
         ("mova.mower.g2405b", "MOVA 600 Kit"),
         ("mova.mower.g2405c", "MOVA 1000"),
         ("mova.mower.g2529b", "LiDAX Ultra 800"),
     ],
 )
-def test_display_name_for_older_mova_models(
+def test_display_name_for_submitted_model_identifiers(
     model: str,
     expected_name: str,
 ) -> None:

@@ -7,6 +7,8 @@ import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+import pytest
+
 from custom_components.dreame_lawn_mower import button as button_module
 from custom_components.dreame_lawn_mower.binary_sensor import (
     BINARY_SENSORS,
@@ -22,7 +24,11 @@ from custom_components.dreame_lawn_mower.button import (
     DreameLawnMowerDockWithoutStoppingButton,
     DreameLawnMowerResetMaintenanceButton,
 )
-from custom_components.dreame_lawn_mower.coordinator import _app_map_index_hints
+from custom_components.dreame_lawn_mower.coordinator import (
+    _app_map_index_hints,
+    _app_map_slot_index_hints,
+    _app_preference_map_index_hints,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     decode_batch_mowing_preferences,
 )
@@ -2503,6 +2509,7 @@ def test_selected_zone_preferences_follow_hinted_app_map_cards() -> None:
         separators=(",", ":"),
     )
     app_maps = {
+        "map_list_valid": True,
         "current_map_index": 1,
         "maps": [
             {"idx": 0, "created": False, "current": False},
@@ -2526,6 +2533,7 @@ def test_selected_zone_preferences_follow_hinted_app_map_cards() -> None:
             "SETTINGS.info": str(len(settings_text)),
         },
         map_index_hints=_app_map_index_hints(app_maps),
+        map_slot_index_hints=_app_map_slot_index_hints(app_maps),
     )
     coordinator = SimpleNamespace(
         data=SimpleNamespace(activity="paused"),
@@ -2555,6 +2563,54 @@ def test_selected_zone_preferences_follow_hinted_app_map_cards() -> None:
     assert efficiency_entity.native_value == "standard"
     assert height_entity.extra_state_attributes["selected_map_index"] == 2
     assert height_entity.extra_state_attributes["reported_version"] == 18
+
+
+@pytest.mark.parametrize(
+    "app_maps",
+    [
+        {"maps": [{"idx": 0}]},
+        {"map_list_valid": False, "maps": [{"idx": 0}]},
+        {"map_list_valid": True, "maps": [{"idx": 1}, {"idx": 1}]},
+        {"map_list_valid": True, "maps": [{"idx": True}]},
+        {"map_list_valid": True, "maps": [{"idx": 0}, {"name": "missing"}]},
+    ],
+)
+def test_app_map_slot_hints_require_one_authoritative_valid_list(
+    app_maps: dict[str, object],
+) -> None:
+    assert _app_map_slot_index_hints(app_maps) == []
+
+
+def test_preference_hints_discard_both_channels_for_ambiguous_map_list() -> None:
+    app_maps = {
+        "map_list_valid": True,
+        "maps": [
+            {"idx": 1, "created": True},
+            {"idx": 1, "created": True},
+            {"idx": 2, "created": True},
+        ],
+    }
+    map_index_hints, map_slot_index_hints = _app_preference_map_index_hints(
+        app_maps
+    )
+    settings_text = json.dumps(
+        [
+            {"mode": 0, "settings": {}},
+            {"mode": 0, "settings": {}},
+        ],
+        separators=(",", ":"),
+    )
+
+    result = decode_batch_mowing_preferences(
+        {"SETTINGS.0": settings_text},
+        map_index_hints=map_index_hints,
+        map_slot_index_hints=map_slot_index_hints,
+    )
+
+    assert map_index_hints == []
+    assert map_slot_index_hints == []
+    assert [entry["idx"] for entry in result["maps"]] == [0, 1]
+    assert result["payload_shape"]["alignment"] == "payload_order"
 
 
 def test_selected_zone_preference_sensors_hide_unavailable_zone_settings() -> None:
