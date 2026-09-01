@@ -29,6 +29,7 @@ OPERATIONAL_HUMAN_DETECTION_NOTICE_MODELS = frozenset({"dreame.mower.q2501a", "q
 MODEL_NAME_MAP = {
     "dreame.mower.p2255": "A1",
     "dreame.mower.g2422": "A1 Pro",
+    "dreame.mower.g2540d": "A1 Pro 2000",
     "dreame.mower.g2408": "A2",
     "dreame.mower.g2568d": "A2 3000",
     "dreame.mower.g2541e": "A3 AWD Pro 3500",
@@ -45,6 +46,7 @@ MODEL_NAME_MAP = {
 DISPLAY_NAME_ALIASES = {
     "a1": "A1",
     "a1 pro": "A1 Pro",
+    "a1 pro 2000": "A1 Pro 2000",
     "a2": "A2",
     "a3 awd 1000": "A3 AWD 1000",
     "a3 awd pro 3500": "A3 AWD Pro 3500",

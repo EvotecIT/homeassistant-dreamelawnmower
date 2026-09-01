@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
+from custom_components.dreame_lawn_mower.coordinator import (
+    _app_map_index_hints,
+    _app_map_slot_index_hints,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    decode_batch_mowing_preferences,
+)
 from custom_components.dreame_lawn_mower.mowing_preference_control import (
     mowing_height_limits,
 )
@@ -252,6 +260,58 @@ def test_global_mowing_height_reads_and_writes_area_zero() -> None:
         execute=True,
         confirm_write=True,
     )
+
+
+def test_global_controls_follow_active_map_after_uncreated_settings_slot() -> None:
+    coordinator = _coordinator(mode_name="global")
+    coordinator.app_maps = {
+        "map_list_valid": True,
+        "current_map_index": 1,
+        "maps": [
+            {"idx": 0, "created": False, "current": False},
+            {
+                "idx": 1,
+                "created": True,
+                "current": True,
+                "name": "Garden",
+            },
+        ],
+    }
+    settings_text = json.dumps(
+        [
+            {"mode": 0, "settings": {}},
+            {
+                "mode": 0,
+                "settings": {
+                    "0": {
+                        "id": 0,
+                        "version": 78,
+                        "mowingHeight": 5,
+                        "efficientMode": 0,
+                    }
+                },
+            },
+        ],
+        separators=(",", ":"),
+    )
+    coordinator.batch_device_data = {
+        "batch_mowing_preferences": decode_batch_mowing_preferences(
+            {
+                "SETTINGS.0": settings_text,
+                "SETTINGS.info": str(len(settings_text)),
+            },
+            map_index_hints=_app_map_index_hints(coordinator.app_maps),
+            map_slot_index_hints=_app_map_slot_index_hints(coordinator.app_maps),
+        )
+    }
+
+    entity = object.__new__(DreameLawnMowerSelectedMapMowingHeightNumber)
+    entity.coordinator = coordinator
+
+    assert entity.available is True
+    assert entity.native_value == 5.0
+    assert entity.extra_state_attributes["selected_map_index"] == 1
+    assert entity.extra_state_attributes["preference_scope"] == "global"
 
 
 def test_global_mowing_height_requires_global_mode() -> None:

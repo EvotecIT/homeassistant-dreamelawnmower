@@ -830,7 +830,11 @@ def test_cached_preference_event_refreshes_only_preferences_once() -> None:
     coordinator._last_device_settings_event_at = None
     coordinator._last_mowing_preferences_event_at = None
     coordinator._preference_write_lock = asyncio.Lock()
-    coordinator.app_maps = {"current_map_index": 0, "maps": [{"idx": 0}]}
+    coordinator.app_maps = {
+        "map_list_valid": True,
+        "current_map_index": 0,
+        "maps": [{"idx": 0}],
+    }
     coordinator.batch_device_data = {
         "batch_schedule": {"available": True},
         "batch_ota_info": {"available": True},
@@ -859,6 +863,7 @@ def test_cached_preference_event_refreshes_only_preferences_once() -> None:
     coordinator.client.async_get_batch_mowing_preferences.assert_awaited_once_with(
         include_raw=False,
         map_index_hints=[0],
+        map_slot_index_hints=[0],
     )
     assert coordinator.batch_device_data["batch_schedule"] == {"available": True}
     assert coordinator.batch_device_data["batch_ota_info"] == {"available": True}

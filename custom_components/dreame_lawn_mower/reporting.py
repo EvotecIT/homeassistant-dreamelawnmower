@@ -108,12 +108,82 @@ def build_coordinator_diagnostics(coordinator: object) -> dict[str, Any]:
             performance.as_dict() if hasattr(performance, "as_dict") else None
         ),
         "maintenance_points": build_maintenance_point_diagnostics(coordinator),
+        "mowing_preferences": _mowing_preference_diagnostics(coordinator),
         "work_log_totals": _work_log_totals_diagnostics(coordinator),
         "video_runtime": sanitize_debug_data(video_diagnostics),
         "last_maintenance_point_probe": (
             dict(last_map_probe) if isinstance(last_map_probe, Mapping) else None
         ),
     }
+
+
+def _mowing_preference_diagnostics(coordinator: object) -> dict[str, Any] | None:
+    """Return preference alignment and schema evidence without setting values."""
+    batch = getattr(coordinator, "batch_device_data", None)
+    preferences = (
+        batch.get("batch_mowing_preferences") if isinstance(batch, Mapping) else None
+    )
+    if not isinstance(preferences, Mapping):
+        return None
+
+    maps = preferences.get("maps")
+    map_summaries: list[dict[str, Any]] = []
+    if isinstance(maps, Sequence) and not isinstance(
+        maps,
+        str | bytes | bytearray,
+    ):
+        for entry in maps:
+            if not isinstance(entry, Mapping):
+                continue
+            items = entry.get("preferences")
+            preference_count = 0
+            if isinstance(items, Sequence) and not isinstance(
+                items,
+                str | bytes | bytearray,
+            ):
+                for item in items:
+                    if not isinstance(item, Mapping):
+                        continue
+                    preference_count += 1
+            entry_errors = entry.get("errors")
+            map_summaries.append(
+                {
+                    "idx": entry.get("idx"),
+                    "available": entry.get("available"),
+                    "mode": entry.get("mode"),
+                    "mode_name": entry.get("mode_name"),
+                    "area_count": entry.get("area_count"),
+                    "preference_count": preference_count,
+                    "error_count": (
+                        len(entry_errors)
+                        if isinstance(entry_errors, Sequence)
+                        and not isinstance(entry_errors, str | bytes | bytearray)
+                        else 1
+                        if entry.get("error")
+                        else 0
+                    ),
+                }
+            )
+
+    errors = preferences.get("errors")
+    error_count = (
+        len(errors)
+        if isinstance(errors, Sequence)
+        and not isinstance(errors, str | bytes | bytearray)
+        else 0
+    )
+    result = {
+        "captured_at": batch.get("captured_at"),
+        "source": preferences.get("source"),
+        "available": preferences.get("available"),
+        "property_hint": preferences.get("property_hint"),
+        "map_count": len(map_summaries),
+        "maps": map_summaries,
+        "error_count": error_count,
+        "errors": errors if error_count else [],
+        "payload_shape": preferences.get("payload_shape"),
+    }
+    return sanitize_debug_data(result)
 
 
 def _work_log_totals_diagnostics(coordinator: object) -> dict[str, Any] | None:

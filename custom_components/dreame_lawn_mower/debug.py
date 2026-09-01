@@ -25,7 +25,7 @@ from .dreame_lawn_mower_client.models import (
     remote_control_state_safe,
 )
 
-DIAGNOSTIC_SCHEMA_VERSION = 9
+DIAGNOSTIC_SCHEMA_VERSION = 10
 UNKNOWN_REALTIME_PREFIX = "UNKNOWN_REALTIME_"
 
 REDACT_KEYS = {

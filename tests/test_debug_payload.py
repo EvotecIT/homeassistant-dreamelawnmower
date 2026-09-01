@@ -164,7 +164,7 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
         device=device,
     )
 
-    assert payload["diagnostic_schema_version"] == 9
+    assert payload["diagnostic_schema_version"] == 10
     assert payload["entry"]["username"] == "**REDACTED**"
     assert payload["entry"]["password"] == "**REDACTED**"
     assert payload["entry"]["token"] == "**REDACTED**"
@@ -272,7 +272,7 @@ def test_build_debug_payload_redacts_sensitive_fields() -> None:
     }
     assert payload["state_reconciliation"]["warnings"] == []
     assert payload["triage"] == {
-        "schema_version": 9,
+        "schema_version": 10,
         "known_model": True,
         "model": "dreame.mower.g2408",
         "display_model": "A2",
@@ -512,7 +512,7 @@ def test_build_debug_payload_highlights_state_disagreements() -> None:
         "raw_mower_state_looks_docked_but_raw_docked_false",
         "raw_mower_state_differs_from_state_name",
     ]
-    assert payload["triage"]["schema_version"] == 9
+    assert payload["triage"]["schema_version"] == 10
     assert payload["triage"]["error"] == {
         "active": True,
         "code": 73,

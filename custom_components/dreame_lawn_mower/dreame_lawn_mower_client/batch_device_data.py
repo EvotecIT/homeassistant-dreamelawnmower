@@ -100,6 +100,7 @@ def decode_batch_mowing_preferences(
     include_raw: bool = False,
     map_indices: Sequence[int] | None = None,
     map_index_hints: Sequence[int] | None = None,
+    map_slot_index_hints: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     """Decode `SETTINGS.*` batch device data into readable preference summaries."""
     result: dict[str, Any] = {
@@ -108,6 +109,7 @@ def decode_batch_mowing_preferences(
         "property_hint": "2.52",
         "maps": [],
         "errors": [],
+        "payload_shape": _batch_text_shape(batch_data, "SETTINGS"),
     }
 
     payload_text = batch_data_text(batch_data, "SETTINGS")
@@ -123,6 +125,7 @@ def decode_batch_mowing_preferences(
         result["errors"].append({"stage": "settings", "error": str(err)})
         return result
 
+    result["payload_shape"]["payload_type"] = _shape_type(payload)
     if not isinstance(payload, Sequence) or isinstance(
         payload, (str, bytes, bytearray)
     ):
@@ -137,11 +140,34 @@ def decode_batch_mowing_preferences(
         else None
     )
     index_hints = _map_index_hints(map_index_hints)
+    slot_index_hints, slot_hint_warning = _strict_map_slot_index_hints(
+        map_slot_index_hints
+    )
+    if slot_hint_warning is not None:
+        resolved_index_hints = []
+        alignment = "payload_order"
+    elif len(slot_index_hints) == len(payload):
+        resolved_index_hints = slot_index_hints
+        alignment = "app_map_slots"
+    elif index_hints:
+        resolved_index_hints = index_hints
+        alignment = "created_app_maps"
+    else:
+        resolved_index_hints = []
+        alignment = "payload_order"
+    map_shapes: list[dict[str, Any]] = []
     for payload_index, map_entry in enumerate(payload):
         map_index = _batch_preference_map_index(
             map_entry,
             payload_index=payload_index,
-            map_index_hints=index_hints,
+            map_index_hints=resolved_index_hints,
+        )
+        map_shapes.append(
+            _batch_preference_map_shape(
+                map_entry,
+                payload_index=payload_index,
+                resolved_map_index=map_index,
+            )
         )
         if selected_indices is not None and map_index not in selected_indices:
             continue
@@ -153,6 +179,15 @@ def decode_batch_mowing_preferences(
         if entry.get("available"):
             result["available"] = True
         result["maps"].append(entry)
+
+    result["payload_shape"].update(
+        {
+            "map_entry_count": len(payload),
+            "alignment": alignment,
+            "alignment_warning": slot_hint_warning,
+            "map_entries": map_shapes,
+        }
+    )
 
     return result
 
@@ -167,6 +202,25 @@ def _map_index_hints(values: Sequence[int] | None) -> list[int]:
             continue
         hints.append(index)
     return hints
+
+
+def _strict_map_slot_index_hints(
+    values: Sequence[int] | None,
+) -> tuple[list[int], str | None]:
+    """Validate authoritative app-map slot hints without repairing them."""
+    if values is None:
+        return [], None
+    hints: list[int] = []
+    for value in values:
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or value < 0
+            or value in hints
+        ):
+            return [], "invalid_app_map_slot_hints"
+        hints.append(value)
+    return hints, None
 
 
 def _batch_preference_map_index(
@@ -271,6 +325,79 @@ def batch_data_text(
     if size is not None:
         text = text[:size]
     return text
+
+
+def _batch_text_shape(
+    batch_data: Mapping[str, Any],
+    prefix: str,
+) -> dict[str, Any]:
+    """Return value-free transport details for diagnostics."""
+    chunk_indices = [
+        index
+        for index in range(_DEFAULT_BATCH_CHUNK_COUNT)
+        if f"{prefix}.{index}" in batch_data
+    ]
+    text = batch_data_text(batch_data, prefix)
+    return {
+        "chunk_indices": chunk_indices,
+        "chunk_count": len(chunk_indices),
+        "declared_size": _batch_text_size(batch_data, prefix),
+        "received_size": len(text) if text is not None else 0,
+    }
+
+
+def _batch_preference_map_shape(
+    value: Any,
+    *,
+    payload_index: int,
+    resolved_map_index: int,
+) -> dict[str, Any]:
+    """Return map preference field names and types without their values."""
+    shape: dict[str, Any] = {
+        "payload_index": payload_index,
+        "resolved_map_index": resolved_map_index,
+        "entry_type": _shape_type(value),
+    }
+    if not isinstance(value, Mapping):
+        return shape
+
+    shape["entry_keys"] = sorted(str(key) for key in value)
+    settings = value.get("settings")
+    shape["settings_type"] = _shape_type(settings)
+    if not isinstance(settings, Mapping):
+        return shape
+
+    field_keys: set[str] = set()
+    setting_value_types: set[str] = set()
+    for preference in settings.values():
+        setting_value_types.add(_shape_type(preference))
+        if isinstance(preference, Mapping):
+            field_keys.update(str(key) for key in preference)
+    shape.update(
+        {
+            "settings_entry_count": len(settings),
+            "settings_value_types": sorted(setting_value_types),
+            "preference_field_keys": sorted(field_keys),
+        }
+    )
+    return shape
+
+
+def _shape_type(value: Any) -> str:
+    """Return a stable JSON-oriented type name."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, Mapping):
+        return "object"
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return "array"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, int | float):
+        return "number"
+    return type(value).__name__
 
 
 def _decode_batch_preference_map_entry(

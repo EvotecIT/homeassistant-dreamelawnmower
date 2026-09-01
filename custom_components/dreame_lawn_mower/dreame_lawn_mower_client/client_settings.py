@@ -1020,6 +1020,7 @@ class _DreameLawnMowerClientSettingsMixin:
         include_raw: bool = False,
         map_indices: Sequence[int] | None = None,
         map_index_hints: Sequence[int] | None = None,
+        map_slot_index_hints: Sequence[int] | None = None,
     ) -> dict[str, Any]:
         """Fetch and decode mower preferences from batch device data."""
         batch_data = self._sync_get_batch_device_data(_batch_settings_keys())
@@ -1041,6 +1042,7 @@ class _DreameLawnMowerClientSettingsMixin:
             include_raw=include_raw,
             map_indices=map_indices,
             map_index_hints=map_index_hints,
+            map_slot_index_hints=map_slot_index_hints,
         )
 
     def _sync_get_batch_ota_info(
