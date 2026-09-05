@@ -209,6 +209,71 @@ def test_app_map_renderer_applies_saved_spot_presentation() -> None:
     assert all(image.size == (width, height) for image in pixels.values())
 
 
+def test_app_map_renderer_draws_200_series_entries_as_connector_corridors() -> None:
+    payload = {
+        "map": [
+            {
+                "id": 1,
+                "area": 100,
+                "data": [[0, 0], [100, 0], [100, 100], [0, 100]],
+            },
+            {
+                "id": 201,
+                "area": 0,
+                "data": [[100, 40], [200, 40], [200, 60], [100, 60]],
+            },
+        ]
+    }
+
+    png, width, height = render_app_map_payload_png(payload)
+    rendered = Image.open(BytesIO(png)).convert("RGB")
+    style = map_render_style()
+    scale = (width - 96) / 200
+    connector_center = (
+        round((200 - 150) * scale + 48),
+        round(50 * scale + 48),
+    )
+    expected_fill = Image.alpha_composite(
+        Image.new("RGBA", (1, 1), style.background),
+        Image.new(
+            "RGBA",
+            (1, 1),
+            (*style.navigation_path[:3], min(style.navigation_path[3], 48)),
+        ),
+    ).convert("RGB").getpixel((0, 0))
+
+    assert height > 320
+    assert rendered.getpixel(connector_center) == expected_fill
+
+
+def test_app_map_renderer_keeps_300_series_entries_as_zones() -> None:
+    payload = {
+        "map": [
+            {
+                "id": 300,
+                "name": "Future zone",
+                "area": 100,
+                "data": [[0, 0], [100, 0], [100, 100], [0, 100]],
+            }
+        ]
+    }
+
+    png, width, _ = render_app_map_payload_png(payload)
+    rendered = Image.open(BytesIO(png)).convert("RGB")
+    style = map_render_style()
+    scale = (width - 96) / 100
+    zone_interior = (
+        round((100 - 20) * scale + 48),
+        round(20 * scale + 48),
+    )
+    expected_fill = Image.alpha_composite(
+        Image.new("RGBA", (1, 1), style.background),
+        Image.new("RGBA", (1, 1), style.zone_fills[0]),
+    ).convert("RGB").getpixel((0, 0))
+
+    assert rendered.getpixel(zone_interior) == expected_fill
+
+
 def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
     client = _client()
     cloud = _FakeAppMapCloud(
@@ -271,6 +336,8 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
         "map_area_total": 12.5,
         "map_area_count": 1,
         "boundary_point_count": 3,
+        "pathway_count": 0,
+        "pathway_boundary_point_count": 0,
         "spot_count": 1,
         "spot_boundary_point_count": 0,
         "point_count": 5,
@@ -671,9 +738,20 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
             "total_area": 1,
             "map": [
                 {
+                    "id": 1,
                     "area": 1,
                     "data": [[0, 0], [100, 0], [100, 100], [0, 100]],
-                }
+                },
+                {
+                    "id": 201,
+                    "area": 0,
+                    "data": [[100, 40], [200, 40], [200, 60], [100, 60]],
+                },
+                {
+                    "id": 300,
+                    "area": 2,
+                    "data": [[200, 0], [300, 0], [300, 100], [200, 100]],
+                },
             ],
             "spot": [{"data": [[20, 20], [40, 20], [40, 40], [20, 40]]}],
             "point": [[50, 50]],
@@ -698,7 +776,8 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
     assert view.summary is not None
     assert view.summary.available is True
     assert view.summary.map_id == 0
-    assert view.summary.segment_count == 1
+    assert view.summary.segment_count == 2
+    assert view.summary.pathway_count == 1
     assert view.summary.no_go_area_count == 0
     assert view.summary.spot_area_count == 1
     assert view.summary.path_point_count == 3
@@ -731,9 +810,11 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
                 "hash_match": True,
                 "payload_keys": ["map", "point", "spot", "total_area", "trajectory"],
                 "total_area": 1,
-                "map_area_count": 1,
-                "map_area_total": 1.0,
-                "boundary_point_count": 4,
+                "map_area_count": 2,
+                "map_area_total": 3.0,
+                "boundary_point_count": 8,
+                "pathway_count": 1,
+                "pathway_boundary_point_count": 4,
                 "spot_count": 1,
                 "point_count": 1,
                 "point_entry_shapes": [

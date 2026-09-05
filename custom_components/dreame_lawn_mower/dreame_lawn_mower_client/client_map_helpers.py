@@ -463,7 +463,10 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
         value.get("cut_relation") if isinstance(value.get("cut_relation"), list) else []
     )
 
+    zone_maps = [item for item in maps if not _is_app_map_pathway(item)]
+    pathways = [item for item in maps if _is_app_map_pathway(item)]
     boundary_point_count = 0
+    pathway_boundary_point_count = 0
     spot_boundary_point_count = 0
     semantic_boundary_point_count = 0
     trajectory_point_count = 0
@@ -471,7 +474,7 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
     semantic_key_counts: dict[str, int] = {}
     total_area = value.get("total_area")
     map_area_total = 0.0
-    for item in maps:
+    for item in zone_maps:
         if not isinstance(item, Mapping):
             continue
         coordinates = item.get("data")
@@ -483,6 +486,15 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
         area = item.get("area")
         if isinstance(area, int | float):
             map_area_total += float(area)
+    for item in pathways:
+        if not isinstance(item, Mapping):
+            continue
+        coordinates = item.get("data")
+        if isinstance(coordinates, Sequence) and not isinstance(
+            coordinates,
+            str | bytes | bytearray,
+        ):
+            pathway_boundary_point_count += len(coordinates)
     for item in spots:
         if not isinstance(item, Mapping):
             continue
@@ -519,8 +531,10 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
         "name": value.get("name"),
         "total_area": total_area,
         "map_area_total": round(map_area_total, 2),
-        "map_area_count": len(maps),
+        "map_area_count": len(zone_maps),
         "boundary_point_count": boundary_point_count,
+        "pathway_count": len(pathways),
+        "pathway_boundary_point_count": pathway_boundary_point_count,
         "spot_count": len(spots),
         "spot_boundary_point_count": spot_boundary_point_count,
         "point_count": len(point_entries),
@@ -666,6 +680,8 @@ def _app_map_entry_view_metadata(entry: Mapping[str, Any]) -> dict[str, Any]:
         "map_area_count": summary.get("map_area_count"),
         "map_area_total": summary.get("map_area_total"),
         "boundary_point_count": summary.get("boundary_point_count"),
+        "pathway_count": summary.get("pathway_count"),
+        "pathway_boundary_point_count": summary.get("pathway_boundary_point_count"),
         "spot_count": summary.get("spot_count"),
         "point_count": summary.get("point_count"),
         "point_entry_shapes": summary.get("point_entry_shapes"),
@@ -700,6 +716,7 @@ def _app_map_view_summary(
         active_area_count=int(payload_summary.get("map_area_count") or 0),
         active_point_count=int(payload_summary.get("point_count") or 0),
         path_point_count=int(payload_summary.get("trajectory_point_count") or 0),
+        pathway_count=int(payload_summary.get("pathway_count") or 0),
         spot_area_count=int(payload_summary.get("spot_count") or 0),
     )
 
@@ -715,6 +732,7 @@ def _app_map_view_details(
         "total_area": payload_summary.get("total_area"),
         "map_area_total": payload_summary.get("map_area_total"),
         "zone_count": payload_summary.get("map_area_count"),
+        "pathway_count": payload_summary.get("pathway_count"),
         "spot_area_count": payload_summary.get("spot_count"),
         "clean_point_count": payload_summary.get("point_count"),
         "trajectory_count": payload_summary.get("trajectory_count"),
@@ -750,15 +768,24 @@ def _render_app_map_payload_png(
     if not isinstance(payload, Mapping):
         raise ValueError("App map payload is missing.")
 
-    map_entries = _app_map_coordinate_entries(payload.get("map"), "Area")
+    all_map_entries = _app_map_coordinate_entries(payload.get("map"), "Area")
+    map_entries = [entry for entry in all_map_entries if not entry["pathway"]]
+    pathway_entries = [entry for entry in all_map_entries if entry["pathway"]]
     spot_entries = _app_map_coordinate_entries(payload.get("spot"), "Spot")
     map_polygons = [entry["points"] for entry in map_entries]
+    pathway_polygons = [entry["points"] for entry in pathway_entries]
     spot_polygons = [entry["points"] for entry in spot_entries]
     trajectories = _app_map_coordinate_sets(payload.get("trajectory"))
     points = _app_map_points(payload.get("point"))
     all_points = [
         point
-        for group in [*map_polygons, *spot_polygons, *trajectories, points]
+        for group in [
+            *map_polygons,
+            *pathway_polygons,
+            *spot_polygons,
+            *trajectories,
+            points,
+        ]
         for point in group
     ]
     if not all_points:
@@ -797,6 +824,22 @@ def _render_app_map_payload_png(
     image = Image.new("RGBA", (width, height), style.background)
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
+
+    pathway_color = style.navigation_path
+    pathway_fill = (*pathway_color[:3], min(pathway_color[3], 48))
+    for polygon in pathway_polygons:
+        projected = [project(point) for point in polygon]
+        if len(projected) >= 3:
+            draw.polygon(
+                projected,
+                fill=pathway_fill,
+                outline=pathway_color,
+            )
+            draw.line(
+                projected + [projected[0]],
+                fill=pathway_color,
+                width=line_width(style, 2),
+            )
 
     for index, polygon in enumerate(sorted(map_polygons, key=len, reverse=True)):
         projected = [project(point) for point in polygon]
@@ -884,9 +927,22 @@ def _app_map_coordinate_entries(
                 {
                     "points": points,
                     "label": _app_map_entry_label(item, label_prefix),
+                    "pathway": _is_app_map_pathway(item),
                 }
             )
     return result
+
+
+def _is_app_map_pathway(item: Any) -> bool:
+    """Return whether an app-map polygon is connector metadata, not a zone."""
+    if not isinstance(item, Mapping):
+        return False
+    entry_id = item.get("id")
+    return (
+        isinstance(entry_id, int)
+        and not isinstance(entry_id, bool)
+        and 200 <= entry_id < 300
+    )
 
 
 def _app_map_coordinate_sets(value: Any) -> list[list[tuple[float, float]]]:
