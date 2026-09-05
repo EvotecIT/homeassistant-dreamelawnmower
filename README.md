@@ -57,7 +57,7 @@ brand name:
 | MOVA 600 | `mova.mower.g2405a` | **Recognized** | Model identity and shared mower state/device-code semantics; controls, maps, media, and model-specific code overrides still need live validation |
 | MOVA 600 Kit | `mova.mower.g2405b` | **Recognized** | Model identity and shared mower state/device-code semantics; controls, maps, media, and model-specific code overrides still need live validation |
 | MOVA 1000 | `mova.mower.g2405c` | **Recognized** | Model identity, station-brush maintenance code, and mowing-start lifecycle semantics; login, controls, maps, media, and model-specific code overrides still need live validation |
-| MOVA LiDAX Ultra 800 | `mova.mower.g2529b` | **Recognized** | Model identity and shared mower state/device-code semantics; controls, maps, media, and model-specific code overrides still need live validation |
+| MOVA LiDAX Ultra 800 | `mova.mower.g2529b` | **Field-reported** | MOVAhome EU login, core state and controls, maps, map selection, and mowing preferences on firmware `4.3.6_0453`; connector paths are currently rendered as lawn areas by the app-map renderer |
 | MOVA LiDAX Ultra 1000 | `mova.mower.g2529c` | **Field-reported** | MOVAhome EU login, commands, battery, and model-specific cloud property handling |
 | MOVA LiDAX Ultra 2000 | `mova.mower.g2529f` | **Field-reported** | MOVAhome US login, core state and commands, maps, and cloud live video on firmware `4.3.6_0453` |
 | MOVA LiDAX Ultra 2000 AWD | `mova.mower.g2584a` | **Field-reported** | MOVAhome US login, realtime state, zone mowing, docking, maps, and cloud live video on firmware `4.3.6_0439` |
