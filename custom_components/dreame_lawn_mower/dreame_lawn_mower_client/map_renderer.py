@@ -1,6 +1,7 @@
 """Legacy PIL map rendering and resource composition."""
 
 from __future__ import annotations
+from .map_drawing import render_legacy_navigation_paths
 import io
 import math
 import time
@@ -1850,13 +1851,13 @@ class DreameMowerMapRenderer:
                 or self._map_data.pathways != map_data.pathways
                 or not cached_layers.get(layer)
             ):
-                changes.append(MapRendererLayer.PATH)
-                cached_layers[layer] = self.render_walls(
+                changes.append(layer)
+                cached_layers[layer] = render_legacy_navigation_paths(
                     map_data.pathways,
                     self.color_scheme.pathway,
                     layer_size,
                     map_data.dimensions,
-                    line_width,
+                    self.presentation_stroke_scale,
                     scale,
                 )
         elif self._cache and cached_layers.get(layer):

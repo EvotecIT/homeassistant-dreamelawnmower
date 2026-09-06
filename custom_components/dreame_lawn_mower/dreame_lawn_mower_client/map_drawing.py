@@ -3,10 +3,35 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
+from math import hypot
 
 from PIL import Image, ImageDraw
 
-from .map_visuals import MapRenderStyle, line_width
+from .map_visuals import MapRenderStyle, line_width, map_render_style
+
+
+def render_legacy_navigation_paths(
+    paths, color, layer_size, dimensions, stroke_scale, scale
+) -> Image.Image:
+    """Adapt legacy line records to the shared road painter in output pixels."""
+    image = Image.new("RGBA", layer_size, (0, 0, 0, 0))
+    style = replace(
+        map_render_style(),
+        navigation_path=color,
+        stroke_scale=stroke_scale * scale,
+    )
+    for path in paths:
+        point = path.to_img(dimensions)
+        draw_navigation_path(
+            image,
+            [
+                (point.x0 * scale, point.y0 * scale),
+                (point.x1 * scale, point.y1 * scale),
+            ],
+            style,
+        )
+    return image
 
 
 def draw_lawn_polygon(
@@ -48,21 +73,55 @@ def draw_navigation_path(
     points: Sequence[tuple[int, int]],
     style: MapRenderStyle,
 ) -> None:
-    """Draw an open connector without joining unrelated endpoints."""
+    """Draw a schematic road, not a measured corridor or a cut-coverage mask.
+
+    Width is a presentation choice in image pixels. Keep the recorded open
+    centerline and carry dash spacing across vertices, including duplicates.
+    """
     if len(points) < 2:
         return
     layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
-    draw.line(
-        points, fill=style.navigation_path, width=line_width(style, 7), joint="curve"
-    )
-    draw.line(
-        points,
-        fill=(
-            *(min(255, c + 30) for c in style.navigation_path[:3]),
-            style.navigation_path[3],
-        ),
-        width=line_width(style, 3),
-        joint="curve",
-    )
+    edge = style.navigation_path
+    surface = (*(min(255, c + 24) for c in edge[:3]), edge[3])
+    marking = (*(min(255, c + 85) for c in edge[:3]), edge[3])
+    for width, color in (
+        (line_width(style, 15), edge),
+        (line_width(style, 11), surface),
+    ):
+        draw.line(points, fill=color, width=width, joint="curve")
+        radius = (width - 1) / 2
+        for x, y in (points[0], points[-1]):
+            draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=color)
+
+    dash = line_width(style, 7)
+    period = dash + line_width(style, 6)
+    distance = 0.0
+    for start, end in zip(points, points[1:], strict=False):
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        length = hypot(dx, dy)
+        offset = 0.0
+        while offset < length:
+            phase = (distance + offset) % period
+            painted = phase < dash
+            step = min(length - offset, (dash if painted else period) - phase)
+            if step < 1e-9:
+                break
+            if painted:
+                draw.line(
+                    [
+                        (
+                            start[0] + dx * offset / length,
+                            start[1] + dy * offset / length,
+                        ),
+                        (
+                            start[0] + dx * (offset + step) / length,
+                            start[1] + dy * (offset + step) / length,
+                        ),
+                    ],
+                    fill=marking,
+                    width=line_width(style, 2),
+                )
+            offset += step
+        distance += length
     image.alpha_composite(layer)
