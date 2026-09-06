@@ -222,12 +222,29 @@ class DreameLawnMowerRefreshMixin:
             False,
         )
         previous_app_maps_refreshed_at = self.app_maps_refreshed_at
+        mission_generation = runtime_mission_session_generation(
+            self.runtime_telemetry_cache
+        )
         await cycle.measure(
             "active_app_maps",
             lambda: self.async_refresh_app_maps(force=force_map_identity),
         )
+        runtime_snapshot = snapshot
         if self._snapshot_is_stale(snapshot):
-            return False
+            # A pose update can overtake the slower map read without changing
+            # the mission. Hydrate the newest published snapshot, never revive
+            # the stale foreground snapshot or cross a mission boundary.
+            if (
+                mission_generation is None
+                or mission_generation
+                != runtime_mission_session_generation(self.runtime_telemetry_cache)
+            ):
+                return False
+            runtime_snapshot = self._snapshot_for_publication(snapshot)
+            if not getattr(
+                runtime_snapshot, "available", False
+            ) or not runtime_tracking_active(runtime_snapshot):
+                return False
         map_identity_refreshed = bool(
             getattr(self, "app_maps_refresh_succeeded", False)
             and (
@@ -241,14 +258,14 @@ class DreameLawnMowerRefreshMixin:
         runtime_current = await cycle.measure(
             "active_runtime_status",
             lambda: self._async_refresh_runtime_status(
-                snapshot,
+                runtime_snapshot,
                 runtime_map_index=runtime_map_index,
             ),
         )
-        if not runtime_current or self._snapshot_is_stale(snapshot):
+        if not runtime_current or self._snapshot_is_stale(runtime_snapshot):
             return False
         self._runtime_map_identity_verified = map_identity_refreshed
-        return True
+        return runtime_snapshot is snapshot
 
     async def _async_refresh_runtime_status(
         self,
