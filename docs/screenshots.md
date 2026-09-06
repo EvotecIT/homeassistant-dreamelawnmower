@@ -2,6 +2,12 @@
 
 [Back to the README](../README.md)
 
+## Dashboard layouts
+
+The companion [Lawn Mower Card gallery](https://github.com/EvotecIT/lovelace-lawn-mower-card/blob/main/docs/gallery.md)
+shows current Dashboard, Hero, Default, Compact, mobile, and 3D views using this
+integration, with YAML examples for each layout.
+
 ## Hero dashboard
 
 ![Lawn Mower Card Hero layout](../assets/dreame-lawn-mower-hero-card.png)

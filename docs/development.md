@@ -20,7 +20,7 @@ small and the reverse-engineering notes in docs or ignored local captures.
   Unit and fixture tests for the public package, Home Assistant entities,
   protocol helpers, and live-probe summarizers.
 - `docs`
-  Roadmap, handoff notes, and protocol research.
+  User guides, open development work, and protocol research.
 
 ## Client Package Layout
 
@@ -148,9 +148,10 @@ settings in [configuration](configuration.md) and [mowing controls](mowing-contr
 and media instructions in [maps](maps.md) and [live video](live-video.md).
 Link to [the Python library](python-library.md) rather than repeating its example.
 
-Keep long probe recipes, protocol notes, app decompilation notes, and live test
-history in `docs/agent-handoff.md`, `docs/dreamehome-research.md`, or focused
-docs like this one.
+Keep reusable probe recipes here and protocol findings in
+[Dreamehome research](dreamehome-research.md) or [video transport](video-transport.md).
+Keep only open work in the [roadmap](roadmap.md). Completed implementation
+history belongs in Git and release notes, not a separate session handoff.
 
 ## Diagnostics Contract
 

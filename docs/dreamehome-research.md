@@ -1,6 +1,11 @@
 # Dreamehome App Research
 
-This note captures concrete findings from the real Dreamehome Android package so map work can move from guesswork to reproducible probes.
+This note records protocol findings from specific Dreamehome app and mower
+firmware captures. Version numbers and dated observations describe those
+captures, not the latest app or an installed mower's current state. Use
+[supported mowers](supported-mowers.md) for current model coverage,
+[maps](maps.md) and [live video](live-video.md) for setup, and the
+[roadmap](roadmap.md) for open work.
 
 ## Package confirmed
 
@@ -176,14 +181,13 @@ separates mowing preferences from schedule slots:
   avoidance, LiDAR obstacle recognition, obstacle avoidance height, AI obstacle
   classes for people/animals/objects, and obstacle avoidance distance.
 - Some controls appear unavailable while the mower is active or in a constrained
-  state. Future write-capable preference support should therefore keep the same
-  style of state guards used by manual control and schedule writes.
+  state. Preference writes must retain the client state guards and verify their
+  result rather than treating a visible app setting as unconditional write access.
 
-These screenshots are UI evidence only; they do not identify the exact
-app-action commands or cloud properties. Treat these preference families as
-read-only discovery targets until a live probe or plugin source scan confirms
-the command names, payload shapes, and whether values are global, per-map, or
-per-custom-profile.
+These screenshots alone did not identify the app-action commands or cloud
+properties. The subsequent protocol work below established the implemented
+preference paths. Any additional setting still needs its command, payload, and
+global/per-map/per-profile scope verified before it becomes writable.
 
 A follow-up scan of the downloaded A2 plugin bundle connected those UI controls
 to the app-action preference protocol:
@@ -507,15 +511,16 @@ confirms that explicit LAN playback is a different path from the XP2P
 - opens the microphone send path with `runSendService` and a `voice` URL
 - sends directional PTZ commands over a separate `command` URL
 
-The managed Home Assistant runtime currently implements downstream video over
-`startService`; it does not perform WLAN discovery, call `startLanService`, send
-microphone audio, or expose movement/patrol controls. The native SDK also
-contains direct and TURN/relay transports, but the retained A2 proof did not
-capture enough route telemetry to say which transport normal XP2P selected.
+The original playback proof used downstream video over `startService`; it did
+not prove WLAN discovery, `startLanService`, microphone audio, or patrol.
+Subsequent LAN discovery and transport work is documented in
+[video transport](video-transport.md), including the implemented fallback paths
+and why they do not establish LAN-only startup on the tested A2 firmware.
 
-Consequently, explicit same-LAN playback, A3/MOVA compatibility, two-way talk,
-and patrol are separate follow-up capabilities. Each needs its own device-safe
-proof rather than being inferred from the working A2 camera stream.
+Explicit same-LAN playback, two-way talk, and patrol require separate device-safe
+proof; they cannot be inferred from a working XP2P camera stream. Later A3 and
+MOVA field reports are recorded in the [support matrix](supported-mowers.md),
+not limited by this original A2 transport capture.
 
 Use `python examples/apk_research.py <apk> --max-string-length 220` when
 testing a new Dreamehome APK.
@@ -535,11 +540,11 @@ That is still useful negative evidence. It suggests the camera/map payload
 schema is either obfuscated in code, delivered dynamically, or best recovered
 from app traffic while opening the feature, rather than from a simple asset file.
 
-For the next offline pass, decompile the APK with `jadx` and scan the output:
+To inspect another APK, decompile it with `jadx` and scan the output:
 
 ```bash
-jadx -d C:\path\to\dreamehome-jadx C:\path\to\dreamehome.apk
-python examples/source_research.py "C:\path\to\dreamehome-jadx" --term STREAM_VIDEO --term operType --term sendAction
+jadx -d /path/to/dreamehome-jadx /path/to/dreamehome.apk
+python examples/source_research.py /path/to/dreamehome-jadx --term STREAM_VIDEO --term operType --term sendAction
 ```
 
 The source scanner reports candidate files plus compact file/line snippets, which
