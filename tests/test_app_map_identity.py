@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -62,6 +63,38 @@ def test_invalid_chunk_sizes_are_not_used_as_offsets(reported_size) -> None:
     }
     with pytest.raises(DreameLawnMowerConnectionError, match="chunk size mismatch"):
         client._sync_get_app_map_text(size=3, chunk_size=3)
+
+
+def test_escaped_chunk_overhead_uses_transport_offsets() -> None:
+    client = _client()
+    calls = []
+
+    def chunk(payload):
+        calls.append(payload["d"]["start"])
+        if payload["d"]["start"] == 0:
+            return {"d": {"data": '{"a":', "size": 7}}
+        return {"d": {"data": "12}", "size": 3}}
+
+    client._sync_call_app_action = chunk
+    assert client._sync_get_app_map_text(size=10, chunk_size=7) == ('{"a":12}', 2, 10)
+    assert calls == [0, 7]
+
+
+def test_map_integrity_hash_covers_decoded_text_not_transport_escape_overhead() -> None:
+    client = _client()
+    text = '{"map":[]}'
+    wire_size = len(text) + 2
+    client._sync_call_app_action = lambda payload: {
+        "d": {"size": wire_size, "hash": hashlib.md5(text.encode()).hexdigest()}
+    }
+    client._sync_get_app_map_text = lambda **kwargs: (text, 1, wire_size)
+    entry = {"idx": 0}
+    client._sync_download_app_map(entry, chunk_size=400, include_payload=True)
+    assert entry["available"] is True
+    assert entry["hash_match"] is True
+    assert entry["decoded_size"] == len(text)
+    assert entry["received_size"] == wire_size
+    assert entry["payload"] == {"map": []}
 
 
 def test_concurrent_readers_do_not_interleave_selected_map_downloads() -> None:

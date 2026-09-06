@@ -148,7 +148,7 @@ class _DreameLawnMowerClientAppMapsMixin:
                 "hash_match": hash_match,
             }
         )
-        if len(encoded) != size or received_size != size:
+        if len(encoded) > size or received_size != size:
             raise DreameLawnMowerConnectionError("App map payload size mismatch.")
         if hash_match is False:
             raise DreameLawnMowerConnectionError("App map payload hash mismatch.")
@@ -203,12 +203,16 @@ class _DreameLawnMowerClientAppMapsMixin:
             if returned_size is not None and (
                 not isinstance(returned_size, int)
                 or isinstance(returned_size, bool)
-                or returned_size != actual_size
+                or not actual_size <= returned_size <= requested_size
             ):
                 raise DreameLawnMowerConnectionError(
                     f"MAPD chunk size mismatch at offset {offset}."
                 )
+            # A2 firmware counts JSON escape overhead in the reported chunk
+            # size (e.g. 392 decoded bytes plus eight escaped quotes = 400).
+            # MAPD start addresses that transport representation, not the decoded
+            # text. The MAPI hash verifies the assembled decoded JSON separately.
             chunks.extend(chunk_bytes)
-            offset += actual_size
+            offset += returned_size if returned_size is not None else actual_size
             chunk_count += 1
         return chunks.decode("utf-8"), chunk_count, offset

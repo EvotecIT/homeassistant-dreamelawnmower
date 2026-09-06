@@ -162,6 +162,7 @@ class DreameLawnMowerMapCamera(
     def _handle_coordinator_update(self) -> None:
         """Refresh enabled map cameras when transient map context changes."""
         context = self._map_refresh_context
+        context_changed = context != self._last_refresh_context
         if (
             self._last_refresh_context is not None
             and context[0] != self._last_refresh_context[0]
@@ -171,7 +172,7 @@ class DreameLawnMowerMapCamera(
             self.coordinator.data and runtime_tracking_active(self.coordinator.data)
         )
         if map_camera_should_refresh(
-            context_changed=context != self._last_refresh_context,
+            context_changed=context_changed,
             runtime_active=active,
             manages_cached_view=self._refresh_cached_view_on_coordinator_update,
             demand_active=map_camera_refresh_demand_active(
@@ -313,6 +314,24 @@ class DreameLawnMowerMapCamera(
         map_index = self._selected_map_index
         rotation = self._map_rotation
         view = await self._async_refresh_map_view()
+        if (
+            map_index is not None
+            and view.image_png is not None
+            and (
+                view.source not in {"app_action_map", "batch_vector_map"}
+                or view.summary is None
+                or view.summary.map_id != map_index
+            )
+        ):
+            # The client can discover a map switch before the coordinator does.
+            # Wait for its next inventory update rather than retrying in a loop
+            # or publishing another lawn with this map's presentation settings.
+            self._map_cache.invalidate_view(drop_image=True)
+            self._map_cache.last_error = (
+                "Map identity changed; waiting for inventory refresh"
+            )
+            self.async_write_ha_state()
+            return None
         if (self._selected_map_index, self._map_rotation) != (map_index, rotation):
             self._map_cache.invalidate_view(drop_image=True)
             self._map_refresh_pending = True
