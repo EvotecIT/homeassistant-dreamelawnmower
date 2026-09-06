@@ -58,7 +58,9 @@ def build_mowing_map_scene(
         *vector_map.forbidden_areas,
         *vector_map.spot_areas,
     )
-    if sum(len(shape.points) for shape in shapes) > MAX_SCENE_POINTS:
+    point_count = sum(len(shape.points) for shape in shapes)
+    point_count += len(vector_map.clean_points) + len(vector_map.cruise_points)
+    if point_count > MAX_SCENE_POINTS:
         raise ValueError("The current map exceeds the interactive geometry budget.")
     # M_PATH records do not establish current-session cutting coverage. Keep
     # them out of the immutable background and use observed runtime tracks only.

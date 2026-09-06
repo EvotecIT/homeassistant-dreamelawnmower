@@ -7,6 +7,9 @@ from io import BytesIO
 import pytest
 from PIL import Image
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    client_mowing_map,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_visuals import (
     map_render_style,
 )
@@ -14,6 +17,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import 
     DreameLawnMowerStatusBlob,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.mowing_map import (
+    MAX_SCENE_POINTS,
     MAX_TRAIL_POINTS,
     build_mowing_map_scene,
     mowing_map_overlay,
@@ -52,6 +56,29 @@ def telemetry():
         candidate_runtime_pose_y=200,
         candidate_runtime_heading_deg=0,
     )
+
+
+@pytest.mark.parametrize("field", ["clean_points", "cruise_points"])
+def test_every_rendered_point_collection_counts_against_the_budget(field):
+    vector = replace(garden(), **{field: ((10, 10),) * MAX_SCENE_POINTS})
+    with pytest.raises(ValueError, match="geometry budget"):
+        build_mowing_map_scene(vector, style=map_render_style())
+
+
+def test_input_budget_precedes_map_parsing_and_ignores_unneeded_history(monkeypatch):
+    monkeypatch.setattr(client_mowing_map, "MAX_SCENE_INPUT_UNITS", 10)
+    assert client_mowing_map.bounded_mowing_map_batch(
+        {
+            "MAP.0": "small",
+            "MAP.info": 5,
+            "M_PATH.0": "x" * 100,
+        }
+    ) == {"MAP.0": "small", "MAP.info": 5}
+    with pytest.raises(ValueError, match="input budget"):
+        client_mowing_map.bounded_mowing_map_batch({"MAP.0": "x" * 11})
+    monkeypatch.setattr(client_mowing_map, "MAX_SCENE_CHUNKS", 1)
+    with pytest.raises(ValueError, match="chunk budget"):
+        client_mowing_map.bounded_mowing_map_batch({"MAP.0": "a", "MAP.1": "b"})
 
 
 @pytest.mark.parametrize("rotation", [0, 90, 180, 270])
