@@ -58,6 +58,19 @@ def telemetry():
     )
 
 
+def test_background_composites_with_the_host_without_claiming_cut_coverage():
+    style = map_render_style("mint")
+    scene = build_mowing_map_scene(garden(), style=style)
+    with Image.open(BytesIO(scene.image_png)) as image:
+        assert image.getpixel((0, 0))[3] == 0
+        # An interior sample away from boundaries and the zone label.
+        x, y = scene.projection.point(200, 100)
+        assert 0 < image.getpixel((x, y))[3] <= 64
+    # The existing camera palette remains unchanged.
+    assert style.background[3] == 255
+    assert style.zone_fills[0][3] == 230
+
+
 @pytest.mark.parametrize("field", ["clean_points", "cruise_points"])
 def test_every_rendered_point_collection_counts_against_the_budget(field):
     vector = replace(garden(), **{field: ((10, 10),) * MAX_SCENE_POINTS})

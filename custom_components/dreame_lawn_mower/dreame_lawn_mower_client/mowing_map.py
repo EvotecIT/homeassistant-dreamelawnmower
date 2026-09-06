@@ -65,8 +65,16 @@ def build_mowing_map_scene(
     # M_PATH records do not establish current-session cutting coverage. Keep
     # them out of the immutable background and use observed runtime tracks only.
     background = replace(vector_map, mow_paths=(), maps={})
+    # Garden geometry is not a cut-area mask. Keep it subdued and let the host
+    # theme show through, while retaining zone hues and all safety overlays.
+    interactive_style = replace(
+        style,
+        background=(0, 0, 0, 0),
+        zone_fills=tuple((*color[:3], min(color[3], 64)) for color in style.zone_fills),
+        zone_pattern="solid",
+    )
     image_png = render_vector_map_png(
-        background, style=replace(style, zone_pattern="solid"), label_scale=label_scale
+        background, style=interactive_style, label_scale=label_scale
     )
     if not image_png or len(image_png) > MAX_BACKGROUND_BYTES:
         raise ValueError("The current map background is unavailable or too large.")
