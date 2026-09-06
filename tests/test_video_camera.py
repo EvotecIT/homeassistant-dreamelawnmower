@@ -2393,7 +2393,7 @@ def test_video_camera_snapshot_start_timeout_returns_last_image() -> None:
             0.01,
         ):
             image = await entity.async_camera_image()
-            await asyncio.wait_for(entity._snapshot_request._task, timeout=1)
+            assert entity._snapshot_request._task is None
         return image, cancelled
 
     assert asyncio.run(_run()) == (b"\xff\xd8cached-jpeg\xff\xd9", True)
@@ -2431,7 +2431,7 @@ def test_video_camera_snapshot_image_timeout_returns_last_image() -> None:
         entity._async_create_stream_locked = _create_stream
         with patch.object(video_camera_module, "_SNAPSHOT_IMAGE_TIMEOUT", 0.01):
             image = await entity.async_camera_image()
-            await asyncio.wait_for(entity._snapshot_request._task, timeout=1)
+            assert entity._snapshot_request._task is None
         return image, cancelled, stops
 
     assert asyncio.run(_run()) == (b"\xff\xd8cached-jpeg\xff\xd9", True, 1)

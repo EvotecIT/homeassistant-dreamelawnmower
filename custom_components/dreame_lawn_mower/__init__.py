@@ -21,7 +21,7 @@ from .const import (
     PLATFORMS,
 )
 from .coordinator import DreameLawnMowerCoordinator
-from .map_preview import CONF_MAP_RESTART_PREVIEW, RestartMapPreview, preview_store
+from .map_preview import CONF_MAP_RESTART_PREVIEW, async_remove_restart_preview
 from .notifications import DreameLawnMowerNotificationManager
 from .option_updates import EntryUpdateSnapshot
 from .performance import format_performance_sample
@@ -75,6 +75,8 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Dreame lawn mower from a config entry."""
+    if not entry.options.get(CONF_MAP_RESTART_PREVIEW):
+        await async_remove_restart_preview(hass, entry.entry_id)
     coordinator = DreameLawnMowerCoordinator(hass, entry)
     coordinator.applied_entry_update = EntryUpdateSnapshot.capture(entry)
 
@@ -225,11 +227,7 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
             and applied.options.get(CONF_MAP_RESTART_PREVIEW)
             and not entry.options.get(CONF_MAP_RESTART_PREVIEW)
         ):
-            preview = getattr(coordinator, "map_restart_preview", None)
-            if isinstance(preview, RestartMapPreview):
-                await preview.async_remove()
-            else:
-                await preview_store(hass, entry.entry_id).async_remove()
+            await async_remove_restart_preview(hass, entry.entry_id)
         await hass.config_entries.async_reload(entry.entry_id)
         return
     changed = applied.changed_options(entry.options)
@@ -246,4 +244,4 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Remove the optional private lawn preview when its entry is deleted."""
-    await preview_store(hass, entry.entry_id).async_remove()
+    await async_remove_restart_preview(hass, entry.entry_id)

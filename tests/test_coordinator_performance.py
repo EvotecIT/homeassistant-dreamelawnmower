@@ -3257,6 +3257,9 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
 
         with (
             patch.object(
+                integration_module, "async_remove_restart_preview", AsyncMock()
+            ),
+            patch.object(
                 integration_module,
                 "DreameLawnMowerCoordinator",
                 return_value=coordinator,
@@ -3337,6 +3340,9 @@ def test_successful_setup_shuts_down_coordinator_on_home_assistant_stop() -> Non
 
         with (
             patch.object(
+                integration_module, "async_remove_restart_preview", AsyncMock()
+            ),
+            patch.object(
                 integration_module,
                 "DreameLawnMowerCoordinator",
                 return_value=coordinator,
@@ -3403,6 +3409,9 @@ def test_initial_connection_failure_keeps_complete_platform_setup_pending() -> N
         entry = SimpleNamespace(entry_id="entry-1", data={}, options={})
 
         with (
+            patch.object(
+                integration_module, "async_remove_restart_preview", AsyncMock()
+            ),
             patch.object(
                 integration_module,
                 "DreameLawnMowerCoordinator",

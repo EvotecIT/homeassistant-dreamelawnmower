@@ -142,3 +142,23 @@ def test_restart_preview_cannot_override_mower_unavailability():
     entity._restart_preview = SimpleNamespace(async_load=AsyncMock())
     assert asyncio.run(entity.async_camera_image()) is None
     entity._restart_preview.async_load.assert_not_called()
+
+
+def test_identical_map_refresh_renews_preview_without_jpeg_conversion():
+    entity = _camera()
+    entity.coordinator = SimpleNamespace(entry=SimpleNamespace(
+        options={"map_restart_preview": True}
+    ))
+    entity._descriptor = SimpleNamespace(unique_id="one-mower")
+    entity._restart_preview = SimpleNamespace(async_save=AsyncMock())
+    entity._map_cache.store_image(
+        b"jpeg", source_image=b"png", render_context=entity._map_rotation
+    )
+    entity._async_refresh_map_view = AsyncMock(return_value=DreameLawnMowerMapView(
+        source="app_action_map", image_png=b"png",
+        summary=DreameLawnMowerMapSummary(available=True, map_id=0),
+    ))
+    assert asyncio.run(entity._async_refresh_and_render_map_image()) == b"jpeg"
+    entity.hass.async_add_executor_job.assert_not_called()
+    entity._restart_preview.async_save.assert_awaited_once()
+    assert entity._restart_preview.async_save.call_args.args[0] == b"jpeg"

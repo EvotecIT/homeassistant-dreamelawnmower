@@ -502,3 +502,18 @@ def test_options_flow_replaces_unknown_notification_mode_default() -> None:
     validated = result["data_schema"]({})
 
     assert validated[CONF_NOTIFICATION_MODE] == DEFAULT_NOTIFICATION_MODE
+
+
+async def test_opt_out_removes_saved_preview_without_loaded_coordinator(hass):
+    from custom_components.dreame_lawn_mower.map_preview import preview_store
+
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={}, options={"map_restart_preview": True}
+    )
+    entry.add_to_hass(hass)
+    await preview_store(hass, entry.entry_id).async_save({"jpeg": "private-map"})
+    flow = DreameLawnMowerOptionsFlow(entry)
+    flow.hass = hass
+    result = await flow.async_step_init({"map_restart_preview": False})
+    assert result["data"]["map_restart_preview"] is False
+    assert await preview_store(hass, entry.entry_id).async_load() is None

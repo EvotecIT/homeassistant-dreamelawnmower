@@ -32,6 +32,16 @@ def preview_scope(device_id: str, render_context: tuple[Any, ...]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+async def async_remove_restart_preview(hass: Any, entry_id: str) -> None:
+    """Honor opt-out without requiring a successfully loaded coordinator."""
+    coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
+    preview = getattr(coordinator, "map_restart_preview", None)
+    if isinstance(preview, RestartMapPreview):
+        await preview.async_remove()
+    else:
+        await preview_store(hass, entry_id).async_remove()
+
+
 def encode_preview(
     image: bytes, scope: str, *, now: float | None = None
 ) -> dict[str, Any] | None:

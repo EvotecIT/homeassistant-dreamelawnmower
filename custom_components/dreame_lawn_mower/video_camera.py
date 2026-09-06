@@ -838,7 +838,6 @@ class DreameLawnMowerVideoCamera(
         return await request.async_get(
             self.hass,
             lambda: self._async_capture_snapshot(width, height),
-            cached_image=getattr(self, "_last_image", None),
         )
 
     async def _async_capture_snapshot(

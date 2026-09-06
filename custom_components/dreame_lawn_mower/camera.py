@@ -404,6 +404,9 @@ class DreameLawnMowerMapCamera(
                 render_context=self._map_rotation,
             ):
                 self._map_cache.last_error = None
+                await self._async_save_restart_preview(
+                    self._map_cache.last_image, render_context
+                )
                 return self._map_cache.last_image
             try:
                 image = await self.hass.async_add_executor_job(
@@ -428,18 +431,7 @@ class DreameLawnMowerMapCamera(
                 self._map_cache.last_error = None
                 self._preview_saved_at = None
                 self.async_write_ha_state()
-                if (
-                    self._restart_preview is not None
-                    and self._selected_map_index is not None
-                    and self.coordinator.entry.options.get(CONF_MAP_RESTART_PREVIEW)
-                ):
-                    try:
-                        await self._restart_preview.async_save(
-                            image,
-                            preview_scope(self._descriptor.unique_id, render_context),
-                        )
-                    except Exception:
-                        _LOGGER.debug("Unable to save optional map restart preview")
+                await self._async_save_restart_preview(image, render_context)
                 return image
             except Exception as err:
                 safe_error = sanitize_diagnostic_text(err)
@@ -463,6 +455,23 @@ class DreameLawnMowerMapCamera(
                 detail=self._map_cache.last_error or view.error,
             )
         )
+
+    async def _async_save_restart_preview(
+        self, image: bytes | None, render_context: tuple
+    ) -> None:
+        """Renew successful map evidence without repeating JPEG conversion."""
+        if (
+            image is not None
+            and self._restart_preview is not None
+            and self._selected_map_index is not None
+            and self.coordinator.entry.options.get(CONF_MAP_RESTART_PREVIEW)
+        ):
+            try:
+                await self._restart_preview.async_save(
+                    image, preview_scope(self._descriptor.unique_id, render_context)
+                )
+            except Exception:
+                _LOGGER.debug("Unable to save optional map restart preview")
 
     async def _async_refresh_map_view(self) -> DreameLawnMowerMapView:
         """Return a cached map view or refresh it on demand."""
