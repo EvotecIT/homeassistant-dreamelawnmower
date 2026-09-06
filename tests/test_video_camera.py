@@ -137,6 +137,7 @@ def _uninitialized_entity(*, snapshot: object | None = None):
         return entity.coordinator.data
 
     entity = object.__new__(DreameLawnMowerVideoCamera)
+    entity.hass = SimpleNamespace(async_create_task=asyncio.create_task)
     entity._descriptor = SimpleNamespace(
         did=f"test-device-{id(entity)}",
         unique_id=f"test-device-{id(entity)}",
@@ -665,6 +666,11 @@ def test_live_video_attributes_are_small_stable_and_unrecorded() -> None:
 
     assert first == second
     assert set(first) == {
+        "video_startup",
+        "video_recovery_pending",
+        "last_stream_health",
+        "last_stream_error_code",
+        "last_stream_error_at",
         "last_video_transport",
         "stream_session_active",
         "video_block_reason",
@@ -2387,6 +2393,7 @@ def test_video_camera_snapshot_start_timeout_returns_last_image() -> None:
             0.01,
         ):
             image = await entity.async_camera_image()
+            assert entity._snapshot_request._task is None
         return image, cancelled
 
     assert asyncio.run(_run()) == (b"\xff\xd8cached-jpeg\xff\xd9", True)
@@ -2424,6 +2431,7 @@ def test_video_camera_snapshot_image_timeout_returns_last_image() -> None:
         entity._async_create_stream_locked = _create_stream
         with patch.object(video_camera_module, "_SNAPSHOT_IMAGE_TIMEOUT", 0.01):
             image = await entity.async_camera_image()
+            assert entity._snapshot_request._task is None
         return image, cancelled, stops
 
     assert asyncio.run(_run()) == (b"\xff\xd8cached-jpeg\xff\xd9", True, 1)
@@ -3523,6 +3531,7 @@ def test_video_camera_tracks_snapshot_request_for_entire_image_wait() -> None:
 def test_video_camera_auto_refreshes_after_stale_cached_lan_endpoint() -> None:
     async def _run() -> tuple[str | None, int, int, list[object]]:
         entity = _uninitialized_entity()
+        entity.async_write_ha_state = lambda: None
         entity._entry.options[CONF_VIDEO_TRANSPORT] = VIDEO_TRANSPORT_AUTO
         cached_inputs = DreameLawnMowerCameraStreamRuntimeInputs(
             source="lan_video_cache",
@@ -3611,6 +3620,7 @@ def test_video_camera_auto_refreshes_after_stale_cached_lan_endpoint() -> None:
 def test_video_camera_disables_video_when_enable_attempt_raises() -> None:
     async def _run() -> tuple[str | None, list[bool], str | None, str | None]:
         entity = _uninitialized_entity()
+        entity.async_write_ha_state = lambda: None
         calls: list[bool] = []
 
         class _Client:

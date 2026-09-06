@@ -75,6 +75,7 @@ from .const import (
     XP2P_RUNNER_MODE_OPTIONS,
     XP2P_RUNNER_MODE_PROCESS,
 )
+from .map_preview import CONF_MAP_RESTART_PREVIEW, async_remove_restart_preview
 
 CONF_DEVICE = "device"
 
@@ -330,6 +331,7 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
     """Handle integration options."""
 
     def __init__(self, config_entry) -> None:
+        self._source_entry = config_entry
         self._entry_options = dict(config_entry.options)
 
     async def async_step_init(
@@ -342,6 +344,12 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                 options[CONF_MAP_ROTATION] = int(options[CONF_MAP_ROTATION])
             if CONF_MAP_ROTATIONS in self._entry_options:
                 options[CONF_MAP_ROTATIONS] = self._entry_options[CONF_MAP_ROTATIONS]
+            if self._entry_options.get(CONF_MAP_RESTART_PREVIEW) and not options.get(
+                CONF_MAP_RESTART_PREVIEW
+            ):
+                await async_remove_restart_preview(
+                    self.hass, self._source_entry.entry_id
+                )
             return self.async_create_entry(title="", data=options)
 
         video_transport = self._entry_options.get(
@@ -393,6 +401,12 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                             max=MAX_MAP_LABEL_SCALE,
                         ),
                     ),
+                    vol.Optional(
+                        CONF_MAP_RESTART_PREVIEW,
+                        default=self._entry_options.get(
+                            CONF_MAP_RESTART_PREVIEW, False
+                        ),
+                    ): bool,
                     vol.Optional(
                         CONF_MAP_ROTATION,
                         default=str(

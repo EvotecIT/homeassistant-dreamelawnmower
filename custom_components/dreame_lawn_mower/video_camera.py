@@ -95,6 +95,7 @@ from .video_session_lifecycle import (
     mower_video_relay_idle_grace,
     mower_video_session_should_stay_warm,
 )
+from .video_snapshot import VideoSnapshotRequest
 
 _LOGGER = logging.getLogger(__name__)
 _VIDEO_UPSTREAM_START_TIMEOUT = DEFAULT_XP2P_HOST_STARTUP_TIMEOUT
@@ -216,6 +217,7 @@ class DreameLawnMowerVideoCamera(
         self._snapshot_lock = asyncio.Lock()
         self._snapshot_requests = 0
         self._snapshot_owned_stream: Any | None = None
+        self._snapshot_request = VideoSnapshotRequest()
         self._video_retention_mode = entry.options.get(
             CONF_VIDEO_RETENTION,
             DEFAULT_VIDEO_RETENTION,
@@ -498,6 +500,9 @@ class DreameLawnMowerVideoCamera(
         provisioning_inputs: DreameLawnMowerCameraStreamRuntimeInputs | None = None
         async with self._stream_lock:
             self._unverified_playback_session = None
+            timing = getattr(self, "_video_startup_timing", None)
+            if timing is not None:
+                timing.verified()
             provisioning_inputs = self._pending_provisioning_inputs
             self._pending_provisioning_inputs = None
             if self._last_stream_health is None:
@@ -827,6 +832,18 @@ class DreameLawnMowerVideoCamera(
         """Return a real JPEG frame decoded from the managed local FLV source."""
         if not getattr(self, "_attr_is_on", True):
             return None
+        request = getattr(self, "_snapshot_request", None)
+        if request is None:
+            self._snapshot_request = request = VideoSnapshotRequest()
+        return await request.async_get(
+            self.hass,
+            lambda: self._async_capture_snapshot(width, height),
+        )
+
+    async def _async_capture_snapshot(
+        self, width: int | None, height: int | None
+    ) -> bytes | None:
+        """Keep retention ownership through the complete background image wait."""
         async with self._snapshot_lock:
             self._snapshot_requests = getattr(self, "_snapshot_requests", 0) + 1
             try:
@@ -933,6 +950,10 @@ class DreameLawnMowerVideoCamera(
 
     async def async_turn_off(self) -> None:
         """Stop the current live video session."""
+        self._attr_is_on = False
+        request = getattr(self, "_snapshot_request", None)
+        if request is not None:
+            await request.async_cancel()
         async with self._stream_lock:
             await self._async_stop_active_session(reason="turn_off")
             self._attr_is_on = False
@@ -946,6 +967,7 @@ class DreameLawnMowerVideoCamera(
 
     async def async_will_remove_from_hass(self) -> None:
         """Stop XP2P video when Home Assistant unloads the camera."""
+        self._attr_is_on = False
         provider = getattr(self.coordinator, "video_diagnostics_provider", None)
         if provider == self.video_runtime_diagnostics:
             self.coordinator.video_diagnostics_provider = None
@@ -963,6 +985,9 @@ class DreameLawnMowerVideoCamera(
             # the relay before any state-gate task that may be waiting for the
             # same lock, so pump cancellation unwinds that startup promptly.
             await relay.async_close()
+        request = getattr(self, "_snapshot_request", None)
+        if request is not None:
+            await request.async_cancel()
         cleanup_task = self._state_gate_cleanup_task
         if cleanup_task is not None and cleanup_task is not asyncio.current_task():
             try:

@@ -220,7 +220,8 @@ def test_app_map_renderer_draws_200_series_entries_as_connector_corridors() -> N
             {
                 "id": 201,
                 "area": 0,
-                "data": [[100, 40], [200, 40], [200, 60], [100, 60]],
+                "type": 1,
+                "data": [[100, 40], [200, 40], [200, 140]],
             },
         ]
     }
@@ -231,19 +232,15 @@ def test_app_map_renderer_draws_200_series_entries_as_connector_corridors() -> N
     scale = (width - 96) / 200
     connector_center = (
         round((200 - 150) * scale + 48),
-        round(50 * scale + 48),
+        round(70 * scale + 48),
     )
-    expected_fill = Image.alpha_composite(
-        Image.new("RGBA", (1, 1), style.background),
-        Image.new(
-            "RGBA",
-            (1, 1),
-            (*style.navigation_path[:3], min(style.navigation_path[3], 48)),
-        ),
-    ).convert("RGB").getpixel((0, 0))
+    path_point = (connector_center[0], round(40 * scale + 48))
+    closing_edge = (connector_center[0], round(90 * scale + 48))
 
     assert height > 320
-    assert rendered.getpixel(connector_center) == expected_fill
+    assert rendered.getpixel(connector_center) == style.background[:3]
+    assert rendered.getpixel(closing_edge) == style.background[:3]
+    assert rendered.getpixel(path_point) != style.background[:3]
 
 
 def test_app_map_renderer_keeps_300_series_entries_as_zones() -> None:
@@ -642,7 +639,7 @@ def test_app_maps_reject_hash_mismatched_payload() -> None:
     client = _client()
     payload = {"map": [{"area": 1, "data": [[1, 2], [3, 4], [5, 6]]}]}
     payload_text = json.dumps(payload, separators=(",", ":"))
-    corrupt_payload_text = '{"map":[]}'
+    corrupt_payload_text = payload_text.replace('"area":1', '"area":2')
     cloud = _FakeAppMapCloud(
         payload,
         chunk_overrides={0: (corrupt_payload_text, len(payload_text))},
@@ -650,7 +647,7 @@ def test_app_maps_reject_hash_mismatched_payload() -> None:
     client._sync_get_cloud_protocol = lambda: cloud
 
     result = client._sync_get_app_maps(
-        chunk_size=40,
+        chunk_size=400,
         include_payload=True,
         include_objects=False,
     )
@@ -808,6 +805,7 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
                 "received_size": len(cloud.payload_text.encode("utf-8")),
                 "chunk_count": 1,
                 "hash_match": True,
+                "download_attempts": 1,
                 "payload_keys": ["map", "point", "spot", "total_area", "trajectory"],
                 "total_area": 1,
                 "map_area_count": 2,

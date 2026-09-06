@@ -327,6 +327,32 @@ def test_point_cloud_api_evicts_downloads_when_ttl_expires() -> None:
     assert calls == 2
 
 
+@pytest.mark.parametrize("budget, expected_calls", [(15, 3), (1, 3), (22, 2)])
+def test_point_cloud_cache_bounds_aggregate_content_bytes(budget, expected_calls):
+    calls = 0
+
+    async def download(**kwargs):
+        nonlocal calls
+        calls += 1
+        return _download(kwargs["map_index"])
+
+    hass = SimpleNamespace(data={DOMAIN: {"entry": SimpleNamespace(
+        client=SimpleNamespace(async_download_app_map_point_cloud=download)
+    )}})
+    api = DreameLawnMowerPointCloudAPI(hass, cache_max_bytes=budget)
+
+    async def run():
+        await api.async_get("entry", 0)
+        await api.async_get("entry", 1)
+        assert sum(len(item.download.content) for item in api._cache.values()) <= budget
+        await api.async_get("entry", 0)
+        api.purge_entry("entry")
+        assert not api._cache_expiry_handles
+
+    asyncio.run(run())
+    assert calls == expected_calls
+
+
 def test_point_cloud_api_deduplicates_concurrent_refreshes() -> None:
     calls = 0
     started = asyncio.Event()

@@ -50,16 +50,11 @@ def test_optional_map_cameras_refresh_only_when_requested() -> None:
 def test_map_camera_attributes_are_excluded_from_recorder() -> None:
     """Large current-map payloads belong in live state, not recorder history."""
     assert DreameLawnMowerMapCamera._unrecorded_attributes == frozenset({MATCH_ALL})
-    assert (
-        DreameLawnMowerLivePathMapCamera._unrecorded_attributes
-        == frozenset({MATCH_ALL})
-    )
-    assert DreameLawnMowerAllMapsCamera._unrecorded_attributes == frozenset(
+    assert DreameLawnMowerLivePathMapCamera._unrecorded_attributes == frozenset(
         {MATCH_ALL}
     )
-    assert DreameLawnMowerMapDataCamera._unrecorded_attributes == frozenset(
-        {MATCH_ALL}
-    )
+    assert DreameLawnMowerAllMapsCamera._unrecorded_attributes == frozenset({MATCH_ALL})
+    assert DreameLawnMowerMapDataCamera._unrecorded_attributes == frozenset({MATCH_ALL})
 
 
 @pytest.mark.parametrize(
@@ -286,11 +281,20 @@ def test_map_camera_refresh_demand_expires_after_window() -> None:
     )
 
 
-def test_all_maps_camera_returns_loading_image_while_refresh_starts() -> None:
-    """An empty contact-sheet cache must not block HA's camera response."""
+@pytest.mark.parametrize(
+    "camera_type",
+    [
+        DreameLawnMowerMapCamera,
+        DreameLawnMowerLivePathMapCamera,
+        DreameLawnMowerAllMapsCamera,
+    ],
+)
+def test_map_cameras_return_loading_image_while_refresh_starts(camera_type) -> None:
+    """Cold map caches must not wait for downloads beyond HA's camera timeout."""
     cache = DreameLawnMowerMapCameraCache(ttl=timedelta(seconds=60))
-    entity = object.__new__(DreameLawnMowerAllMapsCamera)
+    entity = object.__new__(camera_type)
     entity._map_cache = cache
+    entity._restart_preview = None
     refresh_calls = 0
 
     async def async_add_executor_job(target: object) -> bytes:
@@ -427,7 +431,11 @@ def test_all_maps_camera_caches_failure_placeholder_until_ttl(monkeypatch) -> No
         refresh_calls += 1
 
     entity.coordinator = SimpleNamespace(
-        client=SimpleNamespace(async_get_app_maps=async_get_app_maps)
+        client=SimpleNamespace(async_get_app_maps=async_get_app_maps),
+        runtime_status_blob=None,
+        entry=SimpleNamespace(options={}),
+        app_maps=None,
+        selected_map_index=None,
     )
     entity.hass = SimpleNamespace(async_add_executor_job=async_add_executor_job)
     entity.async_write_ha_state = lambda: None  # type: ignore[method-assign]
@@ -651,9 +659,7 @@ def test_map_camera_attributes_overlay_latest_realtime_pose() -> None:
     assert attributes["runtime_pose_y"] == 250
     assert attributes["runtime_heading_deg"] == 91.25
     assert attributes["runtime_region_id"] == 8
-    assert attributes["runtime_position_updated_at"] == (
-        "2026-07-25T11:58:00+00:00"
-    )
+    assert attributes["runtime_position_updated_at"] == ("2026-07-25T11:58:00+00:00")
     assert attributes["position_x"] == -1800
     assert attributes["position_y"] == 250
     assert attributes["position_heading"] == 91.25

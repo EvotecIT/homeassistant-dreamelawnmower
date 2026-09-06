@@ -68,8 +68,18 @@ def runtime_tracking_active(snapshot: DreameLawnMowerSnapshot) -> bool:
 class DreameLawnMowerRefreshMixin:
     """Keep blocking state refreshes separate from optional metadata hydration."""
 
-    def _snapshot_is_stale(self, snapshot: DreameLawnMowerSnapshot) -> bool:
+    def _snapshot_is_stale(
+        self,
+        snapshot: DreameLawnMowerSnapshot,
+        *,
+        observed_generation: int | None = None,
+    ) -> bool:
         """Return whether a newer device snapshot already owns coordinator state."""
+        if observed_generation is not None and max(
+            getattr(self, "_device_snapshot_generation", 0),
+            getattr(self, "_published_device_snapshot_generation", 0),
+        ) > observed_generation:
+            return True
         stale_check = getattr(self, "_device_snapshot_is_stale", None)
         return bool(callable(stale_check) and stale_check(snapshot))
 
@@ -164,10 +174,17 @@ class DreameLawnMowerRefreshMixin:
             self._record_connectivity_success(snapshot)
 
             runtime_active = runtime_tracking_active(snapshot)
-            if runtime_active:
+            defer_active_runtime = bool(
+                getattr(self, "_defer_active_runtime_during_setup", False)
+            )
+            if runtime_active and not defer_active_runtime:
                 if not await self._async_refresh_active_runtime(cycle, snapshot):
                     return self._snapshot_for_publication(snapshot)
             else:
+                # Setup publishes essential device state immediately. Optional
+                # map discovery runs in the existing background owner; the next
+                # regular poll still verifies map identity before live tracking.
+                # Never label this unhydrated snapshot as verified map telemetry.
                 self._runtime_map_identity_verified = False
                 self.client.update_runtime_live_tracking(None, active=False)
 
@@ -176,7 +193,7 @@ class DreameLawnMowerRefreshMixin:
             # confirm that this foreground snapshot is still current.
             self._observe_runtime_mission_boundary(snapshot)
             self._schedule_metadata_refresh(
-                refresh_map_and_runtime=not runtime_active,
+                refresh_map_and_runtime=not runtime_active or defer_active_runtime,
             )
             return self._snapshot_for_publication(snapshot)
         except asyncio.CancelledError:
@@ -215,12 +232,29 @@ class DreameLawnMowerRefreshMixin:
             False,
         )
         previous_app_maps_refreshed_at = self.app_maps_refreshed_at
+        mission_generation = runtime_mission_session_generation(
+            self.runtime_telemetry_cache
+        )
         await cycle.measure(
             "active_app_maps",
             lambda: self.async_refresh_app_maps(force=force_map_identity),
         )
+        runtime_snapshot = snapshot
         if self._snapshot_is_stale(snapshot):
-            return False
+            # A pose update can overtake the slower map read without changing
+            # the mission. Hydrate the newest published snapshot, never revive
+            # the stale foreground snapshot or cross a mission boundary.
+            if (
+                mission_generation is None
+                or mission_generation
+                != runtime_mission_session_generation(self.runtime_telemetry_cache)
+            ):
+                return False
+            runtime_snapshot = self._snapshot_for_publication(snapshot)
+            if not getattr(
+                runtime_snapshot, "available", False
+            ) or not runtime_tracking_active(runtime_snapshot):
+                return False
         map_identity_refreshed = bool(
             getattr(self, "app_maps_refresh_succeeded", False)
             and (
@@ -234,14 +268,14 @@ class DreameLawnMowerRefreshMixin:
         runtime_current = await cycle.measure(
             "active_runtime_status",
             lambda: self._async_refresh_runtime_status(
-                snapshot,
+                runtime_snapshot,
                 runtime_map_index=runtime_map_index,
             ),
         )
-        if not runtime_current or self._snapshot_is_stale(snapshot):
+        if not runtime_current or self._snapshot_is_stale(runtime_snapshot):
             return False
         self._runtime_map_identity_verified = map_identity_refreshed
-        return True
+        return runtime_snapshot is snapshot
 
     async def _async_refresh_runtime_status(
         self,
@@ -250,6 +284,9 @@ class DreameLawnMowerRefreshMixin:
         runtime_map_index: int | None = None,
     ) -> bool:
         """Refresh optional runtime telemetry without failing the main snapshot."""
+        # Keep the fetch-order token independently of bounded snapshot history:
+        # the snapshot can be borrowed from a realtime task that releases it.
+        observed_device_generation = getattr(self, "_device_snapshot_generation", None)
         runtime_active = runtime_tracking_active(snapshot)
         session_started_at = runtime_mission_session_started_at(
             self.runtime_telemetry_cache
@@ -273,7 +310,9 @@ class DreameLawnMowerRefreshMixin:
                 refresh=False,
                 include_cloud=True,
             )
-            if self._snapshot_is_stale(snapshot) or (
+            if self._snapshot_is_stale(
+                snapshot, observed_generation=observed_device_generation
+            ) or (
                 observed_mission_generation is not None
                 and runtime_mission_session_generation(
                     self.runtime_telemetry_cache
@@ -316,7 +355,9 @@ class DreameLawnMowerRefreshMixin:
             )
             return True
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
-            if self._snapshot_is_stale(snapshot) or (
+            if self._snapshot_is_stale(
+                snapshot, observed_generation=observed_device_generation
+            ) or (
                 observed_mission_generation is not None
                 and runtime_mission_session_generation(
                     self.runtime_telemetry_cache

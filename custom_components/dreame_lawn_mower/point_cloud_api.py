@@ -34,6 +34,7 @@ POINT_CLOUD_API_DATA_KEY = "point_cloud_api"
 POINT_CLOUD_API_PATH = f"/api/{DOMAIN}/point-cloud"
 POINT_CLOUD_CACHE_TTL_SECONDS = 300.0
 POINT_CLOUD_CACHE_MAX_ENTRIES = 4
+POINT_CLOUD_CACHE_MAX_BYTES = 64 * 1024 * 1024
 POINT_CLOUD_PROBLEM_SCHEMA_VERSION = 1
 
 _POINT_CLOUD_PROBLEM_STATUS = {
@@ -135,10 +136,12 @@ class DreameLawnMowerPointCloudAPI:
         *,
         cache_ttl: float = POINT_CLOUD_CACHE_TTL_SECONDS,
         cache_max_entries: int = POINT_CLOUD_CACHE_MAX_ENTRIES,
+        cache_max_bytes: int = POINT_CLOUD_CACHE_MAX_BYTES,
     ) -> None:
         self._hass = hass
         self._cache_ttl = cache_ttl
-        self._cache_max_entries = cache_max_entries
+        self._cache_max_entries = max(0, cache_max_entries)
+        self._cache_max_bytes = max(0, cache_max_bytes)
         self._cache: OrderedDict[tuple[str, int], _CacheEntry] = OrderedDict()
         self._cache_expiry_handles: dict[
             tuple[str, int], asyncio.TimerHandle
@@ -415,7 +418,11 @@ class DreameLawnMowerPointCloudAPI:
             created_at,
         )
         self._cache.move_to_end(key)
-        while len(self._cache) > self._cache_max_entries:
+        while (
+            len(self._cache) > self._cache_max_entries
+            or sum(len(item.download.content) for item in self._cache.values())
+            > self._cache_max_bytes
+        ):
             oldest_key = next(iter(self._cache))
             self._remove_cache_entry(oldest_key)
         return download

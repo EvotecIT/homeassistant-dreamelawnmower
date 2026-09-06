@@ -55,7 +55,7 @@
         "title": "Dreame lawn mower options",
         "data": {
           "scan_interval": "Polling interval in seconds",
-          "map_label_scale": "Map label scale",
+          "map_restart_preview": "Keep a map preview across restarts", "map_label_scale": "Map label scale",
           "map_rotation": "Map display rotation",
           "map_theme": "Map theme",
           "map_stroke_scale": "Map line thickness",
@@ -71,6 +71,7 @@
           "xp2p_runner_mode": "Host XP2P runner mode"
         },
         "data_description": {
+          "map_restart_preview": "Off by default. Stores one private map JPEG (up to 2 MB) in Home Assistant. Only previews less than 24 hours old are used while the matching map loads; they are not live mower state. Disabling this option or deleting the integration removes the stored preview.",
           "map_rotation": "Fallback rotation for maps without a per-map selection. Use the Selected Map Display Rotation entity for individual maps.",
           "map_theme": "Choose a coordinated light, dark, midnight, or high-contrast palette for all locally rendered maps.",
           "map_stroke_scale": "Scale map boundaries and paths from 0.5 to 3.",
@@ -109,6 +110,7 @@
     "map_theme": {
       "options": {
         "emerald": "Emerald",
+        "mint": "Mint (decorative stripes)",
         "dark": "Dark",
         "midnight": "Midnight",
         "high_contrast": "High contrast"

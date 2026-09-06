@@ -152,7 +152,16 @@ class DreameLawnMowerVideoStateMixin:
     def extra_state_attributes(self) -> dict[str, Any]:
         """Expose compact stream readiness without recorder-heavy telemetry."""
         capability = self._resolved_video_capability()
+        timing = getattr(self, "_video_startup_timing", None)
         return {
+            "video_startup": timing.as_dict() if timing is not None else None,
+            "video_recovery_pending": self._video_recovery_pending,
+            "last_stream_error_code": getattr(self, "_last_error_code", None),
+            "last_stream_error_at": getattr(self, "_last_error_at", None),
+            "last_stream_health": {
+                key: (self._last_stream_health or {}).get(key)
+                for key in ("playback_session_verified", "recovery_pending")
+            },
             "video_runtime_configured": self._runtime_configured,
             "video_runtime_mode": self._runtime_mode,
             "video_transport_policy": self._video_transport,

@@ -412,13 +412,16 @@ def test_command_boundary_blocks_delayed_foreground_runtime_side_effects() -> No
     asyncio.run(scenario())
 
 
-def test_first_refresh_does_not_wait_for_optional_metadata() -> None:
+@pytest.mark.parametrize("active_during_setup", [False, True])
+def test_first_refresh_does_not_wait_for_optional_metadata(
+    active_during_setup: bool,
+) -> None:
     async def scenario() -> None:
         coordinator = object.__new__(DreameLawnMowerCoordinator)
         snapshot = SimpleNamespace(
             available=True,
-            mowing_session_active=False,
-            activity="idle",
+            mowing_session_active=active_during_setup,
+            activity="mowing" if active_during_setup else "idle",
         )
         metadata_started = asyncio.Event()
         release_metadata = asyncio.Event()
@@ -431,6 +434,10 @@ def test_first_refresh_does_not_wait_for_optional_metadata() -> None:
         coordinator._foreground_refresh_count = 0
         coordinator._metadata_refresh_task = None
         coordinator._runtime_map_identity_verified = False
+        coordinator._defer_active_runtime_during_setup = True
+        coordinator._async_refresh_active_runtime = AsyncMock(
+            side_effect=AssertionError("active map hydration must not block setup")
+        )
         coordinator._shutting_down = False
         background_tasks: list[asyncio.Task[None]] = []
 
@@ -459,6 +466,11 @@ def test_first_refresh_does_not_wait_for_optional_metadata() -> None:
         result = await coordinator._async_update_data()
 
         assert result is snapshot
+        coordinator._async_refresh_active_runtime.assert_not_awaited()
+        assert coordinator._runtime_map_identity_verified is False
+        coordinator.client.update_runtime_live_tracking.assert_called_once_with(
+            None, active=False
+        )
         await asyncio.wait_for(metadata_started.wait(), timeout=1)
         assert coordinator._metadata_refresh_task is not None
         assert not coordinator._metadata_refresh_task.done()
@@ -3239,10 +3251,14 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
         )
         entry = SimpleNamespace(
             entry_id="entry-1",
+            data={},
             options={},
         )
 
         with (
+            patch.object(
+                integration_module, "async_remove_restart_preview", AsyncMock()
+            ),
             patch.object(
                 integration_module,
                 "DreameLawnMowerCoordinator",
@@ -3259,6 +3275,7 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
                 return_value=cache,
             ),
             patch.object(integration_module, "async_setup_point_cloud_api"),
+            patch.object(integration_module, "async_setup_mowing_map_api"),
             patch.object(
                 integration_module,
                 "async_setup_services",
@@ -3309,6 +3326,7 @@ def test_successful_setup_shuts_down_coordinator_on_home_assistant_stop() -> Non
 
         entry = SimpleNamespace(
             entry_id="entry-1",
+            data={},
             options={},
             async_on_unload=unload_callbacks.append,
             add_update_listener=Mock(return_value=Mock()),
@@ -3322,6 +3340,9 @@ def test_successful_setup_shuts_down_coordinator_on_home_assistant_stop() -> Non
         )
 
         with (
+            patch.object(
+                integration_module, "async_remove_restart_preview", AsyncMock()
+            ),
             patch.object(
                 integration_module,
                 "DreameLawnMowerCoordinator",
@@ -3338,6 +3359,7 @@ def test_successful_setup_shuts_down_coordinator_on_home_assistant_stop() -> Non
                 return_value=cache,
             ),
             patch.object(integration_module, "async_setup_point_cloud_api"),
+            patch.object(integration_module, "async_setup_mowing_map_api"),
             patch.object(
                 integration_module,
                 "async_setup_services",
@@ -3386,9 +3408,12 @@ def test_initial_connection_failure_keeps_complete_platform_setup_pending() -> N
             data={},
             config_entries=SimpleNamespace(async_forward_entry_setups=forward),
         )
-        entry = SimpleNamespace(entry_id="entry-1", options={})
+        entry = SimpleNamespace(entry_id="entry-1", data={}, options={})
 
         with (
+            patch.object(
+                integration_module, "async_remove_restart_preview", AsyncMock()
+            ),
             patch.object(
                 integration_module,
                 "DreameLawnMowerCoordinator",

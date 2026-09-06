@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -25,9 +24,9 @@ from .app_protocol import (
     mower_state_key,
     mower_state_label,
 )
+from .client_app_maps import _DreameLawnMowerClientAppMapsMixin
 from .client_map_helpers import (
     _app_map_entries_are_valid,
-    _app_map_payload_summary,
     _app_map_view_details,
     _app_map_view_summary,
     _app_maps_view_metadata,
@@ -46,10 +45,10 @@ from .client_map_helpers import (
     _render_app_map_payload_png,
     _runtime_blob_position,
     _select_app_map_payload,
-    _validate_app_map_chunk_size,
     _validate_point_cloud_map_index,
     _validate_positive_number,
 )
+from .client_mowing_map import _DreameLawnMowerClientMowingMapMixin
 from .client_shared_helpers import (
     _app_action_data,
     _property_entry_received_at,
@@ -166,7 +165,9 @@ def _app_map_inventory_identity(
     )
 
 
-class _DreameLawnMowerClientMapsMixin:
+class _DreameLawnMowerClientMapsMixin(
+    _DreameLawnMowerClientAppMapsMixin, _DreameLawnMowerClientMowingMapMixin
+):
     def _sync_get_current_app_map_index_readback(self) -> int | None:
         """Read only MAPL and return its unambiguous current map index."""
         try:
@@ -289,6 +290,11 @@ class _DreameLawnMowerClientMapsMixin:
         if vector_view.available and vector_view.image_png is not None:
             return vector_view
 
+        if _map_view_current_app_map_index(app_view) is not None:
+            # Legacy snapshots cannot establish app-slot identity. Preserve the
+            # current-map error instead of showing an unverifiable older lawn.
+            return app_view
+
         legacy_view = self._sync_refresh_legacy_map_view(
             timeout,
             interval,
@@ -353,6 +359,7 @@ class _DreameLawnMowerClientMapsMixin:
             self._runtime_live_map_index = vector_map.map_index
         summary = vector_map_to_summary(vector_map)
         details = vector_map_to_details(vector_map)
+        details["render_rotation"] = style.rotation if style else 0
         runtime_context_matches = self._runtime_live_map_index in (
             None,
             vector_map.map_index,
@@ -561,7 +568,10 @@ class _DreameLawnMowerClientMapsMixin:
                 source=source,
                 summary=_app_map_view_summary(selected, payload, width, height),
                 image_png=image_png,
-                details=_app_map_view_details(selected, payload),
+                details={
+                    **_app_map_view_details(selected, payload),
+                    "render_rotation": style.rotation if style else 0,
+                },
                 app_maps=_app_maps_view_metadata(app_maps),
                 diagnostics=self._safe_map_diagnostics(
                     source=source,
@@ -585,116 +595,6 @@ class _DreameLawnMowerClientMapsMixin:
         # fixed key range silently truncates long mowing paths.
         return self._sync_get_batch_device_data()
 
-    def _sync_get_app_maps(
-        self,
-        chunk_size: int = 400,
-        include_payload: bool = False,
-        include_objects: bool = True,
-        include_object_urls: bool = False,
-    ) -> dict[str, Any]:
-        chunk_size = _validate_app_map_chunk_size(chunk_size)
-        map_list_result = self._sync_call_app_action({"m": "g", "t": "MAPL"})
-        map_entries = _normalize_app_map_entries(map_list_result)
-        map_list_valid = _app_map_entries_are_valid(
-            map_list_result,
-            map_entries,
-        )
-        result: dict[str, Any] = {
-            "source": "app_action_map",
-            "available": False,
-            "map_list_valid": map_list_valid,
-            "map_count": len(map_entries),
-            "created_map_count": sum(
-                1 for entry in map_entries if entry.get("created") is not False
-            ),
-            "current_map_index": None,
-            "raw_map_list": _json_safe(map_list_result, max_depth=5),
-            "maps": [],
-            "errors": [],
-        }
-        for entry in map_entries:
-            if (
-                map_list_valid
-                and entry.get("created") is not False
-                and entry.get("current")
-            ):
-                result["current_map_index"] = entry["idx"]
-            if not entry.get("created"):
-                result["maps"].append(entry)
-                continue
-
-            map_result = dict(entry)
-            try:
-                info_result = self._sync_call_app_action(
-                    {"m": "g", "t": "MAPI", "d": {"idx": entry["idx"]}}
-                )
-                info = _app_action_data(info_result)
-                map_result["info"] = _json_safe(info, max_depth=4)
-                size = info.get("size") if isinstance(info, Mapping) else None
-                expected_hash = info.get("hash") if isinstance(info, Mapping) else None
-                if isinstance(size, int) and size > 0:
-                    payload_text, chunk_count, received_size = (
-                        self._sync_get_app_map_text(
-                            size=size,
-                            chunk_size=chunk_size,
-                        )
-                    )
-                    payload_hash = hashlib.md5(payload_text.encode("utf-8")).hexdigest()
-                    parsed_payload = json.loads(payload_text)
-                    hash_match = (
-                        expected_hash == payload_hash
-                        if isinstance(expected_hash, str)
-                        else None
-                    )
-                    if hash_match is False:
-                        raise DreameLawnMowerConnectionError(
-                            "App map payload hash mismatch."
-                        )
-                    map_result.update(
-                        {
-                            "available": True,
-                            "reported_size": size,
-                            "received_size": received_size,
-                            "decoded_size": len(payload_text.encode("utf-8")),
-                            "chunk_count": chunk_count,
-                            "md5": payload_hash,
-                            "hash_match": hash_match,
-                            "payload_keys": (
-                                sorted(str(key) for key in parsed_payload)
-                                if isinstance(parsed_payload, Mapping)
-                                else []
-                            ),
-                            "summary": _app_map_payload_summary(parsed_payload),
-                        }
-                    )
-                    if include_payload:
-                        map_result["payload"] = _json_safe(
-                            parsed_payload,
-                            max_depth=12,
-                        )
-                else:
-                    map_result["available"] = False
-                    map_result["error"] = "map_info_missing_size"
-            except Exception as err:  # noqa: BLE001 - probes keep per-map evidence
-                map_result["available"] = False
-                map_result["error"] = str(err)
-                result["errors"].append({"idx": entry.get("idx"), "error": str(err)})
-
-            result["maps"].append(map_result)
-
-        result["available"] = any(
-            isinstance(item, Mapping) and bool(item.get("available"))
-            for item in result["maps"]
-        )
-        self._sync_update_app_map_inventory_identity(result["maps"])
-        if include_objects:
-            try:
-                result["objects"] = self._sync_get_app_map_objects(
-                    include_urls=include_object_urls,
-                )
-            except Exception as err:  # noqa: BLE001 - object metadata is diagnostic
-                result["objects"] = {"error": str(err)}
-        return result
 
     def _sync_update_app_map_inventory_identity(
         self,
@@ -1763,49 +1663,6 @@ class _DreameLawnMowerClientMapsMixin:
             raise DreameLawnMowerPointCloudError("Point-cloud generation timed out.")
         return raw_url
 
-    def _sync_get_app_map_text(
-        self,
-        *,
-        size: int,
-        chunk_size: int,
-    ) -> tuple[str, int, int]:
-        chunks = bytearray()
-        offset = 0
-        chunk_count = 0
-        while offset < size:
-            requested_size = min(size - offset, chunk_size)
-            chunk_result = self._sync_call_app_action(
-                {
-                    "m": "g",
-                    "t": "MAPD",
-                    "d": {"start": offset, "size": requested_size},
-                }
-            )
-            data = _app_action_data(chunk_result)
-            if not isinstance(data, Mapping):
-                raise DreameLawnMowerConnectionError(
-                    f"MAPD returned invalid chunk at offset {offset}."
-                )
-            text = data.get("data")
-            returned_size = data.get("size")
-            if not isinstance(text, str) or text == "":
-                raise DreameLawnMowerConnectionError(
-                    f"MAPD returned empty data at offset {offset}."
-                )
-            chunk_bytes = text.encode("utf-8")
-            actual_size = len(chunk_bytes)
-            if actual_size > requested_size:
-                raise DreameLawnMowerConnectionError(
-                    f"MAPD returned too much data at offset {offset}."
-                )
-            chunks.extend(chunk_bytes)
-            offset += (
-                returned_size
-                if isinstance(returned_size, int) and returned_size > 0
-                else actual_size
-            )
-            chunk_count += 1
-        return chunks.decode("utf-8"), chunk_count, offset
 
     def _sync_call_app_action(
         self,
