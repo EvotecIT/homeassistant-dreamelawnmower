@@ -43,13 +43,13 @@ jobs:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
         run: >-
           pytest tests
-          --ignore=tests/components/dreame_lawn_mower/test_config_flow.py
+          --ignore=tests/components
           --ignore=tests/test_translations.py
 
-      - name: Home Assistant config flow and translation loading
+      - name: Home Assistant component and translation tests
         run: >-
           pytest
-          tests/components/dreame_lawn_mower/test_config_flow.py
+          tests/components
           tests/test_translations.py
 
   xp2p-runtime-arm64:
