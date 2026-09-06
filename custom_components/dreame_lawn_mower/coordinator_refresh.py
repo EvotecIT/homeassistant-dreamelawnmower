@@ -68,8 +68,18 @@ def runtime_tracking_active(snapshot: DreameLawnMowerSnapshot) -> bool:
 class DreameLawnMowerRefreshMixin:
     """Keep blocking state refreshes separate from optional metadata hydration."""
 
-    def _snapshot_is_stale(self, snapshot: DreameLawnMowerSnapshot) -> bool:
+    def _snapshot_is_stale(
+        self,
+        snapshot: DreameLawnMowerSnapshot,
+        *,
+        observed_generation: int | None = None,
+    ) -> bool:
         """Return whether a newer device snapshot already owns coordinator state."""
+        if observed_generation is not None and max(
+            getattr(self, "_device_snapshot_generation", 0),
+            getattr(self, "_published_device_snapshot_generation", 0),
+        ) > observed_generation:
+            return True
         stale_check = getattr(self, "_device_snapshot_is_stale", None)
         return bool(callable(stale_check) and stale_check(snapshot))
 
@@ -274,6 +284,9 @@ class DreameLawnMowerRefreshMixin:
         runtime_map_index: int | None = None,
     ) -> bool:
         """Refresh optional runtime telemetry without failing the main snapshot."""
+        # Keep the fetch-order token independently of bounded snapshot history:
+        # the snapshot can be borrowed from a realtime task that releases it.
+        observed_device_generation = getattr(self, "_device_snapshot_generation", None)
         runtime_active = runtime_tracking_active(snapshot)
         session_started_at = runtime_mission_session_started_at(
             self.runtime_telemetry_cache
@@ -297,7 +310,9 @@ class DreameLawnMowerRefreshMixin:
                 refresh=False,
                 include_cloud=True,
             )
-            if self._snapshot_is_stale(snapshot) or (
+            if self._snapshot_is_stale(
+                snapshot, observed_generation=observed_device_generation
+            ) or (
                 observed_mission_generation is not None
                 and runtime_mission_session_generation(
                     self.runtime_telemetry_cache
@@ -340,7 +355,9 @@ class DreameLawnMowerRefreshMixin:
             )
             return True
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
-            if self._snapshot_is_stale(snapshot) or (
+            if self._snapshot_is_stale(
+                snapshot, observed_generation=observed_device_generation
+            ) or (
                 observed_mission_generation is not None
                 and runtime_mission_session_generation(
                     self.runtime_telemetry_cache
