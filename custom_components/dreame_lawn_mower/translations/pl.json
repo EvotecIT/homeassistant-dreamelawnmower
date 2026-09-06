@@ -55,7 +55,7 @@
         "title": "Opcje kosiarki Dreame",
         "data": {
           "scan_interval": "Interwał odpytywania (sekundy)",
-          "map_label_scale": "Skala etykiet mapy",
+          "map_restart_preview": "Zachowuj podgląd mapy po restarcie", "map_label_scale": "Skala etykiet mapy",
           "map_rotation": "Obrót mapy",
           "map_theme": "Motyw mapy",
           "map_stroke_scale": "Grubość linii mapy",
@@ -71,6 +71,7 @@
           "xp2p_runner_mode": "Tryb procesu pomocniczego XP2P hosta"
         },
         "data_description": {
+          "map_restart_preview": "Domyślnie wyłączone. Przechowuje w Home Assistant jeden prywatny obraz JPEG mapy (do 2 MB). Podczas ładowania zgodnej mapy używane są tylko podglądy sprzed mniej niż 24 godzin; nie przedstawiają bieżącego stanu kosiarki. Wyłączenie opcji lub usunięcie integracji usuwa zapisany podgląd.",
           "map_rotation": "Domyślny obrót map, które nie mają własnego ustawienia. Dla konkretnej mapy użyj encji Obrót wyświetlania wybranej mapy.",
           "map_theme": "Wybierz spójny jasny, ciemny, nocny lub kontrastowy zestaw kolorów dla wszystkich map renderowanych lokalnie.",
           "map_stroke_scale": "Skaluj granice i ścieżki mapy w zakresie od 0,5 do 3.",

@@ -55,7 +55,7 @@
         "title": "Options du robot tondeuse Dreame",
         "data": {
           "scan_interval": "Intervalle d’interrogation en secondes",
-          "map_label_scale": "Échelle des libellés de la carte",
+          "map_restart_preview": "Conserver un aperçu de carte après redémarrage", "map_label_scale": "Échelle des libellés de la carte",
           "map_rotation": "Rotation de la carte",
           "map_theme": "Thème de la carte",
           "map_stroke_scale": "Épaisseur des lignes de la carte",
@@ -71,6 +71,7 @@
           "xp2p_runner_mode": "Mode du processus auxiliaire XP2P de l’hôte"
         },
         "data_description": {
+          "map_restart_preview": "Désactivé par défaut. Enregistre une image JPEG privée de la carte (jusqu’à 2 Mo) dans Home Assistant. Seuls les aperçus de moins de 24 heures sont utilisés pendant le chargement de la carte correspondante ; ils ne représentent pas l’état en direct. Désactiver cette option ou supprimer l’intégration efface l’aperçu enregistré.",
           "map_rotation": "Rotation utilisée pour les cartes sans réglage individuel. Pour chaque carte, utilisez l’entité Rotation d’affichage de la carte sélectionnée.",
           "map_theme": "Choisissez une palette claire, sombre, nocturne ou à contraste élevé cohérente pour toutes les cartes rendues localement.",
           "map_stroke_scale": "Ajustez l’épaisseur des limites et des trajectoires de la carte entre 0,5 et 3.",

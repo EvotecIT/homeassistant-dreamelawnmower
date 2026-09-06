@@ -294,6 +294,7 @@ def test_map_cameras_return_loading_image_while_refresh_starts(camera_type) -> N
     cache = DreameLawnMowerMapCameraCache(ttl=timedelta(seconds=60))
     entity = object.__new__(camera_type)
     entity._map_cache = cache
+    entity._restart_preview = None
     refresh_calls = 0
 
     async def async_add_executor_job(target: object) -> bytes:
@@ -430,7 +431,11 @@ def test_all_maps_camera_caches_failure_placeholder_until_ttl(monkeypatch) -> No
         refresh_calls += 1
 
     entity.coordinator = SimpleNamespace(
-        client=SimpleNamespace(async_get_app_maps=async_get_app_maps)
+        client=SimpleNamespace(async_get_app_maps=async_get_app_maps),
+        runtime_status_blob=None,
+        entry=SimpleNamespace(options={}),
+        app_maps=None,
+        selected_map_index=None,
     )
     entity.hass = SimpleNamespace(async_add_executor_job=async_add_executor_job)
     entity.async_write_ha_state = lambda: None  # type: ignore[method-assign]

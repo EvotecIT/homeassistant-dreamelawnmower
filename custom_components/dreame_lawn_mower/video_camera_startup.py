@@ -41,6 +41,7 @@ from .video_camera_types import (
     _facade_binding,
     _FacadeModuleProxy,
 )
+from .video_startup_timing import VideoStartupTiming
 
 _LOGGER = logging.getLogger(__name__)
 video_helpers = _FacadeModuleProxy("video_helpers", _video_helpers)
@@ -103,6 +104,31 @@ class DreameLawnMowerVideoStartupMixin:
     """Start and adopt LAN, cached XP2P, or cloud video sessions."""
 
     async def _async_start_stream(
+        self, *, skip_cached_xp2p: bool = False,
+    ) -> str | None:
+        """Measure the serialized attempt without changing transport decisions."""
+        self._video_startup_timing = VideoStartupTiming()
+        outcome = "failed"
+        try:
+            source = await self._async_start_stream_impl(
+                skip_cached_xp2p=skip_cached_xp2p
+            )
+            outcome = "source_ready" if source else "blocked_or_failed"
+            return source
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            raise
+        finally:
+            self._video_startup_timing.finish(outcome)
+            self.async_write_ha_state()
+
+    def _video_startup_phase(self, phase: str) -> None:
+        timing = getattr(self, "_video_startup_timing", None)
+        if timing is not None:
+            timing.enter(phase)
+            self.async_write_ha_state()
+
+    async def _async_start_stream_impl(
         self,
         *,
         skip_cached_xp2p: bool = False,
@@ -149,6 +175,7 @@ class DreameLawnMowerVideoStartupMixin:
         if self._session is not None:
             await self._async_stop_active_session()
         try:
+            self._video_startup_phase("runtime_preparation")
             runtime = await self._async_get_runtime()
             self._runtime_preparation_error = None
         except Exception as err:  # noqa: BLE001 - HA should receive a clean miss.
@@ -161,6 +188,7 @@ class DreameLawnMowerVideoStartupMixin:
             and cached_xp2p_inputs.ready
         ):
             self._last_video_transport_attempted = "cached_xp2p"
+            self._video_startup_phase("cached_transport")
             try:
                 cached_source = await self._async_try_cached_xp2p_stream(
                     runtime,
@@ -204,6 +232,7 @@ class DreameLawnMowerVideoStartupMixin:
 
             if lan_inputs is not None:
                 self._last_video_transport_attempted = VIDEO_TRANSPORT_LAN
+                self._video_startup_phase("lan_transport")
                 try:
                     lan_source = await self._async_try_lan_stream(runtime, lan_inputs)
                 except DreameLawnMowerVideoRuntimeError as err:
@@ -303,6 +332,7 @@ class DreameLawnMowerVideoStartupMixin:
             if self._video_start_is_blocked():
                 await self._async_disable_camera_stream()
                 return None
+            self._video_startup_phase("cloud_transport")
             session = await self._async_start_runtime_session(runtime, cloud_inputs)
         except asyncio.CancelledError:
             if runtime is not None and session is not None:
@@ -483,6 +513,7 @@ class DreameLawnMowerVideoStartupMixin:
         self,
     ) -> DreameLawnMowerCameraStreamRuntimeInputs:
         """Fetch cloud inputs and stage configuration for health-checked use."""
+        self._video_startup_phase("provisioning")
         try:
             inputs = (
                 await self.coordinator.client.async_get_camera_stream_runtime_inputs()

@@ -28,6 +28,8 @@ def _camera():
     entity._map_cache = DreameLawnMowerMapCameraCache(ttl=timedelta(seconds=60))
     entity._map_refresh_pending = False
     entity._map_refresh_task = None
+    entity._restart_preview = None
+    entity._preview_saved_at = None
     entity.async_write_ha_state = Mock()
     entity.hass = SimpleNamespace(
         async_add_executor_job=AsyncMock(return_value=b"jpeg")
@@ -88,3 +90,55 @@ def test_idle_map_change_with_camera_demand_starts_background_refresh(monkeypatc
     entity._handle_coordinator_update()
     entity._start_map_refresh.assert_called_once()
     assert entity._map_cache.last_image is None
+
+
+@pytest.mark.parametrize("during_conversion", [False, True])
+def test_presentation_change_during_render_rejects_obsolete_pixels(during_conversion):
+    entity = _camera()
+    entity._map_refresh_context = (0, None, "light")
+
+    async def refresh():
+        if not during_conversion:
+            entity._map_refresh_context = (0, None, "dark")
+        return DreameLawnMowerMapView(
+            source="app_action_map", image_png=b"png",
+            summary=DreameLawnMowerMapSummary(available=True, map_id=0),
+        )
+
+    async def convert(_):
+        entity._map_refresh_context = (0, None, "dark")
+        return b"obsolete-jpeg"
+
+    entity._async_refresh_map_view = refresh
+    entity.hass.async_add_executor_job = convert
+    assert asyncio.run(entity._async_refresh_and_render_map_image()) is None
+    assert entity._map_cache.last_image is None
+    assert entity._map_refresh_pending is True
+
+
+@pytest.mark.parametrize("fresh_wins", [False, True])
+def test_restart_preview_restores_only_before_current_image(fresh_wins):
+    entity = _camera()
+    entity._descriptor = SimpleNamespace(unique_id="one-mower")
+    entity._preview_attempted_scope = None
+    entity._start_map_refresh = Mock()
+
+    async def restore(_):
+        if fresh_wins:
+            entity._map_cache.store_image(b"fresh")
+        return b"saved", 123.0
+
+    entity._restart_preview = SimpleNamespace(async_load=restore)
+    image = asyncio.run(entity._async_get_map_image())
+    assert image == (b"fresh" if fresh_wins else b"saved")
+    assert entity._preview_saved_at == (None if fresh_wins else 123.0)
+    assert entity._map_cache.last_refresh_at is None
+    entity._start_map_refresh.assert_called_once()
+
+
+def test_restart_preview_cannot_override_mower_unavailability():
+    entity = _camera()
+    entity.available = False
+    entity._restart_preview = SimpleNamespace(async_load=AsyncMock())
+    assert asyncio.run(entity.async_camera_image()) is None
+    entity._restart_preview.async_load.assert_not_called()

@@ -388,6 +388,7 @@ def test_options_flow_accepts_map_label_scale() -> None:
     assert result["data"] == {
         CONF_SCAN_INTERVAL: 45,
         CONF_MAP_LABEL_SCALE: 2.5,
+        "map_restart_preview": False,
         CONF_MAP_ROTATION: 90,
         CONF_MAP_THEME: DEFAULT_MAP_THEME,
         CONF_MAP_STROKE_SCALE: DEFAULT_MAP_STROKE_SCALE,

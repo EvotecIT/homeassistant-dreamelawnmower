@@ -55,7 +55,7 @@
         "title": "Opzioni del robot tagliaerba Dreame",
         "data": {
           "scan_interval": "Intervallo di aggiornamento in secondi",
-          "map_label_scale": "Scala delle etichette della mappa",
+          "map_restart_preview": "Conserva un'anteprima della mappa dopo il riavvio", "map_label_scale": "Scala delle etichette della mappa",
           "map_rotation": "Rotazione della mappa",
           "map_theme": "Tema della mappa",
           "map_stroke_scale": "Spessore delle linee della mappa",
@@ -71,6 +71,7 @@
           "xp2p_runner_mode": "Modalità del processo ausiliario XP2P dell’host"
         },
         "data_description": {
+          "map_restart_preview": "Disattivato per impostazione predefinita. Salva in Home Assistant un JPEG privato della mappa (fino a 2 MB). Vengono usate solo anteprime di meno di 24 ore durante il caricamento della mappa corrispondente; non rappresentano lo stato in tempo reale. Disattivare questa opzione o eliminare l’integrazione rimuove l’anteprima salvata.",
           "map_rotation": "Rotazione predefinita per le mappe senza un’impostazione specifica. Per le singole mappe usa l’entità Rotazione della mappa selezionata.",
           "map_theme": "Scegli una combinazione di colori chiara, scura, notturna o ad alto contrasto per tutte le mappe generate localmente.",
           "map_stroke_scale": "Regola lo spessore dei confini e dei percorsi della mappa da 0,5 a 3.",

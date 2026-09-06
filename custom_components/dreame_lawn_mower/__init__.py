@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
@@ -12,13 +13,17 @@ from homeassistant.helpers import entity_registry as er
 
 from .const import (
     CONF_DID,
+    CONF_SCAN_INTERVAL,
     CONFIG_ENTRY_MINOR_VERSION,
     CONFIG_ENTRY_VERSION,
+    DEFAULT_SCAN_INTERVAL_SECONDS,
     DOMAIN,
     PLATFORMS,
 )
 from .coordinator import DreameLawnMowerCoordinator
+from .map_preview import CONF_MAP_RESTART_PREVIEW, RestartMapPreview, preview_store
 from .notifications import DreameLawnMowerNotificationManager
+from .option_updates import EntryUpdateSnapshot
 from .performance import format_performance_sample
 from .point_cloud_api import (
     POINT_CLOUD_API_DATA_KEY,
@@ -71,6 +76,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Dreame lawn mower from a config entry."""
     coordinator = DreameLawnMowerCoordinator(hass, entry)
+    coordinator.applied_entry_update = EntryUpdateSnapshot.capture(entry)
 
     async def _async_shutdown_on_stop(_: Event) -> None:
         """Release integration resources before Home Assistant waits for tasks."""
@@ -115,10 +121,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator.video_provisioning_cache = provisioning_cache
 
         platforms = tuple(PLATFORMS)
-        await setup_cycle.measure(
-            "first_refresh",
-            coordinator.async_config_entry_first_refresh,
-        )
+        coordinator._defer_active_runtime_during_setup = True
+        try:
+            await setup_cycle.measure(
+                "first_refresh",
+                coordinator.async_config_entry_first_refresh,
+            )
+        finally:
+            coordinator._defer_active_runtime_during_setup = False
 
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
         async_setup_point_cloud_api(hass)
@@ -206,5 +216,34 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the integration when options change."""
-    await hass.config_entries.async_reload(entry.entry_id)
+    """Apply presentation/polling changes without dropping live connections."""
+    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    applied = getattr(coordinator, "applied_entry_update", None)
+    if not isinstance(applied, EntryUpdateSnapshot) or applied.requires_reload(entry):
+        if (
+            isinstance(applied, EntryUpdateSnapshot)
+            and applied.options.get(CONF_MAP_RESTART_PREVIEW)
+            and not entry.options.get(CONF_MAP_RESTART_PREVIEW)
+        ):
+            preview = getattr(coordinator, "map_restart_preview", None)
+            if isinstance(preview, RestartMapPreview):
+                await preview.async_remove()
+            else:
+                await preview_store(hass, entry.entry_id).async_remove()
+        await hass.config_entries.async_reload(entry.entry_id)
+        return
+    changed = applied.changed_options(entry.options)
+    if CONF_SCAN_INTERVAL in changed:
+        coordinator.update_interval = timedelta(seconds=entry.options.get(
+            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_SECONDS
+        ))
+    coordinator.applied_entry_update = EntryUpdateSnapshot.capture(entry)
+    if changed:
+        # Cameras read the entry's current options and invalidate their own
+        # presentation context; this does not fetch optional cloud metadata.
+        coordinator.async_update_listeners()
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove the optional private lawn preview when its entry is deleted."""
+    await preview_store(hass, entry.entry_id).async_remove()

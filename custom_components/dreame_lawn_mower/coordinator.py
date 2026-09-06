@@ -251,6 +251,7 @@ class DreameLawnMowerCoordinator(
         self._metadata_refresh_pending = False
         self._metadata_refresh_publish = True
         self._runtime_map_identity_verified = False
+        self._defer_active_runtime_during_setup = False
         self._foreground_refresh_count = 0
         self._metadata_refresh_count = 0
         self._shutting_down = False

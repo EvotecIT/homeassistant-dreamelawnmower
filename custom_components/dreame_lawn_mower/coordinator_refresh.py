@@ -164,10 +164,17 @@ class DreameLawnMowerRefreshMixin:
             self._record_connectivity_success(snapshot)
 
             runtime_active = runtime_tracking_active(snapshot)
-            if runtime_active:
+            defer_active_runtime = bool(
+                getattr(self, "_defer_active_runtime_during_setup", False)
+            )
+            if runtime_active and not defer_active_runtime:
                 if not await self._async_refresh_active_runtime(cycle, snapshot):
                     return self._snapshot_for_publication(snapshot)
             else:
+                # Setup publishes essential device state immediately. Optional
+                # map discovery runs in the existing background owner; the next
+                # regular poll still verifies map identity before live tracking.
+                # Never label this unhydrated snapshot as verified map telemetry.
                 self._runtime_map_identity_verified = False
                 self.client.update_runtime_live_tracking(None, active=False)
 
@@ -176,7 +183,7 @@ class DreameLawnMowerRefreshMixin:
             # confirm that this foreground snapshot is still current.
             self._observe_runtime_mission_boundary(snapshot)
             self._schedule_metadata_refresh(
-                refresh_map_and_runtime=not runtime_active,
+                refresh_map_and_runtime=not runtime_active or defer_active_runtime,
             )
             return self._snapshot_for_publication(snapshot)
         except asyncio.CancelledError:

@@ -55,7 +55,7 @@
         "title": "Opciones del cortacésped Dreame",
         "data": {
           "scan_interval": "Intervalo de sondeo en segundos",
-          "map_label_scale": "Escala de las etiquetas del mapa",
+          "map_restart_preview": "Conservar una vista previa del mapa tras reiniciar", "map_label_scale": "Escala de las etiquetas del mapa",
           "map_rotation": "Rotación del mapa",
           "map_theme": "Tema del mapa",
           "map_stroke_scale": "Grosor de las líneas del mapa",
@@ -71,6 +71,7 @@
           "xp2p_runner_mode": "Modo del ejecutor XP2P del host"
         },
         "data_description": {
+          "map_restart_preview": "Desactivado por defecto. Guarda una imagen JPEG privada del mapa (hasta 2 MB) en Home Assistant. Solo se usan vistas previas de menos de 24 horas mientras carga el mapa correspondiente; no son el estado en directo. Desactivar esta opción o eliminar la integración borra la vista previa guardada.",
           "map_rotation": "Rotación predeterminada para mapas sin una selección específica. Usa la entidad Rotación de visualización del mapa seleccionado para cada mapa.",
           "map_theme": "Elige una paleta coordinada clara, oscura, nocturna o de alto contraste para todos los mapas renderizados localmente.",
           "map_stroke_scale": "Ajusta los límites y los recorridos del mapa entre 0,5 y 3.",

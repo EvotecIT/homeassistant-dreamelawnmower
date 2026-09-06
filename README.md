@@ -518,9 +518,17 @@ image while the download runs, keeping camera requests responsive. The camera re
 last good JPEG for the same map immediately while a refresh runs. Switching maps
 discards the previous lawn's image. Failed current-map downloads are retried once;
 they do not silently substitute another saved map. Identical source images reuse
-the existing JPEG conversion. This cache is intentionally in memory: a Home
-Assistant restart rebuilds it from the mower rather than persisting garden
-geometry to a second on-disk store.
+the existing JPEG conversion, and requested image sizes use a bounded cache of
+resized JPEGs.
+
+Map images stay in memory by default. To keep a preview through a Home Assistant
+restart, enable **Keep a map preview across restarts** in the integration options.
+This stores one private JPEG, up to 2 MB, for at most 24 hours of reuse. It is
+accepted only for the same mower, map, and presentation settings. The camera marks
+it with `restart_preview: true` and a saved timestamp; it does not restore live
+position or mission telemetry. The companion Lawn Mower Card labels it **Saved
+preview** until a fresh map replaces it. Disabling the option removes the stored
+preview.
 
 Transient paths and positions are scoped to the selected map and mowing task.
 Changing either clears the prior session trail. A mower position outside the
@@ -533,7 +541,10 @@ an Emerald, Mint, Dark, Midnight, or High contrast theme and adjust label, line,
 marker scale. **Saved spot area display** can hide spot rectangles, show only
 their outlines, or restore the filled diagnostic overlay. **Completed mowing
 path display** can hide previous passes, render them subtly, or show every pass
-in full detail. These settings affect both app-map and vector-map rendering.
+in full detail. These settings affect both app-map and vector-map rendering and
+apply without reconnecting the integration. Scan-interval changes also apply
+without a reload. Connection, video, and restart-preview options still reload
+the integration when their values change.
 Mint uses decorative stripes clipped to each lawn; the stripes do not indicate
 mowing progress or direction. Connector paths remain open and are never filled
 as extra lawns. Use **Selected Map Display Rotation** to store a different

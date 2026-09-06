@@ -75,6 +75,7 @@ from .const import (
     XP2P_RUNNER_MODE_OPTIONS,
     XP2P_RUNNER_MODE_PROCESS,
 )
+from .map_preview import CONF_MAP_RESTART_PREVIEW
 
 CONF_DEVICE = "device"
 
@@ -393,6 +394,12 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                             max=MAX_MAP_LABEL_SCALE,
                         ),
                     ),
+                    vol.Optional(
+                        CONF_MAP_RESTART_PREVIEW,
+                        default=self._entry_options.get(
+                            CONF_MAP_RESTART_PREVIEW, False
+                        ),
+                    ): bool,
                     vol.Optional(
                         CONF_MAP_ROTATION,
                         default=str(
