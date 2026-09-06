@@ -78,6 +78,7 @@ class DreameLawnMowerMapCameraCache:
     last_refresh_at: datetime | None = None
     last_error: str | None = None
     _refresh_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    _generation: int = 0
 
     def is_fresh(self, now: datetime | None = None) -> bool:
         """Return whether the cached map data is still fresh."""
@@ -99,8 +100,10 @@ class DreameLawnMowerMapCameraCache:
             if self.last_view is not None and self.is_fresh(now):
                 return self.last_view
 
+            generation = self._generation
             view = await refresh_view()
-            self.store_view(view, now=now)
+            if generation == self._generation:
+                self.store_view(view, now=now)
             return view
 
     def store_view(
@@ -167,6 +170,14 @@ class DreameLawnMowerMapCameraCache:
         self.last_image_render_context = render_context
         self.last_image_is_placeholder = placeholder
 
-    def invalidate_view(self) -> None:
-        """Expire source metadata while preserving the last good image."""
+    def invalidate_view(self, *, drop_image: bool = False) -> None:
+        """Expire a view, discarding geometry when its map identity changed."""
+        self._generation += 1
         self.last_refresh_at = None
+        if drop_image:
+            self.last_view = None
+            self.last_image = None
+            self.last_image_source_sha256 = None
+            self.last_image_render_context = None
+            self.last_image_is_placeholder = False
+            self.last_error = None

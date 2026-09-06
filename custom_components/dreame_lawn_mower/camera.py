@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
@@ -94,9 +95,7 @@ async def async_setup_entry(
         DreameLawnMowerAllMapsCamera(coordinator, all_maps_cache),
         DreameLawnMowerMapDataCamera(coordinator, map_cache),
     ]
-    observed_features, advertised_features = (
-        coordinator.feature_capability_evidence()
-    )
+    observed_features, advertised_features = coordinator.feature_capability_evidence()
     video_capability = resolve_feature_capability(
         FEATURE_LIVE_VIDEO,
         snapshot=coordinator.data,
@@ -163,6 +162,11 @@ class DreameLawnMowerMapCamera(
     def _handle_coordinator_update(self) -> None:
         """Refresh enabled map cameras when transient map context changes."""
         context = self._map_refresh_context
+        if (
+            self._last_refresh_context is not None
+            and context[0] != self._last_refresh_context[0]
+        ):
+            self._invalidate_map_context(context)
         active = bool(
             self.coordinator.data and runtime_tracking_active(self.coordinator.data)
         )
@@ -176,8 +180,7 @@ class DreameLawnMowerMapCamera(
                 window_seconds=_MAP_ACTIVE_REFRESH_WINDOW_SECONDS,
             ),
         ):
-            self._last_refresh_context = context
-            self._map_cache.invalidate_view()
+            self._invalidate_map_context(context)
             if self.available:
                 if (
                     self._map_refresh_task is not None
@@ -246,9 +249,19 @@ class DreameLawnMowerMapCamera(
         self._last_image_request_at = monotonic()
         context = self._map_refresh_context
         if context != self._last_refresh_context:
-            self._last_refresh_context = context
-            self._map_cache.invalidate_view()
+            self._invalidate_map_context(context)
         return await self._async_camera_image_impl()
+
+    def _invalidate_map_context(self, context: tuple[Any, ...]) -> None:
+        """Never retain another lawn's image while a new map is loading."""
+        changed_map = (
+            self._last_refresh_context is not None
+            and context[0] != self._last_refresh_context[0]
+        )
+        self._last_refresh_context = context
+        self._map_cache.invalidate_view(drop_image=changed_map)
+        if self._map_refresh_task is not None and not self._map_refresh_task.done():
+            self._map_refresh_pending = True
 
     async def _async_camera_image_impl(self) -> bytes | None:
         """Build the camera image after shared availability gating."""
@@ -297,7 +310,13 @@ class DreameLawnMowerMapCamera(
 
     async def _async_refresh_and_render_map_image(self) -> bytes | None:
         """Refresh the source view and atomically replace rendered JPEG bytes."""
+        map_index = self._selected_map_index
+        rotation = self._map_rotation
         view = await self._async_refresh_map_view()
+        if (self._selected_map_index, self._map_rotation) != (map_index, rotation):
+            self._map_cache.invalidate_view(drop_image=True)
+            self._map_refresh_pending = True
+            return None
         if view.image_png is not None:
             if self._map_cache.image_matches_source(
                 view.image_png,
@@ -310,9 +329,19 @@ class DreameLawnMowerMapCamera(
                     partial(
                         png_bytes_to_jpeg,
                         view.image_png,
-                        rotation=self._map_rotation,
+                        rotation=(
+                            rotation - (view.details or {}).get("render_rotation", 0)
+                        )
+                        % 360,
                     )
                 )
+                if (self._selected_map_index, self._map_rotation) != (
+                    map_index,
+                    rotation,
+                ):
+                    self._map_cache.invalidate_view(drop_image=True)
+                    self._map_refresh_pending = True
+                    return None
                 self._map_cache.store_image(
                     image,
                     source_image=view.image_png,
@@ -383,8 +412,11 @@ class DreameLawnMowerMapCamera(
     @property
     def _map_rotation(self) -> int:
         """Return the configured clockwise display rotation."""
+        return self._rotation_for_map_index(self._selected_map_index)
+
+    def _rotation_for_map_index(self, map_index: int | None) -> int:
+        """Share each saved map's display orientation with the contact sheet."""
         rotations = self.coordinator.entry.options.get(CONF_MAP_ROTATIONS, {})
-        map_index = self._selected_map_index
         if isinstance(rotations, dict) and map_index is not None:
             value = rotations.get(str(map_index), rotations.get(map_index))
             if value in (0, 90, 180, 270):
@@ -405,6 +437,7 @@ class DreameLawnMowerMapCamera(
         options = self.coordinator.entry.options
         return map_render_style(
             options.get(CONF_MAP_THEME, DEFAULT_MAP_THEME),
+            rotation=self._map_rotation,
             stroke_scale=options.get(
                 CONF_MAP_STROKE_SCALE,
                 DEFAULT_MAP_STROKE_SCALE,
@@ -630,6 +663,11 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
                     app_maps,
                     label_scale=self._map_label_scale,
                     style=self._map_style,
+                    rotations={
+                        item["idx"]: self._rotation_for_map_index(item["idx"])
+                        for item in app_maps.get("maps", [])
+                        if isinstance(item, dict) and isinstance(item.get("idx"), int)
+                    },
                 )
             )
             self._map_cache.store_view(
@@ -672,6 +710,7 @@ def _all_maps_contact_sheet_from_payload(
     *,
     label_scale: float = 1.0,
     style: MapRenderStyle | None = None,
+    rotations: dict[int, int] | None = None,
 ) -> bytes:
     """Render all drawable app map payloads into one contact sheet."""
     rendered: list[dict[str, object]] = []
@@ -690,7 +729,12 @@ def _all_maps_contact_sheet_from_payload(
                 image_png, width, height = render_app_map_payload_png(
                     payload,
                     label_scale=label_scale,
-                    style=style,
+                    style=replace(
+                        style or map_render_style(),
+                        rotation=(rotations or {}).get(
+                            item.get("idx"), (style or map_render_style()).rotation
+                        ),
+                    ),
                 )
                 entry.update(
                     {

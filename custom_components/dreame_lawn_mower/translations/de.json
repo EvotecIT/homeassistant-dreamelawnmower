@@ -39,6 +39,7 @@
     "country": {"options": {"cn": "China", "eu": "Europa", "us": "Vereinigte Staaten", "ru": "Russland", "sg": "Singapur"}},
     "map_rotation": {"options": {"0": "0° (keine Drehung)", "90": "90° im Uhrzeigersinn", "180": "180°", "270": "270° im Uhrzeigersinn"}},
     "map_theme": {"options": {"emerald": "Smaragd", "dark": "Dunkel", "midnight": "Mitternacht", "high_contrast": "Hoher Kontrast"}},
+        "mint": "Minze (dekorative Streifen)",
     "map_spot_area_style": {"options": {"hidden": "Ausgeblendet (empfohlen)", "outline": "Nur Umriss", "filled": "Gefüllt"}},
     "map_mowing_path_style": {"options": {"hidden": "Ausgeblendet", "subtle": "Dezent (empfohlen)", "detailed": "Detailliert"}},
     "notification_mode": {"options": {"off": "Aus", "faults": "Schwere Fehler", "faults_and_warnings": "Schwere Fehler und Warnungen"}},

@@ -514,7 +514,9 @@ and path data remains available in map diagnostics.
 Enabled map cameras warm their first image in the background during entity
 startup. While a mowing session is active, coordinator updates also refresh the
 map source without waiting for a browser request. The camera still returns the
-last good JPEG immediately while a refresh runs. Identical source images reuse
+last good JPEG for the same map immediately while a refresh runs. Switching maps
+discards the previous lawn's image. Failed current-map downloads are retried once;
+they do not silently substitute another saved map. Identical source images reuse
 the existing JPEG conversion. This cache is intentionally in memory: a Home
 Assistant restart rebuilds it from the mower rather than persisting garden
 geometry to a second on-disk store.
@@ -526,13 +528,17 @@ and persisted mower trail data is not presented as live while the session is
 inactive.
 
 Under **Settings → Devices & services → Dreame Lawn Mower → Configure**, choose
-an Emerald, Dark, Midnight, or High contrast theme and adjust label, line, and
+an Emerald, Mint, Dark, Midnight, or High contrast theme and adjust label, line, and
 marker scale. **Saved spot area display** can hide spot rectangles, show only
 their outlines, or restore the filled diagnostic overlay. **Completed mowing
 path display** can hide previous passes, render them subtly, or show every pass
-in full detail. These two settings affect locally rendered vector maps. Use
+in full detail. These settings affect both app-map and vector-map rendering.
+Mint uses decorative stripes clipped to each lawn; the stripes do not indicate
+mowing progress or direction. Connector paths remain open and are never filled
+as extra lawns. Use
 **Selected Map Display Rotation** to store a different
-rotation for each map. To use a custom mower marker, place a PNG, JPEG, or WebP
+rotation for each map, with upright labels in locally rendered maps and the
+All Maps contact sheet. To use a custom mower marker, place a PNG, JPEG, or WebP
 under `/config/www` and enter its relative path, such as
 `mower/my-marker.png`. The integration ignores absolute paths, traversal,
 unsupported types, files over 1 MB, and images larger than 512 by 512 pixels.

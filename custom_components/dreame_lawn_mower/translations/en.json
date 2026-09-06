@@ -109,6 +109,7 @@
     "map_theme": {
       "options": {
         "emerald": "Emerald",
+        "mint": "Mint (decorative stripes)",
         "dark": "Dark",
         "midnight": "Midnight",
         "high_contrast": "High contrast"

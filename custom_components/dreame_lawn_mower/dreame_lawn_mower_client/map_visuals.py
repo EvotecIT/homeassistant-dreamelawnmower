@@ -43,6 +43,8 @@ class MapRenderStyle:
     marker_image: bytes | None = None
     spot_area_style: str = "filled"
     mowing_path_style: str = "detailed"
+    zone_pattern: str = "solid"
+    rotation: int = 0
 
 
 _EMERALD = MapRenderStyle(
@@ -80,6 +82,16 @@ _EMERALD = MapRenderStyle(
 
 MAP_RENDER_STYLES: dict[str, MapRenderStyle] = {
     "emerald": _EMERALD,
+    "mint": replace(
+        _EMERALD,
+        name="mint",
+        background=(246, 248, 247, 255),
+        zone_fills=((171, 227, 207, 230),),
+        zone_outlines=((125, 192, 168, 220),),
+        zone_pattern="striped",
+        navigation_path=(169, 184, 178, 230),
+        label=(35, 55, 47, 255),
+    ),
     "dark": replace(
         _EMERALD,
         name="dark",
@@ -129,11 +141,13 @@ def map_render_style(
     marker_image: bytes | None = None,
     spot_area_style: str = "filled",
     mowing_path_style: str = "detailed",
+    rotation: int = 0,
 ) -> MapRenderStyle:
     """Return a normalized preset with optional safe presentation overrides."""
     preset = MAP_RENDER_STYLES.get(str(name or "").lower(), _EMERALD)
     return replace(
         preset,
+        rotation=rotation if rotation in (0, 90, 180, 270) else 0,
         stroke_scale=_finite_scale(
             preset.stroke_scale * _finite_scale(stroke_scale, 0.5, 3.0),
             0.5,
@@ -177,7 +191,7 @@ def project_dreame_app_point(
     scale: float,
     padding: int,
 ) -> tuple[float, float]:
-    """Project mower coordinates in the orientation shown by the Dreame app."""
+    """Project native coordinates before the user's per-map display rotation."""
     return (
         (max_x - x) * scale + padding,
         (y - min_y) * scale + padding,

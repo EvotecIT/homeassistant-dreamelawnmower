@@ -133,8 +133,12 @@ def current_zone_entries(
         break
 
     vector_zones = _current_vector_zones(vector_map_details, current_idx)
-    zone_ids = list(preferences_by_id)
-    zone_ids.extend(zone_id for zone_id in vector_zones if zone_id not in zone_ids)
+    # Preferences can outlive a deleted zone. Once geometry is available it
+    # defines membership; preferences only supply settings for surviving IDs.
+    zone_ids = (
+        list(vector_zones) if vector_zones is not None else list(preferences_by_id)
+    )
+    vector_zones = vector_zones or {}
 
     return [
         {
@@ -150,10 +154,10 @@ def current_zone_entries(
 def _current_vector_zones(
     vector_map_details: Mapping[str, Any] | None,
     map_index: int,
-) -> dict[int, str | None]:
-    """Return zone names keyed by id without losing unnamed entries."""
+) -> dict[int, str | None] | None:
+    """Return known zone membership, or None when geometry is unavailable."""
     if not isinstance(vector_map_details, Mapping):
-        return {}
+        return None
 
     candidates: list[Mapping[str, Any]] = []
     maps = vector_map_details.get("maps")
@@ -180,14 +184,17 @@ def _current_vector_zones(
                 if not isinstance(zone, Mapping):
                     continue
                 zone_id = zone.get("zone_id")
-                if not isinstance(zone_id, int) or zone_id <= 0:
+                if (
+                    not isinstance(zone_id, int)
+                    or isinstance(zone_id, bool)
+                    or zone_id <= 0
+                ):
                     continue
                 name = zone.get("name")
                 result[zone_id] = (
                     name.strip() if isinstance(name, str) and name.strip() else None
                 )
-            if result:
-                return result
+            return result
 
         zone_ids = candidate.get("zone_ids")
         zone_names = candidate.get("zone_names")
@@ -205,7 +212,7 @@ def _current_vector_zones(
                 for zone_id, name in zip(zone_ids, zone_names, strict=True)
                 if isinstance(zone_id, int) and zone_id > 0
             }
-    return {}
+    return None
 
 
 def _zone_display_label(zone_id: int, name: str | None) -> str:

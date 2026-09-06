@@ -7,12 +7,14 @@ import math
 import re
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from io import BytesIO
 from typing import Any
 
 from PIL import Image, ImageDraw
 
+from .map_drawing import draw_lawn_polygon, draw_navigation_path
+from .map_geometry import polygon_label_point, rotate_canvas_point
 from .map_visuals import (
     MapRenderStyle,
     draw_position_marker,
@@ -178,6 +180,8 @@ def parse_batch_vector_map(
         parsed_maps_by_id[vector_map.map_id] = vector_map
     current_maps = tuple(parsed_maps_by_id.values())
     primary = _select_primary_vector_map(current_maps, current_map_index)
+    if primary is None:
+        return None
 
     available_maps = tuple(
         DreameLawnMowerAvailableMap(
@@ -203,7 +207,7 @@ def parse_batch_vector_map(
 def _select_primary_vector_map(
     parsed_maps: Sequence[DreameLawnMowerVectorMap],
     current_map_index: int | None,
-) -> DreameLawnMowerVectorMap:
+) -> DreameLawnMowerVectorMap | None:
     if current_map_index is not None:
         selected = next(
             (
@@ -213,8 +217,8 @@ def _select_primary_vector_map(
             ),
             None,
         )
-        if selected is not None:
-            return selected
+        # Missing current-map geometry must not be replaced by another map.
+        return selected
 
     return next(
         (
@@ -250,6 +254,15 @@ def render_vector_map_png(
     image_width = int(map_width * scale) + (2 * _PADDING)
     image_height = int(map_height * scale) + (2 * _PADDING)
     style = style or map_render_style()
+    pixel_scale = max(image_width, image_height) / 900
+    style = replace(
+        style,
+        stroke_scale=style.stroke_scale * pixel_scale,
+        marker_scale=style.marker_scale * pixel_scale,
+    )
+    native_width, native_height = image_width, image_height
+    if style.rotation in (90, 270):
+        image_width, image_height = image_height, image_width
     runtime_track_segments = filter_runtime_track_segments(
         vector_map,
         runtime_track_segments,
@@ -258,8 +271,12 @@ def render_vector_map_png(
         runtime_position = None
     image = Image.new("RGBA", (image_width, image_height), style.background)
     draw = ImageDraw.Draw(image)
-    font = _label_font(label_scale)
-    label_halo_width = max(1, int(round(_normalize_label_scale(label_scale) * 2)))
+    font = map_font(
+        round(_LABEL_FONT_SIZE * _normalize_label_scale(label_scale) * pixel_scale)
+    )
+    label_halo_width = max(
+        1, int(round(_normalize_label_scale(label_scale) * 2 * pixel_scale))
+    )
 
     def to_pixel(x: int, y: int) -> tuple[int, int]:
         px, py = project_dreame_app_point(
@@ -270,20 +287,18 @@ def render_vector_map_png(
             scale=scale,
             padding=_PADDING,
         )
-        return int(px), int(py)
+        return rotate_canvas_point(
+            (px, py), native_width, native_height, style.rotation
+        )
+
+    for path in vector_map.paths:
+        draw_navigation_path(image, [to_pixel(x, y) for x, y in path.points], style)
 
     for index, zone in enumerate(vector_map.zones):
         if len(zone.points) < 3:
             continue
-        fill_color = style.zone_fills[index % len(style.zone_fills)]
-        outline_color = style.zone_outlines[index % len(style.zone_outlines)]
         polygon = [to_pixel(x, y) for x, y in zone.points]
-        draw.polygon(
-            polygon,
-            fill=fill_color,
-            outline=outline_color,
-            width=line_width(style, 2),
-        )
+        draw_lawn_polygon(image, polygon, index, style)
 
     for area in vector_map.forbidden_areas:
         if len(area.points) < 3:
@@ -303,11 +318,7 @@ def render_vector_map_png(
             polygon = [to_pixel(x, y) for x, y in area.points]
             draw.polygon(
                 polygon,
-                fill=(
-                    style.spot_fill
-                    if style.spot_area_style == "filled"
-                    else None
-                ),
+                fill=(style.spot_fill if style.spot_area_style == "filled" else None),
                 outline=style.spot_outline,
                 width=line_width(style, 2),
             )
@@ -343,15 +354,6 @@ def render_vector_map_png(
             width=line_width(style, 4),
         )
 
-    for path in vector_map.paths:
-        if len(path.points) < 2:
-            continue
-        draw.line(
-            [to_pixel(x, y) for x, y in path.points],
-            fill=style.navigation_path,
-            width=line_width(style, 3),
-        )
-
     for point in (*vector_map.clean_points, *vector_map.cruise_points):
         px, py = to_pixel(point[0], point[1])
         radius = marker_radius(style, 4)
@@ -367,9 +369,7 @@ def render_vector_map_png(
     for zone in vector_map.zones:
         if len(zone.points) < 3 or not zone.name:
             continue
-        center_x = sum(point[0] for point in zone.points) // len(zone.points)
-        center_y = sum(point[1] for point in zone.points) // len(zone.points)
-        px, py = to_pixel(center_x, center_y)
+        px, py = polygon_label_point([to_pixel(x, y) for x, y in zone.points])
         for dx in range(-label_halo_width, label_halo_width + 1):
             for dy in range(-label_halo_width, label_halo_width + 1):
                 if dx == 0 and dy == 0:
@@ -421,11 +421,6 @@ def filter_runtime_track_segments(
         if len(current) >= 2:
             filtered.append(tuple(current))
     return tuple(filtered)
-
-
-def _label_font(label_scale: float) -> Any:
-    size = max(8, int(round(_LABEL_FONT_SIZE * _normalize_label_scale(label_scale))))
-    return map_font(size, bold=True)
 
 
 def _normalize_label_scale(label_scale: float) -> float:

@@ -65,6 +65,7 @@ MAP_ROTATION_OPTIONS = {
 }
 MAP_THEME_OPTIONS = {
     "emerald": "Emerald",
+    "mint": "Mint (decorative stripes)",
     "dark": "Dark",
     "midnight": "Midnight",
     "high_contrast": "High contrast",
