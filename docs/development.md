@@ -135,15 +135,18 @@ captures into fixtures.
 
 ## Public README Standard
 
-The README should stay user-facing:
+The README is the entry point for Home Assistant users. Keep this order:
 
-- what the integration does
-- status and tested models
-- installation
-- primary entities and services
-- troubleshooting and diagnostics
-- links to deeper docs
-- a concise reusable Python package section
+- project name, artwork, and badges
+- a short overview
+- sponsorship and related Home Assistant projects
+- installation and first configuration
+- links to user guides and support
+
+Keep the compatibility matrix in [supported mowers](supported-mowers.md), daily
+settings in [configuration](configuration.md) and [mowing controls](mowing-controls.md),
+and media instructions in [maps](maps.md) and [live video](live-video.md).
+Link to [the Python library](python-library.md) rather than repeating its example.
 
 Keep long probe recipes, protocol notes, app decompilation notes, and live test
 history in `docs/agent-handoff.md`, `docs/dreamehome-research.md`, or focused

@@ -1,843 +1,117 @@
-![Dreame and MOVA lawn mower integration for Home Assistant](assets/dreame-mova-social.png)
-
-*Illustrative artwork. Available controls depend on the mower and integration support.*
-
 # Dreame & MOVA Lawn Mowers for Home Assistant
 
-[![HACS Custom](https://img.shields.io/badge/HACS-CUSTOM-41BDF5?style=for-the-badge&labelColor=555)](https://hacs.xyz/)
-[![Validate](https://img.shields.io/github/actions/workflow/status/EvotecIT/homeassistant-dreamelawnmower/validate.yml?branch=main&style=for-the-badge&label=VALIDATE&labelColor=555)](https://github.com/EvotecIT/homeassistant-dreamelawnmower/actions/workflows/validate.yml)
-[![Hassfest](https://img.shields.io/github/actions/workflow/status/EvotecIT/homeassistant-dreamelawnmower/hassfest.yml?branch=main&style=for-the-badge&label=HASSFEST&labelColor=555)](https://github.com/EvotecIT/homeassistant-dreamelawnmower/actions/workflows/hassfest.yml)
-[![License](https://img.shields.io/badge/LICENSE-MIT-yellow?style=for-the-badge&labelColor=555)](LICENSE)
+![Dreame & MOVA Lawn Mowers for Home Assistant](assets/dreame-mova-social.png)
 
-Control, monitor, and automate Dreame and MOVA robotic lawn mowers from Home
-Assistant. The integration covers everyday mowing controls, schedules, maps,
-live coverage, rain protection, firmware, maintenance, and camera features
-without presenting the mower as a repurposed robot vacuum.
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://hacs.xyz/)
+[![CI](https://img.shields.io/github/actions/workflow/status/EvotecIT/homeassistant-dreamelawnmower/validate.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/EvotecIT/homeassistant-dreamelawnmower/actions/workflows/validate.yml)
+[![License](https://img.shields.io/github/license/EvotecIT/homeassistant-dreamelawnmower?style=for-the-badge)](LICENSE)
 
-[Install with HACS](#hacs) · [Check mower support](#supported-mowers) ·
-[Explore features](#what-you-can-do) · [Troubleshoot](#troubleshooting)
+## Overview
 
-![Lawn Mower Card Hero layout preview](assets/dreame-lawn-mower-hero-card.png)
+Control and monitor Dreame and MOVA robotic lawn mowers through Home Assistant's
+`lawn_mower` entity. Start, pause, and dock the mower, manage supported schedules
+and mowing preferences, and add maps, mission progress, and camera views to your
+dashboard.
 
-Use the standard Home Assistant `lawn_mower` entity to start, pause, resume, and
-dock the mower. Add the integration's typed controls when you want to switch
-maps, mow a saved zone or edge, adjust supported mowing preferences, manage
-schedules, or build automations around live mower state.
+- Mower state, battery, faults, rain protection, charging, and maintenance.
+- Map selection and targeted zone, spot, or edge mowing.
+- Native schedule switches, notifications, and automation helpers.
+- Optional live video and on-demand 3D maps on supported mowers and hosts.
 
-## What You Can Do
+Check the [supported mower list](docs/supported-mowers.md) before installing.
+Model, firmware, account region, and vendor provisioning affect advanced
+features. Map routes show observed movement, not verified cut-area coverage.
 
-| Area | Available today |
-| --- | --- |
-| Everyday control | Start, pause, resume, stop, dock, or return to the station without discarding a resumable session |
-| Maps and targeted mowing | View the active map and live cut path, switch maps, and start all-area, zone, spot, or edge runs |
-| Schedules | Read mower-native schedules through a calendar, use per-plan switches, and make guarded enable/disable changes |
-| Mowing preferences | Control supported map-wide or per-zone cutting height, mowing efficiency, edge behavior, and obstacle avoidance |
-| Monitoring and protection | Track battery, charging, mower state, active and resumable tasks, progress, errors, maintenance, firmware, rain protection, and reported anti-theft settings |
-| Cameras and 3D | Use the map camera, optional live video on supported Linux hosts, and authenticated 3D point-cloud downloads where validated |
-| Home Assistant automation | Build automations from normal entities and use guarded services for map, schedule, preference, and supervised remote-control workflows |
+## Sponsor
 
-Advanced probes and riskier maintenance operations remain diagnostic or
-disabled by default. The normal device page stays useful instead of being
-filled with reverse-engineering controls.
-
-## Supported Mowers
-
-The integration follows the Dreamehome and MOVAhome mower protocol. Support is
-based on real mower reports and repository fixtures, not only on a matching
-brand name:
-
-- **Validated** means the model has been exercised against real hardware and
-  captured fixtures.
-- **Field-reported** means owners have confirmed important paths, but the full
-  feature set has not been validated yet.
-- **Recognized** means the model identity and protocol family are known; treat
-  unconfirmed features as experimental.
-
-| Brand and model | Raw model identifier | Support | Confirmed coverage |
-| --- | --- | --- | --- |
-| Dreame A2 | `dreame.mower.g2408` | **Validated** | Primary development mower; core control, schedules, maps, remote control, guarded preferences, diagnostics, video, and 3D maps |
-| Dreame A2 3000 | `dreame.mower.g2568d` | **Field-reported** | Home Assistant discovery, core state entities, and heartbeat docking state on firmware `4.3.6_0625`; broader controls and media still need live validation |
-| Dreame A3 AWD 1000 | `dreame.mower.q2501a` | **Validated** | Core entities, mower state, maps, and cloud live video on firmware `4.3.6_0418` with an EU account |
-| MOVA 600 | `mova.mower.g2405a` | **Recognized** | Model identity and shared mower state/device-code semantics; controls, maps, media, and model-specific code overrides still need live validation |
-| MOVA 600 Kit | `mova.mower.g2405b` | **Recognized** | Model identity and shared mower state/device-code semantics; controls, maps, media, and model-specific code overrides still need live validation |
-| MOVA 1000 | `mova.mower.g2405c` | **Recognized** | Model identity, station-brush maintenance code, and mowing-start lifecycle semantics; login, controls, maps, media, and model-specific code overrides still need live validation |
-| MOVA LiDAX Ultra 800 | `mova.mower.g2529b` | **Field-reported** | MOVAhome EU login, core state and controls, maps, map selection, and mowing preferences on firmware `4.3.6_0453`; app-map connector corridors are distinguished from mowing zones |
-| MOVA LiDAX Ultra 1000 | `mova.mower.g2529c` | **Field-reported** | MOVAhome EU login, commands, battery, and model-specific cloud property handling |
-| MOVA LiDAX Ultra 2000 | `mova.mower.g2529f` | **Field-reported** | MOVAhome US login, core state and commands, maps, and cloud live video on firmware `4.3.6_0453` |
-| MOVA LiDAX Ultra 2000 AWD | `mova.mower.g2584a` | **Field-reported** | MOVAhome US login, realtime state, zone mowing, docking, maps, and cloud live video on firmware `4.3.6_0439` |
-| Dreame A3 AWD Pro 3500 | `dreame.mower.g2541e` | **Recognized** | Model mapping and diagnostics report; broader live confirmation is still needed |
-| Dreame A1 | `dreame.mower.p2255` | **Field-reported** | EU account setup, core state, battery, error state, map camera, docking state, and a real docked-to-mowing start are confirmed; live video is explicitly unsupported |
-| Dreame A1 Pro | `dreame.mower.g2422` | **Recognized** | Model mapping and mower-specific state semantics; needs fixtures and live validation |
-| Dreame A1 Pro 2000 | `dreame.mower.g2540d` | **Field-reported** | EU account setup, core state, maps, and app map selection on firmware `4.3.6_0623`; SETTINGS slot alignment has regression coverage, while write controls and model-specific device codes still need supervised live validation |
-| Newer A-series mower | `dreame.mower.g3255` | **Recognized** | Raw identifier observed; retail name and feature coverage are not yet confirmed |
-
-MOVAhome account login is supported. Other MOVA-branded mowers, rebadges,
-regional variants, and firmware revisions may be discovered, but should be
-treated as experimental until their behavior is reported. A model being listed
-does not guarantee that every vendor- or region-gated feature—especially live
-video—will be available on every account.
-
-If your mower is not fully validated, see [Help Expand Support](#help-expand-support)
-for the small, sanitized report that helps turn recognition into confirmed
-support.
-
-## Companion Dashboard
-
-For the dashboard shown above, pair this integration with the
-[Lawn Mower Card](https://github.com/EvotecIT/lovelace-lawn-mower-card). Its Hero
-layout automatically finds the integration's map, mission, coverage, and live
-video entities when their names follow the normal Home Assistant device naming.
+Support development and maintenance through
+[GitHub Sponsors](https://github.com/sponsors/PrzemyslawKlys).
+Sponsorship is optional; these projects remain open source.
 
 ## More for your Home Assistant home
 
-Other projects we maintain for the same setup:
+Other integrations and dashboards we maintain:
 
-- [Lawn Mower Card](https://github.com/EvotecIT/lovelace-lawn-mower-card) — a visual dashboard for mower state, maps, and controls.
-- [KEF](https://github.com/EvotecIT/homeassistant-kef) — local control for modern and legacy speaker families.
-- [Devialet](https://github.com/EvotecIT/homeassistant-devialet) — local speaker control, with Dione support.
-- [Siegenia](https://github.com/EvotecIT/homeassistant-siegenia) — local control for supported window controllers.
-- [EasyControlX](https://github.com/EvotecIT/homeassistant-easycontrolx) — connect supported Windows and macOS hosts.
+- [Lawn Mower Card](https://github.com/EvotecIT/lovelace-lawn-mower-card) — A dashboard for mower state, maps, and controls.
+- [KEF](https://github.com/EvotecIT/homeassistant-kef) — Local control for modern and legacy speaker families.
+- [Devialet](https://github.com/EvotecIT/homeassistant-devialet) — Local speaker control, with Dione support.
+- [Siegenia](https://github.com/EvotecIT/homeassistant-siegenia) — Local control for supported window controllers.
+- [EasyControlX](https://github.com/EvotecIT/homeassistant-easycontrolx) — Connect supported Windows and macOS hosts.
 
-Prefer a native app for everyday control? [CasaRay](https://casaray.dev/)
-brings rooms, devices, cameras, and home activity together on iPhone, iPad, and
-Mac. [Tactra Remote](https://tactra.dev/) puts media players, speakers, and TV
-controls in a focused remote for iPhone, iPad, Apple Watch, and Mac.
+For a native app connected to the same Home Assistant setup:
 
-Both connect to your Home Assistant setup. Neither is required to use this
-project.
+- [CasaRay](https://casaray.dev/) — rooms, devices, cameras, and home activity on
+  iPhone, iPad, and Mac.
+- [Tactra Remote](https://tactra.dev/) — media players, speakers, and TV controls
+  on iPhone, iPad, Apple Watch, and Mac.
 
-## See It In Action
-
-The live-path map combines the stored garden geometry with mower position and
-the current cut trail. The card warms this image while the Overview tab is open,
-so switching to Map does not have to begin with a blank frame.
-
-![Dreame A2 live-path map in the Hero layout](assets/dreame-lawn-mower-hero-map.png)
-
-The standard Home Assistant device page remains available for entity discovery
-and diagnostics:
-
-![Dreame Lawn Mower device overview](assets/dreame-lawn-mower-overview.png)
-
-## Current Limits
-
-The integration deliberately keeps uncertain or potentially disruptive
-operations behind clear boundaries:
-
-- Model, firmware, region, and account provisioning can change which advanced
-  features the vendor makes available.
-- Live video is field-validated on the Dreame A2 and A3 AWD 1000. It currently
-  requires a Linux x86_64 or aarch64 Home Assistant host, a provisioned account,
-  and a mower state in which the vendor permits video.
-- 3D point-cloud generation and download are validated on the Dreame A2; other
-  mower families still need reports.
-- Map rendering and map selection are supported, but editing no-go areas,
-  virtual walls, and garden geometry is not.
-- Charging-period, rain-protection, and three-field anti-theft controls are
-  field-validated on the Dreame A2. Other models expose each group only when
-  their native `CFG` record reports the matching setting. PIN check before
-  power-off appears only on mowers that report the fourth anti-theft field.
-- Mowing-preference writes use guarded paths and have the strongest live proof
-  on the A2. Other models and firmware need broader confirmation.
-- Firmware updates use the app-approved target and confirmation flow. Release
-  notes remain best-effort, and debug catalog candidates stay diagnostic rather
-  than being presented as approved updates.
-- Manual driving remains a supervised diagnostic action with strict mower-state
-  and battery guards.
+Neither app is required to use this project.
 
 ## Installation
 
 ### HACS
 
-1. Add this repository to HACS as a custom integration repository:
+[![Open this repository in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=EvotecIT&repository=homeassistant-dreamelawnmower&category=integration)
 
-   [![Open your Home Assistant instance and open this repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=EvotecIT&repository=homeassistant-dreamelawnmower&category=integration)
-
-   If the button does not open your Home Assistant instance, manually add this
-   repository URL in HACS:
-
-   `https://github.com/EvotecIT/homeassistant-dreamelawnmower`
-
-2. Install **Dreame Lawn Mower** from HACS.
-3. Restart Home Assistant.
-4. Add the integration from **Settings -> Devices & services**:
-
-   [![Open your Home Assistant instance and start setting up Dreame Lawn Mower.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=dreame_lawn_mower)
+1. Open the repository with the button above. Alternatively, in HACS choose
+   **Custom repositories**, add `https://github.com/EvotecIT/homeassistant-dreamelawnmower`,
+   and select **Integration**.
+2. Download **Dreame Lawn Mower** and restart Home Assistant.
+3. Open **Settings → Devices & services → Add integration**, then choose
+   **Dreame Lawn Mower**.
 
 ### Manual
 
-Copy `custom_components/dreame_lawn_mower` into your Home Assistant
-`custom_components` directory, restart Home Assistant, then add the integration
-from the UI.
+1. Download the repository and copy `custom_components/dreame_lawn_mower` into your
+   Home Assistant `config/custom_components` directory.
+2. Restart Home Assistant.
+3. Add **Dreame Lawn Mower** from **Settings → Devices & services**.
 
 ## Configuration
 
-The config flow asks for:
-
-- account type: `dreame` or `mova`
-- country/region
-- username
-- password
-
-The integration stores Home Assistant config-entry data only. Do not put
-credentials into repository files, fixtures, or issue attachments.
-
-### Live video
-
-On Linux x86_64 and aarch64 Home Assistant hosts, the `Live Video` camera uses
-the managed runtime by default. No Android phone, emulator, library path, or
-external runner is required. The integration prepares the runtime during entity
-setup and exposes a dormant loopback FLV relay. Camera capability discovery is
-therefore local and does not enable the mower. The first real media consumer
-starts XP2P, and the relay commits cached provisioning only after it observes
-valid FLV video.
-
-The relay is the only consumer of the mower's private source. It fans that
-source out to Home Assistant's standard camera providers, so a configured
-WebRTC provider is preferred and HLS remains the compatibility fallback. A
-still-image request and a live viewer can share the same mower session instead
-of racing for its single-consumer endpoint. The default `Balanced` retention
-keeps that upstream warm for the active mowing run only after someone opens
-live video. Snapshot cards get a bounded 60-second reconnect window, which
-avoids cold-starting XP2P between normal preview refreshes but releases it after
-the preview surface is no longer active. `Battery saver` always uses the short
-grace after the last consumer, while `Video priority` also lets snapshot access
-keep the session ready during mowing. The short reconnect grace is 15 seconds.
-
-The camera entity remains available while the mower is docked, returning, or in
-another state where Dreame blocks video. Its `video_block_reason` attribute
-explains what must change before a stream can start. Stream requests still fail
-closed until the mower reaches a permitted state; keeping the entity available
-only makes that state gate visible in Home Assistant and downloaded diagnostics.
-
-The first setup needs internet access. The integration downloads fixed versions
-of Tencent XP2P, the required AOSP Bionic libraries, and qemu-user-static on
-x86_64 hosts. Every file is pinned and SHA-256 verified before use, then cached
-under Home Assistant's `.storage` directory. The Home Assistant/Python client
-owns the lifecycle; Tencent's proprietary P2P transport still runs in the small
-native compatibility worker. It does not require an Android device or Android
-framework.
-
-The Dreame A2 proof uses a normal copied `custom_components` installation, the
-real Home Assistant mower and camera entities, and Home Assistant's HLS output.
-The retained H.264 MP4 reopened independently as 640 x 360 video and decoded
-100 frames spanning 6.599 seconds. The HA camera entity also returned a real
-JPEG through the integration's PyAV/Pillow still-image path, even without the
-optional TurboJPEG system library, and that frame was visually inspected. This
-is a pixel-level playback proof, not only an FLV header or byte-count check.
-
-The mower vendor only allows video while the mower is active and away from its
-station. Requesting the camera does not start or move the mower. The existing
-native-library and persistent-runner options remain available as advanced
-overrides for development or unsupported host platforms.
-
-On the field-tested A3 AWD 1000, XP2P negotiation takes about 30–40 seconds and
-the mower media source supports one consumer at a time. The local relay removes
-the extra HLS segment wait when Home Assistant can use WebRTC, but it cannot
-remove that vendor negotiation time. A vendor-timed session is retired when its
-source ends, so the next viewer negotiates a clean replacement. These timings
-and limits are model/firmware observations, not promises for every mower.
-
-The integration exposes two video transport policies. The default uses the
-`Auto` policy, which can restart from health-checked cached provisioning and
-lets Tencent negotiate the available network route. The explicit cloud policy
-always refreshes Dreame/Tencent inputs first. `Auto` also probes Tencent's
-separate same-LAN service when mower firmware advertises one.
-The tested A2 production firmware does not advertise that service, so the
-integration does not offer a LAN-only policy. Downloaded integration
-diagnostics report `coordinator.video_runtime.last_stream_session.stream_route`
-as `direct` only when the separate LAN service was selected; otherwise it stays
-`unknown`. This runtime detail is excluded from camera state and Recorder
-history. Tencent's misleadingly named `getStreamLinkMode` API returns a
-network/NAT-type bitmask, exposed as `sdk_stream_network_type`, rather than a
-direct-versus-relay result.
-
-After valid FLV media reaches the relay, `Auto` privately caches the minimum
-XP2P identity, P2P material, QCloud/app credentials, and resolved device
-configuration under Home Assistant's `.storage`. The cache uses Home Assistant's
-private-store permissions and deliberately excludes the Dreame access token,
-LAN discovery token, and raw cloud responses. On a later restart, `Auto` tries
-that cache before any Dreame video-input or camera-toggle call and refreshes it
-through the normal path if the cached material has expired. Its safety refresh
-updates only the current mower snapshot; it does not wait for map hydration or
-runtime-metadata work before starting video.
-
-This proof is intentionally narrower than every camera feature in the vendor
-apps:
-
-- In one captured A2 session, normal-XP2P AUTO media travelled directly between
-  the Home Assistant host and the mower's same-LAN IP. A retained socket trace
-  includes the direct peer address, FLV request, HTTP 200 response, and media
-  bytes, so this does not depend on an SDK label. Tencent's separate WLAN
-  discovery and `startLanService` path was also implemented, but this A2
-  firmware did not answer that discovery request. Dreame/Tencent cloud calls
-  still provide the
-  initial provisioning. `Auto` can reuse health-checked video provisioning
-  without fetching new video inputs or toggling the camera through Dreame cloud,
-  but it first refreshes the mower snapshot and refuses to start when current
-  safety state cannot be verified. Tencent XP2P can also use its internet
-  rendezvous/STUN control plane to establish the direct peer route. Neither
-  transport policy promises startup with all internet connectivity removed.
-- Home Assistant can display and save the current JPEG frame, but the vendor's
-  stored photo gallery is not exposed.
-- Live video is field-validated on the A2 and A3 AWD 1000. A3 AWD Pro and MOVA
-  camera variants still need their own runtime-input and playback proof.
-- Patrol movement, arbitrary voice-prompt playback, and two-way live talk are
-  separate control/audio features and are not implemented by this camera.
-
-Maintainers can find the confirmed protocol split, A2 findings, retained LAN
-implementation, and future device validation checklist in
-[Video Transport and Same-LAN Research](docs/video-transport.md).
-
-## Help Expand Support
-
-Support across Dreame, MOVA, and rebadged mower variants will improve fastest
-with real-world reports. If your mower is recognized but not yet validated, or
-if it exposes a different raw model string than this README shows, please open a
-GitHub issue or PR with:
-
-- the retail product name and raw app/cloud model identifier
-- account type (`dreame` or `mova`) and region
-- a sanitized diagnostics capture or Home Assistant debug snapshot
-- screenshots of the product page, app model name, or device information page
-- notes about what works, what is missing, and any errors you see
-
-Please redact credentials, tokens, serial numbers, exact coordinates, and any
-other secrets before attaching files.
-
-## Entities
-
-The primary entity is:
-
-- `lawn_mower.<device>`
-
-Its `feature_capabilities` attribute exposes stable optional-feature support as
-`supported`, `unsupported`, or `unknown`, together with the evidence source.
-Only confirmed model facts are listed explicitly; unlisted models and features
-remain unknown so runtime discovery can continue. The live-video camera is not
-created for a model known not to support it, while unknown models retain normal
-capability detection.
-
-Common user-facing helpers include:
-
-- `sensor.<device>_activity`
-- `sensor.<device>_state_name`
-- `sensor.<device>_error`
-- `sensor.<device>_battery`
-- `sensor.<device>_mowing_progress`
-- `sensor.<device>_selected_mowing_action`
-- `sensor.<device>_selected_map`
-- `sensor.<device>_selected_target`
-- `sensor.<device>_selected_zone_mowing_height`
-- `sensor.<device>_selected_zone_efficiency_mode`
-- `sensor.<device>_selected_zone_direction_mode`
-- `sensor.<device>_selected_zone_obstacle_avoidance`
-- `sensor.<device>_selected_zone_obstacle_distance`
-- `sensor.<device>_selected_zone_obstacle_height`
-- `sensor.<device>_selected_zone_obstacle_classes`
-- `sensor.<device>_runtime_mission_progress`
-- `sensor.<device>_runtime_current_area`
-- `sensor.<device>_runtime_total_area`
-- `sensor.<device>_runtime_live_track_length`
-- `sensor.<device>_runtime_live_track_point_count`
-- `sensor.<device>_weather_protection_status`
-- `select.<device>_map`
-- `select.<device>_mowing_action`
-- `select.<device>_edge`
-- `select.<device>_zone`
-- `select.<device>_spot`
-- `select.<device>_rain_delay`
-- `switch.<device>_charging_period`
-- `switch.<device>_rain_protection`
-- `time.<device>_charging_period_start`
-- `time.<device>_charging_period_end`
-- `binary_sensor.<device>_docked`
-- `binary_sensor.<device>_charging`
-- `binary_sensor.<device>_bluetooth_connected`
-- `binary_sensor.<device>_mowing`
-- `binary_sensor.<device>_task_active`
-- `binary_sensor.<device>_task_resumable`
-- `binary_sensor.<device>_rain_delay_active`
-- `binary_sensor.<device>_returning`
-- `calendar.<device>_schedule`
-- `camera.<device>_live_video` on supported Linux hosts
-
-Many reverse-engineering and validation helpers are disabled by default. Enable
-them from the entity registry only when troubleshooting:
-
-- live-path and all-map cameras
-- map diagnostics camera
-- runtime pose / heading / segment-count sensors
-- all-schedules calendar
-- rain delay end time sensor
-- last schedule probe/write sensors
-- last task-status, weather, and preference probe sensors
-- raw vendor flag sensors
-- manual-drive safety diagnostics
-
-## Notifications And Issue Automations
-
-The integration remains silent by default. To show mower conditions in Home
-Assistant, open the integration's **Configure** dialog and choose one of these
-**Home Assistant notifications** modes:
-
-- **Off** — no integration-created notifications (default)
-- **Hard faults** — one persistent notification for the mower's active fault
-- **Hard faults and warnings** — the fault notification plus a separate item
-  for actionable alert, attention, or unknown-tier status notices
-
-Each mower and condition uses a stable notification ID. The existing item is
-updated when its details change and dismissed when the condition clears. These
-notifications stay inside Home Assistant; they do not automatically send a
-mobile push notification.
-
-For mobile delivery, maintenance reminders, offline alerts, confirmation
-delays, repeated reminders, or custom Home Assistant actions, import the
-[Dreame mower condition notifications blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2FEvotecIT%2Fhomeassistant-dreamelawnmower%2Fmain%2Fblueprints%2Fautomation%2Fdreame_lawn_mower%2Fmower_condition_notifications.yaml).
-Choose all entities from the same mower. If the blueprint uses persistent
-delivery, leave the integration option off to avoid duplicate notifications.
-
-See [Notifications and issue automations](docs/notifications.md) for setup,
-delivery examples, restart behavior, and the safety boundary around automatic
-mower controls.
-
-## Schedules And Multiple Maps
-
-Dreame A2 schedules can exist in more than one slot. Live captures have shown a
-default schedule plus per-map schedules. The normal Home Assistant `Schedule`
-calendar follows the active schedule version reported by the mower's `SCHDT`
-response, so hidden/default/other-map schedules do not appear as normal mowing
-events.
-
-Enable the disabled `All Schedules` calendar only when you intentionally want to
-inspect every decoded schedule slot.
-
-Each decoded plan is also exposed as a normal Home Assistant switch. Turning a
-plan on or off uses the mower-native schedule write, then reads the schedules
-again before updating the entity. These switches are suitable for dashboards,
-automations, and voice assistants; no service flags are needed for an ordinary
-switch action.
-
-The guarded `dreame_lawn_mower.set_schedule_plan_enabled` service is dry-run
-first. It sends a write only when both `execute: true` and
-`confirm_schedule_write: true` are set.
-
-`dreame_lawn_mower.plan_mowing_preference_update` is dry-run first. It reads
-the current app preference payload, applies the requested field changes
-locally, and exposes the candidate `PRE` request in a notification plus the
-disabled-by-default `Last Preference Write` diagnostic sensor. It sends a live
-preference write only when both `execute: true` and
-`confirm_preference_write: true` are provided. After every live `PRE` or `PREP`
-acknowledgement, the integration reads the selected map preferences again and
-requires the requested mode and field values to match. A generic success reply
-does not count as confirmation when the mower keeps its previous settings.
-
-The guarded preference fields include per-zone safe edge mowing through
-`edge_mowing_safe`, EdgeMaster through `edge_cutting_attachment`, and mowing
-direction through `mowing_direction_mode` plus `mowing_direction_degrees`. Use
-the dry-run result to inspect the candidate payload before confirming a live
-write.
-
-For normal dashboard and automation use, the integration also exposes:
-
-- **Selected Map Preference Mode**, a `select` entity with `Global` and
-  `Custom` options
-- **Selected Map Mowing Height**, available while the selected map uses
-  `Global` preferences
-- **Selected Zone Mowing Height**, available while the selected map uses
-  `Custom` preferences
-- selects for mowing efficiency, mowing direction mode, obstacle height and
-  distance, and turning method
-- a 0-180 degree mowing-direction slider
-- switches for automatic and safe edge cutting, EdgeMaster, edge obstacle
-  avoidance, lidar obstacle recognition, and the people, animal, and object
-  recognition classes
-
-The cutting-height controls use 0.5 cm steps. A2 and other standard mower
-families expose 3-7 cm; verified AWD families expose 3-10 cm. Every other
-preference control follows the current `Global` record or the zone chosen by
-the normal map and zone selectors. `Global` means area `0` on the selected map,
-not one device-wide setting shared by every map. `Custom` edits the selected
-zone on that map. This prevents a dashboard from presenting a zone value as if
-it were a whole-lawn setting. These standard entities work with Home Assistant
-dashboards, automations, and voice assistants. The companion Lawn Mower Card
-can use them when explicitly configured; automatic discovery support is tracked
-in the card project. The guarded service remains available when you need to
-inspect the complete candidate preference payload before sending it.
-
-## Charging, Rain, And Anti-Theft Settings
-
-Models that report the mower-native `BAT`, `WRP`, and `ATA` records expose only
-the matching Home Assistant configuration entities. The charging-period switch
-keeps the configured start and end times; its two time entities can define a
-window that crosses midnight. Rain protection has a switch and a whole-hour
-delay select. The zero-hour delay means the mower stays docked until it is
-manually started.
-
-Anti-theft settings use ordinary switches for Lift Alarm, Off-Map Alarm, and
-Real-Time Location. PIN Check Before Power-Off is optional: Home Assistant adds
-it only when the mower reports that fourth field. Unknown future fields in the
-same record are preserved during updates.
-
-Every setting change first reads the current `CFG` record, writes only the
-setting-specific payload, and reads `CFG` again. Home Assistant updates only
-after the mower reports the requested value. Battery thresholds and rain-sensor
-sensitivity and untouched anti-theft flags are preserved. The mower's `2:51`
-settings-change announcement causes one coalesced `CFG` refresh. Its separate
-`2:52` preference announcement refreshes only mowing preferences. Changes made
-in the Dreamehome or MOVAhome app therefore appear without waiting for the
-normal metadata interval.
-
-## Maps
-
-The map camera uses the confirmed app-map JSON path first and falls back to the
-vector source when it carries the active session. Both renderers use the same
-palette, bundled Unicode font, path widths, and marker settings.
-
-The primary `Map` camera is enabled by default and follows the current mowing
-session, including the mower position and live path when the device reports
-them. `Live Path Map`, `All Maps`, and `Map Diagnostics` remain optional,
-disabled-by-default cameras for troubleshooting or specialized dashboards.
-
-Locally rendered vector maps hide saved spot-mowing rectangles by default and
-draw completed mowing passes subtly. This keeps the everyday map close to the
-vendor app while preserving the live route and mower marker. The source spot
-and path data remains available in map diagnostics.
-
-Enabled map cameras warm their first image in the background during entity
-startup. While a mowing session is active, coordinator updates also refresh the
-map source without waiting for a browser request. An empty cache returns a loading
-image while the download runs, keeping camera requests responsive. The camera returns the
-last good JPEG for the same map immediately while a refresh runs. Switching maps
-discards the previous lawn's image. Failed current-map downloads are retried once;
-they do not silently substitute another saved map. Identical source images reuse
-the existing JPEG conversion, and requested image sizes use a bounded cache of
-resized JPEGs.
-
-Map images stay in memory by default. To keep a preview through a Home Assistant
-restart, enable **Keep a map preview across restarts** in the integration options.
-This stores one private JPEG, up to 2 MB, for at most 24 hours of reuse. It is
-accepted only for the same mower, map, and presentation settings. The camera marks
-it with `restart_preview: true` and a saved timestamp; it does not restore live
-position or mission telemetry. The companion Lawn Mower Card labels it **Saved
-preview** until a fresh map replaces it. Disabling the option removes the stored
-preview.
-
-Transient paths and positions are scoped to the selected map and mowing task.
-Changing either clears the prior session trail. A mower position outside the
-selected map boundary is retained in diagnostics but withheld from the image,
-and persisted mower trail data is not presented as live while the session is
-inactive.
-
-The primary map camera also exposes `mowing_map_api_path` for compatible versions
-of [Lawn Mower Card](https://github.com/EvotecIT/lovelace-lawn-mower-card). This
-read-only interface delivers the garden background separately from current
-position and observed movement, so a moving marker does not require downloading
-another full map image. The card can pan, zoom, fit the garden, and centre on a
-fresh mower position while keeping battery and mission figures visible.
-
-The interface requires the same read permission as the map camera. Geometry is
-kept out of entity attributes and recorder state. A missing map identity or stale
-position does not produce a live marker. Movement trails are not cut-area masks:
-the interactive background omits historical mowing paths and decorative stripes
-instead of presenting them as verified completed coverage.
-
-Under **Settings → Devices & services → Dreame Lawn Mower → Configure**, choose
-an Emerald, Mint, Dark, Midnight, or High contrast theme and adjust label, line, and
-marker scale. **Saved spot area display** can hide spot rectangles, show only
-their outlines, or restore the filled diagnostic overlay. **Completed mowing
-path display** can hide previous passes, render them subtly, or show every pass
-in full detail. These settings affect both app-map and vector-map rendering and
-apply without reconnecting the integration. Scan-interval changes also apply
-without a reload. Connection, video, and restart-preview options still reload
-the integration when their values change.
-Mint uses decorative stripes clipped to each lawn; the stripes do not indicate
-mowing progress or direction. Connector paths remain open and are never filled
-as extra lawns. Use **Selected Map Display Rotation** to store a different
-rotation for each map, with upright labels in locally rendered maps and the
-All Maps contact sheet. To use a custom mower marker, place a PNG, JPEG, or WebP
-under `/config/www` and enter its relative path, such as
-`mower/my-marker.png`. The integration ignores absolute paths, traversal,
-unsupported types, files over 1 MB, and images larger than 512 by 512 pixels.
-
-The runtime mission progress, current-area, and total-area sensors also retain
-the latest useful session values after mowing stops. While mowing they represent
-live telemetry; after docking their attributes include `cached: true` and
-`captured_at`. They become live again as soon as a new runtime session reports
-metrics. This keeps dashboards useful without presenting an old mower position
-or trail as current.
-
-If the mower has multiple maps, enable the disabled `All Maps` camera to render
-a contact sheet. Use `Map Diagnostics` when the map image is missing or when you
-need source, counts, and parser evidence.
-
-The map camera also advertises a local `point_cloud_api_path` attribute. A
-Home Assistant administrator can sign that path for a short-lived download.
-For the active map, the integration first tries a stored LiDAR object whose map
-index is confirmed by the app inventory or mower `OBJ` response. A mower with
-exactly one created map may also reuse the vendor's `99.20` stored-object
-announcement. That announcement has no map identity, so it is never reused on
-a multi-map mower. If no safely attributed stored object is available, the
-integration asks the mower to upload the selected app map, captures the new
-announcement, and validates the returned PCD file. Firmware without the
-announcement retains the older indexed-object lookup as a fallback. Responses
-use short-lived private caching; forced refreshes use `private, no-store`.
-Vendor filenames, cloud-signed URLs, and point coordinates are never written to
-entity state or logs.
-
-The companion
-[Lawn Mower Card](https://github.com/EvotecIT/lovelace-lawn-mower-card) detects
-this attribute and offers an on-demand 3D viewer. It does not generate or
-download garden geometry during an ordinary dashboard render. Select the Hero
-layout's **3D** tab or press **Load 3D map** in another layout when you want to
-fetch it. Point-cloud access is currently restricted to Home Assistant admins.
-A safely attributed stored file normally avoids mower generation; otherwise the
-mower has up to 45 seconds to publish a fresh file. A failed request returns a
-privacy-safe problem code and stage instead of exposing the vendor object name
-or signed download URL.
-
-This Dreame A2 view uses a real stored PCD from the integration, rendered by
-Lawn Mower Card:
-
-![Dreame A2 3D point-cloud view in Lawn Mower Card](assets/dreame-a2-3d-point-cloud.png)
-
-Current map support now includes:
-
-- a read-only `Map` camera for the active map
-- a read-only `All Maps` contact sheet for quick map inventory
-- a `Map` select that switches the mower's active map and refreshes the map,
-  zone, spot, edge, and maintenance-point controls
-- a `Selected Map Display Rotation` select that stores orientation per map
-- `select` entities for mowing action, edge, zone, spot, and maintenance-point
-  scope
-- preference controls that follow either the selected map's global record or
-  its selected custom zone
-- a **Go to Maintenance Point** button when the selected map contains a point
-  configured in the mower app
-- services for switching the active mower map and starting explicit zone, spot,
-  or edge jobs
-- runtime live-track telemetry surfaced through sensors and map-camera attributes
-- an admin-only, stored-or-fresh PCD point-cloud download for the selected app map
-- circular and rotated rectangular forbidden areas rendered from their compact
-  mower map representation
-
-The mower acknowledges map-switch commands even when it ignores them during an
-active, paused, or returning task. The integration blocks those states before
-writing and does not change the selected map until `MAPL` confirms the requested
-map index.
-
-Interactive map editing is still intentionally out of scope for now:
-
-- no-go editing
-- virtual-wall editing
-- zone geometry edits
-- other direct map mutations
-
-## Services
-
-The integration now exposes guarded current-map services on the `lawn_mower`
-entity:
-
-- `dreame_lawn_mower.switch_current_map`
-- `dreame_lawn_mower.start_zone_mowing`
-- `dreame_lawn_mower.start_spot_mowing`
-- `dreame_lawn_mower.start_edge_mowing`
-
-These use current decoded app-map and vector-map metadata. Map switching updates
-the real active mower map, while zone, spot, and edge starts target explicit
-current-map ids rather than relying only on the generic Home Assistant
-`start_mowing` action.
-
-For example, this starts the saved zone with ID `1` on the mower's active map:
-
-```yaml
-action: dreame_lawn_mower.start_zone_mowing
-target:
-  entity_id: lawn_mower.a3_awd_pro_3500
-data:
-  zone_ids: [1]
-```
-
-Use `entity_id` when the value starts with `lawn_mower.`. A Home Assistant
-`device_id` is a separate device-registry identifier and must not contain an
-entity ID. The lawn mower entity exposes `available_zone_ids`, and zone selects
-use names saved in the Dreame app when vector-map metadata provides them. An
-unnamed zone retains the stable `Zone #<id>` fallback.
-
-Zone, spot, and edge actions require both a mower acknowledgement and an
-authoritative task-type readback before Home Assistant reports success. If the
-mower acknowledges a zone request but starts whole-map mowing, the action fails
-instead of silently reporting the wrong job as successful. Explicit targeted
-services also update the local `Mowing Action` selection after confirmation.
-Unknown current-map IDs, map-scope mismatches, device rejection responses, and
-unconfirmed task types are surfaced as failed actions. A repeated targeted call
-is rejected before dispatch when the mower is already running the same task type
-and the integration cannot prove that a different target was requested.
-
-## Troubleshooting
-
-Start with a fresh Home Assistant diagnostics capture:
-
-1. Reproduce the problem once.
-2. Before reloading or restarting Home Assistant, open the integration or device
-   page and download diagnostics.
-3. Attach the downloaded JSON to the issue. Add screenshots or short log excerpts
-   only when they show something that is not already in the diagnostics.
-
-The report is sanitized by the integration and includes:
-
-- the installed integration, Home Assistant, Python, operating-system, and CPU
-  architecture versions
-- config-entry and coordinator health
-- privacy-safe setup, foreground-refresh, and background-metadata timings,
-  including bounded recent samples plus the latest and aggregate duration for
-  each operation
-- on-demand `point_cloud_generation` timings plus coordinate-free completion or
-  failure events, including the source, point count, payload size, selected map,
-  stored-object eligibility, stable error code, safe numeric Dreame cloud error,
-  stage, retryability flag, and timeout when relevant
-- current state and diagnostic attributes for every entity belonging to the
-  config entry, including the Live Video camera's last failure stage and a
-  bounded, privacy-safe summary of each TX video cloud stage
-- a bounded list of recent coordinator, map, schedule, and video failures with
-  repeated failures coalesced
-- the existing `triage`, `state_reconciliation`, schedule, map, firmware, and raw
-  property summaries
-
-Do not enable broad debug logging unless a maintainer asks for a specific logger.
-Cloud protocol debug output can contain data that needs additional review before
-it is posted publicly.
-
-Startup, refresh, and on-demand 3D map measurements are also written as log
-lines beginning with `Dreame mower performance`. The first setup, metadata
-hydration, and successful point-cloud generation are logged at info level.
-Unusually slow refreshes and failed point-cloud generations are logged as
-warnings. Each line reports only operation names, outcome codes, stages, and
-elapsed time; it does not contain credentials, mower identifiers, map data,
-object names, URLs, or coordinates.
-
-For startup reports, include both the `setup` and `metadata_refresh` entries
-from downloaded diagnostics. `setup` is the blocking Home Assistant load path.
-`metadata_refresh` covers optional maps, schedules, firmware, weather,
-maintenance, and preference metadata that continues in the background after
-the mower entity can load. The per-phase timings show which vendor endpoint is
-slow without requiring broad protocol debug logging.
-
-For a 3D map report, retry once and download diagnostics before restarting Home
-Assistant. Include the visible `point_cloud_*` reference from the card. The
-matching recent event shows whether a later request completed or the mower
-failed to publish a fresh object, the object could not be downloaded and
-validated, another generation was already running, or the integration reloaded
-during the request.
-
-`App Map Count` reports maps the mower has actually created; reserved cloud
-slots with `created: false` are excluded. Raw slot count remains available as
-the mower entity's `app_map_slot_count` diagnostic attribute.
-
-The staged cloud summaries retain field names, value types, safe status codes,
-required-field presence, and sanitized error messages. They do not retain raw
-response values, account or device identifiers, credentials, stream URLs, or
-unbounded payloads. This lets maintainers distinguish unsupported models,
-malformed vendor responses, and missing provisioning without asking users to
-share an account as the first debugging step.
-
-### Live video identity is not provisioned
-
-The integration reports `device_triple_missing` when both Dreame video identity
-endpoints return vendor code `10000`, `设备三元组不存在` ("device triple does not
-exist"), and the required `product_id`, `device_name`, and `p2p_info` fields are
-absent. This means Dreame has not provisioned the mower's XP2P video identity
-for the current account or region; it is not a video-runtime or model-support
-failure.
-
-Check live video in Dreamehome or MOVAhome first. If it is missing there too,
-contact Dreame support and include the diagnostics capture. A field report for
-an A3 AWD 1000 found this condition on an RU account and confirmed working video
-after the same mower was rebound to an EU account. That is one account/device
-result, not evidence that every device in a region behaves the same way.
-
-Changing account region requires pairing the mower to another account and can
-discard cloud-stored maps and settings. Treat that as a last resort, not the
-normal fix for `device_triple_missing`.
-
-For issue reports, include:
-
-- the downloaded diagnostics captured immediately after the failure
-- what you expected and the exact steps that failed
-- whether the same operation worked in Dreamehome or MOVAhome at that time
-- screenshots only when the visible result matters
-
-Home Assistant log lines that start with `Captured Dreame lawn mower ...` can be
-converted to JSON with:
-
-```bash
-python examples/extract_ha_payload.py home-assistant.log --summary
-```
-
-## Reusable Python Package
-
-This repository ships two usable layers:
-
-- `dreame_lawn_mower_client` for direct Python access to Dreame/MOVA mower
-  cloud, app-action, schedule, map, and diagnostic APIs
-- the Home Assistant integration in `custom_components/dreame_lawn_mower`
-
-Library docs: [docs/python-library.md](docs/python-library.md)
-
-Runnable example: [examples/python_client.py](examples/python_client.py)
-
-Example:
-
-```python
-from dreame_lawn_mower_client import DreameLawnMowerClient
-
-devices = await DreameLawnMowerClient.async_discover_devices(
-    username=username,
-    password=password,
-    country="eu",
-    account_type="dreame",
-)
-
-client = DreameLawnMowerClient(
-    username=username,
-    password=password,
-    country="eu",
-    account_type="dreame",
-    descriptor=devices[0],
-)
-snapshot = await client.async_refresh()
-print(snapshot.descriptor.title, snapshot.mower_state_name, snapshot.battery_level)
-```
-
-The Home Assistant integration uses the same client package name inside the
-custom component bundle, so HACS installs the protocol layer together with the
-integration while scripts and tests can still import `dreame_lawn_mower_client`
-directly.
-
-## Development
-
-Install development dependencies:
-
-```bash
-python -m pip install -e .[test]
-```
-
-Run checks:
-
-```bash
-python -m compileall dreame_lawn_mower_client custom_components tests examples
-pytest
-```
-
-Useful docs:
-
-- [Python library](docs/python-library.md)
-- [Development notes](docs/development.md)
-- [Roadmap](docs/roadmap.md)
-- [Dreamehome protocol research](docs/dreamehome-research.md)
-- [Agent handoff notes](docs/agent-handoff.md)
-
-## Safety
-
-Read-only probes are preferred. Anything that can move the mower or write mower
-settings must remain supervised, explicitly confirmed, and safe-state guarded.
+1. Choose **Dreame** or **MOVA**, matching the app you use.
+2. Enter the same account region, username, and password as in that app.
+3. Select your mower, then open its Home Assistant device page to check state,
+   battery, and the available controls.
+4. Open **Configure** to adjust polling, maps, notifications, or live video.
+
+For a dashboard, install
+[Lawn Mower Card](https://github.com/EvotecIT/lovelace-lawn-mower-card) separately
+and select your mower in its visual editor. It is optional: the integration
+also works with standard Home Assistant cards.
+
+Live video requires a supported mower, a provisioned account, and a Linux
+x86_64 or aarch64 Home Assistant host. Opening the camera never starts the mower.
+See [live video setup](docs/live-video.md) before troubleshooting playback.
+
+## Documentation
+
+| I want to… | Guide |
+| --- | --- |
+| Check my mower model and feature support | [Supported mowers](docs/supported-mowers.md) |
+| Set up entities and integration options | [Configuration](docs/configuration.md) · [Entity reference](docs/entities.md) |
+| Manage schedules, mowing targets, and preferences | [Mowing controls and settings](docs/mowing-controls.md) |
+| Configure maps, themes, saved previews, or 3D | [Maps and 3D](docs/maps.md) |
+| Use the camera or change retention behavior | [Live video](docs/live-video.md) |
+| Send alerts and build automations | [Notifications and automations](docs/notifications.md) |
+| See the dashboard and device page | [Screenshots](docs/screenshots.md) |
+| Diagnose a problem | [Troubleshooting](docs/troubleshooting.md) |
+
+Map display and selection are supported; editing no-go areas, virtual walls,
+or garden geometry is not. Confirm the map and target before any mowing action,
+and keep movement and maintenance operations supervised.
+
+## Support
+
+[Report a problem or model](https://github.com/EvotecIT/homeassistant-dreamelawnmower/issues/new/choose)
+with the mower model, firmware, account region, and what failed. Reproduce the
+problem once and download integration diagnostics **before** restarting Home
+Assistant. Review attachments for credentials, tokens, serial numbers, and
+location data before posting.
+
+## Contributing
+
+Use the [development guide](docs/development.md) for checks and safe probes,
+the [Python library guide](docs/python-library.md) for scripts, and the
+[roadmap](docs/roadmap.md) for planned work. Protocol and video research belong
+in the contributor docs, not in normal setup.

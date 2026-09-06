@@ -59,6 +59,17 @@ evidence.
 
 ## Confirmed A2 findings
 
+### Playback validation
+
+The original playback check used a copied `custom_components` installation,
+real Home Assistant mower and camera entities, and Home Assistant HLS output.
+The retained H.264 MP4 reopened independently at 640 × 360 and decoded 100 frames
+spanning 6.599 seconds. The camera also returned a JPEG through the PyAV/Pillow
+still-image path without the optional TurboJPEG system library. The frame was
+visually inspected; the check was not limited to an FLV header or byte count.
+
+### Transport observations
+
 The following observations came from supervised tests against a production
 Dreame A2:
 
