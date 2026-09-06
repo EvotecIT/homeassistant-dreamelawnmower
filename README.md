@@ -513,7 +513,8 @@ and path data remains available in map diagnostics.
 
 Enabled map cameras warm their first image in the background during entity
 startup. While a mowing session is active, coordinator updates also refresh the
-map source without waiting for a browser request. The camera still returns the
+map source without waiting for a browser request. An empty cache returns a loading
+image while the download runs, keeping camera requests responsive. The camera returns the
 last good JPEG for the same map immediately while a refresh runs. Switching maps
 discards the previous lawn's image. Failed current-map downloads are retried once;
 they do not silently substitute another saved map. Identical source images reuse
@@ -535,8 +536,7 @@ path display** can hide previous passes, render them subtly, or show every pass
 in full detail. These settings affect both app-map and vector-map rendering.
 Mint uses decorative stripes clipped to each lawn; the stripes do not indicate
 mowing progress or direction. Connector paths remain open and are never filled
-as extra lawns. Use
-**Selected Map Display Rotation** to store a different
+as extra lawns. Use **Selected Map Display Rotation** to store a different
 rotation for each map, with upright labels in locally rendered maps and the
 All Maps contact sheet. To use a custom mower marker, place a PNG, JPEG, or WebP
 under `/config/www` and enter its relative path, such as

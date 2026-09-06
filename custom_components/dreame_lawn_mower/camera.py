@@ -280,7 +280,17 @@ class DreameLawnMowerMapCamera(
                 self._start_map_refresh()
             return self._map_cache.last_image
 
-        return await asyncio.shield(self._start_map_refresh())
+        # Native map downloads can exceed HA's camera request timeout. Keep the
+        # cold-cache path responsive, just like the all-maps camera, while the
+        # one background refresh owns download and cache publication.
+        self._start_map_refresh()
+        return await self.hass.async_add_executor_job(
+            partial(
+                map_placeholder_jpeg,
+                title="Dreame map loading",
+                detail="The selected mower map is being prepared in the background.",
+            )
+        )
 
     def _start_map_refresh(self) -> asyncio.Task[bytes | None]:
         """Start or reuse the entity's in-flight map render."""
