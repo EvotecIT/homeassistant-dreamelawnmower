@@ -14,7 +14,8 @@ from typing import Any
 from PIL import Image, ImageDraw
 
 from .map_drawing import draw_lawn_polygon, draw_navigation_path
-from .map_geometry import polygon_label_point, rotate_canvas_point
+from .map_geometry import polygon_label_point
+from .map_projection import vector_map_projection
 from .map_visuals import (
     MapRenderStyle,
     draw_position_marker,
@@ -22,7 +23,6 @@ from .map_visuals import (
     map_font,
     map_render_style,
     marker_radius,
-    project_dreame_app_point,
 )
 from .models import DreameLawnMowerMapSummary
 
@@ -30,9 +30,6 @@ _PATH_SENTINEL = (32767, -32768)
 _SHAPE_RECTANGLE = 2
 _SHAPE_CIRCLE = 3
 _CIRCLE_SEGMENTS = 36
-_MAX_IMAGE_SIDE = 2048
-_MIN_IMAGE_SIDE = 400
-_PADDING = 40
 _LABEL_FONT_SIZE = 18
 _MIN_LABEL_SCALE = 0.5
 _MAX_LABEL_SCALE = 4.0
@@ -243,26 +240,17 @@ def render_vector_map_png(
         return None
 
     boundary = vector_map.boundary
-    map_width = max(boundary.width, 1)
-    map_height = max(boundary.height, 1)
-    scale = min(
-        (_MAX_IMAGE_SIDE - (2 * _PADDING)) / map_width,
-        (_MAX_IMAGE_SIDE - (2 * _PADDING)) / map_height,
-    )
-    scale = max(scale, _MIN_IMAGE_SIDE / max(map_width, map_height, 1))
-
-    image_width = int(map_width * scale) + (2 * _PADDING)
-    image_height = int(map_height * scale) + (2 * _PADDING)
     style = style or map_render_style()
+    projection = vector_map_projection(
+        boundary.x1, boundary.y1, boundary.x2, boundary.y2, rotation=style.rotation
+    )
+    image_width, image_height = projection.width, projection.height
     pixel_scale = max(image_width, image_height) / 900
     style = replace(
         style,
         stroke_scale=style.stroke_scale * pixel_scale,
         marker_scale=style.marker_scale * pixel_scale,
     )
-    native_width, native_height = image_width, image_height
-    if style.rotation in (90, 270):
-        image_width, image_height = image_height, image_width
     runtime_track_segments = filter_runtime_track_segments(
         vector_map,
         runtime_track_segments,
@@ -279,17 +267,7 @@ def render_vector_map_png(
     )
 
     def to_pixel(x: int, y: int) -> tuple[int, int]:
-        px, py = project_dreame_app_point(
-            x,
-            y,
-            max_x=boundary.x2,
-            min_y=boundary.y1,
-            scale=scale,
-            padding=_PADDING,
-        )
-        return rotate_canvas_point(
-            (px, py), native_width, native_height, style.rotation
-        )
+        return projection.point(x, y)
 
     for path in vector_map.paths:
         draw_navigation_path(image, [to_pixel(x, y) for x, y in path.points], style)

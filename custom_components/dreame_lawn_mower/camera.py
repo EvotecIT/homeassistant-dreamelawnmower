@@ -24,7 +24,6 @@ from .const import (
     CONF_MAP_MARKER_IMAGE,
     CONF_MAP_MARKER_SCALE,
     CONF_MAP_MOWING_PATH_STYLE,
-    CONF_MAP_ROTATION,
     CONF_MAP_ROTATIONS,
     CONF_MAP_SPOT_AREA_STYLE,
     CONF_MAP_STROKE_SCALE,
@@ -32,7 +31,6 @@ from .const import (
     DEFAULT_MAP_LABEL_SCALE,
     DEFAULT_MAP_MARKER_SCALE,
     DEFAULT_MAP_MOWING_PATH_STYLE,
-    DEFAULT_MAP_ROTATION,
     DEFAULT_MAP_SPOT_AREA_STYLE,
     DEFAULT_MAP_STROKE_SCALE,
     DEFAULT_MAP_THEME,
@@ -70,7 +68,9 @@ from .map_cache import (
     map_camera_should_refresh,
 )
 from .map_image_variants import MapImageVariants
+from .map_presentation import map_rotation, map_style
 from .map_preview import CONF_MAP_RESTART_PREVIEW, RestartMapPreview, preview_scope
+from .mowing_map_api import mowing_map_api_path
 from .point_cloud_api import current_point_cloud_api_path
 from .video_camera import DreameLawnMowerVideoCamera
 
@@ -124,6 +124,7 @@ class DreameLawnMowerMapCamera(
     _requires_map_capability = True
     _prewarm_map_image = True
     _supports_restart_preview = True
+    _supports_mowing_scene = True
     _refresh_cached_view_on_coordinator_update = True
     # Camera attributes describe the current rendered/diagnostic view. Persisting
     # their large map payloads on every refresh creates unbounded recorder churn.
@@ -252,6 +253,10 @@ class DreameLawnMowerMapCamera(
             selected_map_index=self.coordinator.selected_map_index,
         )
         attributes["restart_preview"] = self._preview_saved_at is not None
+        if self._supports_mowing_scene:
+            attributes["mowing_map_api_path"] = mowing_map_api_path(
+                self.coordinator.entry.entry_id
+            )
         attributes["restart_preview_saved_at"] = self._preview_saved_at
         return attributes
 
@@ -516,14 +521,7 @@ class DreameLawnMowerMapCamera(
 
     def _rotation_for_map_index(self, map_index: int | None) -> int:
         """Share each saved map's display orientation with the contact sheet."""
-        rotations = self.coordinator.entry.options.get(CONF_MAP_ROTATIONS, {})
-        if isinstance(rotations, dict) and map_index is not None:
-            value = rotations.get(str(map_index), rotations.get(map_index))
-            if value in (0, 90, 180, 270):
-                return int(value)
-        return int(
-            self.coordinator.entry.options.get(CONF_MAP_ROTATION, DEFAULT_MAP_ROTATION)
-        )
+        return map_rotation(self.coordinator.entry.options, map_index)
 
     @property
     def _selected_map_index(self) -> int | None:
@@ -534,27 +532,10 @@ class DreameLawnMowerMapCamera(
 
     @property
     def _map_style(self) -> MapRenderStyle:
-        options = self.coordinator.entry.options
-        return map_render_style(
-            options.get(CONF_MAP_THEME, DEFAULT_MAP_THEME),
-            rotation=self._map_rotation,
-            stroke_scale=options.get(
-                CONF_MAP_STROKE_SCALE,
-                DEFAULT_MAP_STROKE_SCALE,
-            ),
-            marker_scale=options.get(
-                CONF_MAP_MARKER_SCALE,
-                DEFAULT_MAP_MARKER_SCALE,
-            ),
+        return map_style(
+            self.coordinator.entry.options,
+            self._selected_map_index,
             marker_image=self._map_marker_image,
-            spot_area_style=options.get(
-                CONF_MAP_SPOT_AREA_STYLE,
-                DEFAULT_MAP_SPOT_AREA_STYLE,
-            ),
-            mowing_path_style=options.get(
-                CONF_MAP_MOWING_PATH_STYLE,
-                DEFAULT_MAP_MOWING_PATH_STYLE,
-            ),
         )
 
     @property
@@ -598,6 +579,7 @@ class DreameLawnMowerLivePathMapCamera(DreameLawnMowerMapCamera):
 
     _attr_name = "Live Path Map"
     _supports_restart_preview = False
+    _supports_mowing_scene = False
     _attr_icon = "mdi:map-marker-path"
     _attr_entity_registry_enabled_default = False
     _refresh_cached_view_on_coordinator_update = False
@@ -643,6 +625,7 @@ class DreameLawnMowerMapDataCamera(DreameLawnMowerMapCamera):
 
     _attr_name = "Map Diagnostics"
     _supports_restart_preview = False
+    _supports_mowing_scene = False
     _attr_icon = "mdi:code-json"
     _attr_entity_registry_enabled_default = False
     _requires_map_capability = False
@@ -733,6 +716,7 @@ class DreameLawnMowerAllMapsCamera(DreameLawnMowerMapCamera):
 
     _attr_name = "All Maps"
     _supports_restart_preview = False
+    _supports_mowing_scene = False
     _attr_icon = "mdi:map-multiple-outline"
     _attr_entity_registry_enabled_default = False
     _requires_map_capability = False

@@ -22,6 +22,7 @@ from .const import (
 )
 from .coordinator import DreameLawnMowerCoordinator
 from .map_preview import CONF_MAP_RESTART_PREVIEW, async_remove_restart_preview
+from .mowing_map_api import MOWING_MAP_API_KEY, MowingMapAPI, async_setup_mowing_map_api
 from .notifications import DreameLawnMowerNotificationManager
 from .option_updates import EntryUpdateSnapshot
 from .performance import format_performance_sample
@@ -134,6 +135,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
         async_setup_point_cloud_api(hass)
+        async_setup_mowing_map_api(hass)
         coordinator.loaded_platforms = platforms
         await setup_cycle.measure("services", lambda: async_setup_services(hass))
         await setup_cycle.measure(
@@ -208,6 +210,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         point_cloud_api = hass.data[DOMAIN].get(POINT_CLOUD_API_DATA_KEY)
         if isinstance(point_cloud_api, DreameLawnMowerPointCloudAPI):
             point_cloud_api.purge_entry(entry.entry_id)
+        mowing_map_api = hass.data[DOMAIN].get(MOWING_MAP_API_KEY)
+        if isinstance(mowing_map_api, MowingMapAPI):
+            await mowing_map_api.purge_entry(entry.entry_id)
         await coordinator.async_shutdown()
         if not any(
             isinstance(value, DreameLawnMowerCoordinator)

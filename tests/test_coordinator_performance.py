@@ -3275,6 +3275,7 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
                 return_value=cache,
             ),
             patch.object(integration_module, "async_setup_point_cloud_api"),
+            patch.object(integration_module, "async_setup_mowing_map_api"),
             patch.object(
                 integration_module,
                 "async_setup_services",
@@ -3358,6 +3359,7 @@ def test_successful_setup_shuts_down_coordinator_on_home_assistant_stop() -> Non
                 return_value=cache,
             ),
             patch.object(integration_module, "async_setup_point_cloud_api"),
+            patch.object(integration_module, "async_setup_mowing_map_api"),
             patch.object(
                 integration_module,
                 "async_setup_services",

@@ -48,6 +48,7 @@ from .client_map_helpers import (
     _validate_point_cloud_map_index,
     _validate_positive_number,
 )
+from .client_mowing_map import _DreameLawnMowerClientMowingMapMixin
 from .client_shared_helpers import (
     _app_action_data,
     _property_entry_received_at,
@@ -164,7 +165,9 @@ def _app_map_inventory_identity(
     )
 
 
-class _DreameLawnMowerClientMapsMixin(_DreameLawnMowerClientAppMapsMixin):
+class _DreameLawnMowerClientMapsMixin(
+    _DreameLawnMowerClientAppMapsMixin, _DreameLawnMowerClientMowingMapMixin
+):
     def _sync_get_current_app_map_index_readback(self) -> int | None:
         """Read only MAPL and return its unambiguous current map index."""
         try:

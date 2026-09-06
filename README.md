@@ -536,6 +536,19 @@ selected map boundary is retained in diagnostics but withheld from the image,
 and persisted mower trail data is not presented as live while the session is
 inactive.
 
+The primary map camera also exposes `mowing_map_api_path` for compatible versions
+of [Lawn Mower Card](https://github.com/EvotecIT/lovelace-lawn-mower-card). This
+read-only interface delivers the garden background separately from current
+position and observed movement, so a moving marker does not require downloading
+another full map image. The card can pan, zoom, fit the garden, and centre on a
+fresh mower position while keeping battery and mission figures visible.
+
+The interface requires the same read permission as the map camera. Geometry is
+kept out of entity attributes and recorder state. A missing map identity or stale
+position does not produce a live marker. Movement trails are not cut-area masks:
+the interactive background omits historical mowing paths and decorative stripes
+instead of presenting them as verified completed coverage.
+
 Under **Settings → Devices & services → Dreame Lawn Mower → Configure**, choose
 an Emerald, Mint, Dark, Midnight, or High contrast theme and adjust label, line, and
 marker scale. **Saved spot area display** can hide spot rectangles, show only
