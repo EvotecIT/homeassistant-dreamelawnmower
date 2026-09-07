@@ -180,6 +180,8 @@ async def async_setup_entry(
 class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
     """Main mower entity."""
 
+    _unrecorded_attributes = frozenset({"observed_mowing_time_details"})
+
     _attr_supported_features = (
         LawnMowerEntityFeature.START_MOWING
         | LawnMowerEntityFeature.PAUSE

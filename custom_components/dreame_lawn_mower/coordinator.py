@@ -2403,6 +2403,9 @@ class DreameLawnMowerCoordinator(
                 await super().async_shutdown()
                 self._base_shutdown_complete = True
             await self._async_stop_owned_tasks()
+            checkpoint = getattr(self, "observation_checkpoint", None)
+            if checkpoint is not None:
+                await checkpoint.async_close()
 
     async def async_shutdown_for_home_assistant_stop(self) -> None:
         """Stop owned work and close the client without draining metadata."""

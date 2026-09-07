@@ -24,6 +24,10 @@ from .coordinator import DreameLawnMowerCoordinator
 from .map_preview import CONF_MAP_RESTART_PREVIEW, async_remove_restart_preview
 from .mowing_map_api import MOWING_MAP_API_KEY, MowingMapAPI, async_setup_mowing_map_api
 from .notifications import DreameLawnMowerNotificationManager
+from .observation_checkpoint import (
+    ObservationCheckpoint,
+    async_remove_observation_checkpoint,
+)
 from .option_updates import EntryUpdateSnapshot
 from .performance import format_performance_sample
 from .point_cloud_api import (
@@ -102,6 +106,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         did=coordinator.client.descriptor.did,
     )
     try:
+        coordinator.observation_checkpoint = ObservationCheckpoint(
+            hass, entry.entry_id, coordinator
+        )
+        await coordinator.observation_checkpoint.async_load()
         try:
             await setup_cycle.measure("lan_video_cache", lan_cache.async_load)
         except Exception as err:  # noqa: BLE001 - cloud setup remains available.
@@ -248,5 +256,6 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove the optional private lawn preview when its entry is deleted."""
+    """Remove private cached evidence when its entry is deleted."""
     await async_remove_restart_preview(hass, entry.entry_id)
+    await async_remove_observation_checkpoint(hass, entry.entry_id)

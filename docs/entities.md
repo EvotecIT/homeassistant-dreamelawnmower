@@ -21,6 +21,7 @@ Common user-facing helpers include:
 - `sensor.<device>_battery`
 - `sensor.<device>_mowing_progress`
 - `sensor.<device>_observed_mowing_time`
+- `sensor.<device>_last_observed_run_duration`
 - `sensor.<device>_selected_mowing_action`
 - `sensor.<device>_selected_map`
 - `sensor.<device>_selected_target`
@@ -71,9 +72,37 @@ sampled state duration, not a measurement of blade activity. A new confirmed
 session resets it; before mowing is observed it has no value.
 
 Its `partial` attribute is true if observation began mid-session or a connection
-gap left time unobserved. An integration restart does not restore or backfill
-the timer. The mower entity also exposes `observed_mowing_time` and
+gap left time unobserved. After a restart, saved time continues only when fresh
+telemetry identifies the same firmware task within 24 hours. Time while Home
+Assistant was offline is excluded, and the restored measurement is partial.
+If task identity is missing or changed, the saved observation becomes an
+interrupted previous-run summary instead of being added to a new session.
+The mower entity also exposes `observed_mowing_time` and
 `observed_mowing_time_details` attributes for consumers that do not use the sensor.
+
+**Last Observed Run Duration** retains the previous observation after a session
+ends or is replaced. Its `measurement_state` distinguishes an observed ending
+from an interruption; neither is proof that the mower completed its target area.
+Saved summaries older than 30 days are not restored.
+
+### Restart storage
+
+The integration overwrites one private checkpoint per mower, limited to 16 KiB
+including storage metadata. It contains only the current observation, one
+previous-run summary, and minimal retained position/map identity evidence. It
+does not contain routes, point clouds, images, credentials, or raw telemetry.
+
+Progress is checkpointed on a 60-second schedule while observations change.
+State transitions are coalesced and rate-limited, and orderly shutdown or reload
+flushes the latest observation. A sudden crash can lose progress since the last
+checkpoint; it cannot make offline time count as mowing. Atomic replacement
+protects the previous file if a write fails. Removing the integration entry
+removes its checkpoint. Corrupt or incompatible saved data does not block normal
+mower operation.
+
+The changing observation timestamp is excluded from Recorder history, while
+the numeric duration remains available for normal HA history. This checkpoint
+limit is separate from Recorder retention and the optional saved map preview.
 
 ## Optional diagnostics
 

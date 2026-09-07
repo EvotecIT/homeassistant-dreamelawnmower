@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import math
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from threading import RLock
 from typing import Any
@@ -24,7 +24,11 @@ def position_timestamp(value: Any) -> float | None:
         except (ValueError, OverflowError):
             return None
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return float(value) if math.isfinite(value) else None
+        try:
+            timestamp = float(value)
+            return timestamp if math.isfinite(timestamp) else None
+        except OverflowError:
+            return None
     return None
 
 
@@ -86,8 +90,8 @@ class MowerPositionTracker:
     """Retain validated positions without reusing trails as dock evidence.
 
     Coordinates are bound to the map observed when their packet arrived, then
-    validated against its geometry. The cache is bounded to one map and is not
-    persisted; a cold start with only a heartbeat must remain unpositioned.
+    validated against its geometry. A bounded checkpoint may retain one map's
+    historical evidence, but it can never restore a live input packet.
     """
 
     def __init__(self) -> None:
@@ -98,6 +102,60 @@ class MowerPositionTracker:
         self._last_event: float | None = None
         self._geometry: str | None = None
         self._geometry_changed_at: float | None = None
+
+    def checkpoint(self, *, now: datetime | None = None) -> dict[str, Any] | None:
+        """Export at most two validated poses and a geometry fingerprint."""
+        current = (now or datetime.now(UTC)).timestamp()
+        with self._lock:
+            if self._geometry is None:
+                return None
+            last = self._last
+            dock = self._dock
+            if (
+                last
+                and not 0 <= current - last.observed_at <= LAST_POSITION_MAX_AGE_SECONDS
+            ):
+                last = None
+            if (
+                dock
+                and not 0 <= current - dock.observed_at <= DOCK_POSITION_MAX_AGE_SECONDS
+            ):
+                dock = None
+            if last is None and dock is None:
+                return None
+            return {
+                "geometry": self._geometry,
+                "last": asdict(replace(last, status="last_known", heading=None))
+                if last
+                else None,
+                "dock": asdict(dock) if dock else None,
+            }
+
+    def restore_checkpoint(self, record: Any, *, now: datetime | None = None) -> None:
+        """Restore history only; fresh map geometry must match before display."""
+        if not isinstance(record, dict) or set(record) != {"geometry", "last", "dock"}:
+            return
+        geometry = record["geometry"]
+        if (
+            not isinstance(geometry, str)
+            or len(geometry) != 64
+            or any(char not in "0123456789abcdef" for char in geometry)
+        ):
+            return
+        current = (now or datetime.now(UTC)).timestamp()
+        last = _checkpoint_position(record["last"], "last_known", current)
+        dock = _checkpoint_position(record["dock"], "known_dock", current)
+        with self._lock:
+            # Setup must load before live callbacks begin. Never overwrite live
+            # evidence if a late or repeated restore reaches this owner.
+            if self._input is not None or self._geometry is not None:
+                return
+            self._geometry = geometry
+            self._last, self._dock = last, dock
+            self._last_event = max(
+                (pose.observed_at for pose in (last, dock) if pose is not None),
+                default=None,
+            )
 
     def record(
         self, blob: Any, *, map_index: int | None, now: datetime | None = None
@@ -183,16 +241,61 @@ class MowerPositionTracker:
                     return position
             if docked and self._dock is not None:
                 if (
-                    0
+                    self._dock.map_index == map_index
+                    and contains(self._dock.x, self._dock.y)
+                    and 0
                     <= current - self._dock.observed_at
                     <= DOCK_POSITION_MAX_AGE_SECONDS
                 ):
                     return self._dock
             if self._last is not None:
                 if (
-                    0
+                    self._last.map_index == map_index
+                    and contains(self._last.x, self._last.y)
+                    and 0
                     <= current - self._last.observed_at
                     <= LAST_POSITION_MAX_AGE_SECONDS
                 ):
                     return replace(self._last, status="last_known", heading=None)
             return None
+
+
+def _checkpoint_position(record: Any, status: str, now: float) -> MowerPosition | None:
+    """Validate untrusted persisted pose scalars before they enter the tracker."""
+    if not isinstance(record, dict) or set(record) != {
+        "x",
+        "y",
+        "heading",
+        "observed_at",
+        "map_index",
+        "status",
+    }:
+        return None
+    age_limit = (
+        DOCK_POSITION_MAX_AGE_SECONDS
+        if status == "known_dock"
+        else LAST_POSITION_MAX_AGE_SECONDS
+    )
+    observed = position_timestamp(record["observed_at"])
+    if (
+        record["status"] != status
+        or observed is None
+        or not 0 <= now - observed <= age_limit
+        or not all(
+            type(record[key]) is int and abs(record[key]) <= 2**31 - 1
+            for key in ("x", "y")
+        )
+        or type(record["map_index"]) is not int
+        or not 0 <= record["map_index"] <= 65535
+    ):
+        return None
+    heading = record["heading"]
+    if heading is not None and (
+        type(heading) not in (int, float)
+        or not 0 <= heading <= 360
+        or not math.isfinite(heading)
+    ):
+        return None
+    return MowerPosition(
+        record["x"], record["y"], heading, observed, record["map_index"], status
+    )
