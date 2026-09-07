@@ -203,6 +203,7 @@ def test_camera_and_interactive_overlay_share_dock_evidence_after_session_ends()
         _latest_snapshot=SimpleNamespace(
             available=True,
             activity="docked",
+            state="charging",
             docked=True,
             state_event_at=(now - timedelta(seconds=2)).timestamp(),
         ),

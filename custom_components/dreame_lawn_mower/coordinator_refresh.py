@@ -235,25 +235,35 @@ class DreameLawnMowerRefreshMixin:
         mission_generation = runtime_mission_session_generation(
             self.runtime_telemetry_cache
         )
+        observed_device_generation = getattr(self, "_device_snapshot_generation", None)
         await cycle.measure(
             "active_app_maps",
             lambda: self.async_refresh_app_maps(force=force_map_identity),
         )
         runtime_snapshot = snapshot
-        if self._snapshot_is_stale(snapshot):
+        if (
+            mission_generation is not None
+            and mission_generation
+            != runtime_mission_session_generation(self.runtime_telemetry_cache)
+        ):
+            return False
+        if self._snapshot_is_stale(
+            snapshot, observed_generation=observed_device_generation
+        ):
             # A pose update can overtake the slower map read without changing
             # the mission. Hydrate the newest published snapshot, never revive
             # the stale foreground snapshot or cross a mission boundary.
-            if (
-                mission_generation is None
-                or mission_generation
-                != runtime_mission_session_generation(self.runtime_telemetry_cache)
-            ):
+            if mission_generation is None:
                 return False
-            runtime_snapshot = self._snapshot_for_publication(snapshot)
-            if not getattr(
-                runtime_snapshot, "available", False
-            ) or not runtime_tracking_active(runtime_snapshot):
+            # A borrowed snapshot can be evicted from bounded history while
+            # maps load. Its independent token still proves it is obsolete.
+            runtime_snapshot = self.data
+            if (
+                runtime_snapshot is snapshot
+                or self._snapshot_is_stale(runtime_snapshot)
+                or not getattr(runtime_snapshot, "available", False)
+                or not runtime_tracking_active(runtime_snapshot)
+            ):
                 return False
         map_identity_refreshed = bool(
             getattr(self, "app_maps_refresh_succeeded", False)
@@ -273,6 +283,20 @@ class DreameLawnMowerRefreshMixin:
             ),
         )
         if not runtime_current or self._snapshot_is_stale(runtime_snapshot):
+            newest = self.data
+            if (
+                mission_generation is not None
+                and mission_generation
+                == runtime_mission_session_generation(self.runtime_telemetry_cache)
+                and runtime_map_index is not None
+                and runtime_map_index == self._runtime_map_index()
+                and getattr(newest, "available", False)
+                and runtime_tracking_active(newest)
+            ):
+                # New pose callbacks invalidate a borrowed snapshot, not the
+                # independently verified map identity. Let the next callback
+                # bind its fresh packet without publishing this stale read.
+                self._runtime_map_identity_verified = map_identity_refreshed
             return False
         self._runtime_map_identity_verified = map_identity_refreshed
         return runtime_snapshot is snapshot
@@ -425,7 +449,7 @@ class DreameLawnMowerRefreshMixin:
                 core_operations.append(
                     (
                         "app_maps",
-                        lambda: self.async_refresh_app_maps(force=False),
+                        lambda: self._async_refresh_background_map_runtime(cycle),
                     )
                 )
 
@@ -622,6 +646,18 @@ class DreameLawnMowerRefreshMixin:
                 self._schedule_metadata_refresh(
                     refresh_map_and_runtime=True,
                 )
+
+    async def _async_refresh_background_map_runtime(
+        self, cycle: DreameLawnMowerPerformanceCycle
+    ) -> Any:
+        """Verify active map identity even when MQTT postpones normal polling."""
+        snapshot = getattr(self, "data", None)
+        if (
+            getattr(snapshot, "available", False)
+            and runtime_tracking_active(snapshot)
+        ):
+            return await self._async_refresh_active_runtime(cycle, snapshot)
+        return await self.async_refresh_app_maps(force=False)
 
     def _metadata_phase_needs_retry(self, phase: str, result: Any) -> bool:
         """Return whether one core phase has not populated its cache yet."""

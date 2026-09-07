@@ -151,7 +151,15 @@ class MowerPositionTracker:
                 self._last = self._dock = None
             position = self._input
             docked = snapshot_is_docked(snapshot)
-            docked_at = position_timestamp(getattr(snapshot, "state_event_at", None))
+            # A docked heartbeat can precede the physical charging property.
+            # Its flag must not borrow an older returning/paused timestamp to
+            # promote a pre-arrival position into observed dock coordinates.
+            docked_at = (
+                position_timestamp(getattr(snapshot, "state_event_at", None))
+                if getattr(snapshot, "state", None)
+                in {"charging", "charging_completed"}
+                else None
+            )
             if (
                 position is not None
                 and position.map_index == map_index

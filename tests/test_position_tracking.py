@@ -76,6 +76,19 @@ def test_pose_from_before_docking_is_only_last_known_not_dock_evidence():
     assert result.observed_at == NOW.timestamp()
 
 
+def test_docked_heartbeat_cannot_borrow_a_returning_state_timestamp():
+    """Arrival heartbeat can lead the charging property, as on the live A2."""
+    tracker = MowerPositionTracker()
+    tracker.record(pose(), map_index=0, now=NOW)
+    assert resolve(tracker).status == "current"
+    arrival = state(docked=True, at=NOW - timedelta(seconds=30))
+    arrival.state = "returning"
+    result = resolve(tracker, snapshot=arrival, now=NOW + timedelta(seconds=5))
+    assert snapshot_is_docked(arrival)
+    assert result.status == "last_known"
+    assert result.observed_at == NOW.timestamp()
+
+
 def test_fresh_pose_while_charging_learns_dock_and_survives_missing_packets():
     tracker = MowerPositionTracker()
     tracker.record(pose(), map_index=0, now=NOW)

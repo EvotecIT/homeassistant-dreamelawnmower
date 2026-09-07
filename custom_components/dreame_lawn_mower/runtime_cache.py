@@ -261,8 +261,14 @@ def runtime_mission_new_session(snapshot: Any) -> bool:
         )
     ):
         return True
+    return _runtime_new_session_notice_is_current(snapshot)
+
+
+def _runtime_new_session_notice_is_current(snapshot: Any) -> bool:
+    """Validate retained start notices independently of fresh task heartbeats."""
     if getattr(snapshot, "status_notice_name", None) not in _NEW_SESSION_STATUS_NOTICES:
         return False
+    terminal_event_at = _runtime_terminal_evidence_event_at(snapshot)
     notice_event_at = _event_timestamp(
         getattr(snapshot, "status_notice_event_at", None)
     )
@@ -327,14 +333,15 @@ def runtime_mission_new_session_event_at(snapshot: Any) -> float | None:
     """Return ordered realtime evidence for the current mission start."""
     if snapshot is None or not runtime_mission_new_session(snapshot):
         return None
+    if _runtime_new_session_notice_is_current(snapshot):
+        notice_at = _event_timestamp(getattr(snapshot, "status_notice_event_at", None))
+        if notice_at is not None:
+            return notice_at
     task_status = getattr(snapshot, "task_status", None)
     if task_status in _NEW_SESSION_TASK_STATUSES:
         event_at = _event_timestamp(getattr(snapshot, "task_status_event_at", None))
         if event_at is not None:
             return event_at
-    notice_name = getattr(snapshot, "status_notice_name", None)
-    if notice_name in _NEW_SESSION_STATUS_NOTICES:
-        return _event_timestamp(getattr(snapshot, "status_notice_event_at", None))
     return None
 
 
@@ -456,6 +463,16 @@ def runtime_mission_new_session_evidence(snapshot: Any) -> tuple[Any, ...] | Non
     task_id = runtime_mission_session_identity(snapshot)
     if task_id is not None:
         return ("task", task_id)
+    # Unlike a repeated/resumed starting phase, a start notice identifies an
+    # explicit replacement even when both properties are present together.
+    notice_name = getattr(snapshot, "status_notice_name", None)
+    notice_event_at = getattr(snapshot, "status_notice_event_at", None)
+    if (
+        _runtime_new_session_notice_is_current(snapshot)
+        and isinstance(notice_event_at, int | float)
+        and not isinstance(notice_event_at, bool)
+    ):
+        return ("notice", notice_name, float(notice_event_at))
     task_status = getattr(snapshot, "task_status", None)
     task_status_event_at = getattr(snapshot, "task_status_event_at", None)
     if (
@@ -464,14 +481,6 @@ def runtime_mission_new_session_evidence(snapshot: Any) -> tuple[Any, ...] | Non
         and not isinstance(task_status_event_at, bool)
     ):
         return ("task_status", task_status, float(task_status_event_at))
-    notice_name = getattr(snapshot, "status_notice_name", None)
-    notice_event_at = getattr(snapshot, "status_notice_event_at", None)
-    if (
-        notice_name in _NEW_SESSION_STATUS_NOTICES
-        and isinstance(notice_event_at, int | float)
-        and not isinstance(notice_event_at, bool)
-    ):
-        return ("notice", notice_name, float(notice_event_at))
     return None
 
 
@@ -570,6 +579,29 @@ class DreameLawnMowerRuntimeTelemetryCache:
         session_identity: int | None = None,
     ) -> None:
         """Apply authoritative mission state before optional telemetry work."""
+        if (
+            new_session
+            and active_session
+            and self._session_active
+            and not self._new_session_evidence_pending
+            and new_session_evidence is not None
+            and (
+                (
+                    new_session_evidence[:2] == ("task_status", "starting")
+                    and session_identity is None
+                )
+                or (
+                    session_identity is not None
+                    and new_session_evidence == ("task", session_identity)
+                    and self._session_identity in (None, session_identity)
+                )
+            )
+        ):
+            # Starting is also emitted repeatedly during departure and resume.
+            # A new reception timestamp or the first id of an active mission
+            # cannot establish a replacement. Fresh commands, changed task ids,
+            # explicit start notices and an observed inactive boundary still can.
+            new_session = False
         invalidated = False
         ordered_evidence_is_current = bool(
             not self._new_session_evidence_pending

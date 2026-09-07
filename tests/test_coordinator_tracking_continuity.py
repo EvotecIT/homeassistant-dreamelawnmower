@@ -19,7 +19,20 @@ from custom_components.dreame_lawn_mower.runtime_cache import (
 
 
 @pytest.mark.parametrize(
-    "transition", ["pose", "mission", "docked", "offline", "evicted", "evicted_error"]
+    "transition",
+    [
+        "pose",
+        "runtime_pose",
+        "runtime_mission",
+        "runtime_map",
+        "runtime_offline",
+        "runtime_docked",
+        "mission",
+        "docked",
+        "offline",
+        "evicted",
+        "evicted_error",
+    ],
 )
 def test_slow_map_read_hydrates_only_current_same_mission(transition: str) -> None:
     async def scenario() -> None:
@@ -60,6 +73,24 @@ def test_slow_map_read_hydrates_only_current_same_mission(transition: str) -> No
         blob = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
 
         async def read_runtime(**kwargs: object) -> object:
+            if transition.startswith("runtime_"):
+                # Frequent position callbacks must not starve independently
+                # verified map identity while a cloud telemetry read yields.
+                pose = SimpleNamespace(
+                    available=transition != "runtime_offline",
+                    activity="docked" if transition == "runtime_docked" else "mowing",
+                    docked=transition == "runtime_docked",
+                    mowing_session_active=transition != "runtime_docked",
+                )
+                coordinator._record_device_snapshot(pose)
+                coordinator._published_device_snapshot_generation = (
+                    coordinator._device_snapshot_generation
+                )
+                coordinator.data = pose
+                if transition == "runtime_mission":
+                    coordinator.runtime_telemetry_cache._session_generation += 1
+                if transition == "runtime_map":
+                    coordinator.app_maps = {"current_map_index": 1}
             if transition.startswith("evicted"):
                 # Simulate updates while the real telemetry read is pending.
                 await asyncio.sleep(0)
@@ -101,6 +132,8 @@ def test_slow_map_read_hydrates_only_current_same_mission(transition: str) -> No
             coordinator.client.update_runtime_live_tracking.assert_not_called()
             assert coordinator.runtime_status_blob is None
             assert coordinator.runtime_telemetry_cache.blob is None
-            assert coordinator._runtime_map_identity_verified is False
+            assert coordinator._runtime_map_identity_verified is (
+                transition == "runtime_pose"
+            )
 
     asyncio.run(scenario())
