@@ -43,7 +43,7 @@ position or mission telemetry. The companion Lawn Mower Card labels it **Saved
 preview** until a fresh map replaces it. Disabling the option removes the stored
 preview.
 
-Transient paths and positions are scoped to the selected map and mowing task.
+Transient paths are scoped to the selected map and mowing task.
 Changing either clears the prior session trail. A mower position outside the
 selected map boundary is retained in diagnostics but withheld from the image,
 and persisted mower trail data is not presented as live while the session is
@@ -63,6 +63,20 @@ kept out of entity attributes and recorder state. A missing map identity or stal
 position does not produce a live marker. Movement trails are not cut-area masks:
 the interactive background omits historical mowing paths and decorative stripes
 instead of presenting them as verified completed coverage.
+
+When fresh coordinates stop arriving, a compatible card can show a muted
+**Last known position** for up to 24 hours. **At dock · observed position** requires
+a valid position received while the mower is confirmed docked or charging;
+that observation can be reused for up to seven days while it remains docked.
+Both positions are tied to the map geometry and retain their observation time.
+Neither restores an old movement trail or survives an integration restart.
+
+Charging confirms that the mower is at its station, but does not supply the
+station's coordinates. After a cold start, a docked mower that sends only
+position-free heartbeats therefore shows **Docked · map position unavailable**.
+The integration does not use a maintenance point or the last route endpoint
+as an invented dock location. Camera attributes expose `position_status`,
+`position_source`, and `position_observed_at` for the same retained evidence.
 
 ## Appearance and rotation
 

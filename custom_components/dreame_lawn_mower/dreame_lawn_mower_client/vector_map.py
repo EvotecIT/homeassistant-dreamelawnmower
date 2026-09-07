@@ -233,6 +233,7 @@ def render_vector_map_png(
     label_scale: float = 1.0,
     runtime_track_segments: Sequence[Sequence[tuple[int, int]]] | None = None,
     runtime_position: tuple[int, int] | None = None,
+    position_status: str = "current",
     style: MapRenderStyle | None = None,
 ) -> bytes | None:
     """Render a mower vector map to PNG bytes."""
@@ -342,7 +343,21 @@ def render_vector_map_png(
 
     if runtime_position is not None:
         px, py = to_pixel(runtime_position[0], runtime_position[1])
-        draw_position_marker(image, draw, (px, py), style)
+        marker_style = (
+            replace(style, current_position=(130, 140, 150, 220))
+            if position_status == "last_known"
+            else style
+        )
+        draw_position_marker(image, draw, (px, py), marker_style)
+        label = {
+            "last_known": "Last known mower position",
+            "known_dock": "Mower at observed dock",
+        }.get(position_status)
+        if label:
+            draw.text(
+                (12, 12), label, font=map_font(14), fill=style.label_text,
+                stroke_width=2, stroke_fill=style.label_halo,
+            )
 
     for zone in vector_map.zones:
         if len(zone.points) < 3 or not zone.name:

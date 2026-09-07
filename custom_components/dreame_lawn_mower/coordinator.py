@@ -86,6 +86,7 @@ from .schedule_cache import (
     schedule_entry_has_usable_data,
     schedule_payload_has_usable_data,
 )
+from .session_timing import observe_mowing_time
 
 CLIENT_UPDATE_SHUTDOWN_GRACE_SECONDS = 1.0
 
@@ -359,6 +360,8 @@ class DreameLawnMowerCoordinator(
             self._published_device_snapshot_generation = generation
         if getattr(data, "available", True):
             self._observe_runtime_mission_boundary(data)
+        else:
+            observe_mowing_time(self, data, None)
         super().async_set_updated_data(data)
 
     def _observe_runtime_mission_boundary(
@@ -402,6 +405,7 @@ class DreameLawnMowerCoordinator(
                 cached_session_identity=session_identity,
             ),
         )
+        observe_mowing_time(self, snapshot, mission_active)
         return mission_active
 
     def _retain_feature_capability_evidence(

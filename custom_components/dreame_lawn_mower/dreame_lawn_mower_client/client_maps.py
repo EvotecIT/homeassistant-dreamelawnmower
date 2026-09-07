@@ -43,12 +43,12 @@ from .client_map_helpers import (
     _point_cloud_object_name,
     _PointCloudObjectIdentity,
     _render_app_map_payload_png,
-    _runtime_blob_position,
     _select_app_map_payload,
     _validate_point_cloud_map_index,
     _validate_positive_number,
 )
 from .client_mowing_map import _DreameLawnMowerClientMowingMapMixin
+from .client_position import apply_position_metadata, vector_map_position
 from .client_shared_helpers import (
     _app_action_data,
     _property_entry_received_at,
@@ -89,7 +89,6 @@ from .point_cloud import (
 from .vector_map import (
     filter_runtime_track_segments,
     parse_batch_vector_map,
-    position_within_vector_map,
     render_vector_map_png,
     vector_map_to_details,
     vector_map_to_summary,
@@ -280,7 +279,8 @@ class _DreameLawnMowerClientMapsMixin(
         )
         if _map_view_has_live_path(vector_view) or (
             isinstance(vector_view.details, Mapping)
-            and vector_view.details.get("runtime_position_valid") is True
+            and vector_view.details.get("position_status")
+            in {"current", "known_dock", "last_known"}
         ):
             return vector_view
 
@@ -377,12 +377,11 @@ class _DreameLawnMowerClientMapsMixin(
         )
         runtime_pose_x = getattr(runtime_blob, "candidate_runtime_pose_x", None)
         runtime_pose_y = getattr(runtime_blob, "candidate_runtime_pose_y", None)
-        runtime_position = (
-            _runtime_blob_position(runtime_blob) if runtime_context_matches else None
-        )
-        runtime_position_valid = position_within_vector_map(
-            vector_map,
-            runtime_position,
+        position = vector_map_position(self, vector_map)
+        runtime_position = (position.x, position.y) if position is not None else None
+        runtime_position_valid = position is not None and position.status == "current"
+        summary = apply_position_metadata(
+            position, snapshot=self._latest_snapshot, details=details, summary=summary
         )
         if runtime_pose_x is not None and runtime_pose_y is not None:
             details["runtime_pose_x"] = runtime_pose_x
@@ -425,7 +424,10 @@ class _DreameLawnMowerClientMapsMixin(
                 vector_map,
                 label_scale=label_scale,
                 runtime_track_segments=runtime_track_segments,
-                runtime_position=runtime_position if runtime_position_valid else None,
+                runtime_position=runtime_position,
+                position_status=(
+                    position.status if position is not None else "unavailable"
+                ),
                 style=style,
             )
         except Exception as err:  # noqa: BLE001 - diagnostics path

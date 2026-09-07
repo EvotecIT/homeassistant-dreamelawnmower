@@ -12,12 +12,16 @@ from typing import Any
 from .map_projection import MapProjection, vector_map_projection
 from .map_visuals import MapRenderStyle
 from .models import DreameLawnMowerStatusBlob
+from .position_tracking import (
+    POSITION_MAX_AGE_SECONDS,
+    MowerPosition,
+    map_position_identity,
+)
 from .vector_map import DreameLawnMowerVectorMap, render_vector_map_png
 
 MAX_SCENE_POINTS = 50_000
 MAX_BACKGROUND_BYTES = 4 * 1024 * 1024
 MAX_TRAIL_POINTS = 4096
-POSITION_MAX_AGE_SECONDS = 90
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +35,7 @@ class MowingMapScene:
     image_png: bytes
     projection: MapProjection
     bounds: tuple[int, int, int, int]
+    position_identity: str = ""
 
     def contains(self, x: Any, y: Any) -> bool:
         """Accept finite native coordinates inside this map's bounding box."""
@@ -91,6 +96,7 @@ def build_mowing_map_scene(
         image_png,
         projection,
         (boundary.x1, boundary.y1, boundary.x2, boundary.y2),
+        map_position_identity(vector_map),
     )
 
 
@@ -102,6 +108,8 @@ def mowing_map_overlay(
     active: bool,
     track_segments: Sequence[Sequence[tuple[int, int]]] = (),
     now: datetime | None = None,
+    retained_position: MowerPosition | None = None,
+    docked: bool = False,
 ) -> dict[str, Any]:
     """Project fresh, identity-matched telemetry without fetching or rendering.
 
@@ -116,9 +124,38 @@ def mowing_map_overlay(
         "coverage_available": False,
         "trail_kind": "observed_movement",
         "max_age_seconds": POSITION_MAX_AGE_SECONDS,
+        "docked": docked,
+        "position_observed_at": None,
     }
+    if retained_position is not None and (
+        retained_position.map_index != scene.map_index
+        or not scene.contains(retained_position.x, retained_position.y)
+    ):
+        retained_position = None
+    if retained_position is not None and scene.contains(
+        retained_position.x, retained_position.y
+    ):
+        px, py = scene.projection.point(retained_position.x, retained_position.y)
+        result.update(retained_position.details())
+        result["position"] = {
+            "x": px,
+            "y": py,
+            "heading": (
+                (270 - retained_position.heading + scene.projection.rotation) % 360
+            )
+            if retained_position.heading is not None
+            else None,
+        }
+        # Current markers expire against their measurement, never a refreshed
+        # assessment. Only explicitly retained labels use the assessment time.
+        result["updated_at"] = (
+            result["position_observed_at"]
+            if retained_position.status == "current"
+            else (now or datetime.now(UTC)).isoformat()
+        )
     if map_index != scene.map_index:
-        result["position_status"] = "map_mismatch"
+        if retained_position is None:
+            result["position_status"] = "map_mismatch"
         return result
     if blob is None or not blob.frame_valid:
         return result
@@ -130,11 +167,13 @@ def mowing_map_overlay(
     except (ValueError, TypeError, OverflowError):
         return result
     if not -5 <= age <= POSITION_MAX_AGE_SECONDS:
-        result["position_status"] = "stale"
+        if retained_position is None:
+            result["position_status"] = "stale"
         return result
-    result["updated_at"] = updated.isoformat()
+    if retained_position is None:
+        result["updated_at"] = updated.isoformat()
     x, y = blob.candidate_runtime_pose_x, blob.candidate_runtime_pose_y
-    if scene.contains(x, y):
+    if retained_position is None and scene.contains(x, y):
         px, py = scene.projection.point(x, y)
         heading = blob.candidate_runtime_heading_deg
         result["position"] = {
@@ -147,9 +186,10 @@ def mowing_map_overlay(
             else None,
         }
         result["position_status"] = "current"
-    else:
+        result["position_observed_at"] = updated.isoformat()
+    elif retained_position is None:
         result["position_status"] = "out_of_bounds"
-    if active:
+    if active and result["position_status"] == "current":
         # Retain recent segments, never joining across invalid points or gaps.
         remaining = MAX_TRAIL_POINTS
         retained: list[list[list[int]]] = []

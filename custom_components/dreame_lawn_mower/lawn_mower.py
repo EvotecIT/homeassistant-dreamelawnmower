@@ -66,6 +66,7 @@ from .services import (
     _guard_preference_write_request,
     preference_change_request,
 )
+from .session_timing import observed_mowing_time_attributes
 
 ACTIVITY_MAP = {
     ACTIVITY_DOCKED: LawnMowerActivity.DOCKED,
@@ -359,6 +360,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             "mowing_mode_name": snapshot.mowing_mode_name,
             "mowed_area": snapshot.mowed_area,
             "mowing_time": snapshot.mowing_time,
+            **observed_mowing_time_attributes(self.coordinator),
             "active_segment_count": getattr(snapshot, "active_segment_count", None),
             "current_zone_id": getattr(snapshot, "current_zone_id", None),
             "current_zone_name": getattr(snapshot, "current_zone_name", None),

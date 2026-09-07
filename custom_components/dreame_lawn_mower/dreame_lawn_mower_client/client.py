@@ -190,6 +190,7 @@ from .point_cloud import (
     DreameLawnMowerPointCloudError,
 )
 from .point_cloud import parse_pcd_metadata as parse_pcd_metadata
+from .position_tracking import MowerPositionTracker as _MowerPositionTracker
 from .runtime_state import RESUME_MOWING_REQUEST as RESUME_MOWING_REQUEST
 from .runtime_state import (
     snapshot_session_control_state,
@@ -459,6 +460,7 @@ class DreameLawnMowerClient(
         self._update_callback: _typing.Callable[[], None] | None = None
         self._latest_snapshot: DreameLawnMowerSnapshot | None = None
         self._latest_runtime_status_blob: DreameLawnMowerStatusBlob | None = None
+        self._position_tracker = _MowerPositionTracker()
         self._runtime_live_track_segments: tuple[
             tuple[tuple[int, int], ...],
             ...,
@@ -504,6 +506,7 @@ class DreameLawnMowerClient(
         map_index: int | None = None,
     ) -> None:
         """Cache active-session runtime track history for live map overlays."""
+        self._position_tracker.record(status_blob, map_index=map_index)
         self._latest_runtime_status_blob = status_blob
         self._runtime_session_active = active
         if not active:

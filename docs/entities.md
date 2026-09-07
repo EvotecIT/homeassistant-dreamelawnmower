@@ -20,6 +20,7 @@ Common user-facing helpers include:
 - `sensor.<device>_error`
 - `sensor.<device>_battery`
 - `sensor.<device>_mowing_progress`
+- `sensor.<device>_observed_mowing_time`
 - `sensor.<device>_selected_mowing_action`
 - `sensor.<device>_selected_map`
 - `sensor.<device>_selected_target`
@@ -56,6 +57,25 @@ Common user-facing helpers include:
 - `binary_sensor.<device>_returning`
 - `calendar.<device>_schedule`
 - `camera.<device>_live_video` on supported Linux hosts
+
+## Mowing time
+
+**Current Mowing Time** is reported by the mower. It remains unavailable when
+the firmware supplies no duration; a completed work-log total is not a current
+session measurement.
+
+**Observed Mowing Time** is a separate, integration-measured duration in minutes.
+It accumulates between successful observations of the mowing state, excludes
+observed pauses and docking, and freezes across connection failures. It is a
+sampled state duration, not a measurement of blade activity. A new confirmed
+session resets it; before mowing is observed it has no value.
+
+Its `partial` attribute is true if observation began mid-session or a connection
+gap left time unobserved. An integration restart does not restore or backfill
+the timer. The mower entity also exposes `observed_mowing_time` and
+`observed_mowing_time_details` attributes for consumers that do not use the sensor.
+
+## Optional diagnostics
 
 Many reverse-engineering and validation helpers are disabled by default. Enable
 them from the entity registry only when troubleshooting:

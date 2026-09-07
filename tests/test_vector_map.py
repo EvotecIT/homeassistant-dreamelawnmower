@@ -663,17 +663,23 @@ def test_vector_map_view_exposes_runtime_position_without_track_points() -> None
 
 
 def test_map_view_prefers_valid_runtime_position_before_track_exists() -> None:
+    from datetime import UTC, datetime
+
     client = _client()
+    client._latest_snapshot = SimpleNamespace(available=True, activity="mowing")
     client._sync_refresh_app_map_view = lambda **kwargs: DreameLawnMowerMapView(  # type: ignore[method-assign]  # noqa: ARG005
         source="app_action_map",
         summary=DreameLawnMowerMapSummary(available=True),
         image_png=b"app-map",
+        app_maps={"current_map_index": 0},
     )
     client._sync_get_vector_map_batch_data = lambda: _batch_payload()
     client._safe_map_diagnostics = lambda **kwargs: None
     client.update_runtime_live_tracking(
         SimpleNamespace(
             hex="runtime-pose-only",
+            frame_valid=True,
+            received_at=datetime.now(UTC).isoformat(),
             candidate_runtime_track_segments=(),
             candidate_runtime_pose_x=50,
             candidate_runtime_pose_y=40,

@@ -93,6 +93,9 @@ class DreameLawnMowerConnectivityMixin:
         error: BaseException | str | None,
     ) -> DreameLawnMowerSnapshot | None:
         """Record a link interruption and return safe retained state when fresh."""
+        timer = getattr(self, "observed_mowing_timer", None)
+        if timer is not None:
+            timer.interrupt()
         now = datetime.now(UTC)
         if not self.connection_degraded:
             self._connectivity_degraded_since = now
