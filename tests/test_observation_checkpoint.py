@@ -225,78 +225,86 @@ def setup_checkpoint(monkeypatch, record=None):
     )
 
 
-@pytest.mark.asyncio
-async def test_frequent_samples_cannot_starve_checkpoints_or_write_each_heartbeat(
+def test_frequent_samples_cannot_starve_checkpoints_or_write_each_heartbeat(
     monkeypatch,
 ):
-    checkpoint, coordinator, clock, store, saved = setup_checkpoint(monkeypatch)
-    checkpoint.async_schedule_save()
-    await clock.advance(2)
-    await checkpoint._task
-    assert len(saved) == 1
-    for second in range(3, 123):
-        observe(coordinator.observed_mowing_timer, 60 + second)
+    async def scenario():
+        checkpoint, coordinator, clock, store, saved = setup_checkpoint(monkeypatch)
         checkpoint.async_schedule_save()
-        await clock.advance(1)
-        if checkpoint._task is not None:
-            await checkpoint._task
-    assert 2 <= len(saved) <= 3
-    await checkpoint.async_close()
-    assert saved[-1]["timing"]["current"]["seconds"] == 182
-    assert persistence.checkpoint_fits(saved[-1], checkpoint._key)
-    assert len(json.dumps(saved[-1]).encode()) < 2048
-    assert set(saved[-1]) == {"scope", "saved_at", "timing", "position"}
+        await clock.advance(2)
+        await checkpoint._task
+        assert len(saved) == 1
+        for second in range(3, 123):
+            observe(coordinator.observed_mowing_timer, 60 + second)
+            checkpoint.async_schedule_save()
+            await clock.advance(1)
+            if checkpoint._task is not None:
+                await checkpoint._task
+        assert 2 <= len(saved) <= 3
+        await checkpoint.async_close()
+        assert saved[-1]["timing"]["current"]["seconds"] == 182
+        assert persistence.checkpoint_fits(saved[-1], checkpoint._key)
+        assert len(json.dumps(saved[-1]).encode()) < 2048
+        assert set(saved[-1]) == {"scope", "saved_at", "timing", "position"}
+
+    asyncio.run(scenario())
 
 
-@pytest.mark.asyncio
-async def test_paused_timestamps_do_not_produce_repeated_disk_writes(monkeypatch):
-    checkpoint, coordinator, clock, store, saved = setup_checkpoint(monkeypatch)
-    observe(coordinator.observed_mowing_timer, 90, mowing=False)
-    checkpoint.async_schedule_save()
-    await clock.advance(2)
-    for second in range(100, 1000, 60):
-        observe(coordinator.observed_mowing_timer, second, mowing=False)
+def test_paused_timestamps_do_not_produce_repeated_disk_writes(monkeypatch):
+    async def scenario():
+        checkpoint, coordinator, clock, store, saved = setup_checkpoint(monkeypatch)
+        observe(coordinator.observed_mowing_timer, 90, mowing=False)
         checkpoint.async_schedule_save()
-        await clock.advance(60)
-    await checkpoint.async_close()
-    assert len(saved) == 1
+        await clock.advance(2)
+        for second in range(100, 1000, 60):
+            observe(coordinator.observed_mowing_timer, second, mowing=False)
+            checkpoint.async_schedule_save()
+            await clock.advance(60)
+        await checkpoint.async_close()
+        assert len(saved) == 1
+
+    asyncio.run(scenario())
 
 
-@pytest.mark.asyncio
-async def test_store_failure_does_not_disable_control_or_spam_logs(monkeypatch, caplog):
-    checkpoint, coordinator, clock, store, saved = setup_checkpoint(monkeypatch)
-    store.async_save.side_effect = OSError("disk full")
-    await checkpoint.async_flush()
-    await checkpoint.async_flush()
-    assert caplog.text.count("checkpoint unavailable") == 1
-    store.async_save.side_effect = None
-    await checkpoint.async_flush()
-    assert store.async_save.await_count == 3
+def test_store_failure_does_not_disable_control_or_spam_logs(monkeypatch, caplog):
+    async def scenario():
+        checkpoint, coordinator, clock, store, saved = setup_checkpoint(monkeypatch)
+        store.async_save.side_effect = OSError("disk full")
+        await checkpoint.async_flush()
+        await checkpoint.async_flush()
+        assert caplog.text.count("checkpoint unavailable") == 1
+        store.async_save.side_effect = None
+        await checkpoint.async_flush()
+        assert store.async_save.await_count == 3
+
+    asyncio.run(scenario())
 
 
-@pytest.mark.asyncio
-async def test_remove_waits_for_inflight_write_and_prevents_recreation(monkeypatch):
-    checkpoint, coordinator, clock, store, saved = setup_checkpoint(monkeypatch)
-    entered, release = asyncio.Event(), asyncio.Event()
+def test_remove_waits_for_inflight_write_and_prevents_recreation(monkeypatch):
+    async def scenario():
+        checkpoint, coordinator, clock, store, saved = setup_checkpoint(monkeypatch)
+        entered, release = asyncio.Event(), asyncio.Event()
 
-    async def slow_save(record):
-        entered.set()
-        await release.wait()
-        saved.append(record)
+        async def slow_save(record):
+            entered.set()
+            await release.wait()
+            saved.append(record)
 
-    store.async_save.side_effect = slow_save
-    checkpoint.async_schedule_save()
-    await clock.advance(2)
-    await entered.wait()
-    removing = asyncio.create_task(checkpoint.async_remove())
-    await asyncio.sleep(0)
-    checkpoint.async_schedule_save()
-    assert store.async_remove.await_count == 0
-    release.set()
-    await removing
-    await clock.advance(100)
-    assert store.async_remove.await_count == 1
-    assert len(saved) == 1
+        store.async_save.side_effect = slow_save
+        checkpoint.async_schedule_save()
+        await clock.advance(2)
+        await entered.wait()
+        removing = asyncio.create_task(checkpoint.async_remove())
+        await asyncio.sleep(0)
+        checkpoint.async_schedule_save()
+        assert store.async_remove.await_count == 0
+        release.set()
+        await removing
+        await clock.advance(100)
+        assert store.async_remove.await_count == 1
+        assert len(saved) == 1
+
+    asyncio.run(scenario())
 
 
 def test_checkpoint_size_includes_storage_envelope_and_rejects_oversize():
@@ -330,57 +338,64 @@ def test_previous_run_sensor_and_recorder_exclusions():
     )
 
 
-@pytest.mark.asyncio
-async def test_cancelled_write_is_drained_before_entry_removal(monkeypatch):
-    checkpoint, coordinator, clock, store, saved = setup_checkpoint(monkeypatch)
-    entered, release = asyncio.Event(), asyncio.Event()
+def test_cancelled_write_is_drained_before_entry_removal(monkeypatch):
+    async def scenario():
+        checkpoint, coordinator, clock, store, saved = setup_checkpoint(monkeypatch)
+        entered, release = asyncio.Event(), asyncio.Event()
 
-    async def slow_save(record):
-        entered.set()
-        await release.wait()
-        saved.append(record)
+        async def slow_save(record):
+            entered.set()
+            await release.wait()
+            saved.append(record)
 
-    store.async_save.side_effect = slow_save
-    checkpoint.async_schedule_save()
-    await clock.advance(2)
-    await entered.wait()
-    checkpoint._task.cancel()
-    removing = asyncio.create_task(checkpoint.async_remove())
-    await asyncio.sleep(0)
-    assert store.async_remove.await_count == 0
-    release.set()
-    await removing
-    assert store.async_remove.await_count == 1
-    count = len(saved)
-    checkpoint.async_schedule_save()
-    await clock.advance(100)
-    assert len(saved) == count
-
-
-@pytest.mark.asyncio
-async def test_cancelled_load_never_overwrites_unread_evidence(monkeypatch):
-    checkpoint, coordinator, clock, store, saved = setup_checkpoint(monkeypatch)
-    store.async_load.side_effect = asyncio.CancelledError
-    with pytest.raises(asyncio.CancelledError):
-        await checkpoint.async_load()
-    await checkpoint.async_close()
-    assert not saved
-
-
-@pytest.mark.asyncio
-async def test_rapid_transitions_are_rate_limited(monkeypatch):
-    checkpoint, coordinator, clock, store, saved = setup_checkpoint(monkeypatch)
-    for second in range(120):
-        observe(coordinator.observed_mowing_timer, 60 + second, mowing=second % 2 == 0)
+        store.async_save.side_effect = slow_save
         checkpoint.async_schedule_save()
-        await clock.advance(1)
-        if checkpoint._task is not None:
-            await checkpoint._task
-    assert len(saved) <= 12
-    await checkpoint.async_close()
+        await clock.advance(2)
+        await entered.wait()
+        checkpoint._task.cancel()
+        removing = asyncio.create_task(checkpoint.async_remove())
+        await asyncio.sleep(0)
+        assert store.async_remove.await_count == 0
+        release.set()
+        await removing
+        assert store.async_remove.await_count == 1
+        count = len(saved)
+        checkpoint.async_schedule_save()
+        await clock.advance(100)
+        assert len(saved) == count
+
+    asyncio.run(scenario())
 
 
-@pytest.mark.asyncio
+def test_cancelled_load_never_overwrites_unread_evidence(monkeypatch):
+    async def scenario():
+        checkpoint, coordinator, clock, store, saved = setup_checkpoint(monkeypatch)
+        store.async_load.side_effect = asyncio.CancelledError
+        with pytest.raises(asyncio.CancelledError):
+            await checkpoint.async_load()
+        await checkpoint.async_close()
+        assert not saved
+
+    asyncio.run(scenario())
+
+
+def test_rapid_transitions_are_rate_limited(monkeypatch):
+    async def scenario():
+        checkpoint, coordinator, clock, store, saved = setup_checkpoint(monkeypatch)
+        for second in range(120):
+            observe(
+                coordinator.observed_mowing_timer, 60 + second, mowing=second % 2 == 0
+            )
+            checkpoint.async_schedule_save()
+            await clock.advance(1)
+            if checkpoint._task is not None:
+                await checkpoint._task
+        assert len(saved) <= 12
+        await checkpoint.async_close()
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize(
     "field,value",
     [
@@ -391,18 +406,21 @@ async def test_rapid_transitions_are_rate_limited(monkeypatch):
         ("timing", {"unexpected": "a" * 16384}),
     ],
 )
-async def test_invalid_store_envelope_cannot_restore_a_run(monkeypatch, field, value):
-    first, _, _, _, saved = setup_checkpoint(monkeypatch)
-    await first.async_close()
-    record = saved[-1]
-    record[field] = value
-    second, owner, _, _, _ = setup_checkpoint(monkeypatch, record=record)
-    owner.observed_mowing_timer = ObservedMowingTimer()
-    await second.async_load()
-    observe(owner.observed_mowing_timer, 120)
-    assert owner.observed_mowing_timer.minutes == 0
-    assert owner.observed_mowing_timer.last_run is None
-    await second.async_close()
+def test_invalid_store_envelope_cannot_restore_a_run(monkeypatch, field, value):
+    async def scenario():
+        first, _, _, _, saved = setup_checkpoint(monkeypatch)
+        await first.async_close()
+        record = saved[-1]
+        record[field] = value
+        second, owner, _, _, _ = setup_checkpoint(monkeypatch, record=record)
+        owner.observed_mowing_timer = ObservedMowingTimer()
+        await second.async_load()
+        observe(owner.observed_mowing_timer, 120)
+        assert owner.observed_mowing_timer.minutes == 0
+        assert owner.observed_mowing_timer.last_run is None
+        await second.async_close()
+
+    asyncio.run(scenario())
 
 
 def test_stale_terminal_snapshot_cannot_replace_saved_mission_identity():
