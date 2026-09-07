@@ -3,6 +3,7 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
@@ -186,3 +187,86 @@ def test_trail_preserves_gaps_and_stays_bounded():
         track_segments=(((10, 10), (20, 20)),),
     )
     assert ended["trail"] == []
+
+
+def test_camera_and_interactive_overlay_share_dock_evidence_after_session_ends():
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        client_position,
+        position_tracking,
+    )
+
+    now = datetime.now(UTC)
+    tracker = position_tracking.MowerPositionTracker()
+    tracker.record(replace(telemetry(), received_at=now.isoformat()), map_index=2)
+    client = SimpleNamespace(
+        _position_tracker=tracker,
+        _latest_snapshot=SimpleNamespace(
+            available=True,
+            activity="docked",
+            state="charging",
+            docked=True,
+            state_event_at=(now - timedelta(seconds=2)).timestamp(),
+        ),
+        _latest_runtime_status_blob=None,
+        _runtime_live_map_index=None,
+        _runtime_session_active=False,
+        _runtime_live_track_segments=(),
+    )
+    position = client_position.vector_map_position(client, garden())
+    scene = build_mowing_map_scene(garden(), style=map_render_style())
+    mixin = client_mowing_map._DreameLawnMowerClientMowingMapMixin
+    overlay = mixin.mowing_map_runtime_overlay(client, scene)
+    assert position.status == overlay["position_status"] == "known_dock"
+    assert overlay["position_observed_at"] == position.details()["position_observed_at"]
+    assert overlay["position"]["x"] == scene.projection.point(position.x, position.y)[0]
+    assert overlay["trail"] == []
+    assert overlay["docked"] is True
+
+
+def test_interactive_client_does_not_bypass_replaced_geometry_rejection():
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        position_tracking,
+    )
+
+    now = datetime.now(UTC)
+    blob = replace(telemetry(), received_at=now.isoformat())
+    tracker = position_tracking.MowerPositionTracker()
+    tracker.record(blob, map_index=2)
+    client = SimpleNamespace(
+        _position_tracker=tracker,
+        _latest_snapshot=SimpleNamespace(available=True, activity="mowing"),
+        _latest_runtime_status_blob=blob,
+        _runtime_live_task_id=None,
+        _runtime_live_map_index=2,
+        _runtime_session_active=True,
+        _runtime_live_track_segments=(((10, 10), (20, 20)),),
+    )
+    mixin = client_mowing_map._DreameLawnMowerClientMowingMapMixin
+    first = build_mowing_map_scene(garden(), style=map_render_style())
+    assert mixin.mowing_map_runtime_overlay(client, first)["position"] is not None
+    replaced = build_mowing_map_scene(
+        replace(garden(), map_id=8), style=map_render_style()
+    )
+    overlay = mixin.mowing_map_runtime_overlay(client, replaced)
+    assert overlay["position"] is None
+    assert overlay["trail"] == []
+
+
+def test_current_marker_expiry_remains_bound_to_measurement_time():
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        position_tracking,
+    )
+
+    observed = NOW - timedelta(seconds=89)
+    position = position_tracking.MowerPosition(200, 200, 0, observed.timestamp(), 2)
+    scene = build_mowing_map_scene(garden(), style=map_render_style())
+    overlay = mowing_map_overlay(
+        scene,
+        replace(telemetry(), received_at=observed.isoformat()),
+        map_index=2,
+        active=True,
+        retained_position=position,
+        now=NOW,
+    )
+    assert overlay["position_status"] == "current"
+    assert overlay["updated_at"] == overlay["position_observed_at"]

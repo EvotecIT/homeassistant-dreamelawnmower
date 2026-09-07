@@ -8,6 +8,7 @@ from typing import Any
 
 from .map_visuals import MapRenderStyle
 from .mowing_map import MowingMapScene, build_mowing_map_scene, mowing_map_overlay
+from .position_tracking import snapshot_is_docked
 from .vector_map import parse_batch_vector_map
 
 MAX_SCENE_INPUT_UNITS = 4 * 1024 * 1024
@@ -63,7 +64,17 @@ class _DreameLawnMowerClientMowingMapMixin:
 
     def mowing_map_runtime_overlay(self, scene: MowingMapScene) -> dict[str, Any]:
         """Read the existing session cache without requesting mower operations."""
+        position = self._position_tracker.resolve(
+            map_index=scene.map_index,
+            geometry=scene.position_identity,
+            contains=scene.contains,
+            snapshot=self._latest_snapshot,
+        )
         blob = self._latest_runtime_status_blob
+        # The tracker owns geometry binding, including negative decisions.
+        # A raw packet must not resurrect a rejected position in the projector.
+        if position is None or not getattr(self._latest_snapshot, "available", False):
+            blob = None
         if (
             blob is not None
             and blob.candidate_runtime_task_id is not None
@@ -76,4 +87,6 @@ class _DreameLawnMowerClientMowingMapMixin:
             map_index=self._runtime_live_map_index,
             active=self._runtime_session_active is True,
             track_segments=self._runtime_live_track_segments,
+            retained_position=position,
+            docked=snapshot_is_docked(self._latest_snapshot),
         )

@@ -86,6 +86,7 @@ from .schedule_cache import (
     schedule_entry_has_usable_data,
     schedule_payload_has_usable_data,
 )
+from .session_timing import observe_mowing_time
 
 CLIENT_UPDATE_SHUTDOWN_GRACE_SECONDS = 1.0
 
@@ -359,6 +360,8 @@ class DreameLawnMowerCoordinator(
             self._published_device_snapshot_generation = generation
         if getattr(data, "available", True):
             self._observe_runtime_mission_boundary(data)
+        else:
+            observe_mowing_time(self, data, None)
         super().async_set_updated_data(data)
 
     def _observe_runtime_mission_boundary(
@@ -402,6 +405,7 @@ class DreameLawnMowerCoordinator(
                 cached_session_identity=session_identity,
             ),
         )
+        observe_mowing_time(self, snapshot, mission_active)
         return mission_active
 
     def _retain_feature_capability_evidence(
@@ -627,6 +631,12 @@ class DreameLawnMowerCoordinator(
                     bluetooth_error,
                 )
             self.async_set_updated_data(snapshot)
+            if runtime_active and not getattr(
+                self, "_runtime_map_identity_verified", False
+            ):
+                # Push updates reset HA's polling interval. Acquire missing map
+                # identity through the existing coalesced background owner.
+                self._schedule_metadata_refresh(refresh_map_and_runtime=True)
             settings_event_at = getattr(snapshot, "device_settings_event_at", None)
             preferences_event_at = getattr(
                 snapshot,
@@ -2393,6 +2403,9 @@ class DreameLawnMowerCoordinator(
                 await super().async_shutdown()
                 self._base_shutdown_complete = True
             await self._async_stop_owned_tasks()
+            checkpoint = getattr(self, "observation_checkpoint", None)
+            if checkpoint is not None:
+                await checkpoint.async_close()
 
     async def async_shutdown_for_home_assistant_stop(self) -> None:
         """Stop owned work and close the client without draining metadata."""

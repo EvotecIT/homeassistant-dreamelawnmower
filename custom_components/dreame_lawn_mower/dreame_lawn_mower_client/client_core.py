@@ -849,12 +849,11 @@ class _DreameLawnMowerClientCoreMixin:
         runtime_details = runtime_view.details
         if not isinstance(runtime_details, Mapping):
             return map_view
-        if (
-            runtime_details.get("runtime_pose_x") is None
-            or runtime_details.get("runtime_pose_y") is None
+        if not any(
+            key in runtime_details
+            for key in ("runtime_pose_x", "position_status", "docked")
         ):
             return map_view
-
         details = dict(map_view.details or {})
         for key in (
             "runtime_pose_x",
@@ -862,6 +861,10 @@ class _DreameLawnMowerClientCoreMixin:
             "runtime_heading_deg",
             "runtime_region_id",
             "runtime_position_updated_at",
+            "position_status",
+            "position_source",
+            "position_observed_at",
+            "docked",
         ):
             value = runtime_details.get(key)
             if value is not None:

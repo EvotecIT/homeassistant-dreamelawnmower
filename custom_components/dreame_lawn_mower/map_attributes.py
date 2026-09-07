@@ -14,6 +14,9 @@ _RUNTIME_POSITION_DETAIL_KEYS = frozenset(
         "runtime_heading_deg",
         "runtime_region_id",
         "runtime_position_updated_at",
+        "position_x",
+        "position_y",
+        "position_heading",
     }
 )
 
@@ -121,6 +124,10 @@ def map_camera_attributes(
             "position_heading": details.get("runtime_heading_deg"),
             "position_segment": details.get("runtime_region_id"),
             "position_updated_at": details.get("runtime_position_updated_at"),
+            "position_status": details.get("position_status", "unavailable"),
+            "position_source": details.get("position_source"),
+            "position_observed_at": details.get("position_observed_at"),
+            "docked": details.get("docked"),
             "map_has_live_path": details.get("has_live_path"),
             "map_available_vector_map_count": details.get("available_map_count"),
             "map_available_vector_maps": details.get("available_maps"),
@@ -167,4 +174,13 @@ def map_camera_attributes(
         )
         if runtime_updated_at != details.get("runtime_position_updated_at"):
             attributes["runtime_position_valid"] = None
+    if "position_status" in details:
+        # Validated map-scoped position wins over an unvalidated raw packet.
+        # Retained positions never become raw runtime_pose telemetry.
+        attributes.update(
+            position_x=details.get("position_x"),
+            position_y=details.get("position_y"),
+            position_heading=details.get("position_heading"),
+            position_updated_at=details.get("position_observed_at"),
+        )
     return attributes
