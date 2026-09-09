@@ -588,15 +588,14 @@ def test_active_runtime_tracking_uses_fresh_app_map_identity() -> None:
         ),
     )
 
-    async def refresh_app_maps(*, force: bool) -> dict[str, object]:
+    async def refresh_map_index() -> int:
         events.append("maps")
-        assert force is True
         coordinator.app_maps = {"current_map_index": 2}
         coordinator.app_maps_refreshed_at = datetime.now(UTC)
         coordinator.app_maps_refresh_succeeded = True
-        return coordinator.app_maps
+        return 2
 
-    coordinator.async_refresh_app_maps = refresh_app_maps
+    coordinator.client.async_get_current_app_map_index = refresh_map_index
     for name in (
         "async_refresh_batch_device_data",
         "async_refresh_firmware_update_support",
@@ -642,13 +641,12 @@ def test_active_runtime_tracking_survives_status_blob_failure() -> None:
         ),
     )
 
-    async def refresh_app_maps(*, force: bool) -> dict[str, object]:
-        assert force is True
+    async def refresh_map_index() -> int:
         coordinator.app_maps_refreshed_at = datetime.now(UTC)
         coordinator.app_maps_refresh_succeeded = True
-        return coordinator.app_maps
+        return 2
 
-    coordinator.async_refresh_app_maps = refresh_app_maps
+    coordinator.client.async_get_current_app_map_index = refresh_map_index
     for name in (
         "async_refresh_batch_device_data",
         "async_refresh_firmware_update_support",
@@ -680,6 +678,7 @@ def test_cached_device_update_publishes_realtime_runtime_position() -> None:
     tracking_updates: list[tuple[object, bool, int | None]] = []
     coordinator._client_update_task = Mock()
     coordinator._runtime_map_identity_verified = True
+    coordinator._runtime_map_index_refreshed_at = datetime.now(UTC)
     coordinator.app_maps = {"current_map_index": 2}
     coordinator.selected_map_index = 2
     coordinator.runtime_status_blob = None
@@ -733,6 +732,7 @@ def test_cached_settings_event_refreshes_cfg_once_per_event() -> None:
     )
     coordinator._client_update_task = Mock()
     coordinator._runtime_map_identity_verified = True
+    coordinator._runtime_map_index_refreshed_at = datetime.now(UTC)
     coordinator._last_device_settings_event_at = None
     coordinator._device_settings_write_lock = asyncio.Lock()
     coordinator.app_maps = {"current_map_index": 0}
@@ -777,6 +777,7 @@ def test_cached_settings_event_retries_after_failed_cfg_refresh() -> None:
     )
     coordinator._client_update_task = Mock()
     coordinator._runtime_map_identity_verified = True
+    coordinator._runtime_map_index_refreshed_at = datetime.now(UTC)
     coordinator._last_device_settings_event_at = None
     coordinator.app_maps = {"current_map_index": 0}
     coordinator.selected_map_index = 0
@@ -827,6 +828,7 @@ def test_cached_preference_event_refreshes_only_preferences_once() -> None:
     }
     coordinator._client_update_task = Mock()
     coordinator._runtime_map_identity_verified = True
+    coordinator._runtime_map_index_refreshed_at = datetime.now(UTC)
     coordinator._last_device_settings_event_at = None
     coordinator._last_mowing_preferences_event_at = None
     coordinator._preference_write_lock = asyncio.Lock()
@@ -882,6 +884,7 @@ def test_cached_preference_event_retries_after_failed_decode() -> None:
     )
     coordinator._client_update_task = Mock()
     coordinator._runtime_map_identity_verified = True
+    coordinator._runtime_map_index_refreshed_at = datetime.now(UTC)
     coordinator._last_device_settings_event_at = None
     coordinator._last_mowing_preferences_event_at = None
     coordinator._preference_write_lock = asyncio.Lock()
@@ -942,6 +945,7 @@ def test_cached_completion_survives_runtime_failure_and_later_idle_refresh() -> 
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator._client_update_task = Mock()
     coordinator._runtime_map_identity_verified = True
+    coordinator._runtime_map_index_refreshed_at = datetime.now(UTC)
     coordinator.app_maps = {"current_map_index": 2}
     coordinator.selected_map_index = 2
     coordinator.runtime_status_blob = None
@@ -990,6 +994,7 @@ def test_new_session_discards_prior_telemetry_before_completion() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator._client_update_task = Mock()
     coordinator._runtime_map_identity_verified = True
+    coordinator._runtime_map_index_refreshed_at = datetime.now(UTC)
     coordinator.app_maps = {"current_map_index": 2}
     coordinator.selected_map_index = 2
     coordinator.runtime_status_blob = None
@@ -1062,6 +1067,7 @@ def test_resumed_charging_session_preserves_current_telemetry() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator._client_update_task = Mock()
     coordinator._runtime_map_identity_verified = True
+    coordinator._runtime_map_index_refreshed_at = datetime.now(UTC)
     coordinator.app_maps = {"current_map_index": 2}
     coordinator.selected_map_index = 2
     coordinator.runtime_status_blob = None
@@ -1120,6 +1126,7 @@ def test_foreground_charging_snapshot_preserves_current_session_cache() -> None:
     coordinator.runtime_status_blob = None
     coordinator.runtime_telemetry_cache = cache
     coordinator._runtime_map_identity_verified = True
+    coordinator._runtime_map_index_refreshed_at = datetime.now(UTC)
     coordinator._schedule_metadata_refresh = Mock()
     coordinator.client = SimpleNamespace(
         async_refresh=AsyncMock(return_value=charging),
@@ -1153,6 +1160,7 @@ def test_cached_device_update_does_not_confirm_connectivity() -> None:
     coordinator._record_connectivity_failure("action acknowledgement was lost")
     coordinator._client_update_task = Mock()
     coordinator._runtime_map_identity_verified = True
+    coordinator._runtime_map_index_refreshed_at = datetime.now(UTC)
     coordinator.app_maps = {"current_map_index": 2}
     coordinator.selected_map_index = 2
     coordinator.runtime_status_blob = None
@@ -1206,6 +1214,7 @@ def test_newer_video_safety_state_wins_over_delayed_cached_mqtt_update() -> None
         coordinator._client_update_pending = False
         coordinator._shutting_down = False
         coordinator._runtime_map_identity_verified = True
+        coordinator._runtime_map_index_refreshed_at = datetime.now(UTC)
         coordinator._device_refresh_lock = asyncio.Lock()
         coordinator._device_snapshot_generation = 0
         coordinator._published_device_snapshot_generation = 0
@@ -1280,6 +1289,7 @@ def test_command_boundary_blocks_delayed_cached_mqtt_runtime_side_effects() -> N
         coordinator._client_update_pending = False
         coordinator._shutting_down = False
         coordinator._runtime_map_identity_verified = True
+        coordinator._runtime_map_index_refreshed_at = datetime.now(UTC)
         coordinator._device_refresh_lock = asyncio.Lock()
         coordinator._device_snapshot_generation = 0
         coordinator._published_device_snapshot_generation = 0

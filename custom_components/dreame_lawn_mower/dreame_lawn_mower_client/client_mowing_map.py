@@ -64,6 +64,7 @@ class _DreameLawnMowerClientMowingMapMixin:
 
     def mowing_map_runtime_overlay(self, scene: MowingMapScene) -> dict[str, Any]:
         """Read the existing session cache without requesting mower operations."""
+        self._expire_runtime_live_tracking()
         position = self._position_tracker.resolve(
             map_index=scene.map_index,
             geometry=scene.position_identity,

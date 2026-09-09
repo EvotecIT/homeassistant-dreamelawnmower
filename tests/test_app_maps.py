@@ -685,6 +685,94 @@ def test_app_maps_can_omit_sensitive_payload_coordinates() -> None:
     assert result["maps"][0]["payload_keys"] == ["map"]
 
 
+def test_app_maps_reuse_verified_payload_without_redownloading_or_leaking_mutations():
+    client = _client()
+    payload = {"map": [{"area": 1, "data": [[1, 2]]}]}
+    cloud = _FakeAppMapCloud(payload)
+    client._sync_get_cloud_protocol = lambda: cloud
+    first = client._sync_get_app_maps(include_payload=False, include_objects=False)
+    assert first["maps"][0]["hash_match"] is True
+    assert first["maps"][0]["payload_cached"] is False
+    assert "payload" not in first["maps"][0]
+    first["maps"][0]["summary"].clear()
+    cloud.calls.clear()
+    second = client._sync_get_app_maps(include_payload=True, include_objects=False)
+    assert [call["t"] for call in cloud.calls] == ["MAPL", "MAPI"]
+    assert second["maps"][0]["payload_cached"] is True
+    assert second["maps"][0]["chunk_count"] == 0
+    assert second["maps"][0]["payload"] == payload
+    assert second["maps"][0]["summary"]
+    second["maps"][0]["payload"].clear()
+    third = client._sync_get_app_maps(include_payload=True, include_objects=False)
+    assert third["maps"][0]["payload"] == payload
+    fourth = client._sync_get_app_maps(include_payload=False, include_objects=False)
+    assert "payload" not in fourth["maps"][0]
+
+
+def test_app_maps_refresh_changed_payload_and_never_reuse_failed_download():
+    client = _client()
+    cloud = _FakeAppMapCloud({"map": [{"area": 1, "data": [[1, 2]]}]})
+    client._sync_get_cloud_protocol = lambda: cloud
+    assert client._sync_get_app_maps(include_objects=False)["available"]
+    changed = {"map": [{"area": 2, "data": [[3, 4]]}]}
+    cloud.payload_text = json.dumps(changed, separators=(",", ":"))
+    cloud.payload_hash = hashlib.md5(cloud.payload_text.encode()).hexdigest()
+    cloud.chunk_overrides = {0: ("bad", 3)}
+    failed = client._sync_get_app_maps(include_objects=False)
+    assert failed["available"] is False
+    cloud.chunk_overrides.clear()
+    cloud.calls.clear()
+    result = client._sync_get_app_maps(include_payload=True, include_objects=False)
+    assert any(call["t"] == "MAPD" for call in cloud.calls)
+    assert result["maps"][0]["payload"] == changed
+    assert result["maps"][0]["payload_cached"] is False
+
+
+def test_app_maps_without_hash_are_downloaded_on_every_refresh():
+    client = _client()
+    cloud = _FakeAppMapCloud({"map": []})
+    cloud.payload_hash = None
+    client._sync_get_cloud_protocol = lambda: cloud
+    for _ in range(2):
+        cloud.calls.clear()
+        result = client._sync_get_app_maps(include_objects=False)
+        assert result["available"] is True
+        assert result["maps"][0]["hash_match"] is None
+        assert any(call["t"] == "MAPD" for call in cloud.calls)
+
+
+def test_app_map_cache_tracks_slots_and_preserves_fresh_current_map_selection():
+    client = _client()
+    cloud = _FakeAppMapCloud({"map": []})
+    client._sync_get_cloud_protocol = lambda: cloud
+    native_call = cloud.call_app_action
+    slots = [[0, 1, 1, 1, 0], [1, 0, 1, 0, 0]]
+
+    def call(payload, **kwargs):
+        response = native_call(payload, **kwargs)
+        if payload.get("t") == "MAPL":
+            response["out"][0]["d"] = slots
+        return response
+
+    cloud.call_app_action = call
+    first = client._sync_get_app_maps(include_objects=False)
+    assert first["current_map_index"] == 0
+    assert sum(c["t"] == "MAPD" for c in cloud.calls) == 2
+    slots[:] = [[0, 0, 1, 1, 0], [1, 1, 1, 0, 0]]
+    cloud.calls.clear()
+    switched = client._sync_get_app_maps(include_objects=False)
+    assert switched["current_map_index"] == 1
+    assert [m["current"] for m in switched["maps"]] == [False, True]
+    assert all(m["payload_cached"] for m in switched["maps"])
+    assert all(c["t"] != "MAPD" for c in cloud.calls)
+    slots[:] = [[0, 0, 0, 0, 0], [1, 1, 1, 0, 0]]
+    client._sync_get_app_maps(include_objects=False)
+    slots[:] = [[0, 0, 1, 0, 0], [1, 1, 1, 0, 0]]
+    recreated = client._sync_get_app_maps(include_objects=False)
+    assert recreated["maps"][0]["payload_cached"] is False
+    assert recreated["maps"][1]["payload_cached"] is True
+
+
 def test_app_map_object_urls_are_opt_in() -> None:
     client = _client()
     cloud = _FakeAppMapCloud({"map": [{"area": 1, "data": [[1, 2]]}]})
@@ -804,6 +892,7 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
                 "reported_size": len(cloud.payload_text.encode("utf-8")),
                 "received_size": len(cloud.payload_text.encode("utf-8")),
                 "chunk_count": 1,
+                "payload_cached": False,
                 "hash_match": True,
                 "download_attempts": 1,
                 "payload_keys": ["map", "point", "spot", "total_area", "trajectory"],

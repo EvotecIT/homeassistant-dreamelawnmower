@@ -105,13 +105,19 @@ class DreameLawnMowerVideoStateMixin:
         """Return whether live video can be requested from Home Assistant."""
         if not self._runtime_configured:
             return False
+        snapshot = self.coordinator.data
+        # Capability remains supported, but HA must not offer playback while
+        # the mower's state explicitly forbids video (including cached routes).
+        # Keep stream_source dormant and discoverable so WebRTC is ready again
+        # as soon as the next snapshot clears the gate.
+        if camera_stream_block_reason(snapshot) is not None:
+            return False
         # Do not make an already-open camera disappear during a brief mower
         # connectivity loss. Existing HA Stream/WebRTC consumers need the
         # entity to remain addressable while their bounded reconnect path
         # refreshes safety state and waits for Wi-Fi to recover.
         if self._session is not None or getattr(self, "stream", None) is not None:
             return True
-        snapshot = self.coordinator.data
         if snapshot is not None and not getattr(snapshot, "available", True):
             return False
         cached_lan_ready = (

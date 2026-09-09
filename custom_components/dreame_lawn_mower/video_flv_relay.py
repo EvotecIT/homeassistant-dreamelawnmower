@@ -32,6 +32,7 @@ _MAX_SPS_BYTES: Final = 4 * 1024
 _MAX_SPS_BIT_OPERATIONS: Final = 32 * 1024
 _UPSTREAM_READ_TIMEOUT: Final = 30.0
 _MEDIA_READY_TIMEOUT: Final = 15.0
+_VIDEO_FRAME_TIMEOUT: Final = 15.0
 _IDLE_GRACE: Final = 15.0
 _IDLE_POLL_INTERVAL: Final = 1.0
 
@@ -441,6 +442,7 @@ class DreameLawnMowerFlvRelay:
         self._media_callback_sent = False
         self._started_at: float | None = None
         self._first_media_at: float | None = None
+        self._last_video_frame_at: float | None = None
         self._last_failure: str | None = None
 
     @property
@@ -482,6 +484,10 @@ class DreameLawnMowerFlvRelay:
                 else None
             ),
             "relay_first_media_ready": self._first_media_at is not None,
+            "relay_last_video_frame_age_ms": (
+                round((now - self._last_video_frame_at) * 1000)
+                if self._last_video_frame_at is not None else None
+            ),
             "relay_last_failure": self._last_failure,
             **self._parser.diagnostics(),
         }
@@ -692,21 +698,47 @@ class DreameLawnMowerFlvRelay:
                 response.raise_for_status()
                 async with asyncio.timeout(_MEDIA_READY_TIMEOUT) as media_deadline:
                     async for chunk in response.content.iter_chunked(64 * 1024):
+                        previous_frames = self._parser.video_frames
                         for record in self._record_parser.feed(chunk):
                             await self._async_broadcast(record)
+                        if (
+                            self._parser.media_ready
+                            and self._parser.video_frames > previous_frames
+                        ):
+                            self._last_video_frame_at = (
+                                asyncio.get_running_loop().time()
+                            )
+                            # Bytes alone do not prove live video: audio,
+                            # metadata and partial tags must not keep a frozen
+                            # picture alive after the first keyframe.
+                            media_deadline.reschedule(
+                                self._last_video_frame_at + _VIDEO_FRAME_TIMEOUT
+                            )
                         if (
                             self._parser.media_ready
                             and not self._media_callback_sent
                         ):
                             self._media_callback_sent = True
                             self._first_media_at = asyncio.get_running_loop().time()
+                            # The reader cannot observe frames while this owner
+                            # callback waits for locks or persists provisioning.
                             media_deadline.reschedule(None)
                             await self._media_ready_callback(self.diagnostics)
+                            media_deadline.reschedule(
+                                asyncio.get_running_loop().time() + _VIDEO_FRAME_TIMEOUT
+                            )
                 raise RuntimeError("The mower video source ended.")
         except asyncio.CancelledError:
             raise
         except Exception as err:  # noqa: BLE001 - propagate a clean local stream end.
             safe_error = _safe_relay_failure(err)
+            if (
+                isinstance(err, TimeoutError)
+                and self._last_video_frame_at is not None
+                and asyncio.get_running_loop().time() - self._last_video_frame_at
+                >= _VIDEO_FRAME_TIMEOUT
+            ):
+                safe_error = "The mower video source stopped delivering video frames."
             self._last_failure = safe_error
             _LOGGER.debug("Dreame mower FLV relay stopped: %s", safe_error)
             # Detach the failed pump before cleanup may await native runtime
@@ -827,3 +859,4 @@ class DreameLawnMowerFlvRelay:
         self._media_callback_sent = False
         self._started_at = None
         self._first_media_at = None
+        self._last_video_frame_at = None

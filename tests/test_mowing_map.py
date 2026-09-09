@@ -200,6 +200,7 @@ def test_camera_and_interactive_overlay_share_dock_evidence_after_session_ends()
     tracker.record(replace(telemetry(), received_at=now.isoformat()), map_index=2)
     client = SimpleNamespace(
         _position_tracker=tracker,
+        _expire_runtime_live_tracking=lambda: False,
         _latest_snapshot=SimpleNamespace(
             available=True,
             activity="docked",
@@ -234,6 +235,7 @@ def test_interactive_client_does_not_bypass_replaced_geometry_rejection():
     tracker.record(blob, map_index=2)
     client = SimpleNamespace(
         _position_tracker=tracker,
+        _expire_runtime_live_tracking=lambda: False,
         _latest_snapshot=SimpleNamespace(available=True, activity="mowing"),
         _latest_runtime_status_blob=blob,
         _runtime_live_task_id=None,

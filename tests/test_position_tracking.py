@@ -52,6 +52,28 @@ def resolve(tracker, *, snapshot=None, now=NOW, index=0, geometry="lawn-a"):
     )
 
 
+@pytest.mark.parametrize("docked", [False, True])
+def test_foreign_map_projection_preserves_owned_position_evidence(docked):
+    tracker = MowerPositionTracker()
+    tracker.record(pose(), map_index=0, now=NOW)
+    snapshot = state(docked=docked)
+    original = resolve(tracker, snapshot=snapshot)
+    assert original is not None
+    checkpoint = tracker.checkpoint(now=NOW)
+    assert resolve(tracker, index=1, geometry="foreign", snapshot=snapshot) is None
+    assert tracker.checkpoint(now=NOW) == checkpoint
+    assert resolve(tracker, snapshot=snapshot) == original
+
+
+def test_new_verified_input_allows_actual_map_transition():
+    tracker = MowerPositionTracker()
+    tracker.record(pose(), map_index=0, now=NOW)
+    assert resolve(tracker).map_index == 0
+    later = NOW + timedelta(seconds=1)
+    tracker.record(pose(at=later), map_index=1, now=later)
+    assert resolve(tracker, index=1, geometry="new-map", now=later).map_index == 1
+
+
 @pytest.mark.parametrize("charging_state", ["charging", "charging_completed"])
 def test_charging_establishes_docking_but_not_map_coordinates(charging_state):
     snapshot = state(docked=True)

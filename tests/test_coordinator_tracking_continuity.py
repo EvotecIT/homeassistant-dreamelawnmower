@@ -57,8 +57,7 @@ def test_slow_map_read_hydrates_only_current_same_mission(transition: str) -> No
         coordinator._published_device_snapshot_generation = 1
         coordinator.data = original
 
-        async def read_map(*, force: bool) -> None:
-            assert force is True
+        async def read_map() -> int:
             coordinator.app_maps_refreshed_at = object()
             coordinator.app_maps_refresh_succeeded = True
             coordinator._record_device_snapshot(newest)
@@ -69,7 +68,7 @@ def test_slow_map_read_hydrates_only_current_same_mission(transition: str) -> No
             if transition == "mission":
                 coordinator.runtime_telemetry_cache._session_generation += 1
 
-        coordinator.async_refresh_app_maps = read_map
+            return 0
         blob = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
 
         async def read_runtime(**kwargs: object) -> object:
@@ -91,6 +90,7 @@ def test_slow_map_read_hydrates_only_current_same_mission(transition: str) -> No
                     coordinator.runtime_telemetry_cache._session_generation += 1
                 if transition == "runtime_map":
                     coordinator.app_maps = {"current_map_index": 1}
+                    coordinator._invalidate_runtime_map_identity()
             if transition.startswith("evicted"):
                 # Simulate updates while the real telemetry read is pending.
                 await asyncio.sleep(0)
@@ -110,6 +110,7 @@ def test_slow_map_read_hydrates_only_current_same_mission(transition: str) -> No
             return blob
 
         coordinator.client = SimpleNamespace(
+            async_get_current_app_map_index=read_map,
             async_get_runtime_status_blob=AsyncMock(side_effect=read_runtime),
             update_runtime_live_tracking=Mock(),
         )

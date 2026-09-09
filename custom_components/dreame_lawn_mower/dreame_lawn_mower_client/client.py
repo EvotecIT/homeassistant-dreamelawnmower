@@ -90,6 +90,7 @@ from .client_settings import (
     SCHEDULE_READ_TIMEOUT_SECONDS as _SCHEDULE_READ_TIMEOUT_SECONDS,
 )
 from .client_settings import _DreameLawnMowerClientSettingsMixin
+from .client_tracking import _DreameLawnMowerClientTrackingMixin
 from .deadline import DeadlineExceededError as DeadlineExceededError
 from .deadline import run_with_deadline as run_with_deadline
 from .debug_ota_catalog import (
@@ -434,6 +435,7 @@ class DreameLawnMowerClient(
     _DreameLawnMowerClientDeviceSettingsMixin,
     _DreameLawnMowerClientSettingsMixin,
     _DreameLawnMowerClientMapsMixin,
+    _DreameLawnMowerClientTrackingMixin,
 ):
     """Small async wrapper around the reverse-engineered mower protocol."""
 
@@ -466,6 +468,9 @@ class DreameLawnMowerClient(
             ...,
         ] = ()
         self._last_runtime_track_blob_hex: str | None = None
+        self._runtime_map_identity_expires_at: datetime | None = datetime.max.replace(
+            tzinfo=UTC
+        )
         self._runtime_live_map_index: int | None = None
         self._runtime_live_task_id: int | None = None
         self._runtime_session_active: bool | None = None
@@ -474,6 +479,7 @@ class DreameLawnMowerClient(
         self._last_camera_stream_diagnostics: Mapping[str, Any] = {}
         self._app_map_object_cache_lock = _threading.Lock()
         self._app_map_download_lock = _threading.Lock()
+        self._app_map_payload_cache: dict[int, dict[str, Any]] = {}
         self._point_cloud_generation_lock = _threading.Lock()
         self._latest_app_map_inventory_identity: str | None = None
         self._latest_app_map_object_inventory_identity: str | None = None
@@ -497,64 +503,6 @@ class DreameLawnMowerClient(
         self._update_callback = callback
         if self._device is not None:
             self._device.listen(callback)
-
-    def update_runtime_live_tracking(
-        self,
-        status_blob: DreameLawnMowerStatusBlob | None,
-        *,
-        active: bool,
-        map_index: int | None = None,
-    ) -> None:
-        """Cache active-session runtime track history for live map overlays."""
-        self._position_tracker.record(status_blob, map_index=map_index)
-        self._latest_runtime_status_blob = status_blob
-        self._runtime_session_active = active
-        if not active:
-            self._runtime_live_track_segments = ()
-            self._last_runtime_track_blob_hex = None
-            self._runtime_live_map_index = None
-            self._runtime_live_task_id = None
-            return
-
-        if status_blob is None:
-            return
-
-        task_id = getattr(status_blob, "candidate_runtime_task_id", None)
-        context_changed = (
-            self._runtime_live_map_index is not None
-            and map_index is not None
-            and self._runtime_live_map_index != map_index
-        ) or (
-            self._runtime_live_task_id is not None
-            and task_id is not None
-            and self._runtime_live_task_id != task_id
-        )
-        if context_changed:
-            self._runtime_live_track_segments = ()
-            self._last_runtime_track_blob_hex = None
-        if map_index is not None:
-            self._runtime_live_map_index = map_index
-        if task_id is not None:
-            self._runtime_live_task_id = task_id
-
-        blob_hex = getattr(status_blob, "hex", None)
-        if blob_hex and blob_hex == self._last_runtime_track_blob_hex:
-            return
-
-        segments = getattr(status_blob, "candidate_runtime_track_segments", ()) or ()
-        if not segments:
-            if blob_hex:
-                self._last_runtime_track_blob_hex = blob_hex
-            return
-
-        self._runtime_live_track_segments = (
-            *self._runtime_live_track_segments,
-            *tuple(tuple(tuple(point) for point in segment) for segment in segments),
-        )
-        if len(self._runtime_live_track_segments) > 64:
-            self._runtime_live_track_segments = self._runtime_live_track_segments[-64:]
-        if blob_hex:
-            self._last_runtime_track_blob_hex = blob_hex
 
     @classmethod
     async def async_discover_devices(

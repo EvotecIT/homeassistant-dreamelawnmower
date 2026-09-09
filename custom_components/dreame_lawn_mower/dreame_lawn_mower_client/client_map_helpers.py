@@ -703,6 +703,7 @@ def _app_map_entry_view_metadata(entry: Mapping[str, Any]) -> dict[str, Any]:
         "reported_size": entry.get("reported_size") or info.get("size"),
         "received_size": entry.get("received_size"),
         "chunk_count": entry.get("chunk_count"),
+        "payload_cached": entry.get("payload_cached"),
         "hash_match": entry.get("hash_match"),
         "download_attempts": entry.get("download_attempts"),
         "retry_reason": entry.get("retry_reason"),

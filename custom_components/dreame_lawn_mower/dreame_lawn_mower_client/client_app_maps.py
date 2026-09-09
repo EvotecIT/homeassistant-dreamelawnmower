@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
+from copy import deepcopy
 from typing import Any
 
 from .client_map_helpers import (
@@ -46,6 +47,14 @@ class _DreameLawnMowerClientAppMapsMixin:
             map_list_result,
             map_entries,
         )
+        # Only retain slots confirmed by the latest authoritative inventory.
+        live_indices = {
+            entry["idx"] for entry in map_entries if entry.get("created")
+        } if map_list_valid else set()
+        self._app_map_payload_cache = {
+            idx: cached for idx, cached in self._app_map_payload_cache.items()
+            if idx in live_indices
+        }
         result: dict[str, Any] = {
             "source": "app_action_map",
             "available": False,
@@ -89,6 +98,7 @@ class _DreameLawnMowerClientAppMapsMixin:
                         # last chunk; the mobile app may also be reading maps.
                         map_result["retry_reason"] = str(err)
             except Exception as err:  # noqa: BLE001 - probes keep per-map evidence
+                self._app_map_payload_cache.pop(entry["idx"], None)
                 map_result["available"] = False
                 map_result["error"] = str(err)
                 result["errors"].append({"idx": entry.get("idx"), "error": str(err)})
@@ -129,6 +139,21 @@ class _DreameLawnMowerClientAppMapsMixin:
         if isinstance(info.get("idx"), int) and info["idx"] != entry["idx"]:
             raise DreameLawnMowerConnectionError("App map metadata index mismatch.")
         entry["reported_size"] = size
+        cache = self._app_map_payload_cache
+        cached = cache.get(entry["idx"])
+        if (
+            cached is not None
+            and isinstance(expected_hash, str)
+            and cached["md5"] == expected_hash.lower()
+            and cached["reported_size"] == size
+        ):
+            entry.update(deepcopy(cached))
+            entry["payload_cached"] = True
+            entry["chunk_count"] = 0
+            if not include_payload:
+                entry.pop("payload", None)
+            return
+        cache.pop(entry["idx"], None)
         payload_text, chunk_count, received_size = self._sync_get_app_map_text(
             size=size, chunk_size=chunk_size
         )
@@ -162,8 +187,21 @@ class _DreameLawnMowerClientAppMapsMixin:
                 "summary": _app_map_payload_summary(parsed_payload),
             }
         )
+        payload = _json_safe(parsed_payload, max_depth=12)
+        # A hash-verified payload belongs to this client and map slot. Read MAPI
+        # on every refresh, but avoid MAPD for unchanged geometry. Never cache
+        # unverified data or caller-owned mutable dictionaries.
+        if hash_match is True:
+            cache[entry["idx"]] = deepcopy({
+                key: entry[key] for key in (
+                    "reported_size", "received_size", "decoded_size", "chunk_count",
+                    "md5", "hash_match", "available", "payload_keys", "summary",
+                )
+            })
+            cache[entry["idx"]]["payload"] = deepcopy(payload)
+        entry["payload_cached"] = False
         if include_payload:
-            entry["payload"] = _json_safe(parsed_payload, max_depth=12)
+            entry["payload"] = payload
 
     def _sync_get_app_map_text(
         self,

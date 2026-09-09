@@ -25,6 +25,118 @@ from custom_components.dreame_lawn_mower.video_flv_relay import (
 FLV_HEADER = b"FLV\x01\x01\x00\x00\x00\x09\x00\x00\x00\x00"
 
 
+@pytest.mark.parametrize(
+    "traffic", ["audio", "metadata", "partial", "video", "callback"]
+)
+def test_relay_frame_deadline_ignores_nonvideo_and_allows_fresh_reconnect(traffic):
+    async def scenario():
+        pytest_socket.enable_socket()
+        sequence = _tag(9, 0, b"\x17\x00\x00\x00\x00\x01\x64\x00\x1f")
+        keyframe = _tag(9, 0, b"\x17\x01\x00\x00\x00\x00\x00\x00\x01")
+        initial = FLV_HEADER + sequence + keyframe
+        chunks = {
+            "audio": _tag(8, 40, b"\xaf\x01\x01"),
+            "metadata": _tag(18, 40, b"metadata"),
+            "partial": b"x",
+            "video": _tag(9, 40, b"\x27\x01\x00\x00\x00\x00\x00\x00\x02"),
+        }
+        stop, failed, flowing = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        connections = 0
+        failures = []
+
+        async def source(request):
+            nonlocal connections
+            connections += 1
+            attempt = connections
+            response = web.StreamResponse(headers={"Content-Type": "video/x-flv"})
+            await response.prepare(request)
+            await response.write(initial)
+            if attempt > 1:
+                await stop.wait()
+                return response
+            if traffic == "partial":
+                # A valid large tag header followed by incomplete payload bytes.
+                await response.write(_tag(9, 40, b"x" * 10000)[:11])
+            try:
+                for _ in range(20):
+                    await asyncio.sleep(0.025)
+                    await response.write(
+                        chunks["video" if traffic == "callback" else traffic]
+                    )
+                flowing.set()
+                await stop.wait()
+            except ConnectionResetError:
+                pass
+            return response
+
+        async def failure(error):
+            failures.append(error)
+            failed.set()
+
+        application = web.Application()
+        application.router.add_get("/source.flv", source)
+        runner = web.AppRunner(application)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        client = ClientSession(connector=TCPConnector(resolver=ThreadedResolver()))
+        relay = DreameLawnMowerFlvRelay(
+            SimpleNamespace(async_create_task=asyncio.create_task),
+            source_factory=lambda: asyncio.sleep(
+                0, result=f"http://127.0.0.1:{port}/source.flv"
+            ),
+            media_ready=lambda diagnostics: asyncio.sleep(
+                0.35 if traffic == "callback" else 0
+            ),
+            failed=failure,
+            idle=lambda: asyncio.sleep(0),
+        )
+        responses = []
+        try:
+            with (
+                patch(
+                    "custom_components.dreame_lawn_mower.video_flv_relay."
+                    "async_get_clientsession", return_value=client,
+                ),
+                patch(
+                    "custom_components.dreame_lawn_mower.video_flv_relay."
+                    "_VIDEO_FRAME_TIMEOUT", 0.2,
+                ),
+            ):
+                url = await relay.async_start()
+                response = await client.get(url)
+                responses.append(response)
+                assert await response.content.readexactly(len(initial)) == initial
+                if traffic in {"video", "callback"}:
+                    await asyncio.wait_for(flowing.wait(), 2)
+                    assert failures == []
+                    assert connections == 1
+                    assert relay.diagnostics["relay_last_video_frame_age_ms"] < 200
+                else:
+                    await asyncio.wait_for(failed.wait(), 2)
+                    assert failures == [
+                        "The mower video source stopped delivering video frames."
+                    ]
+                    # Existing subscribers end and the stable URL starts fresh.
+                    await asyncio.wait_for(response.read(), 1)
+                    replacement = await client.get(url)
+                    responses.append(replacement)
+                    assert (
+                        await replacement.content.readexactly(len(initial)) == initial
+                    )
+                    assert connections == 2
+        finally:
+            stop.set()
+            for response in responses:
+                response.close()
+            await relay.async_close()
+            await client.close()
+            await runner.cleanup()
+
+    asyncio.run(scenario())
+
+
 def _tag(tag_type: int, timestamp: int, payload: bytes) -> bytes:
     header = (
         bytes([tag_type])

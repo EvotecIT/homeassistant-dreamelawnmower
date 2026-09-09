@@ -252,6 +252,10 @@ class DreameLawnMowerCoordinator(
         self._metadata_refresh_pending = False
         self._metadata_refresh_publish = True
         self._runtime_map_identity_verified = False
+        self._runtime_map_identity_lock = asyncio.Lock()
+        self._runtime_map_index_refreshed_at: datetime | None = None
+        self._runtime_active_map_index: int | None = None
+        self.client.runtime_map_identity_expires_at = None
         self._defer_active_runtime_during_setup = False
         self._foreground_refresh_count = 0
         self._metadata_refresh_count = 0
@@ -535,12 +539,14 @@ class DreameLawnMowerCoordinator(
                 session_started_at=session_started_at,
                 session_identity=session_identity,
             )
+            self._expire_runtime_map_identity()
             runtime_map_index = (
                 self._runtime_map_index()
                 if not runtime_active
                 or getattr(self, "_runtime_map_identity_verified", False)
                 else None
             )
+            identity_generation = getattr(self, "_runtime_map_identity_generation", 0)
             runtime_status_blob: DreameLawnMowerStatusBlob | None = None
             runtime_status_error: Exception | None = None
             try:
@@ -564,6 +570,10 @@ class DreameLawnMowerCoordinator(
             # Both optional reads can yield while a newer authoritative fetch
             # publishes. Commit no runtime or Bluetooth side effects until the
             # cached snapshot is still current after every await.
+            if identity_generation != getattr(
+                self, "_runtime_map_identity_generation", 0
+            ):
+                return
             if self._device_snapshot_is_stale(snapshot) or (
                 observed_mission_generation is not None
                 and runtime_mission_session_generation(self.runtime_telemetry_cache)
@@ -571,6 +581,9 @@ class DreameLawnMowerCoordinator(
             ):
                 return
 
+            self._expire_runtime_map_identity()
+            if runtime_active and not self._runtime_map_identity_is_fresh():
+                runtime_map_index = None
             self._observe_runtime_mission_boundary(snapshot)
             if runtime_status_error is None:
                 try:
@@ -1993,6 +2006,7 @@ class DreameLawnMowerCoordinator(
     ) -> dict[str, Any] | None:
         """Refresh cached app-map payloads without failing the main poll."""
         now = datetime.now(UTC)
+        identity_generation = getattr(self, "_runtime_map_identity_generation", 0)
         if (
             not force
             and self.app_maps is not None
@@ -2020,16 +2034,51 @@ class DreameLawnMowerCoordinator(
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh app maps: %s", err)
+            refreshed_at = self.app_maps_refreshed_at
+            if (
+                isinstance(refreshed_at, datetime) and refreshed_at > now
+            ) or identity_generation != getattr(
+                self, "_runtime_map_identity_generation", 0
+            ):
+                return self.app_maps
             self.app_maps_refresh_succeeded = False
             return self.app_maps
 
         payload = dict(app_maps)
+        current_idx = active_map_index(payload)
+        identity_at = getattr(self, "_runtime_map_index_refreshed_at", None)
+        newer_geometry_at = self.app_maps_refreshed_at
+        if isinstance(newer_geometry_at, datetime) and newer_geometry_at > now:
+            return self.app_maps
+        if (
+            identity_at is not None
+            and now < identity_at
+            and current_idx != self._runtime_active_map_index
+        ) or (
+            identity_generation != getattr(self, "_runtime_map_identity_generation", 0)
+            and (
+                identity_at is None
+                or current_idx != self._runtime_active_map_index
+            )
+        ):
+            # A completed download cannot revive inventory from before a switch
+            # or contradict a newer MAPL read. Retry without changing selections.
+            self.app_maps_refreshed_at = None
+            self.app_maps_refresh_succeeded = False
+            return self.app_maps
         payload.setdefault("captured_at", now.isoformat())
         payload["source"] = source
         self.app_maps = payload
         self.app_maps_refreshed_at = now
         self.app_maps_refresh_succeeded = payload.get("map_list_valid") is True
-        current_idx = active_map_index(payload)
+        if (
+            identity_at is not None
+            and now >= identity_at
+            and self.app_maps_refresh_succeeded
+            and current_idx != self._runtime_active_map_index
+        ):
+            # An older geometry download must not replace a newer MAPL read.
+            self._invalidate_runtime_map_identity()
         known_map_indices = set(_app_map_index_hints(payload))
         map_hints_authoritative = _app_map_hints_are_authoritative(
             payload,
@@ -2323,7 +2372,15 @@ class DreameLawnMowerCoordinator(
 
     async def async_switch_current_map(self, map_index: int) -> None:
         """Switch the active mower map and refresh all map-scoped state."""
-        await self.client.async_switch_current_map(map_index)
+        self._invalidate_runtime_map_identity()
+        if not hasattr(self, "_runtime_map_identity_lock"):
+            self._runtime_map_identity_lock = asyncio.Lock()
+        async with self._runtime_map_identity_lock:
+            try:
+                await self.client.async_switch_current_map(map_index)
+            finally:
+                # Expire outcomes even when the command's response is lost.
+                self._invalidate_runtime_map_identity()
         if self.selected_map_index != map_index:
             self._invalidate_schedule_map_hint()
         self.selected_map_index = map_index
