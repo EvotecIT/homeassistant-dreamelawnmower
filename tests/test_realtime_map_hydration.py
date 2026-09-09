@@ -101,10 +101,9 @@ def test_background_map_phase_uses_latest_state_without_foreground_poll(
                 coordinator._async_refresh_active_runtime.call_args.args[1]
                 is coordinator.data
             )
-            coordinator.async_refresh_app_maps.assert_not_awaited()
         else:
             coordinator._async_refresh_active_runtime.assert_not_awaited()
-            coordinator.async_refresh_app_maps.assert_awaited_once_with(force=False)
+        coordinator.async_refresh_app_maps.assert_awaited_once_with(force=False)
 
     asyncio.run(scenario())
 
@@ -126,8 +125,7 @@ def test_background_map_read_cannot_revive_an_evicted_snapshot(transition):
         coordinator._published_device_snapshot_generation = 1
         coordinator.data = original
 
-        async def read_map(*, force):
-            assert force is True
+        async def read_map():
             coordinator.app_maps_refreshed_at = object()
             coordinator.app_maps_refresh_succeeded = True
             for _ in range(DEVICE_SNAPSHOT_GENERATION_HISTORY + 2):
@@ -147,10 +145,12 @@ def test_background_map_read_cannot_revive_an_evicted_snapshot(transition):
                     session_started_at=100.0
                 )
             assert id(original) not in coordinator._device_snapshot_generations
+            return 0
 
-        coordinator.async_refresh_app_maps = read_map
+        coordinator.async_refresh_app_maps = AsyncMock(return_value={})
         blob = SimpleNamespace(candidate_runtime_area_progress_percent=42.0)
         coordinator.client = SimpleNamespace(
+            async_get_current_app_map_index=read_map,
             async_get_runtime_status_blob=AsyncMock(return_value=blob),
             update_runtime_live_tracking=Mock(),
         )
@@ -160,7 +160,7 @@ def test_background_map_read_cannot_revive_an_evicted_snapshot(transition):
         result = await coordinator._async_refresh_background_map_runtime(
             DreameLawnMowerPerformanceTracker().start("test")
         )
-        assert result is False
+        assert result == {}
         if transition == "pose":
             assert (
                 coordinator._async_refresh_runtime_status.call_args.args[0]

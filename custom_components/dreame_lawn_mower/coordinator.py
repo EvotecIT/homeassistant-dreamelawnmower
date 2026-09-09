@@ -252,6 +252,9 @@ class DreameLawnMowerCoordinator(
         self._metadata_refresh_pending = False
         self._metadata_refresh_publish = True
         self._runtime_map_identity_verified = False
+        self._runtime_map_identity_lock = asyncio.Lock()
+        self._runtime_map_index_refreshed_at: datetime | None = None
+        self._runtime_active_map_index: int | None = None
         self._defer_active_runtime_during_setup = False
         self._foreground_refresh_count = 0
         self._metadata_refresh_count = 0
@@ -2030,6 +2033,15 @@ class DreameLawnMowerCoordinator(
         self.app_maps_refreshed_at = now
         self.app_maps_refresh_succeeded = payload.get("map_list_valid") is True
         current_idx = active_map_index(payload)
+        identity_at = getattr(self, "_runtime_map_index_refreshed_at", None)
+        if (
+            identity_at is not None
+            and now >= identity_at
+            and self.app_maps_refresh_succeeded
+            and current_idx != self._runtime_active_map_index
+        ):
+            # An older geometry download must not replace a newer MAPL read.
+            self._invalidate_runtime_map_identity()
         known_map_indices = set(_app_map_index_hints(payload))
         map_hints_authoritative = _app_map_hints_are_authoritative(
             payload,
@@ -2323,7 +2335,12 @@ class DreameLawnMowerCoordinator(
 
     async def async_switch_current_map(self, map_index: int) -> None:
         """Switch the active mower map and refresh all map-scoped state."""
-        await self.client.async_switch_current_map(map_index)
+        self._invalidate_runtime_map_identity()
+        try:
+            await self.client.async_switch_current_map(map_index)
+        finally:
+            # A read started during the command cannot establish the final map.
+            self._invalidate_runtime_map_identity()
         if self.selected_map_index != map_index:
             self._invalidate_schedule_map_hint()
         self.selected_map_index = map_index

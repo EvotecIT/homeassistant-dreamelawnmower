@@ -369,18 +369,10 @@ def render_vector_map_png(
         if len(zone.points) < 3 or not zone.name:
             continue
         px, py = polygon_label_point([to_pixel(x, y) for x, y in zone.points])
-        for dx in range(-label_halo_width, label_halo_width + 1):
-            for dy in range(-label_halo_width, label_halo_width + 1):
-                if dx == 0 and dy == 0:
-                    continue
-                draw.text(
-                    (px + dx, py + dy),
-                    zone.name,
-                    fill=style.label_halo,
-                    font=font,
-                    anchor="mm",
-                )
-        draw.text((px, py), zone.name, fill=style.label, font=font, anchor="mm")
+        draw.text(
+            (px, py), zone.name, fill=style.label, font=font, anchor="mm",
+            stroke_width=label_halo_width, stroke_fill=style.label_halo,
+        )
 
     buffer = BytesIO()
     image.save(buffer, format="PNG")

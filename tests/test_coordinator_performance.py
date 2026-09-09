@@ -329,6 +329,7 @@ def test_newer_video_safety_snapshot_blocks_foreground_runtime_side_effects() ->
         coordinator.client = SimpleNamespace(
             async_refresh=refresh_snapshot,
             async_refresh_authoritative_snapshot=refresh_snapshot,
+            async_get_current_app_map_index=AsyncMock(return_value=2),
             async_get_runtime_status_blob=refresh_runtime,
             update_runtime_live_tracking=Mock(),
         )
@@ -390,6 +391,7 @@ def test_command_boundary_blocks_delayed_foreground_runtime_side_effects() -> No
         coordinator.runtime_status_blob = retained_runtime
         coordinator.runtime_telemetry_cache = cache
         coordinator.client = SimpleNamespace(
+            async_get_current_app_map_index=AsyncMock(return_value=2),
             async_get_runtime_status_blob=refresh_runtime,
             update_runtime_live_tracking=Mock(),
         )
@@ -788,6 +790,8 @@ def test_active_session_reuses_verified_map_identity_between_polls() -> None:
         coordinator = object.__new__(DreameLawnMowerCoordinator)
         coordinator.performance = DreameLawnMowerPerformanceTracker()
         coordinator._runtime_map_identity_verified = True
+        coordinator._runtime_active_map_index = 2
+        coordinator._runtime_map_index_refreshed_at = datetime.now(UTC)
         coordinator.app_maps = {"current_map_index": 2}
         coordinator.app_maps_refreshed_at = object()
         coordinator.app_maps_refresh_succeeded = True
@@ -801,6 +805,7 @@ def test_active_session_reuses_verified_map_identity_between_polls() -> None:
             activity="mowing",
         )
         coordinator.client = SimpleNamespace(
+            async_get_current_app_map_index=AsyncMock(side_effect=TimeoutError),
             async_get_runtime_status_blob=AsyncMock(return_value=status_blob),
             update_runtime_live_tracking=Mock(),
         )
@@ -812,7 +817,8 @@ def test_active_session_reuses_verified_map_identity_between_polls() -> None:
         await coordinator._async_refresh_active_runtime(cycle, snapshot)
         cycle.finish()
 
-        coordinator.async_refresh_app_maps.assert_awaited_once_with(force=False)
+        coordinator.async_refresh_app_maps.assert_not_awaited()
+        coordinator.client.async_get_current_app_map_index.assert_not_awaited()
         coordinator.client.update_runtime_live_tracking.assert_called_once_with(
             status_blob,
             active=True,
@@ -840,6 +846,7 @@ def test_failed_due_map_refresh_does_not_stamp_runtime_with_stale_identity() -> 
             activity="mowing",
         )
         coordinator.client = SimpleNamespace(
+            async_get_current_app_map_index=AsyncMock(side_effect=TimeoutError),
             async_get_runtime_status_blob=AsyncMock(return_value=status_blob),
             update_runtime_live_tracking=Mock(),
         )

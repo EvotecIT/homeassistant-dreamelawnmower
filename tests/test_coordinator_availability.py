@@ -588,15 +588,14 @@ def test_active_runtime_tracking_uses_fresh_app_map_identity() -> None:
         ),
     )
 
-    async def refresh_app_maps(*, force: bool) -> dict[str, object]:
+    async def refresh_map_index() -> int:
         events.append("maps")
-        assert force is True
         coordinator.app_maps = {"current_map_index": 2}
         coordinator.app_maps_refreshed_at = datetime.now(UTC)
         coordinator.app_maps_refresh_succeeded = True
-        return coordinator.app_maps
+        return 2
 
-    coordinator.async_refresh_app_maps = refresh_app_maps
+    coordinator.client.async_get_current_app_map_index = refresh_map_index
     for name in (
         "async_refresh_batch_device_data",
         "async_refresh_firmware_update_support",
@@ -642,13 +641,12 @@ def test_active_runtime_tracking_survives_status_blob_failure() -> None:
         ),
     )
 
-    async def refresh_app_maps(*, force: bool) -> dict[str, object]:
-        assert force is True
+    async def refresh_map_index() -> int:
         coordinator.app_maps_refreshed_at = datetime.now(UTC)
         coordinator.app_maps_refresh_succeeded = True
-        return coordinator.app_maps
+        return 2
 
-    coordinator.async_refresh_app_maps = refresh_app_maps
+    coordinator.client.async_get_current_app_map_index = refresh_map_index
     for name in (
         "async_refresh_batch_device_data",
         "async_refresh_firmware_update_support",

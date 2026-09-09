@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import Any
 
@@ -48,6 +49,7 @@ METADATA_RETRY_DELAY_SECONDS = 2.0
 METADATA_SHUTDOWN_GRACE_SECONDS = 5.0
 SLOW_FOREGROUND_REFRESH_SECONDS = 15.0
 SLOW_METADATA_REFRESH_SECONDS = 30.0
+RUNTIME_MAP_IDENTITY_INTERVAL = timedelta(seconds=60)
 
 
 def runtime_tracking_active(snapshot: DreameLawnMowerSnapshot) -> bool:
@@ -193,7 +195,7 @@ class DreameLawnMowerRefreshMixin:
             # confirm that this foreground snapshot is still current.
             self._observe_runtime_mission_boundary(snapshot)
             self._schedule_metadata_refresh(
-                refresh_map_and_runtime=not runtime_active or defer_active_runtime,
+                refresh_map_and_runtime=True,
             )
             return self._snapshot_for_publication(snapshot)
         except asyncio.CancelledError:
@@ -231,16 +233,18 @@ class DreameLawnMowerRefreshMixin:
             "_runtime_map_identity_verified",
             False,
         )
-        previous_app_maps_refreshed_at = self.app_maps_refreshed_at
         mission_generation = runtime_mission_session_generation(
             self.runtime_telemetry_cache
         )
         observed_device_generation = getattr(self, "_device_snapshot_generation", None)
-        await cycle.measure(
-            "active_app_maps",
-            lambda: self.async_refresh_app_maps(force=force_map_identity),
+        identity_generation = getattr(self, "_runtime_map_identity_generation", 0)
+        map_identity_refreshed, runtime_map_index = await cycle.measure(
+            "active_map_identity",
+            lambda: self._async_refresh_runtime_map_index(force=force_map_identity),
         )
         runtime_snapshot = snapshot
+        if identity_generation != getattr(self, "_runtime_map_identity_generation", 0):
+            return False
         if (
             mission_generation is not None
             and mission_generation
@@ -265,16 +269,6 @@ class DreameLawnMowerRefreshMixin:
                 or not runtime_tracking_active(runtime_snapshot)
             ):
                 return False
-        map_identity_refreshed = bool(
-            getattr(self, "app_maps_refresh_succeeded", False)
-            and (
-                not force_map_identity
-                or self.app_maps_refreshed_at is not previous_app_maps_refreshed_at
-            )
-        )
-        runtime_map_index = (
-            self._runtime_map_index() if map_identity_refreshed else None
-        )
         runtime_current = await cycle.measure(
             "active_runtime_status",
             lambda: self._async_refresh_runtime_status(
@@ -282,6 +276,8 @@ class DreameLawnMowerRefreshMixin:
                 runtime_map_index=runtime_map_index,
             ),
         )
+        if identity_generation != getattr(self, "_runtime_map_identity_generation", 0):
+            return False
         if not runtime_current or self._snapshot_is_stale(runtime_snapshot):
             newest = self.data
             if (
@@ -289,7 +285,7 @@ class DreameLawnMowerRefreshMixin:
                 and mission_generation
                 == runtime_mission_session_generation(self.runtime_telemetry_cache)
                 and runtime_map_index is not None
-                and runtime_map_index == self._runtime_map_index()
+                and runtime_map_index == self._runtime_active_map_index
                 and getattr(newest, "available", False)
                 and runtime_tracking_active(newest)
             ):
@@ -301,6 +297,49 @@ class DreameLawnMowerRefreshMixin:
         self._runtime_map_identity_verified = map_identity_refreshed
         return runtime_snapshot is snapshot
 
+    async def _async_refresh_runtime_map_index(
+        self, *, force: bool,
+    ) -> tuple[bool, int | None]:
+        """Read only MAPL for live tracking; never wait for a MAPD download."""
+        requested_at = datetime.now(UTC)
+        if not hasattr(self, "_runtime_map_identity_lock"):
+            self._runtime_map_identity_lock = asyncio.Lock()
+        async with self._runtime_map_identity_lock:
+            identity_generation = getattr(self, "_runtime_map_identity_generation", 0)
+            refreshed_at = getattr(self, "_runtime_map_index_refreshed_at", None)
+            if (
+                refreshed_at is not None
+                and (not force or refreshed_at >= requested_at)
+                and datetime.now(UTC) - refreshed_at < RUNTIME_MAP_IDENTITY_INTERVAL
+            ):
+                return True, self._runtime_active_map_index
+            try:
+                index = await self.client.async_get_current_app_map_index()
+            except Exception as err:  # A stale map must not label fresh poses.
+                _LOGGER.debug("Failed to refresh runtime map identity: %s", err)
+                self._runtime_map_index_refreshed_at = None
+                self._runtime_map_identity_verified = False
+                return False, None
+            if identity_generation != getattr(
+                self, "_runtime_map_identity_generation", 0
+            ):
+                return False, None
+            self._runtime_active_map_index = index
+            self._runtime_map_index_refreshed_at = datetime.now(UTC)
+            # The complete map cache belongs to background hydration. Expire it
+            # promptly on a switch without publishing old geometry as current.
+            if index != active_map_index(getattr(self, "app_maps", None)):
+                self.app_maps_refreshed_at = None
+            return True, index
+
+    def _invalidate_runtime_map_identity(self) -> None:
+        """Retire cached identity and any outstanding map-scoped runtime read."""
+        self._runtime_map_identity_generation = (
+            getattr(self, "_runtime_map_identity_generation", 0) + 1
+        )
+        self._runtime_map_index_refreshed_at = None
+        self._runtime_map_identity_verified = False
+
     async def _async_refresh_runtime_status(
         self,
         snapshot: DreameLawnMowerSnapshot,
@@ -311,6 +350,7 @@ class DreameLawnMowerRefreshMixin:
         # Keep the fetch-order token independently of bounded snapshot history:
         # the snapshot can be borrowed from a realtime task that releases it.
         observed_device_generation = getattr(self, "_device_snapshot_generation", None)
+        identity_generation = getattr(self, "_runtime_map_identity_generation", 0)
         runtime_active = runtime_tracking_active(snapshot)
         session_started_at = runtime_mission_session_started_at(
             self.runtime_telemetry_cache
@@ -334,6 +374,10 @@ class DreameLawnMowerRefreshMixin:
                 refresh=False,
                 include_cloud=True,
             )
+            if identity_generation != getattr(
+                self, "_runtime_map_identity_generation", 0
+            ):
+                return False
             if self._snapshot_is_stale(
                 snapshot, observed_generation=observed_device_generation
             ) or (
@@ -379,6 +423,10 @@ class DreameLawnMowerRefreshMixin:
             )
             return True
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
+            if identity_generation != getattr(
+                self, "_runtime_map_identity_generation", 0
+            ):
+                return False
             if self._snapshot_is_stale(
                 snapshot, observed_generation=observed_device_generation
             ) or (
@@ -656,7 +704,7 @@ class DreameLawnMowerRefreshMixin:
             getattr(snapshot, "available", False)
             and runtime_tracking_active(snapshot)
         ):
-            return await self._async_refresh_active_runtime(cycle, snapshot)
+            await self._async_refresh_active_runtime(cycle, snapshot)
         return await self.async_refresh_app_maps(force=False)
 
     def _metadata_phase_needs_retry(self, phase: str, result: Any) -> bool:
@@ -866,6 +914,11 @@ class DreameLawnMowerRefreshMixin:
 
     def _runtime_map_index(self) -> int | None:
         """Return the map identity used to scope transient runtime overlays."""
+        if (
+            getattr(self, "_runtime_map_identity_verified", False)
+            and hasattr(self, "_runtime_active_map_index")
+        ):
+            return self._runtime_active_map_index
         return active_map_index(
             self.app_maps,
             selected_map_index=self.selected_map_index,
