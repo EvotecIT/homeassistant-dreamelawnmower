@@ -474,6 +474,7 @@ class DreameLawnMowerClient(
         self._last_camera_stream_diagnostics: Mapping[str, Any] = {}
         self._app_map_object_cache_lock = _threading.Lock()
         self._app_map_download_lock = _threading.Lock()
+        self._app_map_payload_cache: dict[int, dict[str, Any]] = {}
         self._point_cloud_generation_lock = _threading.Lock()
         self._latest_app_map_inventory_identity: str | None = None
         self._latest_app_map_object_inventory_identity: str | None = None

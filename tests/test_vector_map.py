@@ -11,6 +11,9 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from PIL import Image
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_visuals import (
+    MAP_RENDER_STYLES,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.vector_map import (
     filter_runtime_track_segments,
     parse_batch_vector_map,
@@ -29,6 +32,31 @@ from dreame_lawn_mower_client.models import (
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
 )
+
+
+@pytest.mark.parametrize("style", MAP_RENDER_STYLES.values(), ids=MAP_RENDER_STYLES)
+@pytest.mark.parametrize("position_status", ["current", "last_known", "known_dock"])
+def test_vector_map_renders_position_captions_in_every_theme(style, position_status):
+    vector_map = parse_batch_vector_map(_batch_payload())
+    png = render_vector_map_png(
+        vector_map, style=style, runtime_position=(50, 50),
+        position_status=position_status,
+    )
+    assert png is not None
+    with Image.open(BytesIO(png)) as image:
+        image.load()
+        assert image.format == "PNG"
+        assert image.width > 0 and image.height > 0
+        if position_status != "current":
+            # Captions must actually be painted, not silently skipped.
+            current = render_vector_map_png(
+                vector_map, style=style, runtime_position=(50, 50),
+            )
+            with Image.open(BytesIO(current)) as baseline:
+                caption_box = (0, 0, image.width, image.height // 6)
+                assert image.crop(caption_box).tobytes() != (
+                    baseline.crop(caption_box).tobytes()
+                )
 
 
 def _client() -> DreameLawnMowerClient:

@@ -27,6 +27,17 @@ refreshed, the camera fails closed. Cached provisioning avoids repeating
 video-specific configuration calls; it does not bypass live mower safety
 checks.
 
+Live Video is temporarily unavailable while the mower is docked, returning,
+mapping, or reporting an unrecognized active state. Its `video_block_reason`
+attribute explains the restriction; camera support and saved provisioning are
+retained. Availability returns when a new mower snapshot clears the restriction.
+The integration never moves the mower to enable video.
+
+On older versions, trying playback in the dock can instead produce a WebRTC EOF
+or an RTSP `404 Not Found` because the mower does not publish video there. A
+working stream outside the station confirms that this dock restriction is not
+itself a transport compatibility failure.
+
 The integration exposes a dormant loopback FLV relay to Home Assistant. The
 first actual media GET starts XP2P, while camera capability discovery remains
 local. The relay owns the mower's single-consumer source and fans it out to

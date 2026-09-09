@@ -355,8 +355,14 @@ def render_vector_map_png(
         }.get(position_status)
         if label:
             draw.text(
-                (12, 12), label, font=map_font(14), fill=style.label_text,
-                stroke_width=2, stroke_fill=style.label_halo,
+                (round(12 * pixel_scale), round(12 * pixel_scale)),
+                label,
+                font=map_font(round(
+                    14 * _normalize_label_scale(label_scale) * pixel_scale
+                )),
+                fill=style.label,
+                stroke_width=label_halo_width,
+                stroke_fill=style.label_halo,
             )
 
     for zone in vector_map.zones:

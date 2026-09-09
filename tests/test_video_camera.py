@@ -1001,7 +1001,7 @@ def test_video_camera_dock_transition_recovers_from_stale_raw_returning() -> Non
     assert asyncio.run(_run()) == (
         1,
         1,
-        True,
+        False,
         (
             "Camera stream handshake probe is blocked while the mower is "
             "docked. The Dreame app requires moving the mower out of the "
@@ -1529,6 +1529,41 @@ def test_video_camera_direct_stream_source_returns_dormant_local_relay() -> None
         "http://127.0.0.1:12345/private.flv",
         1,
     )
+
+
+@pytest.mark.parametrize("blocked_state", ["charging", "returning", "mapping"])
+@pytest.mark.parametrize("active_session", [False, True])
+def test_video_availability_gates_cached_routes_without_losing_discovery(
+    blocked_state, active_session,
+):
+    async def run():
+        snapshot = SimpleNamespace(
+            available=True, state=blocked_state, activity=blocked_state,
+            raw_attributes={"mapping": blocked_state == "mapping"},
+        )
+        entity = _uninitialized_entity(snapshot=snapshot)
+        entity._provisioning_cache.inputs = object()
+        entity._provisioning_cache.device_config = object()
+        entity._video_capability_observed = True
+        if active_session:
+            entity._session = object()
+
+        class Relay:
+            async def async_start(self):
+                return "http://127.0.0.1:12345/dormant.flv"
+
+        entity._flv_relay = Relay()
+        assert entity.available is False
+        assert entity.extra_state_attributes["video_block_reason"]
+        assert entity.extra_state_attributes["video_capability"] == "supported"
+        # Provider discovery must remain local and survive a docked reload.
+        assert await entity.stream_source() == "http://127.0.0.1:12345/dormant.flv"
+        snapshot.state = snapshot.activity = "mowing"
+        snapshot.raw_attributes = {}
+        assert entity.available is True
+        assert entity.extra_state_attributes["video_block_reason"] is None
+
+    asyncio.run(run())
 
 
 def test_video_camera_direct_stream_source_failure_does_not_touch_ha_stream() -> None:

@@ -862,6 +862,7 @@ def _app_map_entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
         "hash_match": entry.get("hash_match"),
         "force_load": entry.get("force_load"),
         "chunk_count": entry.get("chunk_count"),
+        "payload_cached": entry.get("payload_cached"),
         "total_area": summary.get("total_area"),
         "map_area_total": summary.get("map_area_total"),
         "map_area_count": summary.get("map_area_count"),
