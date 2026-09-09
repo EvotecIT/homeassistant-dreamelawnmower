@@ -277,6 +277,7 @@ class DreameLawnMowerRefreshMixin:
                 runtime_map_index=runtime_map_index,
             ),
         )
+        self._expire_runtime_map_identity()
         if identity_generation != getattr(self, "_runtime_map_identity_generation", 0):
             return False
         if not runtime_current or self._snapshot_is_stale(runtime_snapshot):
@@ -311,7 +312,7 @@ class DreameLawnMowerRefreshMixin:
             if (
                 refreshed_at is not None
                 and (not force or refreshed_at >= requested_at)
-                and datetime.now(UTC) - refreshed_at < RUNTIME_MAP_IDENTITY_INTERVAL
+                and self._runtime_map_identity_is_fresh()
             ):
                 return True, self._runtime_active_map_index, identity_generation
             try:
@@ -337,13 +338,16 @@ class DreameLawnMowerRefreshMixin:
             if (
                 index != getattr(self, "_runtime_active_map_index", None)
                 or refreshed_at is None
-                or datetime.now(UTC) - refreshed_at >= RUNTIME_MAP_IDENTITY_INTERVAL
+                or not self._runtime_map_identity_is_fresh()
             ):
                 # Supersede telemetry still awaiting the previous map's result.
                 self._invalidate_runtime_map_identity()
                 identity_generation = self._runtime_map_identity_generation
             self._runtime_active_map_index = index
             self._runtime_map_index_refreshed_at = datetime.now(UTC)
+            self.client.runtime_map_identity_expires_at = (
+                self._runtime_map_index_refreshed_at + RUNTIME_MAP_IDENTITY_INTERVAL
+            )
             # The complete map cache belongs to background hydration. Expire it
             # promptly on a switch without publishing old geometry as current.
             if index != active_map_index(getattr(self, "app_maps", None)):
@@ -357,6 +361,24 @@ class DreameLawnMowerRefreshMixin:
         )
         self._runtime_map_index_refreshed_at = None
         self._runtime_map_identity_verified = False
+        self.client.runtime_map_identity_expires_at = None
+
+    def _runtime_map_identity_is_fresh(self) -> bool:
+        """Check the MAPL lease independently of polling or telemetry activity."""
+        refreshed_at = getattr(self, "_runtime_map_index_refreshed_at", None)
+        return (
+            refreshed_at is not None
+            and timedelta(0) <= datetime.now(UTC) - refreshed_at
+            < RUNTIME_MAP_IDENTITY_INTERVAL
+        )
+
+    def _expire_runtime_map_identity(self) -> None:
+        """Fence pending readers when the cached MAPL lease expires."""
+        if not self._runtime_map_identity_is_fresh() and (
+            getattr(self, "_runtime_map_identity_verified", False)
+            or getattr(self, "_runtime_map_index_refreshed_at", None) is not None
+        ):
+            self._invalidate_runtime_map_identity()
 
     async def _async_refresh_runtime_status(
         self,
@@ -406,6 +428,10 @@ class DreameLawnMowerRefreshMixin:
                 != observed_mission_generation
             ):
                 return False
+            if runtime_active:
+                self._expire_runtime_map_identity()
+                if not self._runtime_map_identity_is_fresh():
+                    runtime_map_index = None
             self.runtime_status_blob = runtime_status_blob
             self.runtime_telemetry_cache.update(
                 self.runtime_status_blob,
@@ -456,6 +482,10 @@ class DreameLawnMowerRefreshMixin:
             ):
                 return False
             _LOGGER.debug("Failed to refresh runtime status blob: %s", err)
+            if runtime_active:
+                self._expire_runtime_map_identity()
+                if not self._runtime_map_identity_is_fresh():
+                    runtime_map_index = None
             self.runtime_status_blob = None
             self.client.update_runtime_live_tracking(
                 None,
@@ -717,6 +747,7 @@ class DreameLawnMowerRefreshMixin:
         self, cycle: DreameLawnMowerPerformanceCycle
     ) -> Any:
         """Verify active map identity even when MQTT postpones normal polling."""
+        self._expire_runtime_map_identity()
         snapshot = getattr(self, "data", None)
         if (
             getattr(snapshot, "available", False)
@@ -937,7 +968,10 @@ class DreameLawnMowerRefreshMixin:
             getattr(self, "_runtime_map_identity_verified", False)
             and hasattr(self, "_runtime_active_map_index")
         ):
-            return self._runtime_active_map_index
+            return (
+                self._runtime_active_map_index
+                if self._runtime_map_identity_is_fresh() else None
+            )
         return active_map_index(
             self.app_maps,
             selected_map_index=self.selected_map_index,

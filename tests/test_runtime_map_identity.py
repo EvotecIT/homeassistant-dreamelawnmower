@@ -38,6 +38,7 @@ def test_background_geometry_does_not_repeat_verified_active_telemetry():
             available=True, activity="mowing", mowing_session_active=True
         )
         coordinator._runtime_map_identity_verified = True
+        coordinator._runtime_map_index_refreshed_at = datetime.now(UTC)
         coordinator._async_refresh_active_runtime = AsyncMock()
         coordinator.async_refresh_app_maps = AsyncMock()
         await coordinator._async_refresh_background_map_runtime(
@@ -288,6 +289,7 @@ def test_cancelled_identity_read_expires_its_previous_verification():
         coordinator = _coordinator()
         await coordinator._async_refresh_runtime_map_index(force=True)
         coordinator._runtime_map_identity_verified = True
+        coordinator._runtime_map_index_refreshed_at = datetime.now(UTC)
         previous = coordinator._runtime_map_identity_generation
         started = asyncio.Event()
 
@@ -353,6 +355,7 @@ def test_realtime_read_cannot_publish_after_identity_invalidation(boundary, fail
     async def scenario():
         coordinator = _coordinator()
         coordinator._runtime_map_identity_verified = True
+        coordinator._runtime_map_index_refreshed_at = datetime.now(UTC)
         coordinator._runtime_active_map_index = 2
         coordinator._shutting_down = False
         coordinator._last_device_settings_event_at = None

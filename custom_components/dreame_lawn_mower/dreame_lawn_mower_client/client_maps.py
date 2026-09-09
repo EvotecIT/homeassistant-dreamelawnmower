@@ -346,6 +346,7 @@ class _DreameLawnMowerClientMapsMixin(
                 ),
             )
 
+        self._expire_runtime_live_tracking()
         runtime_blob = self._latest_runtime_status_blob
         if self._runtime_session_active is False:
             vector_map.mow_paths = ()

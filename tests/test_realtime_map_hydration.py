@@ -1,6 +1,7 @@
 """Realtime positions must acquire map identity without waiting for a poll."""
 
 import asyncio
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -31,6 +32,9 @@ def test_realtime_update_requests_missing_active_map_identity(active, verified):
     )
     coordinator._shutting_down = False
     coordinator._runtime_map_identity_verified = verified
+    coordinator._runtime_map_index_refreshed_at = (
+        datetime.now(UTC) if verified else None
+    )
     coordinator._last_device_settings_event_at = None
     coordinator.runtime_telemetry_cache = DreameLawnMowerRuntimeTelemetryCache()
     coordinator.app_maps = {"current_map_index": 0}

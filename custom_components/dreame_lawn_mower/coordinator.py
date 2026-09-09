@@ -255,6 +255,7 @@ class DreameLawnMowerCoordinator(
         self._runtime_map_identity_lock = asyncio.Lock()
         self._runtime_map_index_refreshed_at: datetime | None = None
         self._runtime_active_map_index: int | None = None
+        self.client.runtime_map_identity_expires_at = None
         self._defer_active_runtime_during_setup = False
         self._foreground_refresh_count = 0
         self._metadata_refresh_count = 0
@@ -538,6 +539,7 @@ class DreameLawnMowerCoordinator(
                 session_started_at=session_started_at,
                 session_identity=session_identity,
             )
+            self._expire_runtime_map_identity()
             runtime_map_index = (
                 self._runtime_map_index()
                 if not runtime_active
@@ -579,6 +581,9 @@ class DreameLawnMowerCoordinator(
             ):
                 return
 
+            self._expire_runtime_map_identity()
+            if runtime_active and not self._runtime_map_identity_is_fresh():
+                runtime_map_index = None
             self._observe_runtime_mission_boundary(snapshot)
             if runtime_status_error is None:
                 try:
