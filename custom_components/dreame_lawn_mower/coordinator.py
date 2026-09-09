@@ -544,6 +544,7 @@ class DreameLawnMowerCoordinator(
                 or getattr(self, "_runtime_map_identity_verified", False)
                 else None
             )
+            identity_generation = getattr(self, "_runtime_map_identity_generation", 0)
             runtime_status_blob: DreameLawnMowerStatusBlob | None = None
             runtime_status_error: Exception | None = None
             try:
@@ -567,6 +568,10 @@ class DreameLawnMowerCoordinator(
             # Both optional reads can yield while a newer authoritative fetch
             # publishes. Commit no runtime or Bluetooth side effects until the
             # cached snapshot is still current after every await.
+            if identity_generation != getattr(
+                self, "_runtime_map_identity_generation", 0
+            ):
+                return
             if self._device_snapshot_is_stale(snapshot) or (
                 observed_mission_generation is not None
                 and runtime_mission_session_generation(self.runtime_telemetry_cache)
@@ -2336,11 +2341,14 @@ class DreameLawnMowerCoordinator(
     async def async_switch_current_map(self, map_index: int) -> None:
         """Switch the active mower map and refresh all map-scoped state."""
         self._invalidate_runtime_map_identity()
-        try:
-            await self.client.async_switch_current_map(map_index)
-        finally:
-            # A read started during the command cannot establish the final map.
-            self._invalidate_runtime_map_identity()
+        if not hasattr(self, "_runtime_map_identity_lock"):
+            self._runtime_map_identity_lock = asyncio.Lock()
+        async with self._runtime_map_identity_lock:
+            try:
+                await self.client.async_switch_current_map(map_index)
+            finally:
+                # Expire outcomes even when the command's response is lost.
+                self._invalidate_runtime_map_identity()
         if self.selected_map_index != map_index:
             self._invalidate_schedule_map_hint()
         self.selected_map_index = map_index

@@ -237,8 +237,9 @@ class DreameLawnMowerRefreshMixin:
             self.runtime_telemetry_cache
         )
         observed_device_generation = getattr(self, "_device_snapshot_generation", None)
-        identity_generation = getattr(self, "_runtime_map_identity_generation", 0)
-        map_identity_refreshed, runtime_map_index = await cycle.measure(
+        (
+            map_identity_refreshed, runtime_map_index, identity_generation
+        ) = await cycle.measure(
             "active_map_identity",
             lambda: self._async_refresh_runtime_map_index(force=force_map_identity),
         )
@@ -299,7 +300,7 @@ class DreameLawnMowerRefreshMixin:
 
     async def _async_refresh_runtime_map_index(
         self, *, force: bool,
-    ) -> tuple[bool, int | None]:
+    ) -> tuple[bool, int | None, int]:
         """Read only MAPL for live tracking; never wait for a MAPD download."""
         requested_at = datetime.now(UTC)
         if not hasattr(self, "_runtime_map_identity_lock"):
@@ -312,25 +313,38 @@ class DreameLawnMowerRefreshMixin:
                 and (not force or refreshed_at >= requested_at)
                 and datetime.now(UTC) - refreshed_at < RUNTIME_MAP_IDENTITY_INTERVAL
             ):
-                return True, self._runtime_active_map_index
+                return True, self._runtime_active_map_index, identity_generation
             try:
                 index = await self.client.async_get_current_app_map_index()
+            except asyncio.CancelledError:
+                if identity_generation == getattr(
+                    self, "_runtime_map_identity_generation", 0
+                ):
+                    self._invalidate_runtime_map_identity()
+                raise
             except Exception as err:  # A stale map must not label fresh poses.
                 _LOGGER.debug("Failed to refresh runtime map identity: %s", err)
-                self._runtime_map_index_refreshed_at = None
-                self._runtime_map_identity_verified = False
-                return False, None
+                if identity_generation == getattr(
+                    self, "_runtime_map_identity_generation", 0
+                ):
+                    self._invalidate_runtime_map_identity()
+                    identity_generation = self._runtime_map_identity_generation
+                return False, None, identity_generation
             if identity_generation != getattr(
                 self, "_runtime_map_identity_generation", 0
             ):
-                return False, None
+                return False, None, identity_generation
+            if index != getattr(self, "_runtime_active_map_index", None):
+                # Supersede telemetry still awaiting the previous map's result.
+                self._invalidate_runtime_map_identity()
+                identity_generation = self._runtime_map_identity_generation
             self._runtime_active_map_index = index
             self._runtime_map_index_refreshed_at = datetime.now(UTC)
             # The complete map cache belongs to background hydration. Expire it
             # promptly on a switch without publishing old geometry as current.
             if index != active_map_index(getattr(self, "app_maps", None)):
                 self.app_maps_refreshed_at = None
-            return True, index
+            return True, index, identity_generation
 
     def _invalidate_runtime_map_identity(self) -> None:
         """Retire cached identity and any outstanding map-scoped runtime read."""
