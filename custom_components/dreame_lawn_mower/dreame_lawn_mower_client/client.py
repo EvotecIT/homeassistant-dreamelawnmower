@@ -506,18 +506,27 @@ class DreameLawnMowerClient(
         active: bool,
         map_index: int | None = None,
     ) -> None:
-        """Cache active-session runtime track history for live map overlays."""
+        """Cache live overlays only against an explicitly verified map index.
+
+        An unknown map retires live context; it never inherits the previous slot.
+        Scoped historical position evidence remains available as last-known data.
+        """
+        if map_index is None or self._runtime_live_map_index not in (None, map_index):
+            self._position_tracker.invalidate_current()
         self._position_tracker.record(status_blob, map_index=map_index)
-        self._latest_runtime_status_blob = status_blob
+        self._latest_runtime_status_blob = (
+            status_blob if map_index is not None else None
+        )
         self._runtime_session_active = active
-        if not active:
+        if not active or map_index is None:
             self._runtime_live_track_segments = ()
-            self._last_runtime_track_blob_hex = None
+            # Consume unscoped packets so recovery cannot rebind their cached
+            # coordinates to a map discovered only after they arrived.
+            self._last_runtime_track_blob_hex = (
+                getattr(status_blob, "hex", None) or self._last_runtime_track_blob_hex
+            )
             self._runtime_live_map_index = None
             self._runtime_live_task_id = None
-            return
-
-        if status_blob is None:
             return
 
         task_id = getattr(status_blob, "candidate_runtime_task_id", None)
@@ -532,11 +541,13 @@ class DreameLawnMowerClient(
         )
         if context_changed:
             self._runtime_live_track_segments = ()
-            self._last_runtime_track_blob_hex = None
         if map_index is not None:
             self._runtime_live_map_index = map_index
         if task_id is not None:
             self._runtime_live_task_id = task_id
+
+        if status_blob is None:
+            return
 
         blob_hex = getattr(status_blob, "hex", None)
         if blob_hex and blob_hex == self._last_runtime_track_blob_hex:

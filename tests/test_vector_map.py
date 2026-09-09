@@ -640,6 +640,7 @@ def test_vector_map_view_includes_cached_runtime_track_overlay() -> None:
             received_at="2026-07-16T10:02:09+00:00",
         ),
         active=True,
+        map_index=0,
     )
 
     view = client._sync_refresh_vector_map_view()
@@ -677,6 +678,7 @@ def test_vector_map_view_exposes_runtime_position_without_track_points() -> None
             received_at="2026-07-16T10:02:09+00:00",
         ),
         active=True,
+        map_index=0,
     )
 
     view = client._sync_refresh_vector_map_view()
@@ -758,6 +760,115 @@ def test_runtime_track_resets_when_map_or_task_changes() -> None:
     assert client._runtime_live_map_index == 1
     assert client._runtime_live_task_id == 5
     assert client._runtime_live_track_segments == (((40, 40), (50, 50)),)
+
+
+@pytest.mark.parametrize("missing_blob", [False, True])
+def test_unverified_runtime_clears_retained_map_context(missing_blob):
+    client = _client()
+    first = SimpleNamespace(
+        hex="verified", candidate_runtime_task_id=4,
+        candidate_runtime_track_segments=(((10, 20), (30, 40)),),
+    )
+    client.update_runtime_live_tracking(first, active=True, map_index=0)
+    unverified = SimpleNamespace(
+        hex="unverified", candidate_runtime_task_id=4,
+        candidate_runtime_track_segments=(((40, 40), (50, 50)),),
+    )
+    client.update_runtime_live_tracking(
+        None if missing_blob else unverified, active=True, map_index=None
+    )
+    assert client._runtime_live_map_index is None
+    assert client._runtime_live_track_segments == ()
+    assert client._latest_runtime_status_blob is None
+    client.update_runtime_live_tracking(unverified, active=True, map_index=1)
+    assert client._runtime_live_map_index == 1
+    if not missing_blob:
+        assert client._runtime_live_track_segments == ()
+        unverified.hex = "fresh-verified"
+        client.update_runtime_live_tracking(unverified, active=True, map_index=1)
+    assert client._runtime_live_track_segments == (((40, 40), (50, 50)),)
+
+
+def test_cached_packet_cannot_move_between_verified_maps():
+    client = _client()
+    packet = SimpleNamespace(
+        hex="same-packet", candidate_runtime_track_segments=(((10, 20), (30, 40)),),
+    )
+    client.update_runtime_live_tracking(packet, active=True, map_index=0)
+    client.update_runtime_live_tracking(packet, active=True, map_index=1)
+    assert client._runtime_live_map_index == 1
+    assert client._runtime_live_track_segments == ()
+
+
+@pytest.mark.parametrize("publisher", ["poll", "realtime"])
+def test_coordinator_unverified_packets_cannot_extend_real_client_track(publisher):
+    from custom_components.dreame_lawn_mower.coordinator import (
+        DreameLawnMowerCoordinator,
+    )
+    from custom_components.dreame_lawn_mower.performance import (
+        DreameLawnMowerPerformanceTracker,
+    )
+    from custom_components.dreame_lawn_mower.runtime_cache import (
+        DreameLawnMowerRuntimeTelemetryCache,
+    )
+
+    async def scenario():
+        client = _client()
+        client.update_runtime_live_tracking(SimpleNamespace(
+            hex="prior", candidate_runtime_track_segments=(((10, 20), (30, 40)),),
+        ), active=True, map_index=0)
+        packet = SimpleNamespace(
+            hex="unverified", candidate_runtime_track_segments=(((40, 40), (50, 50)),),
+        )
+        snapshot = SimpleNamespace(
+            available=True, activity="mowing", mowing_session_active=True
+        )
+        client.async_get_current_app_map_index = AsyncMock(side_effect=TimeoutError())
+        client.async_get_runtime_status_blob = AsyncMock(return_value=packet)
+        client.async_get_cached_snapshot = AsyncMock(return_value=snapshot)
+        client.async_get_bluetooth_connected = AsyncMock(return_value=False)
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        coordinator.client = client
+        coordinator.runtime_telemetry_cache = DreameLawnMowerRuntimeTelemetryCache()
+        coordinator._shutting_down = False
+        coordinator._last_device_settings_event_at = None
+        coordinator._runtime_map_identity_verified = False
+        coordinator.async_set_updated_data = Mock()
+        coordinator._schedule_metadata_refresh = Mock()
+        if publisher == "poll":
+            await coordinator._async_refresh_active_runtime(
+                DreameLawnMowerPerformanceTracker().start("test"), snapshot
+            )
+        else:
+            await coordinator._async_process_client_update()
+        assert client._runtime_live_map_index is None
+        assert client._runtime_live_track_segments == ()
+        assert client._latest_runtime_status_blob is None
+    asyncio.run(scenario())
+
+
+def test_verified_map_change_without_blob_retires_previous_track():
+    client = _client()
+    client.update_runtime_live_tracking(SimpleNamespace(
+        hex="verified", candidate_runtime_track_segments=(((10, 20), (30, 40)),),
+    ), active=True, map_index=0)
+    client.update_runtime_live_tracking(None, active=True, map_index=1)
+    assert client._runtime_live_map_index == 1
+    assert client._runtime_live_track_segments == ()
+
+
+def test_rendering_another_map_does_not_retarget_live_tracking():
+    client = _client()
+    client._sync_get_vector_map_batch_data = lambda: _batch_payload()
+    client._safe_map_diagnostics = lambda **kwargs: None
+    segments = (((10, 20), (30, 40)),)
+    client.update_runtime_live_tracking(SimpleNamespace(
+        hex="verified", candidate_runtime_track_segments=segments,
+    ), active=True, map_index=1)
+    view = client._sync_refresh_vector_map_view(current_map_index=0)
+    assert "runtime_track_point_count" not in view.details
+    assert client._runtime_live_map_index == 1
+    assert client._runtime_live_track_segments == segments
 
 
 def test_vector_map_view_withholds_position_from_another_map() -> None:

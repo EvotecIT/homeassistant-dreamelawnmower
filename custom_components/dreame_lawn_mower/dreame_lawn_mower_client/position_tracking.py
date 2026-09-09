@@ -157,6 +157,11 @@ class MowerPositionTracker:
                 default=None,
             )
 
+    def invalidate_current(self) -> None:
+        """Retire live input while preserving scoped historical position evidence."""
+        with self._lock:
+            self._input = None
+
     def record(
         self, blob: Any, *, map_index: int | None, now: datetime | None = None
     ) -> None:

@@ -349,21 +349,10 @@ class _DreameLawnMowerClientMapsMixin(
         runtime_blob = self._latest_runtime_status_blob
         if self._runtime_session_active is False:
             vector_map.mow_paths = ()
-        if (
-            runtime_blob is not None
-            and self._runtime_live_map_index is not None
-            and self._runtime_live_map_index != vector_map.map_index
-        ):
-            self._runtime_live_track_segments = ()
-            self._last_runtime_track_blob_hex = None
-            self._runtime_live_map_index = vector_map.map_index
         summary = vector_map_to_summary(vector_map)
         details = vector_map_to_details(vector_map)
         details["render_rotation"] = style.rotation if style else 0
-        runtime_context_matches = self._runtime_live_map_index in (
-            None,
-            vector_map.map_index,
-        )
+        runtime_context_matches = self._runtime_live_map_index == vector_map.map_index
         runtime_track_segments = (
             filter_runtime_track_segments(
                 vector_map,
