@@ -31,6 +31,112 @@ def _coordinator():
     return coordinator
 
 
+def test_background_geometry_does_not_repeat_verified_active_telemetry():
+    async def scenario():
+        coordinator = _coordinator()
+        coordinator.data = SimpleNamespace(
+            available=True, activity="mowing", mowing_session_active=True
+        )
+        coordinator._runtime_map_identity_verified = True
+        coordinator._async_refresh_active_runtime = AsyncMock()
+        coordinator.async_refresh_app_maps = AsyncMock()
+        await coordinator._async_refresh_background_map_runtime(
+            DreameLawnMowerPerformanceTracker().start("test")
+        )
+        coordinator._async_refresh_active_runtime.assert_not_awaited()
+        coordinator.async_refresh_app_maps.assert_awaited_once_with(force=False)
+    asyncio.run(scenario())
+
+
+def test_same_index_recovery_supersedes_unscoped_telemetry():
+    async def scenario():
+        coordinator = _coordinator()
+        await coordinator._async_refresh_runtime_map_index(force=True)
+        coordinator.client.async_get_current_app_map_index.side_effect = TimeoutError()
+        started, release = asyncio.Event(), asyncio.Event()
+        async def telemetry(**kwargs):
+            started.set()
+            await release.wait()
+        coordinator.client.async_get_runtime_status_blob.side_effect = telemetry
+        snapshot = SimpleNamespace(
+            available=True, activity="mowing", mowing_session_active=True
+        )
+        task = asyncio.create_task(coordinator._async_refresh_active_runtime(
+            DreameLawnMowerPerformanceTracker().start("test"), snapshot
+        ))
+        await started.wait()
+        coordinator.client.async_get_current_app_map_index.side_effect = None
+        await coordinator._async_refresh_runtime_map_index(force=True)
+        release.set()
+        assert await task is False
+        coordinator.client.update_runtime_live_tracking.assert_not_called()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("new_identity", [None, 3])
+def test_old_geometry_cannot_replace_newer_map_identity(new_identity):
+    async def scenario():
+        coordinator = _coordinator()
+        coordinator._invalidate_schedule_map_hint = Mock()
+        original = coordinator.app_maps
+        started, release = asyncio.Event(), asyncio.Event()
+        async def geometry(**kwargs):
+            started.set()
+            await release.wait()
+            return {"map_list_valid": True, "current_map_index": 2}
+        coordinator.client.async_get_app_maps = geometry
+        task = asyncio.create_task(coordinator.async_refresh_app_maps(force=True))
+        await started.wait()
+        coordinator.client.async_get_current_app_map_index.return_value = new_identity
+        await coordinator._async_refresh_runtime_map_index(force=True)
+        coordinator.selected_map_index = new_identity
+        release.set()
+        assert await task is original
+        assert coordinator.selected_map_index == new_identity
+        assert coordinator.app_maps_refreshed_at is None
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_superseded_geometry_cannot_expire_a_newer_geometry_result(fails):
+    async def scenario():
+        coordinator = _coordinator()
+        started, release = asyncio.Event(), asyncio.Event()
+        async def geometry(**kwargs):
+            started.set()
+            await release.wait()
+            if fails:
+                raise TimeoutError("Older download failed")
+            return {"map_list_valid": True, "current_map_index": 2}
+        coordinator.client.async_get_app_maps = geometry
+        task = asyncio.create_task(coordinator.async_refresh_app_maps(force=True))
+        await started.wait()
+        newer = {"map_list_valid": True, "current_map_index": 3}
+        coordinator.app_maps = newer
+        coordinator.app_maps_refreshed_at = datetime.now(UTC)
+        coordinator.app_maps_refresh_succeeded = True
+        release.set()
+        assert await task is newer
+        assert coordinator.app_maps_refresh_succeeded is True
+        assert coordinator.app_maps_refreshed_at is not None
+    asyncio.run(scenario())
+
+
+def test_matching_geometry_can_finish_after_identity_refresh():
+    async def scenario():
+        coordinator = _coordinator()
+        coordinator._invalidate_schedule_map_hint = Mock()
+        async def geometry(**kwargs):
+            await coordinator._async_refresh_runtime_map_index(force=True)
+            return {"map_list_valid": True, "current_map_index": 2}
+        coordinator.client.async_get_app_maps = geometry
+        result = await coordinator.async_refresh_app_maps(force=True)
+        assert result["current_map_index"] == 2
+        assert coordinator.app_maps_refresh_succeeded is True
+        assert coordinator.app_maps_refreshed_at is not None
+    asyncio.run(scenario())
+
+
 def test_active_tracking_does_not_wait_for_geometry_download():
     async def scenario():
         coordinator = _coordinator()

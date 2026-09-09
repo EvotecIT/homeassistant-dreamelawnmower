@@ -334,7 +334,11 @@ class DreameLawnMowerRefreshMixin:
                 self, "_runtime_map_identity_generation", 0
             ):
                 return False, None, identity_generation
-            if index != getattr(self, "_runtime_active_map_index", None):
+            if (
+                index != getattr(self, "_runtime_active_map_index", None)
+                or refreshed_at is None
+                or datetime.now(UTC) - refreshed_at >= RUNTIME_MAP_IDENTITY_INTERVAL
+            ):
                 # Supersede telemetry still awaiting the previous map's result.
                 self._invalidate_runtime_map_identity()
                 identity_generation = self._runtime_map_identity_generation
@@ -717,6 +721,7 @@ class DreameLawnMowerRefreshMixin:
         if (
             getattr(snapshot, "available", False)
             and runtime_tracking_active(snapshot)
+            and not getattr(self, "_runtime_map_identity_verified", False)
         ):
             await self._async_refresh_active_runtime(cycle, snapshot)
         return await self.async_refresh_app_maps(force=False)

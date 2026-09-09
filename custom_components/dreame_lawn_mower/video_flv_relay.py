@@ -720,7 +720,13 @@ class DreameLawnMowerFlvRelay:
                         ):
                             self._media_callback_sent = True
                             self._first_media_at = asyncio.get_running_loop().time()
+                            # The reader cannot observe frames while this owner
+                            # callback waits for locks or persists provisioning.
+                            media_deadline.reschedule(None)
                             await self._media_ready_callback(self.diagnostics)
+                            media_deadline.reschedule(
+                                asyncio.get_running_loop().time() + _VIDEO_FRAME_TIMEOUT
+                            )
                 raise RuntimeError("The mower video source ended.")
         except asyncio.CancelledError:
             raise

@@ -2001,6 +2001,7 @@ class DreameLawnMowerCoordinator(
     ) -> dict[str, Any] | None:
         """Refresh cached app-map payloads without failing the main poll."""
         now = datetime.now(UTC)
+        identity_generation = getattr(self, "_runtime_map_identity_generation", 0)
         if (
             not force
             and self.app_maps is not None
@@ -2028,17 +2029,43 @@ class DreameLawnMowerCoordinator(
             )
         except Exception as err:  # noqa: BLE001 - best-effort extra metadata
             _LOGGER.debug("Failed to refresh app maps: %s", err)
+            refreshed_at = self.app_maps_refreshed_at
+            if (
+                isinstance(refreshed_at, datetime) and refreshed_at > now
+            ) or identity_generation != getattr(
+                self, "_runtime_map_identity_generation", 0
+            ):
+                return self.app_maps
             self.app_maps_refresh_succeeded = False
             return self.app_maps
 
         payload = dict(app_maps)
+        current_idx = active_map_index(payload)
+        identity_at = getattr(self, "_runtime_map_index_refreshed_at", None)
+        newer_geometry_at = self.app_maps_refreshed_at
+        if isinstance(newer_geometry_at, datetime) and newer_geometry_at > now:
+            return self.app_maps
+        if (
+            identity_at is not None
+            and now < identity_at
+            and current_idx != self._runtime_active_map_index
+        ) or (
+            identity_generation != getattr(self, "_runtime_map_identity_generation", 0)
+            and (
+                identity_at is None
+                or current_idx != self._runtime_active_map_index
+            )
+        ):
+            # A completed download cannot revive inventory from before a switch
+            # or contradict a newer MAPL read. Retry without changing selections.
+            self.app_maps_refreshed_at = None
+            self.app_maps_refresh_succeeded = False
+            return self.app_maps
         payload.setdefault("captured_at", now.isoformat())
         payload["source"] = source
         self.app_maps = payload
         self.app_maps_refreshed_at = now
         self.app_maps_refresh_succeeded = payload.get("map_list_valid") is True
-        current_idx = active_map_index(payload)
-        identity_at = getattr(self, "_runtime_map_index_refreshed_at", None)
         if (
             identity_at is not None
             and now >= identity_at

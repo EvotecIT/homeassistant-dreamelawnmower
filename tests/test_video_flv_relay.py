@@ -25,7 +25,9 @@ from custom_components.dreame_lawn_mower.video_flv_relay import (
 FLV_HEADER = b"FLV\x01\x01\x00\x00\x00\x09\x00\x00\x00\x00"
 
 
-@pytest.mark.parametrize("traffic", ["audio", "metadata", "partial", "video"])
+@pytest.mark.parametrize(
+    "traffic", ["audio", "metadata", "partial", "video", "callback"]
+)
 def test_relay_frame_deadline_ignores_nonvideo_and_allows_fresh_reconnect(traffic):
     async def scenario():
         pytest_socket.enable_socket()
@@ -58,7 +60,9 @@ def test_relay_frame_deadline_ignores_nonvideo_and_allows_fresh_reconnect(traffi
             try:
                 for _ in range(20):
                     await asyncio.sleep(0.025)
-                    await response.write(chunks[traffic])
+                    await response.write(
+                        chunks["video" if traffic == "callback" else traffic]
+                    )
                 flowing.set()
                 await stop.wait()
             except ConnectionResetError:
@@ -82,7 +86,9 @@ def test_relay_frame_deadline_ignores_nonvideo_and_allows_fresh_reconnect(traffi
             source_factory=lambda: asyncio.sleep(
                 0, result=f"http://127.0.0.1:{port}/source.flv"
             ),
-            media_ready=lambda diagnostics: asyncio.sleep(0),
+            media_ready=lambda diagnostics: asyncio.sleep(
+                0.35 if traffic == "callback" else 0
+            ),
             failed=failure,
             idle=lambda: asyncio.sleep(0),
         )
@@ -102,7 +108,7 @@ def test_relay_frame_deadline_ignores_nonvideo_and_allows_fresh_reconnect(traffi
                 response = await client.get(url)
                 responses.append(response)
                 assert await response.content.readexactly(len(initial)) == initial
-                if traffic == "video":
+                if traffic in {"video", "callback"}:
                     await asyncio.wait_for(flowing.wait(), 2)
                     assert failures == []
                     assert connections == 1
