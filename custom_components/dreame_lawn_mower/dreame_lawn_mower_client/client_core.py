@@ -542,13 +542,11 @@ class _DreameLawnMowerClientCoreMixin:
         refresh: bool = False,
         include_cloud: bool = True,
     ) -> DreameLawnMowerStatusBlob | None:
-        blob = self._sync_get_decoded_status_blob(
+        return self._sync_get_decoded_status_blob(
             MOWER_RUNTIME_STATUS_PROPERTY_KEY,
             refresh=refresh,
             include_cloud=include_cloud,
         )
-        self._latest_runtime_status_blob = blob
-        return blob
 
     def _sync_get_bluetooth_connected(
         self,

@@ -207,6 +207,11 @@ class MowerPositionTracker:
         """Prefer current telemetry, or proven docking, then labelled history."""
         current = (now or datetime.now(UTC)).timestamp()
         with self._lock:
+            owned_position = self._input or self._last or self._dock
+            if owned_position is not None and owned_position.map_index != map_index:
+                # A projection is not a map switch. Only fresh, map-bound input
+                # can move the live owner and its historical geometry context.
+                return None
             if self._geometry != geometry:
                 if self._geometry is not None:
                     self._geometry_changed_at = current

@@ -800,6 +800,16 @@ def test_cached_packet_cannot_move_between_verified_maps():
     assert client._runtime_live_track_segments == ()
 
 
+def test_fetching_runtime_status_does_not_publish_unverified_overlay_input():
+    client = _client()
+    verified = SimpleNamespace(hex="verified")
+    client.update_runtime_live_tracking(verified, active=True, map_index=0)
+    unverified = SimpleNamespace(hex="unverified")
+    client._sync_get_decoded_status_blob = lambda *args, **kwargs: unverified
+    assert client._sync_get_runtime_status_blob() is unverified
+    assert client._latest_runtime_status_blob is verified
+
+
 @pytest.mark.parametrize("publisher", ["poll", "realtime"])
 def test_coordinator_unverified_packets_cannot_extend_real_client_track(publisher):
     from custom_components.dreame_lawn_mower.coordinator import (
