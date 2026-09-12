@@ -1,0 +1,192 @@
+{
+  "common": {
+    "notification_unknown_fault": "Neznámá porucha",
+    "notification_fault_title": "{name}: porucha sekačky",
+    "notification_fault_message": "Sekačka hlásí **{display}**.",
+    "notification_error_code": "Kód chyby: `{code}`",
+    "notification_warning_title": "{name}: varování sekačky",
+    "notification_warning_message": "Sekačka hlásí **{display}**.",
+    "notification_status_code": "Kód stavu: `{code}`"
+  },
+  "config": {
+    "step": {
+      "user": {
+        "title": "Připojit robotickou sekačku Dreame",
+        "description": "Přihlaste se pomocí účtu Dreamehome nebo MOVAhome a vyhledejte sekačky.",
+        "data": {
+          "account_type": "Typ účtu",
+          "username": "Uživatelské jméno",
+          "password": "Heslo",
+          "country": "Oblast"
+        }
+      },
+      "device": {
+        "title": "Vybrat sekačku",
+        "description": "Vyberte jednu sekačku, kterou chcete přidat. Chcete-li přidat další sekačku ze stejného účtu, spusťte nastavení znovu.",
+        "data": {
+          "device": "Nalezená sekačka"
+        }
+      },
+      "reauth": {
+        "title": "Znovu připojit účet",
+        "description": "Aktualizujte přihlašovací údaje k účtu Dreamehome nebo MOVAhome.",
+        "data": {
+          "username": "Uživatelské jméno",
+          "password": "Heslo",
+          "country": "Oblast"
+        }
+      }
+    },
+    "error": {
+      "2fa_required": "Než bude možné pokračovat v nastavení, je nutné dokončit dvoufaktorové ověření v aplikaci nebo na webu výrobce.",
+      "cannot_auth": "Přihlášení k účtu se nezdařilo. Zkontrolujte uživatelské jméno, heslo, typ účtu a oblast.",
+      "cannot_connect": "Home Assistant se nemohl spojit s cloudem Dreame nebo MOVA. Zkontrolujte přístup k síti a zkuste to znovu.",
+      "invalid_account_type": "Vybraný typ účtu tato integrace nepodporuje.",
+      "invalid_region": "Cloud odmítl vybranou oblast. Zkontrolujte oblast účtu používanou v aplikaci výrobce.",
+      "no_devices": "Pro tento účet nebyly nalezeny žádné podporované robotické sekačky. Zkontrolujte, zda vybraná oblast a typ účtu odpovídají aplikaci výrobce."
+    },
+    "abort": {
+      "already_configured": "Všechny podporované sekačky tohoto účtu jsou již nakonfigurovány."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Možnosti robotické sekačky Dreame",
+        "data": {
+          "scan_interval": "Interval dotazování v sekundách",
+          "map_restart_preview": "Zachovat náhled mapy po restartu",
+          "map_label_scale": "Měřítko popisků mapy",
+          "map_rotation": "Otočení zobrazení mapy",
+          "map_theme": "Motiv mapy",
+          "map_stroke_scale": "Tloušťka čar mapy",
+          "map_marker_scale": "Velikost značek mapy",
+          "map_marker_image": "Vlastní značka sekačky",
+          "map_spot_area_style": "Zobrazení uložených oblastí místního sekání",
+          "map_mowing_path_style": "Zobrazení dokončených drah sekání",
+          "notification_mode": "Oznámení Home Assistanta",
+          "video_retention": "Udržování živého videa",
+          "video_transport": "Přenos živého videa",
+          "xp2p_library_path": "Cesta k nativní knihovně XP2P na hostiteli",
+          "xp2p_runner_command": "Příkaz spouštěče XP2P na hostiteli",
+          "xp2p_runner_mode": "Režim spouštěče XP2P na hostiteli"
+        },
+        "data_description": {
+          "map_restart_preview": "Ve výchozím nastavení vypnuto. Uloží jeden soukromý náhled mapy ve formátu JPEG (až 2 MB) v Home Assistantovi. Při načítání odpovídající mapy se používají pouze náhledy mladší než 24 hodin; nejde o živý stav sekačky. Vypnutím této možnosti nebo odstraněním integrace se uložený náhled odstraní.",
+          "map_rotation": "Náhradní otočení pro mapy bez vlastního nastavení. Pro jednotlivé mapy použijte entitu Otočení zobrazení vybrané mapy.",
+          "map_theme": "Vyberte sladěnou světlou, tmavou, půlnoční nebo vysoce kontrastní paletu pro všechny místně vykreslované mapy.",
+          "map_stroke_scale": "Nastavte měřítko hranic mapy a drah od 0,5 do 3.",
+          "map_marker_scale": "Nastavte měřítko bodů mapy a živé značky sekačky od 0,5 do 3.",
+          "map_marker_image": "Volitelný soubor PNG, JPEG nebo WebP ve složce config/www Home Assistanta, například mower/marker.png nebo /local/mower/marker.png. Soubory mimo tuto složku a soubory větší než 1 MB budou ignorovány.",
+          "map_spot_area_style": "Skryjte uložené obdélníky místního sekání pro čistou mapu ve stylu Dreame, zobrazte pouze jejich obrysy nebo obnovte vyplněné diagnostické překrytí. Ovlivní to pouze místně vykreslované vektorové mapy.",
+          "map_mowing_path_style": "Skryjte dokončené průjezdy, vykreslete je nenápadně nebo zobrazte každý průjezd se všemi podrobnostmi. Živá trasa a značka sekačky zůstanou viditelné.",
+          "notification_mode": "Vytváří trvalá oznámení Home Assistanta o stavech sekačky. Oznámení používají jednu stálou položku pro každou sekačku a stav, aktualizují se při změně podrobností a zmizí, když stav pomine. Ve výchozím nastavení jsou vypnuta; pro doručování do mobilu, připomenutí údržby, upozornění na odpojení, zpoždění, opakování nebo vlastní akce použijte automatizační předlohu oznámení.",
+          "video_retention": "Vyvážený režim poskytuje náhledům snímků 60sekundové okno pro opětovné připojení a po otevření živého videa udržuje XP2P připravené pro aktuální sekání. Úspora baterie jej vždy uvolní krátce poté, co odejde poslední divák. Priorita videa považuje za důvod k připravenosti během sekání také přístup ke snímkům. Všechny režimy zůstávají neaktivní, dokud nejsou vyžádána média, a zastaví se, když stav sekačky video blokuje.",
+          "video_transport": "Automatický režim je rychlá výchozí volba: obnoví pouze bezpečnostní stav sekačky, poté znovu použije funkční připojení a upřednostní ověřenou trasu LAN, pokud ji firmware zpřístupňuje. Cloud zůstává náhradní možností kvůli kompatibilitě. Testovaný firmware A2 samostatnou službu LAN společnosti Tencent nezpřístupňuje, takže žádný režim nezaručuje spuštění nezávislé na internetu.",
+          "xp2p_library_path": "Pokročilá možnost videa. Použijte dynamickou knihovnu XP2P sestavenou pro operační systém a procesor tohoto hostitele Home Assistanta. Knihovny APK/AAR pro Android ani frameworky pro iOS nejsou běhovým prostředím hostitele.",
+          "xp2p_runner_command": "Pokročilá možnost videa. Použijte pouze místní spouštěč hostitele, který vlastní kompatibilní běhové prostředí XP2P a vrací místní adresu URL FLV. Pomocné aplikace pro Android nejsou zamýšleným běhovým prostředím Home Assistanta.",
+          "xp2p_runner_mode": "Procesní režim použijte pro spouštěč, který zůstává aktivní, zatímco Home Assistant streamuje."
+        }
+      }
+    }
+  },
+  "selector": {
+    "country": {
+      "options": {
+        "cn": "Čína",
+        "eu": "Evropa",
+        "us": "Spojené státy",
+        "ru": "Rusko",
+        "sg": "Singapur"
+      }
+    },
+    "map_rotation": {
+      "options": {
+        "0": "0° (bez otočení)",
+        "90": "90° po směru hodinových ručiček",
+        "180": "180°",
+        "270": "270° po směru hodinových ručiček"
+      }
+    },
+    "map_theme": {
+      "options": {
+        "emerald": "Smaragdový",
+        "mint": "Mátový (ozdobné pruhy)",
+        "dark": "Tmavý",
+        "midnight": "Půlnoční",
+        "high_contrast": "Vysoký kontrast"
+      }
+    },
+    "map_spot_area_style": {
+      "options": {
+        "hidden": "Skryté (doporučeno)",
+        "outline": "Pouze obrys",
+        "filled": "Vyplněné"
+      }
+    },
+    "map_mowing_path_style": {
+      "options": {
+        "hidden": "Skryté",
+        "subtle": "Nenápadné (doporučeno)",
+        "detailed": "Podrobné"
+      }
+    },
+    "notification_mode": {
+      "options": {
+        "off": "Vypnuto",
+        "faults": "Závažné poruchy",
+        "faults_and_warnings": "Závažné poruchy a varování"
+      }
+    },
+    "video_retention": {
+      "options": {
+        "balanced": "Vyvážené (živé zobrazení zůstává připravené)",
+        "battery_saver": "Úspora baterie (zastaví se po odchodu diváků)",
+        "video_priority": "Priorita videa (připravené zůstávají i snímky)"
+      }
+    },
+    "video_transport": {
+      "options": {
+        "auto": "Automatické XP2P s rychlým opětovným připojením",
+        "cloud": "XP2P (zřízené přes cloud)"
+      }
+    },
+    "xp2p_runner_mode": {
+      "options": {
+        "process": "Trvalý proces",
+        "one-shot": "Jednorázový příkaz"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "state_name": {
+        "name": "Stav",
+        "state": {
+          "unknown": "Neznámý",
+          "mowing": "Sekání",
+          "idle": "Nečinnost",
+          "paused": "Pozastaveno",
+          "error": "Chyba",
+          "returning": "Návrat do doku",
+          "charging": "Nabíjení",
+          "building": "Mapování",
+          "charging_completed": "Nabíjení dokončeno",
+          "upgrading": "Aktualizace",
+          "mow_summon": "Sekání na vyžádání",
+          "station_reset": "Resetování stanice",
+          "remote_control": "Dálkové ovládání",
+          "smart_charging": "Chytré nabíjení",
+          "second_mowing": "Druhý cyklus sekání",
+          "human_following": "Sledování osoby",
+          "spot_mowing": "Místní sekání",
+          "waiting_for_task": "Čekání na úkol",
+          "station_cleaning": "Čištění stanice",
+          "shortcut": "Zkratka",
+          "monitoring": "Monitorování",
+          "monitoring_paused": "Monitorování pozastaveno"
+        }
+      }
+    }
+  }
+}
