@@ -2135,6 +2135,45 @@ def test_download_point_cloud_accepts_unchanged_mova_fixed_object_after_ack(
     assert result.metadata.points == 1
 
 
+def test_download_point_cloud_rejects_unchanged_unverified_mova_model_after_ack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _mova_client()
+    calls: list[dict[str, Any]] = []
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        calls.append(payload)
+        if payload.get("m") == "a":
+            kwargs["on_dispatch"]()
+            return {"r": 0}
+        return {"r": 0, "d": {"name": ["private/existing-map.bin"]}}
+
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+        client._sync_download_app_map_point_cloud(0, 0.05, 0.001, 10, 1024)
+
+    assert captured.value.code == "point_cloud_not_published"
+    assert calls[:2] == [
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+    ]
+
+
 def test_download_point_cloud_accepts_mova_fixed_object_absent_before_generation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -99,6 +99,7 @@ if TYPE_CHECKING:
 
 # Dreame and MOVA can report 3D-map PCD payloads with a "*.bin" object name.
 _POINT_CLOUD_OBJECT_EXTENSIONS = frozenset({"pcd", "bin"})
+_POINT_CLOUD_ACKNOWLEDGED_FIXED_OBJECT_MODELS = frozenset({"mova.mower.g2583"})
 _POINT_CLOUD_ANNOUNCEMENT_PROPERTY_KEY = "99.20"
 _POINT_CLOUD_ANNOUNCEMENT_CLOCK_SKEW_MS = 5_000
 _POINT_CLOUD_ANNOUNCEMENT_PROBE_TIMEOUT_SECONDS = 2.0
@@ -1236,6 +1237,8 @@ class _DreameLawnMowerClientMapsMixin(
                         fixed_object
                         and self._account_type == "mova"
                         and generation_acknowledged
+                        and str(self._descriptor.model).strip().casefold()
+                        in _POINT_CLOUD_ACKNOWLEDGED_FIXED_OBJECT_MODELS
                     )
                     if fixed_object and not fixed_baseline_known:
                         saw_unverified_fixed_object = True
