@@ -2135,17 +2135,18 @@ def test_download_point_cloud_accepts_unchanged_mova_fixed_object_after_ack(
     assert result.metadata.points == 1
 
 
-def test_download_point_cloud_rejects_unchanged_unverified_mova_model_after_ack(
+def test_download_point_cloud_rejects_false_viax_generation_reply(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = _mova_client()
-    calls: list[dict[str, Any]] = []
+    client = _mova_client(
+        model="mova.mower.g2583",
+        display_model="VIAX 500",
+    )
 
     def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
-        calls.append(payload)
         if payload.get("m") == "a":
             kwargs["on_dispatch"]()
-            return {"r": 0}
+            return {"r": False}
         return {"r": 0, "d": {"name": ["private/existing-map.bin"]}}
 
     client._sync_call_app_action = call_app_action
@@ -2168,10 +2169,49 @@ def test_download_point_cloud_rejects_unchanged_unverified_mova_model_after_ack(
         client._sync_download_app_map_point_cloud(0, 0.05, 0.001, 10, 1024)
 
     assert captured.value.code == "point_cloud_not_published"
-    assert calls[:2] == [
+
+
+def test_download_point_cloud_waits_for_changed_unverified_mova_model_after_ack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _mova_client()
+    calls: list[dict[str, Any]] = []
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        calls.append(payload)
+        if payload.get("m") == "a":
+            kwargs["on_dispatch"]()
+            return {"r": 0}
+        return {"r": 0, "d": {"name": ["private/existing-map.bin"]}}
+
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    baseline_content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    refreshed_content = _binary_pcd((4.0, 5.0, 6.0, 0x654321))
+    downloads = iter([baseline_content, baseline_content, refreshed_content])
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            next(downloads),
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert calls == [
         {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
         {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
     ]
+    assert result.content == refreshed_content
 
 
 def test_download_point_cloud_accepts_mova_fixed_object_absent_before_generation(
@@ -2831,6 +2871,41 @@ def test_point_cloud_action_can_raise_safe_cloud_api_code() -> None:
 
     assert captured.value.code == 80001
     assert "80001" in str(captured.value)
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"data": {"result": {"r": 0}}},
+        {"code": None, "data": {"result": {"r": 0}}},
+        {"code": "0", "data": {"result": {"r": 0}}},
+        {"code": 0.0, "data": {"result": {"r": 0}}},
+        {"code": False, "data": {"result": {"r": 0}}},
+        {"code": True, "data": {"result": {"r": 0}}},
+    ],
+)
+def test_point_cloud_action_rejects_malformed_cloud_api_code(
+    response: dict[str, Any],
+) -> None:
+    protocol_type = _internal_protocol_module.DreameMowerDreameHomeCloudProtocol
+    cloud = object.__new__(protocol_type)
+    cloud._request_lock = threading.RLock()
+    cloud._strings = [f"value-{index}" for index in range(57)]
+    cloud._host = "host.example.invalid"
+    cloud._did = "device-1"
+    cloud._id = 1
+    cloud._api_call = lambda *args, **kwargs: response
+
+    with pytest.raises(
+        _internal_exceptions_module.DeviceException,
+        match="invalid response code",
+    ):
+        cloud.call_app_action(
+            {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+            retry_count=0,
+            redact_response=True,
+            raise_on_api_error=True,
+        )
 
 
 def test_point_cloud_wraps_safe_cloud_api_rejection() -> None:

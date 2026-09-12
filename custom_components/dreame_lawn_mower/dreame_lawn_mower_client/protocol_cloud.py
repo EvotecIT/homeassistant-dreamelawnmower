@@ -1017,13 +1017,13 @@ class DreameMowerDreameHomeCloudProtocol:
         response_code = (
             api_response.get("code") if isinstance(api_response, Mapping) else None
         )
-        if (
-            raise_on_api_error
-            and isinstance(response_code, int)
-            and not isinstance(response_code, bool)
-            and response_code != 0
-        ):
-            raise DreameLawnMowerCloudAPIError(response_code)
+        if raise_on_api_error:
+            if not isinstance(response_code, int) or isinstance(response_code, bool):
+                raise DeviceException(
+                    "Dreame cloud API returned an invalid response code."
+                )
+            if response_code != 0:
+                raise DreameLawnMowerCloudAPIError(response_code)
         if isinstance(api_response, Mapping) and api_response.get("code") == 80001:
             # Seems to be a valid error message from the server which translates to:
             #   "The device may be offline and the command sending timed out."

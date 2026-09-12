@@ -118,7 +118,12 @@ def _point_cloud_action_data(
     require_data: bool,
 ) -> Any:
     """Normalize point-cloud app-action failures without exposing raw payloads."""
-    if not isinstance(value, Mapping) or value.get("r") != 0:
+    result = value.get("r") if isinstance(value, Mapping) else None
+    if (
+        not isinstance(result, int)
+        or isinstance(result, bool)
+        or result != 0
+    ):
         raise DreameLawnMowerPointCloudError(f"The mower could not {operation}.")
     data = value.get("d")
     if require_data and not isinstance(data, Mapping):
