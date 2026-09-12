@@ -99,6 +99,7 @@ if TYPE_CHECKING:
 
 # Dreame and MOVA can report 3D-map PCD payloads with a "*.bin" object name.
 _POINT_CLOUD_OBJECT_EXTENSIONS = frozenset({"pcd", "bin"})
+_POINT_CLOUD_ACKNOWLEDGED_FIXED_OBJECT_MODELS = frozenset({"mova.mower.g2583"})
 _POINT_CLOUD_ANNOUNCEMENT_PROPERTY_KEY = "99.20"
 _POINT_CLOUD_ANNOUNCEMENT_CLOCK_SKEW_MS = 5_000
 _POINT_CLOUD_ANNOUNCEMENT_PROBE_TIMEOUT_SECONDS = 2.0
@@ -929,6 +930,7 @@ class _DreameLawnMowerClientMapsMixin(
             if generation_requested_at_ms is None:
                 generation_requested_at_ms = int(time.time() * 1000)
 
+        generation_acknowledged = False
         try:
             self._sync_call_point_cloud_action(
                 {"m": "a", "p": 0, "o": 10, "d": {"idx": map_index}},
@@ -937,6 +939,7 @@ class _DreameLawnMowerClientMapsMixin(
                 require_data=False,
                 on_dispatch=mark_generation_dispatched,
             )
+            generation_acknowledged = True
         except DreameLawnMowerPointCloudError as err:
             if generation_requested_at_ms is None or err.code not in {
                 "point_cloud_timeout",
@@ -1227,12 +1230,23 @@ class _DreameLawnMowerClientMapsMixin(
                 except (DeviceException, DreameLawnMowerPointCloudError):
                     saw_unusable_point_cloud = True
                 else:
+                    # MOVA can keep a fixed object byte-for-byte deterministic
+                    # after o:10. A successful action reply is the only safe
+                    # substitute for an observable object-identity change.
+                    acknowledged_mova_fixed_object = (
+                        fixed_object
+                        and self._account_type == "mova"
+                        and generation_acknowledged
+                        and str(self._descriptor.model).strip().casefold()
+                        in _POINT_CLOUD_ACKNOWLEDGED_FIXED_OBJECT_MODELS
+                    )
                     if fixed_object and not fixed_baseline_known:
                         saw_unverified_fixed_object = True
                     elif (
                         fixed_object
                         and baseline_identity is not None
                         and not object_identity.differs_from(baseline_identity)
+                        and not acknowledged_mova_fixed_object
                     ):
                         saw_stale_point_cloud = True
                     else:
