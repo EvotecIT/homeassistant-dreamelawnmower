@@ -45,7 +45,7 @@ from custom_components.dreame_lawn_mower.sensor import SENSORS
 from tests.test_notification_blueprint import _substituted_automation
 
 INTEGRATION_ROOT = Path(__file__).parents[1] / "custom_components" / "dreame_lawn_mower"
-EXPECTED_LOCALES = {"de", "en", "es", "fr", "it", "pl", "ru", "uk"}
+EXPECTED_LOCALES = {"cs", "de", "en", "es", "fr", "it", "pl", "ru", "uk"}
 MAX_UNTRANSLATED_SHARE = 0.10
 PLACEHOLDER_PATTERN = re.compile(r"\{[^{}]+\}")
 STATE_NAME_SENSOR = next(item for item in SENSORS if item.key == "state_name")
