@@ -111,7 +111,11 @@ def _point_cloud_protocol() -> Any:
     return cloud
 
 
-def _mova_client() -> DreameLawnMowerClient:
+def _mova_client(
+    *,
+    model: str = "mova.mower.g2408",
+    display_model: str = "A2",
+) -> DreameLawnMowerClient:
     return DreameLawnMowerClient(
         username="user@example.invalid",
         password="secret",
@@ -120,8 +124,8 @@ def _mova_client() -> DreameLawnMowerClient:
         descriptor=DreameLawnMowerDescriptor(
             did="device-1",
             name="Garage Mower",
-            model="mova.mower.g2408",
-            display_model="A2",
+            model=model,
+            display_model=display_model,
             account_type="mova",
             country="eu",
         ),
@@ -2011,7 +2015,7 @@ def test_download_point_cloud_bounds_invalid_announced_object_downloads(
     assert download_count == 2
 
 
-def test_download_point_cloud_waits_for_changed_mova_fixed_object(
+def test_download_point_cloud_waits_for_changed_mova_fixed_object_after_lost_reply(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _mova_client()
@@ -2019,7 +2023,6 @@ def test_download_point_cloud_waits_for_changed_mova_fixed_object(
     responses = iter(
         [
             {"r": 0, "d": {"name": ["private/existing-map.bin"]}},
-            {"r": 0},
             {"r": 0, "d": {"name": ["private/existing-map.bin"]}},
             {"r": 0, "d": {"name": ["private/existing-map.bin"]}},
             {"r": 0, "d": {"name": ["private/existing-map.bin"]}},
@@ -2028,6 +2031,12 @@ def test_download_point_cloud_waits_for_changed_mova_fixed_object(
 
     def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         calls.append(payload)
+        if payload.get("m") == "a":
+            kwargs["on_dispatch"]()
+            raise DreameLawnMowerPointCloudError(
+                "generation reply lost",
+                code="point_cloud_mower_response_invalid",
+            )
         return next(responses)
 
     signed_url = "https://downloads.example.invalid/object?private=signature"
@@ -2074,6 +2083,56 @@ def test_download_point_cloud_waits_for_changed_mova_fixed_object(
     assert result.metadata.points == 1
     assert not hasattr(result, "url")
     assert not hasattr(result, "object_name")
+
+
+def test_download_point_cloud_accepts_unchanged_mova_fixed_object_after_ack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _mova_client(
+        model="mova.mower.g2583",
+        display_model="VIAX 500",
+    )
+    calls: list[dict[str, Any]] = []
+    responses = iter(
+        [
+            {"r": 0, "d": {"name": ["private/existing-map.bin"]}},
+            {"r": 0},
+            {"r": 0, "d": {"name": ["private/existing-map.bin"]}},
+        ]
+    )
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        calls.append(payload)
+        if payload.get("m") == "a":
+            kwargs["on_dispatch"]()
+        return next(responses)
+
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert calls == [
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+    ]
+    assert result.source == "generated"
+    assert result.content == content
+    assert result.metadata.points == 1
 
 
 def test_download_point_cloud_accepts_mova_fixed_object_absent_before_generation(

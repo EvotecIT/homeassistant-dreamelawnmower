@@ -929,6 +929,7 @@ class _DreameLawnMowerClientMapsMixin(
             if generation_requested_at_ms is None:
                 generation_requested_at_ms = int(time.time() * 1000)
 
+        generation_acknowledged = False
         try:
             self._sync_call_point_cloud_action(
                 {"m": "a", "p": 0, "o": 10, "d": {"idx": map_index}},
@@ -937,6 +938,7 @@ class _DreameLawnMowerClientMapsMixin(
                 require_data=False,
                 on_dispatch=mark_generation_dispatched,
             )
+            generation_acknowledged = True
         except DreameLawnMowerPointCloudError as err:
             if generation_requested_at_ms is None or err.code not in {
                 "point_cloud_timeout",
@@ -1227,12 +1229,21 @@ class _DreameLawnMowerClientMapsMixin(
                 except (DeviceException, DreameLawnMowerPointCloudError):
                     saw_unusable_point_cloud = True
                 else:
+                    # MOVA can keep a fixed object byte-for-byte deterministic
+                    # after o:10. A successful action reply is the only safe
+                    # substitute for an observable object-identity change.
+                    acknowledged_mova_fixed_object = (
+                        fixed_object
+                        and self._account_type == "mova"
+                        and generation_acknowledged
+                    )
                     if fixed_object and not fixed_baseline_known:
                         saw_unverified_fixed_object = True
                     elif (
                         fixed_object
                         and baseline_identity is not None
                         and not object_identity.differs_from(baseline_identity)
+                        and not acknowledged_mova_fixed_object
                     ):
                         saw_stale_point_cloud = True
                     else:
