@@ -2076,6 +2076,59 @@ def test_download_point_cloud_waits_for_changed_mova_fixed_object(
     assert not hasattr(result, "object_name")
 
 
+def test_download_point_cloud_accepts_mova_fixed_object_absent_before_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _mova_client()
+    calls: list[dict[str, Any]] = []
+    responses = iter(
+        [
+            {"r": 0, "d": {"name": ["private/map-0.bin"]}},
+            {"r": 0},
+            {"r": 0, "d": {"name": ["private/map-0.bin"]}},
+        ]
+    )
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        calls.append(payload)
+        return next(responses)
+
+    signer_options: list[dict[str, Any]] = []
+
+    def get_interim_file_url(name: str, **options: Any) -> str | None:
+        signer_options.append(options)
+        if len(signer_options) == 1:
+            return None
+        return "https://downloads.example.invalid/object"
+
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_interim_file_url=get_interim_file_url,
+    )
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert calls == [
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+    ]
+    assert signer_options[0]["require_response"] is True
+    assert "require_response" not in signer_options[1]
+    assert result.source == "generated"
+    assert result.content == content
+    assert result.metadata.points == 1
+
+
 def test_download_point_cloud_accepts_new_mova_object_validator(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3524,8 +3577,15 @@ def test_legacy_baseline_preflight_is_bounded_before_generation(
     client = _client()
     clock = [100.0]
     object_deadlines: list[tuple[float, float]] = []
+    signer_options: list[dict[str, Any]] = []
     generation_deadlines: list[float] = []
-    cloud = SimpleNamespace(get_interim_file_url=lambda name, **options: None)
+
+    def get_interim_file_url(name: str, **options: Any) -> None:
+        signer_options.append(options)
+        clock[0] += 5.0
+        return None
+
+    cloud = SimpleNamespace(get_interim_file_url=get_interim_file_url)
     client._sync_get_cloud_protocol = lambda **kwargs: cloud
 
     def probe(*args: Any, **kwargs: Any) -> tuple[bool, None, None]:
@@ -3541,9 +3601,7 @@ def test_legacy_baseline_preflight_is_bounded_before_generation(
         raise RuntimeError("stop after generation deadline capture")
 
     def fail_object_download(*args: Any, **kwargs: Any) -> None:
-        object_deadlines.append(
-            (kwargs["deadline"], kwargs["download_timeout"])
-        )
+        object_deadlines.append((kwargs["deadline"], kwargs["download_timeout"]))
         clock[0] += 5.0
         raise DreameLawnMowerPointCloudError("not ready")
 
@@ -3563,7 +3621,15 @@ def test_legacy_baseline_preflight_is_bounded_before_generation(
             allow_stored=True,
         )
 
-    assert object_deadlines == [(115.0, 5.0), (120.0, 5.0)]
+    assert object_deadlines == [(115.0, 5.0)]
+    assert signer_options == [
+        {
+            "retry_count": 0,
+            "timeout": 5.0,
+            "deadline": 120.0,
+            "require_response": True,
+        }
+    ]
     assert generation_deadlines == [125.0]
 
 

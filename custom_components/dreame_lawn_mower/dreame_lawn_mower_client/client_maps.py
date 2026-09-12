@@ -891,74 +891,31 @@ class _DreameLawnMowerClientMapsMixin(
             and baseline_extension is not None
             and baseline_extension.casefold() == "bin"
         )
+        fixed_baseline_known = False
         if fixed_object_baseline:
-            fixed_baseline_deadline = min(
-                deadline,
-                time.monotonic() + _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
-            )
-            try:
-                _, _, baseline_identity = self._sync_download_point_cloud_object(
+            fixed_baseline_known, baseline_identity = (
+                self._sync_probe_point_cloud_object_identity(
                     cloud,
                     baseline_name,
-                    deadline=fixed_baseline_deadline,
-                    download_timeout=min(
-                        download_timeout,
-                        _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
-                    ),
+                    deadline=deadline,
+                    download_timeout=download_timeout,
                     max_bytes=max_bytes,
                 )
-            except (DeviceException, DreameLawnMowerPointCloudError):
-                baseline_identity = None
+            )
 
         stable_announcement_baseline_known = False
         stable_announcement_baseline_identity: _PointCloudObjectIdentity | None = None
         if use_announcement_path and announcement_baseline is not None:
-            baseline_probe_deadline = min(
-                deadline,
-                time.monotonic() + _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
+            (
+                stable_announcement_baseline_known,
+                stable_announcement_baseline_identity,
+            ) = self._sync_probe_point_cloud_object_identity(
+                cloud,
+                announcement_baseline[0],
+                deadline=deadline,
+                download_timeout=download_timeout,
+                max_bytes=max_bytes,
             )
-            try:
-                raw_baseline_url = self._sync_get_point_cloud_download_url(
-                    cloud,
-                    announcement_baseline[0],
-                    deadline=baseline_probe_deadline,
-                    require_response=True,
-                )
-            except (
-                DeviceException,
-                DreameLawnMowerPointCloudError,
-                json.JSONDecodeError,
-            ):
-                pass
-            else:
-                try:
-                    baseline_url = _point_cloud_download_url(raw_baseline_url)
-                except DreameLawnMowerPointCloudError:
-                    # Only the signer's explicit empty result proves the
-                    # stable object was unavailable before o:10. Malformed or
-                    # otherwise unusable signer responses remain inconclusive.
-                    stable_announcement_baseline_known = raw_baseline_url is None
-                else:
-                    remaining = baseline_probe_deadline - time.monotonic()
-                    if remaining > 0:
-                        try:
-                            _, _, stable_announcement_baseline_identity = (
-                                _download_point_cloud_content_with_identity(
-                                    baseline_url,
-                                    timeout=min(
-                                        download_timeout,
-                                        _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
-                                        remaining,
-                                    ),
-                                    max_bytes=max_bytes,
-                                )
-                            )
-                        except DreameLawnMowerPointCloudError:
-                            # HTTP, transport, size, and content failures do not
-                            # prove that a signable baseline object was absent.
-                            pass
-                        else:
-                            stable_announcement_baseline_known = True
 
         # Object baselines are preflight work for both forced and stored
         # requests. Give o:10 the complete advertised generation window after
@@ -1270,10 +1227,12 @@ class _DreameLawnMowerClientMapsMixin(
                 except (DeviceException, DreameLawnMowerPointCloudError):
                     saw_unusable_point_cloud = True
                 else:
-                    if fixed_object and baseline_identity is None:
+                    if fixed_object and not fixed_baseline_known:
                         saw_unverified_fixed_object = True
-                    elif fixed_object and not object_identity.differs_from(
-                        baseline_identity
+                    elif (
+                        fixed_object
+                        and baseline_identity is not None
+                        and not object_identity.differs_from(baseline_identity)
                     ):
                         saw_stale_point_cloud = True
                     else:
@@ -1485,6 +1444,60 @@ class _DreameLawnMowerClientMapsMixin(
             return True, normalized_name if fresh else None, observed
         return False, None, None
 
+    def _sync_probe_point_cloud_object_identity(
+        self,
+        cloud: Any,
+        object_name: str,
+        *,
+        deadline: float,
+        download_timeout: float,
+        max_bytes: int,
+    ) -> tuple[bool, _PointCloudObjectIdentity | None]:
+        """Return whether a pre-generation object baseline is conclusive."""
+        baseline_deadline = min(
+            deadline,
+            time.monotonic() + _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
+        )
+        try:
+            raw_url = self._sync_get_point_cloud_download_url(
+                cloud,
+                object_name,
+                deadline=baseline_deadline,
+                require_response=True,
+            )
+        except (
+            DeviceException,
+            DreameLawnMowerPointCloudError,
+            json.JSONDecodeError,
+        ):
+            return False, None
+
+        try:
+            url = _point_cloud_download_url(raw_url)
+        except DreameLawnMowerPointCloudError:
+            # Only the signer's explicit empty result proves the object was
+            # unavailable before o:10. Malformed responses are inconclusive.
+            return raw_url is None, None
+
+        remaining = baseline_deadline - time.monotonic()
+        if remaining <= 0:
+            return False, None
+        try:
+            _, _, identity = _download_point_cloud_content_with_identity(
+                url,
+                timeout=min(
+                    download_timeout,
+                    _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
+                    remaining,
+                ),
+                max_bytes=max_bytes,
+            )
+        except DreameLawnMowerPointCloudError:
+            # Transport, size, and content failures do not prove that a
+            # signable baseline object was absent.
+            return False, None
+        return True, identity
+
     def _sync_download_point_cloud_object(
         self,
         cloud: Any,
@@ -1626,7 +1639,7 @@ class _DreameLawnMowerClientMapsMixin(
         *,
         deadline: float,
         require_response: bool = False,
-    ) -> str:
+    ) -> str | None:
         """Resolve a signed point-cloud URL within the generation deadline."""
         remaining = deadline - time.monotonic()
         if remaining <= 0:
