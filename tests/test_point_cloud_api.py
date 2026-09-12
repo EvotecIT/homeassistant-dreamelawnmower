@@ -833,6 +833,9 @@ def test_point_cloud_api_records_safe_failure_and_timing() -> None:
             ),
             timeout_seconds=45,
             retry_after_seconds=10,
+            diagnostic_reason="unchanged_object",
+            discovery_route="announcement_property",
+            generation_acknowledged=True,
         )
 
     coordinator = SimpleNamespace(
@@ -857,6 +860,9 @@ def test_point_cloud_api_records_safe_failure_and_timing() -> None:
     assert event["context"]["map_index"] == 0
     assert event["context"]["allow_stored"] is False
     assert event["context"]["vendor_error_code"] is None
+    assert event["context"]["reason"] == "unchanged_object"
+    assert event["context"]["discovery_route"] == "announcement_property"
+    assert event["context"]["generation_acknowledged"] is True
     assert private_detail not in repr(event)
     performance = coordinator.performance.as_dict()
     assert performance["summary"]["point_cloud_generation"]["outcomes"] == {

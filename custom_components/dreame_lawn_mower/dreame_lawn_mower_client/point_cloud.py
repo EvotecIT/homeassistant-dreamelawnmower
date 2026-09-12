@@ -36,6 +36,9 @@ class DreameLawnMowerPointCloudError(ValueError):
         timeout_seconds: float | None = None,
         retry_after_seconds: int | None = None,
         vendor_error_code: int | None = None,
+        diagnostic_reason: str | None = None,
+        discovery_route: str | None = None,
+        generation_acknowledged: bool | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -45,6 +48,9 @@ class DreameLawnMowerPointCloudError(ValueError):
         self.timeout_seconds = timeout_seconds
         self.retry_after_seconds = retry_after_seconds
         self.vendor_error_code = vendor_error_code
+        self.diagnostic_reason = diagnostic_reason
+        self.discovery_route = discovery_route
+        self.generation_acknowledged = generation_acknowledged
 
 
 @dataclass(frozen=True, slots=True)

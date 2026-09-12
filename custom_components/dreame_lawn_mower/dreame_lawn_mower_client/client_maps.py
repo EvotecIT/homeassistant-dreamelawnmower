@@ -955,6 +955,20 @@ class _DreameLawnMowerClientMapsMixin(
             # do not expose the dispatch hook.
             mark_generation_dispatched()
 
+        def acknowledged_fixed_object(object_name: str | None) -> bool:
+            """Return whether an exact-model action ack proves fixed-key refresh."""
+            extension = (
+                _app_object_extension(object_name) if object_name is not None else None
+            )
+            return (
+                extension is not None
+                and extension.casefold() == "bin"
+                and self._account_type == "mova"
+                and generation_acknowledged
+                and str(self._descriptor.model).strip().casefold()
+                in _POINT_CLOUD_ACKNOWLEDGED_FIXED_OBJECT_MODELS
+            )
+
         observed_clear = baseline_known and baseline_name is None
         saw_unusable_point_cloud = False
         saw_stale_point_cloud = False
@@ -1090,11 +1104,14 @@ class _DreameLawnMowerClientMapsMixin(
                     )
                     if stable_announced_name is not None:
                         stable_refresh_proven = (
-                            stable_announcement_baseline_known
-                            and (
-                                stable_announcement_baseline_identity is None
-                                or object_identity.differs_from(
-                                    stable_announcement_baseline_identity
+                            acknowledged_fixed_object(stable_announced_name)
+                            or (
+                                stable_announcement_baseline_known
+                                and (
+                                    stable_announcement_baseline_identity is None
+                                    or object_identity.differs_from(
+                                        stable_announcement_baseline_identity
+                                    )
                                 )
                             )
                         )
@@ -1235,10 +1252,7 @@ class _DreameLawnMowerClientMapsMixin(
                     # substitute for an observable object-identity change.
                     acknowledged_mova_fixed_object = (
                         fixed_object
-                        and self._account_type == "mova"
-                        and generation_acknowledged
-                        and str(self._descriptor.model).strip().casefold()
-                        in _POINT_CLOUD_ACKNOWLEDGED_FIXED_OBJECT_MODELS
+                        and acknowledged_fixed_object(object_name)
                     )
                     if fixed_object and not fixed_baseline_known:
                         saw_unverified_fixed_object = True
@@ -1284,6 +1298,9 @@ class _DreameLawnMowerClientMapsMixin(
                 ),
                 timeout_seconds=timeout,
                 retry_after_seconds=10,
+                diagnostic_reason="fixed_baseline_inconclusive",
+                discovery_route="legacy_obj",
+                generation_acknowledged=generation_acknowledged,
             )
 
         if saw_unusable_point_cloud:
@@ -1298,6 +1315,11 @@ class _DreameLawnMowerClientMapsMixin(
                 ),
                 timeout_seconds=timeout,
                 retry_after_seconds=10,
+                diagnostic_reason="published_object_invalid",
+                discovery_route=(
+                    "announcement_property" if use_announcement_path else "legacy_obj"
+                ),
+                generation_acknowledged=generation_acknowledged,
             )
 
         if saw_stale_point_cloud:
@@ -1312,6 +1334,11 @@ class _DreameLawnMowerClientMapsMixin(
                 ),
                 timeout_seconds=timeout,
                 retry_after_seconds=10,
+                diagnostic_reason="unchanged_object",
+                discovery_route=(
+                    "announcement_property" if use_announcement_path else "legacy_obj"
+                ),
+                generation_acknowledged=generation_acknowledged,
             )
 
         raise DreameLawnMowerPointCloudError(
@@ -1323,6 +1350,11 @@ class _DreameLawnMowerClientMapsMixin(
             ),
             timeout_seconds=timeout,
             retry_after_seconds=10,
+            diagnostic_reason="object_not_observed",
+            discovery_route=(
+                "announcement_property" if use_announcement_path else "legacy_obj"
+            ),
+            generation_acknowledged=generation_acknowledged,
         )
 
     def _sync_try_download_stored_point_cloud(

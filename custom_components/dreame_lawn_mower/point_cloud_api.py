@@ -499,6 +499,12 @@ class DreameLawnMowerPointCloudAPI:
             "allow_stored": allow_stored,
             "allow_unscoped_stored": allow_unscoped_stored,
         }
+        if error.diagnostic_reason is not None:
+            context["reason"] = error.diagnostic_reason
+        if error.discovery_route is not None:
+            context["discovery_route"] = error.discovery_route
+        if error.generation_acknowledged is not None:
+            context["generation_acknowledged"] = error.generation_acknowledged
         exception_type = None
         if unexpected_error is not None:
             exception_type = _exception_type_name(unexpected_error)
