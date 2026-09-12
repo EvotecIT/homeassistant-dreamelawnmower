@@ -1045,6 +1045,106 @@ def test_download_point_cloud_accepts_indexed_stable_announcement(
     assert result.content == content
 
 
+def test_download_point_cloud_accepts_unchanged_viax_announcement_after_ack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _mova_client(
+        model="mova.mower.g2583",
+        display_model="VIAX 500",
+    )
+    calls: list[dict[str, Any]] = []
+    responses = iter(
+        [
+            {"r": 0},
+            {"r": 0, "d": {"name": ["private/stable-map.bin"]}},
+        ]
+    )
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        calls.append(payload)
+        if payload.get("m") == "a":
+            kwargs["on_dispatch"]()
+        return next(responses)
+
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {
+                "key": key,
+                "value": "private/stable-map.bin",
+                "updateDate": 1,
+            }
+        ],
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert calls == [
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+    ]
+    assert result.source == "generated"
+    assert result.content == content
+
+
+def test_download_point_cloud_rejects_unchanged_viax_announcement_without_ack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _mova_client(
+        model="mova.mower.g2583",
+        display_model="VIAX 500",
+    )
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        if payload.get("m") == "a":
+            kwargs["on_dispatch"]()
+            return {"r": False}
+        return {"r": 0, "d": {"name": ["private/stable-map.bin"]}}
+
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {
+                "key": key,
+                "value": "private/stable-map.bin",
+                "updateDate": 1,
+            }
+        ],
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+        client._sync_download_app_map_point_cloud(0, 0.05, 0.001, 10, 1024)
+
+    assert captured.value.code == "point_cloud_not_published"
+    assert captured.value.diagnostic_reason == "unchanged_object"
+    assert captured.value.discovery_route == "announcement_property"
+    assert captured.value.generation_acknowledged is False
+
+
 def test_download_point_cloud_rejects_unchanged_signable_stable_announcement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
