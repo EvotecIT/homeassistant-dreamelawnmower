@@ -163,6 +163,31 @@ def test_malformed_action_retains_reply_shape_without_echoing_content():
     assert "private" not in json.dumps(report)
 
 
+def test_terminal_baseline_failure_retains_discovery_evidence():
+    client = _client()
+    actions = []
+
+    def action(payload, **options):
+        actions.append(payload)
+        return {"r": 0, "d": {"name": {"private": "object"}}}
+
+    client._sync_call_app_action = action
+    client._sync_get_cloud_protocol = lambda **options: SimpleNamespace(
+        get_properties=lambda *args, **kwargs: [],
+        get_interim_file_url=lambda *args, **kwargs: pytest.fail("No valid object"),
+    )
+    with pytest.raises(DreameLawnMowerPointCloudError) as failure:
+        client._sync_download_app_map_point_cloud(1, 1, 0.01, 10, 1024)
+    trace = failure.value.safe_diagnostics()["attempt"]
+    assert trace["initial_announcement"]["status"] == "property_missing"
+    assert trace["action_reply"]["names_shape"] == "mapping"
+    assert trace["generation_result"] == "not_attempted"
+    assert trace["stored_attempt"]["download_attempts"] == 0
+    assert trace["map_index"] == 1
+    assert actions == [{"m": "g", "t": "OBJ", "d": {"type": "3dmap"}}]
+    assert "private" not in json.dumps(trace)
+
+
 def test_http_failure_retains_status_without_url(monkeypatch):
     secret = "https://example.invalid/private.pcd?token=private"
 

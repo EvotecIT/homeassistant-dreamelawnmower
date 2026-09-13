@@ -908,6 +908,7 @@ class _DreameLawnMowerClientMapsMixin(
                 )
             except DreameLawnMowerPointCloudError as err:
                 attempt_diagnostics.update(err.safe_diagnostics()["attempt"])
+                err.diagnostic_context.update(attempt_diagnostics)
                 if err.code not in {
                     "point_cloud_timeout",
                     "point_cloud_mower_request_failed",
