@@ -785,14 +785,16 @@ class _DreameLawnMowerClientMapsMixin(
         )
         use_announcement_path = announcement_capability is True
         announcement_probe_pending = announcement_capability is None
+        initial_announcement_capability = (
+            "available"
+            if announcement_capability is True
+            else "unavailable"
+            if announcement_capability is False
+            else "inconclusive"
+        )
         attempt_diagnostics: dict[str, Any] = {
-            "announcement_capability": (
-                "available"
-                if announcement_capability is True
-                else "unavailable"
-                if announcement_capability is False
-                else "inconclusive"
-            ),
+            "announcement_capability_initial": initial_announcement_capability,
+            "announcement_capability": initial_announcement_capability,
             "announcement_baseline": (
                 "observed" if announcement_baseline is not None else "not_observed"
             ),
@@ -800,6 +802,7 @@ class _DreameLawnMowerClientMapsMixin(
             "announcement_fresh_observations": 0,
             "announcement_stale_observations": 0,
             "announcement_empty_observations": 0,
+            "announcement_unavailable_observations": 0,
             "announcement_inconclusive_observations": 0,
             "indexed_verification_attempts": 0,
             "indexed_verification_result": "not_attempted",
@@ -1011,6 +1014,7 @@ class _DreameLawnMowerClientMapsMixin(
         while time.monotonic() < deadline:
             announced_name = None
             announced_identity = None
+            announcement_polled = False
             observed_announcement_capability: bool | None = None
             if use_announcement_path:
                 (
@@ -1026,6 +1030,7 @@ class _DreameLawnMowerClientMapsMixin(
                         deadline=deadline,
                     )
                 )
+                announcement_polled = True
             elif announcement_probe_pending:
                 # A transient cloud timeout during the preflight probe must not
                 # permanently select the legacy OBJ route. Keep that fallback
@@ -1051,6 +1056,7 @@ class _DreameLawnMowerClientMapsMixin(
                     ),
                     deadline=deadline,
                 )
+                announcement_polled = True
                 announcement_reprobe_attempts += 1
                 if announcement_capability is True:
                     use_announcement_path = True
@@ -1065,12 +1071,22 @@ class _DreameLawnMowerClientMapsMixin(
                     # route when the dedicated property remains inconclusive.
                     announcement_probe_pending = False
                 observed_announcement_capability = announcement_capability
-            if use_announcement_path:
+            if announcement_polled:
+                if observed_announcement_capability is not None:
+                    attempt_diagnostics["announcement_capability"] = (
+                        "available"
+                        if observed_announcement_capability
+                        else "unavailable"
+                    )
                 attempt_diagnostics["announcement_polls"] += 1
                 if announced_name is not None:
                     attempt_diagnostics["announcement_fresh_observations"] += 1
                 elif announced_identity is not None:
                     attempt_diagnostics["announcement_stale_observations"] += 1
+                elif observed_announcement_capability is False:
+                    attempt_diagnostics[
+                        "announcement_unavailable_observations"
+                    ] += 1
                 elif observed_announcement_capability is None:
                     attempt_diagnostics[
                         "announcement_inconclusive_observations"
@@ -1164,7 +1180,7 @@ class _DreameLawnMowerClientMapsMixin(
                             * (2 ** min(stable_announcement_verification_attempts, 3)),
                         )
                     )
-            if indexed_announcement_name is not None:
+            if announced_name is None and indexed_announcement_name is not None:
                 # Firmware 4.3.6_0625 can keep both the 99.20 object name and
                 # updateDate unchanged after accepting o:10. The signer is
                 # activated for the requested indexed object instead. Only
@@ -1321,6 +1337,7 @@ class _DreameLawnMowerClientMapsMixin(
                 and object_ready
                 and attempt_allowed
             ):
+                attempt_diagnostics["download_attempts"] += 1
                 if not fixed_object:
                     object_download_attempts[object_name] = (
                         object_download_attempts.get(object_name, 0) + 1
@@ -1335,7 +1352,12 @@ class _DreameLawnMowerClientMapsMixin(
                             max_bytes=max_bytes,
                         )
                     )
-                except (DeviceException, DreameLawnMowerPointCloudError):
+                except (DeviceException, DreameLawnMowerPointCloudError) as err:
+                    attempt_diagnostics["last_download_result"] = (
+                        f"error:{err.code}"
+                        if isinstance(err, DreameLawnMowerPointCloudError)
+                        else "error:device"
+                    )
                     saw_unusable_point_cloud = True
                 else:
                     # MOVA can keep a fixed object byte-for-byte deterministic
@@ -1346,6 +1368,9 @@ class _DreameLawnMowerClientMapsMixin(
                         and acknowledged_fixed_object(object_name)
                     )
                     if fixed_object and not fixed_baseline_known:
+                        attempt_diagnostics["last_download_result"] = (
+                            "rejected:fixed_baseline_inconclusive"
+                        )
                         saw_unverified_fixed_object = True
                     elif (
                         fixed_object
@@ -1353,6 +1378,9 @@ class _DreameLawnMowerClientMapsMixin(
                         and not object_identity.differs_from(baseline_identity)
                         and not acknowledged_mova_fixed_object
                     ):
+                        attempt_diagnostics["last_download_result"] = (
+                            "rejected:stale_object"
+                        )
                         saw_stale_point_cloud = True
                     else:
                         try:
@@ -1361,11 +1389,15 @@ class _DreameLawnMowerClientMapsMixin(
                                 max_bytes=max_bytes,
                                 deadline=deadline,
                             )
-                        except DreameLawnMowerPointCloudError:
+                        except DreameLawnMowerPointCloudError as err:
+                            attempt_diagnostics["last_download_result"] = (
+                                f"error:{err.code}"
+                            )
                             saw_unusable_point_cloud = True
                             if not fixed_object:
                                 rejected_object_names.add(object_name)
                         else:
+                            attempt_diagnostics["last_download_result"] = "validated"
                             return DreameLawnMowerPointCloudDownload(
                                 map_index=map_index,
                                 content=content,
