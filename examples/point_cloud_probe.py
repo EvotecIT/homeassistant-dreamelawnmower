@@ -8,7 +8,10 @@ import json
 import os
 from pathlib import Path
 
-from dreame_lawn_mower_client import DreameLawnMowerClient
+from dreame_lawn_mower_client import (
+    DreameLawnMowerClient,
+    DreameLawnMowerPointCloudError,
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -37,7 +40,7 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-async def main() -> None:
+async def main() -> int:
     args = _build_parser().parse_args()
     username = os.environ["DREAME_USERNAME"]
     password = os.environ["DREAME_PASSWORD"]
@@ -83,9 +86,24 @@ async def main() -> None:
             args.out.write_bytes(download.content)
             result["saved_to"] = str(args.out)
         print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+    except DreameLawnMowerPointCloudError as error:
+        print(
+            json.dumps(
+                {
+                    "code": error.code,
+                    "stage": error.stage,
+                    "detail": error.public_message,
+                    "diagnostics": error.safe_diagnostics(),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 1
     finally:
         await client.async_close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(main()))

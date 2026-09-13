@@ -10,6 +10,9 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Any, Literal
 
+from .point_cloud_diagnostics import safe_failure_diagnostics
+from .point_cloud_trace import record_point_cloud_stage
+
 DEFAULT_POINT_CLOUD_MAX_BYTES = 32 * 1024 * 1024
 DEFAULT_POINT_CLOUD_MAX_POINTS = 2_000_000
 MAX_POINT_CLOUD_HEADER_BYTES = 64 * 1024
@@ -53,6 +56,10 @@ class DreameLawnMowerPointCloudError(ValueError):
         self.discovery_route = discovery_route
         self.generation_acknowledged = generation_acknowledged
         self.diagnostic_context = dict(diagnostic_context or {})
+
+    def safe_diagnostics(self) -> dict[str, Any]:
+        """Return bounded attempt evidence safe to share without cloud secrets."""
+        return safe_failure_diagnostics(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +131,7 @@ def parse_pcd_metadata(
     deadline: float | None = None,
 ) -> DreameLawnMowerPointCloudMetadata:
     """Validate a PCD payload and return coordinate-free metadata."""
+    record_point_cloud_stage("validation")
     if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes <= 0:
         raise DreameLawnMowerPointCloudError(
             "Point-cloud maximum size must be a positive integer."
@@ -142,10 +150,11 @@ def parse_pcd_metadata(
     raw = bytes(content)
     _ensure_validation_deadline(deadline)
     if not raw:
-        raise DreameLawnMowerPointCloudError("Point-cloud content is empty.")
+        raise _pcd_failure("Point-cloud content is empty.", "empty_content")
     if len(raw) > max_bytes:
-        raise DreameLawnMowerPointCloudError(
-            f"Point-cloud content exceeds the {max_bytes}-byte limit."
+        raise _pcd_failure(
+            f"Point-cloud content exceeds the {max_bytes}-byte limit.",
+            "byte_limit",
         )
 
     header, header_bytes = _parse_pcd_header(raw)
@@ -162,45 +171,68 @@ def parse_pcd_metadata(
     height = _parse_nonnegative_int(header, "HEIGHT")
     points = _parse_nonnegative_int(header, "POINTS")
     data_encoding = _single_header_value(header, "DATA").casefold()
+    record_point_cloud_stage(
+        "validation",
+        {
+            "pcd_encoding": data_encoding
+            if data_encoding
+            in {
+                "ascii",
+                "binary",
+                "binary_compressed",
+            }
+            else "other",
+            "pcd_fields": len(fields),
+            "pcd_points": points,
+            "pcd_payload_bytes": len(raw) - header_bytes,
+        },
+    )
 
     if version not in {"0.7", ".7"}:
-        raise DreameLawnMowerPointCloudError(
-            f"Unsupported PCD version {version!r}; expected 0.7."
+        raise _pcd_failure(
+            f"Unsupported PCD version {version!r}; expected 0.7.",
+            "version",
         )
     if not fields or not {"x", "y", "z"}.issubset(fields):
-        raise DreameLawnMowerPointCloudError(
-            "PCD fields must include x, y, and z coordinates."
+        raise _pcd_failure(
+            "PCD fields must include x, y, and z coordinates.",
+            "coordinate_fields",
         )
     if len({*fields}) != len(fields):
-        raise DreameLawnMowerPointCloudError("PCD fields must be unique.")
+        raise _pcd_failure("PCD fields must be unique.", "duplicate_fields")
     if not (len(fields) == len(sizes) == len(types) == len(counts)):
-        raise DreameLawnMowerPointCloudError(
-            "PCD FIELDS, SIZE, TYPE, and COUNT lengths do not match."
+        raise _pcd_failure(
+            "PCD FIELDS, SIZE, TYPE, and COUNT lengths do not match.",
+            "field_lengths",
         )
     if any(size not in _SUPPORTED_FIELD_SIZES for size in sizes):
-        raise DreameLawnMowerPointCloudError("PCD contains an unsupported field size.")
+        raise _pcd_failure("PCD contains an unsupported field size.", "field_size")
     if any(field_type not in _SUPPORTED_FIELD_TYPES for field_type in types):
-        raise DreameLawnMowerPointCloudError("PCD contains an unsupported field type.")
+        raise _pcd_failure("PCD contains an unsupported field type.", "field_type")
     if any(
         field_type == "F" and size not in {4, 8}
         for field_type, size in zip(types, sizes, strict=True)
     ):
-        raise DreameLawnMowerPointCloudError(
-            "PCD floating-point fields must use 4-byte or 8-byte values."
+        raise _pcd_failure(
+            "PCD floating-point fields must use 4-byte or 8-byte values.",
+            "float_size",
         )
     for coordinate in ("x", "y", "z"):
         coordinate_index = fields.index(coordinate)
         if types[coordinate_index] != "F" or counts[coordinate_index] != 1:
-            raise DreameLawnMowerPointCloudError(
-                "PCD x, y, and z coordinates must be scalar floating-point fields."
+            raise _pcd_failure(
+                "PCD x, y, and z coordinates must be scalar floating-point fields.",
+                "coordinate_type",
             )
     if width * height != points:
-        raise DreameLawnMowerPointCloudError(
-            "PCD WIDTH and HEIGHT do not match the declared point count."
+        raise _pcd_failure(
+            "PCD WIDTH and HEIGHT do not match the declared point count.",
+            "point_dimensions",
         )
     if points > max_points:
-        raise DreameLawnMowerPointCloudError(
+        raise _pcd_failure(
             "Point-cloud point count exceeds the supported rendering limit.",
+            "point_limit",
             code="point_cloud_download_invalid",
             stage="download_validation",
             public_message=(
@@ -208,15 +240,14 @@ def parse_pcd_metadata(
             ),
         )
     if data_encoding not in _SUPPORTED_DATA_ENCODINGS:
-        raise DreameLawnMowerPointCloudError(
-            f"Unsupported PCD DATA encoding {data_encoding!r}."
+        raise _pcd_failure(
+            f"Unsupported PCD DATA encoding {data_encoding!r}.",
+            "encoding",
         )
-    if (
-        data_encoding == "ascii"
-        and sum(counts) > _MAX_ASCII_SCALARS_PER_POINT
-    ):
-        raise DreameLawnMowerPointCloudError(
-            "PCD ASCII point contains too many scalar values."
+    if data_encoding == "ascii" and sum(counts) > _MAX_ASCII_SCALARS_PER_POINT:
+        raise _pcd_failure(
+            "PCD ASCII point contains too many scalar values.",
+            "ascii_scalar_limit",
         )
 
     bytes_per_point = sum(
@@ -235,6 +266,7 @@ def parse_pcd_metadata(
         deadline=deadline,
     )
     _ensure_validation_deadline(deadline)
+    record_point_cloud_stage("validation_result", {"last_download_result": "validated"})
     return DreameLawnMowerPointCloudMetadata(
         version="0.7",
         fields=fields,
@@ -252,6 +284,17 @@ def parse_pcd_metadata(
     )
 
 
+def _pcd_failure(
+    message: str, reason: str, **options: Any
+) -> DreameLawnMowerPointCloudError:
+    """Attach a stable rule name without sharing interpolated vendor text."""
+    context = {"validation_reason": reason}
+    record_point_cloud_stage("validation_result", context)
+    return DreameLawnMowerPointCloudError(
+        message, diagnostic_context=context, **options
+    )
+
+
 def _parse_pcd_header(content: bytes) -> tuple[dict[str, list[str]], int]:
     header: dict[str, list[str]] = {}
     offset = 0
@@ -265,8 +308,9 @@ def _parse_pcd_header(content: bytes) -> tuple[dict[str, list[str]], int]:
         try:
             line = line_bytes.decode("ascii")
         except UnicodeDecodeError as err:
-            raise DreameLawnMowerPointCloudError(
-                "PCD header must contain only ASCII text."
+            raise _pcd_failure(
+                "PCD header must contain only ASCII text.",
+                "header_non_ascii",
             ) from err
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
@@ -274,22 +318,25 @@ def _parse_pcd_header(content: bytes) -> tuple[dict[str, list[str]], int]:
         parts = stripped.split()
         key = parts[0].upper()
         if key in header:
-            raise DreameLawnMowerPointCloudError(
-                f"PCD header contains duplicate {key} entries."
+            raise _pcd_failure(
+                f"PCD header contains duplicate {key} entries.",
+                "duplicate_header",
             )
         header[key] = parts[1:]
         if key == "DATA":
             return header, offset
-    raise DreameLawnMowerPointCloudError(
-        "PCD header is missing a complete DATA declaration."
+    raise _pcd_failure(
+        "PCD header is missing a complete DATA declaration.",
+        "missing_data_declaration",
     )
 
 
 def _header_values(header: dict[str, list[str]], key: str) -> list[str]:
     values = header.get(key)
     if not values:
-        raise DreameLawnMowerPointCloudError(
-            f"PCD header is missing a {key} value."
+        raise _pcd_failure(
+            f"PCD header is missing a {key} value.",
+            "missing_header_value",
         )
     return values
 
@@ -297,8 +344,9 @@ def _header_values(header: dict[str, list[str]], key: str) -> list[str]:
 def _single_header_value(header: dict[str, list[str]], key: str) -> str:
     values = _header_values(header, key)
     if len(values) != 1:
-        raise DreameLawnMowerPointCloudError(
-            f"PCD {key} must contain exactly one value."
+        raise _pcd_failure(
+            f"PCD {key} must contain exactly one value.",
+            "header_value_count",
         )
     return values[0]
 
@@ -309,8 +357,9 @@ def _parse_positive_ints(
 ) -> tuple[int, ...]:
     values = _parse_ints(header, key)
     if any(value <= 0 for value in values):
-        raise DreameLawnMowerPointCloudError(
-            f"PCD {key} values must be positive integers."
+        raise _pcd_failure(
+            f"PCD {key} values must be positive integers.",
+            "header_positive_integer",
         )
     return values
 
@@ -318,8 +367,9 @@ def _parse_positive_ints(
 def _parse_nonnegative_int(header: dict[str, list[str]], key: str) -> int:
     values = _parse_ints(header, key)
     if len(values) != 1 or values[0] < 0:
-        raise DreameLawnMowerPointCloudError(
-            f"PCD {key} must be one non-negative integer."
+        raise _pcd_failure(
+            f"PCD {key} must be one non-negative integer.",
+            "header_nonnegative_integer",
         )
     return values[0]
 
@@ -330,9 +380,12 @@ def _parse_ints(
 ) -> tuple[int, ...]:
     try:
         return tuple(int(value) for value in _header_values(header, key))
+    except DreameLawnMowerPointCloudError:
+        raise
     except ValueError as err:
-        raise DreameLawnMowerPointCloudError(
-            f"PCD {key} contains a non-integer value."
+        raise _pcd_failure(
+            f"PCD {key} contains a non-integer value.",
+            "header_integer",
         ) from err
 
 
@@ -351,8 +404,9 @@ def _validate_pcd_payload(
     expected_bytes = points * bytes_per_point
     if data_encoding == "binary":
         if len(payload) != expected_bytes:
-            raise DreameLawnMowerPointCloudError(
-                "PCD binary payload length does not match its header."
+            raise _pcd_failure(
+                "PCD binary payload length does not match its header.",
+                "binary_payload_length",
             )
         _validate_binary_coordinates(
             payload,
@@ -382,22 +436,26 @@ def _validate_pcd_payload(
             bytes_since_deadline_check = 0
         row_count += 1
         if row_count > points:
-            raise DreameLawnMowerPointCloudError(
-                "PCD ASCII payload row count does not match its header."
+            raise _pcd_failure(
+                "PCD ASCII payload row count does not match its header.",
+                "ascii_row_count",
             )
         if len(row) > max_row_bytes:
-            raise DreameLawnMowerPointCloudError(
-                "PCD ASCII payload row exceeds the supported size."
+            raise _pcd_failure(
+                "PCD ASCII payload row exceeds the supported size.",
+                "ascii_row_size",
             )
         try:
             values = row.decode("ascii").split()
         except UnicodeDecodeError as err:
-            raise DreameLawnMowerPointCloudError(
-                "PCD ASCII payload must contain only ASCII text."
+            raise _pcd_failure(
+                "PCD ASCII payload must contain only ASCII text.",
+                "ascii_non_ascii",
             ) from err
         if len(values) != scalar_count:
-            raise DreameLawnMowerPointCloudError(
-                "PCD ASCII payload column count does not match its header."
+            raise _pcd_failure(
+                "PCD ASCII payload column count does not match its header.",
+                "ascii_column_count",
             )
         _validate_ascii_scalars(
             values,
@@ -407,8 +465,9 @@ def _validate_pcd_payload(
         )
     _ensure_validation_deadline(deadline)
     if row_count != points:
-        raise DreameLawnMowerPointCloudError(
-            "PCD ASCII payload row count does not match its header."
+        raise _pcd_failure(
+            "PCD ASCII payload row count does not match its header.",
+            "ascii_row_count",
         )
 
 
@@ -427,12 +486,12 @@ def _iter_nonempty_ascii_rows(
         row_bytes = newline - offset
         if row_bytes > max_row_bytes:
             allowed_trailing_carriage_return = (
-                row_bytes == max_row_bytes + 1
-                and payload[newline - 1] == 0x0D
+                row_bytes == max_row_bytes + 1 and payload[newline - 1] == 0x0D
             )
             if not allowed_trailing_carriage_return:
-                raise DreameLawnMowerPointCloudError(
-                    "PCD ASCII payload row exceeds the supported size."
+                raise _pcd_failure(
+                    "PCD ASCII payload row exceeds the supported size.",
+                    "ascii_row_size",
                 )
         row = payload[offset:newline].rstrip(b"\r")
         offset = newline + 1
@@ -473,8 +532,9 @@ def _validate_binary_coordinates(
                 point_offset + coordinate_offset,
             )[0]
             if not math.isfinite(value):
-                raise DreameLawnMowerPointCloudError(
-                    "PCD coordinates must contain only finite values."
+                raise _pcd_failure(
+                    "PCD coordinates must contain only finite values.",
+                    "nonfinite_coordinates",
                 )
     _ensure_validation_deadline(deadline)
 
@@ -482,8 +542,9 @@ def _validate_binary_coordinates(
 def _ensure_validation_deadline(deadline: float | None) -> None:
     """Stop CPU-bound validation after the caller's absolute deadline."""
     if deadline is not None and time.monotonic() >= deadline:
-        raise DreameLawnMowerPointCloudError(
-            "Point-cloud validation timed out."
+        raise _pcd_failure(
+            "Point-cloud validation timed out.",
+            "validation_timeout",
         )
 
 
@@ -513,13 +574,12 @@ def _validate_ascii_scalars(
                 bits = size * 8
                 minimum = -(1 << (bits - 1)) if field_type == "I" else 0
                 maximum = (
-                    (1 << (bits - 1)) - 1
-                    if field_type == "I"
-                    else (1 << bits) - 1
+                    (1 << (bits - 1)) - 1 if field_type == "I" else (1 << bits) - 1
                 )
                 if not minimum <= value <= maximum:
                     raise ValueError
             except (OverflowError, ValueError, struct.error) as err:
-                raise DreameLawnMowerPointCloudError(
-                    "PCD ASCII payload contains an invalid scalar value."
+                raise _pcd_failure(
+                    "PCD ASCII payload contains an invalid scalar value.",
+                    "ascii_scalar",
                 ) from err

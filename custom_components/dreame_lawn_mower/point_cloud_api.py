@@ -499,14 +499,7 @@ class DreameLawnMowerPointCloudAPI:
             "allow_stored": allow_stored,
             "allow_unscoped_stored": allow_unscoped_stored,
         }
-        if error.diagnostic_reason is not None:
-            context["reason"] = error.diagnostic_reason
-        if error.discovery_route is not None:
-            context["discovery_route"] = error.discovery_route
-        if error.generation_acknowledged is not None:
-            context["generation_acknowledged"] = error.generation_acknowledged
-        if error.diagnostic_context:
-            context["attempt"] = dict(error.diagnostic_context)
+        context.update(error.safe_diagnostics())
         exception_type = None
         if unexpected_error is not None:
             exception_type = _exception_type_name(unexpected_error)
@@ -865,6 +858,7 @@ def _point_cloud_problem_response(
             "retry_after_seconds": error.retry_after_seconds,
             "elapsed_ms": elapsed_ms,
             "timeout_seconds": error.timeout_seconds,
+            "diagnostics": error.safe_diagnostics(),
         },
         status=status,
         content_type="application/problem+json",

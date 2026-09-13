@@ -1074,6 +1074,7 @@ def test_point_cloud_view_returns_actionable_problem_details() -> None:
         "retry_after_seconds": 10,
         "elapsed_ms": pytest.approx(0, abs=10),
         "timeout_seconds": 45,
+        "diagnostics": {"attempt": {}},
     }
 
 
@@ -1101,6 +1102,35 @@ def test_point_cloud_view_does_not_log_private_exception_details(
     assert private_detail not in caplog.text
     assert "do-not-log" not in caplog.text
     assert private_detail not in response.text
+
+
+def test_point_cloud_view_includes_only_allowlisted_attempt_evidence() -> None:
+    async def get(*args: Any, **kwargs: Any) -> None:
+        raise DreameLawnMowerPointCloudError(
+            "private-url", code="point_cloud_not_published",
+            diagnostic_reason="object_not_observed",
+            discovery_route="announcement_property", generation_acknowledged=True,
+            diagnostic_context={
+                "download_attempts": 0,
+                "latest_indexed": {
+                    "slot_count": 2, "selected_shape": "empty_string",
+                    "names": ["private-url"],
+                },
+                "last_download_result": "private-url",
+            },
+        )
+
+    view = DreameLawnMowerPointCloudView(SimpleNamespace(async_get=get))
+    response = asyncio.run(view.get(_FakeRequest(is_admin=True), "entry-1", "0"))
+    assert json.loads(response.text)["diagnostics"] == {
+        "reason": "object_not_observed", "discovery_route": "announcement_property",
+        "generation_acknowledged": True,
+        "attempt": {
+            "download_attempts": 0,
+            "latest_indexed": {"slot_count": 2, "selected_shape": "empty_string"},
+        },
+    }
+    assert "private-url" not in response.text
 
 
 def test_point_cloud_api_records_safe_unexpected_exception_type(

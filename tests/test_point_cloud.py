@@ -716,8 +716,10 @@ def test_download_point_cloud_reuses_privately_cached_metadata_object(
     )
 
     assert metadata["objects"] == [
-        {"extension": "bin", "url_present": False},
-        {"extension": None, "url_present": False},
+        {"extension": "bin", "url_present": False, "url_checked": False,
+         "name_present": True, "name_shape": "nonempty_string"},
+        {"extension": None, "url_present": False, "url_checked": False,
+         "name_present": False, "name_shape": "empty_string"},
     ]
     assert actions == [{"m": "g", "t": "OBJ", "d": {"type": "3dmap"}}]
     assert signed_names == ["private/fixed-map.bin"]
@@ -2513,6 +2515,15 @@ def test_download_point_cloud_accepts_unchanged_mova_fixed_object_after_ack(
 def test_download_point_cloud_rejects_false_viax_generation_reply(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Exercise the acknowledgement/freshness contract, not a 50 ms wall-clock
+    # race between baseline validation and the final polling iteration.
+    elapsed = [0.0]
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: elapsed[0])
+
+    def advance(seconds: float) -> None:
+        elapsed[0] += seconds
+
+    monkeypatch.setattr(client_module.time, "sleep", advance)
     client = _mova_client(
         model="mova.mower.g2583",
         display_model="VIAX 500",
