@@ -36,6 +36,7 @@ def _coordinator(download):
     coordinator.entry = SimpleNamespace(entry_id="test-entry")
     coordinator.app_maps = {"current_map_index": 0, "maps": [{"idx": 0}]}
     coordinator.batch_device_data = {}
+    coordinator._listeners = {}
     coordinator.selected_map_index = 0
     # Command serialization is covered by its own tests; no live command runner.
     coordinator.async_run_command = None
@@ -64,6 +65,10 @@ def test_validated_download_promotes_unknown_mower_across_map_and_diagnostics():
 
     coordinator = _coordinator(download)
     before = _map_attributes(coordinator)
+    published_attributes = []
+    coordinator._listeners[0] = (
+        lambda: published_attributes.append(_map_attributes(coordinator)), None
+    )
     assert before["feature_capabilities"]["point_cloud"]["state"] == "unknown"
     api = DreameLawnMowerPointCloudAPI(
         SimpleNamespace(data={DOMAIN: {"test-entry": coordinator}})
@@ -75,9 +80,26 @@ def test_validated_download_promotes_unknown_mower_across_map_and_diagnostics():
     assert after["feature_capabilities"]["point_cloud"] == {
         "state": "supported", "source": "observed"
     }
+    assert published_attributes == [after]
+    coordinator.record_feature_capability_observed("point_cloud")
+    assert len(published_attributes) == 1
     coordinator.data.capabilities = ()
     assert build_coordinator_diagnostics(coordinator)["feature_capabilities"] == (
         after["feature_capabilities"]
+    )
+
+
+@pytest.mark.parametrize("feature", ["point_cloud", "live_video"])
+def test_advertised_support_survives_sparse_snapshot_on_all_surfaces(feature):
+    coordinator = _coordinator(None)
+    coordinator.data.capabilities = (feature,)
+    before = _map_attributes(coordinator)["feature_capabilities"][feature]
+    assert before == {"state": "supported", "source": "advertised"}
+    coordinator.data.capabilities = ("map", "lidar_navigation")
+    assert _map_attributes(coordinator)["feature_capabilities"][feature] == before
+    assert (
+        build_coordinator_diagnostics(coordinator)["feature_capabilities"][feature]
+        == before
     )
 
 

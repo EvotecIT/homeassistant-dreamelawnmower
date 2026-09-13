@@ -44,11 +44,14 @@ from .coordinator_refresh import (
 )
 from .diagnostic_events import DreameLawnMowerDiagnosticEventStore
 from .dreame_lawn_mower_client.exceptions import attempted_write_fields
-from .dreame_lawn_mower_client.feature_capabilities import FEATURE_LIVE_VIDEO
+from .dreame_lawn_mower_client.feature_capabilities import (
+    FEATURE_LIVE_VIDEO,
+    FEATURE_POINT_CLOUD,
+    snapshot_advertises_feature,
+)
 from .dreame_lawn_mower_client.models import (
     DreameLawnMowerStatusBlob,
     display_name_for_model,
-    snapshot_advertises_video,
 )
 from .dreame_lawn_mower_client.schedule import (
     decode_schedule_payload_text,
@@ -423,8 +426,9 @@ class DreameLawnMowerCoordinator(
         observed = getattr(self, "_observed_feature_capabilities", None)
         if observed is None:
             observed = self._observed_feature_capabilities = set()
-        if snapshot_advertises_video(snapshot):
-            advertised.add(FEATURE_LIVE_VIDEO)
+        for feature in (FEATURE_LIVE_VIDEO, FEATURE_POINT_CLOUD):
+            if snapshot_advertises_feature(snapshot, feature):
+                advertised.add(feature)
         if self._persisted_video_route_available():
             observed.add(FEATURE_LIVE_VIDEO)
 
@@ -446,11 +450,13 @@ class DreameLawnMowerCoordinator(
         )
 
     def record_feature_capability_observed(self, feature: str) -> None:
-        """Retain direct runtime proof for later entity and card consumers."""
+        """Retain runtime proof and publish newly observed support on the HA loop."""
         observed = getattr(self, "_observed_feature_capabilities", None)
         if observed is None:
             observed = self._observed_feature_capabilities = set()
-        observed.add(feature)
+        if feature not in observed:
+            observed.add(feature)
+            self.async_update_listeners()
 
     def feature_capability_evidence(self) -> tuple[frozenset[str], frozenset[str]]:
         """Return observed and advertised capability evidence."""

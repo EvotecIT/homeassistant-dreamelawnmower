@@ -70,7 +70,9 @@ def _descriptor_model(snapshot: Any, descriptor: Any | None) -> str | None:
     return None
 
 
-def _snapshot_advertises_feature(snapshot: Any, feature: str) -> bool:
+def snapshot_advertises_feature(snapshot: Any, feature: str) -> bool:
+    """Identify explicit advertised evidence independently of model overrides."""
+    feature = _normalized_feature(feature)
     if snapshot is None:
         return False
     if feature == FEATURE_LIVE_VIDEO and snapshot_advertises_video(snapshot):
@@ -112,7 +114,7 @@ def resolve_feature_capability(
             CAPABILITY_SOURCE_MODEL,
         )
 
-    if advertised or _snapshot_advertises_feature(snapshot, normalized_feature):
+    if advertised or snapshot_advertises_feature(snapshot, normalized_feature):
         return DreameLawnMowerFeatureCapability(
             CAPABILITY_SUPPORTED,
             CAPABILITY_SOURCE_ADVERTISED,

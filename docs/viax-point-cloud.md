@@ -19,6 +19,16 @@ permanently unsupported. LiDAR navigation and 2D mapping are separate features.
 The earlier assumption that a successful A2 export implied a broken VIAX export
 was not justified by the evidence.
 
+Read-only shared-account validation on the same firmware retrieved both map
+slots and rendered them through the existing vector-map and mowing-map scene
+code. The current map index matched the mower's inventory. Battery and docked
+status were readable too. The indexed 3D-object query was accepted by both the
+cloud and mower, but returned two empty slots; this was not an authorization
+rejection. These results establish working map access, not raw LiDAR export.
+The docked status packets supplied no position, so live position and trail
+updates still need observation during normal mowing. No movement, map changes,
+generation, or camera activation was used for this validation.
+
 ## What the supplied evidence establishes
 
 The issue's first ten JSON attachments through comment `5652302135` contain four
