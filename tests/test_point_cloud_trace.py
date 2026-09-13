@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+import urllib.error
 from types import SimpleNamespace
 
 import pytest
@@ -131,6 +132,85 @@ def test_concurrent_request_traces_are_isolated():
             assert report["worker_finished"] is True
             assert report["timeline"][1]["observation"]["map_index"] == index
         assert trace_module.active_point_cloud_trace.get() is None
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("timeout_type", [TimeoutError, client_module._RequestsTimeout])
+def test_completed_worker_timeout_is_not_an_outer_deadline(timeout_type):
+    client = _client()
+
+    def fail(*args):
+        raise timeout_type("private")
+
+    client._sync_download_app_map_point_cloud = fail
+    with pytest.raises(DreameLawnMowerPointCloudError) as failure:
+        asyncio.run(client.async_download_app_map_point_cloud())
+    report = failure.value.safe_diagnostics()["attempt"]
+    assert report["worker_finished"] is True
+    assert report["timeline"][-1]["trace_stage"] == "worker_timeout"
+
+
+@pytest.mark.parametrize("blocked", [True, False])
+def test_stored_http_failure_is_published_before_next_phase(monkeypatch, blocked):
+    client = _client()
+    client._sync_update_app_map_inventory_identity(
+        [
+            {
+                "idx": 0,
+                "current": True,
+                "created": True,
+                "info": {"hash": "map-hash", "size": 123},
+            },
+        ]
+    )
+    client._latest_app_map_object_names = ("private/stored.bin",)
+    client._latest_app_map_object_inventory_identity = (
+        client._latest_app_map_inventory_identity
+    )
+    release, started = threading.Event(), threading.Event()
+    monkeypatch.setattr(client_module, "_POINT_CLOUD_CLOUD_SETUP_TIMEOUT_SECONDS", 0)
+    monkeypatch.setattr(
+        client_module, "_POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS", 0
+    )
+
+    def next_phase(*args, **kwargs):
+        started.set()
+        if blocked:
+            assert release.wait(3)
+        parse_pcd_metadata(b"invalid subsequent content")
+
+    def forbidden(*args, **kwargs):
+        raise urllib.error.HTTPError(
+            "https://example.invalid/private", 403, "private", {}, None
+        )
+
+    monkeypatch.setattr(helpers, "_open_point_cloud_response", forbidden)
+    client._sync_get_cloud_protocol = lambda **options: SimpleNamespace(
+        get_properties=next_phase,
+        get_interim_file_url=lambda *args, **kwargs: "https://example.invalid/private",
+    )
+
+    async def run():
+        task = asyncio.create_task(
+            client.async_download_app_map_point_cloud(
+                timeout=0.3,
+                allow_stored=True,
+            )
+        )
+        try:
+            assert await asyncio.to_thread(started.wait, 2)
+            with pytest.raises(DreameLawnMowerPointCloudError) as failure:
+                await task
+            report = failure.value.safe_diagnostics()["attempt"]
+            assert report["first_failure"]["download_http_status"] == 403
+            assert report["first_failure"]["download_reason"] == "http_error"
+            assert report["worker_finished"] is (not blocked)
+            if not blocked:
+                assert report["validation_reason"] == "missing_data_declaration"
+            assert "private" not in json.dumps(report)
+        finally:
+            release.set()
 
     asyncio.run(run())
 

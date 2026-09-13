@@ -308,6 +308,7 @@ _TRACE_STAGES = frozenset(
         "poll_result",
         "failed",
         "outer_timeout",
+        "worker_timeout",
     }
 )
 

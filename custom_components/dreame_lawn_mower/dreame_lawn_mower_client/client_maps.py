@@ -1854,45 +1854,57 @@ class _DreameLawnMowerClientMapsMixin(
         observation.pop("download_reason", None)
         record_point_cloud_stage("signer", observation)
         try:
-            raw_url = self._sync_get_point_cloud_download_url(
-                cloud,
-                object_name,
-                deadline=deadline,
+            try:
+                raw_url = self._sync_get_point_cloud_download_url(
+                    cloud,
+                    object_name,
+                    deadline=deadline,
+                )
+            except json.JSONDecodeError as err:
+                raise DreameLawnMowerPointCloudError(
+                    "Point-cloud signer returned an invalid response.",
+                    code="point_cloud_download_invalid",
+                    stage="download",
+                    public_message=(
+                        "The mower's generated 3D map is not ready to download."
+                    ),
+                    retry_after_seconds=2,
+                    diagnostic_context={"download_reason": "signer_invalid_response"},
+                ) from err
+            observation["signer_shape"] = value_shape(raw_url)
+            record_point_cloud_stage("signer_reply", observation)
+            url = _point_cloud_download_url(raw_url)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise DreameLawnMowerPointCloudError(
+                    "Point-cloud generation timed out.",
+                    code="point_cloud_timeout",
+                    stage="download",
+                    public_message=(
+                        "The mower did not finish the 3D map request in time."
+                    ),
+                    timeout_seconds=download_timeout,
+                    retry_after_seconds=10,
+                )
+            observation["last_download_step"] = "download"
+            record_point_cloud_stage("download", observation)
+            result = _download_point_cloud_content_with_identity(
+                url,
+                timeout=min(download_timeout, remaining),
+                max_bytes=max_bytes,
             )
-        except json.JSONDecodeError as err:
-            raise DreameLawnMowerPointCloudError(
-                "Point-cloud signer returned an invalid response.",
-                code="point_cloud_download_invalid",
-                stage="download",
-                public_message=(
-                    "The mower's generated 3D map is not ready to download."
-                ),
-                retry_after_seconds=2,
-                diagnostic_context={"download_reason": "signer_invalid_response"},
-            ) from err
-        observation["signer_shape"] = value_shape(raw_url)
-        record_point_cloud_stage("signer_reply", observation)
-        url = _point_cloud_download_url(raw_url)
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise DreameLawnMowerPointCloudError(
-                "Point-cloud generation timed out.",
-                code="point_cloud_timeout",
-                stage="download",
-                public_message="The mower did not finish the 3D map request in time.",
-                timeout_seconds=download_timeout,
-                retry_after_seconds=10,
+            observation["download_bytes"] = len(result[0])
+            record_point_cloud_stage("download_result", observation)
+            return result
+        except (DeviceException, DreameLawnMowerPointCloudError) as err:
+            if isinstance(err, DreameLawnMowerPointCloudError):
+                observation.update(err.safe_diagnostics()["attempt"])
+            observation["last_download_result"] = (
+                f"error:{err.code}" if isinstance(err, DreameLawnMowerPointCloudError)
+                else "error:device"
             )
-        observation["last_download_step"] = "download"
-        record_point_cloud_stage("download", observation)
-        result = _download_point_cloud_content_with_identity(
-            url,
-            timeout=min(download_timeout, remaining),
-            max_bytes=max_bytes,
-        )
-        observation["download_bytes"] = len(result[0])
-        record_point_cloud_stage("download_result", observation)
-        return result
+            record_point_cloud_stage("download_result", observation)
+            raise
 
     def _sync_call_point_cloud_action(
         self,

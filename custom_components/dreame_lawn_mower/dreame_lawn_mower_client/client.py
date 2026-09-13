@@ -1438,8 +1438,9 @@ class DreameLawnMowerClient(
         trace = _PointCloudTrace()
         trace.record("queue")
         trace_token = _active_point_cloud_trace.set(trace)
+        timeout_scope = asyncio.timeout(operation_timeout)
         try:
-            async with asyncio.timeout(operation_timeout):
+            async with timeout_scope:
                 worker = asyncio.create_task(
                     asyncio.to_thread(
                         self._sync_download_app_map_point_cloud_singleflight,
@@ -1462,7 +1463,8 @@ class DreameLawnMowerClient(
                 return await asyncio.shield(worker)
         except (TimeoutError, _RequestsTimeout) as err:
             abandoned.set()
-            trace.record("outer_timeout")
+            outer_expired = timeout_scope.expired()
+            trace.record("outer_timeout" if outer_expired else "worker_timeout")
             raise DreameLawnMowerPointCloudError(
                 "Point-cloud generation timed out.",
                 code="point_cloud_timeout",
@@ -1473,7 +1475,7 @@ class DreameLawnMowerClient(
                 ),
                 timeout_seconds=timeout,
                 retry_after_seconds=10,
-                diagnostic_context=trace.snapshot(complete=False),
+                diagnostic_context=trace.snapshot(complete=not outer_expired),
             ) from err
         except DreameLawnMowerPointCloudError as err:
             trace.record("failed", err.diagnostic_context)

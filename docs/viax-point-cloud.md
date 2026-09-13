@@ -7,8 +7,10 @@ it and controls the selector.
 
 ## What the supplied evidence establishes
 
-The issue's ten JSON attachments through comment `5652302135` contain four mower
-diagnostics and six HACS diagnostics. All four mower reports identify
+The issue's first ten JSON attachments through comment `5652302135` contain four
+mower diagnostics and six HACS diagnostics. A subsequent mower capture in
+[comment 5652426735](https://github.com/EvotecIT/lovelace-lawn-mower-card/issues/52#issuecomment-5652426735)
+adds a fifth mower report, on integration 0.2.97. All five mower reports identify
 `mova.mower.g2583`, marketed as VIAX 500, on firmware `4.3.6_0260`.
 
 | Integration in mower report | Recorded result | Subsequent change |
@@ -17,10 +19,14 @@ diagnostics and six HACS diagnostics. All four mower reports identify
 | 0.2.94 | One recorded point-cloud timeout | [PR #192](https://github.com/EvotecIT/homeassistant-dreamelawnmower/pull/192), released in 0.2.95, allowed acknowledged fixed `.bin` objects for the exact VIAX model |
 | 0.2.95 | Seven recorded point-cloud timeouts | [PR #193](https://github.com/EvotecIT/homeassistant-dreamelawnmower/pull/193), released in 0.2.96, added indexed verification for stable announcements |
 | 0.2.96 | Eight recorded timeouts; acknowledgement true, announcement route, object not observed | [PR #195](https://github.com/EvotecIT/homeassistant-dreamelawnmower/pull/195), released in 0.2.97, added VIAX indexed fallback and attempt counters |
+| 0.2.97 | Seven failed attempts; acknowledgement true, 15-19 indexed checks per attempt, zero downloads | This change adds response shapes and timeout-safe evidence to distinguish absent objects from rejected or unfamiliar values |
 
 These are counts within individual captures, not a claim that every event is
 unique across reports. The latest HACS report confirms integration 0.2.97 and
-card 0.2.9, but contains no 0.2.97 mower attempt. The paused-selector correction
+card 0.2.9; the subsequent mower report supplies actual 0.2.97 attempt counters.
+Those counters locate the failure before a download attempt, not in PCD validation.
+They still do not distinguish empty OBJ slots from an unfamiliar response shape.
+The paused-selector correction
 in [card PR #55](https://github.com/EvotecIT/lovelace-lawn-mower-card/pull/55)
 shipped in [card 0.2.10](https://github.com/EvotecIT/lovelace-lawn-mower-card/releases/tag/v0.2.10).
 Installed card metadata does not establish which bundle an existing browser tab
