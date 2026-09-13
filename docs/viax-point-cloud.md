@@ -113,6 +113,12 @@ current integration session. Failed attempts never mark a model unsupported or
 erase positive evidence. The companion card asks for an explicit load on an
 unverified mower, and a completed no-publication failure stops automatic retries.
 
+Failed or inconclusive discovery reads remain retryable. The attempt reports
+the latest announcement and indexed-object poll results separately, so a
+transport failure is not reported as an empty export. Unfamiliar object slots
+also leave the freshness baseline unchanged; they cannot make an old file
+appear newly generated.
+
 Keep 2D mapping available independently. Do not request repeated generation
 captures unless new evidence, such as an actual official-app 3D view or a
 published point-cloud object, justifies another attempt. See

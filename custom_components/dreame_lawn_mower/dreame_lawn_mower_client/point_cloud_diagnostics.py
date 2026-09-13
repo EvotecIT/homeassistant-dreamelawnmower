@@ -141,6 +141,17 @@ def action_reply_observation(response: Any) -> dict[str, Any]:
     return result
 
 
+def indexed_poll_result(observation: Mapping[str, Any]) -> str:
+    """Recognize supported OBJ slots; unfamiliar shapes are not empty exports."""
+    return (
+        "observed"
+        if observation.get("names_shape") == "sequence"
+        and observation.get("selected_shape")
+        in {"null", "empty_string", "nonempty_string"}
+        else "inconclusive"
+    )
+
+
 _COUNTERS = frozenset(
     {
         "announcement_polls",
@@ -169,6 +180,8 @@ _ENUM_FIELDS = frozenset(
         "announcement_capability",
         "announcement_baseline",
         "indexed_verification_result",
+        "announcement_poll_result",
+        "indexed_poll_result",
         "last_download_result",
         "status",
         "data_shape",
@@ -456,6 +469,7 @@ def safe_failure_diagnostics(error: Any) -> dict[str, Any]:
         "published_object_invalid",
         "unchanged_object",
         "object_not_observed",
+        "polling_inconclusive",
     }:
         result["reason"] = error.diagnostic_reason
     if error.discovery_route in {"announcement_property", "legacy_obj"}:

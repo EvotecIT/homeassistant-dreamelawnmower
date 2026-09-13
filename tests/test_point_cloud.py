@@ -1457,7 +1457,8 @@ def test_download_point_cloud_keeps_failed_signable_baseline_inconclusive(
     with pytest.raises(DreameLawnMowerPointCloudError) as captured:
         client._sync_download_app_map_point_cloud(0, 0.05, 0.001, 10, 1024)
 
-    assert captured.value.code == "point_cloud_not_published"
+    assert captured.value.code == "point_cloud_download_invalid"
+    assert captured.value.retryable is True
     assert download_attempts >= 2
 
 
