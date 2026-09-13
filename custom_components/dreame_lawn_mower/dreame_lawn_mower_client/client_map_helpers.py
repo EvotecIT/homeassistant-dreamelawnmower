@@ -214,12 +214,14 @@ def _point_cloud_download_url(value: Any) -> str:
 
     if not isinstance(candidate, str) or not candidate:
         raise DreameLawnMowerPointCloudError(
-            "The cloud did not return a point-cloud download URL."
+            "The cloud did not return a point-cloud download URL.",
+            diagnostic_context={"download_reason": "signer_empty"},
         )
     parsed = urllib.parse.urlsplit(candidate)
     if parsed.scheme.casefold() != "https" or not parsed.netloc:
         raise DreameLawnMowerPointCloudError(
-            "The cloud returned an invalid point-cloud download URL."
+            "The cloud returned an invalid point-cloud download URL.",
+            diagnostic_context={"download_reason": "signer_invalid_url"},
         )
     return candidate
 
@@ -261,7 +263,8 @@ def _download_point_cloud_content_with_identity(
             final_url = response.geturl()
             if urllib.parse.urlsplit(final_url).scheme.casefold() != "https":
                 raise DreameLawnMowerPointCloudError(
-                    "The point-cloud download redirected to an insecure URL."
+                    "The point-cloud download redirected to an insecure URL.",
+                    diagnostic_context={"download_reason": "https_redirect"},
                 )
             content_length = response.headers.get("Content-Length")
             declared_bytes: int | None = None
@@ -270,11 +273,15 @@ def _download_point_cloud_content_with_identity(
                     declared_bytes = int(content_length)
                 except ValueError as err:
                     raise DreameLawnMowerPointCloudError(
-                        "The point-cloud download returned an invalid size."
+                        "The point-cloud download returned an invalid size.",
+                        diagnostic_context={
+                            "download_reason": "invalid_content_length",
+                        },
                     ) from err
                 if declared_bytes < 0 or declared_bytes > max_bytes:
                     raise DreameLawnMowerPointCloudError(
-                        "The point-cloud download exceeds the configured size limit."
+                        "The point-cloud download exceeds the configured size limit.",
+                        diagnostic_context={"download_reason": "byte_limit"},
                     )
             content_parts: list[bytes] = []
             received_bytes = 0
@@ -286,7 +293,8 @@ def _download_point_cloud_content_with_identity(
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise DreameLawnMowerPointCloudError(
-                        "The point-cloud download timed out."
+                        "The point-cloud download timed out.",
+                        diagnostic_context={"download_reason": "download_timeout"},
                     )
                 _set_point_cloud_response_timeout(response, remaining)
                 read_bytes = min(64 * 1024, max_bytes + 1 - received_bytes)
@@ -295,7 +303,8 @@ def _download_point_cloud_content_with_identity(
                 chunk = response.read(read_bytes)
                 if time.monotonic() >= deadline:
                     raise DreameLawnMowerPointCloudError(
-                        "The point-cloud download timed out."
+                        "The point-cloud download timed out.",
+                        diagnostic_context={"download_reason": "download_timeout"},
                     )
                 if not chunk:
                     break
@@ -303,11 +312,13 @@ def _download_point_cloud_content_with_identity(
                 received_bytes += len(chunk)
                 if received_bytes > max_bytes:
                     raise DreameLawnMowerPointCloudError(
-                        "The point-cloud download exceeds the configured size limit."
+                        "The point-cloud download exceeds the configured size limit.",
+                        diagnostic_context={"download_reason": "byte_limit"},
                     )
             if declared_bytes is not None and received_bytes != declared_bytes:
                 raise DreameLawnMowerPointCloudError(
-                    "The point-cloud download ended before its declared size."
+                    "The point-cloud download ended before its declared size.",
+                    diagnostic_context={"download_reason": "truncated_content"},
                 )
             content = b"".join(content_parts)
             content_type = (
@@ -325,15 +336,19 @@ def _download_point_cloud_content_with_identity(
     except urllib.error.HTTPError as err:
         raise DreameLawnMowerPointCloudError(
             f"The point-cloud download failed with HTTP status {err.code}.",
-            diagnostic_context={"download_http_status": err.code},
+            diagnostic_context={
+                "download_http_status": err.code, "download_reason": "http_error",
+            },
         ) from err
     except TimeoutError as err:
         raise DreameLawnMowerPointCloudError(
-            "The point-cloud download timed out."
+            "The point-cloud download timed out.",
+            diagnostic_context={"download_reason": "download_timeout"},
         ) from err
     except (urllib.error.URLError, OSError) as err:
         raise DreameLawnMowerPointCloudError(
-            "The point-cloud download could not be completed."
+            "The point-cloud download could not be completed.",
+            diagnostic_context={"download_reason": "transport_error"},
         ) from err
 
     return content, content_type, identity
@@ -355,7 +370,8 @@ class _HttpsOnlyPointCloudRedirectHandler(urllib.request.HTTPRedirectHandler):
         parsed = urllib.parse.urlsplit(target)
         if parsed.scheme.casefold() != "https" or not parsed.netloc:
             raise DreameLawnMowerPointCloudError(
-                "The point-cloud download redirected to an insecure URL."
+                "The point-cloud download redirected to an insecure URL.",
+                diagnostic_context={"download_reason": "https_redirect"},
             )
         return super().redirect_request(
             req,
@@ -382,7 +398,8 @@ def _open_point_cloud_response(
         )
     except DeadlineExceededError as err:
         raise DreameLawnMowerPointCloudError(
-            "The point-cloud download timed out."
+            "The point-cloud download timed out.",
+            diagnostic_context={"download_reason": "download_timeout"},
         ) from err
 
 
@@ -404,7 +421,8 @@ def _set_point_cloud_response_timeout(response: Any, timeout: float) -> None:
             set_timeout(timeout)
             return
     raise DreameLawnMowerPointCloudError(
-        "The point-cloud download deadline could not be enforced."
+        "The point-cloud download deadline could not be enforced.",
+        diagnostic_context={"download_reason": "deadline_unavailable"},
     )
 
 

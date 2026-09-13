@@ -89,8 +89,10 @@ from .point_cloud import (
 from .point_cloud_diagnostics import (
     action_reply_observation,
     indexed_object_observation,
+    property_value_observation,
     value_shape,
 )
+from .point_cloud_trace import record_point_cloud_stage
 from .vector_map import (
     filter_runtime_track_segments,
     parse_batch_vector_map,
@@ -723,6 +725,7 @@ class _DreameLawnMowerClientMapsMixin(
                 timeout_seconds=timeout,
                 retry_after_seconds=10,
             )
+        record_point_cloud_stage("cloud_setup")
         try:
             cloud = self._sync_get_cloud_protocol(
                 deadline=min(
@@ -832,6 +835,7 @@ class _DreameLawnMowerClientMapsMixin(
             "download_attempts": 0,
             "last_download_result": "not_attempted",
         }
+        record_point_cloud_stage("poll_result", attempt_diagnostics)
         if (
             allow_unscoped_stored
             and stored_name is not None
@@ -1027,6 +1031,7 @@ class _DreameLawnMowerClientMapsMixin(
             # Preserve compatibility with alternate/mock cloud transports that
             # do not expose the dispatch hook.
             mark_generation_dispatched()
+        record_point_cloud_stage("generation_reply", attempt_diagnostics)
 
         def acknowledged_fixed_object(object_name: str | None) -> bool:
             """Return whether an exact-model action ack proves fixed-key refresh."""
@@ -1061,6 +1066,7 @@ class _DreameLawnMowerClientMapsMixin(
         stable_announcement_verification_attempts = 0
         stable_announcement_verification_after = 0.0
         while time.monotonic() < deadline:
+            record_point_cloud_stage("poll_result", attempt_diagnostics)
             latest_announcement: dict[str, Any] = {}
             announced_name = None
             announced_identity = None
@@ -1474,6 +1480,7 @@ class _DreameLawnMowerClientMapsMixin(
                                 deadline=deadline,
                             )
                         except DreameLawnMowerPointCloudError as err:
+                            attempt_diagnostics.update(err.safe_diagnostics()["attempt"])
                             attempt_diagnostics["last_download_result"] = (
                                 f"error:{err.code}"
                             )
@@ -1493,6 +1500,7 @@ class _DreameLawnMowerClientMapsMixin(
             if remaining > 0:
                 time.sleep(min(poll_interval, remaining))
 
+        record_point_cloud_stage("poll_result", attempt_diagnostics)
         if saw_unverified_fixed_object:
             raise DreameLawnMowerPointCloudError(
                 "The fixed point-cloud object could not be compared with "
@@ -1592,6 +1600,7 @@ class _DreameLawnMowerClientMapsMixin(
             time.monotonic() + _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
         )
         observation["download_attempts"] = observation.get("download_attempts", 0) + 1
+        record_point_cloud_stage("stored_download", observation)
         try:
             content, content_type, _ = self._sync_download_point_cloud_object(
                 cloud,
@@ -1645,6 +1654,7 @@ class _DreameLawnMowerClientMapsMixin(
         """
         observation = {} if observation is None else observation
         observation["status"] = "budget_exhausted"
+        record_point_cloud_stage("announcement_read")
         remaining = deadline - time.monotonic()
         probe_budget = remaining - max(0.0, fallback_reserve_seconds)
         if probe_budget <= 0:
@@ -1676,6 +1686,9 @@ class _DreameLawnMowerClientMapsMixin(
             return None, None, None
 
         entries = self._normalize_cloud_property_entries(payload)
+        record_point_cloud_stage("announcement_result", {
+            "value_shape": value_shape(payload), "property_entry_count": len(entries),
+        })
         observation["property_entry_count"] = min(len(entries), 1_000_000)
         observation["status"] = "property_missing"
         for entry in entries:
@@ -1684,6 +1697,7 @@ class _DreameLawnMowerClientMapsMixin(
             object_name = entry.get("value")
             updated_at = entry.get("updateDate")
             observation["value_shape"] = value_shape(object_name)
+            observation.update(property_value_observation(object_name))
             observation["timestamp_shape"] = value_shape(updated_at)
             observation["status"] = "invalid_value"
             if (
@@ -1720,6 +1734,10 @@ class _DreameLawnMowerClientMapsMixin(
                 return True, None, None
             normalized_name = object_name.strip()
             observed = (normalized_name, updated_at_ms)
+            observation["after_request"] = updated_at_ms > requested_after_ms
+            if baseline is not None:
+                observation["name_changed"] = normalized_name != baseline[0]
+                observation["timestamp_changed"] = updated_at_ms != baseline[1]
             fresh = (
                 (
                     (normalized_name != baseline[0] or updated_at_ms > baseline[1])
@@ -1755,6 +1773,7 @@ class _DreameLawnMowerClientMapsMixin(
             deadline,
             time.monotonic() + _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
         )
+        record_point_cloud_stage("baseline_signer")
         try:
             raw_url = self._sync_get_point_cloud_download_url(
                 cloud,
@@ -1762,24 +1781,42 @@ class _DreameLawnMowerClientMapsMixin(
                 deadline=baseline_deadline,
                 require_response=True,
             )
+            record_point_cloud_stage(
+                "signer_reply", {"signer_shape": value_shape(raw_url)},
+            )
         except (
             DeviceException,
             DreameLawnMowerPointCloudError,
             json.JSONDecodeError,
-        ):
+        ) as err:
+            record_point_cloud_stage("signer_reply", {
+                "last_download_step": "signer",
+                "download_reason": (
+                    "signer_invalid_response" if isinstance(err, json.JSONDecodeError)
+                    else "transport_error"
+                ),
+                **(
+                    err.safe_diagnostics()["attempt"]
+                    if isinstance(err, DreameLawnMowerPointCloudError) else {}
+                ),
+            })
             return False, None
 
         try:
             url = _point_cloud_download_url(raw_url)
-        except DreameLawnMowerPointCloudError:
+        except DreameLawnMowerPointCloudError as err:
             # Only the signer's explicit empty result proves the object was
             # unavailable before o:10. Malformed responses are inconclusive.
+            record_point_cloud_stage("signer_reply", {
+                "last_download_step": "signer", **err.safe_diagnostics()["attempt"],
+            })
             return raw_url is None, None
 
         remaining = baseline_deadline - time.monotonic()
         if remaining <= 0:
             return False, None
         try:
+            record_point_cloud_stage("baseline_download")
             _, _, identity = _download_point_cloud_content_with_identity(
                 url,
                 timeout=min(
@@ -1789,9 +1826,12 @@ class _DreameLawnMowerClientMapsMixin(
                 ),
                 max_bytes=max_bytes,
             )
-        except DreameLawnMowerPointCloudError:
+        except DreameLawnMowerPointCloudError as err:
             # Transport, size, and content failures do not prove that a
             # signable baseline object was absent.
+            record_point_cloud_stage("download_result", {
+                "last_download_step": "download", **err.safe_diagnostics()["attempt"],
+            })
             return False, None
         return True, identity
 
@@ -1810,6 +1850,9 @@ class _DreameLawnMowerClientMapsMixin(
         observation.pop("download_http_status", None)
         observation.pop("download_bytes", None)
         observation.pop("signer_shape", None)
+        observation.pop("validation_reason", None)
+        observation.pop("download_reason", None)
+        record_point_cloud_stage("signer", observation)
         try:
             raw_url = self._sync_get_point_cloud_download_url(
                 cloud,
@@ -1825,8 +1868,10 @@ class _DreameLawnMowerClientMapsMixin(
                     "The mower's generated 3D map is not ready to download."
                 ),
                 retry_after_seconds=2,
+                diagnostic_context={"download_reason": "signer_invalid_response"},
             ) from err
         observation["signer_shape"] = value_shape(raw_url)
+        record_point_cloud_stage("signer_reply", observation)
         url = _point_cloud_download_url(raw_url)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -1839,12 +1884,14 @@ class _DreameLawnMowerClientMapsMixin(
                 retry_after_seconds=10,
             )
         observation["last_download_step"] = "download"
+        record_point_cloud_stage("download", observation)
         result = _download_point_cloud_content_with_identity(
             url,
             timeout=min(download_timeout, remaining),
             max_bytes=max_bytes,
         )
         observation["download_bytes"] = len(result[0])
+        record_point_cloud_stage("download_result", observation)
         return result
 
     def _sync_call_point_cloud_action(
@@ -1857,6 +1904,9 @@ class _DreameLawnMowerClientMapsMixin(
         on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
         """Call one point-cloud action within the shared generation deadline."""
+        record_point_cloud_stage(
+            "indexed_read" if require_data else "generation_request",
+        )
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise DreameLawnMowerPointCloudError(
@@ -1877,6 +1927,10 @@ class _DreameLawnMowerClientMapsMixin(
             if on_dispatch is not None:
                 action_options["on_dispatch"] = on_dispatch
             response = self._sync_call_app_action(payload, **action_options)
+            record_point_cloud_stage(
+                "indexed_reply" if require_data else "generation_reply",
+                {"action_reply": action_reply_observation(response)},
+            )
         except DreameLawnMowerCloudAPIError as err:
             raise DreameLawnMowerPointCloudError(
                 f"The Dreame cloud rejected the {operation} request.",

@@ -191,6 +191,8 @@ from .point_cloud import (
     DreameLawnMowerPointCloudError,
 )
 from .point_cloud import parse_pcd_metadata as parse_pcd_metadata
+from .point_cloud_trace import PointCloudTrace as _PointCloudTrace
+from .point_cloud_trace import active_point_cloud_trace as _active_point_cloud_trace
 from .position_tracking import MowerPositionTracker as _MowerPositionTracker
 from .runtime_state import RESUME_MOWING_REQUEST as RESUME_MOWING_REQUEST
 from .runtime_state import (
@@ -1433,6 +1435,9 @@ class DreameLawnMowerClient(
         )
         deadline = time.monotonic() + operation_timeout
         abandoned = _threading.Event()
+        trace = _PointCloudTrace()
+        trace.record("queue")
+        trace_token = _active_point_cloud_trace.set(trace)
         try:
             async with asyncio.timeout(operation_timeout):
                 worker = asyncio.create_task(
@@ -1457,6 +1462,7 @@ class DreameLawnMowerClient(
                 return await asyncio.shield(worker)
         except (TimeoutError, _RequestsTimeout) as err:
             abandoned.set()
+            trace.record("outer_timeout")
             raise DreameLawnMowerPointCloudError(
                 "Point-cloud generation timed out.",
                 code="point_cloud_timeout",
@@ -1467,10 +1473,30 @@ class DreameLawnMowerClient(
                 ),
                 timeout_seconds=timeout,
                 retry_after_seconds=10,
+                diagnostic_context=trace.snapshot(complete=False),
+            ) from err
+        except DreameLawnMowerPointCloudError as err:
+            trace.record("failed", err.diagnostic_context)
+            err.diagnostic_context.update(trace.snapshot(complete=True))
+            raise
+        except Exception as err:
+            # Unknown transport/parser failures still need the observations
+            # preceding them, without publishing a raw exception message.
+            kind = type(err).__name__
+            trace.record("failed", {"exception_kind": kind if kind in {
+                "KeyError", "TypeError", "ValueError", "AttributeError",
+                "RuntimeError", "OSError", "ConnectionError",
+            } else "other"})
+            raise DreameLawnMowerPointCloudError(
+                "The point-cloud operation failed unexpectedly.",
+                code="point_cloud_failed", stage="generation",
+                diagnostic_context=trace.snapshot(complete=True),
             ) from err
         except asyncio.CancelledError:
             abandoned.set()
             raise
+        finally:
+            _active_point_cloud_trace.reset(trace_token)
 
     def _sync_download_app_map_point_cloud_singleflight(
         self,

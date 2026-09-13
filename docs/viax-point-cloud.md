@@ -51,6 +51,24 @@ failure and standalone probe expose the same sanitized evidence as the mower
 diagnostics. No additional polling, generation commands, accepted extensions,
 or model-specific freshness exceptions are introduced by this diagnostic change.
 
+Each failed attempt has an `attempt_id` and a timed `timeline` containing the
+first eight and latest 24 observations. `first_failure` preserves the first
+classified download or validation failure even if it falls outside that window;
+`trace_dropped_events` makes omitted observations explicit. `worker_finished`
+is false when the caller's deadline expires before the worker returns. The report
+then retains evidence gathered up to that deadline, not any later worker result.
+
+Validation failures identify the rejected rule, such as unsupported PCD encoding,
+inconsistent payload length, or non-finite coordinates. Unfamiliar JSON values
+expose only recognized member names and coarse types, plus a count of unknown
+members. Object names, URLs, coordinates, arbitrary keys, and exception messages
+are excluded. Very large JSON structures are marked as truncated.
+
+These diagnostics distinguish known failure paths; they cannot guarantee that an
+arbitrary new firmware schema can be implemented without a further targeted
+capture. An unknown shape is evidence of an unrecognized response, not proof of
+missing mower capability or permission to accept unvalidated map data.
+
 Existing `.pcd`/`.bin` validation, requested-map checks, byte limits, deadlines,
 and stored-map rules remain in force. Existing VIAX fixed-object handling is
 retained for compatibility; the supplied reports do not validate that hypothesis
