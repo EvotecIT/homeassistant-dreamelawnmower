@@ -89,6 +89,7 @@ from .point_cloud import (
 from .point_cloud_diagnostics import (
     action_reply_observation,
     indexed_object_observation,
+    indexed_poll_result,
     property_value_observation,
     value_shape,
 )
@@ -920,7 +921,9 @@ class _DreameLawnMowerClientMapsMixin(
                     raise
                 baseline_result = None
             else:
-                baseline_known = True
+                baseline_known = indexed_poll_result(
+                    indexed_object_observation(baseline_result, map_index),
+                ) == "observed"
             attempt_diagnostics["baseline_indexed"] = indexed_object_observation(
                 baseline_result, map_index,
             )
@@ -1058,6 +1061,12 @@ class _DreameLawnMowerClientMapsMixin(
         saw_unusable_point_cloud = False
         saw_stale_point_cloud = False
         saw_unverified_fixed_object = False
+        # Pre-generation baselines do not prove that post-dispatch reads work.
+        # Track the latest result per required route: a later successful read
+        # can recover a transient failure, but an old empty read cannot mask it.
+        attempt_diagnostics["announcement_poll_result"] = "not_attempted"
+        attempt_diagnostics["indexed_poll_result"] = "not_attempted"
+        indexed_verification_required = False
         rejected_object_names: set[str] = set()
         object_download_attempts: dict[str, int] = {}
         announcement_download_attempts: dict[tuple[str, int], int] = {}
@@ -1131,6 +1140,15 @@ class _DreameLawnMowerClientMapsMixin(
                 observed_announcement_capability = announcement_capability
             if announcement_polled:
                 attempt_diagnostics["latest_announcement"] = latest_announcement
+                attempt_diagnostics["announcement_poll_result"] = (
+                    "observed"
+                    if observed_announcement_capability is True and (
+                        latest_announcement.get("status") in {"fresh", "stale"}
+                        or latest_announcement.get("value_shape") in {
+                            "null", "empty_string",
+                        }
+                    ) else "inconclusive"
+                )
                 if observed_announcement_capability is not None:
                     attempt_diagnostics["announcement_capability"] = (
                         "available"
@@ -1166,6 +1184,7 @@ class _DreameLawnMowerClientMapsMixin(
                     and acknowledged_fixed_object_model
                 )
             )
+            indexed_verification_required = needs_indexed_verification
             if needs_indexed_verification and (
                 indexed_announcement_name is None
                 and time.monotonic() >= stable_announcement_verification_after
@@ -1194,6 +1213,11 @@ class _DreameLawnMowerClientMapsMixin(
                     )
                 attempt_diagnostics["latest_indexed"] = indexed_object_observation(
                     indexed_result, map_index,
+                )
+                attempt_diagnostics["indexed_poll_result"] = (
+                    indexed_poll_result(attempt_diagnostics["latest_indexed"])
+                    if indexed_verification_error is None
+                    else "inconclusive"
                 )
                 observed_indexed_name = _point_cloud_object_name(
                     indexed_result,
@@ -1290,6 +1314,12 @@ class _DreameLawnMowerClientMapsMixin(
                             )
                         )
                         if not stable_refresh_proven:
+                            if not stable_announcement_baseline_known:
+                                raise DreameLawnMowerPointCloudError(
+                                    "The stable point-cloud baseline could not "
+                                    "be read before generation.",
+                                    code="point_cloud_download_invalid",
+                                )
                             saw_stale_point_cloud = True
                             raise DreameLawnMowerPointCloudError(
                                 "The stable point-cloud object has not changed "
@@ -1365,6 +1395,7 @@ class _DreameLawnMowerClientMapsMixin(
             except DreameLawnMowerPointCloudError as err:
                 attempt_diagnostics.update(err.safe_diagnostics()["attempt"])
                 err.diagnostic_context.update(attempt_diagnostics)
+                attempt_diagnostics["indexed_poll_result"] = "inconclusive"
                 if err.code in {
                     "point_cloud_timeout",
                     "point_cloud_mower_request_failed",
@@ -1381,6 +1412,16 @@ class _DreameLawnMowerClientMapsMixin(
             attempt_diagnostics["latest_indexed"] = indexed_object_observation(
                 object_result, map_index,
             )
+            attempt_diagnostics["indexed_poll_result"] = (
+                indexed_poll_result(attempt_diagnostics["latest_indexed"])
+            )
+            if attempt_diagnostics["indexed_poll_result"] != "observed":
+                # An unfamiliar slot is not a clear or a usable baseline.
+                # Preserve freshness state until the mower supplies one.
+                remaining = deadline - time.monotonic()
+                if remaining > 0:
+                    time.sleep(min(poll_interval, remaining))
+                continue
             if not baseline_known:
                 # A bounded preflight timeout is not proof that the prior OBJ
                 # state was empty. Establish the missing baseline from the
@@ -1539,6 +1580,30 @@ class _DreameLawnMowerClientMapsMixin(
                 diagnostic_context=attempt_diagnostics,
             )
 
+        if (
+            use_announcement_path
+            and attempt_diagnostics["announcement_poll_result"] != "observed"
+            or (not use_announcement_path or indexed_verification_required)
+            and attempt_diagnostics["indexed_poll_result"] != "observed"
+        ):
+            raise DreameLawnMowerPointCloudError(
+                "Point-cloud discovery ended without a conclusive final read.",
+                code="point_cloud_timeout",
+                stage="generation",
+                public_message=(
+                    "Home Assistant could not confirm whether the mower published "
+                    f"a fresh 3D map within {timeout:g} seconds."
+                ),
+                timeout_seconds=timeout,
+                retry_after_seconds=10,
+                diagnostic_reason="polling_inconclusive",
+                discovery_route=(
+                    "announcement_property" if use_announcement_path else "legacy_obj"
+                ),
+                generation_acknowledged=generation_acknowledged,
+                diagnostic_context=attempt_diagnostics,
+            )
+
         if saw_stale_point_cloud:
             raise DreameLawnMowerPointCloudError(
                 "The mower's fixed point-cloud object did not refresh before "
@@ -1552,6 +1617,7 @@ class _DreameLawnMowerClientMapsMixin(
                 timeout_seconds=timeout,
                 retry_after_seconds=10,
                 diagnostic_reason="unchanged_object",
+                retryable=False,
                 discovery_route=(
                     "announcement_property" if use_announcement_path else "legacy_obj"
                 ),
@@ -1569,6 +1635,7 @@ class _DreameLawnMowerClientMapsMixin(
             timeout_seconds=timeout,
             retry_after_seconds=10,
             diagnostic_reason="object_not_observed",
+            retryable=False,
             discovery_route=(
                 "announcement_property" if use_announcement_path else "legacy_obj"
             ),

@@ -9,6 +9,7 @@ from typing import Any, Final
 from .models import snapshot_advertises_video
 
 FEATURE_LIVE_VIDEO: Final = "live_video"
+FEATURE_POINT_CLOUD: Final = "point_cloud"
 
 CAPABILITY_SUPPORTED: Final = "supported"
 CAPABILITY_UNSUPPORTED: Final = "unsupported"
@@ -27,6 +28,8 @@ MODEL_FEATURE_CAPABILITIES: Final[dict[str, dict[str, str]]] = {
     },
     "dreame.mower.g2408": {
         FEATURE_LIVE_VIDEO: CAPABILITY_SUPPORTED,
+        # Validated PCD export on A2; LiDAR or 2D mapping alone is not proof.
+        FEATURE_POINT_CLOUD: CAPABILITY_SUPPORTED,
     },
     "dreame.mower.q2501a": {
         FEATURE_LIVE_VIDEO: CAPABILITY_SUPPORTED,
@@ -67,7 +70,9 @@ def _descriptor_model(snapshot: Any, descriptor: Any | None) -> str | None:
     return None
 
 
-def _snapshot_advertises_feature(snapshot: Any, feature: str) -> bool:
+def snapshot_advertises_feature(snapshot: Any, feature: str) -> bool:
+    """Identify explicit advertised evidence independently of model overrides."""
+    feature = _normalized_feature(feature)
     if snapshot is None:
         return False
     if feature == FEATURE_LIVE_VIDEO and snapshot_advertises_video(snapshot):
@@ -109,7 +114,7 @@ def resolve_feature_capability(
             CAPABILITY_SOURCE_MODEL,
         )
 
-    if advertised or _snapshot_advertises_feature(snapshot, normalized_feature):
+    if advertised or snapshot_advertises_feature(snapshot, normalized_feature):
         return DreameLawnMowerFeatureCapability(
             CAPABILITY_SUPPORTED,
             CAPABILITY_SOURCE_ADVERTISED,
@@ -125,7 +130,7 @@ def resolved_feature_capabilities(
     snapshot: Any,
     *,
     descriptor: Any = None,
-    features: tuple[str, ...] = (FEATURE_LIVE_VIDEO,),
+    features: tuple[str, ...] = (FEATURE_LIVE_VIDEO, FEATURE_POINT_CLOUD),
     observed: Collection[str] = (),
     advertised: Collection[str] = (),
 ) -> dict[str, dict[str, str]]:

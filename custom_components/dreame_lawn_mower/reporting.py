@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
 from .debug import sanitize_debug_data, sanitize_diagnostic_text
+from .feature_capabilities import coordinator_feature_capabilities
 from .manual_control import maintenance_point_movement_block_reason
 
 _SYSTEM_INFO_KEYS = (
@@ -91,6 +92,7 @@ def build_coordinator_diagnostics(coordinator: object) -> dict[str, Any]:
             }
     return {
         "last_update_success": getattr(coordinator, "last_update_success", None),
+        "feature_capabilities": coordinator_feature_capabilities(coordinator),
         "last_exception_type": (
             type(last_exception).__name__ if last_exception is not None else None
         ),

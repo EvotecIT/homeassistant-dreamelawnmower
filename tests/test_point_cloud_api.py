@@ -114,6 +114,10 @@ def test_point_cloud_api_caches_recent_downloads() -> None:
         "point_count": 1,
         "total_bytes": 112,
         "data_encoding": "binary",
+        "feature_capabilities": {
+            "live_video": {"state": "unknown", "source": "unknown"},
+            "point_cloud": {"state": "unknown", "source": "unknown"},
+        },
     }
 
 

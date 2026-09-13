@@ -126,6 +126,10 @@ def test_coordinator_diagnostics_sanitize_last_failure() -> None:
         "work_log_totals": None,
         "video_runtime": None,
         "last_maintenance_point_probe": None,
+        "feature_capabilities": {
+            "live_video": {"state": "unknown", "source": "unknown"},
+            "point_cloud": {"state": "unknown", "source": "unknown"},
+        },
     }
 
 

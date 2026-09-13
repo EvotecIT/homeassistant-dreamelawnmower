@@ -23,6 +23,8 @@ from .dreame_lawn_mower_client import (
     DreameLawnMowerPointCloudDownload,
     DreameLawnMowerPointCloudError,
 )
+from .dreame_lawn_mower_client.feature_capabilities import FEATURE_POINT_CLOUD
+from .feature_capabilities import coordinator_feature_capabilities
 from .performance import format_performance_sample
 
 if TYPE_CHECKING:
@@ -434,12 +436,18 @@ class DreameLawnMowerPointCloudAPI:
         sample: Any,
     ) -> None:
         """Keep coordinate-free evidence that 3D generation recovered."""
+        record_observed = getattr(
+            coordinator, "record_feature_capability_observed", None
+        )
+        if callable(record_observed):
+            record_observed(FEATURE_POINT_CLOUD)
         context: dict[str, Any] = {
             "map_index": download.map_index,
             "source": download.source,
             "point_count": download.metadata.points,
             "total_bytes": download.metadata.total_bytes,
             "data_encoding": download.metadata.data_encoding,
+            "feature_capabilities": coordinator_feature_capabilities(coordinator),
         }
         if sample is not None:
             context["duration_ms"] = round(sample.total_seconds * 1000, 1)
@@ -498,6 +506,7 @@ class DreameLawnMowerPointCloudAPI:
             "map_index": map_index,
             "allow_stored": allow_stored,
             "allow_unscoped_stored": allow_unscoped_stored,
+            "feature_capabilities": coordinator_feature_capabilities(coordinator),
         }
         context.update(error.safe_diagnostics())
         exception_type = None

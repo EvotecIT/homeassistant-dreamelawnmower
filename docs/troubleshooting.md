@@ -49,8 +49,14 @@ maintenance, and preference metadata that continues in the background after
 the mower entity can load. The per-phase timings show which vendor endpoint is
 slow without requiring broad protocol debug logging.
 
-For a 3D map report, retry once and download diagnostics before restarting Home
-Assistant. Include the visible `point_cloud_*` reference from the card. The
+For a 3D map report, first check whether the official app offers an actual 3D
+view for the same mower. A 2D map or LiDAR does not confirm point-cloud export.
+After a failed attempt, download diagnostics before restarting Home Assistant;
+do not repeatedly request generation when no export has been demonstrated.
+The mower and map camera expose `feature_capabilities.point_cloud`, including
+whether support comes from model facts, explicit metadata, or a validated
+download. Missing evidence remains `unknown`; a failed request is not proof of
+`unsupported`. Include the visible `point_cloud_*` reference from the card. The
 matching recent event shows whether a later request completed or the mower
 failed to publish a fresh object, the object could not be downloaded and
 validated, another generation was already running, or the integration reloaded

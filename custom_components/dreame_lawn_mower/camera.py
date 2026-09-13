@@ -52,6 +52,7 @@ from .dreame_lawn_mower_client.map_visuals import (
     map_render_style,
 )
 from .dreame_lawn_mower_client.models import DreameLawnMowerMapView
+from .feature_capabilities import coordinator_feature_capabilities
 from .ha_tasks import create_background_task
 from .image import (
     app_maps_contact_sheet_jpeg,
@@ -251,6 +252,10 @@ class DreameLawnMowerMapCamera(
             self.coordinator.app_maps,
             self.coordinator.batch_device_data,
             selected_map_index=self.coordinator.selected_map_index,
+        )
+        # A request route is not proof that this mower exports point clouds.
+        attributes["feature_capabilities"] = coordinator_feature_capabilities(
+            self.coordinator
         )
         attributes["restart_preview"] = self._preview_saved_at is not None
         if self._supports_mowing_scene:
