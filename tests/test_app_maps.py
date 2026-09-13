@@ -811,7 +811,11 @@ def test_app_map_object_state_omits_names_and_redacts_action_logs() -> None:
     assert objects == {
         "source": "app_action_obj_3dmap",
         "object_count": 1,
-        "objects": [{"extension": "pcd", "url_present": False}],
+        "named_object_count": 1,
+        "objects": [{
+            "extension": "pcd", "url_present": False, "url_checked": False,
+            "name_present": True, "name_shape": "nonempty_string",
+        }],
         "urls_included": False,
     }
 
@@ -879,6 +883,9 @@ def test_map_view_falls_back_to_rendered_app_map() -> None:
             {
                 "extension": "bin",
                 "url_present": False,
+                "url_checked": False,
+                "name_present": True,
+                "name_shape": "nonempty_string",
             }
         ],
         "maps": [

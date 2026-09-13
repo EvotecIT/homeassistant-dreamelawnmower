@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Any, Literal
 
+from .point_cloud_diagnostics import safe_failure_diagnostics
+
 DEFAULT_POINT_CLOUD_MAX_BYTES = 32 * 1024 * 1024
 DEFAULT_POINT_CLOUD_MAX_POINTS = 2_000_000
 MAX_POINT_CLOUD_HEADER_BYTES = 64 * 1024
@@ -53,6 +55,10 @@ class DreameLawnMowerPointCloudError(ValueError):
         self.discovery_route = discovery_route
         self.generation_acknowledged = generation_acknowledged
         self.diagnostic_context = dict(diagnostic_context or {})
+
+    def safe_diagnostics(self) -> dict[str, Any]:
+        """Return bounded attempt evidence safe to share without cloud secrets."""
+        return safe_failure_diagnostics(self)
 
 
 @dataclass(frozen=True, slots=True)

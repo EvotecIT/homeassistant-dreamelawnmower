@@ -86,6 +86,11 @@ from .point_cloud import (
     DreameLawnMowerPointCloudError,
     parse_pcd_metadata,
 )
+from .point_cloud_diagnostics import (
+    action_reply_observation,
+    indexed_object_observation,
+    value_shape,
+)
 from .vector_map import (
     filter_runtime_track_segments,
     parse_batch_vector_map,
@@ -637,10 +642,16 @@ class _DreameLawnMowerClientMapsMixin(
             item: dict[str, Any] = {
                 "extension": _app_object_extension(name),
                 "url_present": False,
+                "name_shape": value_shape(raw_name),
+                "name_present": isinstance(raw_name, str) and bool(raw_name.strip()),
+                "url_checked": False,
             }
             if include_urls:
                 item["name"] = name
                 try:
+                    item["url_checked"] = (
+                        cloud is not None and hasattr(cloud, "get_interim_file_url")
+                    )
                     url = (
                         cloud.get_interim_file_url(name)
                         if cloud is not None and hasattr(cloud, "get_interim_file_url")
@@ -655,6 +666,7 @@ class _DreameLawnMowerClientMapsMixin(
         result = {
             "source": "app_action_obj_3dmap",
             "object_count": len(objects),
+            "named_object_count": sum(item["name_present"] for item in objects),
             "objects": objects,
             "urls_included": bool(include_urls),
         }
@@ -742,6 +754,9 @@ class _DreameLawnMowerClientMapsMixin(
                 ),
             )
 
+        stored_attempt: dict[str, Any] = {
+            "download_attempts": 0, "last_download_step": "not_attempted",
+        }
         with self._app_map_object_cache_lock:
             cached_names = (
                 self._latest_app_map_object_names
@@ -759,6 +774,7 @@ class _DreameLawnMowerClientMapsMixin(
                 deadline=deadline,
                 download_timeout=download_timeout,
                 max_bytes=max_bytes,
+                observation=stored_attempt,
             )
             if stored is not None:
                 return stored
@@ -772,6 +788,7 @@ class _DreameLawnMowerClientMapsMixin(
             ),
             remaining,
         )
+        initial_announcement: dict[str, Any] = {}
         announcement_capability, stored_name, announcement_baseline = (
             self._sync_get_announced_point_cloud_object(
                 cloud,
@@ -781,6 +798,7 @@ class _DreameLawnMowerClientMapsMixin(
                     remaining - initial_probe_budget,
                 ),
                 deadline=deadline,
+                observation=initial_announcement,
             )
         )
         use_announcement_path = announcement_capability is True
@@ -793,6 +811,11 @@ class _DreameLawnMowerClientMapsMixin(
             else "inconclusive"
         )
         attempt_diagnostics: dict[str, Any] = {
+            "map_index": map_index,
+            "initial_announcement": initial_announcement,
+            "stored_attempt": stored_attempt,
+            "generation_result": "not_attempted",
+            "last_download_step": "not_attempted",
             "announcement_capability_initial": initial_announcement_capability,
             "announcement_capability": initial_announcement_capability,
             "announcement_baseline": (
@@ -821,6 +844,7 @@ class _DreameLawnMowerClientMapsMixin(
                 deadline=deadline,
                 download_timeout=download_timeout,
                 max_bytes=max_bytes,
+                observation=stored_attempt,
             )
             if stored is not None:
                 return stored
@@ -841,8 +865,12 @@ class _DreameLawnMowerClientMapsMixin(
                     deadline=legacy_deadline,
                     require_data=True,
                 )
-            except DreameLawnMowerPointCloudError:
+            except DreameLawnMowerPointCloudError as err:
+                attempt_diagnostics.update(err.safe_diagnostics()["attempt"])
                 legacy_result = None
+            attempt_diagnostics["baseline_indexed"] = indexed_object_observation(
+                legacy_result, map_index,
+            )
             legacy_name = _point_cloud_object_name(
                 legacy_result,
                 map_index,
@@ -855,6 +883,7 @@ class _DreameLawnMowerClientMapsMixin(
                     deadline=deadline,
                     download_timeout=download_timeout,
                     max_bytes=max_bytes,
+                    observation=stored_attempt,
                 )
                 if stored is not None:
                     return stored
@@ -878,6 +907,7 @@ class _DreameLawnMowerClientMapsMixin(
                     require_data=True,
                 )
             except DreameLawnMowerPointCloudError as err:
+                attempt_diagnostics.update(err.safe_diagnostics()["attempt"])
                 if err.code not in {
                     "point_cloud_timeout",
                     "point_cloud_mower_request_failed",
@@ -886,6 +916,9 @@ class _DreameLawnMowerClientMapsMixin(
                 baseline_result = None
             else:
                 baseline_known = True
+            attempt_diagnostics["baseline_indexed"] = indexed_object_observation(
+                baseline_result, map_index,
+            )
             baseline_name = _point_cloud_object_name(
                 baseline_result,
                 map_index,
@@ -902,6 +935,7 @@ class _DreameLawnMowerClientMapsMixin(
                     deadline=deadline,
                     download_timeout=download_timeout,
                     max_bytes=max_bytes,
+                    observation=stored_attempt,
                 )
                 if stored is not None:
                     return stored
@@ -946,6 +980,16 @@ class _DreameLawnMowerClientMapsMixin(
         # requests. Give o:10 the complete advertised generation window after
         # those bounded reads finish.
         deadline = min(request_deadline, time.monotonic() + timeout)
+        attempt_diagnostics["fixed_baseline"] = (
+            "not_attempted" if not fixed_object_baseline else
+            "inconclusive" if not fixed_baseline_known else
+            "absent" if baseline_identity is None else "present"
+        )
+        attempt_diagnostics["stable_baseline"] = (
+            "not_attempted" if announcement_baseline is None else
+            "inconclusive" if not stable_announcement_baseline_known else
+            "absent" if stable_announcement_baseline_identity is None else "present"
+        )
 
         generation_requested_at_ms: int | None = None
 
@@ -964,7 +1008,11 @@ class _DreameLawnMowerClientMapsMixin(
                 on_dispatch=mark_generation_dispatched,
             )
             generation_acknowledged = True
+            attempt_diagnostics["generation_result"] = "accepted"
         except DreameLawnMowerPointCloudError as err:
+            attempt_diagnostics["generation_result"] = f"error:{err.code}"
+            attempt_diagnostics.update(err.safe_diagnostics()["attempt"])
+            err.diagnostic_context.update(attempt_diagnostics)
             if generation_requested_at_ms is None or err.code not in {
                 "point_cloud_timeout",
                 "point_cloud_mower_request_failed",
@@ -1012,6 +1060,7 @@ class _DreameLawnMowerClientMapsMixin(
         stable_announcement_verification_attempts = 0
         stable_announcement_verification_after = 0.0
         while time.monotonic() < deadline:
+            latest_announcement: dict[str, Any] = {}
             announced_name = None
             announced_identity = None
             announcement_polled = False
@@ -1028,6 +1077,7 @@ class _DreameLawnMowerClientMapsMixin(
                         baseline=announcement_baseline,
                         require_post_request=announcement_baseline is None,
                         deadline=deadline,
+                        observation=latest_announcement,
                     )
                 )
                 announcement_polled = True
@@ -1055,6 +1105,7 @@ class _DreameLawnMowerClientMapsMixin(
                         remaining - reprobe_budget,
                     ),
                     deadline=deadline,
+                    observation=latest_announcement,
                 )
                 announcement_polled = True
                 announcement_reprobe_attempts += 1
@@ -1072,6 +1123,7 @@ class _DreameLawnMowerClientMapsMixin(
                     announcement_probe_pending = False
                 observed_announcement_capability = announcement_capability
             if announcement_polled:
+                attempt_diagnostics["latest_announcement"] = latest_announcement
                 if observed_announcement_capability is not None:
                     attempt_diagnostics["announcement_capability"] = (
                         "available"
@@ -1127,14 +1179,27 @@ class _DreameLawnMowerClientMapsMixin(
                         require_data=True,
                     )
                 except DreameLawnMowerPointCloudError as err:
+                    attempt_diagnostics.update(err.safe_diagnostics()["attempt"])
                     indexed_result = None
                     indexed_verification_error = err.code
                     attempt_diagnostics["indexed_verification_result"] = (
                         f"error:{err.code}"
                     )
+                attempt_diagnostics["latest_indexed"] = indexed_object_observation(
+                    indexed_result, map_index,
+                )
                 observed_indexed_name = _point_cloud_object_name(
                     indexed_result,
                     map_index,
+                )
+                observed_extension = (
+                    _app_object_extension(observed_indexed_name)
+                    if observed_indexed_name is not None else None
+                )
+                attempt_diagnostics["latest_indexed"]["object_extension"] = (
+                    "missing" if observed_extension is None else
+                    observed_extension.casefold() if observed_extension.casefold()
+                    in accepted_extensions else "unsupported"
                 )
                 stable_announcement_verification_attempts += 1
                 attempt_diagnostics["indexed_verification_attempts"] = (
@@ -1201,6 +1266,7 @@ class _DreameLawnMowerClientMapsMixin(
                             deadline=deadline,
                             download_timeout=download_timeout,
                             max_bytes=max_bytes,
+                            observation=attempt_diagnostics,
                         )
                     )
                     if stable_announced_name is not None:
@@ -1223,12 +1289,15 @@ class _DreameLawnMowerClientMapsMixin(
                                 "since the generation request.",
                                 code="point_cloud_not_published",
                             )
+                    attempt_diagnostics["last_download_step"] = "validation"
                     metadata = parse_pcd_metadata(
                         content,
                         max_bytes=max_bytes,
                         deadline=deadline,
                     )
                 except (DeviceException, DreameLawnMowerPointCloudError) as err:
+                    if isinstance(err, DreameLawnMowerPointCloudError):
+                        attempt_diagnostics.update(err.safe_diagnostics()["attempt"])
                     attempt_diagnostics["last_download_result"] = (
                         f"error:{err.code}"
                         if isinstance(err, DreameLawnMowerPointCloudError)
@@ -1287,6 +1356,8 @@ class _DreameLawnMowerClientMapsMixin(
                     require_data=True,
                 )
             except DreameLawnMowerPointCloudError as err:
+                attempt_diagnostics.update(err.safe_diagnostics()["attempt"])
+                err.diagnostic_context.update(attempt_diagnostics)
                 if err.code in {
                     "point_cloud_timeout",
                     "point_cloud_mower_request_failed",
@@ -1299,6 +1370,9 @@ class _DreameLawnMowerClientMapsMixin(
             object_name = _point_cloud_object_name(
                 object_result,
                 map_index,
+            )
+            attempt_diagnostics["latest_indexed"] = indexed_object_observation(
+                object_result, map_index,
             )
             if not baseline_known:
                 # A bounded preflight timeout is not proof that the prior OBJ
@@ -1315,6 +1389,11 @@ class _DreameLawnMowerClientMapsMixin(
                 observed_clear = True
             object_extension = (
                 _app_object_extension(object_name) if object_name is not None else None
+            )
+            attempt_diagnostics["latest_indexed"]["object_extension"] = (
+                "missing" if object_extension is None else
+                object_extension.casefold() if object_extension.casefold()
+                in accepted_extensions else "unsupported"
             )
             fixed_object = (
                 object_name is not None
@@ -1350,9 +1429,12 @@ class _DreameLawnMowerClientMapsMixin(
                             deadline=deadline,
                             download_timeout=download_timeout,
                             max_bytes=max_bytes,
+                            observation=attempt_diagnostics,
                         )
                     )
                 except (DeviceException, DreameLawnMowerPointCloudError) as err:
+                    if isinstance(err, DreameLawnMowerPointCloudError):
+                        attempt_diagnostics.update(err.safe_diagnostics()["attempt"])
                     attempt_diagnostics["last_download_result"] = (
                         f"error:{err.code}"
                         if isinstance(err, DreameLawnMowerPointCloudError)
@@ -1384,6 +1466,7 @@ class _DreameLawnMowerClientMapsMixin(
                         saw_stale_point_cloud = True
                     else:
                         try:
+                            attempt_diagnostics["last_download_step"] = "validation"
                             metadata = parse_pcd_metadata(
                                 content,
                                 max_bytes=max_bytes,
@@ -1493,8 +1576,10 @@ class _DreameLawnMowerClientMapsMixin(
         deadline: float,
         download_timeout: float,
         max_bytes: int,
+        observation: dict[str, Any] | None = None,
     ) -> DreameLawnMowerPointCloudDownload | None:
         """Return one valid stored PCD from either object-discovery route."""
+        observation = {} if observation is None else observation
         extension = _app_object_extension(object_name)
         if (
             extension is None
@@ -1505,6 +1590,7 @@ class _DreameLawnMowerClientMapsMixin(
             deadline,
             time.monotonic() + _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
         )
+        observation["download_attempts"] = observation.get("download_attempts", 0) + 1
         try:
             content, content_type, _ = self._sync_download_point_cloud_object(
                 cloud,
@@ -1515,14 +1601,23 @@ class _DreameLawnMowerClientMapsMixin(
                     _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
                 ),
                 max_bytes=max_bytes,
+                observation=observation,
             )
+            observation["last_download_step"] = "validation"
             metadata = parse_pcd_metadata(
                 content,
                 max_bytes=max_bytes,
                 deadline=stored_deadline,
             )
-        except (DeviceException, DreameLawnMowerPointCloudError):
+        except (DeviceException, DreameLawnMowerPointCloudError) as err:
+            if isinstance(err, DreameLawnMowerPointCloudError):
+                observation.update(err.safe_diagnostics()["attempt"])
+            observation["last_download_result"] = (
+                f"error:{err.code}" if isinstance(err, DreameLawnMowerPointCloudError)
+                else "error:device"
+            )
             return None
+        observation["last_download_result"] = "validated"
         return DreameLawnMowerPointCloudDownload(
             map_index=map_index,
             content=content,
@@ -1540,18 +1635,22 @@ class _DreameLawnMowerClientMapsMixin(
         require_post_request: bool = False,
         fallback_reserve_seconds: float = 0,
         deadline: float,
+        observation: dict[str, Any] | None = None,
     ) -> tuple[bool | None, str | None, tuple[str, int] | None]:
         """Return capability state and a fresh cloud-property 99.20 object.
 
         A ``None`` capability means the probe was inconclusive, so callers may
         retry it without treating the firmware as unsupported.
         """
+        observation = {} if observation is None else observation
+        observation["status"] = "budget_exhausted"
         remaining = deadline - time.monotonic()
         probe_budget = remaining - max(0.0, fallback_reserve_seconds)
         if probe_budget <= 0:
             return None, None, None
         get_properties = getattr(cloud, "get_properties", None)
         if not callable(get_properties):
+            observation["status"] = "unavailable"
             return False, None, None
         probe_timeout = min(
             probe_budget,
@@ -1569,31 +1668,54 @@ class _DreameLawnMowerClientMapsMixin(
                 deadline=probe_deadline,
             )
         except (DeviceException, RequestsTimeout, json.JSONDecodeError):
+            observation["status"] = "transport_error"
             return None, None, None
         if payload is None:
+            observation["status"] = "no_response"
             return None, None, None
 
-        for entry in self._normalize_cloud_property_entries(payload):
+        entries = self._normalize_cloud_property_entries(payload)
+        observation["property_entry_count"] = min(len(entries), 1_000_000)
+        observation["status"] = "property_missing"
+        for entry in entries:
             if entry.get("key") != _POINT_CLOUD_ANNOUNCEMENT_PROPERTY_KEY:
                 continue
             object_name = entry.get("value")
             updated_at = entry.get("updateDate")
+            observation["value_shape"] = value_shape(object_name)
+            observation["timestamp_shape"] = value_shape(updated_at)
+            observation["status"] = "invalid_value"
             if (
                 not isinstance(object_name, str)
                 or not object_name.strip()
-                or isinstance(updated_at, bool)
-                or not isinstance(updated_at, int | float | str)
+            ):
+                return True, None, None
+            observation["status"] = "invalid_timestamp"
+            if isinstance(updated_at, bool) or not isinstance(
+                updated_at, int | float | str,
             ):
                 return True, None, None
             try:
                 updated_at_ms = int(updated_at)
             except (TypeError, ValueError, OverflowError):
                 return True, None, None
+            observation["timestamp_unit"] = (
+                "milliseconds"
+                if 1_000_000_000_000 <= updated_at_ms < 10_000_000_000_000
+                else "seconds" if 1_000_000_000 <= updated_at_ms < 10_000_000_000
+                else "unknown"
+            )
             extension = _app_object_extension(object_name)
+            observation["object_extension"] = (
+                "missing" if extension is None else extension.casefold()
+                if extension.casefold() in _POINT_CLOUD_OBJECT_EXTENSIONS
+                else "unsupported"
+            )
             if (
                 extension is None
                 or extension.casefold() not in _POINT_CLOUD_OBJECT_EXTENSIONS
             ):
+                observation["status"] = "unsupported_extension"
                 return True, None, None
             normalized_name = object_name.strip()
             observed = (normalized_name, updated_at_ms)
@@ -1614,6 +1736,7 @@ class _DreameLawnMowerClientMapsMixin(
                     )
                 )
             )
+            observation["status"] = "fresh" if fresh else "stale"
             return True, normalized_name if fresh else None, observed
         return False, None, None
 
@@ -1679,7 +1802,13 @@ class _DreameLawnMowerClientMapsMixin(
         deadline: float,
         download_timeout: float,
         max_bytes: int,
+        observation: dict[str, Any] | None = None,
     ) -> tuple[bytes, str, _PointCloudObjectIdentity]:
+        observation = {} if observation is None else observation
+        observation["last_download_step"] = "signer"
+        observation.pop("download_http_status", None)
+        observation.pop("download_bytes", None)
+        observation.pop("signer_shape", None)
         try:
             raw_url = self._sync_get_point_cloud_download_url(
                 cloud,
@@ -1696,6 +1825,7 @@ class _DreameLawnMowerClientMapsMixin(
                 ),
                 retry_after_seconds=2,
             ) from err
+        observation["signer_shape"] = value_shape(raw_url)
         url = _point_cloud_download_url(raw_url)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
@@ -1707,11 +1837,14 @@ class _DreameLawnMowerClientMapsMixin(
                 timeout_seconds=download_timeout,
                 retry_after_seconds=10,
             )
-        return _download_point_cloud_content_with_identity(
+        observation["last_download_step"] = "download"
+        result = _download_point_cloud_content_with_identity(
             url,
             timeout=min(download_timeout, remaining),
             max_bytes=max_bytes,
         )
+        observation["download_bytes"] = len(result[0])
+        return result
 
     def _sync_call_point_cloud_action(
         self,
@@ -1803,6 +1936,7 @@ class _DreameLawnMowerClientMapsMixin(
                     "The mower returned an invalid response for the 3D map request."
                 ),
                 retry_after_seconds=10,
+                diagnostic_context={"action_reply": action_reply_observation(response)},
             ) from err
 
     def _sync_get_point_cloud_download_url(

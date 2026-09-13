@@ -324,7 +324,8 @@ def _download_point_cloud_content_with_identity(
         raise
     except urllib.error.HTTPError as err:
         raise DreameLawnMowerPointCloudError(
-            f"The point-cloud download failed with HTTP status {err.code}."
+            f"The point-cloud download failed with HTTP status {err.code}.",
+            diagnostic_context={"download_http_status": err.code},
         ) from err
     except TimeoutError as err:
         raise DreameLawnMowerPointCloudError(
@@ -682,7 +683,10 @@ def _app_map_objects_view_metadata(value: Any) -> dict[str, Any]:
     entries = [
         {
             key: item.get(key)
-            for key in ("extension", "url_present", "error")
+            for key in (
+                "extension", "url_present", "url_checked",
+                "name_present", "name_shape", "error",
+            )
             if item.get(key) is not None
         }
         for item in objects
@@ -691,6 +695,7 @@ def _app_map_objects_view_metadata(value: Any) -> dict[str, Any]:
     return {
         "objects": entries,
         "object_count": value.get("object_count", len(entries)),
+        "named_object_count": value.get("named_object_count"),
         "error": value.get("error"),
     }
 

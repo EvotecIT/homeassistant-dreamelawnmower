@@ -56,6 +56,43 @@ failed to publish a fresh object, the object could not be downloaded and
 validated, another generation was already running, or the integration reloaded
 during the request.
 
+The failed `point-cloud` request in browser developer tools also contains a
+sanitized `diagnostics` section. Copy its **Response** JSON, not request headers
+or cookies. This uses the same allowlisted attempt evidence as the mower's
+`recent_events[].context.attempt`:
+
+- `initial_announcement` and `latest_announcement` distinguish a missing `99.20`
+  property, empty or structured values, invalid timestamps, unrecognized file
+  extensions, and fresh or stale announcements.
+- `latest_indexed` distinguishes an absent map index, an empty string, `null`,
+  or a nonempty object name. It reports shapes and counts, never object names.
+- `generation_result` records whether the generation command was acknowledged;
+  acknowledgement alone does not prove that an upload completed.
+- `last_download_step` separates URL signing, HTTP download, and PCD validation.
+  When observed, `download_http_status` and `download_bytes` identify an HTTP
+  failure or the size of a downloaded payload without exposing its contents.
+- `stored_attempt` records pre-generation stored-download attempts separately
+  from the generated-object download counters.
+
+These observations reuse the request's existing reads. They do not add polling
+or change download acceptance. A failure before discovery starts may have an
+empty `attempt`; that is missing evidence, not proof of unsupported hardware.
+
+In cached app-map object metadata, `object_count` is the vendor's slot count.
+Use `named_object_count` and per-slot `name_present` to identify nonempty names.
+`url_present: false` with `url_checked: false` means signing was **not checked**,
+not that the cloud refused a URL. A missing extension does not distinguish an
+empty name from an extensionless name in older diagnostics.
+
+For local client debugging, `python examples/point_cloud_probe.py` performs one
+generation request and prints the same safe failure diagnostics with a nonzero
+exit status if it fails. It does not print the private exception text. Download
+Home Assistant diagnostics from **Dreame Lawn Mower**, not HACS: the HACS report
+helps establish installed versions but does not contain the mower attempt.
+
+See the [VIAX 500 investigation](viax-point-cloud.md) for the evidence and
+remaining hardware-validation boundary in card issue #52.
+
 `App Map Count` reports maps the mower has actually created; reserved cloud
 slots with `created: false` are excluded. Raw slot count remains available as
 the mower entity's `app_map_slot_count` diagnostic attribute.

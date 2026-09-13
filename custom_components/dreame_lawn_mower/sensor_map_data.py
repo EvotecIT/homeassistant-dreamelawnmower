@@ -726,7 +726,10 @@ def _app_map_object_summary(value: Any) -> dict[str, Any] | None:
     objects = [
         {
             key: item.get(key)
-            for key in ("extension", "url_present", "error")
+            for key in (
+                "extension", "url_present", "url_checked",
+                "name_present", "name_shape", "error",
+            )
             if item.get(key) is not None
         }
         for item in value.get("objects", [])
@@ -740,6 +743,7 @@ def _app_map_object_summary(value: Any) -> dict[str, Any] | None:
     summary = {
         "source": value.get("source"),
         "object_count": value.get("object_count", len(objects)),
+        "named_object_count": value.get("named_object_count"),
         "urls_included": value.get("urls_included"),
         "extension_counts": extension_counts,
         "objects": objects,
