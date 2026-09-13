@@ -1045,6 +1045,69 @@ def test_download_point_cloud_accepts_indexed_stable_announcement(
     assert result.content == content
 
 
+def test_download_point_cloud_prefers_fresh_announcement_after_stable_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cached indexed fallback must not taint a later fresh announcement."""
+    client = _client()
+    now_ms = int(time.time() * 1000)
+    property_results = iter(
+        [
+            [
+                {
+                    "key": "99.20",
+                    "value": "private/stable-map.bin",
+                    "updateDate": now_ms - 1_000,
+                }
+            ],
+            [
+                {
+                    "key": "99.20",
+                    "value": "private/stable-map.bin",
+                    "updateDate": now_ms - 1_000,
+                }
+            ],
+            [
+                {
+                    "key": "99.20",
+                    "value": "private/fresh-map.bin",
+                    "updateDate": now_ms + 1_000,
+                }
+            ],
+        ]
+    )
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        if payload.get("m") == "a":
+            return {"r": 0}
+        return {"r": 0, "d": {"name": ["private/stable-map.bin"]}}
+
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_properties=lambda key, **options: next(property_results),
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+            if name == "private/fresh-map.bin"
+            else None
+        ),
+    )
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert result.source == "generated"
+    assert result.content == content
+
+
 def test_download_point_cloud_accepts_unchanged_viax_announcement_after_ack(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1097,6 +1160,165 @@ def test_download_point_cloud_accepts_unchanged_viax_announcement_after_ack(
     ]
     assert result.source == "generated"
     assert result.content == content
+
+
+def test_download_point_cloud_uses_indexed_viax_object_without_announcement_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An acknowledged VIAX request may need OBJ when 99.20 has no baseline."""
+    client = _mova_client(
+        model="mova.mower.g2583",
+        display_model="VIAX 500",
+    )
+    calls: list[dict[str, Any]] = []
+    property_calls = 0
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        calls.append(payload)
+        if payload.get("m") == "a":
+            kwargs["on_dispatch"]()
+            return {"r": 0}
+        return {"r": 0, "d": {"name": ["private/indexed-map.bin"]}}
+
+    def get_properties(key: str, **options: Any) -> list[dict[str, Any]]:
+        nonlocal property_calls
+        property_calls += 1
+        if property_calls == 1:
+            return [{"key": key, "value": "", "updateDate": 1}]
+        return [
+            {
+                "key": key,
+                "value": "private/announcement-map.bin",
+                "updateDate": 1,
+            }
+        ]
+
+    content = _binary_pcd((1.0, 2.0, 3.0, 0x123456))
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_properties=get_properties,
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+            if name == "private/indexed-map.bin"
+            else None
+        ),
+    )
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        lambda request, *, timeout, deadline: _FakeResponse(
+            content,
+            request.full_url,
+        ),
+    )
+
+    result = client._sync_download_app_map_point_cloud(0, 5, 0.1, 10, 1024)
+
+    assert calls == [
+        {"m": "a", "p": 0, "o": 10, "d": {"idx": 0}},
+        {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
+    ]
+    assert result.source == "generated"
+    assert result.content == content
+
+
+def test_download_point_cloud_reports_privacy_safe_attempt_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _mova_client(
+        model="mova.mower.g2583",
+        display_model="VIAX 500",
+    )
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        if payload.get("m") == "a":
+            kwargs["on_dispatch"]()
+            return {"r": 0}
+        return {"r": 0, "d": {"name": []}}
+
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {"key": key, "value": "", "updateDate": 1}
+        ],
+        get_interim_file_url=lambda name, **options: None,
+    )
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+
+    with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+        client._sync_download_app_map_point_cloud(0, 0.02, 0.001, 10, 1024)
+
+    trace = captured.value.diagnostic_context
+    assert trace["announcement_capability_initial"] == "available"
+    assert trace["announcement_capability"] == "available"
+    assert trace["announcement_baseline"] == "not_observed"
+    assert trace["announcement_polls"] > 0
+    assert trace["announcement_empty_observations"] > 0
+    assert trace["announcement_unavailable_observations"] == 0
+    assert trace["indexed_verification_attempts"] > 0
+    assert trace["indexed_verification_result"] == "object_not_observed"
+    assert trace["download_attempts"] == 0
+    assert trace["last_download_result"] == "not_attempted"
+    assert "private" not in repr(trace)
+
+
+def test_download_point_cloud_reports_settled_announcement_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    property_results = iter([None, []])
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        if payload.get("m") == "a":
+            return {"r": 0}
+        return {"r": 0, "d": {"name": ["private/stale-map.pcd"]}}
+
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_properties=lambda key, **options: next(property_results),
+        get_interim_file_url=lambda name, **options: None,
+    )
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+
+    with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+        client._sync_download_app_map_point_cloud(0, 0.02, 0.001, 10, 1024)
+
+    trace = captured.value.diagnostic_context
+    assert trace["announcement_capability_initial"] == "inconclusive"
+    assert trace["announcement_capability"] == "unavailable"
+    assert trace["announcement_polls"] == 1
+    assert trace["announcement_unavailable_observations"] == 1
+    assert trace["announcement_inconclusive_observations"] == 0
+
+
+def test_download_point_cloud_rejects_missing_announcement_for_unknown_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _mova_client(model="mova.mower.unknown")
+    calls: list[dict[str, Any]] = []
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        calls.append(payload)
+        if payload.get("m") == "a":
+            kwargs["on_dispatch"]()
+            return {"r": 0}
+        return {"r": 0, "d": {"name": ["private/indexed-map.bin"]}}
+
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_properties=lambda key, **options: [
+            {"key": key, "value": "", "updateDate": 1}
+        ],
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+
+    with pytest.raises(DreameLawnMowerPointCloudError):
+        client._sync_download_app_map_point_cloud(0, 0.02, 0.001, 10, 1024)
+
+    assert calls == [{"m": "a", "p": 0, "o": 10, "d": {"idx": 0}}]
 
 
 def test_download_point_cloud_rejects_unchanged_viax_announcement_without_ack(
@@ -2113,6 +2335,59 @@ def test_download_point_cloud_bounds_invalid_announced_object_downloads(
 
     assert captured.value.code == "point_cloud_download_invalid"
     assert download_count == 2
+
+
+def test_download_point_cloud_reports_legacy_download_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    download_count = 0
+    baseline_read = False
+
+    def call_app_action(payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        nonlocal baseline_read
+        if payload.get("m") == "a":
+            return {"r": 0}
+        name = (
+            "private/previous-map.pcd"
+            if not baseline_read
+            else "private/generated-map.pcd"
+        )
+        baseline_read = True
+        return {"r": 0, "d": {"name": [name]}}
+
+    def open_response(
+        request: Any,
+        *,
+        timeout: float,
+        deadline: float,
+    ) -> _FakeResponse:
+        nonlocal download_count
+        download_count += 1
+        return _FakeResponse(b"not a pcd", request.full_url)
+
+    client._sync_call_app_action = call_app_action
+    client._sync_get_cloud_protocol = lambda **kwargs: SimpleNamespace(
+        get_properties=lambda key, **options: [],
+        get_interim_file_url=lambda name, **options: (
+            "https://downloads.example.invalid/object"
+        ),
+    )
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(
+        _internal_client_module,
+        "_open_point_cloud_response",
+        open_response,
+    )
+
+    with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+        client._sync_download_app_map_point_cloud(0, 0.02, 0.001, 10, 1024)
+
+    trace = captured.value.diagnostic_context
+    assert captured.value.code == "point_cloud_download_invalid"
+    assert trace["announcement_capability_initial"] == "unavailable"
+    assert trace["download_attempts"] == 1
+    assert trace["last_download_result"] == "error:point_cloud_failed"
 
 
 def test_download_point_cloud_waits_for_changed_mova_fixed_object_after_lost_reply(

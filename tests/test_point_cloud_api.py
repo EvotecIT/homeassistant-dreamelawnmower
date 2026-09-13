@@ -748,6 +748,13 @@ def test_point_cloud_api_throttles_retryable_failures_until_retry_after(
             public_message="The mower did not finish the 3D map request in time.",
             timeout_seconds=45,
             retry_after_seconds=10,
+            diagnostic_reason="object_not_observed",
+            discovery_route="announcement_property",
+            generation_acknowledged=True,
+            diagnostic_context={
+                "indexed_verification_attempts": 2,
+                "indexed_verification_result": "object_not_observed",
+            },
         )
 
     hass = SimpleNamespace(
@@ -772,6 +779,13 @@ def test_point_cloud_api_throttles_retryable_failures_until_retry_after(
         assert cached.value.code == "point_cloud_timeout"
         assert cached.value.stage == "mower_request"
         assert cached.value.retry_after_seconds == 1
+        assert cached.value.diagnostic_reason == "object_not_observed"
+        assert cached.value.discovery_route == "announcement_property"
+        assert cached.value.generation_acknowledged is True
+        assert cached.value.diagnostic_context == {
+            "indexed_verification_attempts": 2,
+            "indexed_verification_result": "object_not_observed",
+        }
         assert "private cloud timeout detail" not in str(cached.value)
         clock[0] = 110.0
         with pytest.raises(DreameLawnMowerPointCloudError):
@@ -836,6 +850,11 @@ def test_point_cloud_api_records_safe_failure_and_timing() -> None:
             diagnostic_reason="unchanged_object",
             discovery_route="announcement_property",
             generation_acknowledged=True,
+            diagnostic_context={
+                "announcement_baseline": "not_observed",
+                "indexed_verification_attempts": 3,
+                "indexed_verification_result": "object_not_observed",
+            },
         )
 
     coordinator = SimpleNamespace(
@@ -863,6 +882,11 @@ def test_point_cloud_api_records_safe_failure_and_timing() -> None:
     assert event["context"]["reason"] == "unchanged_object"
     assert event["context"]["discovery_route"] == "announcement_property"
     assert event["context"]["generation_acknowledged"] is True
+    assert event["context"]["attempt"] == {
+        "announcement_baseline": "not_observed",
+        "indexed_verification_attempts": 3,
+        "indexed_verification_result": "object_not_observed",
+    }
     assert private_detail not in repr(event)
     performance = coordinator.performance.as_dict()
     assert performance["summary"]["point_cloud_generation"]["outcomes"] == {

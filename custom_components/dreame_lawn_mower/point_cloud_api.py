@@ -505,6 +505,8 @@ class DreameLawnMowerPointCloudAPI:
             context["discovery_route"] = error.discovery_route
         if error.generation_acknowledged is not None:
             context["generation_acknowledged"] = error.generation_acknowledged
+        if error.diagnostic_context:
+            context["attempt"] = dict(error.diagnostic_context)
         exception_type = None
         if unexpected_error is not None:
             exception_type = _exception_type_name(unexpected_error)
@@ -657,6 +659,10 @@ def _copy_point_cloud_error(
             else retry_after_seconds
         ),
         vendor_error_code=error.vendor_error_code,
+        diagnostic_reason=error.diagnostic_reason,
+        discovery_route=error.discovery_route,
+        generation_acknowledged=error.generation_acknowledged,
+        diagnostic_context=error.diagnostic_context,
     )
 
 
