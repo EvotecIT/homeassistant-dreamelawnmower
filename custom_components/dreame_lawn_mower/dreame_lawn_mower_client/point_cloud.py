@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import struct
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Any, Literal
@@ -39,6 +39,7 @@ class DreameLawnMowerPointCloudError(ValueError):
         diagnostic_reason: str | None = None,
         discovery_route: str | None = None,
         generation_acknowledged: bool | None = None,
+        diagnostic_context: Mapping[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -51,6 +52,7 @@ class DreameLawnMowerPointCloudError(ValueError):
         self.diagnostic_reason = diagnostic_reason
         self.discovery_route = discovery_route
         self.generation_acknowledged = generation_acknowledged
+        self.diagnostic_context = dict(diagnostic_context or {})
 
 
 @dataclass(frozen=True, slots=True)
