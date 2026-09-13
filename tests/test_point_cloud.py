@@ -1365,6 +1365,7 @@ def test_download_point_cloud_rejects_unchanged_viax_announcement_without_ack(
 
     assert captured.value.code == "point_cloud_not_published"
     assert captured.value.diagnostic_reason == "unchanged_object"
+    assert captured.value.retryable is False
     assert captured.value.discovery_route == "announcement_property"
     assert captured.value.generation_acknowledged is False
 

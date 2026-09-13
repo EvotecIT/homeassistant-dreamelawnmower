@@ -1552,6 +1552,7 @@ class _DreameLawnMowerClientMapsMixin(
                 timeout_seconds=timeout,
                 retry_after_seconds=10,
                 diagnostic_reason="unchanged_object",
+                retryable=False,
                 discovery_route=(
                     "announcement_property" if use_announcement_path else "legacy_obj"
                 ),
@@ -1569,6 +1570,7 @@ class _DreameLawnMowerClientMapsMixin(
             timeout_seconds=timeout,
             retry_after_seconds=10,
             diagnostic_reason="object_not_observed",
+            retryable=False,
             discovery_route=(
                 "announcement_property" if use_announcement_path else "legacy_obj"
             ),

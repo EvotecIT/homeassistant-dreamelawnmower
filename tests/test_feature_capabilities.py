@@ -13,6 +13,7 @@ from dreame_lawn_mower_client import (
     CAPABILITY_UNKNOWN,
     CAPABILITY_UNSUPPORTED,
     FEATURE_LIVE_VIDEO,
+    FEATURE_POINT_CLOUD,
     resolve_feature_capability,
     resolved_feature_capabilities,
 )
@@ -49,6 +50,30 @@ def test_known_a2_is_video_supported_before_metadata_arrives() -> None:
 
     assert capability.state == CAPABILITY_SUPPORTED
     assert capability.source == CAPABILITY_SOURCE_MODEL
+
+
+def test_a2_point_cloud_export_is_confirmed_without_live_metadata() -> None:
+    capability = resolve_feature_capability(
+        FEATURE_POINT_CLOUD, snapshot=_snapshot("dreame.mower.g2408")
+    )
+    assert capability.as_dict() == {"state": "supported", "source": "model"}
+
+
+def test_viax_lidar_and_2d_map_do_not_claim_point_cloud_export() -> None:
+    snapshot = _snapshot("mova.mower.g2583", capabilities=("lidar_navigation", "map"))
+    assert resolved_feature_capabilities(snapshot)[FEATURE_POINT_CLOUD] == {
+        "state": "unknown", "source": "unknown"
+    }
+    assert resolve_feature_capability(
+        FEATURE_POINT_CLOUD, snapshot=snapshot, observed=True
+    ).as_dict() == {"state": "supported", "source": "observed"}
+
+
+def test_explicit_point_cloud_metadata_is_distinct_from_map_metadata() -> None:
+    assert resolve_feature_capability(
+        FEATURE_POINT_CLOUD,
+        snapshot=_snapshot("future.mower", capabilities=(FEATURE_POINT_CLOUD,)),
+    ).as_dict() == {"state": "supported", "source": "advertised"}
 
 
 def test_validated_a3_is_video_supported_before_metadata_arrives() -> None:

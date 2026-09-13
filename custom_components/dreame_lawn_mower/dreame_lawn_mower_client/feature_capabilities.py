@@ -9,6 +9,7 @@ from typing import Any, Final
 from .models import snapshot_advertises_video
 
 FEATURE_LIVE_VIDEO: Final = "live_video"
+FEATURE_POINT_CLOUD: Final = "point_cloud"
 
 CAPABILITY_SUPPORTED: Final = "supported"
 CAPABILITY_UNSUPPORTED: Final = "unsupported"
@@ -27,6 +28,8 @@ MODEL_FEATURE_CAPABILITIES: Final[dict[str, dict[str, str]]] = {
     },
     "dreame.mower.g2408": {
         FEATURE_LIVE_VIDEO: CAPABILITY_SUPPORTED,
+        # Validated PCD export on A2; LiDAR or 2D mapping alone is not proof.
+        FEATURE_POINT_CLOUD: CAPABILITY_SUPPORTED,
     },
     "dreame.mower.q2501a": {
         FEATURE_LIVE_VIDEO: CAPABILITY_SUPPORTED,
@@ -125,7 +128,7 @@ def resolved_feature_capabilities(
     snapshot: Any,
     *,
     descriptor: Any = None,
-    features: tuple[str, ...] = (FEATURE_LIVE_VIDEO,),
+    features: tuple[str, ...] = (FEATURE_LIVE_VIDEO, FEATURE_POINT_CLOUD),
     observed: Collection[str] = (),
     advertised: Collection[str] = (),
 ) -> dict[str, dict[str, str]]:
