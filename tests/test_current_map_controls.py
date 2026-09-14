@@ -22,6 +22,7 @@ from custom_components.dreame_lawn_mower.control_options import (
 from custom_components.dreame_lawn_mower.coordinator import DreameLawnMowerCoordinator
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     DreameLawnMowerCommandRejectedError,
+    DreameLawnMowerConnectionError,
 )
 from custom_components.dreame_lawn_mower.lawn_mower import DreameLawnMower
 from custom_components.dreame_lawn_mower.runtime_cache import (
@@ -1125,6 +1126,18 @@ def test_lawn_mower_cancel_current_task_service_uses_coordinator() -> None:
     asyncio.run(entity.async_cancel_current_task())
 
     entity.coordinator.async_cancel_current_task.assert_awaited_once_with()
+
+
+def test_lawn_mower_cancel_current_task_translates_connection_failure() -> None:
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = SimpleNamespace(
+        async_cancel_current_task=AsyncMock(
+            side_effect=DreameLawnMowerConnectionError("still active")
+        )
+    )
+
+    with pytest.raises(HomeAssistantError, match="still active"):
+        asyncio.run(entity.async_cancel_current_task())
 
 
 def test_lawn_mower_switch_current_map_service_rejects_unknown_map_index() -> None:

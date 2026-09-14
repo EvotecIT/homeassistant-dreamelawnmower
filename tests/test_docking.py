@@ -27,6 +27,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions imp
     DeviceCommandRejectedException,
     DeviceUpdateFailedException,
     DreameLawnMowerCommandRejectedError,
+    InvalidActionException,
 )
 
 
@@ -271,6 +272,66 @@ def test_cancel_current_task_is_idempotent_while_idle() -> None:
     client._async_call_device_method.assert_not_awaited()
 
 
+def test_cancel_current_task_uses_active_flags_when_session_state_is_unknown() -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        side_effect=[
+            _task_snapshot(state="error", active=None, started=True),
+            _task_snapshot(state="idle", active=False),
+        ]
+    )
+    client._async_call_device_method = AsyncMock()
+
+    with patch(
+        "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+        "client.asyncio.sleep",
+        AsyncMock(),
+    ):
+        cancelled = asyncio.run(client.async_cancel_current_task())
+
+    assert cancelled is True
+    client._async_call_device_method.assert_awaited_once_with("stop")
+
+
+def test_cancel_current_task_accepts_stop_race_after_inactive_readback() -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        side_effect=[
+            _task_snapshot(state="mowing", active=True, started=True),
+            _task_snapshot(state="idle", active=False),
+        ]
+    )
+    rejection = DreameLawnMowerCommandRejectedError("Action unavailable")
+    client._async_call_device_method = AsyncMock(side_effect=rejection)
+
+    assert asyncio.run(client.async_cancel_current_task()) is True
+
+
+def test_cancel_current_task_preserves_stop_rejection_while_still_active() -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    active = _task_snapshot(state="mowing", active=True, started=True)
+    client.async_refresh_authoritative_snapshot = AsyncMock(return_value=active)
+    rejection = DreameLawnMowerCommandRejectedError("Action unavailable")
+    client._async_call_device_method = AsyncMock(side_effect=rejection)
+
+    with pytest.raises(DreameLawnMowerCommandRejectedError, match="unavailable"):
+        asyncio.run(client.async_cancel_current_task())
+
+    assert client.async_refresh_authoritative_snapshot.await_count == 2
+
+
+def test_cancel_current_task_translates_local_stop_rejection_while_active() -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    active = _task_snapshot(state="error", active=None, started=True)
+    client.async_refresh_authoritative_snapshot = AsyncMock(return_value=active)
+    client._async_call_device_method = AsyncMock(
+        side_effect=InvalidActionException("Action unavailable")
+    )
+
+    with pytest.raises(DreameLawnMowerCommandRejectedError, match="unavailable"):
+        asyncio.run(client.async_cancel_current_task())
+
+
 def test_cancel_current_task_rejects_unsettled_active_state() -> None:
     client = object.__new__(DreameLawnMowerClient)
     active = _task_snapshot(state="mowing", active=True, started=True, mowing=True)
@@ -291,14 +352,14 @@ def test_cancel_current_task_rejects_unsettled_active_state() -> None:
         asyncio.run(client.async_cancel_current_task())
 
     client._async_call_device_method.assert_awaited_once_with("stop")
-    assert client.async_refresh_authoritative_snapshot.await_count == 5
+    assert client.async_refresh_authoritative_snapshot.await_count == 12
 
 
 def test_cancel_current_task_reports_failed_authoritative_readback() -> None:
     client = object.__new__(DreameLawnMowerClient)
     active = _task_snapshot(state="mowing", active=True, started=True, mowing=True)
     client.async_refresh_authoritative_snapshot = AsyncMock(
-        side_effect=[active, *[DreameLawnMowerConnectionError("offline")] * 4]
+        side_effect=[active, *[DreameLawnMowerConnectionError("offline")] * 11]
     )
     client._async_call_device_method = AsyncMock()
 

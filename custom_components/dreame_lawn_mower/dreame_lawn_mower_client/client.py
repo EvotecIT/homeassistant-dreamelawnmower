@@ -343,7 +343,10 @@ _SPOT_TASK_CONFIRMATION_STATUSES = _GENERIC_ACTIVE_TASK_CONFIRMATION_STATUSES | 
 }
 _TARGETED_TASK_CONFIRMATION_OFFSETS_SECONDS = (0.5, 2.0, 5.0, 9.0, 12.0, 14.5)
 _TARGETED_TASK_CONFIRMATION_TIMEOUT_SECONDS = 15.0
-_TASK_CANCEL_CONFIRMATION_DELAYS_SECONDS = (0.5, 1.0, 2.0, 3.0)
+_TASK_CANCEL_CONFIRMATION_TIMEOUT_SECONDS = 20.0
+_TASK_CANCEL_CONFIRMATION_INITIAL_DELAY_SECONDS = 0.5
+_TASK_CANCEL_CONFIRMATION_POLL_INTERVAL_SECONDS = 2.0
+_TASK_CANCEL_CONFIRMATION_MAX_READS = 11
 
 
 def _task_confirmation_key(snapshot: DreameLawnMowerSnapshot) -> tuple[Any, ...]:
@@ -364,6 +367,21 @@ def _targeted_task_is_active(snapshot: DreameLawnMowerSnapshot) -> bool:
         or getattr(snapshot, "started", False)
         or getattr(snapshot, "mowing", False)
         or getattr(snapshot, "paused", False)
+    )
+
+
+def _snapshot_requires_task_cancel(snapshot: DreameLawnMowerSnapshot) -> bool:
+    """Return whether authoritative or fallback fields still own a task."""
+    if getattr(snapshot, "mowing_session_active", None) is False:
+        return False
+    if getattr(snapshot, "mowing_session_active", None) is True:
+        return True
+    return bool(
+        snapshot_session_control_state(snapshot) in _SESSION_STATES_TO_END
+        or getattr(snapshot, "started", False)
+        or getattr(snapshot, "mowing", False)
+        or getattr(snapshot, "paused", False)
+        or getattr(snapshot, "returning", False)
     )
 
 
@@ -634,29 +652,52 @@ class DreameLawnMowerClient(
         retried after dispatch, even when its response is lost.
         """
         baseline = await self.async_refresh_authoritative_snapshot()
-        if snapshot_session_control_state(baseline) not in _SESSION_STATES_TO_END:
+        if not _snapshot_requires_task_cancel(baseline):
             return False
 
-        await self._async_call_device_method("stop")
+        try:
+            await self._async_call_device_method("stop")
+        except (
+            _DreameLawnMowerCommandRejectedError,
+            InvalidActionException,
+        ) as stop_error:
+            # The task can finish naturally between the preflight read and STOP.
+            # Accept that race only after a fresh authoritative inactive readback.
+            try:
+                snapshot = await self.async_refresh_authoritative_snapshot()
+            except DreameLawnMowerConnectionError as read_error:
+                if isinstance(stop_error, InvalidActionException):
+                    raise _DreameLawnMowerCommandRejectedError(
+                        str(stop_error)
+                    ) from read_error
+                raise stop_error from read_error
+            if not _snapshot_requires_task_cancel(snapshot):
+                return True
+            if isinstance(stop_error, InvalidActionException):
+                raise _DreameLawnMowerCommandRejectedError(
+                    str(stop_error)
+                ) from stop_error
+            raise
 
         readable = False
-        for delay in _TASK_CANCEL_CONFIRMATION_DELAYS_SECONDS:
-            await asyncio.sleep(delay)
+        deadline = time.monotonic() + _TASK_CANCEL_CONFIRMATION_TIMEOUT_SECONDS
+        delay = _TASK_CANCEL_CONFIRMATION_INITIAL_DELAY_SECONDS
+        reads = 0
+        while (
+            reads < _TASK_CANCEL_CONFIRMATION_MAX_READS
+            and (remaining := deadline - time.monotonic()) > 0
+        ):
+            await asyncio.sleep(min(delay, remaining))
+            reads += 1
             try:
                 snapshot = await self.async_refresh_authoritative_snapshot()
             except DreameLawnMowerConnectionError:
+                delay = _TASK_CANCEL_CONFIRMATION_POLL_INTERVAL_SECONDS
                 continue
             readable = True
-            if (
-                snapshot_session_control_state(snapshot)
-                not in _SESSION_STATES_TO_END
-                and snapshot.mowing_session_active is not True
-                and not snapshot.started
-                and not snapshot.mowing
-                and not snapshot.paused
-                and not snapshot.returning
-            ):
+            if not _snapshot_requires_task_cancel(snapshot):
                 return True
+            delay = _TASK_CANCEL_CONFIRMATION_POLL_INTERVAL_SECONDS
 
         if readable:
             raise _DreameLawnMowerCommandRejectedError(

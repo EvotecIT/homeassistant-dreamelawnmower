@@ -678,7 +678,9 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
 
     async def async_cancel_current_task(self) -> None:
         """End the current mower task without returning to the dock."""
-        await self.coordinator.async_cancel_current_task()
+        await _async_run_targeted_mowing_command(
+            self.coordinator.async_cancel_current_task()
+        )
 
     async def async_plan_zone_mowing_preference_update(
         self,
