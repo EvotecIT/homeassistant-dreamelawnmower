@@ -25,6 +25,12 @@ FOUR_WHEEL_MOWER_MODEL_PREFIXES = (
     "dreame.mower.q2501",
     "dreame.mower.g2541",
 )
+MANUAL_MOWING_HEIGHT_MODELS = frozenset(
+    {
+        "mova.mower.g2552",
+        "g2552",
+    }
+)
 
 PREFERENCE_MODE_GLOBAL = "Global"
 PREFERENCE_MODE_CUSTOM = "Custom"
@@ -144,6 +150,12 @@ def mowing_height_limits(model: str | None) -> tuple[float, float]:
     return MOWING_HEIGHT_MIN_CM, maximum
 
 
+def mowing_height_adjustment_supported(model: str | None) -> bool:
+    """Return whether the mower supports changing blade height electronically."""
+    normalized = str(model or "").strip().casefold()
+    return normalized not in MANUAL_MOWING_HEIGHT_MODELS
+
+
 async def async_update_selected_mowing_preference(
     coordinator: DreameLawnMowerCoordinator,
     *,
@@ -160,6 +172,18 @@ async def async_update_selected_mowing_preference(
         )
     if not changes:
         raise HomeAssistantError("At least one mowing preference change is required.")
+    model = getattr(
+        getattr(getattr(coordinator, "client", None), "descriptor", None),
+        "model",
+        None,
+    )
+    if (
+        "mowing_height_cm" in changes
+        and not mowing_height_adjustment_supported(model)
+    ):
+        raise HomeAssistantError(
+            "Mowing height is adjusted manually on this mower."
+        )
 
     maps = map_entries(coordinator.app_maps, coordinator.batch_device_data)
     if not maps:

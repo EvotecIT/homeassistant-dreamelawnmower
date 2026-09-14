@@ -40,6 +40,7 @@ MODEL_NAME_MAP = {
     "mova.mower.g2529b": "LiDAX Ultra 800",
     "mova.mower.g2529c": "LiDAX Ultra 1000",
     "mova.mower.g2529f": "LiDAX Ultra 2000",
+    "mova.mower.g2552": "VIAX 250",
     "mova.mower.g2584a": "LiDAX Ultra 2000 AWD",
 }
 
@@ -59,6 +60,7 @@ DISPLAY_NAME_ALIASES = {
     "mova 600": "MOVA 600",
     "mova 600 kit": "MOVA 600 Kit",
     "mova 1000": "MOVA 1000",
+    "viax 250": "VIAX 250",
     "viax 300": "Viax 300",
     "vivax 250": "Vivax 250",
 }

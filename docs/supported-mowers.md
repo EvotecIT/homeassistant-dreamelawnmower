@@ -25,6 +25,7 @@ brand name:
 | MOVA LiDAX Ultra 1000 | `mova.mower.g2529c` | **Field-reported** | MOVAhome EU login, commands, battery, and model-specific cloud property handling |
 | MOVA LiDAX Ultra 2000 | `mova.mower.g2529f` | **Field-reported** | MOVAhome US login, core state and commands, maps, and cloud live video on firmware `4.3.6_0453` |
 | MOVA LiDAX Ultra 2000 AWD | `mova.mower.g2584a` | **Field-reported** | MOVAhome US login, realtime state, zone mowing, docking, maps, and cloud live video on firmware `4.3.6_0439` |
+| MOVA VIAX 250 | `mova.mower.g2552` | **Recognized** | Model identity and shared mower device-code semantics; dual-map and multi-zone capabilities are [documented by MOVA](https://www.mova.tech/products/viax-250-smart-robot-mower), while cutting height is manual-only; login, controls, maps, and media still need owner validation |
 | MOVA VIAX 500 | `mova.mower.g2583` | **Field-reported** | Integration state and app-map metadata on firmware `4.3.6_0260`; [3D point-cloud download remains unconfirmed](viax-point-cloud.md) |
 | Dreame A3 AWD Pro 3500 | `dreame.mower.g2541e` | **Recognized** | Model mapping and diagnostics report; broader live confirmation is still needed |
 | Dreame A1 | `dreame.mower.p2255` | **Field-reported** | EU account setup, core state, battery, error state, map camera, docking state, and a real docked-to-mowing start are confirmed; live video is explicitly unsupported |

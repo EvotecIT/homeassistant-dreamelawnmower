@@ -22,6 +22,7 @@ from .mowing_preference_control import (
     PREFERENCE_MODE_GLOBAL,
     async_update_selected_active_preference,
     async_update_selected_mowing_preference,
+    mowing_height_adjustment_supported,
     mowing_height_limits,
     selected_active_preference_attributes,
     selected_map_global_preference_attributes,
@@ -100,6 +101,13 @@ class _DreameLawnMowerMowingHeightNumber(
     _attr_mode = NumberMode.SLIDER
 
     @property
+    def _height_adjustment_supported(self) -> bool:
+        """Return whether this mower exposes electronic cutting-height control."""
+        return mowing_height_adjustment_supported(
+            getattr(getattr(self, "_descriptor", None), "model", None)
+        )
+
+    @property
     def native_min_value(self) -> float:
         """Return the family limit while retaining a reported outlier."""
         minimum, _ = mowing_height_limits(
@@ -153,6 +161,7 @@ class DreameLawnMowerSelectedMapMowingHeightNumber(
         """Return whether global cutting height can currently be changed."""
         return (
             self.coordinator.data is not None
+            and self._height_adjustment_supported
             and self.native_value is not None
             and selected_map_preference_mode(self.coordinator) == PREFERENCE_MODE_GLOBAL
         )
@@ -168,12 +177,18 @@ class DreameLawnMowerSelectedMapMowingHeightNumber(
         attributes = selected_map_global_preference_attributes(self.coordinator)
         attributes["write_available"] = self.available
         if not self.available:
-            attributes["write_unavailable_reason"] = (
-                "Select Global map preference mode before changing whole-lawn height."
-                if selected_map_preference_mode(self.coordinator)
-                != PREFERENCE_MODE_GLOBAL
-                else "Selected map global mowing preference data is unavailable."
-            )
+            if not self._height_adjustment_supported:
+                attributes["write_unavailable_reason"] = (
+                    "Mowing height is adjusted manually on this mower."
+                )
+            else:
+                attributes["write_unavailable_reason"] = (
+                    "Select Global map preference mode before changing "
+                    "whole-lawn height."
+                    if selected_map_preference_mode(self.coordinator)
+                    != PREFERENCE_MODE_GLOBAL
+                    else "Selected map global mowing preference data is unavailable."
+                )
         return attributes
 
     async def async_set_native_value(self, value: float) -> None:
@@ -207,6 +222,7 @@ class DreameLawnMowerSelectedZoneMowingHeightNumber(
         """Return whether the selected zone height can currently be changed."""
         return (
             self.coordinator.data is not None
+            and self._height_adjustment_supported
             and self.native_value is not None
             and selected_map_preference_mode(self.coordinator) == PREFERENCE_MODE_CUSTOM
         )
@@ -222,12 +238,17 @@ class DreameLawnMowerSelectedZoneMowingHeightNumber(
         attributes = selected_zone_preference_attributes(self.coordinator)
         attributes["write_available"] = self.available
         if not self.available:
-            attributes["write_unavailable_reason"] = (
-                "Select Custom map preference mode before changing zone height."
-                if selected_map_preference_mode(self.coordinator)
-                != PREFERENCE_MODE_CUSTOM
-                else "Selected zone mowing preference data is unavailable."
-            )
+            if not self._height_adjustment_supported:
+                attributes["write_unavailable_reason"] = (
+                    "Mowing height is adjusted manually on this mower."
+                )
+            else:
+                attributes["write_unavailable_reason"] = (
+                    "Select Custom map preference mode before changing zone height."
+                    if selected_map_preference_mode(self.coordinator)
+                    != PREFERENCE_MODE_CUSTOM
+                    else "Selected zone mowing preference data is unavailable."
+                )
         return attributes
 
     async def async_set_native_value(self, value: float) -> None:

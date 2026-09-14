@@ -18,6 +18,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     decode_batch_mowing_preferences,
 )
 from custom_components.dreame_lawn_mower.mowing_preference_control import (
+    mowing_height_adjustment_supported,
     mowing_height_limits,
 )
 from custom_components.dreame_lawn_mower.number import (
@@ -40,8 +41,13 @@ from custom_components.dreame_lawn_mower.select import (
 )
 
 
-def _coordinator(*, mode_name: str = "custom") -> SimpleNamespace:
+def _coordinator(
+    *,
+    mode_name: str = "custom",
+    model: str | None = None,
+) -> SimpleNamespace:
     client = SimpleNamespace(
+        descriptor=SimpleNamespace(model=model),
         async_plan_app_mowing_preference_update=AsyncMock(
             return_value={
                 "source": "app_action_mowing_preference_write",
@@ -208,6 +214,23 @@ def test_mowing_height_number_requires_custom_mode() -> None:
     assert "Custom" in entity.extra_state_attributes["write_unavailable_reason"]
 
     with pytest.raises(HomeAssistantError, match="Select Custom"):
+        asyncio.run(entity.async_set_native_value(4.5))
+
+    coordinator.client.async_plan_app_mowing_preference_update.assert_not_awaited()
+
+
+def test_viax_250_reports_manual_only_mowing_height() -> None:
+    coordinator = _coordinator(model="mova.mower.g2552")
+    entity = object.__new__(DreameLawnMowerSelectedZoneMowingHeightNumber)
+    entity.coordinator = coordinator
+    entity._descriptor = coordinator.client.descriptor
+
+    assert mowing_height_adjustment_supported("mova.mower.g2552") is False
+    assert entity.native_value == 4.0
+    assert entity.available is False
+    assert "manually" in entity.extra_state_attributes["write_unavailable_reason"]
+
+    with pytest.raises(HomeAssistantError, match="adjusted manually"):
         asyncio.run(entity.async_set_native_value(4.5))
 
     coordinator.client.async_plan_app_mowing_preference_update.assert_not_awaited()

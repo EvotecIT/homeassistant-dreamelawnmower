@@ -594,6 +594,16 @@ def test_model_overrides_prevent_cross_model_code_guesses() -> None:
     assert mower_fault_active(0, model="mova.mower.x1234") is False
 
 
+def test_viax_250_uses_shared_codes_without_unverified_model_overrides() -> None:
+    assert (
+        mower_device_code_name(4, model="mova.mower.g2552")
+        == "left_drive_wheel_error"
+    )
+    assert mower_fault_active(4, model="mova.mower.g2552") is True
+    assert mower_device_code_name(0, model="mova.mower.g2552") == "no_device_code"
+    assert mower_fault_active(0, model="mova.mower.g2552") is False
+
+
 @pytest.mark.parametrize(
     "model",
     [None, "dreame.mower.p2255", "dreame.mower.x1234", "mova.mower.x1234"],
