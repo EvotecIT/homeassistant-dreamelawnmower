@@ -449,6 +449,46 @@ def test_camera_stream_inputs_classify_unprovisioned_device_triple() -> None:
     assert result.diagnostics["provisioning_issue"] == "device_triple_missing"
 
 
+def test_camera_stream_inputs_classify_device_permission_denied() -> None:
+    class _PermissionDeniedCloud(_FakeCloud):
+        def get_tx_video_p2p_info(
+            self,
+            access_token: str | None = None,
+            os: int = 1,
+        ) -> dict[str, object]:
+            assert access_token == "access-token-1"
+            assert os == 1
+            return {
+                "code": 10000,
+                "success": False,
+                "msg": "用户对该设备无权限",
+            }
+
+        def get_tx_video_user_eligibility(
+            self,
+            access_token: str | None = None,
+            os: int = 1,
+        ) -> dict[str, object]:
+            assert access_token == "access-token-1"
+            assert os == 1
+            return {"isDevUser": False}
+
+    client = _client()
+    client._sync_get_cloud_protocol = lambda: _PermissionDeniedCloud()
+
+    result = client._sync_get_camera_stream_runtime_inputs()
+
+    assert result.ready is False
+    assert result.missing_required == ("p2p_info",)
+    assert result.provisioning_issue == "device_permission_denied"
+    assert result.diagnostics["provisioning_issue"] == (
+        "device_permission_denied"
+    )
+    assert result.diagnostics["stages"][-1]["result"] == {
+        "is_device_user": "False"
+    }
+
+
 def test_camera_stream_failure_retains_sanitized_stage_diagnostics() -> None:
     class _FailingCloud(_FakeCloud):
         def get_tx_video_access_token(self, os: int = 1) -> dict[str, object]:

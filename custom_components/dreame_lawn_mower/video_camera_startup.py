@@ -29,6 +29,7 @@ from .dreame_lawn_mower_client.stream_health import (
     DreameLawnMowerStreamUrlProbeResult,
 )
 from .dreame_lawn_mower_client.video_provisioning_status import (
+    XP2P_PROVISIONING_DEVICE_PERMISSION_DENIED,
     XP2P_PROVISIONING_DEVICE_TRIPLE_MISSING,
 )
 from .dreame_lawn_mower_client.video_runtime import (
@@ -94,6 +95,14 @@ def _runtime_inputs_not_ready_message(
             "mower on the current account/region. Confirm that live video works "
             "in Dreamehome or MOVAhome; contact Dreame support if it is also "
             "missing there."
+        )
+    if inputs.provisioning_issue == XP2P_PROVISIONING_DEVICE_PERMISSION_DENIED:
+        return (
+            "The mower vendor's video backend denied this account access to "
+            "the media session even though Video sharing may be enabled. "
+            "Toggle Video sharing off and on or remove and re-add the share "
+            "once. If access remains denied, report the sharing issue to the "
+            "vendor or test from the mower owner's account."
         )
     return "Dreame cloud did not return required XP2P fields: " + ", ".join(
         inputs.missing_required

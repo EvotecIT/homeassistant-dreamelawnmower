@@ -71,6 +71,10 @@ For `device_triple_missing`, follow
 Do not change account region as a routine troubleshooting step: rebinding can
 discard cloud-stored maps and settings.
 
+For `device_permission_denied`, follow
+[shared-account permission troubleshooting](troubleshooting.md#shared-account-is-denied-video-access).
+Mower state does not bypass the vendor's account-level media permission.
+
 ## Limits and technical details
 
 The camera does not expose the vendor's stored photo gallery, patrol movement,

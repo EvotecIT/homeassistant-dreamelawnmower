@@ -110,6 +110,26 @@ unbounded payloads. This lets maintainers distinguish unsupported models,
 malformed vendor responses, and missing provisioning without asking users to
 share an account as the first debugging step.
 
+### Shared account is denied video access
+
+The integration reports `device_permission_denied` when the mower vendor's
+video backend explicitly refuses the current account access to the media
+session. It can happen even when ordinary mower control, map data, and the
+camera share toggle are available. Docking or starting the mower does not grant
+this backend permission.
+
+Confirm that Video sharing is enabled for the member in MOVAhome or Dreamehome.
+If it already appears enabled, toggle it off and on or remove and re-add the
+share once, then retry video. Testing from the mower owner's account
+distinguishes a sharing problem from device provisioning. If the owner account
+works but the shared account remains denied, report the Video sharing issue to
+the vendor; MOVAhome does not expose a separate device-user permission that the
+owner can grant.
+
+Do not post account credentials, access tokens, device identifiers, or stream
+details in an issue. The downloaded integration diagnostics preserve the safe
+vendor response and the stable `device_permission_denied` classification.
+
 ### Live video identity is not provisioned
 
 The integration reports `device_triple_missing` when both Dreame video identity
