@@ -2405,6 +2405,17 @@ class DreameLawnMowerCoordinator(
         )
         self.async_update_listeners()
 
+    async def async_cancel_current_task(self) -> bool:
+        """End the current mower task without docking and refresh its state."""
+        if not hasattr(self, "_runtime_map_identity_lock"):
+            self._runtime_map_identity_lock = asyncio.Lock()
+        async with self._runtime_map_identity_lock:
+            cancelled = await self.client.async_cancel_current_task()
+            self._invalidate_runtime_map_identity()
+        await self.async_request_refresh()
+        self.async_update_listeners()
+        return cancelled
+
     def _invalidate_schedule_map_hint(self) -> None:
         """Expire schedule selection tied to the previous active map."""
         self.schedules_refreshed_at = None

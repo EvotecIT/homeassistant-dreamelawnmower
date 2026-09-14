@@ -156,6 +156,11 @@ async def async_setup_entry(
         "async_switch_current_map",
     )
     platform.async_register_entity_service(
+        "cancel_current_task",
+        {},
+        "async_cancel_current_task",
+    )
+    platform.async_register_entity_service(
         "plan_map_preference_mode_update",
         {
             vol.Required(ATTR_PREFERENCE_MODE): _validate_preference_mode,
@@ -670,6 +675,10 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         normalized_map_index = int(map_index)
         self._ensure_known_map_index(normalized_map_index)
         await self.coordinator.async_switch_current_map(normalized_map_index)
+
+    async def async_cancel_current_task(self) -> None:
+        """End the current mower task without returning to the dock."""
+        await self.coordinator.async_cancel_current_task()
 
     async def async_plan_zone_mowing_preference_update(
         self,

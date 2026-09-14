@@ -73,6 +73,17 @@ switch_current_map:
           step: 1
           mode: box
 
+cancel_current_task:
+  name: Cancel current task
+  description: >-
+    End the mower's current mowing task without sending it to the dock. The
+    service waits for authoritative inactive state before completing, so a map
+    switch can safely follow it. Calling it while already idle has no effect.
+  target:
+    entity:
+      integration: dreame_lawn_mower
+      domain: lawn_mower
+
 plan_map_preference_mode_update:
   name: Plan map preference mode update
   description: >-

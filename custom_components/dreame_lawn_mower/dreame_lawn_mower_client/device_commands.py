@@ -831,12 +831,12 @@ class _DreameMowerDeviceCommandMixin:
         if self.status.fast_mapping:
             return self.return_to_base()
 
-
         self.schedule_update(10, True)
-
-        response = None
-        if self.status.go_to_zone:
-            response = self.call_action(DreameMowerAction.STOP)
+        # Dispatch before updating the optimistic local state. Updating the
+        # status first makes ``ACTION_AVAILABILITY`` see an idle mower and
+        # reject the STOP action locally, so the command never reaches the
+        # device.
+        response = self.call_action(DreameMowerAction.STOP)
 
         if self.status.started:
             self._update_status(DreameMowerTaskStatus.COMPLETED, DreameMowerStatus.STANDBY)
@@ -848,10 +848,7 @@ class _DreameMowerDeviceCommandMixin:
                 self._map_manager.editor.set_cruise_points([])
                 self._map_manager.editor.set_active_segments([])
 
-        if response:
-            return response
-
-        return self.call_action(DreameMowerAction.STOP)
+        return response
 
     def pause(self) -> dict[str, Any] | None:
         """Pause the cleaning task."""

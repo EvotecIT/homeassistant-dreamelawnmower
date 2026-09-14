@@ -12,7 +12,12 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import 
     DreameLawnMowerClient,
     DreameLawnMowerConnectionError,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device import (
+    DreameMowerDevice,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device_types import (
+    DreameMowerAction,
+    DreameMowerStatus,
     DreameMowerTaskStatus,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.docking import (
@@ -172,6 +177,145 @@ def test_dock_without_stopping_preserves_session_by_docking_directly() -> None:
     asyncio.run(client.async_dock_without_stopping())
 
     client._async_call_device_method.assert_awaited_once_with("dock")
+
+
+def test_device_stop_dispatches_before_optimistic_idle_update() -> None:
+    calls: list[str] = []
+    mower = SimpleNamespace(
+        status=SimpleNamespace(
+            fast_mapping=False,
+            go_to_zone=False,
+            started=True,
+        ),
+        schedule_update=Mock(),
+        _map_manager=None,
+    )
+
+    def call_action(action: DreameMowerAction) -> dict[str, int]:
+        assert mower.status.started is True
+        calls.append("stop")
+        assert action is DreameMowerAction.STOP
+        return {"code": 0}
+
+    def update_status(
+        task_status: DreameMowerTaskStatus,
+        mower_status: DreameMowerStatus,
+    ) -> None:
+        calls.append("update")
+        assert task_status is DreameMowerTaskStatus.COMPLETED
+        assert mower_status is DreameMowerStatus.STANDBY
+        mower.status.started = False
+
+    mower.call_action = call_action
+    mower._update_status = update_status
+
+    response = DreameMowerDevice.stop(mower)
+
+    assert response == {"code": 0}
+    assert calls == ["stop", "update"]
+
+
+def _task_snapshot(
+    *,
+    state: str,
+    active: bool | None,
+    started: bool = False,
+    mowing: bool = False,
+    paused: bool = False,
+    returning: bool = False,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        state=state,
+        task_status=state,
+        mowing_session_active=active,
+        started=started,
+        mowing=mowing,
+        paused=paused,
+        returning=returning,
+    )
+
+
+def test_cancel_current_task_waits_for_authoritative_inactive_state() -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        side_effect=[
+            _task_snapshot(state="paused", active=True, started=True, paused=True),
+            _task_snapshot(state="paused", active=True, started=True, paused=True),
+            _task_snapshot(state="idle", active=False),
+        ]
+    )
+    client._async_call_device_method = AsyncMock()
+
+    with patch(
+        "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+        "client.asyncio.sleep",
+        AsyncMock(),
+    ):
+        cancelled = asyncio.run(client.async_cancel_current_task())
+
+    assert cancelled is True
+    client._async_call_device_method.assert_awaited_once_with("stop")
+    assert client.async_refresh_authoritative_snapshot.await_count == 3
+
+
+def test_cancel_current_task_is_idempotent_while_idle() -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        return_value=_task_snapshot(state="idle", active=False)
+    )
+    client._async_call_device_method = AsyncMock()
+
+    cancelled = asyncio.run(client.async_cancel_current_task())
+
+    assert cancelled is False
+    client._async_call_device_method.assert_not_awaited()
+
+
+def test_cancel_current_task_rejects_unsettled_active_state() -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    active = _task_snapshot(state="mowing", active=True, started=True, mowing=True)
+    client.async_refresh_authoritative_snapshot = AsyncMock(return_value=active)
+    client._async_call_device_method = AsyncMock()
+
+    with (
+        patch(
+            "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+            "client.asyncio.sleep",
+            AsyncMock(),
+        ),
+        pytest.raises(
+            DreameLawnMowerCommandRejectedError,
+            match="still reports an active",
+        ),
+    ):
+        asyncio.run(client.async_cancel_current_task())
+
+    client._async_call_device_method.assert_awaited_once_with("stop")
+    assert client.async_refresh_authoritative_snapshot.await_count == 5
+
+
+def test_cancel_current_task_reports_failed_authoritative_readback() -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    active = _task_snapshot(state="mowing", active=True, started=True, mowing=True)
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        side_effect=[active, *[DreameLawnMowerConnectionError("offline")] * 4]
+    )
+    client._async_call_device_method = AsyncMock()
+
+    with (
+        patch(
+            "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+            "client.asyncio.sleep",
+            AsyncMock(),
+        ),
+        pytest.raises(
+            DreameLawnMowerConnectionError,
+            match="every authoritative state readback failed",
+        ),
+    ):
+        asyncio.run(client.async_cancel_current_task())
+
+    client._async_call_device_method.assert_awaited_once_with("stop")
 
 
 def test_start_resumes_heartbeat_confirmed_paused_session() -> None:

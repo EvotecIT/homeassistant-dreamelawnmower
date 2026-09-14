@@ -1118,6 +1118,15 @@ def test_lawn_mower_switch_current_map_service_updates_scope_and_refreshes() -> 
     coordinator.async_switch_current_map.assert_awaited_once_with(1)
 
 
+def test_lawn_mower_cancel_current_task_service_uses_coordinator() -> None:
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = SimpleNamespace(async_cancel_current_task=AsyncMock())
+
+    asyncio.run(entity.async_cancel_current_task())
+
+    entity.coordinator.async_cancel_current_task.assert_awaited_once_with()
+
+
 def test_lawn_mower_switch_current_map_service_rejects_unknown_map_index() -> None:
     client = SimpleNamespace(
         async_switch_current_map=AsyncMock(),
