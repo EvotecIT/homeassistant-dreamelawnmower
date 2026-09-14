@@ -264,6 +264,11 @@ class DreameMowerState(IntEnum):
     SHORTCUT = 97
     MONITORING = 98
     MONITORING_PAUSED = 99
+    # Normalized mower states whose raw values collide with inherited
+    # cross-model meanings. Model-aware decoding maps the vendor values here.
+    CHARGING_PAUSED_HIGH_TEMPERATURE = 115
+    CHARGING_PAUSED_LOW_TEMPERATURE = 116
+    REPOSITIONING = 119
 
 
 class DreameMowerStateOld(IntEnum):

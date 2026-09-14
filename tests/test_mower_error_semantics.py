@@ -23,6 +23,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import 
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
     DreameMowerProperty,
+    DreameMowerState,
 )
 
 MowerDeviceCodeTier = device_code_semantics.MowerDeviceCodeTier
@@ -737,6 +738,63 @@ def test_inherited_device_status_uses_mower_registry(
     assert status.has_warning is has_warning
     assert status.error_name == name
     assert status.error_image is None
+
+
+@pytest.mark.parametrize(
+    ("raw_state", "expected_state", "expected_name"),
+    [
+        (
+            15,
+            DreameMowerState.CHARGING_PAUSED_HIGH_TEMPERATURE,
+            "charging_paused_high_temperature",
+        ),
+        (
+            16,
+            DreameMowerState.CHARGING_PAUSED_LOW_TEMPERATURE,
+            "charging_paused_low_temperature",
+        ),
+        (19, DreameMowerState.REPOSITIONING, "repositioning"),
+    ],
+)
+def test_viax_500_uses_model_specific_state_catalog(
+    raw_state: int,
+    expected_state: DreameMowerState,
+    expected_name: str,
+) -> None:
+    device = SimpleNamespace(
+        info=SimpleNamespace(model="mova.mower.g2583"),
+        capability=SimpleNamespace(new_state=False),
+    )
+    device.get_property = lambda prop: (
+        raw_state if getattr(prop, "name", None) == "STATE" else None
+    )
+    status = DreameMowerDeviceStatus(device)
+
+    assert status.state is expected_state
+    assert status.state_name == expected_name
+
+
+@pytest.mark.parametrize(
+    ("raw_state", "expected_state"),
+    [
+        (15, DreameMowerState.CLEAN_SUMMON),
+        (16, DreameMowerState.STATION_RESET),
+    ],
+)
+def test_viax_500_state_overrides_do_not_change_other_models(
+    raw_state: int,
+    expected_state: DreameMowerState,
+) -> None:
+    device = SimpleNamespace(
+        info=SimpleNamespace(model="dreame.mower.g2408"),
+        capability=SimpleNamespace(new_state=True),
+    )
+    device.get_property = lambda prop: (
+        raw_state if getattr(prop, "name", None) == "STATE" else None
+    )
+    status = DreameMowerDeviceStatus(device)
+
+    assert status.state is expected_state
 
 
 @pytest.mark.parametrize(

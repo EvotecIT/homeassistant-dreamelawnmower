@@ -481,8 +481,10 @@ class _DreameMowerDeviceStateMixin:
         }
         if key == MOWER_STATE_PROPERTY_KEY:
             active_states = {"mowing", "paused"}
-            current_state = mower_state_key(value)
-            previous_state = mower_state_key(previous_value)
+            info = getattr(self, "info", None)
+            model = getattr(info, "model", None) if info else None
+            current_state = mower_state_key(value, model=model)
+            previous_state = mower_state_key(previous_value, model=model)
             active_session_started_at = None
             if current_state in active_states:
                 previous_session_started_at = (

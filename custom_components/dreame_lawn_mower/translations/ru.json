@@ -183,7 +183,10 @@
           "station_cleaning": "Очистка станции",
           "shortcut": "Быстрая команда",
           "monitoring": "Наблюдение",
-          "monitoring_paused": "Наблюдение приостановлено"
+          "monitoring_paused": "Наблюдение приостановлено",
+          "charging_paused_high_temperature": "Зарядка приостановлена: температура аккумулятора слишком высокая",
+          "charging_paused_low_temperature": "Зарядка приостановлена: температура аккумулятора слишком низкая",
+          "repositioning": "Повторное позиционирование"
         }
       }
     }

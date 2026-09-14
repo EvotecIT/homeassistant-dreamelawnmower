@@ -1059,6 +1059,8 @@ def camera_stream_block_reason(snapshot: Any) -> str | None:
         "docked",
         "charging",
         "charging_completed",
+        "charging_paused_high_temperature",
+        "charging_paused_low_temperature",
         "smart_charging",
         "station_reset",
     }
@@ -1295,6 +1297,8 @@ def snapshot_from_device(
         "station_reset",
         "smart_charging",
         "waiting_for_task",
+        "charging_paused_high_temperature",
+        "charging_paused_low_temperature",
     }
     charging_states = {
         "charging",

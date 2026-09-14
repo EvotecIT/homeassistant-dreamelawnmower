@@ -14,7 +14,7 @@ from random import randrange
 from threading import RLock, Timer
 from typing import Any, Optional
 
-from .app_protocol import mower_realtime_property_name
+from .app_protocol import mower_realtime_property_name, mower_state_override
 from .device_code_semantics import (
     MowerDeviceCodeTier,
     mower_device_code_definition,
@@ -325,6 +325,9 @@ class DreameMowerDeviceStatus:
     def state(self) -> DreameMowerState:
         """Return state of the device."""
         value = self._get_property(DreameMowerProperty.STATE)
+        state_override = mower_state_override(value, model=self._device_model)
+        if state_override is not None:
+            return state_override
         if (
             value is not None
             and int(value) > 18
@@ -541,7 +544,8 @@ class DreameMowerDeviceStatus:
     @property
     def _device_model(self) -> str | None:
         """Return the current cloud model used for device-code overrides."""
-        return getattr(self._device.info, "model", None) if self._device.info else None
+        info = getattr(self._device, "info", None)
+        return getattr(info, "model", None) if info else None
 
     @property
     def scheduled_clean(self) -> bool:

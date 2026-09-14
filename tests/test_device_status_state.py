@@ -45,6 +45,7 @@ def _status(
     status: DreameMowerStatus,
     state: DreameMowerState,
     task_status: DreameMowerTaskStatus | None,
+    model: str | None = None,
 ) -> DreameMowerDeviceStatus:
     properties = {
         DreameMowerProperty.STATUS: status.value,
@@ -64,6 +65,7 @@ def _status(
             new_state=True,
         ),
         device_connected=True,
+        info=SimpleNamespace(model=model) if model else None,
         get_property=lambda prop: properties.get(prop),
     )
     return DreameMowerDeviceStatus(device)
@@ -167,4 +169,16 @@ def test_explicit_paused_task_remains_active_and_paused() -> None:
 
     assert status.started is True
     assert status.paused is True
+    assert status.state is DreameMowerState.PAUSED
+
+
+def test_viax_catalog_does_not_bypass_existing_idle_state_reconciliation() -> None:
+    status = _status(
+        status=DreameMowerStatus.CLEANING,
+        state=DreameMowerState.IDLE,
+        task_status=DreameMowerTaskStatus.AUTO_CLEANING_PAUSED,
+        model="mova.mower.g2583",
+    )
+
+    assert status.started is True
     assert status.state is DreameMowerState.PAUSED
