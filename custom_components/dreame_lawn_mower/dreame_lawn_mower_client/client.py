@@ -349,6 +349,11 @@ _TASK_CANCEL_CONFIRMATION_POLL_INTERVAL_SECONDS = 2.0
 _TASK_CANCEL_CONFIRMATION_MAX_READS = 11
 
 
+def _task_cancel_confirmation_deadline() -> float:
+    """Return the end of a complete post-dispatch settlement window."""
+    return time.monotonic() + _TASK_CANCEL_CONFIRMATION_TIMEOUT_SECONDS
+
+
 def _task_confirmation_key(snapshot: DreameLawnMowerSnapshot) -> tuple[Any, ...]:
     """Return native task identity that must change for a new targeted task."""
     return (
@@ -693,17 +698,18 @@ class DreameLawnMowerClient(
         if not _snapshot_requires_task_cancel(baseline):
             return False
 
-        deadline = time.monotonic() + _TASK_CANCEL_CONFIRMATION_TIMEOUT_SECONDS
         ambiguous_stop_error: DreameLawnMowerConnectionError | None = None
         try:
             await self._async_call_device_method(
                 "stop",
                 reconcile_ambiguous=False,
+                method_kwargs={"authoritative_task_active": True},
             )
         except (
             _DreameLawnMowerCommandRejectedError,
             InvalidActionException,
         ) as stop_error:
+            deadline = _task_cancel_confirmation_deadline()
             # The task can finish naturally between the preflight read and STOP.
             # Accept that race only after a fresh authoritative inactive readback.
             try:
@@ -728,6 +734,9 @@ class DreameLawnMowerClient(
             # not redispatch it; use the complete dedicated settlement window.
             ambiguous_stop_error = stop_error
 
+        # Transport dispatch has its own protocol timeout. Give the mower the
+        # complete confirmation window after that dispatch returns or raises.
+        deadline = _task_cancel_confirmation_deadline()
         readable = False
         latest_readback_failed = False
         delay = _TASK_CANCEL_CONFIRMATION_INITIAL_DELAY_SECONDS

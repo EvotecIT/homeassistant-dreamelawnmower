@@ -192,10 +192,15 @@ def test_device_stop_dispatches_before_optimistic_idle_update() -> None:
         _map_manager=None,
     )
 
-    def call_action(action: DreameMowerAction) -> dict[str, int]:
+    def call_action(
+        action: DreameMowerAction,
+        *,
+        enforce_availability: bool = True,
+    ) -> dict[str, int]:
         assert mower.status.started is True
         calls.append("stop")
         assert action is DreameMowerAction.STOP
+        assert enforce_availability is True
         return {"code": 0}
 
     def update_status(
@@ -214,6 +219,68 @@ def test_device_stop_dispatches_before_optimistic_idle_update() -> None:
 
     assert response == {"code": 0}
     assert calls == ["stop", "update"]
+
+
+def test_device_stop_bypasses_stale_availability_after_authoritative_read() -> None:
+    mower = SimpleNamespace(
+        status=SimpleNamespace(
+            fast_mapping=False,
+            go_to_zone=False,
+            started=False,
+        ),
+        schedule_update=Mock(),
+        _map_manager=None,
+        call_action=Mock(return_value={"code": 0}),
+    )
+
+    response = DreameMowerDevice.stop(mower, authoritative_task_active=True)
+
+    assert response == {"code": 0}
+    mower.call_action.assert_called_once_with(
+        DreameMowerAction.STOP,
+        enforce_availability=False,
+    )
+
+
+def test_authoritative_device_stop_never_docks_during_fast_mapping() -> None:
+    mower = SimpleNamespace(
+        status=SimpleNamespace(fast_mapping=True),
+        return_to_base=Mock(),
+    )
+
+    with pytest.raises(InvalidActionException, match="fast mapping"):
+        DreameMowerDevice.stop(mower, authoritative_task_active=True)
+
+    mower.return_to_base.assert_not_called()
+
+
+def test_stop_action_can_bypass_only_the_stale_local_availability_check() -> None:
+    protocol = SimpleNamespace(
+        action=Mock(return_value={"code": 0}),
+        dreame_cloud=False,
+    )
+    mower = SimpleNamespace(
+        action_mapping={DreameMowerAction.STOP: {"siid": 2, "aiid": 1}},
+        status=SimpleNamespace(started=False, returning=False, paused=False),
+        schedule_update=Mock(),
+        _map_select_time=None,
+        _consumable_change=False,
+        _protocol=protocol,
+        _last_change=0.0,
+        _last_settings_request=1.0,
+    )
+
+    with pytest.raises(InvalidActionException, match="unavailable"):
+        DreameMowerDevice.call_action(mower, DreameMowerAction.STOP)
+
+    response = DreameMowerDevice.call_action(
+        mower,
+        DreameMowerAction.STOP,
+        enforce_availability=False,
+    )
+
+    assert response == {"code": 0}
+    protocol.action.assert_called_once_with(2, 1, None)
 
 
 def _task_snapshot(
@@ -260,7 +327,9 @@ def test_cancel_current_task_waits_for_authoritative_inactive_state() -> None:
 
     assert cancelled is True
     client._async_call_device_method.assert_awaited_once_with(
-        "stop", reconcile_ambiguous=False
+        "stop",
+        reconcile_ambiguous=False,
+        method_kwargs={"authoritative_task_active": True},
     )
     assert client.async_refresh_authoritative_snapshot.await_count == 3
     deadlines = [
@@ -270,6 +339,53 @@ def test_cancel_current_task_waits_for_authoritative_inactive_state() -> None:
     assert deadlines[0] is None
     assert isinstance(deadlines[1], float)
     assert deadlines[2] == deadlines[1]
+
+
+def test_cancel_confirmation_window_starts_after_stop_dispatch() -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        side_effect=[
+            _task_snapshot(state="mowing", active=True, started=True),
+            _task_snapshot(state="idle", active=False),
+        ]
+    )
+    stop_completed = False
+
+    async def stop(*_args: object, **_kwargs: object) -> None:
+        nonlocal stop_completed
+        stop_completed = True
+
+    def deadline() -> float:
+        assert stop_completed is True
+        return 120.0
+
+    client._async_call_device_method = AsyncMock(side_effect=stop)
+
+    with (
+        patch(
+            "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+            "client.asyncio.sleep",
+            AsyncMock(),
+        ),
+        patch(
+            "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+            "client._task_cancel_confirmation_deadline",
+            deadline,
+        ),
+        patch(
+            "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+            "client.time.monotonic",
+            return_value=100.0,
+        ),
+    ):
+        assert asyncio.run(client.async_cancel_current_task()) is True
+
+    assert (
+        client.async_refresh_authoritative_snapshot.await_args_list[1].kwargs[
+            "deadline"
+        ]
+        == 120.0
+    )
 
 
 def test_cancel_current_task_is_idempotent_while_idle() -> None:
@@ -304,7 +420,9 @@ def test_cancel_current_task_uses_active_flags_when_session_state_is_unknown() -
 
     assert cancelled is True
     client._async_call_device_method.assert_awaited_once_with(
-        "stop", reconcile_ambiguous=False
+        "stop",
+        reconcile_ambiguous=False,
+        method_kwargs={"authoritative_task_active": True},
     )
 
 
@@ -326,7 +444,9 @@ def test_cancel_current_task_uses_active_flags_when_session_is_inactive() -> Non
         assert asyncio.run(client.async_cancel_current_task()) is True
 
     client._async_call_device_method.assert_awaited_once_with(
-        "stop", reconcile_ambiguous=False
+        "stop",
+        reconcile_ambiguous=False,
+        method_kwargs={"authoritative_task_active": True},
     )
 
 
@@ -400,7 +520,9 @@ def test_cancel_current_task_settles_after_ambiguous_stop_response() -> None:
         assert asyncio.run(client.async_cancel_current_task()) is True
 
     client._async_call_device_method.assert_awaited_once_with(
-        "stop", reconcile_ambiguous=False
+        "stop",
+        reconcile_ambiguous=False,
+        method_kwargs={"authoritative_task_active": True},
     )
 
 
@@ -449,7 +571,9 @@ def test_cancel_current_task_rejects_unsettled_active_state() -> None:
         asyncio.run(client.async_cancel_current_task())
 
     client._async_call_device_method.assert_awaited_once_with(
-        "stop", reconcile_ambiguous=False
+        "stop",
+        reconcile_ambiguous=False,
+        method_kwargs={"authoritative_task_active": True},
     )
     assert client.async_refresh_authoritative_snapshot.await_count == 12
 
@@ -476,7 +600,9 @@ def test_cancel_current_task_reports_failed_authoritative_readback() -> None:
         asyncio.run(client.async_cancel_current_task())
 
     client._async_call_device_method.assert_awaited_once_with(
-        "stop", reconcile_ambiguous=False
+        "stop",
+        reconcile_ambiguous=False,
+        method_kwargs={"authoritative_task_active": True},
     )
 
 
@@ -506,7 +632,9 @@ def test_cancel_current_task_reports_lost_final_readback_as_ambiguous() -> None:
         asyncio.run(client.async_cancel_current_task())
 
     client._async_call_device_method.assert_awaited_once_with(
-        "stop", reconcile_ambiguous=False
+        "stop",
+        reconcile_ambiguous=False,
+        method_kwargs={"authoritative_task_active": True},
     )
 
 
@@ -557,7 +685,9 @@ def test_cancel_current_task_ends_resumable_task_at_dock() -> None:
         assert asyncio.run(client.async_cancel_current_task()) is True
 
     client._async_call_device_method.assert_awaited_once_with(
-        "stop", reconcile_ambiguous=False
+        "stop",
+        reconcile_ambiguous=False,
+        method_kwargs={"authoritative_task_active": True},
     )
 
 
