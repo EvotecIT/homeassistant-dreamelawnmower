@@ -557,6 +557,50 @@ def test_async_map_switch_rejects_active_task_before_write() -> None:
     client._sync_switch_current_map.assert_not_called()
 
 
+def test_async_map_switch_rejects_non_mowing_started_task_before_write() -> None:
+    client = _client()
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        return_value=SimpleNamespace(
+            state="remote_control",
+            activity="remote_control",
+            mowing_session_active=False,
+            started=True,
+            mowing=False,
+            paused=False,
+            returning=False,
+        )
+    )
+    client._sync_switch_current_map = Mock()  # type: ignore[method-assign]
+
+    with pytest.raises(DreameLawnMowerCommandRejectedError, match="Finish or cancel"):
+        asyncio.run(client.async_switch_current_map(1))
+
+    client._sync_switch_current_map.assert_not_called()
+
+
+def test_async_map_switch_rejects_fast_mapping_before_write() -> None:
+    client = _client()
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        return_value=SimpleNamespace(
+            state="idle",
+            task_status="fast_mapping",
+            activity="idle",
+            raw_attributes={"fast_mapping": True},
+            mowing_session_active=False,
+            started=False,
+            mowing=False,
+            paused=False,
+            returning=False,
+        )
+    )
+    client._sync_switch_current_map = Mock()  # type: ignore[method-assign]
+
+    with pytest.raises(DreameLawnMowerCommandRejectedError, match="Finish or cancel"):
+        asyncio.run(client.async_switch_current_map(1))
+
+    client._sync_switch_current_map.assert_not_called()
+
+
 def test_async_map_switch_allows_docked_snapshot_with_unknown_session_flag() -> None:
     client = _client()
     client.async_refresh_authoritative_snapshot = AsyncMock(

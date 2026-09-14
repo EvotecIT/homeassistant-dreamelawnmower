@@ -224,6 +224,7 @@ def _task_snapshot(
     mowing: bool = False,
     paused: bool = False,
     returning: bool = False,
+    fast_mapping: bool = False,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         state=state,
@@ -233,6 +234,7 @@ def _task_snapshot(
         mowing=mowing,
         paused=paused,
         returning=returning,
+        raw_attributes={"fast_mapping": fast_mapping} if fast_mapping else {},
     )
 
 
@@ -257,6 +259,13 @@ def test_cancel_current_task_waits_for_authoritative_inactive_state() -> None:
     assert cancelled is True
     client._async_call_device_method.assert_awaited_once_with("stop")
     assert client.async_refresh_authoritative_snapshot.await_count == 3
+    deadlines = [
+        call.kwargs.get("deadline")
+        for call in client.async_refresh_authoritative_snapshot.await_args_list
+    ]
+    assert deadlines[0] is None
+    assert isinstance(deadlines[1], float)
+    assert deadlines[2] == deadlines[1]
 
 
 def test_cancel_current_task_is_idempotent_while_idle() -> None:
@@ -291,6 +300,61 @@ def test_cancel_current_task_uses_active_flags_when_session_state_is_unknown() -
 
     assert cancelled is True
     client._async_call_device_method.assert_awaited_once_with("stop")
+
+
+def test_cancel_current_task_uses_active_flags_when_session_is_inactive() -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        side_effect=[
+            _task_snapshot(state="remote_control", active=False, started=True),
+            _task_snapshot(state="idle", active=False),
+        ]
+    )
+    client._async_call_device_method = AsyncMock()
+
+    with patch(
+        "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+        "client.asyncio.sleep",
+        AsyncMock(),
+    ):
+        assert asyncio.run(client.async_cancel_current_task()) is True
+
+    client._async_call_device_method.assert_awaited_once_with("stop")
+
+
+def test_cancel_current_task_rejects_fast_mapping_without_docking() -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        return_value=_task_snapshot(
+            state="fast_mapping",
+            active=False,
+            started=True,
+            fast_mapping=True,
+        )
+    )
+    client._async_call_device_method = AsyncMock()
+
+    with pytest.raises(
+        DreameLawnMowerCommandRejectedError,
+        match="interprets Stop as Return to Dock",
+    ):
+        asyncio.run(client.async_cancel_current_task())
+
+    client._async_call_device_method.assert_not_awaited()
+
+
+def test_public_authoritative_refresh_forwards_deadline() -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    snapshot = _task_snapshot(state="idle", active=False)
+    client._async_refresh_authoritative_snapshot = AsyncMock(return_value=snapshot)
+
+    assert (
+        asyncio.run(client.async_refresh_authoritative_snapshot(deadline=123.0))
+        is snapshot
+    )
+    client._async_refresh_authoritative_snapshot.assert_awaited_once_with(
+        deadline=123.0
+    )
 
 
 def test_cancel_current_task_accepts_stop_race_after_inactive_readback() -> None:
