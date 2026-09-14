@@ -729,6 +729,7 @@ class DreameLawnMowerClient(
             ambiguous_stop_error = stop_error
 
         readable = False
+        latest_readback_failed = False
         delay = _TASK_CANCEL_CONFIRMATION_INITIAL_DELAY_SECONDS
         reads = 0
         while (
@@ -742,13 +743,24 @@ class DreameLawnMowerClient(
                     deadline=deadline
                 )
             except DreameLawnMowerConnectionError:
+                latest_readback_failed = True
                 delay = _TASK_CANCEL_CONFIRMATION_POLL_INTERVAL_SECONDS
                 continue
             readable = True
+            latest_readback_failed = False
             if not _snapshot_requires_task_cancel(snapshot):
                 return True
             delay = _TASK_CANCEL_CONFIRMATION_POLL_INTERVAL_SECONDS
 
+        if readable and latest_readback_failed:
+            readback_error = DreameLawnMowerConnectionError(
+                "The mower may have received the cancel request, but final "
+                "authoritative state readback became unavailable after it was "
+                "last observed active. Refresh the mower state before trying again."
+            )
+            if ambiguous_stop_error is not None:
+                raise readback_error from ambiguous_stop_error
+            raise readback_error
         if readable:
             if ambiguous_stop_error is not None:
                 raise DreameLawnMowerConnectionError(

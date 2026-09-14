@@ -480,6 +480,36 @@ def test_cancel_current_task_reports_failed_authoritative_readback() -> None:
     )
 
 
+def test_cancel_current_task_reports_lost_final_readback_as_ambiguous() -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    active = _task_snapshot(state="mowing", active=True, started=True, mowing=True)
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        side_effect=[
+            active,
+            active,
+            *[DreameLawnMowerConnectionError("offline")] * 10,
+        ]
+    )
+    client._async_call_device_method = AsyncMock()
+
+    with (
+        patch(
+            "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+            "client.asyncio.sleep",
+            AsyncMock(),
+        ),
+        pytest.raises(
+            DreameLawnMowerConnectionError,
+            match="final authoritative state readback became unavailable",
+        ),
+    ):
+        asyncio.run(client.async_cancel_current_task())
+
+    client._async_call_device_method.assert_awaited_once_with(
+        "stop", reconcile_ambiguous=False
+    )
+
+
 def test_cancel_current_task_honors_confirmed_dock_over_stale_returning_state() -> None:
     client = object.__new__(DreameLawnMowerClient)
     client.async_refresh_authoritative_snapshot = AsyncMock(

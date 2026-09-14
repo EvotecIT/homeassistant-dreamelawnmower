@@ -525,6 +525,32 @@ def test_coordinator_switch_current_map_updates_device_and_scoped_caches() -> No
     assert coordinator.schedules["active_selection_available"] is False
 
 
+def test_coordinator_cancel_current_task_waits_for_device_refresh_lock() -> None:
+    async def scenario() -> None:
+        coordinator = object.__new__(DreameLawnMowerCoordinator)
+        coordinator.client = SimpleNamespace(
+            async_cancel_current_task=AsyncMock(return_value=True),
+            runtime_map_identity_expires_at=None,
+        )
+        coordinator._runtime_map_identity_lock = asyncio.Lock()
+        coordinator._device_refresh_lock = asyncio.Lock()
+        coordinator.async_request_refresh = AsyncMock()
+        coordinator.async_update_listeners = Mock()
+
+        await coordinator._device_refresh_lock.acquire()
+        task = asyncio.create_task(coordinator.async_cancel_current_task())
+        await asyncio.sleep(0)
+
+        coordinator.client.async_cancel_current_task.assert_not_awaited()
+        coordinator._device_refresh_lock.release()
+
+        assert await task is True
+        coordinator.client.async_cancel_current_task.assert_awaited_once_with()
+        coordinator.async_request_refresh.assert_awaited_once_with()
+
+    asyncio.run(scenario())
+
+
 def test_app_map_refresh_invalidates_schedule_selection_after_external_switch() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator.client = SimpleNamespace(
@@ -1115,6 +1141,25 @@ def test_lawn_mower_switch_current_map_service_updates_scope_and_refreshes() -> 
     entity.coordinator = coordinator
 
     asyncio.run(entity.async_switch_current_map(1))
+
+    coordinator.async_switch_current_map.assert_awaited_once_with(1)
+
+
+def test_lawn_mower_switch_current_map_translates_task_rejection() -> None:
+    coordinator = SimpleNamespace(
+        app_maps=_app_maps(current_map_index=0),
+        batch_device_data=_batch_device_data(),
+        async_switch_current_map=AsyncMock(
+            side_effect=DreameLawnMowerCommandRejectedError(
+                "Finish or cancel the active task first."
+            )
+        ),
+    )
+    entity = object.__new__(DreameLawnMower)
+    entity.coordinator = coordinator
+
+    with pytest.raises(HomeAssistantError, match="Finish or cancel"):
+        asyncio.run(entity.async_switch_current_map(1))
 
     coordinator.async_switch_current_map.assert_awaited_once_with(1)
 

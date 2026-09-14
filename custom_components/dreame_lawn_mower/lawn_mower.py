@@ -674,7 +674,9 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         """Switch the mower's active app map."""
         normalized_map_index = int(map_index)
         self._ensure_known_map_index(normalized_map_index)
-        await self.coordinator.async_switch_current_map(normalized_map_index)
+        await _async_run_targeted_mowing_command(
+            self.coordinator.async_switch_current_map(normalized_map_index)
+        )
 
     async def async_cancel_current_task(self) -> None:
         """End the current mower task without returning to the dock."""

@@ -2381,12 +2381,15 @@ class DreameLawnMowerCoordinator(
         self._invalidate_runtime_map_identity()
         if not hasattr(self, "_runtime_map_identity_lock"):
             self._runtime_map_identity_lock = asyncio.Lock()
+        if not hasattr(self, "_device_refresh_lock"):
+            self._device_refresh_lock = asyncio.Lock()
         async with self._runtime_map_identity_lock:
-            try:
-                await self.client.async_switch_current_map(map_index)
-            finally:
-                # Expire outcomes even when the command's response is lost.
-                self._invalidate_runtime_map_identity()
+            async with self._device_refresh_lock:
+                try:
+                    await self.client.async_switch_current_map(map_index)
+                finally:
+                    # Expire outcomes even when the command's response is lost.
+                    self._invalidate_runtime_map_identity()
         if self.selected_map_index != map_index:
             self._invalidate_schedule_map_hint()
         self.selected_map_index = map_index
@@ -2409,9 +2412,12 @@ class DreameLawnMowerCoordinator(
         """End the current mower task without docking and refresh its state."""
         if not hasattr(self, "_runtime_map_identity_lock"):
             self._runtime_map_identity_lock = asyncio.Lock()
+        if not hasattr(self, "_device_refresh_lock"):
+            self._device_refresh_lock = asyncio.Lock()
         async with self._runtime_map_identity_lock:
-            cancelled = await self.client.async_cancel_current_task()
-            self._invalidate_runtime_map_identity()
+            async with self._device_refresh_lock:
+                cancelled = await self.client.async_cancel_current_task()
+                self._invalidate_runtime_map_identity()
         await self.async_request_refresh()
         self.async_update_listeners()
         return cancelled
