@@ -167,6 +167,7 @@ from .schedule import (
 )
 from .stream_health import DreameLawnMowerStreamUrlProbeResult, probe_stream_url
 from .video_provisioning_status import (
+    XP2P_PROVISIONING_DEVICE_PERMISSION_DENIED,
     XP2P_PROVISIONING_DEVICE_TRIPLE_MISSING,
     classify_xp2p_provisioning_issue,
 )
@@ -265,6 +266,7 @@ __all__ = [
     "XP2P_PROTOCOL_AUTO",
     "XP2P_PROTOCOL_TCP",
     "XP2P_PROTOCOL_UDP",
+    "XP2P_PROVISIONING_DEVICE_PERMISSION_DENIED",
     "XP2P_PROVISIONING_DEVICE_TRIPLE_MISSING",
     "MAP_PROBE_PROPERTY_KEYS",
     "MAP_HISTORY_PROPERTY_KEYS",

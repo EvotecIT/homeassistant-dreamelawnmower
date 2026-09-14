@@ -1,0 +1,39 @@
+{
+  "operation": "camera_stream_inputs",
+  "version": 1,
+  "stages": [
+    {
+      "stage": "cloud_p2p_info",
+      "response": {
+        "type": "object",
+        "codes": [
+          {
+            "path": "$.code",
+            "value": 10000
+          }
+        ],
+        "messages": [
+          {
+            "path": "$.msg",
+            "text": "用户对该设备无权限"
+          }
+        ]
+      },
+      "result": {
+        "p2p_info_present": false,
+        "available": true
+      }
+    },
+    {
+      "stage": "cloud_user_eligibility",
+      "result": {
+        "is_device_user": "False"
+      }
+    }
+  ],
+  "ready": false,
+  "missing_required": [
+    "p2p_info"
+  ],
+  "completed": true
+}

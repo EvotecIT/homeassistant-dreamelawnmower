@@ -499,6 +499,72 @@ def test_video_camera_explains_unprovisioned_device_triple() -> None:
     assert "product_id" not in message
 
 
+def test_video_camera_explains_shared_account_permission_denial() -> None:
+    diagnostics = load_json_fixture(
+        "g2583_eu_xp2p_shared_permission_denied.json"
+    )
+    inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+        source="dreame_third_video_tx",
+        did="sanitized-device",
+        product_id="present",
+        device_name="present",
+        diagnostics=diagnostics,
+    )
+
+    message = video_camera_module._runtime_inputs_not_ready_message(inputs)
+
+    assert "backend denied this account access" in message
+    assert "Video sharing may be enabled" in message
+    assert "report the sharing issue to the vendor" in message
+    assert "owner's account" in message
+    assert "p2p_info" not in message
+
+
+def test_video_camera_cloud_start_surfaces_device_permission_denied() -> None:
+    async def _run() -> tuple[str | None, str | None, str | None]:
+        diagnostics = load_json_fixture(
+            "g2583_eu_xp2p_shared_permission_denied.json"
+        )
+        inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+            source="dreame_third_video_tx",
+            did="sanitized-device",
+            product_id="present",
+            device_name="present",
+            diagnostics=diagnostics,
+        )
+
+        class _Client:
+            async def async_get_camera_stream_runtime_inputs(self) -> object:
+                return inputs
+
+            async def async_set_camera_stream_enabled(
+                self,
+                _enabled: bool,
+            ) -> None:
+                raise AssertionError("Denied video must not be enabled")
+
+        entity = _uninitialized_entity()
+        entity.coordinator.client = _Client()
+        entity.coordinator.data = object()
+        entity._prepared_runtime = object()
+        entity._async_stop_active_session = lambda: asyncio.sleep(0)
+        entity.async_write_ha_state = lambda: None
+
+        source = await entity._async_start_stream()
+        return (
+            source,
+            entity._last_error,
+            entity._last_runtime_inputs_provisioning_issue,
+        )
+
+    source, error, issue = asyncio.run(_run())
+
+    assert source is None
+    assert error is not None
+    assert "denied this account access" in error
+    assert issue == "device_permission_denied"
+
+
 def test_video_camera_cloud_start_surfaces_unprovisioned_device_triple() -> None:
     async def _run() -> tuple[str | None, str | None, str | None]:
         diagnostics = load_json_fixture("q2501a_ru_xp2p_unprovisioned.json")

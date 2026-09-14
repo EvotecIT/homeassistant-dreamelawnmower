@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 XP2P_PROVISIONING_DEVICE_TRIPLE_MISSING = "device_triple_missing"
+XP2P_PROVISIONING_DEVICE_PERMISSION_DENIED = "device_permission_denied"
 
 _DEVICE_TRIPLE_REQUIRED_FIELDS = frozenset(
     {"product_id", "device_name", "p2p_info"}
@@ -21,6 +22,13 @@ _DEVICE_TRIPLE_MISSING_MESSAGES = frozenset(
 _DEVICE_TRIPLE_STAGES = frozenset(
     {"cloud_device_identity", "cloud_p2p_info"}
 )
+_DEVICE_PERMISSION_DENIED_MESSAGES = frozenset(
+    {
+        "用户对该设备无权限",
+        "user has no permission for this device",
+        "user does not have permission for this device",
+    }
+)
 
 
 def classify_xp2p_provisioning_issue(
@@ -29,9 +37,7 @@ def classify_xp2p_provisioning_issue(
     missing_required: Sequence[str],
 ) -> str | None:
     """Return a stable provisioning issue from sanitized cloud-stage evidence."""
-    if not _DEVICE_TRIPLE_REQUIRED_FIELDS.issubset(missing_required):
-        return None
-
+    missing = frozenset(missing_required)
     matching_stages: set[str] = set()
     stages = diagnostics.get("stages")
     if not _is_sequence(stages):
@@ -46,12 +52,34 @@ def classify_xp2p_provisioning_issue(
         response = stage.get("response")
         if not isinstance(response, Mapping):
             continue
+        if (
+            stage_name == "cloud_p2p_info"
+            and "p2p_info" in missing
+            and _has_device_permission_denied_response(response)
+        ):
+            return XP2P_PROVISIONING_DEVICE_PERMISSION_DENIED
         if _has_device_triple_missing_response(response):
             matching_stages.add(str(stage_name))
 
-    if matching_stages == _DEVICE_TRIPLE_STAGES:
+    if (
+        _DEVICE_TRIPLE_REQUIRED_FIELDS.issubset(missing)
+        and matching_stages == _DEVICE_TRIPLE_STAGES
+    ):
         return XP2P_PROVISIONING_DEVICE_TRIPLE_MISSING
     return None
+
+
+def _has_device_permission_denied_response(response: Mapping[str, Any]) -> bool:
+    messages = response.get("messages")
+    if not _is_sequence(messages):
+        return False
+
+    return any(
+        isinstance(item, Mapping)
+        and str(item.get("text") or "").strip().casefold()
+        in _DEVICE_PERMISSION_DENIED_MESSAGES
+        for item in messages
+    )
 
 
 def _has_device_triple_missing_response(response: Mapping[str, Any]) -> bool:
