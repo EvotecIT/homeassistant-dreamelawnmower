@@ -1138,7 +1138,14 @@ class _DreameLawnMowerClientMapsMixin(
                     # route when the dedicated property remains inconclusive.
                     announcement_probe_pending = False
                 observed_announcement_capability = announcement_capability
-            if announcement_polled:
+            if (
+                announcement_polled
+                and latest_announcement.get("status") != "budget_exhausted"
+            ):
+                # A call started just before the outer deadline can run out of
+                # budget before it reaches the cloud transport. Preserve the
+                # last actual property observation instead of replacing useful
+                # diagnostics with that scheduling race.
                 attempt_diagnostics["latest_announcement"] = latest_announcement
                 attempt_diagnostics["announcement_poll_result"] = (
                     "observed"

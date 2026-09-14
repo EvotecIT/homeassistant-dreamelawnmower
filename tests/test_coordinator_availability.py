@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from custom_components.dreame_lawn_mower import (
@@ -1615,9 +1616,31 @@ def _coordinator_for_confirmed_preference_write(
     coordinator.async_refresh_batch_device_data = AsyncMock(return_value={})
     coordinator.async_request_refresh = AsyncMock()
     coordinator.client = SimpleNamespace(
+        descriptor=SimpleNamespace(model="dreame.mower.g2408"),
         async_plan_app_mowing_preference_update=AsyncMock(return_value=confirmed)
     )
     return coordinator
+
+
+def test_coordinator_rejects_manual_height_write_before_client_boundary() -> None:
+    coordinator = _coordinator_for_confirmed_preference_write(
+        batch_device_data=None,
+        confirmed={},
+    )
+    coordinator.client.descriptor.model = "mova.mower.g2583"
+
+    with pytest.raises(HomeAssistantError, match="adjusted manually"):
+        asyncio.run(
+            coordinator.async_plan_mowing_preference_update(
+                map_index=0,
+                area_id=1,
+                changes={"mowing_height_cm": 4.5},
+                execute=True,
+                confirm_write=True,
+            )
+        )
+
+    coordinator.client.async_plan_app_mowing_preference_update.assert_not_awaited()
 
 
 def test_confirmed_preference_mode_readback_wins_over_stale_batch_cache() -> None:

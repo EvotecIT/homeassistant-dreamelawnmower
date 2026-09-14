@@ -57,6 +57,7 @@ from .dreame_lawn_mower_client.schedule import (
     decode_schedule_payload_text,
     encode_schedule_payload_text,
 )
+from .mowing_height import guard_mowing_height_changes
 from .performance import DreameLawnMowerPerformanceTracker
 from .preference_cache import (
     CONFIRMED_PREFERENCE_RETENTION,
@@ -1602,6 +1603,10 @@ class DreameLawnMowerCoordinator(
         confirm_write: bool,
     ) -> dict[str, Any]:
         """Serialize full-payload mowing preference reads and writes."""
+        guard_mowing_height_changes(
+            getattr(getattr(self.client, "descriptor", None), "model", None),
+            changes,
+        )
         async with self._preference_write_lock:
             try:
                 result = await self.client.async_plan_app_mowing_preference_update(
