@@ -1026,6 +1026,8 @@ def remote_control_block_reason(snapshot: Any) -> str | None:
         return "Remote control is blocked while mapping."
     if bool(raw_attributes.get("fast_mapping")):
         return "Remote control is blocked while fast mapping."
+    if state == "repositioning" or activity == "repositioning":
+        return "Remote control is blocked while the mower is repositioning."
     if (
         isinstance(battery_level, int | float)
         and battery_level < MIN_REMOTE_CONTROL_BATTERY_LEVEL

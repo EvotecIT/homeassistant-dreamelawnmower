@@ -164,6 +164,13 @@ def mower_state_label(
     if normalized_model in _VIAX_500_MODELS:
         definition = _VIAX_500_STATE_OVERRIDES.get(str(value))
         if definition is not None:
+            localized_label = (
+                MOWER_STATE_LABELS.get(language, {}).get(str(value))
+                if language != "en"
+                else None
+            )
+            if localized_label:
+                return localized_label
             return definition[2]
     label_map = MOWER_STATE_LABELS.get(language) or MOWER_STATE_LABELS["en"]
     return label_map.get(str(value))

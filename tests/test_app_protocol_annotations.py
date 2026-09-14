@@ -70,6 +70,17 @@ def test_property_annotations_apply_exact_viax_500_state_catalog() -> None:
     assert entry["decoded_label_source"] == "bundled_mower_protocol"
 
 
+def test_property_annotations_preserve_available_localized_viax_labels() -> None:
+    entry = DreameLawnMowerClient._annotate_cloud_property_entry(
+        {"key": "2.1", "value": 1},
+        language="zh",
+        model="mova.mower.g2583",
+    )
+
+    assert entry["state_key"] == "mowing"
+    assert entry["decoded_label"] == "割草中"
+
+
 def test_property_annotations_do_not_apply_viax_state_to_other_models() -> None:
     entry = DreameLawnMowerClient._annotate_cloud_property_entry(
         {"key": "2.1", "value": 19},

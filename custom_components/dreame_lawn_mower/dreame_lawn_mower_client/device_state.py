@@ -480,7 +480,7 @@ class _DreameMowerDeviceStateMixin:
             "changed_at": changed_at,
         }
         if key == MOWER_STATE_PROPERTY_KEY:
-            active_states = {"mowing", "paused"}
+            active_states = {"mowing", "paused", "error"}
             info = getattr(self, "info", None)
             model = getattr(info, "model", None) if info else None
             current_state = mower_state_key(value, model=model)

@@ -295,6 +295,23 @@ def test_realtime_state_tracks_continuous_active_session_boundary() -> None:
     )
 
 
+def test_viax_error_pause_remains_in_the_active_session() -> None:
+    device, _ = _device_stub()
+    device.info = SimpleNamespace(model="mova.mower.g2583")
+
+    for received_at, value in ((100.0, 1), (101.0, 4), (102.0, 1)):
+        device.last_realtime_message = {"received_at": received_at}
+        DreameMowerDevice._remember_realtime_property(
+            device,
+            {"siid": 2, "piid": 1, "value": value},
+            None,
+        )
+        assert (
+            device.realtime_properties["2.1"]["active_session_started_at"]
+            == 100.0
+        )
+
+
 def test_reconnect_starts_a_new_realtime_ordering_epoch() -> None:
     """Cross-property timestamps from before reconnect must not be reused."""
     device, _ = _device_stub()
