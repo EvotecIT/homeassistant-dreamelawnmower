@@ -84,6 +84,34 @@ def test_viax_shared_trace_classifies_device_permission_denied() -> None:
     )
 
 
+def test_owner_account_permission_response_is_not_mislabeled_as_shared() -> None:
+    diagnostics = deepcopy(
+        load_json_fixture("g2583_eu_xp2p_shared_permission_denied.json")
+    )
+    diagnostics["stages"][1]["result"]["is_device_user"] = "True"
+
+    issue = classify_xp2p_provisioning_issue(
+        diagnostics,
+        missing_required=("p2p_info",),
+    )
+
+    assert issue is None
+
+
+def test_permission_response_without_eligibility_is_not_mislabeled_as_shared() -> None:
+    diagnostics = deepcopy(
+        load_json_fixture("g2583_eu_xp2p_shared_permission_denied.json")
+    )
+    diagnostics["stages"] = diagnostics["stages"][:1]
+
+    issue = classify_xp2p_provisioning_issue(
+        diagnostics,
+        missing_required=("p2p_info",),
+    )
+
+    assert issue is None
+
+
 def test_ineligible_account_without_permission_response_is_not_mislabeled() -> None:
     diagnostics = deepcopy(
         load_json_fixture("g2583_eu_xp2p_shared_permission_denied.json")
