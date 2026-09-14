@@ -3,34 +3,22 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.exceptions import HomeAssistantError
 
 from .control_options import current_map_index, current_zone_entries, map_entries
-from .coordinator import DreameLawnMowerCoordinator
 from .dreame_lawn_mower_client.mowing_preferences import (
     MOWING_PREFERENCE_MODE_FIELD,
 )
+from .mowing_height import guard_mowing_height_changes
 from .sensor_map_data import (
     _selected_map_preference_summary,
     _selected_zone_preference_summary,
 )
 
-MOWING_HEIGHT_MIN_CM = 3.0
-MOWING_HEIGHT_MAX_CM = 7.0
-MOWING_HEIGHT_FOUR_WHEEL_MAX_CM = 10.0
-MOWING_HEIGHT_STEP_CM = 0.5
-FOUR_WHEEL_MOWER_MODEL_PREFIXES = (
-    "dreame.mower.q2501",
-    "dreame.mower.g2541",
-)
-MANUAL_MOWING_HEIGHT_MODELS = frozenset(
-    {
-        "mova.mower.g2552",
-        "g2552",
-    }
-)
+if TYPE_CHECKING:
+    from .coordinator import DreameLawnMowerCoordinator
 
 PREFERENCE_MODE_GLOBAL = "Global"
 PREFERENCE_MODE_CUSTOM = "Custom"
@@ -139,23 +127,6 @@ async def async_update_selected_active_preference(
     )
 
 
-def mowing_height_limits(model: str | None) -> tuple[float, float]:
-    """Return official mower-family cutting-height bounds."""
-    normalized = str(model or "").strip().casefold()
-    maximum = (
-        MOWING_HEIGHT_FOUR_WHEEL_MAX_CM
-        if normalized.startswith(FOUR_WHEEL_MOWER_MODEL_PREFIXES)
-        else MOWING_HEIGHT_MAX_CM
-    )
-    return MOWING_HEIGHT_MIN_CM, maximum
-
-
-def mowing_height_adjustment_supported(model: str | None) -> bool:
-    """Return whether the mower supports changing blade height electronically."""
-    normalized = str(model or "").strip().casefold()
-    return normalized not in MANUAL_MOWING_HEIGHT_MODELS
-
-
 async def async_update_selected_mowing_preference(
     coordinator: DreameLawnMowerCoordinator,
     *,
@@ -177,13 +148,7 @@ async def async_update_selected_mowing_preference(
         "model",
         None,
     )
-    if (
-        "mowing_height_cm" in changes
-        and not mowing_height_adjustment_supported(model)
-    ):
-        raise HomeAssistantError(
-            "Mowing height is adjusted manually on this mower."
-        )
+    guard_mowing_height_changes(model, changes)
 
     maps = map_entries(coordinator.app_maps, coordinator.batch_device_data)
     if not maps:

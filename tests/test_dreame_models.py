@@ -222,6 +222,7 @@ def test_display_name_for_model_prefers_known_mapping_over_fallback_name() -> No
         ("mova.mower.g2405c", "MOVA 1000"),
         ("mova.mower.g2529b", "LiDAX Ultra 800"),
         ("mova.mower.g2552", "VIAX 250"),
+        ("mova.mower.g2583", "VIAX 500"),
     ],
 )
 def test_display_name_for_submitted_model_identifiers(

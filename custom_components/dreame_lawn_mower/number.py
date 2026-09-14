@@ -14,16 +14,18 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity
-from .mowing_preference_control import (
+from .mowing_height import (
     MOWING_HEIGHT_MAX_CM,
     MOWING_HEIGHT_MIN_CM,
     MOWING_HEIGHT_STEP_CM,
+    mowing_height_adjustment_supported,
+    mowing_height_limits,
+)
+from .mowing_preference_control import (
     PREFERENCE_MODE_CUSTOM,
     PREFERENCE_MODE_GLOBAL,
     async_update_selected_active_preference,
     async_update_selected_mowing_preference,
-    mowing_height_adjustment_supported,
-    mowing_height_limits,
     selected_active_preference_attributes,
     selected_map_global_preference_attributes,
     selected_map_mowing_height,

@@ -17,7 +17,7 @@ from custom_components.dreame_lawn_mower.coordinator import (
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     decode_batch_mowing_preferences,
 )
-from custom_components.dreame_lawn_mower.mowing_preference_control import (
+from custom_components.dreame_lawn_mower.mowing_height import (
     mowing_height_adjustment_supported,
     mowing_height_limits,
 )
@@ -219,13 +219,23 @@ def test_mowing_height_number_requires_custom_mode() -> None:
     coordinator.client.async_plan_app_mowing_preference_update.assert_not_awaited()
 
 
-def test_viax_250_reports_manual_only_mowing_height() -> None:
-    coordinator = _coordinator(model="mova.mower.g2552")
+@pytest.mark.parametrize(
+    "model",
+    [
+        "mova.mower.g2405a",
+        "mova.mower.g2405b",
+        "mova.mower.g2405c",
+        "mova.mower.g2552",
+        "mova.mower.g2583",
+    ],
+)
+def test_manual_height_mowers_reject_electronic_adjustment(model: str) -> None:
+    coordinator = _coordinator(model=model)
     entity = object.__new__(DreameLawnMowerSelectedZoneMowingHeightNumber)
     entity.coordinator = coordinator
     entity._descriptor = coordinator.client.descriptor
 
-    assert mowing_height_adjustment_supported("mova.mower.g2552") is False
+    assert mowing_height_adjustment_supported(model) is False
     assert entity.native_value == 4.0
     assert entity.available is False
     assert "manually" in entity.extra_state_attributes["write_unavailable_reason"]
@@ -351,6 +361,11 @@ def test_mowing_height_limits_follow_verified_mower_families() -> None:
     assert mowing_height_limits("dreame.mower.g2408") == (3.0, 7.0)
     assert mowing_height_limits("dreame.mower.q2501a") == (3.0, 10.0)
     assert mowing_height_limits("dreame.mower.g2541e") == (3.0, 10.0)
+    assert mowing_height_limits("mova.mower.g2529b") == (3.0, 10.0)
+    assert mowing_height_limits("mova.mower.g2529f") == (3.0, 10.0)
+    assert mowing_height_limits("mova.mower.g2584a") == (3.0, 10.0)
+    assert mowing_height_limits("mova.mower.g2552") == (2.0, 6.0)
+    assert mowing_height_limits("mova.mower.g2583") == (2.0, 6.0)
 
 
 def test_active_preference_select_reads_and_writes_custom_zone() -> None:
