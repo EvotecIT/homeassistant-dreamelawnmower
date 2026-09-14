@@ -174,8 +174,25 @@ def _mowing_preference_diagnostics(coordinator: object) -> dict[str, Any] | None
         and not isinstance(errors, str | bytes | bytearray)
         else 0
     )
+    pending_confirmations = []
+    for confirmation in getattr(coordinator, "_pending_preference_confirmations", []):
+        confirmed_at = getattr(confirmation, "confirmed_at", None)
+        pending_confirmations.append(
+            {
+                "confirmed_at": (
+                    confirmed_at.isoformat()
+                    if hasattr(confirmed_at, "isoformat")
+                    else None
+                ),
+                "map_index": getattr(confirmation, "map_index", None),
+                "area_id": getattr(confirmation, "area_id", None),
+                "field": getattr(confirmation, "field", None),
+                "versions": dict(getattr(confirmation, "version_values", {}) or {}),
+            }
+        )
     result = {
         "captured_at": batch.get("captured_at"),
+        "cache_source": batch.get("source"),
         "source": preferences.get("source"),
         "available": preferences.get("available"),
         "property_hint": preferences.get("property_hint"),
@@ -184,6 +201,8 @@ def _mowing_preference_diagnostics(coordinator: object) -> dict[str, Any] | None
         "error_count": error_count,
         "errors": errors if error_count else [],
         "payload_shape": preferences.get("payload_shape"),
+        "pending_confirmation_count": len(pending_confirmations),
+        "pending_confirmations": pending_confirmations,
     }
     return sanitize_debug_data(result)
 

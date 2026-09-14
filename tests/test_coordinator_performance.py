@@ -2563,23 +2563,50 @@ def test_batch_metadata_reuses_fresh_schedule_fetch() -> None:
         }
         coordinator.schedules_refreshed_at = datetime.now(UTC)
         coordinator.app_maps = {"current_map_index": 0}
+        direct_preferences = {
+            "source": "app_action_mowing_preferences",
+            "available": True,
+            "maps": [
+                {
+                    "idx": 0,
+                    "mode": 0,
+                    "area_count": 1,
+                    "preferences": [
+                        {
+                            "area_id": 0,
+                            "version": 1,
+                            "reported_version": 1,
+                            "mowing_height_cm": 4.5,
+                        }
+                    ],
+                }
+            ],
+            "errors": [],
+        }
         coordinator.client = SimpleNamespace(
             async_get_batch_schedules=AsyncMock(),
-            async_get_batch_mowing_preferences=AsyncMock(
-                return_value={"maps": []}
-            ),
+            async_get_mowing_preferences=AsyncMock(return_value=direct_preferences),
+            async_get_batch_mowing_preferences=AsyncMock(),
             async_get_batch_ota_info=AsyncMock(return_value={"available": True}),
         )
 
-        schedule, preferences, ota, generation = (
-            await coordinator._async_fetch_batch_device_data()
-        )
+        (
+            schedule,
+            preferences,
+            ota,
+            generation,
+            authoritative_preferences,
+            batch_preferences,
+        ) = await coordinator._async_fetch_batch_device_data()
 
         assert schedule is coordinator.schedules
-        assert preferences == {"maps": []}
+        assert preferences is direct_preferences
         assert ota == {"available": True}
         assert generation == 0
+        assert authoritative_preferences is direct_preferences
+        assert batch_preferences is None
         coordinator.client.async_get_batch_schedules.assert_not_awaited()
+        coordinator.client.async_get_batch_mowing_preferences.assert_not_awaited()
 
     asyncio.run(scenario())
 
@@ -2609,13 +2636,20 @@ def test_forced_batch_metadata_bypasses_fresh_merged_schedule_cache() -> None:
             async_get_batch_ota_info=AsyncMock(return_value={"available": True}),
         )
 
-        schedule, preferences, ota, _generation = (
-            await coordinator._async_fetch_batch_device_data(force=True)
-        )
+        (
+            schedule,
+            preferences,
+            ota,
+            _generation,
+            direct_preferences,
+            batch_preferences,
+        ) = await coordinator._async_fetch_batch_device_data(force=True)
 
         assert schedule is fresh_batch_schedule
         assert preferences == {"maps": []}
         assert ota == {"available": True}
+        assert direct_preferences is None
+        assert batch_preferences is None
         coordinator.client.async_get_batch_schedules.assert_awaited_once_with(
             include_raw=False,
             map_index_hint=0,

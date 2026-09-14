@@ -75,7 +75,7 @@ class _FakePreferenceCloud:
             payload_data = self.preference_payloads.get(
                 (idx, region),
                 [
-                    8,
+                    9 if region == 12 else 8,
                     idx,
                     region,
                     1,
@@ -199,6 +199,7 @@ def test_summarize_mowing_preference_info_decodes_mode_and_area_versions() -> No
         "mode": 1,
         "mode_name": "custom",
         "area_count": 1,
+        "area_inventory_valid": True,
         "areas": [{"area_id": 11, "version": 8}],
     }
 
@@ -249,6 +250,259 @@ def test_get_mowing_preferences_can_limit_maps_and_include_raw() -> None:
     assert [call["t"] for call in cloud.calls] == ["PREI", "PRE", "PRE"]
 
 
+def test_get_mowing_preferences_accepts_global_mode_without_pre_records() -> None:
+    client = _client()
+    cloud = _FakePreferenceCloud()
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_get_mowing_preferences(map_indices=[1])
+
+    assert result["available"] is True
+    assert result["maps"] == [
+        {
+            "idx": 1,
+            "label": "map_1",
+            "available": True,
+            "preferences": [],
+            "mode": 0,
+            "mode_name": "global",
+            "area_count": 0,
+            "advertised_area_ids": [],
+        }
+    ]
+    assert [call["t"] for call in cloud.calls] == ["PREI"]
+
+
+def test_get_mowing_preferences_rejects_unsupported_prei_mode() -> None:
+    client = _client()
+    cloud = _FakePreferenceCloud()
+    cloud.modes[0] = 2
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_get_mowing_preferences(map_indices=[0])
+
+    target_map = result["maps"][0]
+    assert result["available"] is False
+    assert target_map["available"] is False
+    assert target_map["mode"] == 2
+    assert target_map["mode_name"] == "unknown_2"
+    assert target_map["preferences"]
+    assert "unsupported preference mode" in target_map["errors"][0]["error"]
+
+
+@pytest.mark.parametrize(
+    ("advertised_versions", "expected_error"),
+    [
+        ([[11, 8], [None, 9]], "invalid area identity"),
+        ([[11, 8], [11, 9]], "duplicate area identity"),
+    ],
+)
+def test_get_mowing_preferences_reports_invalid_prei_area_identity(
+    advertised_versions: list[list[object]],
+    expected_error: str,
+) -> None:
+    client = _client()
+    cloud = _FakePreferenceCloud()
+    call_app_action = cloud.call_app_action
+
+    def malformed_info_call(
+        payload: dict[str, object],
+        *,
+        siid: int = 2,
+        aiid: int = 50,
+    ) -> dict[str, object]:
+        result = call_app_action(payload, siid=siid, aiid=aiid)
+        if payload.get("t") == "PREI" and payload.get("m") == "g":
+            result["out"][0]["d"]["ver"] = advertised_versions
+        return result
+
+    cloud.call_app_action = malformed_info_call  # type: ignore[method-assign]
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_get_mowing_preferences(map_indices=[0])
+
+    target_map = result["maps"][0]
+    assert "area_count" not in target_map
+    assert "advertised_area_ids" not in target_map
+    assert [item["area_id"] for item in target_map["preferences"]] == [11]
+    assert target_map["errors"][0]["stage"] == "preference_info"
+    assert target_map["errors"][0]["area_position"] == 1
+    assert expected_error in target_map["errors"][0]["error"]
+    assert [call["t"] for call in cloud.calls] == ["PREI", "PRE"]
+
+
+@pytest.mark.parametrize(
+    "advertised_versions",
+    [None, {}, [[11]], [[True, 8]], [[11, True]]],
+)
+def test_get_mowing_preferences_rejects_malformed_prei_inventory(
+    advertised_versions: object,
+) -> None:
+    client = _client()
+    cloud = _FakePreferenceCloud()
+    call_app_action = cloud.call_app_action
+
+    def malformed_info_call(
+        payload: dict[str, object],
+        *,
+        siid: int = 2,
+        aiid: int = 50,
+    ) -> dict[str, object]:
+        result = call_app_action(payload, siid=siid, aiid=aiid)
+        if payload.get("t") == "PREI" and payload.get("m") == "g":
+            result["out"][0]["d"]["ver"] = advertised_versions
+        return result
+
+    cloud.call_app_action = malformed_info_call  # type: ignore[method-assign]
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_get_mowing_preferences(map_indices=[0])
+
+    target_map = result["maps"][0]
+    assert "area_count" not in target_map
+    assert "advertised_area_ids" not in target_map
+    assert target_map["preferences"] == []
+    assert target_map["available"] is True
+    assert target_map["errors"]
+    assert all(error["idx"] == 0 for error in target_map["errors"])
+    assert any("PREI returned" in error["error"] for error in target_map["errors"])
+
+
+def test_get_mowing_preferences_rejects_stale_pre_version() -> None:
+    client = _client()
+    cloud = _FakePreferenceCloud()
+    call_app_action = cloud.call_app_action
+
+    def stale_version_call(
+        payload: dict[str, object],
+        *,
+        siid: int = 2,
+        aiid: int = 50,
+    ) -> dict[str, object]:
+        result = call_app_action(payload, siid=siid, aiid=aiid)
+        if (
+            payload.get("t") == "PRE"
+            and payload.get("m") == "g"
+            and int(payload["d"]["region"]) == 11
+        ):
+            result["out"][0]["d"][0] = 7
+        return result
+
+    cloud.call_app_action = stale_version_call  # type: ignore[method-assign]
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_get_mowing_preferences(map_indices=[0])
+
+    target_map = result["maps"][0]
+    assert target_map["advertised_area_ids"] == [11, 12]
+    assert [item["area_id"] for item in target_map["preferences"]] == [12]
+    assert target_map["errors"][0]["area_id"] == 11
+    assert "PREI advertised version 8" in target_map["errors"][0]["error"]
+
+
+@pytest.mark.parametrize("missing_source", ["pre", "prei"])
+def test_get_mowing_preferences_rejects_missing_pre_version(
+    missing_source: str,
+) -> None:
+    client = _client()
+    cloud = _FakePreferenceCloud()
+    call_app_action = cloud.call_app_action
+
+    def missing_version_call(
+        payload: dict[str, object],
+        *,
+        siid: int = 2,
+        aiid: int = 50,
+    ) -> dict[str, object]:
+        result = call_app_action(payload, siid=siid, aiid=aiid)
+        if (
+            missing_source == "prei"
+            and payload.get("t") == "PREI"
+            and payload.get("m") == "g"
+        ):
+            result["out"][0]["d"]["ver"] = [[11, None], [12, 9]]
+        if (
+            missing_source == "pre"
+            and payload.get("t") == "PRE"
+            and payload.get("m") == "g"
+            and int(payload["d"]["region"]) == 11
+        ):
+            result["out"][0]["d"][0] = None
+        return result
+
+    cloud.call_app_action = missing_version_call  # type: ignore[method-assign]
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_get_mowing_preferences(map_indices=[0])
+
+    target_map = result["maps"][0]
+    assert [item["area_id"] for item in target_map["preferences"]] == [12]
+    assert "missing preference version evidence" in target_map["errors"][0]["error"]
+
+
+def test_get_mowing_preferences_rejects_truncated_pre_payload() -> None:
+    client = _client()
+    cloud = _FakePreferenceCloud()
+    call_app_action = cloud.call_app_action
+
+    def truncated_call(
+        payload: dict[str, object],
+        *,
+        siid: int = 2,
+        aiid: int = 50,
+    ) -> dict[str, object]:
+        result = call_app_action(payload, siid=siid, aiid=aiid)
+        if (
+            payload.get("t") == "PRE"
+            and payload.get("m") == "g"
+            and int(payload["d"]["region"]) == 11
+        ):
+            result["out"][0]["d"] = [8, 0, 11]
+        return result
+
+    cloud.call_app_action = truncated_call  # type: ignore[method-assign]
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_get_mowing_preferences(map_indices=[0])
+
+    target_map = result["maps"][0]
+    assert [item["area_id"] for item in target_map["preferences"]] == [12]
+    assert "expected at least 17 positions" in target_map["errors"][0]["error"]
+
+
+@pytest.mark.parametrize("core_position", range(3, 17))
+def test_get_mowing_preferences_rejects_null_mandatory_pre_value(
+    core_position: int,
+) -> None:
+    client = _client()
+    cloud = _FakePreferenceCloud()
+    call_app_action = cloud.call_app_action
+
+    def null_core_call(
+        payload: dict[str, object],
+        *,
+        siid: int = 2,
+        aiid: int = 50,
+    ) -> dict[str, object]:
+        result = call_app_action(payload, siid=siid, aiid=aiid)
+        if (
+            payload.get("t") == "PRE"
+            and payload.get("m") == "g"
+            and int(payload["d"]["region"]) == 11
+        ):
+            result["out"][0]["d"][core_position] = None
+        return result
+
+    cloud.call_app_action = null_core_call  # type: ignore[method-assign]
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_get_mowing_preferences(map_indices=[0])
+
+    target_map = result["maps"][0]
+    assert [item["area_id"] for item in target_map["preferences"]] == [12]
+    assert "unreadable mandatory preference value" in target_map["errors"][0]["error"]
+
+
 @pytest.mark.parametrize(
     ("payload_map_index", "payload_area_id"),
     [(1, 11), (0, 12)],
@@ -281,7 +535,9 @@ def test_get_mowing_preferences_rejects_mismatched_payload_identity(
 
     result = client._sync_get_mowing_preferences(map_indices=[0])
 
-    assert result["available"] is False
+    assert result["available"] is True
+    assert result["maps"][0]["available"] is True
+    assert result["maps"][0]["mode_name"] == "custom"
     assert result["maps"][0]["preferences"] == []
     assert "mismatched preference identity" in result["maps"][0]["error"]
 

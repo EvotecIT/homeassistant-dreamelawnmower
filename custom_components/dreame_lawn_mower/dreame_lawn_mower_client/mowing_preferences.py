@@ -84,11 +84,28 @@ MOWING_PREFERENCE_UPDATE_FIELDS = (
     "cutter_position_height",
 )
 
-_OPTIONAL_PAYLOAD_FIELDS = (
+MOWING_PREFERENCE_OPTIONAL_PAYLOAD_FIELDS = (
     (17, "obstacle_avoidance_sensitivity"),
     (18, "edge_cutting_attachment"),
     (19, "steering_mode"),
     (20, "cutter_position_height"),
+)
+
+MOWING_PREFERENCE_MANDATORY_FIELDS = (
+    "efficient_mode",
+    "mowing_height_cm",
+    "mowing_direction_mode",
+    "mowing_direction_degrees",
+    "edge_mowing_auto",
+    "edge_mowing_walk_mode",
+    "edge_mowing_obstacle_avoidance",
+    "cutter_position",
+    "edge_mowing_num",
+    "obstacle_avoidance_enabled",
+    "obstacle_avoidance_height_cm",
+    "obstacle_avoidance_distance_cm",
+    "obstacle_avoidance_ai",
+    "edge_mowing_safe",
 )
 
 
@@ -153,13 +170,15 @@ def summarize_mowing_preference_info(info: Any) -> dict[str, Any]:
     if not isinstance(info, dict):
         return {"valid": False, "value_type": type(info).__name__}
 
-    mode = _to_int(info.get("type"))
-    versions = _preference_version_entries(info.get("ver"))
+    raw_mode = info.get("type")
+    mode = None if isinstance(raw_mode, bool) else _to_int(raw_mode)
+    versions, area_inventory_valid = _preference_version_inventory(info.get("ver"))
     return {
         "valid": True,
         "mode": mode,
         "mode_name": _label(MOWING_PREFERENCE_MODE_NAMES, mode),
         "area_count": len(versions),
+        "area_inventory_valid": area_inventory_valid,
         "areas": versions,
     }
 
@@ -219,7 +238,7 @@ def encode_mowing_preference_payload(preference: Mapping[str, Any]) -> list[int]
         raw_values = list(raw_payload)
         if len(raw_values) > len(values):
             values.extend(raw_values[len(values) :])
-    for index, field in _OPTIONAL_PAYLOAD_FIELDS:
+    for index, field in MOWING_PREFERENCE_OPTIONAL_PAYLOAD_FIELDS:
         if field not in preference or preference.get(field) is None:
             continue
         while len(values) <= index:
@@ -302,18 +321,29 @@ def _ensure_obstacle_ai_change_is_writable(
         )
 
 
-def _preference_version_entries(value: Any) -> list[dict[str, int | None]]:
+def _preference_version_inventory(
+    value: Any,
+) -> tuple[list[dict[str, int | None]], bool]:
     if not isinstance(value, Sequence) or isinstance(value, str | bytes | bytearray):
-        return []
+        return [], False
     entries: list[dict[str, int | None]] = []
+    valid = True
     for item in value:
         if not isinstance(item, Sequence) or isinstance(item, str | bytes | bytearray):
+            valid = False
             continue
         values = list(item)
         if len(values) < 2:
+            valid = False
             continue
-        entries.append({"area_id": _to_int(values[0]), "version": _to_int(values[1])})
-    return entries
+        raw_area_id = values[0]
+        raw_version = values[1]
+        area_id = None if isinstance(raw_area_id, bool) else _to_int(raw_area_id)
+        version = None if isinstance(raw_version, bool) else _to_int(raw_version)
+        if area_id is None or version is None:
+            valid = False
+        entries.append({"area_id": area_id, "version": version})
+    return entries, valid
 
 
 def _ai_class_names(mask: int | None) -> list[str]:
