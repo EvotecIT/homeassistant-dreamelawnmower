@@ -60,12 +60,16 @@ from .dreame_lawn_mower_client.schedule import (
 from .mowing_height import guard_mowing_height_changes
 from .performance import DreameLawnMowerPerformanceTracker
 from .preference_cache import (
-    CONFIRMED_PREFERENCE_RETENTION,
     PendingPreferenceConfirmation,
     invalidate_preference_confirmations,
     merge_confirmed_preference_readback,
+    merge_mowing_preference_readbacks,
+    mowing_preference_map_read_complete,
+    mowing_preference_optional_fallback_complete,
+    mowing_preferences_need_optional_fallback,
     reconcile_pending_preference_readbacks,
     retain_confirmed_preference_write,
+    retain_preference_confirmations_for_maps,
 )
 from .runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,
@@ -128,11 +132,263 @@ def _device_settings_read_succeeded(settings: Mapping[str, Any]) -> bool:
     )
 
 
-def _batch_mowing_preferences_read_succeeded(
+def _mowing_preferences_read_succeeded(
     settings: Mapping[str, Any],
 ) -> bool:
-    """Return whether a batch preference payload decoded successfully."""
-    return bool(settings.get("available")) and not settings.get("errors")
+    """Return whether a preference payload contains usable current data."""
+    maps = settings.get("maps")
+    return bool(settings.get("available")) and bool(
+        isinstance(maps, Sequence)
+        and not isinstance(maps, str | bytes | bytearray)
+        and (
+            any(isinstance(entry, Mapping) for entry in maps)
+            or (not maps and settings.get("map_inventory_authoritative") is True)
+        )
+    )
+
+
+def _direct_mowing_preferences_read_complete(
+    settings: Mapping[str, Any],
+) -> bool:
+    """Return whether every direct map supplied its preference records."""
+    if not _mowing_preferences_read_succeeded(settings) or settings.get("errors"):
+        return False
+    maps = settings.get("maps")
+    if not isinstance(maps, Sequence) or isinstance(maps, str | bytes | bytearray):
+        return False
+    for entry in maps:
+        if not isinstance(entry, Mapping):
+            return False
+        mode = entry.get("mode")
+        if (
+            not isinstance(mode, int)
+            or isinstance(mode, bool)
+            or mode not in {0, 1}
+            or not mowing_preference_map_read_complete(
+                entry,
+                require_version_evidence=True,
+            )
+            or (
+                not entry.get("preferences")
+                and not (
+                    mode == 1
+                    and entry.get("mode_name") == "custom"
+                    and entry.get("advertised_area_ids") == []
+                )
+            )
+        ):
+            return False
+    return True
+
+
+def _batch_mowing_preferences_read_complete(
+    settings: Mapping[str, Any],
+    *,
+    expected_map_indices: Sequence[int],
+) -> bool:
+    """Return whether batch data covered every expected map without errors."""
+    if settings.get("errors"):
+        return False
+    maps = settings.get("maps")
+    if not isinstance(maps, Sequence) or isinstance(maps, str | bytes | bytearray):
+        return False
+    mapped_entries = [entry for entry in maps if isinstance(entry, Mapping)]
+    if not mapped_entries:
+        return False
+    if expected_map_indices:
+        mapped_by_index = {
+            entry.get("idx"): entry
+            for entry in mapped_entries
+            if isinstance(entry.get("idx"), int)
+            and not isinstance(entry.get("idx"), bool)
+        }
+        target_entries = [mapped_by_index.get(index) for index in expected_map_indices]
+        if any(entry is None for entry in target_entries):
+            return False
+    else:
+        target_entries = mapped_entries
+    return all(
+        isinstance(entry, Mapping)
+        and not entry.get("error")
+        and not entry.get("errors")
+        and entry.get("mandatory_values_complete") is not False
+        and mowing_preference_map_read_complete(entry)
+        and bool(entry.get("preferences"))
+        for entry in target_entries
+    )
+
+
+def _mowing_preference_refresh_read_complete(
+    direct_preferences: Mapping[str, Any] | None,
+    batch_preferences: Mapping[str, Any] | None,
+    *,
+    expected_map_indices: Sequence[int],
+) -> bool:
+    """Return whether every expected map has one complete current read."""
+    if not expected_map_indices:
+        expected_map_indices = _mowing_preference_map_indices(direct_preferences)
+    if not expected_map_indices:
+        return bool(
+            (
+                direct_preferences is not None
+                and _direct_mowing_preferences_read_complete(direct_preferences)
+            )
+            or (
+                batch_preferences is not None
+                and _batch_mowing_preferences_read_complete(
+                    batch_preferences,
+                    expected_map_indices=(),
+                )
+            )
+        )
+    for map_index in expected_map_indices:
+        direct_complete = _mowing_preference_payload_map_read_complete(
+            direct_preferences,
+            map_index=map_index,
+            require_direct_mode=True,
+        )
+        batch_complete = _mowing_preference_payload_map_read_complete(
+            batch_preferences,
+            map_index=map_index,
+            require_direct_mode=False,
+        )
+        if not (direct_complete or batch_complete):
+            return False
+        if not mowing_preference_optional_fallback_complete(
+            direct_preferences,
+            batch_preferences,
+            map_index=map_index,
+        ):
+            return False
+    return True
+
+
+def _mowing_preference_map_indices(
+    settings: Mapping[str, Any] | None,
+) -> tuple[int, ...]:
+    """Return valid unique map identities attempted by one preference read."""
+    if settings is None:
+        return ()
+    maps = settings.get("maps")
+    if not isinstance(maps, Sequence) or isinstance(maps, str | bytes | bytearray):
+        return ()
+    return tuple(
+        sorted(
+            {
+                index
+                for entry in maps
+                if isinstance(entry, Mapping)
+                and isinstance((index := entry.get("idx")), int)
+                and not isinstance(index, bool)
+                and index >= 0
+            }
+        )
+    )
+
+
+def _mowing_preferences_for_map_indices(
+    preferences: Mapping[str, Any],
+    map_indices: Sequence[int],
+) -> dict[str, Any]:
+    """Restrict preference evidence to authoritative created or fenced maps."""
+    allowed_indices = set(map_indices)
+    scoped = dict(preferences)
+    raw_maps = preferences.get("maps")
+    maps = (
+        [
+            dict(entry)
+            for entry in raw_maps
+            if isinstance(entry, Mapping) and entry.get("idx") in allowed_indices
+        ]
+        if isinstance(raw_maps, Sequence)
+        and not isinstance(raw_maps, str | bytes | bytearray)
+        else []
+    )
+    scoped["maps"] = maps
+    scoped["available"] = bool(
+        maps and any(entry.get("available") is not False for entry in maps)
+    )
+    raw_errors = preferences.get("errors")
+    if isinstance(raw_errors, Sequence) and not isinstance(
+        raw_errors,
+        str | bytes | bytearray,
+    ):
+        scoped["errors"] = [
+            error
+            for error in raw_errors
+            if not isinstance(error, Mapping)
+            or error.get("idx") is None
+            or error.get("idx") in allowed_indices
+        ]
+    return scoped
+
+
+def _mowing_preference_payload_map_read_complete(
+    settings: Mapping[str, Any] | None,
+    *,
+    map_index: int,
+    require_direct_mode: bool,
+) -> bool:
+    """Return whether one source fully read the requested map."""
+    if settings is None or not _mowing_preferences_read_succeeded(settings):
+        return False
+    raw_errors = settings.get("errors")
+    if raw_errors and (
+        not isinstance(raw_errors, Sequence)
+        or isinstance(raw_errors, str | bytes | bytearray)
+    ):
+        return False
+    for error in raw_errors or ():
+        if not isinstance(error, Mapping):
+            return False
+        error_map_index = error.get("idx")
+        if error_map_index is None or (
+            error_map_index == map_index and error.get("area_id") is None
+        ):
+            return False
+    maps = settings.get("maps")
+    if not isinstance(maps, Sequence) or isinstance(maps, str | bytes | bytearray):
+        return False
+    target_map = next(
+        (
+            entry
+            for entry in maps
+            if isinstance(entry, Mapping) and entry.get("idx") == map_index
+        ),
+        None,
+    )
+    if (
+        target_map is None
+        or target_map.get("error")
+        or target_map.get("errors")
+        or (
+            not target_map.get("preferences")
+            and not (
+                require_direct_mode
+                and target_map.get("mode") == 1
+                and target_map.get("mode_name") == "custom"
+                and target_map.get("area_count") == 0
+                and target_map.get("advertised_area_ids") == []
+            )
+        )
+    ):
+        return False
+    if target_map.get("area_count") is not None and not (
+        mowing_preference_map_read_complete(
+            target_map,
+            require_version_evidence=require_direct_mode,
+        )
+    ):
+        return False
+    if not require_direct_mode:
+        return target_map.get("mandatory_values_complete") is not False
+    mode = target_map.get("mode")
+    return bool(
+        isinstance(mode, int)
+        and not isinstance(mode, bool)
+        and mode in {0, 1}
+        and target_map.get("mode_name") == {0: "global", 1: "custom"}[mode]
+    )
 
 
 class DreameLawnMowerCoordinator(
@@ -206,10 +462,10 @@ class DreameLawnMowerCoordinator(
         self._batch_schedule_read_completed_at: float | None = None
         self._schedule_write_lock = asyncio.Lock()
         self._preference_write_lock = asyncio.Lock()
-        self._pending_preference_confirmations: list[
-            PendingPreferenceConfirmation
-        ] = []
+        self._pending_preference_confirmations: list[PendingPreferenceConfirmation] = []
         self._preference_read_generation = 0
+        self._published_preference_read_generation = 0
+        self._published_preference_read_complete = False
         self._active_preference_read_generations: set[int] = set()
         self._device_settings_write_lock = asyncio.Lock()
         self._device_refresh_lock = asyncio.Lock()
@@ -1548,7 +1804,11 @@ class DreameLawnMowerCoordinator(
             return self.batch_device_data
 
         schedule_generation = getattr(self, "_schedule_cache_generation", 0)
+        preference_map_index_hints, _ = _app_preference_map_index_hints(
+            getattr(self, "app_maps", None)
+        )
         preference_read_generation = self._begin_preference_read()
+        preference_read_started_at = datetime.now(UTC)
         try:
             try:
                 (
@@ -1556,18 +1816,69 @@ class DreameLawnMowerCoordinator(
                     batch_mowing_preferences,
                     batch_ota_info,
                     batch_schedule_generation,
+                    direct_mowing_preferences,
+                    batch_convergence_preferences,
                 ) = await self._async_fetch_batch_device_data(force=force)
             except Exception as err:  # noqa: BLE001 - best-effort extra metadata
                 _LOGGER.debug("Failed to refresh batch device data: %s", err)
+                current_preferences = (
+                    self.batch_device_data.get("batch_mowing_preferences")
+                    if isinstance(self.batch_device_data, Mapping)
+                    else None
+                )
+                if isinstance(current_preferences, Mapping):
+                    updated_batch_device_data = dict(self.batch_device_data)
+                    updated_batch_device_data["batch_mowing_preferences"] = (
+                        self._reconcile_pending_preference_readbacks(
+                            current_preferences,
+                            allow_convergence=False,
+                            observed_after=preference_read_started_at,
+                        )
+                    )
+                    self.batch_device_data = updated_batch_device_data
                 return self.batch_device_data
-
-            batch_mowing_preferences = self._reconcile_pending_preference_readbacks(
-                batch_mowing_preferences,
-                now=datetime.now(UTC),
-                allow_convergence=self._preference_read_can_converge(
-                    preference_read_generation
-                ),
+            preference_read_is_current = self._preference_read_can_publish(
+                preference_read_generation
             )
+            preference_refresh_succeeded = bool(
+                direct_mowing_preferences is not None
+                or batch_convergence_preferences is not None
+            )
+            if preference_read_is_current and preference_refresh_succeeded:
+                if direct_mowing_preferences is not None:
+                    self._reconcile_pending_preference_readbacks(
+                        direct_mowing_preferences,
+                        allow_convergence=False,
+                        authoritative=True,
+                        observed_after=preference_read_started_at,
+                    )
+                if batch_convergence_preferences is not None and (
+                    self._preference_read_can_converge(preference_read_generation)
+                ):
+                    self._reconcile_pending_preference_readbacks(
+                        batch_convergence_preferences,
+                        allow_convergence=True,
+                        observed_after=preference_read_started_at,
+                    )
+                batch_mowing_preferences = self._reconcile_pending_preference_readbacks(
+                    batch_mowing_preferences,
+                    allow_convergence=False,
+                    observed_after=preference_read_started_at,
+                )
+            else:
+                current_preferences = (
+                    self.batch_device_data.get("batch_mowing_preferences")
+                    if isinstance(self.batch_device_data, Mapping)
+                    else None
+                )
+                if isinstance(current_preferences, Mapping):
+                    batch_mowing_preferences = (
+                        self._reconcile_pending_preference_readbacks(
+                            current_preferences,
+                            allow_convergence=False,
+                            observed_after=preference_read_started_at,
+                        )
+                    )
 
             payload = {
                 "captured_at": now.isoformat(),
@@ -1577,9 +1888,22 @@ class DreameLawnMowerCoordinator(
                 "batch_ota_info": batch_ota_info,
             }
             self.batch_device_data = payload
-            self.batch_device_data_refreshed_at = (
-                self._batch_device_data_refreshed_at_for_preferences(now)
+            preference_refresh_complete = _mowing_preference_refresh_read_complete(
+                direct_mowing_preferences,
+                batch_convergence_preferences,
+                expected_map_indices=preference_map_index_hints,
             )
+            if getattr(self, "_pending_preference_confirmations", []):
+                preference_refresh_complete = False
+            if preference_read_is_current:
+                self.batch_device_data_refreshed_at = (
+                    now if preference_refresh_complete else None
+                )
+            if preference_read_is_current and preference_refresh_succeeded:
+                self._mark_preference_read_published(
+                    preference_read_generation,
+                    complete=preference_refresh_complete,
+                )
             if (
                 batch_schedule is not self.schedules
                 and self._schedule_refresh_is_current(schedule_generation)
@@ -1671,12 +1995,10 @@ class DreameLawnMowerCoordinator(
 
         try:
             confirmed_at = datetime.now(UTC)
-            self._pending_preference_confirmations = (
-                retain_confirmed_preference_write(
-                    getattr(self, "_pending_preference_confirmations", []),
-                    confirmed_result or {},
-                    confirmed_at=confirmed_at,
-                )
+            self._pending_preference_confirmations = retain_confirmed_preference_write(
+                getattr(self, "_pending_preference_confirmations", []),
+                confirmed_result or {},
+                confirmed_at=confirmed_at,
             )
             reconciled = merge_confirmed_preference_readback(
                 self.batch_device_data,
@@ -1701,40 +2023,96 @@ class DreameLawnMowerCoordinator(
         *,
         source: str,
     ) -> dict[str, Any] | None:
-        """Refresh only SETTINGS.* after the mower announces a change."""
+        """Refresh mower preferences after the mower announces a change."""
         async with self._preference_write_lock:
             preference_read_generation = self._begin_preference_read()
+            preference_read_started_at = datetime.now(UTC)
             try:
-                try:
-                    map_index_hints, map_slot_index_hints = (
-                        _app_preference_map_index_hints(self.app_maps)
+                map_index_hints, map_slot_index_hints = _app_preference_map_index_hints(
+                    self.app_maps
+                )
+                (
+                    preferences,
+                    direct_preferences,
+                    batch_convergence_preferences,
+                ) = await self._async_get_current_mowing_preferences(
+                    map_index_hints=map_index_hints,
+                    map_slot_index_hints=map_slot_index_hints,
+                    map_hints_authoritative=_app_map_hints_are_authoritative(
+                        getattr(self, "app_maps", None),
+                        refresh_succeeded=getattr(
+                            self,
+                            "app_maps_refresh_succeeded",
+                            False,
+                        ),
+                    ),
+                )
+                if not self._preference_read_can_publish(preference_read_generation):
+                    if not getattr(self, "_published_preference_read_complete", False):
+                        self.batch_device_data_refreshed_at = None
+                        return None
+                    return (
+                        self.batch_device_data.get("batch_mowing_preferences")
+                        if isinstance(self.batch_device_data, Mapping)
+                        else None
                     )
-                    preferences = await self.client.async_get_batch_mowing_preferences(
-                        include_raw=False,
-                        map_index_hints=map_index_hints,
-                        map_slot_index_hints=map_slot_index_hints,
+                preference_refresh_succeeded = bool(
+                    direct_preferences is not None
+                    or batch_convergence_preferences is not None
+                )
+                if not preference_refresh_succeeded:
+                    _LOGGER.debug(
+                        "Mowing preference refresh failed; retaining cached data"
                     )
-                except Exception as err:  # noqa: BLE001 - retry on next event pass
-                    _LOGGER.debug("Failed to refresh mowing preferences: %s", err)
+                    # Keep the cached payload visible, but do not acknowledge
+                    # the realtime event or let a stale batch timestamp defer
+                    # its next read attempt.
+                    self.batch_device_data_refreshed_at = None
                     return None
-                if not _batch_mowing_preferences_read_succeeded(preferences):
+                if not _mowing_preferences_read_succeeded(preferences):
                     _LOGGER.debug("Mowing preference refresh returned no usable maps")
                     return None
 
+                if direct_preferences is not None:
+                    self._reconcile_pending_preference_readbacks(
+                        direct_preferences,
+                        allow_convergence=False,
+                        authoritative=True,
+                        observed_after=preference_read_started_at,
+                    )
+                if batch_convergence_preferences is not None and (
+                    self._preference_read_can_converge(preference_read_generation)
+                ):
+                    self._reconcile_pending_preference_readbacks(
+                        batch_convergence_preferences,
+                        allow_convergence=True,
+                        observed_after=preference_read_started_at,
+                    )
                 preferences = self._reconcile_pending_preference_readbacks(
                     preferences,
-                    now=datetime.now(UTC),
-                    allow_convergence=self._preference_read_can_converge(
-                        preference_read_generation
-                    ),
+                    allow_convergence=False,
+                    observed_after=preference_read_started_at,
                 )
 
                 payload = dict(self.batch_device_data or {})
                 payload["captured_at"] = datetime.now(UTC).isoformat()
                 payload["source"] = source
                 payload["batch_mowing_preferences"] = preferences
+                preference_refresh_complete = _mowing_preference_refresh_read_complete(
+                    direct_preferences,
+                    batch_convergence_preferences,
+                    expected_map_indices=map_index_hints,
+                )
+                self._mark_preference_read_published(
+                    preference_read_generation,
+                    complete=preference_refresh_complete,
+                )
                 self.batch_device_data = payload
-                return preferences
+                if preference_refresh_complete:
+                    return preferences
+                self.batch_device_data_refreshed_at = None
+                self.async_update_listeners()
+                return None
             finally:
                 self._finish_preference_read(preference_read_generation)
 
@@ -1742,31 +2120,20 @@ class DreameLawnMowerCoordinator(
         self,
         preferences: Mapping[str, Any],
         *,
-        now: datetime,
         allow_convergence: bool,
+        authoritative: bool = False,
+        observed_after: datetime | None = None,
     ) -> dict[str, Any]:
-        """Keep exact write fields until batch preference state catches up."""
+        """Keep exact write fields until batch or direct state supersedes them."""
         reconciled, pending = reconcile_pending_preference_readbacks(
             preferences,
             getattr(self, "_pending_preference_confirmations", []),
-            now=now,
             allow_convergence=allow_convergence,
+            authoritative=authoritative,
+            observed_after=observed_after,
         )
         self._pending_preference_confirmations = pending
         return reconciled
-
-    def _batch_device_data_refreshed_at_for_preferences(
-        self,
-        now: datetime,
-    ) -> datetime:
-        """Schedule another batch read no later than confirmation expiry."""
-        pending = getattr(self, "_pending_preference_confirmations", [])
-        if not pending:
-            return now
-        earliest_expiry = min(
-            item.confirmed_at + CONFIRMED_PREFERENCE_RETENTION for item in pending
-        )
-        return min(now, earliest_expiry - BATCH_DEVICE_DATA_REFRESH_INTERVAL)
 
     def _begin_preference_read(self) -> int:
         """Track a preference read until its result can no longer publish."""
@@ -1785,6 +2152,25 @@ class DreameLawnMowerCoordinator(
             generation
         }
 
+    def _preference_read_can_publish(self, generation: int) -> bool:
+        """Return whether no newer usable preference read has published."""
+        return generation > getattr(
+            self,
+            "_published_preference_read_generation",
+            0,
+        )
+
+    def _mark_preference_read_published(
+        self,
+        generation: int,
+        *,
+        complete: bool,
+    ) -> None:
+        """Remember the newest preference read that published usable data."""
+        if generation >= getattr(self, "_published_preference_read_generation", 0):
+            self._published_preference_read_generation = generation
+            self._published_preference_read_complete = complete
+
     def _finish_preference_read(self, generation: int) -> None:
         """Mark a preference read as unable to publish further state."""
         getattr(self, "_active_preference_read_generations", set()).discard(generation)
@@ -1793,7 +2179,14 @@ class DreameLawnMowerCoordinator(
         self,
         *,
         force: bool = False,
-    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], int]:
+    ) -> tuple[
+        dict[str, Any],
+        dict[str, Any],
+        dict[str, Any],
+        int,
+        dict[str, Any] | None,
+        dict[str, Any] | None,
+    ]:
         """Fetch batch schedule, settings, and OTA payloads in parallel."""
         cached_schedule = None if force else self._fresh_batch_schedule()
         map_index_hints, map_slot_index_hints = _app_preference_map_index_hints(
@@ -1802,37 +2195,227 @@ class DreameLawnMowerCoordinator(
         if cached_schedule is None:
             schedule_generation = self._begin_schedule_read()
             map_index_hint = self._schedule_map_index_hint()
-            schedule, preferences, ota = await asyncio.gather(
+            schedule, preference_result, ota = await asyncio.gather(
                 self._async_get_shared_batch_schedules(
                     map_index_hint=map_index_hint,
                     force=force,
                 ),
-                self.client.async_get_batch_mowing_preferences(
-                    include_raw=False,
+                self._async_get_current_mowing_preferences(
                     map_index_hints=map_index_hints,
                     map_slot_index_hints=map_slot_index_hints,
+                    map_hints_authoritative=_app_map_hints_are_authoritative(
+                        getattr(self, "app_maps", None),
+                        refresh_succeeded=getattr(
+                            self,
+                            "app_maps_refresh_succeeded",
+                            False,
+                        ),
+                    ),
                 ),
                 self.client.async_get_batch_ota_info(include_raw=False),
             )
             if self._schedule_map_index_hint() != map_index_hint:
                 self._invalidate_schedule_map_hint()
                 schedule = _discard_stale_batch_schedule(schedule)
-            return schedule, preferences, ota, schedule_generation
+            preferences, direct_preferences, batch_preferences = preference_result
+            return (
+                schedule,
+                preferences,
+                ota,
+                schedule_generation,
+                direct_preferences,
+                batch_preferences,
+            )
 
-        batch_mowing_preferences, batch_ota_info = await asyncio.gather(
-            self.client.async_get_batch_mowing_preferences(
-                include_raw=False,
+        preference_result, batch_ota_info = await asyncio.gather(
+            self._async_get_current_mowing_preferences(
                 map_index_hints=map_index_hints,
                 map_slot_index_hints=map_slot_index_hints,
+                map_hints_authoritative=_app_map_hints_are_authoritative(
+                    getattr(self, "app_maps", None),
+                    refresh_succeeded=getattr(
+                        self,
+                        "app_maps_refresh_succeeded",
+                        False,
+                    ),
+                ),
             ),
             self.client.async_get_batch_ota_info(include_raw=False),
         )
+        (
+            batch_mowing_preferences,
+            direct_preferences,
+            batch_preferences,
+        ) = preference_result
         return (
             cached_schedule,
             batch_mowing_preferences,
             batch_ota_info,
             getattr(self, "_published_schedule_read_generation", 0),
+            direct_preferences,
+            batch_preferences,
         )
+
+    async def _async_get_current_mowing_preferences(
+        self,
+        *,
+        map_index_hints: Sequence[int],
+        map_slot_index_hints: Sequence[int],
+        map_hints_authoritative: bool = False,
+    ) -> tuple[
+        dict[str, Any],
+        dict[str, Any] | None,
+        dict[str, Any] | None,
+    ]:
+        """Read current PREI/PRE state with batch fallback for missing areas."""
+        cached_device_data = getattr(self, "batch_device_data", None)
+        cached_preferences = (
+            cached_device_data.get("batch_mowing_preferences")
+            if isinstance(cached_device_data, Mapping)
+            else None
+        )
+        pending_map_indices = {
+            item.map_index
+            for item in getattr(self, "_pending_preference_confirmations", [])
+        }
+        cached_map_indices = _mowing_preference_map_indices(
+            cached_preferences if isinstance(cached_preferences, Mapping) else None
+        )
+        if (
+            map_hints_authoritative
+            and not map_index_hints
+            and not pending_map_indices
+        ):
+            empty_preferences: dict[str, Any] = {
+                "source": "authoritative_app_map_inventory",
+                "available": True,
+                "map_inventory_authoritative": True,
+                "maps": [],
+                "errors": [],
+            }
+            return empty_preferences, empty_preferences, None
+        direct_map_indices = (
+            sorted(
+                {
+                    *map_index_hints,
+                    *(() if map_hints_authoritative else cached_map_indices),
+                    *pending_map_indices,
+                }
+            )
+            or None
+        )
+        direct_preferences: dict[str, Any] | None = None
+        try:
+            direct_preferences = await self.client.async_get_mowing_preferences(
+                include_raw=False,
+                map_indices=direct_map_indices,
+            )
+        except Exception as err:  # noqa: BLE001 - use batch fallback
+            _LOGGER.debug(
+                "Direct mowing preference refresh failed; using batch fallback: %s",
+                err,
+            )
+        if (
+            map_hints_authoritative
+            and isinstance(direct_preferences, Mapping)
+            and direct_map_indices is not None
+            and not set(_mowing_preference_map_indices(direct_preferences)).issubset(
+                direct_map_indices
+            )
+        ):
+            direct_preferences = _mowing_preferences_for_map_indices(
+                direct_preferences,
+                direct_map_indices,
+            )
+
+        direct_complete = bool(
+            direct_preferences
+            and _direct_mowing_preferences_read_complete(direct_preferences)
+        )
+        if direct_complete and not pending_map_indices:
+            if not mowing_preferences_need_optional_fallback(direct_preferences):
+                return direct_preferences, direct_preferences, None
+
+        expected_map_indices = (
+            tuple(direct_map_indices or ())
+            or tuple(map_index_hints)
+            or _mowing_preference_map_indices(direct_preferences)
+        )
+        effective_cached_preferences = cached_preferences
+        if map_hints_authoritative and isinstance(cached_preferences, Mapping):
+            effective_cached_preferences = _mowing_preferences_for_map_indices(
+                cached_preferences,
+                expected_map_indices,
+            )
+        effective_cached_preferences_succeeded = bool(
+            isinstance(effective_cached_preferences, Mapping)
+            and _mowing_preferences_read_succeeded(effective_cached_preferences)
+        )
+
+        try:
+            batch_request: dict[str, Any] = {
+                "include_raw": False,
+                "map_index_hints": map_index_hints,
+                "map_slot_index_hints": map_slot_index_hints,
+            }
+            if map_hints_authoritative:
+                batch_request["map_indices"] = list(expected_map_indices)
+            batch_preferences = await self.client.async_get_batch_mowing_preferences(
+                **batch_request
+            )
+        except Exception as err:  # noqa: BLE001 - retain partial direct evidence
+            _LOGGER.debug("Failed to refresh batch mowing preferences: %s", err)
+            batch_preferences = {}
+        if map_hints_authoritative and isinstance(batch_preferences, Mapping):
+            batch_preferences = _mowing_preferences_for_map_indices(
+                batch_preferences,
+                expected_map_indices,
+            )
+
+        batch_preferences_succeeded = _mowing_preferences_read_succeeded(
+            batch_preferences
+        )
+        batch_preferences_complete = bool(
+            batch_preferences_succeeded
+            and _batch_mowing_preferences_read_complete(
+                batch_preferences,
+                expected_map_indices=expected_map_indices,
+            )
+        )
+        effective_batch_preferences = batch_preferences
+        if (
+            batch_preferences_succeeded
+            and not batch_preferences_complete
+            and effective_cached_preferences_succeeded
+        ):
+            effective_batch_preferences = merge_mowing_preference_readbacks(
+                batch_preferences,
+                effective_cached_preferences,
+                source="batch_device_data_mowing_preferences_with_cache_fallback",
+            )
+        if direct_preferences and _mowing_preferences_read_succeeded(
+            direct_preferences
+        ):
+            fallback_preferences = (
+                effective_batch_preferences
+                if batch_preferences_succeeded
+                else dict(effective_cached_preferences)
+                if effective_cached_preferences_succeeded
+                else batch_preferences
+            )
+            return (
+                merge_mowing_preference_readbacks(
+                    direct_preferences,
+                    fallback_preferences,
+                ),
+                direct_preferences,
+                batch_preferences if batch_preferences_succeeded else None,
+            )
+        if batch_preferences_succeeded:
+            return effective_batch_preferences, None, batch_preferences
+        if effective_cached_preferences_succeeded:
+            return dict(effective_cached_preferences), None, None
+        return batch_preferences, None, None
 
     def _schedule_map_index_hint(self) -> int | None:
         """Return the safest available writable-slot hint for batch decoding."""
@@ -2067,10 +2650,7 @@ class DreameLawnMowerCoordinator(
             and current_idx != self._runtime_active_map_index
         ) or (
             identity_generation != getattr(self, "_runtime_map_identity_generation", 0)
-            and (
-                identity_at is None
-                or current_idx != self._runtime_active_map_index
-            )
+            and (identity_at is None or current_idx != self._runtime_active_map_index)
         ):
             # A completed download cannot revive inventory from before a switch
             # or contradict a newer MAPL read. Retry without changing selections.
@@ -2095,6 +2675,14 @@ class DreameLawnMowerCoordinator(
             payload,
             refresh_succeeded=True,
         )
+        if map_hints_authoritative:
+            self._pending_preference_confirmations = (
+                retain_preference_confirmations_for_maps(
+                    getattr(self, "_pending_preference_confirmations", []),
+                    sorted(known_map_indices),
+                    observed_after=now,
+                )
+            )
         if map_hints_authoritative and (
             not previous_map_hints_authoritative
             or known_map_indices != previous_map_indices

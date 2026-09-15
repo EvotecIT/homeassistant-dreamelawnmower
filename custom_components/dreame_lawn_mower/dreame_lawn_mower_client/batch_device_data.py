@@ -12,6 +12,7 @@ from .mowing_preferences import (
     MOWING_DIRECTION_METHOD_NAMES,
     MOWING_DIRECTION_MODE_NAMES,
     MOWING_EFFICIENCY_MODE_NAMES,
+    MOWING_PREFERENCE_MANDATORY_FIELDS,
     MOWING_PREFERENCE_MODE_NAMES,
     OBSTACLE_AI_CLASSES,
     TURNING_METHOD_NAMES,
@@ -176,6 +177,14 @@ def decode_batch_mowing_preferences(
             map_index=map_index,
             include_raw=include_raw,
         )
+        if entry.get("error"):
+            result["errors"].append(
+                {
+                    "idx": map_index,
+                    "stage": "settings_map",
+                    "error": entry["error"],
+                }
+            )
         if entry.get("available"):
             result["available"] = True
         result["maps"].append(entry)
@@ -416,21 +425,31 @@ def _decode_batch_preference_map_entry(
         entry["error"] = "invalid_batch_settings_map_entry"
         return entry
 
-    mode = _to_int(value.get("mode"))
+    raw_mode = value.get("mode")
+    mode = None if isinstance(raw_mode, bool) else _to_int(raw_mode)
     settings = value.get("settings")
     entry["mode"] = mode
     entry["mode_name"] = _label(MOWING_PREFERENCE_MODE_NAMES, mode)
 
     preferences: list[dict[str, Any]] = []
+    incomplete_preferences: list[dict[str, Any]] = []
+    settings_inventory_valid = isinstance(settings, Mapping)
+    area_ids: set[int] = set()
     if isinstance(settings, Mapping):
         for area_key, raw_preference in settings.items():
             if not isinstance(raw_preference, Mapping):
+                settings_inventory_valid = False
                 continue
-            area_id = _to_int(raw_preference.get("id"))
+            raw_area_id = raw_preference.get("id")
+            area_id = (
+                None if isinstance(raw_area_id, bool) else _to_int(raw_area_id)
+            )
             if area_id is None:
                 area_id = _to_int(area_key)
-            if area_id is None:
+            if area_id is None or area_id in area_ids:
+                settings_inventory_valid = False
                 continue
+            area_ids.add(area_id)
             preference = {
                 "version": _to_int(raw_preference.get("version")),
                 "reported_version": _to_int(raw_preference.get("version")),
@@ -507,13 +526,35 @@ def _decode_batch_preference_map_entry(
                     raw_preference.get("cutterPositionHeight")
                 ),
             }
+            missing_mandatory_fields = [
+                field
+                for field in MOWING_PREFERENCE_MANDATORY_FIELDS
+                if preference.get(field) is None
+            ]
+            if missing_mandatory_fields:
+                preference["missing_mandatory_fields"] = missing_mandatory_fields
+                incomplete_preferences.append(
+                    {
+                        "area_id": area_id,
+                        "missing_mandatory_fields": missing_mandatory_fields,
+                    }
+                )
             if include_raw:
                 preference["raw_setting"] = dict(raw_preference)
             preferences.append(preference)
 
     entry["preferences"] = preferences
-    entry["area_count"] = len(preferences)
-    entry["available"] = bool(preferences)
+    if settings_inventory_valid:
+        entry["area_count"] = len(preferences)
+        entry["mandatory_values_complete"] = not incomplete_preferences
+    entry["available"] = mode in MOWING_PREFERENCE_MODE_NAMES
+    if not entry["available"]:
+        entry["error"] = "invalid_batch_settings_mode"
+    elif not settings_inventory_valid:
+        entry["error"] = "invalid_batch_settings_inventory"
+    elif incomplete_preferences:
+        entry["error"] = "incomplete_batch_settings_preferences"
+        entry["errors"] = incomplete_preferences
     if include_raw:
         entry["raw_settings"] = (
             dict(settings) if isinstance(settings, Mapping) else settings

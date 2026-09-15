@@ -65,6 +65,7 @@ from .maintenance import (
 )
 from .mowing_preferences import (
     MOWING_PREFERENCE_MODE_FIELD,
+    MOWING_PREFERENCE_MODE_NAMES,
     MOWING_PREFERENCE_PROPERTY_KEY,
     apply_mowing_preference_changes,
     decode_mowing_preference_payload,
@@ -929,7 +930,11 @@ class _DreameLawnMowerClientSettingsMixin:
                 info_summary = summarize_mowing_preference_info(info)
                 entry["mode"] = info_summary.get("mode")
                 entry["mode_name"] = info_summary.get("mode_name")
-                entry["area_count"] = info_summary.get("area_count")
+                advertised_area_inventory_valid = bool(
+                    info_summary.get("area_inventory_valid")
+                )
+                if advertised_area_inventory_valid:
+                    entry["area_count"] = info_summary.get("area_count")
 
                 areas = info_summary.get("areas")
                 if not isinstance(areas, Sequence) or isinstance(
@@ -940,12 +945,55 @@ class _DreameLawnMowerClientSettingsMixin:
 
                 preferences: list[dict[str, Any]] = []
                 area_errors: list[dict[str, Any]] = []
-                for area in areas:
+                mode = info_summary.get("mode")
+                mode_name = info_summary.get("mode_name")
+                mode_supported = bool(
+                    isinstance(mode, int)
+                    and not isinstance(mode, bool)
+                    and mode in MOWING_PREFERENCE_MODE_NAMES
+                    and mode_name == MOWING_PREFERENCE_MODE_NAMES[mode]
+                )
+                if not mode_supported:
+                    mode_error = {
+                        "idx": map_index,
+                        "stage": "preference_info",
+                        "error": (
+                            "PREI returned unsupported preference mode "
+                            f"{mode!r} ({mode_name!r})."
+                        ),
+                    }
+                    area_errors.append(mode_error)
+                    result["errors"].append(mode_error)
+                advertised_area_ids: set[int] = set()
+                for area_position, area in enumerate(areas):
                     if not isinstance(area, Mapping):
+                        advertised_area_inventory_valid = False
                         continue
                     area_id = _positive_int(area.get("area_id"))
                     if area_id is None:
+                        advertised_area_inventory_valid = False
+                        area_error = {
+                            "idx": map_index,
+                            "area_position": area_position,
+                            "stage": "preference_info",
+                            "error": "PREI returned an invalid area identity.",
+                        }
+                        area_errors.append(area_error)
+                        result["errors"].append(area_error)
                         continue
+                    if area_id in advertised_area_ids:
+                        advertised_area_inventory_valid = False
+                        area_error = {
+                            "idx": map_index,
+                            "area_id": area_id,
+                            "area_position": area_position,
+                            "stage": "preference_info",
+                            "error": "PREI returned a duplicate area identity.",
+                        }
+                        area_errors.append(area_error)
+                        result["errors"].append(area_error)
+                        continue
+                    advertised_area_ids.add(area_id)
                     try:
                         preference_result = self._sync_call_app_action(
                             {
@@ -964,6 +1012,20 @@ class _DreameLawnMowerClientSettingsMixin:
                                 f"{map_index} area {area_id}."
                             )
                         preference = decode_mowing_preference_payload(preference_data)
+                        if len(preference_data) < 17:
+                            raise DreameLawnMowerConnectionError(
+                                "PRE returned a truncated preference payload for map "
+                                f"{map_index} area {area_id}: expected at least 17 "
+                                f"positions, received {len(preference_data)}."
+                            )
+                        if any(
+                            _as_optional_int(value) is None
+                            for value in preference_data[3:17]
+                        ):
+                            raise DreameLawnMowerConnectionError(
+                                "PRE returned an unreadable mandatory preference "
+                                f"value for map {map_index} area {area_id}."
+                            )
                         reported_map_index = _positive_int(
                             preference.get("map_index")
                         )
@@ -978,6 +1040,19 @@ class _DreameLawnMowerClientSettingsMixin:
                                 f"map {reported_map_index} area {reported_area_id}."
                             )
                         preference["reported_version"] = area.get("version")
+                        version = _positive_int(preference.get("version"))
+                        reported_version = _positive_int(area.get("version"))
+                        if version is None or reported_version is None:
+                            raise DreameLawnMowerConnectionError(
+                                "PRE/PREI returned missing preference version evidence "
+                                f"for map {map_index} area {area_id}."
+                            )
+                        if version != reported_version:
+                            raise DreameLawnMowerConnectionError(
+                                "PRE returned preference version "
+                                f"{version} for map {map_index} area {area_id}, but "
+                                f"PREI advertised version {reported_version}."
+                            )
                         if include_raw:
                             preference["raw_response"] = _json_safe(
                                 preference_result,
@@ -998,13 +1073,34 @@ class _DreameLawnMowerClientSettingsMixin:
                         area_errors.append(area_error)
                         result["errors"].append(area_error)
 
+                if not advertised_area_inventory_valid and not area_errors:
+                    inventory_error = {
+                        "idx": map_index,
+                        "stage": "preference_info",
+                        "error": (
+                            "PREI returned a missing or malformed area version "
+                            "inventory."
+                        ),
+                    }
+                    area_errors.append(inventory_error)
+                    result["errors"].append(inventory_error)
+
+                if not advertised_area_inventory_valid:
+                    entry.pop("area_count", None)
+                area_count = _positive_int(entry.get("area_count"))
+                if (
+                    advertised_area_inventory_valid
+                    and area_count is not None
+                    and len(advertised_area_ids) == area_count
+                ):
+                    entry["advertised_area_ids"] = sorted(advertised_area_ids)
                 entry["preferences"] = preferences
-                entry["available"] = bool(preferences)
+                entry["available"] = mode_supported
                 if area_errors:
                     entry["errors"] = area_errors
                     if not preferences:
                         entry["error"] = area_errors[0]["error"]
-                if preferences:
+                if entry["available"]:
                     result["available"] = True
             except Exception as err:  # noqa: BLE001 - keep probing other maps
                 entry["error"] = str(err)

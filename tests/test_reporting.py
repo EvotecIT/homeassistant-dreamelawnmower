@@ -1,6 +1,6 @@
 """Contract tests for downloaded issue-report context."""
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from custom_components.dreame_lawn_mower.performance import (
@@ -169,6 +169,7 @@ def test_coordinator_diagnostics_report_preference_shape_without_values() -> Non
         SimpleNamespace(
             batch_device_data={
                 "captured_at": "2026-09-01T09:33:05+00:00",
+                "source": "mowing_preference_write_readback",
                 "batch_mowing_preferences": {
                     "source": "batch_device_data_mowing_preferences",
                     "available": True,
@@ -201,7 +202,16 @@ def test_coordinator_diagnostics_report_preference_shape_without_values() -> Non
                     ],
                     "errors": [],
                 },
-            }
+            },
+            _pending_preference_confirmations=[
+                SimpleNamespace(
+                    confirmed_at=datetime(2026, 9, 1, 9, 33, 5, tzinfo=UTC),
+                    map_index=1,
+                    area_id=0,
+                    field="mowing_height_cm",
+                    version_values={"version": 164, "reported_version": 164},
+                )
+            ],
         )
     )
 
@@ -210,6 +220,17 @@ def test_coordinator_diagnostics_report_preference_shape_without_values() -> Non
     assert [entry["idx"] for entry in preferences["maps"]] == [0, 1]
     assert preferences["maps"][1]["preference_count"] == 1
     assert preferences["payload_shape"] == payload_shape
+    assert preferences["cache_source"] == "mowing_preference_write_readback"
+    assert preferences["pending_confirmation_count"] == 1
+    assert preferences["pending_confirmations"] == [
+        {
+            "confirmed_at": "2026-09-01T09:33:05+00:00",
+            "map_index": 1,
+            "area_id": 0,
+            "field": "mowing_height_cm",
+            "versions": {"version": 164, "reported_version": 164},
+        }
+    ]
     assert "5.0" not in repr(preferences)
     assert "secret" not in repr(preferences)
 

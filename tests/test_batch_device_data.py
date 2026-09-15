@@ -255,6 +255,110 @@ def test_decode_batch_mowing_preferences_decodes_map_settings() -> None:
     assert "raw_setting" not in result["payload_shape"]["map_entries"][0]
 
 
+def test_decode_batch_mowing_preferences_exposes_mode_without_area_settings() -> None:
+    settings_text = json.dumps([{"mode": 0, "settings": {}}], separators=(",", ":"))
+
+    result = decode_batch_mowing_preferences(
+        {
+            "SETTINGS.0": settings_text,
+            "SETTINGS.info": str(len(settings_text)),
+        }
+    )
+
+    assert result["available"] is True
+    assert result["maps"][0]["available"] is True
+    assert result["maps"][0]["mode_name"] == "global"
+    assert result["maps"][0]["preferences"] == []
+
+
+@pytest.mark.parametrize("mode", [None, True, 2, "unknown"])
+def test_decode_batch_mowing_preferences_rejects_invalid_mode(mode: object) -> None:
+    settings_text = json.dumps(
+        [{"mode": mode, "settings": {}}], separators=(",", ":")
+    )
+
+    result = decode_batch_mowing_preferences(
+        {
+            "SETTINGS.0": settings_text,
+            "SETTINGS.info": str(len(settings_text)),
+        }
+    )
+
+    assert result["available"] is False
+    assert result["maps"][0]["available"] is False
+    assert result["maps"][0]["error"] == "invalid_batch_settings_mode"
+    assert result["errors"] == [
+        {
+            "idx": 0,
+            "stage": "settings_map",
+            "error": "invalid_batch_settings_mode",
+        }
+    ]
+
+
+def test_decode_batch_mowing_preferences_reports_malformed_settings_inventory() -> None:
+    settings_text = json.dumps(
+        [{"mode": 0, "settings": {"1": []}}], separators=(",", ":")
+    )
+
+    result = decode_batch_mowing_preferences(
+        {
+            "SETTINGS.0": settings_text,
+            "SETTINGS.info": str(len(settings_text)),
+        }
+    )
+
+    assert result["available"] is True
+    assert result["maps"][0]["available"] is True
+    assert "area_count" not in result["maps"][0]
+    assert result["maps"][0]["error"] == "invalid_batch_settings_inventory"
+    assert result["errors"] == [
+        {
+            "idx": 0,
+            "stage": "settings_map",
+            "error": "invalid_batch_settings_inventory",
+        }
+    ]
+
+
+def test_decode_batch_mowing_preferences_reports_sparse_area_settings() -> None:
+    settings_text = json.dumps(
+        [
+            {
+                "mode": 1,
+                "settings": {
+                    "1": {
+                        "id": 1,
+                        "version": 11,
+                        "mowingHeight": 45,
+                    }
+                },
+            }
+        ]
+    )
+
+    result = decode_batch_mowing_preferences(
+        {
+            "SETTINGS.0": settings_text,
+            "SETTINGS.info": str(len(settings_text)),
+        }
+    )
+
+    target_map = result["maps"][0]
+    assert target_map["error"] == "incomplete_batch_settings_preferences"
+    assert target_map["errors"][0]["area_id"] == 1
+    assert "efficient_mode" in target_map["errors"][0][
+        "missing_mandatory_fields"
+    ]
+    assert result["errors"] == [
+        {
+            "idx": 0,
+            "stage": "settings_map",
+            "error": "incomplete_batch_settings_preferences",
+        }
+    ]
+
+
 def test_decode_batch_mowing_preferences_aligns_with_app_map_index_hints() -> None:
     settings_text = _settings_text()
 
@@ -321,7 +425,7 @@ def test_decode_batch_mowing_preferences_preserves_uncreated_map_slots() -> None
     )
 
     assert [entry["idx"] for entry in result["maps"]] == [0, 1]
-    assert result["maps"][0]["available"] is False
+    assert result["maps"][0]["available"] is True
     assert result["maps"][1]["available"] is True
     assert result["maps"][1]["preferences"][0]["mowing_height_cm"] == 5.0
     assert result["payload_shape"]["alignment"] == "app_map_slots"
