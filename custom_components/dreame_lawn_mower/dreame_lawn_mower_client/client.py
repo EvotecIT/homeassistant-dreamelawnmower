@@ -354,6 +354,38 @@ def _task_cancel_confirmation_deadline() -> float:
     return time.monotonic() + _TASK_CANCEL_CONFIRMATION_TIMEOUT_SECONDS
 
 
+_IDLE_ONLY_COMMAND_BLOCKED_STATES = frozenset({"repositioning"})
+
+
+def _snapshot_blocks_idle_only_command(snapshot: DreameLawnMowerSnapshot) -> bool:
+    """Return whether a snapshot is outside a safe stationary command state."""
+    activity = str(getattr(snapshot, "activity", None) or "").casefold()
+    state = str(getattr(snapshot, "state", None) or "").casefold()
+    return bool(
+        activity not in {"docked", "idle"}
+        or state in _IDLE_ONLY_COMMAND_BLOCKED_STATES
+    )
+
+
+def _maintenance_point_command_block_reason(
+    snapshot: DreameLawnMowerSnapshot,
+) -> str | None:
+    """Return why a maintenance-point movement is unsafe."""
+    state_block_reason = remote_control_block_reason(snapshot)
+    if state_block_reason is not None:
+        return state_block_reason
+
+    session_active = getattr(snapshot, "mowing_session_active", None)
+    control_state = (
+        snapshot_session_control_state(snapshot)
+        if session_active is not None
+        else str(getattr(snapshot, "activity", "") or "").casefold()
+    )
+    if control_state not in {"docked", "idle"}:
+        return "The mower must be idle or docked before moving."
+    return None
+
+
 def _task_confirmation_key(snapshot: DreameLawnMowerSnapshot) -> tuple[Any, ...]:
     """Return native task identity that must change for a new targeted task."""
     return (
@@ -1016,6 +1048,10 @@ class DreameLawnMowerClient(
 
     async def async_go_to_maintenance_point(self, point_id: int) -> Any:
         """Drive to one configured map maintenance point."""
+        snapshot = await self.async_refresh_authoritative_snapshot()
+        block_reason = _maintenance_point_command_block_reason(snapshot)
+        if block_reason is not None:
+            raise _DreameLawnMowerCommandRejectedError(block_reason)
         return await asyncio.to_thread(
             self._sync_go_to_maintenance_point,
             int(point_id),
@@ -1025,17 +1061,14 @@ class DreameLawnMowerClient(
         """Switch the active map only while idle and require map-list readback."""
         map_index = int(map_index)
         snapshot = await self.async_refresh_authoritative_snapshot()
-        session_unknown_outside_safe_state = (
-            snapshot.mowing_session_active is None
-            and snapshot.activity not in {"docked", "idle"}
-        )
         if (
             _snapshot_requires_task_cancel(snapshot)
-            or session_unknown_outside_safe_state
+            or _snapshot_blocks_idle_only_command(snapshot)
         ):
             raise _DreameLawnMowerCommandRejectedError(
                 "The active map cannot be changed while any mower task is active, "
-                "paused, remotely controlled, or returning to the dock. Finish or "
+                "paused, repositioning, remotely controlled, or returning to the "
+                "dock. Finish or "
                 "cancel the task first."
             )
         try:

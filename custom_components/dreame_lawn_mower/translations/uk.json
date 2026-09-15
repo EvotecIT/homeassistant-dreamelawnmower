@@ -183,7 +183,10 @@
           "station_cleaning": "Очищення станції",
           "shortcut": "Швидка команда",
           "monitoring": "Моніторинг",
-          "monitoring_paused": "Моніторинг призупинено"
+          "monitoring_paused": "Моніторинг призупинено",
+          "charging_paused_high_temperature": "Заряджання призупинено: температура акумулятора надто висока",
+          "charging_paused_low_temperature": "Заряджання призупинено: температура акумулятора надто низька",
+          "repositioning": "Повторне позиціонування"
         }
       }
     }

@@ -58,6 +58,71 @@ def test_property_annotations_label_known_mower_state_and_error_keys() -> None:
     assert error_entry["decoded_label_source"] == "bundled_mower_errors"
 
 
+def test_property_annotations_apply_exact_viax_500_state_catalog() -> None:
+    entry = DreameLawnMowerClient._annotate_cloud_property_entry(
+        {"key": "2.1", "value": 19},
+        language="en",
+        model="mova.mower.g2583",
+    )
+
+    assert entry["state_key"] == "repositioning"
+    assert entry["decoded_label"] == "Repositioning"
+    assert entry["decoded_label_source"] == "bundled_mower_protocol"
+
+
+def test_property_annotations_preserve_available_localized_viax_labels() -> None:
+    entry = DreameLawnMowerClient._annotate_cloud_property_entry(
+        {"key": "2.1", "value": 1},
+        language="zh",
+        model="mova.mower.g2583",
+    )
+
+    assert entry["state_key"] == "mowing"
+    assert entry["decoded_label"] == "割草中"
+
+
+def test_property_annotations_do_not_apply_viax_state_to_other_models() -> None:
+    entry = DreameLawnMowerClient._annotate_cloud_property_entry(
+        {"key": "2.1", "value": 19},
+        language="en",
+        model="dreame.mower.g2408",
+    )
+
+    assert "state_key" not in entry
+    assert "decoded_label" not in entry
+
+
+@pytest.mark.parametrize(
+    ("raw_state", "expected_key"),
+    [
+        (1, "mowing"),
+        (2, "standby"),
+        (3, "paused"),
+        (4, "error"),
+        (5, "returning"),
+        (6, "charging"),
+        (11, "mapping"),
+        (13, "charging_completed"),
+        (14, "upgrading"),
+        (15, "charging_paused_high_temperature"),
+        (16, "charging_paused_low_temperature"),
+        (19, "repositioning"),
+    ],
+)
+def test_viax_500_vendor_state_catalog_is_fully_mapped(
+    raw_state: int,
+    expected_key: str,
+) -> None:
+    entry = DreameLawnMowerClient._annotate_cloud_property_entry(
+        {"key": "2.1", "value": raw_state},
+        language="en",
+        model="mova.mower.g2583",
+    )
+
+    assert entry["state_key"] == expected_key
+    assert entry["decoded_label"]
+
+
 def test_property_annotations_mark_bluetooth_property_hint() -> None:
     entry = DreameLawnMowerClient._annotate_cloud_property_entry(
         {"key": "1.53", "value": "false"},

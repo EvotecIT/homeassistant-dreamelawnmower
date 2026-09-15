@@ -2658,11 +2658,11 @@ class _DreameLawnMowerClientMapsMixin(
             rendered["decoded_label_source"] = "cloud_key_definition"
 
         if key == MOWER_STATE_PROPERTY_KEY:
-            state_key = mower_state_key(value)
+            state_key = mower_state_key(value, model=model)
             if state_key:
                 rendered["state_key"] = state_key
             if not rendered.get("decoded_label"):
-                label = mower_state_label(value, language=language)
+                label = mower_state_label(value, language=language, model=model)
                 if label:
                     rendered["decoded_label"] = label
                     rendered["decoded_label_source"] = "bundled_mower_protocol"

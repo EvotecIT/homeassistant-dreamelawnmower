@@ -183,7 +183,10 @@
           "station_cleaning": "Limpieza de la estación",
           "shortcut": "Acceso directo",
           "monitoring": "Supervisión",
-          "monitoring_paused": "Supervisión en pausa"
+          "monitoring_paused": "Supervisión en pausa",
+          "charging_paused_high_temperature": "Carga en pausa: temperatura de la batería demasiado alta",
+          "charging_paused_low_temperature": "Carga en pausa: temperatura de la batería demasiado baja",
+          "repositioning": "Reposicionamiento"
         }
       }
     }

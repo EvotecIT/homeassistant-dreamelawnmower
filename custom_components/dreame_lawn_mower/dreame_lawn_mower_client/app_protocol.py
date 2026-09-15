@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from typing import Final
 
 from .device_code_semantics import mower_device_code_name
+from .device_types import DreameMowerState
 from .models import DreameLawnMowerStatusBlob
 from .mowing_preferences import MOWING_PREFERENCE_PROPERTY_KEY
 
@@ -70,6 +71,44 @@ MOWER_STATE_KEYS: Final[dict[str, str]] = {
     "16": "charging_paused_low_temperature",
     "75": "paused",
 }
+_VIAX_500_MODELS: Final[frozenset[str]] = frozenset(
+    {"mova.mower.g2583", "g2583"}
+)
+_VIAX_500_STATE_OVERRIDES: Final[
+    dict[str, tuple[DreameMowerState, str, str]]
+] = {
+    "1": (DreameMowerState.MOWING, "mowing", "Mowing"),
+    "2": (DreameMowerState.IDLE, "standby", "Standby"),
+    "3": (DreameMowerState.PAUSED, "paused", "Paused"),
+    "4": (DreameMowerState.ERROR, "error", "Paused due to errors"),
+    "5": (DreameMowerState.RETURNING, "returning", "Returning to station to charge"),
+    "6": (DreameMowerState.CHARGING, "charging", "Charging"),
+    "11": (DreameMowerState.BUILDING, "mapping", "Mapping"),
+    "13": (
+        DreameMowerState.CHARGING_COMPLETED,
+        "charging_completed",
+        "Charging complete",
+    ),
+    "14": (DreameMowerState.UPGRADING, "upgrading", "Updating"),
+    "15": (
+        DreameMowerState.CHARGING_PAUSED_HIGH_TEMPERATURE,
+        "charging_paused_high_temperature",
+        "Charging paused: battery temperature is too high",
+    ),
+    "16": (
+        DreameMowerState.CHARGING_PAUSED_LOW_TEMPERATURE,
+        "charging_paused_low_temperature",
+        "Charging paused: battery temperature is too low",
+    ),
+    "19": (
+        DreameMowerState.REPOSITIONING,
+        "repositioning",
+        "Repositioning",
+    ),
+}
+_VIAX_500_COLLIDING_STATE_VALUES: Final[frozenset[str]] = frozenset(
+    {"15", "16", "19"}
+)
 
 
 def mower_property_hint(key: object) -> str | None:
@@ -95,20 +134,62 @@ def _clean_label(value: object) -> str | None:
     return text.capitalize()
 
 
-def mower_state_label(value: object, language: str = "en") -> str | None:
+def mower_state_override(
+    value: object,
+    *,
+    model: str | None = None,
+) -> DreameMowerState | None:
+    """Return an exact-model normalized state for colliding raw values."""
+    normalized_model = str(model or "").strip().casefold()
+    if normalized_model not in _VIAX_500_MODELS:
+        return None
+    raw_value = str(value)
+    if raw_value not in _VIAX_500_COLLIDING_STATE_VALUES:
+        return None
+    definition = _VIAX_500_STATE_OVERRIDES.get(raw_value)
+    return definition[0] if definition is not None else None
+
+
+def mower_state_label(
+    value: object,
+    language: str = "en",
+    *,
+    model: str | None = None,
+) -> str | None:
     """Return the app-derived mower state label for a raw `2.1` value."""
     if value is None:
         return None
 
+    normalized_model = str(model or "").strip().casefold()
+    if normalized_model in _VIAX_500_MODELS:
+        definition = _VIAX_500_STATE_OVERRIDES.get(str(value))
+        if definition is not None:
+            localized_label = (
+                MOWER_STATE_LABELS.get(language, {}).get(str(value))
+                if language != "en"
+                else None
+            )
+            if localized_label:
+                return localized_label
+            return definition[2]
     label_map = MOWER_STATE_LABELS.get(language) or MOWER_STATE_LABELS["en"]
     return label_map.get(str(value))
 
 
-def mower_state_key(value: object) -> str | None:
+def mower_state_key(
+    value: object,
+    *,
+    model: str | None = None,
+) -> str | None:
     """Return a stable app-derived mower state key for a raw `2.1` value."""
     if value is None:
         return None
 
+    normalized_model = str(model or "").strip().casefold()
+    if normalized_model in _VIAX_500_MODELS:
+        definition = _VIAX_500_STATE_OVERRIDES.get(str(value))
+        if definition is not None:
+            return definition[1]
     return MOWER_STATE_KEYS.get(str(value))
 
 

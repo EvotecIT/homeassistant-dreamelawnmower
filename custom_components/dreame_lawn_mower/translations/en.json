@@ -183,7 +183,10 @@
           "station_cleaning": "Station cleaning",
           "shortcut": "Shortcut",
           "monitoring": "Monitoring",
-          "monitoring_paused": "Monitoring paused"
+          "monitoring_paused": "Monitoring paused",
+          "charging_paused_high_temperature": "Charging paused: battery temperature is too high",
+          "charging_paused_low_temperature": "Charging paused: battery temperature is too low",
+          "repositioning": "Repositioning"
         }
       }
     }

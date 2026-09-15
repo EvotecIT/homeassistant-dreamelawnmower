@@ -6,6 +6,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
+    DreameMowerState,
+)
 from dreame_lawn_mower_client.models import (
     descriptor_from_cloud_record,
     display_name_for_model,
@@ -230,6 +233,46 @@ def test_display_name_for_submitted_model_identifiers(
     expected_name: str,
 ) -> None:
     assert display_name_for_model(model) == expected_name
+
+
+@pytest.mark.parametrize(
+    ("state", "expected_state", "expected_activity"),
+    [
+        (
+            DreameMowerState.CHARGING_PAUSED_HIGH_TEMPERATURE,
+            "charging_paused_high_temperature",
+            "docked",
+        ),
+        (
+            DreameMowerState.CHARGING_PAUSED_LOW_TEMPERATURE,
+            "charging_paused_low_temperature",
+            "docked",
+        ),
+        (DreameMowerState.REPOSITIONING, "repositioning", "idle"),
+    ],
+)
+def test_viax_500_normalized_state_reaches_snapshot_without_cross_model_alias(
+    state: DreameMowerState,
+    expected_state: str,
+    expected_activity: str,
+) -> None:
+    descriptor = descriptor_from_cloud_record(
+        {"did": "viax-500", "model": "mova.mower.g2583"},
+        account_type="mova",
+        country="eu",
+    )
+    assert descriptor is not None
+    device = _FakeDevice()
+    device.status.state = state
+    device.status.state_name = expected_state
+    device.status.attributes["started"] = False
+
+    snapshot = snapshot_from_device(descriptor, device)
+
+    assert snapshot.state == expected_state
+    assert snapshot.activity == expected_activity
+    assert snapshot.docked is (expected_activity == "docked")
+    assert snapshot.mowing is False
 
 
 def test_descriptor_maps_lidax_ultra_1000_model_name() -> None:

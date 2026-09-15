@@ -183,7 +183,10 @@
           "station_cleaning": "Czyszczenie stacji",
           "shortcut": "Skrót",
           "monitoring": "Monitorowanie",
-          "monitoring_paused": "Monitorowanie wstrzymane"
+          "monitoring_paused": "Monitorowanie wstrzymane",
+          "charging_paused_high_temperature": "Ładowanie wstrzymane: temperatura baterii jest zbyt wysoka",
+          "charging_paused_low_temperature": "Ładowanie wstrzymane: temperatura baterii jest zbyt niska",
+          "repositioning": "Ponowne ustalanie pozycji"
         }
       }
     }

@@ -183,7 +183,10 @@
           "station_cleaning": "Nettoyage de la station",
           "shortcut": "Raccourci",
           "monitoring": "Surveillance",
-          "monitoring_paused": "Surveillance en pause"
+          "monitoring_paused": "Surveillance en pause",
+          "charging_paused_high_temperature": "Recharge en pause : température de la batterie trop élevée",
+          "charging_paused_low_temperature": "Recharge en pause : température de la batterie trop basse",
+          "repositioning": "Repositionnement"
         }
       }
     }

@@ -524,6 +524,7 @@ def test_async_map_switch_requires_idle_state_and_confirmed_readback() -> None:
     client = _client()
     client.async_refresh_authoritative_snapshot = AsyncMock(
         return_value=SimpleNamespace(
+            activity="idle",
             mowing_session_active=False,
             mowing=False,
             paused=False,
@@ -601,6 +602,26 @@ def test_async_map_switch_rejects_fast_mapping_before_write() -> None:
     client._sync_switch_current_map.assert_not_called()
 
 
+def test_async_map_switch_rejects_repositioning_before_write() -> None:
+    client = _client()
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        return_value=SimpleNamespace(
+            activity="idle",
+            state="repositioning",
+            mowing_session_active=False,
+            mowing=False,
+            paused=False,
+            returning=False,
+        )
+    )
+    client._sync_switch_current_map = Mock()  # type: ignore[method-assign]
+
+    with pytest.raises(DreameLawnMowerCommandRejectedError, match="repositioning"):
+        asyncio.run(client.async_switch_current_map(1))
+
+    client._sync_switch_current_map.assert_not_called()
+
+
 def test_async_map_switch_rejects_resumable_task_at_dock() -> None:
     client = _client()
     client.async_refresh_authoritative_snapshot = AsyncMock(
@@ -626,6 +647,64 @@ def test_async_map_switch_rejects_resumable_task_at_dock() -> None:
         asyncio.run(client.async_switch_current_map(1))
 
     client._sync_switch_current_map.assert_not_called()
+
+
+def test_async_map_switch_rejects_non_idle_activity_with_inactive_session() -> None:
+    client = _client()
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        return_value=SimpleNamespace(
+            activity="returning",
+            state="returning",
+            mowing_session_active=False,
+            mowing=False,
+            paused=False,
+            returning=False,
+        )
+    )
+    client._sync_switch_current_map = Mock()  # type: ignore[method-assign]
+
+    with pytest.raises(DreameLawnMowerCommandRejectedError, match="returning"):
+        asyncio.run(client.async_switch_current_map(1))
+
+    client._sync_switch_current_map.assert_not_called()
+
+
+def test_maintenance_point_rejects_repositioning_at_client_boundary() -> None:
+    client = _client()
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        return_value=SimpleNamespace(
+            activity="idle",
+            state="repositioning",
+            mowing_session_active=False,
+            raw_attributes={},
+        )
+    )
+    client._sync_go_to_maintenance_point = Mock()  # type: ignore[method-assign]
+
+    with pytest.raises(DreameLawnMowerCommandRejectedError, match="repositioning"):
+        asyncio.run(client.async_go_to_maintenance_point(7))
+
+    client._sync_go_to_maintenance_point.assert_not_called()
+
+
+def test_maintenance_point_allows_authoritatively_inactive_paused_report() -> None:
+    client = _client()
+    client.async_refresh_authoritative_snapshot = AsyncMock(
+        return_value=SimpleNamespace(
+            activity="paused",
+            state="paused",
+            mowing_session_active=False,
+            raw_attributes={},
+        )
+    )
+    client._sync_go_to_maintenance_point = Mock(  # type: ignore[method-assign]
+        return_value={"code": 0}
+    )
+
+    result = asyncio.run(client.async_go_to_maintenance_point(7))
+
+    assert result == {"code": 0}
+    client._sync_go_to_maintenance_point.assert_called_once_with(7)
 
 
 def test_async_map_switch_allows_docked_snapshot_with_unknown_session_flag() -> None:
@@ -676,6 +755,7 @@ def test_async_map_switch_rejects_acknowledged_but_ignored_switch() -> None:
     client = _client()
     client.async_refresh_authoritative_snapshot = AsyncMock(
         return_value=SimpleNamespace(
+            activity="idle",
             mowing_session_active=False,
             mowing=False,
             paused=False,

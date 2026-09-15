@@ -184,7 +184,10 @@
           "station_cleaning": "Čištění stanice",
           "shortcut": "Zkratka",
           "monitoring": "Monitorování",
-          "monitoring_paused": "Monitorování pozastaveno"
+          "monitoring_paused": "Monitorování pozastaveno",
+          "charging_paused_high_temperature": "Nabíjení pozastaveno: teplota baterie je příliš vysoká",
+          "charging_paused_low_temperature": "Nabíjení pozastaveno: teplota baterie je příliš nízká",
+          "repositioning": "Opětovné určení polohy"
         }
       }
     }

@@ -298,6 +298,10 @@ def test_public_package_exports_app_protocol_helpers() -> None:
     assert mower_state_key(5) == "returning"
     assert mower_state_key("13") == "charging_completed"
     assert mower_state_key("15") == "charging_paused_high_temperature"
+    assert (
+        mower_state_key(19, model="mova.mower.g2583") == "repositioning"
+    )
+    assert mower_state_key(19, model="dreame.mower.g2408") is None
     assert mower_state_key("75") == "paused"
     assert mower_state_key(999) is None
     assert mower_state_label(11) == "Mapping"
@@ -305,6 +309,8 @@ def test_public_package_exports_app_protocol_helpers() -> None:
     assert mower_state_label("15") == (
         "Charging paused: battery temperature is too high"
     )
+    assert mower_state_label(19, model="mova.mower.g2583") == "Repositioning"
+    assert mower_state_label(19, model="dreame.mower.g2408") is None
     assert mower_state_label("75") == "Paused at maintenance point"
     assert mower_state_label(999) is None
     assert mower_error_label(31) == "Return to station failed"

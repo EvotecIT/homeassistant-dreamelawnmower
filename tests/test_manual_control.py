@@ -60,6 +60,15 @@ def test_remote_control_safety_allows_active_remote_control_session() -> None:
     assert remote_control_block_reason(snapshot) is None
 
 
+def test_remote_control_safety_blocks_repositioning() -> None:
+    snapshot = _snapshot(activity="idle", state="repositioning")
+
+    assert remote_control_state_safe(snapshot) is False
+    assert remote_control_block_reason(snapshot) == (
+        "Remote control is blocked while the mower is repositioning."
+    )
+
+
 def test_remote_control_safety_explains_missing_state() -> None:
     assert remote_control_state_safe(None) is False
     assert remote_control_block_reason(None) == "Mower state is not available yet."

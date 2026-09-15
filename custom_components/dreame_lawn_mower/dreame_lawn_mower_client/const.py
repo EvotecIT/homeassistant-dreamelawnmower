@@ -51,6 +51,9 @@ STATE_STATION_CLEANING: Final = "station_cleaning"
 STATE_SHORTCUT: Final = "shortcut"
 STATE_MONITORING: Final = "monitoring"
 STATE_MONITORING_PAUSED: Final = "monitoring_paused"
+STATE_CHARGING_PAUSED_HIGH_TEMPERATURE: Final = "charging_paused_high_temperature"
+STATE_CHARGING_PAUSED_LOW_TEMPERATURE: Final = "charging_paused_low_temperature"
+STATE_REPOSITIONING: Final = "repositioning"
 STATE_UNAVAILABLE: Final = "unavailable"
 STATE_OFF: Final = "off"
 
@@ -575,6 +578,13 @@ STATE_CODE_TO_STATE: Final = {
     DreameMowerState.SHORTCUT: STATE_SHORTCUT,
     DreameMowerState.MONITORING: STATE_MONITORING,
     DreameMowerState.MONITORING_PAUSED: STATE_MONITORING_PAUSED,
+    DreameMowerState.CHARGING_PAUSED_HIGH_TEMPERATURE: (
+        STATE_CHARGING_PAUSED_HIGH_TEMPERATURE
+    ),
+    DreameMowerState.CHARGING_PAUSED_LOW_TEMPERATURE: (
+        STATE_CHARGING_PAUSED_LOW_TEMPERATURE
+    ),
+    DreameMowerState.REPOSITIONING: STATE_REPOSITIONING,
 }
 
 # Dreame Mower cleaning mode names
