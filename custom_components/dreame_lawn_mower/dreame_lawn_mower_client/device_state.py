@@ -553,8 +553,9 @@ class _DreameMowerDeviceStateMixin:
                 and int(value) > 18
                 and value in DreameMowerState._value2member_map_
             ):
-                old_state = DreameMowerStateOld[DreameMowerState(value).name]
-                if old_state:
+                state_name = DreameMowerState(value).name
+                if state_name in DreameMowerStateOld.__members__:
+                    old_state = DreameMowerStateOld[state_name]
                     value = int(old_state)
             current_value = self.get_property(prop)
             if current_value != value:

@@ -271,6 +271,15 @@ class DreameMowerState(IntEnum):
     REPOSITIONING = 119
 
 
+_MODEL_SPECIFIC_MOWER_STATE_VALUES = frozenset(
+    {
+        DreameMowerState.CHARGING_PAUSED_HIGH_TEMPERATURE.value,
+        DreameMowerState.CHARGING_PAUSED_LOW_TEMPERATURE.value,
+        DreameMowerState.REPOSITIONING.value,
+    }
+)
+
+
 class DreameMowerStateOld(IntEnum):
     """Dreame Mower old state"""
 

@@ -36,6 +36,7 @@ from .device_types import (
     DreameMowerTaskStatus,
     DreameMowerState,
     DreameMowerStateOld,
+    _MODEL_SPECIFIC_MOWER_STATE_VALUES,
     DreameMowerStatus,
     DreameMowerRelocationStatus,
     DreameMowerCleaningMode,
@@ -336,7 +337,11 @@ class DreameMowerDeviceStatus:
         ):
             value = DreameMowerState[DreameMowerStateOld(value).name].value
 
-        if value is not None and value in DreameMowerState._value2member_map_:
+        if (
+            value is not None
+            and value in DreameMowerState._value2member_map_
+            and value not in _MODEL_SPECIFIC_MOWER_STATE_VALUES
+        ):
             if self.go_to_zone and (
                 value == DreameMowerState.IDLE
                 or value == DreameMowerState.MOWING.value

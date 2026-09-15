@@ -43,13 +43,15 @@ _UNKNOWN_TASK_INACTIVE_STATUSES = {
 def _status(
     *,
     status: DreameMowerStatus,
-    state: DreameMowerState,
+    state: DreameMowerState | int,
     task_status: DreameMowerTaskStatus | None,
     model: str | None = None,
 ) -> DreameMowerDeviceStatus:
     properties = {
         DreameMowerProperty.STATUS: status.value,
-        DreameMowerProperty.STATE: state.value,
+        DreameMowerProperty.STATE: (
+            state.value if isinstance(state, DreameMowerState) else state
+        ),
         DreameMowerProperty.TASK_STATUS: (
             None if task_status is None else task_status.value
         ),
@@ -182,3 +184,17 @@ def test_viax_catalog_does_not_bypass_existing_idle_state_reconciliation() -> No
 
     assert status.started is True
     assert status.state is DreameMowerState.PAUSED
+
+
+@pytest.mark.parametrize("raw_state", [115, 116, 119])
+def test_model_specific_normalized_states_are_not_generic_raw_states(
+    raw_state: int,
+) -> None:
+    status = _status(
+        status=DreameMowerStatus.IDLE,
+        state=raw_state,
+        task_status=DreameMowerTaskStatus.COMPLETED,
+        model="dreame.mower.g2408",
+    )
+
+    assert status.state is DreameMowerState.UNKNOWN
