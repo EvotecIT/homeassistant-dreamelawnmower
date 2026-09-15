@@ -438,8 +438,18 @@ class _DreameMowerDeviceCommandMixin:
             ],
         )
 
-    def call_action(self, action: DreameMowerAction, parameters: dict[str, Any] = None) -> dict[str, Any] | None:
+    def call_action(
+        self,
+        action: DreameMowerAction,
+        parameters: dict[str, Any] = None,
+        *,
+        enforce_availability: bool = True,
+    ) -> dict[str, Any] | None:
         """Call an action."""
+        if not enforce_availability and action is not DreameMowerAction.STOP:
+            raise InvalidActionException(
+                "Availability can only be bypassed for an authoritative STOP"
+            )
         if action not in self.action_mapping:
             raise InvalidActionException(f"Unable to find {action} in the action mapping")
 
@@ -461,7 +471,7 @@ class _DreameMowerDeviceCommandMixin:
             ]
         )
 
-        if not cleaning_action:
+        if not cleaning_action and enforce_availability:
             available_fn = ACTION_AVAILABILITY.get(action.name)
             if available_fn and not available_fn(self):
                 raise InvalidActionException("Action unavailable")
@@ -826,17 +836,33 @@ class _DreameMowerDeviceCommandMixin:
 
         return self.call_action(DreameMowerAction.START_CUSTOM, payload)
 
-    def stop(self) -> dict[str, Any] | None:
-        """Stop the mower cleaner."""
+    def stop(
+        self,
+        *,
+        authoritative_task_active: bool = False,
+    ) -> dict[str, Any] | None:
+        """Stop the mower cleaner.
+
+        ``authoritative_task_active`` is reserved for the client cancellation
+        flow after a fresh combined property and heartbeat read. It bypasses a
+        stale legacy-property availability decision, but never fast mapping.
+        """
         if self.status.fast_mapping:
+            if authoritative_task_active:
+                raise InvalidActionException(
+                    "Cannot cancel the current task while fast mapping"
+                )
             return self.return_to_base()
 
-
         self.schedule_update(10, True)
-
-        response = None
-        if self.status.go_to_zone:
-            response = self.call_action(DreameMowerAction.STOP)
+        # Dispatch before updating the optimistic local state. Updating the
+        # status first makes ``ACTION_AVAILABILITY`` see an idle mower and
+        # reject the STOP action locally, so the command never reaches the
+        # device.
+        response = self.call_action(
+            DreameMowerAction.STOP,
+            enforce_availability=not authoritative_task_active,
+        )
 
         if self.status.started:
             self._update_status(DreameMowerTaskStatus.COMPLETED, DreameMowerStatus.STANDBY)
@@ -848,10 +874,7 @@ class _DreameMowerDeviceCommandMixin:
                 self._map_manager.editor.set_cruise_points([])
                 self._map_manager.editor.set_active_segments([])
 
-        if response:
-            return response
-
-        return self.call_action(DreameMowerAction.STOP)
+        return response
 
     def pause(self) -> dict[str, Any] | None:
         """Pause the cleaning task."""

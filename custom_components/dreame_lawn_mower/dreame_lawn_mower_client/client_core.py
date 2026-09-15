@@ -145,15 +145,23 @@ class _DreameLawnMowerClientCoreMixin:
         device = await asyncio.to_thread(self._ensure_device)
         return await asyncio.to_thread(self._snapshot_from_device, device)
 
-    async def _async_call_device_method(self, method_name: str) -> Any:
+    async def _async_call_device_method(
+        self,
+        method_name: str,
+        *,
+        reconcile_ambiguous: bool = True,
+        method_kwargs: Mapping[str, Any] | None = None,
+    ) -> Any:
         device = await asyncio.to_thread(self._ensure_device)
         method = getattr(device, method_name)
         try:
-            return await asyncio.to_thread(method)
+            return await asyncio.to_thread(method, **(method_kwargs or {}))
         except DeviceCommandRejectedException as err:
             raise DreameLawnMowerCommandRejectedError(str(err)) from err
         except DeviceException as err:
             connection_error = DreameLawnMowerConnectionError(str(err))
+            if not reconcile_ambiguous:
+                raise connection_error from err
             confirmation = {
                 "start_mowing": (
                     "start mowing",

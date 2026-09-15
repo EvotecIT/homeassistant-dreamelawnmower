@@ -99,6 +99,7 @@ from .debug_ota_catalog import (
 from .debug_ota_catalog import (
     normalize_debug_ota_catalog_payload as normalize_debug_ota_catalog_payload,
 )
+from .docking import SESSION_STATES_TO_END as _SESSION_STATES_TO_END
 from .docking import async_stop_then_dock
 from .exceptions import DeviceException as DeviceException
 from .exceptions import (
@@ -342,6 +343,15 @@ _SPOT_TASK_CONFIRMATION_STATUSES = _GENERIC_ACTIVE_TASK_CONFIRMATION_STATUSES | 
 }
 _TARGETED_TASK_CONFIRMATION_OFFSETS_SECONDS = (0.5, 2.0, 5.0, 9.0, 12.0, 14.5)
 _TARGETED_TASK_CONFIRMATION_TIMEOUT_SECONDS = 15.0
+_TASK_CANCEL_CONFIRMATION_TIMEOUT_SECONDS = 20.0
+_TASK_CANCEL_CONFIRMATION_INITIAL_DELAY_SECONDS = 0.5
+_TASK_CANCEL_CONFIRMATION_POLL_INTERVAL_SECONDS = 2.0
+_TASK_CANCEL_CONFIRMATION_MAX_READS = 11
+
+
+def _task_cancel_confirmation_deadline() -> float:
+    """Return the end of a complete post-dispatch settlement window."""
+    return time.monotonic() + _TASK_CANCEL_CONFIRMATION_TIMEOUT_SECONDS
 
 
 def _task_confirmation_key(snapshot: DreameLawnMowerSnapshot) -> tuple[Any, ...]:
@@ -362,6 +372,51 @@ def _targeted_task_is_active(snapshot: DreameLawnMowerSnapshot) -> bool:
         or getattr(snapshot, "started", False)
         or getattr(snapshot, "mowing", False)
         or getattr(snapshot, "paused", False)
+    )
+
+
+def _snapshot_requires_task_cancel(snapshot: DreameLawnMowerSnapshot) -> bool:
+    """Return whether authoritative or fallback fields still own a task."""
+    if getattr(snapshot, "mowing_session_active", None) is True:
+        return True
+    physical_task_flags = bool(
+        getattr(snapshot, "started", False)
+        or getattr(snapshot, "mowing", False)
+        or getattr(snapshot, "paused", False)
+        or getattr(snapshot, "returning", False)
+        or getattr(snapshot, "task_resumable", None) is True
+    )
+    station_evidence = bool(
+        getattr(snapshot, "activity", None) == "docked"
+        and (
+            getattr(snapshot, "docked", False)
+            or getattr(snapshot, "charging", False)
+            or getattr(snapshot, "raw_docked", None) is True
+        )
+    )
+    if (
+        station_evidence
+        and not physical_task_flags
+        and not _snapshot_is_fast_mapping(snapshot)
+    ):
+        return False
+    return bool(
+        getattr(snapshot, "state", None) in _SESSION_STATES_TO_END
+        or physical_task_flags
+        or _snapshot_is_fast_mapping(snapshot)
+    )
+
+
+def _snapshot_is_fast_mapping(snapshot: DreameLawnMowerSnapshot) -> bool:
+    """Return whether STOP would be translated into Return to Dock."""
+    raw_attributes = getattr(snapshot, "raw_attributes", {})
+    return bool(
+        getattr(snapshot, "state", None) == "fast_mapping"
+        or getattr(snapshot, "task_status", None) == "fast_mapping"
+        or (
+            isinstance(raw_attributes, Mapping)
+            and raw_attributes.get("fast_mapping") is True
+        )
     )
 
 
@@ -526,9 +581,11 @@ class DreameLawnMowerClient(
 
     async def async_refresh_authoritative_snapshot(
         self,
+        *,
+        deadline: float | None = None,
     ) -> DreameLawnMowerSnapshot:
         """Force a device-property read for a safety-critical decision."""
-        return await self._async_refresh_authoritative_snapshot()
+        return await self._async_refresh_authoritative_snapshot(deadline=deadline)
 
     async def async_refresh(self) -> DreameLawnMowerSnapshot:
         """Refresh device state and return a normalized snapshot."""
@@ -623,6 +680,116 @@ class DreameLawnMowerClient(
     async def async_pause(self) -> None:
         """Pause mowing."""
         await self._async_call_device_method("pause")
+
+    async def async_cancel_current_task(self) -> bool:
+        """End the current task and require authoritative inactive readback.
+
+        Returns ``False`` when the mower was already outside an active task and
+        ``True`` after a dispatched stop is confirmed. The stop command is never
+        retried after dispatch, even when its response is lost.
+        """
+        baseline = await self.async_refresh_authoritative_snapshot()
+        if _snapshot_is_fast_mapping(baseline):
+            raise _DreameLawnMowerCommandRejectedError(
+                "The mower is creating a map. Cancel current task cannot be used "
+                "because this device interprets Stop as Return to Dock during "
+                "fast mapping. Finish or stop mapping in the mower app."
+            )
+        if not _snapshot_requires_task_cancel(baseline):
+            return False
+
+        ambiguous_stop_error: DreameLawnMowerConnectionError | None = None
+        try:
+            await self._async_call_device_method(
+                "stop",
+                reconcile_ambiguous=False,
+                method_kwargs={"authoritative_task_active": True},
+            )
+        except (
+            _DreameLawnMowerCommandRejectedError,
+            InvalidActionException,
+        ) as stop_error:
+            deadline = _task_cancel_confirmation_deadline()
+            # The task can finish naturally between the preflight read and STOP.
+            # Accept that race only after a fresh authoritative inactive readback.
+            try:
+                snapshot = await self.async_refresh_authoritative_snapshot(
+                    deadline=deadline
+                )
+            except DreameLawnMowerConnectionError as read_error:
+                if isinstance(stop_error, InvalidActionException):
+                    raise _DreameLawnMowerCommandRejectedError(
+                        str(stop_error)
+                    ) from read_error
+                raise stop_error from read_error
+            if not _snapshot_requires_task_cancel(snapshot):
+                return True
+            if isinstance(stop_error, InvalidActionException):
+                raise _DreameLawnMowerCommandRejectedError(
+                    str(stop_error)
+                ) from stop_error
+            raise
+        except DreameLawnMowerConnectionError as stop_error:
+            # STOP may have reached the mower before its reply was lost. Do
+            # not redispatch it; use the complete dedicated settlement window.
+            ambiguous_stop_error = stop_error
+
+        # Transport dispatch has its own protocol timeout. Give the mower the
+        # complete confirmation window after that dispatch returns or raises.
+        deadline = _task_cancel_confirmation_deadline()
+        readable = False
+        latest_readback_failed = False
+        delay = _TASK_CANCEL_CONFIRMATION_INITIAL_DELAY_SECONDS
+        reads = 0
+        while (
+            reads < _TASK_CANCEL_CONFIRMATION_MAX_READS
+            and (remaining := deadline - time.monotonic()) > 0
+        ):
+            await asyncio.sleep(min(delay, remaining))
+            reads += 1
+            try:
+                snapshot = await self.async_refresh_authoritative_snapshot(
+                    deadline=deadline
+                )
+            except DreameLawnMowerConnectionError:
+                latest_readback_failed = True
+                delay = _TASK_CANCEL_CONFIRMATION_POLL_INTERVAL_SECONDS
+                continue
+            readable = True
+            latest_readback_failed = False
+            if not _snapshot_requires_task_cancel(snapshot):
+                return True
+            delay = _TASK_CANCEL_CONFIRMATION_POLL_INTERVAL_SECONDS
+
+        if readable and latest_readback_failed:
+            readback_error = DreameLawnMowerConnectionError(
+                "The mower may have received the cancel request, but final "
+                "authoritative state readback became unavailable after it was "
+                "last observed active. Refresh the mower state before trying again."
+            )
+            if ambiguous_stop_error is not None:
+                raise readback_error from ambiguous_stop_error
+            raise readback_error
+        if readable:
+            if ambiguous_stop_error is not None:
+                raise DreameLawnMowerConnectionError(
+                    "The mower may have received the cancel request, but it "
+                    "still reports an active task. Refresh the mower state "
+                    "before trying again."
+                ) from ambiguous_stop_error
+            raise _DreameLawnMowerCommandRejectedError(
+                "The mower acknowledged the cancel request but still reports an "
+                "active, paused, or returning task. Wait for the mower state to "
+                "settle before trying again."
+            )
+        readback_error = DreameLawnMowerConnectionError(
+            "The mower may have received the cancel request, but every "
+            "authoritative state readback failed. Refresh the mower state before "
+            "trying again."
+        )
+        if ambiguous_stop_error is not None:
+            raise readback_error from ambiguous_stop_error
+        raise readback_error
 
     async def async_dock(self) -> None:
         """End an active mowing session and return the mower to base."""
@@ -863,15 +1030,13 @@ class DreameLawnMowerClient(
             and snapshot.activity not in {"docked", "idle"}
         )
         if (
-            snapshot.mowing_session_active is True
+            _snapshot_requires_task_cancel(snapshot)
             or session_unknown_outside_safe_state
-            or snapshot.mowing
-            or snapshot.paused
-            or snapshot.returning
         ):
             raise _DreameLawnMowerCommandRejectedError(
-                "The active map cannot be changed while a mowing task is active, "
-                "paused, or returning to the dock. Finish or cancel the task first."
+                "The active map cannot be changed while any mower task is active, "
+                "paused, remotely controlled, or returning to the dock. Finish or "
+                "cancel the task first."
             )
         try:
             response = await asyncio.to_thread(self._sync_switch_current_map, map_index)
