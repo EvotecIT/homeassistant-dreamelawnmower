@@ -140,12 +140,6 @@ _BASE_DEVICE_CODES: Final[dict[int, MowerDeviceCodeDefinition]] = {
             70: "resuming_unfinished_task",
             71: "idle_timeout_returning",
             72: "pause_timeout_returning",
-            74: "patrol_task_completed",
-            75: "maintenance_point_reached",
-            76: "maintenance_point_unreachable",
-            77: "error_while_going_to_maintenance_point",
-            78: "outside_operating_hours_low_light_returning",
-            80: "lidar_cooling",
         },
     ),
 }
@@ -177,6 +171,7 @@ _A2_DEVICE_CODE_OVERRIDES: Final[dict[int, MowerDeviceCodeDefinition]] = {
         {
             16: "scheduled_mowing_suspended_low_light",
             47: "task_cancelled",
+            80: "lidar_cooling",
         },
     ),
 }
@@ -208,6 +203,15 @@ _MOVA_DEVICE_CODE_OVERRIDES: Final[dict[int, MowerDeviceCodeDefinition]] = {
     ),
 }
 
+# VIAX 500 g2583: code 78 was reported with this exact model. Do not promote
+# the informational meaning to other mowers without matching model evidence.
+_VIAX_500_DEVICE_CODE_OVERRIDES: Final[dict[int, MowerDeviceCodeDefinition]] = {
+    **_definitions(
+        MowerDeviceCodeTier.INFO,
+        {78: "outside_operating_hours_low_light_returning"},
+    ),
+}
+
 _A2_MODELS: Final[frozenset[str]] = frozenset(
     {
         "dreame.mower.g2408",
@@ -235,6 +239,9 @@ _MOVA_MODELS: Final[frozenset[str]] = frozenset(
         "g2529f",
         "g2584a",
     }
+)
+_VIAX_500_MODELS: Final[frozenset[str]] = frozenset(
+    {"mova.mower.g2583", "g2583"}
 )
 
 
@@ -265,6 +272,10 @@ def mower_device_code_definition(
             return definition
     elif normalized_model in _A1_MODELS:
         definition = _A1_DEVICE_CODE_OVERRIDES.get(code)
+        if definition is not None:
+            return definition
+    elif normalized_model in _VIAX_500_MODELS:
+        definition = _VIAX_500_DEVICE_CODE_OVERRIDES.get(code)
         if definition is not None:
             return definition
     elif normalized_model in _MOVA_MODELS:

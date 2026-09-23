@@ -606,25 +606,21 @@ def test_viax_250_uses_shared_codes_without_unverified_model_overrides() -> None
 
 
 @pytest.mark.parametrize(
-    ("code", "name"),
+    ("code", "name", "tier"),
     [
-        (74, "patrol_task_completed"),
-        (75, "maintenance_point_reached"),
-        (76, "maintenance_point_unreachable"),
-        (77, "error_while_going_to_maintenance_point"),
-        (78, "outside_operating_hours_low_light_returning"),
-        (80, "lidar_cooling"),
+        (74, "patrol_task_completed", MowerDeviceCodeTier.ATTENTION),
+        (75, "maintenance_point_reached", MowerDeviceCodeTier.ATTENTION),
+        (76, "maintenance_point_unreachable", MowerDeviceCodeTier.ATTENTION),
+        (77, "error_while_going_to_maintenance_point", MowerDeviceCodeTier.ATTENTION),
+        (80, "lidar_cooling", MowerDeviceCodeTier.INFO),
     ],
 )
-def test_new_device_codes_are_informational_not_hard_faults(
-    code: int, name: str
+def test_a2_app_codes_keep_their_model_specific_meanings(
+    code: int, name: str, tier: MowerDeviceCodeTier
 ) -> None:
-    assert mower_device_code_name(code, model="mova.mower.g2583") == name
-    assert (
-        mower_device_code_tier(code, model="mova.mower.g2583")
-        is MowerDeviceCodeTier.INFO
-    )
-    assert mower_fault_active(code, model="mova.mower.g2583") is False
+    assert mower_device_code_name(code, model="dreame.mower.g2408") == name
+    assert mower_device_code_tier(code, model="dreame.mower.g2408") is tier
+    assert mower_fault_active(code, model="dreame.mower.g2408") is False
 
 
 def test_a2_maintenance_point_code_keeps_its_model_specific_tier() -> None:
@@ -634,7 +630,21 @@ def test_a2_maintenance_point_code_keeps_its_model_specific_tier() -> None:
     )
 
 
+@pytest.mark.parametrize("code", [74, 75, 76, 77, 78, 80])
+def test_unverified_model_does_not_inherit_new_notice_meanings(code: int) -> None:
+    assert mower_device_code_name(code, model="mova.mower.g2552") == (
+        f"unknown_mower_device_code_{code}"
+    )
+    snapshot = _snapshot(code, "unknown", state="ERROR", model="mova.mower.g2552")
+    assert snapshot.error_code == code
+    assert snapshot.status_notice_code is None
+
+
 def test_viax_500_low_light_return_is_a_status_notice() -> None:
+    assert (
+        mower_device_code_name(78, model="g2583")
+        == "outside_operating_hours_low_light_returning"
+    )
     snapshot = _snapshot(
         78,
         "unknown",
