@@ -22,6 +22,7 @@ from custom_components.dreame_lawn_mower.binary_sensor import (
 )
 from custom_components.dreame_lawn_mower.button import (
     DreameLawnMowerDockWithoutStoppingButton,
+    DreameLawnMowerEndCurrentTaskButton,
     DreameLawnMowerResetMaintenanceButton,
 )
 from custom_components.dreame_lawn_mower.coordinator import (
@@ -678,6 +679,25 @@ def test_dock_without_stopping_button_calls_session_preserving_client_action() -
 
     assert coordinator.client.called is True
     assert coordinator.refreshed is True
+
+
+def test_end_current_task_button_uses_confirmed_coordinator_action() -> None:
+    class _FakeCoordinator:
+        def __init__(self) -> None:
+            self.client = SimpleNamespace(async_cancel_current_task=None)
+            self.called = False
+
+        async def async_cancel_current_task(self) -> bool:
+            self.called = True
+            return True
+
+    coordinator = _FakeCoordinator()
+    entity = object.__new__(DreameLawnMowerEndCurrentTaskButton)
+    entity.coordinator = coordinator
+
+    asyncio.run(entity.async_press())
+
+    assert coordinator.called is True
 
 
 def test_raw_returning_binary_sensor_preserves_vendor_flag() -> None:

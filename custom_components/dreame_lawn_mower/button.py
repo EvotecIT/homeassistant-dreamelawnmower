@@ -36,6 +36,7 @@ async def async_setup_entry(
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
+            DreameLawnMowerEndCurrentTaskButton(coordinator),
             DreameLawnMowerDockWithoutStoppingButton(coordinator),
             DreameLawnMowerCaptureDebugSnapshotButton(coordinator),
             DreameLawnMowerCaptureOperationSnapshotButton(coordinator),
@@ -52,6 +53,21 @@ async def async_setup_entry(
             for item in MAINTENANCE_ITEMS
         ]
     )
+
+
+class DreameLawnMowerEndCurrentTaskButton(DreameLawnMowerEntity, ButtonEntity):
+    """End the current mowing task without returning to the dock."""
+
+    _attr_name = "End Current Task"
+    _attr_icon = "mdi:stop-circle-outline"
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{self._descriptor.unique_id}_end_current_task"
+
+    async def async_press(self) -> None:
+        """Use the guarded task cancellation and authoritative state refresh."""
+        await self.coordinator.async_cancel_current_task()
 
 
 class DreameLawnMowerDockWithoutStoppingButton(
