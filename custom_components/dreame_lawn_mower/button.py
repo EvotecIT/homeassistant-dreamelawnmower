@@ -21,6 +21,7 @@ from .debug import build_debug_payload, sanitize_debug_data
 from .dreame_lawn_mower_client.maintenance import MAINTENANCE_ITEMS, MaintenanceItem
 from .entity import DreameLawnMowerEntity
 from .manual_control import maintenance_point_movement_block_reason
+from .mowing_command import async_run_mowing_command
 from .reporting import build_maintenance_point_diagnostics
 from .task_status_probe import TASK_STATUS_PROBE_KEYS, task_status_probe_payload
 
@@ -67,7 +68,7 @@ class DreameLawnMowerEndCurrentTaskButton(DreameLawnMowerEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Use the guarded task cancellation and authoritative state refresh."""
-        await self.coordinator.async_cancel_current_task()
+        await async_run_mowing_command(self.coordinator.async_cancel_current_task())
 
 
 class DreameLawnMowerDockWithoutStoppingButton(
@@ -87,7 +88,9 @@ class DreameLawnMowerDockWithoutStoppingButton(
 
     async def async_press(self) -> None:
         """Dock directly so the current task remains available to resume."""
-        await self.coordinator.client.async_dock_without_stopping()
+        await async_run_mowing_command(
+            self.coordinator.client.async_dock_without_stopping()
+        )
         await self.coordinator.async_request_refresh()
 
 
@@ -180,7 +183,9 @@ class DreameLawnMowerGoToMaintenancePointButton(
         block_reason = self._movement_block_reason()
         if block_reason is not None:
             raise ValueError(block_reason)
-        await self.coordinator.client.async_go_to_maintenance_point(point_id)
+        await async_run_mowing_command(
+            self.coordinator.client.async_go_to_maintenance_point(point_id)
+        )
         await self.coordinator.async_request_refresh()
 
 

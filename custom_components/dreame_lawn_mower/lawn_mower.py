@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable
 from time import time
 from types import SimpleNamespace
 from typing import Any
@@ -44,7 +43,6 @@ from .control_options import (
     mowing_action_label,
 )
 from .coordinator import DreameLawnMowerCoordinator
-from .dreame_lawn_mower_client import DreameLawnMowerConnectionError
 from .dreame_lawn_mower_client.feature_capabilities import (
     resolved_feature_capabilities,
 )
@@ -52,6 +50,9 @@ from .dreame_lawn_mower_client.mowing_preferences import (
     normalize_mowing_preference_mode,
 )
 from .entity import DreameLawnMowerEntity
+from .mowing_command import (
+    async_run_mowing_command as _async_run_targeted_mowing_command,
+)
 from .mowing_preference_control import async_update_selected_mowing_preference
 from .runtime_cache import (
     begin_runtime_mission_session,
@@ -76,14 +77,6 @@ ACTIVITY_MAP = {
     ACTIVITY_PAUSED: LawnMowerActivity.PAUSED,
     ACTIVITY_RETURNING: LawnMowerActivity.RETURNING,
 }
-
-
-async def _async_run_targeted_mowing_command(command: Awaitable[Any]) -> Any:
-    """Run a targeted command with Home Assistant service error semantics."""
-    try:
-        return await command
-    except DreameLawnMowerConnectionError as err:
-        raise HomeAssistantError(str(err)) from err
 
 
 def _normalize_contour_ids(contour_ids: Any) -> list[list[int]]:

@@ -7,9 +7,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.dreame_lawn_mower.button import (
     DreameLawnMowerGoToMaintenancePointButton,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    DreameLawnMowerConnectionError,
 )
 from custom_components.dreame_lawn_mower.select import (
     DreameLawnMowerMaintenancePointSelect,
@@ -182,6 +186,22 @@ def test_go_to_maintenance_point_uses_selected_configured_id() -> None:
     coordinator.client.async_go_to_maintenance_point.assert_awaited_once_with(302)
     assert coordinator.async_refresh.await_count == 2
     coordinator.async_request_refresh.assert_awaited_once()
+
+
+def test_go_to_maintenance_point_reports_rejected_command() -> None:
+    coordinator = _coordinator(activity="docked")
+    _complete_fresh_map_refresh(coordinator)
+    coordinator.selected_maintenance_point_id = 302
+    coordinator.client.async_go_to_maintenance_point.side_effect = (
+        DreameLawnMowerConnectionError("Maintenance point rejected")
+    )
+    entity = object.__new__(DreameLawnMowerGoToMaintenancePointButton)
+    entity.coordinator = coordinator
+
+    with pytest.raises(HomeAssistantError, match="Maintenance point rejected"):
+        asyncio.run(entity.async_press())
+
+    coordinator.async_request_refresh.assert_not_awaited()
 
 
 def test_go_to_maintenance_point_uses_fresh_a2_app_map_id() -> None:

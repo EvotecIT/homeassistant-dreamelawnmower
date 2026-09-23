@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.dreame_lawn_mower import button as button_module
 from custom_components.dreame_lawn_mower.binary_sensor import (
@@ -31,6 +32,7 @@ from custom_components.dreame_lawn_mower.coordinator import (
     _app_preference_map_index_hints,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    DreameLawnMowerConnectionError,
     decode_batch_mowing_preferences,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.maintenance import (
@@ -698,6 +700,30 @@ def test_end_current_task_button_uses_confirmed_coordinator_action() -> None:
     asyncio.run(entity.async_press())
 
     assert coordinator.called is True
+
+
+def test_end_current_task_button_reports_rejected_action_to_home_assistant() -> None:
+    async def reject() -> None:
+        raise DreameLawnMowerConnectionError("Task is still active")
+
+    entity = object.__new__(DreameLawnMowerEndCurrentTaskButton)
+    entity.coordinator = SimpleNamespace(async_cancel_current_task=reject)
+
+    with pytest.raises(HomeAssistantError, match="Task is still active"):
+        asyncio.run(entity.async_press())
+
+
+def test_dock_without_stopping_button_reports_rejected_action() -> None:
+    async def reject() -> None:
+        raise DreameLawnMowerConnectionError("Dock request was rejected")
+
+    entity = object.__new__(DreameLawnMowerDockWithoutStoppingButton)
+    entity.coordinator = SimpleNamespace(
+        client=SimpleNamespace(async_dock_without_stopping=reject)
+    )
+
+    with pytest.raises(HomeAssistantError, match="Dock request was rejected"):
+        asyncio.run(entity.async_press())
 
 
 def test_raw_returning_binary_sensor_preserves_vendor_flag() -> None:
