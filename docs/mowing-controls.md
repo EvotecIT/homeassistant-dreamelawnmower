@@ -61,8 +61,10 @@ For normal dashboard and automation use, the integration also exposes:
 
 Electronic cutting-height controls use 0.5 cm steps. A2 and other standard
 families expose 3-7 cm; LiDAX Ultra and supported AWD families expose 3-10 cm.
-MOVA 600/1000 and VIAX 250/500 report height but use a physical 2-6 cm knob,
-so their number entities remain read-only. Every other preference control
+MOVA 600/1000 and VIAX 250/300/500 use a physical 2-6 cm knob, so the
+integration does not create electronic height number entities for them. A
+reported height of 0 on these mowers is a vendor placeholder, not a cutting
+height setting. Every other preference control
 follows the current `Global` record or the zone chosen by
 the normal map and zone selectors. `Global` means area `0` on the selected map,
 not one device-wide setting shared by every map. `Custom` edits the selected

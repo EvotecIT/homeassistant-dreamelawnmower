@@ -1645,12 +1645,22 @@ def _coordinator_for_confirmed_preference_write(
     return coordinator
 
 
-def test_coordinator_rejects_manual_height_write_before_client_boundary() -> None:
+@pytest.mark.parametrize(
+    ("model", "display_model"),
+    [
+        ("mova.mower.g2583", None),
+        ("mova.mower.unknown", "Viax 300"),
+    ],
+)
+def test_coordinator_rejects_manual_height_write_before_client_boundary(
+    model: str, display_model: str | None
+) -> None:
     coordinator = _coordinator_for_confirmed_preference_write(
         batch_device_data=None,
         confirmed={},
     )
-    coordinator.client.descriptor.model = "mova.mower.g2583"
+    coordinator.client.descriptor.model = model
+    coordinator.client.descriptor.display_model = display_model
 
     with pytest.raises(HomeAssistantError, match="adjusted manually"):
         asyncio.run(

@@ -143,12 +143,12 @@ async def async_update_selected_mowing_preference(
         )
     if not changes:
         raise HomeAssistantError("At least one mowing preference change is required.")
-    model = getattr(
-        getattr(getattr(coordinator, "client", None), "descriptor", None),
-        "model",
-        None,
+    descriptor = getattr(getattr(coordinator, "client", None), "descriptor", None)
+    guard_mowing_height_changes(
+        getattr(descriptor, "model", None),
+        changes,
+        getattr(descriptor, "display_model", None),
     )
-    guard_mowing_height_changes(model, changes)
 
     maps = map_entries(coordinator.app_maps, coordinator.batch_device_data)
     if not maps:

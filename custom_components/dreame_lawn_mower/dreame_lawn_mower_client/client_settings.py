@@ -63,6 +63,7 @@ from .maintenance import (
     maintenance_status_from_app_data,
     reset_cms_counter,
 )
+from .mowing_height_capabilities import mowing_height_adjustment_supported
 from .mowing_preferences import (
     MOWING_PREFERENCE_MODE_FIELD,
     MOWING_PREFERENCE_MODE_NAMES,
@@ -497,6 +498,10 @@ class _DreameLawnMowerClientSettingsMixin:
             )
         if not isinstance(changes, Mapping) or not changes:
             raise ValueError("At least one mowing preference change is required.")
+        if "mowing_height_cm" in changes and not mowing_height_adjustment_supported(
+            self.descriptor.model, self.descriptor.display_model
+        ):
+            raise ValueError("Mowing height is adjusted manually on this mower.")
 
         preferences = self._sync_get_mowing_preferences(map_indices=[map_index])
         maps = preferences.get("maps")

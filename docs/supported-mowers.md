@@ -25,7 +25,8 @@ brand name:
 | MOVA LiDAX Ultra 1000 | `mova.mower.g2529c` | **Field-reported** | MOVAhome EU login, commands, battery, and model-specific cloud property handling |
 | MOVA LiDAX Ultra 2000 | `mova.mower.g2529f` | **Field-reported** | MOVAhome US login, core state and commands, maps, and cloud live video on firmware `4.3.6_0453` |
 | MOVA LiDAX Ultra 2000 AWD | `mova.mower.g2584a` | **Field-reported** | MOVAhome US login, realtime state, zone mowing, docking, maps, and cloud live video on firmware `4.3.6_0439` |
-| MOVA VIAX 250 | `mova.mower.g2552` | **Recognized** | Model identity and shared mower device-code semantics; dual-map and multi-zone capabilities are [documented by MOVA](https://www.mova.tech/products/viax-250-smart-robot-mower), while cutting height is manual-only; login, controls, maps, and media still need owner validation |
+| MOVA VIAX 250 | `mova.mower.g2552`, `mova.mower.g2420a` | **Recognized** | Model identity and shared mower device-code semantics; dual-map and multi-zone capabilities are [documented by MOVA](https://www.mova.tech/products/viax-250-smart-robot-mower), while cutting height is manual-only; login, controls, maps, and media still need owner validation |
+| MOVA VIAX 300 | `mova.mower.g2420b` (community-reported) | **Field-reported** | Owner report on firmware `4.3.6_0482`: zero is reported for the mowing-preference height field. [MOVA documents manual 2–6 cm adjustment](https://pl.mova.tech/products/viax300-robot-lawn-mower). Other preference writes need owner validation after the height fix. |
 | MOVA VIAX 500 | `mova.mower.g2583` | **Field-reported** | Integration state and app-map metadata on firmware `4.3.6_0260`; [MOVA documents manual 2–6 cm height, dual maps, LiDAR-assisted 3D mapping, and TrueGuard video](https://www.mova.tech/products/robot-lawn-mower-viax-500), but account video provisioning and [3D point-cloud download remain separate and unconfirmed](viax-point-cloud.md) |
 | Dreame A3 AWD Pro 3500 | `dreame.mower.g2541e` | **Recognized** | Model mapping and diagnostics report; broader live confirmation is still needed |
 | Dreame A1 | `dreame.mower.p2255` | **Field-reported** | EU account setup, core state, battery, error state, map camera, docking state, and a real docked-to-mowing start are confirmed; live video is explicitly unsupported |
@@ -64,7 +65,8 @@ operations behind clear boundaries:
 - Mowing-preference writes use guarded paths and have the strongest live proof
   on the A2. Other models and firmware need broader confirmation.
 - Height controls follow the known hardware families: MOVA 600/1000 and VIAX
-  250/500 report their height but use a physical 2–6 cm knob; LiDAX Ultra and
+  250/300/500 use a physical 2–6 cm knob and have no electronic height number
+  entities; LiDAX Ultra and
   supported AWD families use electronic 3–10 cm adjustment. Unknown models keep
   the conservative 3–7 cm range until their identity is confirmed.
 - Firmware updates use the app-approved target and confirmation flow. Release

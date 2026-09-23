@@ -1930,6 +1930,7 @@ class DreameLawnMowerCoordinator(
         guard_mowing_height_changes(
             getattr(getattr(self.client, "descriptor", None), "model", None),
             changes,
+            getattr(getattr(self.client, "descriptor", None), "display_model", None),
         )
         async with self._preference_write_lock:
             try:

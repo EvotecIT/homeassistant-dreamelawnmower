@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
+from custom_components.dreame_lawn_mower.const import DOMAIN
 from custom_components.dreame_lawn_mower.coordinator import (
     _app_map_index_hints,
     _app_map_slot_index_hints,
@@ -25,6 +26,9 @@ from custom_components.dreame_lawn_mower.number import (
     DreameLawnMowerSelectedMapMowingHeightNumber,
     DreameLawnMowerSelectedMowingDirectionNumber,
     DreameLawnMowerSelectedZoneMowingHeightNumber,
+)
+from custom_components.dreame_lawn_mower.number import (
+    async_setup_entry as async_setup_number_entry,
 )
 from custom_components.dreame_lawn_mower.preference_select import (
     PREFERENCE_SELECTS,
@@ -45,9 +49,12 @@ def _coordinator(
     *,
     mode_name: str = "custom",
     model: str | None = None,
+    display_model: str | None = None,
 ) -> SimpleNamespace:
     client = SimpleNamespace(
-        descriptor=SimpleNamespace(model=model),
+        descriptor=SimpleNamespace(
+            model=model, display_model=display_model, unique_id="test-mower"
+        ),
         async_plan_app_mowing_preference_update=AsyncMock(
             return_value={
                 "source": "app_action_mowing_preference_write",
@@ -225,6 +232,8 @@ def test_mowing_height_number_requires_custom_mode() -> None:
         "mova.mower.g2405a",
         "mova.mower.g2405b",
         "mova.mower.g2405c",
+        "mova.mower.g2420a",
+        "mova.mower.g2420b",
         "mova.mower.g2552",
         "mova.mower.g2583",
     ],
@@ -244,6 +253,61 @@ def test_manual_height_mowers_reject_electronic_adjustment(model: str) -> None:
         asyncio.run(entity.async_set_native_value(4.5))
 
     coordinator.client.async_plan_app_mowing_preference_update.assert_not_awaited()
+
+
+def test_viax_300_display_name_disables_height_controls_and_writes() -> None:
+    coordinator = _coordinator(
+        model="mova.mower.unknown", display_model="MOVA VIAX 300"
+    )
+    entity = object.__new__(DreameLawnMowerSelectedZoneMowingHeightNumber)
+    entity.coordinator = coordinator
+    entity._descriptor = coordinator.client.descriptor
+
+    assert mowing_height_adjustment_supported(
+        coordinator.client.descriptor.model,
+        coordinator.client.descriptor.display_model,
+    ) is False
+    assert mowing_height_limits(
+        coordinator.client.descriptor.model,
+        coordinator.client.descriptor.display_model,
+    ) == (2.0, 6.0)
+    assert entity.available is False
+    with pytest.raises(HomeAssistantError, match="adjusted manually"):
+        asyncio.run(entity.async_set_native_value(4.5))
+    coordinator.client.async_plan_app_mowing_preference_update.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("model", "display_model", "has_height_controls"),
+    [
+        ("mova.mower.g2552", "Viax 250", False),
+        ("mova.mower.g2420b", "mova.mower.g2420b", False),
+        ("mova.mower.unknown", "Viax 300", False),
+        ("dreame.mower.g2408", "A2", True),
+    ],
+)
+def test_number_setup_exposes_height_only_for_electronic_models(
+    model: str, display_model: str, has_height_controls: bool
+) -> None:
+    coordinator = _coordinator(model=model, display_model=display_model)
+    hass = SimpleNamespace(data={DOMAIN: {"test-entry": coordinator}})
+    entry = SimpleNamespace(entry_id="test-entry")
+    added: list[object] = []
+
+    asyncio.run(async_setup_number_entry(hass, entry, added.extend))
+
+    assert any(
+        isinstance(item, DreameLawnMowerSelectedMowingDirectionNumber)
+        for item in added
+    )
+    assert any(
+        isinstance(item, DreameLawnMowerSelectedMapMowingHeightNumber)
+        for item in added
+    ) is has_height_controls
+    assert any(
+        isinstance(item, DreameLawnMowerSelectedZoneMowingHeightNumber)
+        for item in added
+    ) is has_height_controls
 
 
 @pytest.mark.parametrize("value", [2.5, 3.6, 7.5])

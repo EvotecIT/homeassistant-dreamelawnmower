@@ -42,14 +42,19 @@ async def async_setup_entry(
 ) -> None:
     """Set up Dreame mower number entities."""
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        [
-            DreameLawnMowerVoiceVolumeNumber(coordinator),
-            DreameLawnMowerSelectedMapMowingHeightNumber(coordinator),
-            DreameLawnMowerSelectedZoneMowingHeightNumber(coordinator),
-            DreameLawnMowerSelectedMowingDirectionNumber(coordinator),
-        ]
-    )
+    descriptor = coordinator.client.descriptor
+    entities = [DreameLawnMowerVoiceVolumeNumber(coordinator)]
+    if mowing_height_adjustment_supported(
+        descriptor.model, getattr(descriptor, "display_model", None)
+    ):
+        entities.extend(
+            (
+                DreameLawnMowerSelectedMapMowingHeightNumber(coordinator),
+                DreameLawnMowerSelectedZoneMowingHeightNumber(coordinator),
+            )
+        )
+    entities.append(DreameLawnMowerSelectedMowingDirectionNumber(coordinator))
+    async_add_entities(entities)
 
 
 class DreameLawnMowerVoiceVolumeNumber(DreameLawnMowerEntity, NumberEntity):
@@ -106,14 +111,16 @@ class _DreameLawnMowerMowingHeightNumber(
     def _height_adjustment_supported(self) -> bool:
         """Return whether this mower exposes electronic cutting-height control."""
         return mowing_height_adjustment_supported(
-            getattr(getattr(self, "_descriptor", None), "model", None)
+            getattr(getattr(self, "_descriptor", None), "model", None),
+            getattr(getattr(self, "_descriptor", None), "display_model", None),
         )
 
     @property
     def native_min_value(self) -> float:
         """Return the family limit while retaining a reported outlier."""
         minimum, _ = mowing_height_limits(
-            getattr(getattr(self, "_descriptor", None), "model", None)
+            getattr(getattr(self, "_descriptor", None), "model", None),
+            getattr(getattr(self, "_descriptor", None), "display_model", None),
         )
         current = self.native_value
         return min(minimum, current) if current is not None else minimum
@@ -122,7 +129,8 @@ class _DreameLawnMowerMowingHeightNumber(
     def native_max_value(self) -> float:
         """Return the family limit while retaining a reported outlier."""
         _, maximum = mowing_height_limits(
-            getattr(getattr(self, "_descriptor", None), "model", None)
+            getattr(getattr(self, "_descriptor", None), "model", None),
+            getattr(getattr(self, "_descriptor", None), "display_model", None),
         )
         current = self.native_value
         return max(maximum, current) if current is not None else maximum
@@ -130,7 +138,8 @@ class _DreameLawnMowerMowingHeightNumber(
     def _validate_height(self, value: float) -> float:
         normalized = float(value)
         minimum, maximum = mowing_height_limits(
-            getattr(getattr(self, "_descriptor", None), "model", None)
+            getattr(getattr(self, "_descriptor", None), "model", None),
+            getattr(getattr(self, "_descriptor", None), "display_model", None),
         )
         if normalized < minimum or normalized > maximum:
             raise HomeAssistantError(

@@ -504,6 +504,9 @@ def _required_int(preference: Mapping[str, Any], field: str) -> int:
 
 
 def _encode_height_cm(value: Any) -> int:
+    # Manual-height mowers report zero as a placeholder in otherwise writable PRE data.
+    if isinstance(value, int | float) and not isinstance(value, bool) and value == 0:
+        return 0
     return int(round(_normalize_height_cm(value) * 10))
 
 

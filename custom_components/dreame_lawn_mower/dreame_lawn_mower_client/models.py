@@ -37,6 +37,8 @@ MODEL_NAME_MAP = {
     "mova.mower.g2405a": "MOVA 600",
     "mova.mower.g2405b": "MOVA 600 Kit",
     "mova.mower.g2405c": "MOVA 1000",
+    "mova.mower.g2420a": "VIAX 250",
+    "mova.mower.g2420b": "VIAX 300",
     "mova.mower.g2529b": "LiDAX Ultra 800",
     "mova.mower.g2529c": "LiDAX Ultra 1000",
     "mova.mower.g2529f": "LiDAX Ultra 2000",
