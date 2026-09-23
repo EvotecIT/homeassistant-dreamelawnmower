@@ -58,6 +58,8 @@ Common user-facing helpers include:
 - `binary_sensor.<device>_task_resumable`
 - `binary_sensor.<device>_rain_delay_active`
 - `binary_sensor.<device>_returning`
+- `button.<device>_end_current_task`
+- `button.<device>_dock_without_ending_session`
 - `calendar.<device>_schedule`
 - `camera.<device>_live_video` on supported Linux hosts
 
@@ -69,6 +71,13 @@ These sensors work even when optional persistent notifications are off and remai
 readable while the mower is offline. The list is kept in memory and starts empty
 after an integration reload or Home Assistant restart; it is not a complete
 device notification log.
+
+**End Current Task** ends a resumable mowing task without sending the mower to
+the dock. **Dock Without Ending Session** sends it to the dock while keeping
+the task resumable. Use the mower's normal dock action to end the task and
+return to the dock. The end-task button uses the same confirmed operation as
+the `cancel_current_task` action; it waits for the mower's inactive state before
+reporting success.
 
 ## Mowing time
 
