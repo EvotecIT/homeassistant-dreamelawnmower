@@ -606,6 +606,51 @@ def test_viax_250_uses_shared_codes_without_unverified_model_overrides() -> None
 
 
 @pytest.mark.parametrize(
+    ("code", "name"),
+    [
+        (74, "patrol_task_completed"),
+        (75, "maintenance_point_reached"),
+        (76, "maintenance_point_unreachable"),
+        (77, "error_while_going_to_maintenance_point"),
+        (78, "outside_operating_hours_low_light_returning"),
+        (80, "lidar_cooling"),
+    ],
+)
+def test_new_device_codes_are_informational_not_hard_faults(
+    code: int, name: str
+) -> None:
+    assert mower_device_code_name(code, model="mova.mower.g2583") == name
+    assert (
+        mower_device_code_tier(code, model="mova.mower.g2583")
+        is MowerDeviceCodeTier.INFO
+    )
+    assert mower_fault_active(code, model="mova.mower.g2583") is False
+
+
+def test_a2_maintenance_point_code_keeps_its_model_specific_tier() -> None:
+    assert (
+        mower_device_code_tier(76, model="dreame.mower.g2408")
+        is MowerDeviceCodeTier.ATTENTION
+    )
+
+
+def test_viax_500_low_light_return_is_a_status_notice() -> None:
+    snapshot = _snapshot(
+        78,
+        "unknown",
+        realtime_error_code=78,
+        state="RETURNING",
+        model="mova.mower.g2583",
+        account_type="mova",
+    )
+
+    assert snapshot.error_code is None
+    assert snapshot.status_notice_code == 78
+    assert snapshot.status_notice_name == "outside_operating_hours_low_light_returning"
+    assert snapshot.status_notice_tier == "info"
+
+
+@pytest.mark.parametrize(
     "model",
     [None, "dreame.mower.p2255", "dreame.mower.x1234", "mova.mower.x1234"],
 )

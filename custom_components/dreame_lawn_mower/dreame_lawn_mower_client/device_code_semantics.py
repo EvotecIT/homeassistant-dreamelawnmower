@@ -140,6 +140,12 @@ _BASE_DEVICE_CODES: Final[dict[int, MowerDeviceCodeDefinition]] = {
             70: "resuming_unfinished_task",
             71: "idle_timeout_returning",
             72: "pause_timeout_returning",
+            74: "patrol_task_completed",
+            75: "maintenance_point_reached",
+            76: "maintenance_point_unreachable",
+            77: "error_while_going_to_maintenance_point",
+            78: "outside_operating_hours_low_light_returning",
+            80: "lidar_cooling",
         },
     ),
 }
