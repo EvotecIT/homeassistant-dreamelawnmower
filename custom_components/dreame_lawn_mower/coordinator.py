@@ -57,6 +57,7 @@ from .dreame_lawn_mower_client.schedule import (
     decode_schedule_payload_text,
     encode_schedule_payload_text,
 )
+from .mower_condition_history import MowerConditionHistory
 from .mowing_height import guard_mowing_height_changes
 from .performance import DreameLawnMowerPerformanceTracker
 from .preference_cache import (
@@ -488,6 +489,7 @@ class DreameLawnMowerCoordinator(
         self._advertised_feature_capabilities: set[str] = set()
         self._observed_feature_capabilities: set[str] = set()
         self.diagnostic_events = DreameLawnMowerDiagnosticEventStore()
+        self.mower_condition_history = MowerConditionHistory()
         self.video_diagnostics_provider: Callable[[], Mapping[str, Any]] | None = None
         self.performance = DreameLawnMowerPerformanceTracker()
         self.last_batch_device_data_probe_result: dict[str, Any] | None = None
@@ -626,6 +628,9 @@ class DreameLawnMowerCoordinator(
             self._observe_runtime_mission_boundary(data)
         else:
             observe_mowing_time(self, data, None)
+        history = getattr(self, "mower_condition_history", None)
+        if history is not None:
+            history.observe(data)
         super().async_set_updated_data(data)
 
     def _observe_runtime_mission_boundary(

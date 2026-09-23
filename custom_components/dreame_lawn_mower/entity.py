@@ -9,7 +9,14 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .coordinator import DreameLawnMowerCoordinator
 
 _OFFLINE_REPORTING_ENTITY_KEYS = frozenset(
-    {"online", "device_connected", "cloud_connected", "last_observed_run_duration"}
+    {
+        "online",
+        "device_connected",
+        "cloud_connected",
+        "last_observed_run_duration",
+        "last_mower_error",
+        "last_mower_notification",
+    }
 )
 
 

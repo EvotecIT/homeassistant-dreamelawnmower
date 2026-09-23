@@ -18,6 +18,8 @@ Common user-facing helpers include:
 - `sensor.<device>_activity`
 - `sensor.<device>_state_name`
 - `sensor.<device>_error`
+- `sensor.<device>_last_mower_error`
+- `sensor.<device>_last_mower_notification`
 - `sensor.<device>_battery`
 - `sensor.<device>_mowing_progress`
 - `sensor.<device>_observed_mowing_time`
@@ -58,6 +60,15 @@ Common user-facing helpers include:
 - `binary_sensor.<device>_returning`
 - `calendar.<device>_schedule`
 - `camera.<device>_live_video` on supported Linux hosts
+
+**Error** shows the mower's current fault. **Last Mower Error** retains the
+latest fault message, code, source, and observation time after the fault clears.
+**Last Mower Notification** retains the latest fault or actionable warning and
+lists up to five recent conditions in its `recent` attribute, newest first.
+These sensors work even when optional persistent notifications are off and remain
+readable while the mower is offline. The list is kept in memory and starts empty
+after an integration reload or Home Assistant restart; it is not a complete
+device notification log.
 
 ## Mowing time
 

@@ -17,8 +17,8 @@ from .const import (
     NOTIFICATION_MODE_OPTIONS,
 )
 from .coordinator import DreameLawnMowerCoordinator
+from .mower_condition_history import ACTIONABLE_NOTICE_TIERS
 
-_WARNING_TIERS = frozenset({"alert", "attention", "unknown"})
 _DEFAULT_TEXT = {
     "unknown_fault": "Unknown fault",
     "fault_title": "{name}: mower fault",
@@ -126,7 +126,7 @@ class DreameLawnMowerNotificationManager:
             mode == NOTIFICATION_MODE_FAULTS_AND_WARNINGS
             and snapshot.status_notice_display
             and (snapshot.status_notice_tier or "unknown").casefold()
-            in _WARNING_TIERS
+            in ACTIONABLE_NOTICE_TIERS
         ):
             code = (
                 "\n\n"
