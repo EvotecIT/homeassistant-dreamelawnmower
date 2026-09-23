@@ -29,6 +29,7 @@ class _FakePreferenceCloud:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
         self.modes = {0: 1, 1: 0}
+        self.versions = {11: 8, 12: 9}
         self.preference_payloads: dict[tuple[int, int], list[int]] = {}
 
     def call_app_action(
@@ -55,7 +56,10 @@ class _FakePreferenceCloud:
         if command == "PREI":
             idx = int(payload["d"]["idx"])
             data = (
-                {"type": self.modes[idx], "ver": [[11, 8], [12, 9]]}
+                {
+                    "type": self.modes[idx],
+                    "ver": [[area, version] for area, version in self.versions.items()],
+                }
                 if idx == 0
                 else {
                     "type": self.modes[idx],
@@ -101,7 +105,9 @@ class _FakePreferenceCloud:
         raise AssertionError(f"Unexpected app command: {payload}")
 
 
-def _client() -> DreameLawnMowerClient:
+def _client(
+    *, model: str = "dreame.mower.g2408", display_model: str = "A2"
+) -> DreameLawnMowerClient:
     return DreameLawnMowerClient(
         username="user@example.invalid",
         password="secret",
@@ -110,8 +116,8 @@ def _client() -> DreameLawnMowerClient:
         descriptor=DreameLawnMowerDescriptor(
             did="device-1",
             name="Garage Mower",
-            model="dreame.mower.g2408",
-            display_model="A2",
+            model=model,
+            display_model=display_model,
             account_type="dreame",
             country="eu",
         ),
@@ -606,6 +612,74 @@ def test_encode_mowing_preference_payload_round_trips_decoded_values() -> None:
         7,
         1,
     ]
+
+
+def test_manual_height_placeholder_survives_other_preference_changes() -> None:
+    payload = [21, 0, 11, 1, 0, 2, 90, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1]
+    decoded = decode_mowing_preference_payload(payload)
+
+    updated, changed_fields = apply_mowing_preference_changes(
+        decoded, {"obstacle_avoidance_distance_cm": 25}
+    )
+
+    assert decoded["mowing_height_cm"] == 0.0
+    assert changed_fields == ["obstacle_avoidance_distance_cm"]
+    assert encode_mowing_preference_payload(updated) == [
+        *payload[:14],
+        25,
+        *payload[15:],
+    ]
+    with pytest.raises(ValueError, match="greater than zero"):
+        apply_mowing_preference_changes(decoded, {"mowing_height_cm": 0})
+
+
+def test_manual_height_placeholder_allows_confirmed_preference_write() -> None:
+    client = _client()
+    cloud = _FakePreferenceCloud()
+    cloud.versions[11] = 21
+    cloud.preference_payloads[(0, 11)] = [
+        21, 0, 11, 1, 0, 2, 90, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1
+    ]
+    client._sync_get_cloud_protocol = lambda: cloud
+
+    result = client._sync_plan_app_mowing_preference_update(
+        map_index=0,
+        area_id=11,
+        changes={"obstacle_avoidance_distance_cm": 25},
+        execute=True,
+        confirm_write=True,
+    )
+
+    assert result["executed"] is True
+    assert result["request_verified"] is True
+    assert result["payload"][4] == 0
+    assert result["payload"][14] == 25
+    assert cloud.preference_payloads[(0, 11)] == result["payload"]
+
+
+@pytest.mark.parametrize(
+    ("model", "display_model"),
+    [
+        ("mova.mower.g2420b", "mova.mower.g2420b"),
+        ("mova.mower.unknown", "Viax 300"),
+    ],
+)
+def test_client_rejects_manual_height_write_before_reading_preferences(
+    model: str, display_model: str
+) -> None:
+    client = _client(model=model, display_model=display_model)
+
+    with patch.object(client, "_sync_get_mowing_preferences") as read_preferences:
+        with pytest.raises(ValueError, match="adjusted manually"):
+            client._sync_plan_app_mowing_preference_update(
+                map_index=0,
+                area_id=11,
+                changes={"mowing_height_cm": 4.5},
+                execute=True,
+                confirm_write=True,
+            )
+
+    read_preferences.assert_not_called()
 
 
 def test_encode_mowing_preference_payload_preserves_newer_vendor_fields() -> None:

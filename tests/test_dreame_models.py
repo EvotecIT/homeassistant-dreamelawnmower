@@ -192,6 +192,11 @@ def test_descriptor_accepts_generic_mower_prefix() -> None:
     assert descriptor.display_model == "Viax 300"
 
 
+def test_viax_300_raw_model_maps_to_hardware_family_without_display_name() -> None:
+    assert display_name_for_model("mova.mower.g2420b") == "VIAX 300"
+    assert display_name_for_model("mova.mower.g2420a") == "VIAX 250"
+
+
 def test_descriptor_rejects_non_mower_models() -> None:
     descriptor = descriptor_from_cloud_record(
         {
