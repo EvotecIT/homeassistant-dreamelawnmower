@@ -564,8 +564,9 @@ class DreameMowerDreameHomeCloudProtocol:
                         return self.login(timeout=timeout, deadline=deadline)
                 except:
                     pass
-                _LOGGER.error("Login failed: %s => %s -- %s -- %s", response_text,
-                              self.get_api_url() + self._strings[17], headers, data)
+                # Login payloads, headers, and server responses can contain
+                # account credentials or tokens, including on malformed replies.
+                _LOGGER.error("Login failed: HTTP %s", response.status_code)
         except requests.exceptions.Timeout as err:
             response = None
             _LOGGER.warning(
@@ -578,7 +579,7 @@ class DreameMowerDreameHomeCloudProtocol:
                 ) from err
         except Exception as ex:
             response = None
-            _LOGGER.error("Login failed: %s", str(ex))
+            _LOGGER.error("Login failed: %s", type(ex).__name__)
 
         if self._logged_in and not self._disconnect_is_pending():
             self._fail_count = 0
