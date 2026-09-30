@@ -41,9 +41,8 @@ class MowerNoticeEventBuffer:
         """Return an immutable snapshot without consuming other readers' events."""
         return tuple(self._events)
 
-    def clear(self) -> None:
-        """Start a new MQTT ordering epoch without resetting consumer sequences."""
-        self._events.clear()
+    def reset_connection(self) -> None:
+        """Reset delivery identities while retaining queued and consumed events."""
         self._seen.clear()
 
     def record(self, *, received_at: float, message_id: Any = None) -> bool:

@@ -32,6 +32,20 @@ _OPERATIONAL_HUMAN_DETECTION_MODELS = frozenset(
     {"dreame.mower.q2501a", "q2501a", "mova.mower.g2529b", "g2529b"}
 )
 
+# The normalized activity and notice paths share these firmware work states.
+MOWER_MOWING_STATES: Final = frozenset(
+    {
+        "mowing",
+        "remote_control",
+        "clean_summon",
+        "second_cleaning",
+        "human_following",
+        "spot_cleaning",
+        "shortcut",
+        "monitoring",
+    }
+)
+
 
 def supports_operational_human_detection(model: str | None) -> bool:
     """Return whether field evidence confirms person avoidance while mowing."""
@@ -39,11 +53,13 @@ def supports_operational_human_detection(model: str | None) -> bool:
 
 
 def mower_operational_human_detection_notice(
-    code: int | None, *, model: str | None, state: str | None
+    code: object, *, model: str | None, state: str | None
 ) -> bool:
     """Recognize code 27 as a notice only on confirmed models still mowing."""
     return bool(
-        code == 27 and state == "mowing" and supports_operational_human_detection(model)
+        mower_device_code(code) == 27
+        and state in MOWER_MOWING_STATES
+        and supports_operational_human_detection(model)
     )
 
 

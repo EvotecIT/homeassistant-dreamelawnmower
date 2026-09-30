@@ -83,8 +83,9 @@ Each occurrence includes `stream_id`, `sequence`, `received_at`, `code`, `name`,
 each occurrence once across repeated snapshots; timestamps alone are not unique.
 Readers do not consume each other's events.
 
-The connection resets the retained buffer on MQTT reconnect, while sequences
-continue increasing. Replacing the device creates a new stream identifier.
+MQTT reconnect resets message-ID deduplication and retains occurrences so queued
+updates can still reach their consumers. Sequences continue increasing, while
+replacing the device creates a new stream identifier.
 Polling the same notice creates no occurrence. Receipt time is local UTC epoch
 time, not a firmware detection timestamp, and this buffer is not an archive of
 announcements made while disconnected.

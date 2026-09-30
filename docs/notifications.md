@@ -31,7 +31,8 @@ select a phone or other delivery service.
 On the MOVA LiDAX Ultra 800 (`mova.mower.g2529b`) and Dreame A3 AWD 1000
 (`dreame.mower.q2501a`), code `27` is an attention notice while the mower reports
 that it is mowing. **Mowing** stays on and **Error Active** stays off. If the
-mower is paused or reports an error, the same code remains a fault.
+mower is paused or reports an error, the same code remains a fault. Active work
+states such as spot mowing, mowing on demand, and shortcuts follow the same rule.
 
 The **Person detection** event entity publishes `human_detected` for each fresh
 realtime announcement, including repeated code `27` messages. Its attributes

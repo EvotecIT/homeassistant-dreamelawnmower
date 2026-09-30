@@ -2,7 +2,9 @@
 
 import logging
 from dataclasses import replace
+from threading import RLock
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from homeassistant.const import EVENT_STATE_CHANGED
@@ -12,6 +14,10 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.setup import async_setup_component
 
 from custom_components.dreame_lawn_mower.const import DOMAIN
+from custom_components.dreame_lawn_mower.coordinator import DreameLawnMowerCoordinator
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device import (
+    DreameMowerDevice,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
     DreameLawnMowerSnapshot,
     descriptor_from_cloud_record,
@@ -22,6 +28,9 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.notice_events 
 from custom_components.dreame_lawn_mower.event import (
     DreameLawnMowerPersonDetectionEvent,
     async_setup_entry,
+)
+from custom_components.dreame_lawn_mower.mower_condition_history import (
+    MowerConditionHistory,
 )
 
 
@@ -56,6 +65,55 @@ async def test_event_platform_only_creates_supported_models(hass, model, expecte
     entities = []
     await async_setup_entry(hass, SimpleNamespace(entry_id="test"), entities.extend)
     assert len(entities) == expected
+
+
+async def test_queued_ha_update_survives_reconnect_before_snapshot(hass):
+    coordinator = _coordinator(hass)
+    buffer = MowerNoticeEventBuffer()
+    history = MowerConditionHistory()
+    component = EntityComponent(logging.getLogger(__name__), "event", hass)
+    entity = DreameLawnMowerPersonDetectionEvent(coordinator)
+    entity.entity_id = "event.mower_person_detection"
+    await component.async_add_entities([entity])
+
+    @callback
+    def publish():
+        snapshot = replace(
+            coordinator.data,
+            notification_events=buffer.events,
+            status_notice_code=27,
+            status_notice_display="Human detected",
+            status_notice_tier="attention",
+        )
+        history.observe(snapshot)
+        coordinator.async_set_updated_data(snapshot)
+
+    bridge = SimpleNamespace(
+        hass=hass, _shutting_down=False, _schedule_client_update=publish
+    )
+    device = SimpleNamespace(
+        _ready=True,
+        _state_lock=RLock(),
+        realtime_properties={},
+        last_realtime_message=None,
+        _notice_events=buffer,
+        schedule_update=Mock(),
+    )
+    try:
+        buffer.record(received_at=100, message_id=11)
+        DreameLawnMowerCoordinator._handle_client_update(bridge)
+        # The HA loop has not yet read the newly received device occurrence.
+        DreameMowerDevice._connected_callback(device)
+        await hass.async_block_till_done()
+        state = hass.states.get(entity.entity_id)
+        assert state.attributes["event_type"] == "human_detected"
+        assert state.attributes["observed_at"] == "1970-01-01T00:01:40+00:00"
+        assert len(history.recent()) == 1
+        publish()
+        await hass.async_block_till_done()
+        assert len(history.recent()) == 1
+    finally:
+        await component.async_remove_entity(entity.entity_id)
 
 
 async def test_burst_emits_each_ha_state_once_and_unload_removes_listener(hass):
@@ -145,7 +203,7 @@ async def test_burst_emits_each_ha_state_once_and_unload_removes_listener(hass):
         coordinator.async_set_updated_data(replace(snapshot, available=False))
         await hass.async_block_till_done()
         assert hass.states.get(entity.entity_id).state == "unavailable"
-        buffer.clear()
+        buffer.reset_connection()
         coordinator.async_set_updated_data(
             replace(snapshot, notification_events=buffer.events)
         )

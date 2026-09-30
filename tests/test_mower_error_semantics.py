@@ -248,7 +248,7 @@ def test_human_detection_is_a_notice_while_confirmed_model_keeps_mowing(
     assert snapshot.realtime_error_code == realtime_code
 
 
-@pytest.mark.parametrize("state", ["PAUSED", "ERROR"])
+@pytest.mark.parametrize("state", ["PAUSED", "ERROR", "MONITORING_PAUSED"])
 @pytest.mark.parametrize("model", ["dreame.mower.q2501a", "mova.mower.g2529b"])
 def test_human_detection_remains_a_fault_when_confirmed_model_is_halted(
     state: str,
@@ -270,6 +270,26 @@ def test_human_detection_remains_a_fault_when_confirmed_model_is_halted(
     assert snapshot.status_notice_code is None
     assert snapshot.raw_error_code == 27
     assert snapshot.realtime_error_code == 27
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        "SPOT_CLEANING",
+        "CLEAN_SUMMON",
+        "SECOND_CLEANING",
+        "SHORTCUT",
+        "REMOTE_CONTROL",
+        "HUMAN_FOLLOWING",
+        "MONITORING",
+    ],
+)
+@pytest.mark.parametrize("model", ["dreame.mower.q2501a", "mova.mower.g2529b"])
+def test_human_detection_preserves_special_mowing_activity(state, model):
+    snapshot = _snapshot(27, "infrared_shielding", state=state, model=model)
+    assert snapshot.activity == "mowing"
+    assert snapshot.error_code is None
+    assert snapshot.status_notice_code == 27
 
 
 @pytest.mark.parametrize(

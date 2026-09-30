@@ -184,7 +184,7 @@ class _DreameMowerDeviceStateMixin:
             self.realtime_properties.clear()
             self.last_realtime_message = None
             if getattr(self, "_notice_events", None) is not None:
-                self._notice_events.clear()
+                self._notice_events.reset_connection()
         _LOGGER.info("Requesting properties after connect")
         self.schedule_update(2, True)
 

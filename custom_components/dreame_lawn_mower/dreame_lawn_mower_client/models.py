@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from .device_code_semantics import (
+    MOWER_MOWING_STATES,
     mower_device_code_definition,
     mower_device_code_name,
     mower_device_code_tier,
@@ -1281,16 +1282,6 @@ def snapshot_from_device(
 
     paused_states = {"paused", "monitoring_paused"}
     returning_states = {"returning"}
-    mowing_states = {
-        "mowing",
-        "remote_control",
-        "clean_summon",
-        "second_cleaning",
-        "human_following",
-        "spot_cleaning",
-        "shortcut",
-        "monitoring",
-    }
     docked_states = {
         "idle",
         "charging",
@@ -1322,7 +1313,7 @@ def snapshot_from_device(
         previous_snapshot,
         current_state=state,
         current_state_is_operational=(
-            state in mowing_states
+            state in MOWER_MOWING_STATES
             or state in returning_states
             or state in docked_states
         ),
@@ -1364,7 +1355,7 @@ def snapshot_from_device(
         activity = "paused"
     elif state in returning_states:
         activity = "returning"
-    elif state in mowing_states:
+    elif state in MOWER_MOWING_STATES:
         activity = "mowing"
     elif state in docked_states:
         activity = "docked"

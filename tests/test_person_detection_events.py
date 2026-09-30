@@ -49,10 +49,10 @@ def _device(model="mova.mower.g2529b", state=DreameMowerState.MOWING):
     return device
 
 
-def _message(message_id=None, *, state=None, code=0):
+def _message(message_id=None, *, state=None, code=0, value=27):
     message = {
         "method": "properties_changed",
-        "params": [{"siid": 2, "piid": 2, "value": 27, "code": code}],
+        "params": [{"siid": 2, "piid": 2, "value": value, "code": code}],
     }
     if message_id is not None:
         message["id"] = message_id
@@ -109,6 +109,37 @@ def test_reconnect_allows_vendor_id_reuse_without_replaying_consumed_events():
     device._message_callback(_message(11))
     assert len(cursor.new_events(device._notice_events.events)) == 1
     device.schedule_update.assert_called_once_with(2, True)
+
+
+def test_reconnect_before_consumption_retains_queued_detections():
+    device = _device()
+    cursor = MowerNoticeEventCursor()
+    device._message_callback(_message(11))
+    device._connected_callback()
+    assert len(cursor.new_events(device._notice_events.events)) == 1
+    assert cursor.new_events(device._notice_events.events) == ()
+    device._message_callback(_message(11))
+    assert len(cursor.new_events(device._notice_events.events)) == 1
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        DreameMowerState.MOWING,
+        DreameMowerState.SPOT_CLEANING,
+        DreameMowerState.CLEAN_SUMMON,
+        DreameMowerState.SECOND_CLEANING,
+        DreameMowerState.SHORTCUT,
+        DreameMowerState.REMOTE_CONTROL,
+        DreameMowerState.HUMAN_FOLLOWING,
+        DreameMowerState.MONITORING,
+    ],
+)
+def test_numeric_string_notice_is_captured_in_every_mowing_state(state):
+    device = _device(state=state)
+    device._message_callback(_message(11, value="27"))
+    assert device.status.device_code == 27
+    assert len(device._notice_events.events) == 1
 
 
 def test_bounded_burst_has_independent_readers_and_receipt_fallback():
