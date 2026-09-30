@@ -60,6 +60,10 @@ Neither app is required to use this project.
 3. Open **Settings → Devices & services → Add integration**, then choose
    **Dreame Lawn Mower**.
 
+If adding the integration fails, follow the
+[dependency installation checks](docs/troubleshooting.md#integration-cannot-be-added)
+to find the package installer error and check DNS connectivity.
+
 ### Manual
 
 1. Download the repository and copy `custom_components/dreame_lawn_mower` into your

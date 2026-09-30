@@ -2,6 +2,52 @@
 
 [Back to the README](../README.md) · [Live video](live-video.md)
 
+## Integration cannot be added
+
+Home Assistant installs the integration's Python requirements before loading its
+configuration flow. If this fails, integration diagnostics are not available.
+In **Settings → System → Logs**, find the `homeassistant.util.package` entry
+beginning with `Unable to install package`. Include that full error, the
+integration version, Home Assistant version, installation type, and CPU
+architecture in your report. The final `RequirementsNotFound` traceback names
+the missing package but does not explain why installation failed.
+
+An error containing `failed to lookup address information` or `Name has no
+usable address` means the installer could not resolve the download hostname.
+For Python packages, check access to both `pypi.org` and `files.pythonhosted.org`.
+Downloading the integration through HACS only confirms access to its repository;
+Python dependencies are downloaded separately.
+
+On Home Assistant OS, inspect DNS and network health from its terminal or VM
+console:
+
+```text
+ha dns info
+ha network info
+ha resolution info
+```
+
+Check the HA OS VM's configured DNS server and its access through the router,
+DNS filter, and firewall. A successful lookup on another computer or the
+Proxmox host does not establish connectivity inside the HA OS VM. Follow
+[Home Assistant's DNS troubleshooting guide](https://www.home-assistant.io/more-info/unsupported/dns_server/)
+for any reported DNS issues. If fallback DNS is disabled and your network
+allows it, the guide documents enabling it with
+`ha dns options --fallback=true`. If `ha resolution info` reports
+`dns_server_ipv6_error`, use the linked guide to check the DNS server's answers
+to A and AAAA queries.
+
+After correcting DNS, retry **Add integration**. If HA still reports the
+previous requirement failure, restart Home Assistant and retry. If the error
+changes to a timeout, certificate error, or missing compatible package,
+include the new installer error so that failure can be investigated separately.
+
+If the missing requirement is `py-mini-racer`, update the integration through
+HACS and restart Home Assistant. Integration v0.2.108 and later use QuickJS-NG.
+A download error for QuickJS-NG still needs the installer cause above.
+
+## Collect integration diagnostics
+
 Start with a fresh Home Assistant diagnostics capture:
 
 1. Reproduce the problem once.
