@@ -70,9 +70,9 @@ def test_optimizer_preserves_pixels_and_coordinates(case, digest, dimensions):
         np.testing.assert_array_equal(current.pixel_type, source)
 
 
-def test_cached_optimizer_accepts_calls_from_different_workers():
+def test_optimizer_accepts_calls_from_different_workers():
     optimizer = _optimizer.DreameMowerMapOptimizer()
-    # Initialize from one thread, then reuse from the camera/map worker threads.
+    # Reuse the optimizer across camera/map workers after a call on this thread.
     optimizer.optimize(*_map_pair("room"))
 
     def optimize_from_worker(_):

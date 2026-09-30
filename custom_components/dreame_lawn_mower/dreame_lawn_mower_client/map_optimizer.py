@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import copy
 import logging
 import math
@@ -10,19 +9,15 @@ import time
 from functools import cmp_to_key
 
 import numpy as np
-from quickjs import Function
 
+from .map_javascript import optimize_map
 from .map_renderer_types import ALine, Angle, CLine, Paths
 from .map_types import MapImageDimensions, MapPixelType, Point
-from .resources import MAP_OPTIMIZER_JS
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class DreameMowerMapOptimizer:
-    def __init__(self) -> None:
-        self._js_optimizer = None
-
     def _clean_wall(self, data, width, height):
         for j in range(1, height - 1):
             for i in range(1, width - 1):
@@ -1466,13 +1461,6 @@ class DreameMowerMapOptimizer:
             now = time.time()
 
             if js_optimizer:
-                if self._js_optimizer is None:
-                    # Function owns thread-safe execution for map-update and
-                    # camera workers while preserving the existing JS algorithm.
-                    self._js_optimizer = Function(
-                        "optimize", base64.b64decode(MAP_OPTIMIZER_JS).decode("utf-8")
-                    )
-
                 data = map_data.pixel_type.tolist()
                 data_size = [
                     map_data.dimensions.left,
@@ -1515,7 +1503,7 @@ class DreameMowerMapOptimizer:
                         map_data.charger_position.a,
                     ]
 
-                result = self._js_optimizer(
+                result = optimize_map(
                     data,
                     data_size,
                     saved_data,
