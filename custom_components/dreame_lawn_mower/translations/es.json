@@ -158,6 +158,11 @@
     }
   },
   "entity": {
+    "event": {
+      "person_detection": {
+        "name": "Detección de personas"
+      }
+    },
     "sensor": {
       "state_name": {
         "name": "Estado",

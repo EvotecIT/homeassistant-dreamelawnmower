@@ -152,6 +152,7 @@ from .protocol import DreameMowerProtocol
 from .map_manager import DreameMapMowerMapManager
 from .map_decoder import DreameMowerMapDecoder
 from .mowing_preferences import MOWING_PREFERENCE_PROPERTY_KEY
+from .notice_events import remember_notice_events
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -182,6 +183,8 @@ class _DreameMowerDeviceStateMixin:
             # freshness between state, task, and settings properties.
             self.realtime_properties.clear()
             self.last_realtime_message = None
+            if getattr(self, "_notice_events", None) is not None:
+                self._notice_events.reset_connection()
         _LOGGER.info("Requesting properties after connect")
         self.schedule_update(2, True)
 
@@ -234,11 +237,14 @@ class _DreameMowerDeviceStateMixin:
                     if len(map_params) and self._map_manager:
                         self._map_manager.handle_properties(map_params)
 
-                    known_property_changed = self._handle_properties(params)
-                    if external_realtime_changed and not known_property_changed:
+                    known_property_changed = self._handle_properties(params, notify=False)
+                    notice_announced = remember_notice_events(
+                        self, self.last_realtime_message
+                    )
+                    if known_property_changed or external_realtime_changed or notice_announced:
                         self._property_changed()
 
-    def _handle_properties(self, properties) -> bool:
+    def _handle_properties(self, properties, *, notify=True) -> bool:
         if not isinstance(properties, list | tuple):
             _LOGGER.debug(
                 "Ignoring invalid property response of type %s",
@@ -333,7 +339,7 @@ class _DreameMowerDeviceStateMixin:
 
         if changed:
             self._last_change = time.time()
-            if self._ready:
+            if self._ready and notify:
                 self._property_changed()
 
         if not self._ready:
