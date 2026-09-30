@@ -52,6 +52,48 @@ jobs:
           tests/components
           tests/test_translations.py
 
+  ha-dependencies:
+    name: Home Assistant dependencies (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install integration requirements and exercise map optimization
+        env:
+          HOME_ASSISTANT_IMAGE: ghcr.io/home-assistant/home-assistant:2026.9.2
+        run: |
+          docker run --rm -i \
+            --entrypoint python \
+            --volume "$PWD:/work:ro" \
+            --workdir /work \
+            --env PYTHONPATH=/work \
+            --env PYTHONDONTWRITEBYTECODE=1 \
+            --env PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+            "$HOME_ASSISTANT_IMAGE" - <<'PY'
+          import importlib
+          import json
+          from pathlib import Path
+          from homeassistant.requirements import pip_kwargs
+          from homeassistant.util.package import install_package
+
+          manifest = json.loads(Path("custom_components/dreame_lawn_mower/manifest.json").read_text())
+          for requirement in [*manifest["requirements"], "pytest"]:
+              assert install_package(requirement, **pip_kwargs("/config")), requirement
+          importlib.import_module("custom_components.dreame_lawn_mower.config_flow")
+
+          import pytest
+          raise SystemExit(pytest.main(["tests/test_map_optimizer.py", "-q", "-p", "no:cacheprovider"]))
+          PY
+
   xp2p-runtime-arm64:
     runs-on: ubuntu-24.04-arm
     steps:
