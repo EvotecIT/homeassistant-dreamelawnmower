@@ -145,6 +145,7 @@ from .mowing_tasks import (
     build_zone_mowing_request,
     ensure_mowing_task_succeeded,
 )
+from .notice_events import MowerNoticeEvent
 from .point_cloud import (
     DEFAULT_POINT_CLOUD_MAX_BYTES,
     DreameLawnMowerPointCloudDownload,
@@ -226,6 +227,7 @@ __all__ = [
     "MowingTaskResponseError",
     "DreameLawnMowerRemoteControlSupport",
     "DreameLawnMowerSnapshot",
+    "MowerNoticeEvent",
     "DreameLawnMowerStatusBlob",
     "DreameLawnMowerStreamUrlProbeResult",
     "DreameLawnMowerTwoFactorRequiredError",

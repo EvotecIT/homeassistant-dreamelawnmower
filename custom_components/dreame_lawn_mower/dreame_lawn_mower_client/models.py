@@ -11,9 +11,11 @@ from .device_code_semantics import (
     mower_device_code_name,
     mower_device_code_tier,
     mower_fault_code,
+    mower_operational_human_detection_notice,
     mower_status_notice_code,
 )
 from .mowing_preferences import MOWING_PREFERENCE_PROPERTY_KEY
+from .notice_events import MowerNoticeEvent
 from .video_provisioning_status import classify_xp2p_provisioning_issue
 
 SUPPORTED_ACCOUNT_TYPES = ("dreame", "mova")
@@ -24,7 +26,6 @@ REALTIME_STATE_PROPERTY_KEY = "2.1"
 REALTIME_ERROR_PROPERTY_KEY = "2.2"
 REALTIME_TASK_STATUS_PROPERTY_KEY = "4.7"
 REALTIME_SETTINGS_PROPERTY_KEY = "2.51"
-OPERATIONAL_HUMAN_DETECTION_NOTICE_MODELS = frozenset({"dreame.mower.q2501a", "q2501a"})
 
 MODEL_NAME_MAP = {
     "dreame.mower.p2255": "A1",
@@ -190,13 +191,8 @@ def _is_operational_human_detection_notice(
     model: str | None,
     state: str | None,
 ) -> bool:
-    """Return whether q2501a is mowing through a human-detection notice."""
-    return bool(
-        code == 27
-        and state == "mowing"
-        and str(model or "").strip().casefold()
-        in OPERATIONAL_HUMAN_DETECTION_NOTICE_MODELS
-    )
+    """Apply the shared operational notice policy to normalized snapshots."""
+    return mower_operational_human_detection_notice(code, model=model, state=state)
 
 
 def _status_notice_code_from_raw(
@@ -474,6 +470,9 @@ class DreameLawnMowerSnapshot:
     status_notice_display: str | None = None
     status_notice_tier: str | None = None
     status_notice_source: str | None = None
+    notification_events: tuple[MowerNoticeEvent, ...] = field(
+        default=(), repr=False, compare=False
+    )
     status_notice_event_at: float | None = field(
         default=None,
         repr=False,
@@ -1432,6 +1431,22 @@ def snapshot_from_device(
     )
     current_zone_name = _as_optional_str(getattr(current_zone, "name", None))
 
+    notice_events = (
+        device._notice_events.events
+        if getattr(device, "_notice_events", None) is not None
+        else ()
+    )
+    notice_event_at = (
+        _realtime_property_last_seen(device, REALTIME_ERROR_PROPERTY_KEY)
+        if status_notice_code is not None and status_notice_code == realtime_error_code
+        else None
+    )
+    if notice_events and _is_operational_human_detection_notice(
+        status_notice_code, model=descriptor.model, state=state
+    ):
+        # A retransmitted MQTT message updates last_seen, but is not a new notice.
+        notice_event_at = notice_events[-1].received_at
+
     return DreameLawnMowerSnapshot(
         descriptor=descriptor,
         available=bool(getattr(device, "available", False)),
@@ -1501,14 +1516,8 @@ def snapshot_from_device(
             )
         ),
         status_notice_source=status_notice_source,
-        status_notice_event_at=(
-            _realtime_property_last_seen(device, REALTIME_ERROR_PROPERTY_KEY)
-            if (
-                status_notice_code is not None
-                and status_notice_code == realtime_error_code
-            )
-            else None
-        ),
+        notification_events=notice_events,
+        status_notice_event_at=notice_event_at,
         raw_error_code=raw_error_code,
         realtime_error_code=realtime_error_code,
         _error_suppression_active=error_suppression_active,

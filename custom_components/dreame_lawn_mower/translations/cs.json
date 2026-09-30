@@ -159,6 +159,11 @@
     }
   },
   "entity": {
+    "event": {
+      "person_detection": {
+        "name": "Detekce osoby"
+      }
+    },
     "sensor": {
       "state_name": {
         "name": "Stav",

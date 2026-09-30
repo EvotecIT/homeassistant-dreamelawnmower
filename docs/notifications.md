@@ -26,6 +26,57 @@ when the condition clears, the option is disabled, or the integration unloads.
 This path uses Home Assistant's persistent notification panel; it does not
 select a phone or other delivery service.
 
+## Person detection events
+
+On the MOVA LiDAX Ultra 800 (`mova.mower.g2529b`) and Dreame A3 AWD 1000
+(`dreame.mower.q2501a`), code `27` is an attention notice while the mower reports
+that it is mowing. **Mowing** stays on and **Error Active** stays off. If the
+mower is paused or reports an error, the same code remains a fault.
+
+The **Person detection** event entity publishes `human_detected` for each fresh
+realtime announcement, including repeated code `27` messages. Its attributes
+include `code`, `severity`, `observed_at` (UTC receipt time), and `occurrence`
+(an identifier for that announcement). An unchanged polling result does not
+create an event. The last 64 MQTT message identifiers are retained to deduplicate
+redelivery within the connection.
+
+Use the changing `occurrence` attribute to notify on each detection. Replace
+the example entity and notification action with those from your installation:
+
+```yaml
+alias: Mower person detected
+triggers:
+  - trigger: state
+    entity_id: event.mower_person_detection
+    attribute: occurrence
+conditions:
+  - condition: template
+    value_template: >-
+      {{ trigger.to_state is not none
+         and trigger.from_state is not none
+         and trigger.from_state.state != 'unavailable'
+         and trigger.to_state.state not in ['unknown', 'unavailable']
+         and trigger.to_state.attributes.event_type == 'human_detected' }}
+actions:
+  - action: notify.mobile_app_your_phone
+    data:
+      message: Someone was detected near the mower.
+mode: queued
+```
+
+The event entity starts without a detection on first setup. Home Assistant can
+restore the last event after a reload; the example ignores restored state and
+cached announcements are not emitted again. Realtime bursts retain up to 64
+occurrences between consumers reading the snapshot. Announcements received while Home
+Assistant is disconnected are not recovered as a notification log. Firmware
+without message identifiers uses local receipt identity, so transport replay
+cannot always be distinguished from a new detection.
+
+**Last Mower Notification** also records repeated detections in its five-item
+history. Integration-managed persistent notifications and the condition
+blueprint continue to follow the current warning; use this event automation
+when you want a separate action for each detection.
+
 ## Import the blueprint
 
 [Import the Dreame mower condition notifications blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2FEvotecIT%2Fhomeassistant-dreamelawnmower%2Fmain%2Fblueprints%2Fautomation%2Fdreame_lawn_mower%2Fmower_condition_notifications.yaml),

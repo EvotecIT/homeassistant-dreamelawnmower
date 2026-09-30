@@ -424,12 +424,14 @@ def test_message_callback_applies_known_and_realtime_state_under_one_lock() -> N
     original_handle_properties = device._handle_properties
     lock_owned_during_update = False
 
-    def handle_properties(properties: list[dict[str, object]]) -> bool:
+    def handle_properties(
+        properties: list[dict[str, object]], *, notify: bool = True
+    ) -> bool:
         nonlocal lock_owned_during_update
         lock_owned_during_update = device._state_lock._is_owned()
         assert "2.1" in device.realtime_properties
         assert "2.2" in device.realtime_properties
-        return original_handle_properties(properties)
+        return original_handle_properties(properties, notify=notify)
 
     device._handle_properties = handle_properties
 

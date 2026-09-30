@@ -21,6 +21,9 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import 
     descriptor_from_cloud_record,
     snapshot_from_device,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.notice_events import (
+    MowerNoticeEventBuffer,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
     DreameMowerProperty,
     DreameMowerState,
@@ -215,17 +218,19 @@ def test_mower_operating_conditions_are_not_hard_errors(
         (None, 27, "realtime_property_2.2"),
     ],
 )
-def test_human_detection_is_a_notice_while_q2501a_keeps_mowing(
+@pytest.mark.parametrize("model", ["dreame.mower.q2501a", "mova.mower.g2529b"])
+def test_human_detection_is_a_notice_while_confirmed_model_keeps_mowing(
     status_code: int | None,
     realtime_code: int | None,
     expected_source: str,
+    model: str,
 ) -> None:
     snapshot = _snapshot(
         status_code,
         "infrared_shielding",
         realtime_error_code=realtime_code,
         state="MOWING",
-        model="dreame.mower.q2501a",
+        model=model,
     )
 
     assert snapshot.state == "mowing"
@@ -244,15 +249,17 @@ def test_human_detection_is_a_notice_while_q2501a_keeps_mowing(
 
 
 @pytest.mark.parametrize("state", ["PAUSED", "ERROR"])
-def test_human_detection_remains_a_fault_when_q2501a_is_halted(
+@pytest.mark.parametrize("model", ["dreame.mower.q2501a", "mova.mower.g2529b"])
+def test_human_detection_remains_a_fault_when_confirmed_model_is_halted(
     state: str,
+    model: str,
 ) -> None:
     snapshot = _snapshot(
         27,
         "infrared_shielding",
         realtime_error_code=27,
         state=state,
-        model="dreame.mower.q2501a",
+        model=model,
     )
 
     assert snapshot.activity == "error"
@@ -288,6 +295,24 @@ def test_human_detection_while_mowing_remains_a_fault_on_other_models(
     assert snapshot.error_name == "human_detected"
     assert snapshot.error_display == "Human detected"
     assert snapshot.status_notice_code is None
+
+
+def test_snapshot_retains_occurrences_without_treating_redelivery_as_a_new_notice():
+    descriptor = descriptor_from_cloud_record(
+        {"did": "test", "model": "mova.mower.g2529b", "name": "Mower"},
+        account_type="mova",
+        country="eu",
+    )
+    device = _ErrorDevice(27, "infrared_shielding", state="MOWING")
+    device._notice_events = MowerNoticeEventBuffer()
+    device._notice_events.record(received_at=100, message_id=11)
+    device.realtime_properties["2.2"] = {"value": 27, "last_seen": 200}
+    snapshot = snapshot_from_device(descriptor, device)
+    assert snapshot.status_notice_event_at == 100
+    assert snapshot.notification_events == device._notice_events.events
+    device._notice_events.record(received_at=300, message_id=12)
+    assert len(snapshot.notification_events) == 1
+    assert len(snapshot_from_device(descriptor, device).notification_events) == 2
 
 
 def test_mower_native_name_replaces_vacuum_name() -> None:

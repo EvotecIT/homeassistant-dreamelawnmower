@@ -158,6 +158,11 @@
     }
   },
   "entity": {
+    "event": {
+      "person_detection": {
+        "name": "Wykrycie osoby"
+      }
+    },
     "sensor": {
       "state_name": {
         "name": "Stan",

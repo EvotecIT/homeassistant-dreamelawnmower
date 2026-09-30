@@ -73,6 +73,22 @@ asyncio.run(main())
 
 The same flow is available as `examples/python_client.py`.
 
+## Realtime notice occurrences
+
+Snapshots expose `notification_events`, an immutable tuple of `MowerNoticeEvent`
+values. It retains up to 64 recent person-detection announcements on the confirmed
+MOVA LiDAX Ultra 800 and Dreame A3 AWD 1000 models while they report mowing.
+Each occurrence includes `stream_id`, `sequence`, `received_at`, `code`, `name`,
+`tier`, and `source`. Track `(stream_id, sequence)` in your consumer to process
+each occurrence once across repeated snapshots; timestamps alone are not unique.
+Readers do not consume each other's events.
+
+The connection resets the retained buffer on MQTT reconnect, while sequences
+continue increasing. Replacing the device creates a new stream identifier.
+Polling the same notice creates no occurrence. Receipt time is local UTC epoch
+time, not a firmware detection timestamp, and this buffer is not an archive of
+announcements made while disconnected.
+
 ## Mower Terminology
 
 Use the mower-native snapshot properties in new scripts and automations:

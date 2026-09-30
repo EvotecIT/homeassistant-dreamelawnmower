@@ -118,6 +118,7 @@ VIDEO_RETENTION_OPTIONS = {
 PLATFORMS: list[Platform] = [
     Platform.CAMERA,
     Platform.CALENDAR,
+    Platform.EVENT,
     Platform.BINARY_SENSOR,
     Platform.BUTTON,
     Platform.LAWN_MOWER,

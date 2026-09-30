@@ -8,6 +8,7 @@ from typing import Any
 
 from .const import ACTIVITY_ERROR
 from .debug import sanitize_diagnostic_text
+from .dreame_lawn_mower_client.notice_events import MowerNoticeEventCursor
 
 ACTIONABLE_NOTICE_TIERS = frozenset({"alert", "attention", "unknown"})
 _HISTORY_LIMIT = 5
@@ -20,7 +21,10 @@ class MowerConditionHistory:
     def __init__(self) -> None:
         self._events: deque[dict[str, Any]] = deque(maxlen=_HISTORY_LIMIT)
         self._last_error: dict[str, Any] | None = None
-        self._active: dict[str, tuple[int | None, str] | None] = {
+        self._notice_cursor = MowerNoticeEventCursor()
+        self._active: dict[
+            str, tuple[int | None, str, tuple[str, int] | None] | None
+        ] = {
             "warning": None,
             "error": None,
         }
@@ -29,6 +33,22 @@ class MowerConditionHistory:
         """Record newly observed conditions and return whether history changed."""
         if not getattr(snapshot, "available", True):
             return False
+
+        changed = False
+        for event in self._notice_cursor.new_events(
+            getattr(snapshot, "notification_events", ())
+        ):
+            changed = (
+                self._record(
+                    "warning",
+                    event.code,
+                    "Human detected",
+                    event.source,
+                    observed_at=datetime.fromtimestamp(event.received_at, UTC),
+                    occurrence=(event.stream_id, event.sequence),
+                )
+                or changed
+            )
 
         warning = None
         if (
@@ -52,29 +72,57 @@ class MowerConditionHistory:
                 getattr(snapshot, "error_source", None),
             )
 
-        changed = False
         for severity, condition in (("warning", warning), ("error", error)):
             if condition is None:
                 self._active[severity] = None
                 continue
             code, raw_message, source = condition
-            message = sanitize_diagnostic_text(raw_message).strip()[:_STATE_LIMIT]
-            fingerprint = (code, message)
-            if fingerprint == self._active[severity]:
-                continue
-            self._active[severity] = fingerprint
-            event = {
-                "severity": severity,
-                "code": code,
-                "message": message,
-                "source": source,
-                "observed_at": (observed_at or datetime.now(UTC)).isoformat(),
-            }
-            self._events.appendleft(event)
-            if severity == "error":
-                self._last_error = event
-            changed = True
+            changed = (
+                self._record(
+                    severity,
+                    code,
+                    raw_message,
+                    source,
+                    observed_at=observed_at,
+                    occurrence=(
+                        (events[-1].stream_id, events[-1].sequence)
+                        if severity == "warning"
+                        and code == 27
+                        and (events := getattr(snapshot, "notification_events", ()))
+                        else None
+                    ),
+                )
+                or changed
+            )
         return changed
+
+    def _record(
+        self,
+        severity: str,
+        code: int | None,
+        raw_message: str,
+        source: str | None,
+        *,
+        observed_at: datetime | None = None,
+        occurrence: tuple[str, int] | None = None,
+    ) -> bool:
+        """Keep transitions and timestamped occurrences without polling duplicates."""
+        message = sanitize_diagnostic_text(raw_message).strip()[:_STATE_LIMIT]
+        fingerprint = (code, message, occurrence)
+        if fingerprint == self._active[severity]:
+            return False
+        self._active[severity] = fingerprint
+        event = {
+            "severity": severity,
+            "code": code,
+            "message": message,
+            "source": source,
+            "observed_at": (observed_at or datetime.now(UTC)).isoformat(),
+        }
+        self._events.appendleft(event)
+        if severity == "error":
+            self._last_error = event
+        return True
 
     def latest(self, *, severity: str | None = None) -> dict[str, Any] | None:
         """Return a copy of the latest matching condition."""

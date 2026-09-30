@@ -61,6 +61,7 @@ Common user-facing helpers include:
 - `button.<device>_end_current_task`
 - `button.<device>_dock_without_ending_session`
 - `calendar.<device>_schedule`
+- `event.<device>_person_detection` on the MOVA LiDAX Ultra 800 and Dreame A3 AWD 1000
 - `camera.<device>_live_video` on supported Linux hosts
 
 **Error** shows the mower's current fault. **Last Mower Error** retains the
@@ -71,6 +72,12 @@ These sensors work even when optional persistent notifications are off and remai
 readable while the mower is offline. The list is kept in memory and starts empty
 after an integration reload or Home Assistant restart; it is not a complete
 device notification log.
+
+**Person detection** publishes each fresh `human_detected` realtime announcement,
+even when the mower's current warning remains unchanged. Code `27` is a notice
+while these confirmed models keep mowing, and remains a fault when they halt.
+See [person detection automations](notifications.md#person-detection-events) for
+an example and the event's delivery limits.
 
 **End Current Task** ends a resumable mowing task without sending the mower to
 the dock. **Dock Without Ending Session** sends it to the dock while keeping

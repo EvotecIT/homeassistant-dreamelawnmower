@@ -28,6 +28,25 @@ class MowerDeviceCodeTier(StrEnum):
     INFO = "info"
 
 
+_OPERATIONAL_HUMAN_DETECTION_MODELS = frozenset(
+    {"dreame.mower.q2501a", "q2501a", "mova.mower.g2529b", "g2529b"}
+)
+
+
+def supports_operational_human_detection(model: str | None) -> bool:
+    """Return whether field evidence confirms person avoidance while mowing."""
+    return str(model or "").strip().casefold() in _OPERATIONAL_HUMAN_DETECTION_MODELS
+
+
+def mower_operational_human_detection_notice(
+    code: int | None, *, model: str | None, state: str | None
+) -> bool:
+    """Recognize code 27 as a notice only on confirmed models still mowing."""
+    return bool(
+        code == 27 and state == "mowing" and supports_operational_human_detection(model)
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class MowerDeviceCodeDefinition:
     """Meaning and impact of one mower device code."""
