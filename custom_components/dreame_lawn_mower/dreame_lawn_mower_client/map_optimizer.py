@@ -10,7 +10,7 @@ import time
 from functools import cmp_to_key
 
 import numpy as np
-from py_mini_racer import MiniRacer
+from quickjs import Function
 
 from .map_renderer_types import ALine, Angle, CLine, Paths
 from .map_types import MapImageDimensions, MapPixelType, Point
@@ -1467,8 +1467,11 @@ class DreameMowerMapOptimizer:
 
             if js_optimizer:
                 if self._js_optimizer is None:
-                    self._js_optimizer = MiniRacer()
-                    self._js_optimizer.eval(base64.b64decode(MAP_OPTIMIZER_JS))
+                    # Function owns thread-safe execution for map-update and
+                    # camera workers while preserving the existing JS algorithm.
+                    self._js_optimizer = Function(
+                        "optimize", base64.b64decode(MAP_OPTIMIZER_JS).decode("utf-8")
+                    )
 
                 data = map_data.pixel_type.tolist()
                 data_size = [
@@ -1512,8 +1515,7 @@ class DreameMowerMapOptimizer:
                         map_data.charger_position.a,
                     ]
 
-                result = self._js_optimizer.call(
-                    "optimize",
+                result = self._js_optimizer(
                     data,
                     data_size,
                     saved_data,
