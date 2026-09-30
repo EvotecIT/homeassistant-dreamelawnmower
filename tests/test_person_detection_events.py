@@ -158,3 +158,39 @@ def test_history_keeps_burst_occurrences_at_same_time_without_polling_repeats():
     assert not history.observe(snapshot)
     assert len(history.recent()) == 3
     assert history.latest()["observed_at"] == "1970-01-01T00:01:40+00:00"
+
+
+def test_history_reconnect_preserves_condition_until_fresh_notice_or_clear():
+    device = _device()
+    history = MowerConditionHistory()
+
+    def snapshot(available=True, *, warning=True):
+        return SimpleNamespace(
+            available=available,
+            notification_events=device._notice_events.events,
+            status_notice_code=27 if warning else None,
+            status_notice_display="Human detected" if warning else None,
+            status_notice_tier="attention" if warning else None,
+            status_notice_source="status",
+        )
+
+    with patch("time.time", return_value=100.0):
+        device._message_callback(_message(11))
+    assert history.observe(snapshot())
+    original = history.recent()
+    assert not history.observe(snapshot(available=False))
+    device._connected_callback()
+    assert not history.observe(snapshot())
+    assert history.recent() == original
+
+    with patch("time.time", return_value=200.0):
+        device._message_callback(_message(11))
+    assert history.observe(snapshot())
+    assert len(history.recent()) == 2
+    assert history.latest()["observed_at"] == "1970-01-01T00:03:20+00:00"
+    assert not history.observe(snapshot())
+
+    device._connected_callback()
+    assert not history.observe(snapshot(warning=False))
+    assert history.observe(snapshot())
+    assert len(history.recent()) == 3

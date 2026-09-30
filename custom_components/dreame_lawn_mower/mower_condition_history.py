@@ -109,7 +109,14 @@ class MowerConditionHistory:
         """Keep transitions and timestamped occurrences without polling duplicates."""
         message = sanitize_diagnostic_text(raw_message).strip()[:_STATE_LIMIT]
         fingerprint = (code, message, occurrence)
-        if fingerprint == self._active[severity]:
+        active = self._active[severity]
+        if (
+            active is not None
+            and active[:2] == fingerprint[:2]
+            and (occurrence is None or occurrence == active[2])
+        ):
+            # A polling condition has no occurrence identity after reconnect.
+            # Keep the active fingerprint until a fresh event or condition change.
             return False
         self._active[severity] = fingerprint
         event = {
