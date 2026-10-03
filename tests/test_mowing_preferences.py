@@ -1458,14 +1458,14 @@ def test_preference_write_error_reports_full_attempted_area_payload() -> None:
     preference = decode_mowing_preference_payload(
         [8, 0, 11, 1, 40, 2, 35, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1]
     )
-    client._sync_get_mowing_preferences = lambda **kwargs: _preference_result(  # type: ignore[method-assign]  # noqa: ARG005
-        preference
-    )
+    current_preferences = _preference_result(preference)
+    client._sync_get_mowing_preferences = lambda **kwargs: current_preferences
     attempted_commands: list[str] = []
 
     def fail_area_write(request):  # noqa: ANN001, ANN202
         attempted_commands.append(request["t"])
         if request["t"] == "PREP":
+            current_preferences["maps"][0].update(mode=1, mode_name="custom")
             return {"r": 0}
         raise RuntimeError("area write failed")
 
@@ -1492,12 +1492,14 @@ def test_rejected_area_command_reports_only_prior_mode_write() -> None:
     preference = decode_mowing_preference_payload(
         [8, 0, 11, 1, 40, 2, 35, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1]
     )
-    client._sync_get_mowing_preferences = lambda **kwargs: _preference_result(  # type: ignore[method-assign]  # noqa: ARG005
-        preference
-    )
+    current_preferences = _preference_result(preference)
+    client._sync_get_mowing_preferences = lambda **kwargs: current_preferences
 
     def reject_area_write(request):  # noqa: ANN001, ANN202
-        return {"r": 0} if request["t"] == "PREP" else {"r": 5}
+        if request["t"] == "PREP":
+            current_preferences["maps"][0].update(mode=1, mode_name="custom")
+            return {"r": 0}
+        return {"r": 5}
 
     client._sync_call_app_action = reject_area_write  # type: ignore[method-assign]
 
