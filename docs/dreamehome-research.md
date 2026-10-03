@@ -200,14 +200,19 @@ to the app-action preference protocol:
   `256` / `0`. The client compares the low byte when `PRE` carries a byte
   revision, retains the full `reported_version` for diagnostics, and uses the
   `PRE` revision for writes. Full-width `PRE` revisions require exact equality.
+  Cache reconciliation preserves full packed revisions when both snapshots
+  provide them, including ordering across a low-byte wrap. A matching plain
+  byte revision can establish convergence but cannot prove a newer packed
+  revision by itself.
   The meaning of the additional `PREI` high bytes remains unverified.
 - Write-capable commands exist as `PRE` with `m:"s"` for settings and `PREP`
   for preference mode. The client now exposes guarded planning/execution for
   both `PRE` and `PREP`, including mode-only dry runs and combined
   `PREP` then `PRE` request sequences when switching a map into custom mode
   before applying zone-specific settings. After executing `PREP`, it rereads
-  the preference payload and rebuilds `PRE` with the current revision and
-  values before sending the settings write.
+  the preference payload, retrying delayed readback at the same bounded
+  intervals as final write verification, and rebuilds `PRE` with the current
+  revision and values before sending the settings write.
 - The decoded payload fields line up with the UI: efficient mode, cutting
   height, mowing direction mode/direction, automatic and safe edge mowing,
   EdgeMaster/cutter position, edge obstacle avoidance, LiDAR obstacle

@@ -257,10 +257,17 @@ def test_combined_write_rereads_pre_after_mode_advances_revision(
 @pytest.mark.parametrize("read_failure", [True, False])
 def test_combined_write_stops_when_post_mode_snapshot_is_unconfirmed(
     read_failure: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cloud = _PreferenceCloud(1770, 234)
     client = _client(cloud)
     call_app_action = cloud.call_app_action
+    delays = []
+    monkeypatch.setattr(
+        "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+        "client_settings.time.sleep",
+        delays.append,
+    )
 
     def unconfirmed_mode(payload, **kwargs):
         if cloud.writes and payload["m"] == "g" and payload["t"] == "PREI":
@@ -281,3 +288,109 @@ def test_combined_write_stops_when_post_mode_snapshot_is_unconfirmed(
 
     assert [request["t"] for request in cloud.writes] == ["PREP"]
     assert attempted_write_fields(exc_info.value) == ("preference_mode",)
+    assert delays == [1.0, 2.0]
+
+
+def test_older_packed_revision_cannot_clear_confirmation_with_matching_values() -> None:
+    client = _client(_PreferenceCloud(1770, 234))
+    write = client._sync_plan_app_mowing_preference_update(
+        map_index=0,
+        area_id=0,
+        changes={"mowing_height_cm": 5.0},
+        execute=True,
+        confirm_write=True,
+    )
+    pending = retain_confirmed_preference_write(
+        [], write, confirmed_at=datetime.now(UTC)
+    )
+    preference = dict(write["readback"]["preference"], reported_version=1515)
+    batch = {"available": True, "maps": [{"idx": 0, "preferences": [preference]}]}
+
+    _, unresolved = reconcile_pending_preference_readbacks(batch, pending)
+
+    assert unresolved == pending
+    preference["mowing_height_cm"] = 4.0
+    protected, unresolved = reconcile_pending_preference_readbacks(batch, unresolved)
+    assert unresolved == pending
+    assert protected["maps"][0]["preferences"][0]["mowing_height_cm"] == 5.0
+    assert preference["reported_version"] == 1515
+    preference.update(reported_version=1771, mowing_height_cm=5.0)
+    converged, unresolved = reconcile_pending_preference_readbacks(batch, pending)
+    assert unresolved == []
+    assert converged is batch
+
+
+def test_newer_packed_revision_supersedes_confirmation_across_byte_wrap() -> None:
+    client = _client(_PreferenceCloud(1790, 254))
+    write = client._sync_plan_app_mowing_preference_update(
+        map_index=0,
+        area_id=0,
+        changes={"mowing_height_cm": 5.0},
+        execute=True,
+        confirm_write=True,
+    )
+    pending = retain_confirmed_preference_write(
+        [], write, confirmed_at=datetime.now(UTC)
+    )
+    preference = dict(
+        write["readback"]["preference"],
+        version=0,
+        reported_version=1792,
+        mowing_height_cm=6.0,
+    )
+    batch = {"available": True, "maps": [{"idx": 0, "preferences": [preference]}]}
+
+    superseded, unresolved = reconcile_pending_preference_readbacks(batch, pending)
+
+    assert unresolved == []
+    assert superseded["maps"][0]["preferences"][0]["mowing_height_cm"] == 6.0
+
+
+@pytest.mark.parametrize("transient_failure", ["mode", "revision", "network"])
+def test_combined_write_waits_for_post_mode_snapshot_without_repeating_writes(
+    transient_failure: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cloud = _PreferenceCloud(1770, 234)
+    client = _client(cloud)
+    call_app_action = cloud.call_app_action
+    post_mode_reads = 0
+    delays = []
+    monkeypatch.setattr(
+        "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+        "client_settings.time.sleep",
+        delays.append,
+    )
+
+    def delayed_snapshot(payload, **kwargs):
+        nonlocal post_mode_reads
+        after_mode = len(cloud.writes) == 1 and payload["m"] == "g"
+        if after_mode and payload["t"] == "PREI":
+            post_mode_reads += 1
+            if post_mode_reads <= 2 and transient_failure == "network":
+                raise DreameLawnMowerConnectionError("read unavailable")
+        response = call_app_action(payload, **kwargs)
+        if after_mode and post_mode_reads <= 2:
+            data = response["out"][0]["d"]
+            if payload["t"] == "PREI" and transient_failure == "mode":
+                data["type"] = 0
+            elif payload["t"] == "PRE" and transient_failure == "revision":
+                data[0] = 234
+        return response
+
+    cloud.call_app_action = delayed_snapshot
+    result = client._sync_plan_app_mowing_preference_update(
+        map_index=0,
+        area_id=0,
+        changes={"preference_mode": "custom", "mowing_height_cm": 5.0},
+        execute=True,
+        confirm_write=True,
+    )
+
+    assert post_mode_reads == 3
+    assert delays == [1.0, 2.0]
+    assert [request["t"] for request in cloud.writes] == ["PREP", "PRE"]
+    assert cloud.writes[1]["d"][0] == 235
+    assert cloud.writes[1]["d"][13] == 25
+    assert result["readback"]["preference"]["mowing_height_cm"] == 5.0
+    assert result["request_verified"] is True

@@ -584,12 +584,29 @@ def _confirmation_matches(
     target = _confirmation_target(batch_preferences, confirmation)
     if not isinstance(target, Mapping):
         return False
-    current_versions = _comparable_preference_version_values(target)
+    current_versions = _preference_version_values(target)
+    confirmed_versions = dict(confirmation.version_values)
+    if (
+        _mowing_preference_versions_match(
+            current_versions.get("version"), current_versions.get("reported_version")
+        )
+        and _mowing_preference_versions_match(
+            confirmed_versions.get("version"),
+            confirmed_versions.get("reported_version"),
+        )
+        and current_versions["version"] <= 0xFF
+        and confirmed_versions["version"] <= 0xFF
+        and min(
+            current_versions["reported_version"], confirmed_versions["reported_version"]
+        ) <= 0xFF
+    ):
+        # A plain batch revision may converge with packed direct evidence.
+        # Two packed revisions must retain their full identity.
+        current_versions["reported_version"] = current_versions["version"]
+        confirmed_versions["reported_version"] = confirmed_versions["version"]
     return _confirmation_values_match(batch_preferences, confirmation) and all(
         current_versions.get(key) == value
-        for key, value in _comparable_preference_version_values(
-            confirmation.version_values
-        ).items()
+        for key, value in confirmed_versions.items()
     )
 
 
@@ -597,15 +614,19 @@ def _confirmation_superseded_by_newer_version(
     batch_preferences: Mapping[str, Any],
     confirmation: PendingPreferenceConfirmation,
 ) -> bool:
-    """Return whether every retained area version advanced in current batch data."""
+    """Return whether current batch revisions supersede retained evidence."""
     if not confirmation.version_values:
         return False
     target = _confirmation_target(batch_preferences, confirmation)
     if not isinstance(target, Mapping):
         return False
-    # Packed PREI equivalence proves equality, not revision ordering. Keep raw
-    # evidence here so a delayed byte revision 255 cannot supersede a confirmed
-    # wrapped PRE revision 0 with a newer packed PREI advertisement.
+    current_packed_revision = _packed_preference_revision(target)
+    confirmed_packed_revision = _packed_preference_revision(confirmation.version_values)
+    if current_packed_revision is not None and confirmed_packed_revision is not None:
+        # Compare complete packed revisions even when their low bytes wrap.
+        return current_packed_revision > confirmed_packed_revision
+    # Plain byte evidence cannot establish ordering across a packed revision.
+    # Retain raw comparisons so a delayed 255 cannot supersede a confirmed 0.
     current_versions = _preference_version_values(target)
     return all(
         key in current_versions and current_versions[key] > value
@@ -960,15 +981,21 @@ def _plain_int(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
-def _comparable_preference_version_values(
+def _packed_preference_revision(
     preference: Mapping[str, Any],
-) -> dict[str, int]:
-    """Compare direct and batch revisions without changing raw evidence."""
-    values = _preference_version_values(preference)
-    version = values.get("version")
-    if _mowing_preference_versions_match(version, values.get("reported_version")):
-        values["reported_version"] = version
-    return values
+) -> int | None:
+    """Return full packed evidence only when it agrees with a byte PRE revision."""
+    version = _plain_int(preference.get("version"))
+    reported_version = _plain_int(preference.get("reported_version"))
+    if (
+        version is not None
+        and version <= 0xFF
+        and reported_version is not None
+        and reported_version > 0xFF
+        and _mowing_preference_versions_match(version, reported_version)
+    ):
+        return reported_version
+    return None
 
 
 def _preference_version_values(preference: Mapping[str, Any]) -> dict[str, int]:

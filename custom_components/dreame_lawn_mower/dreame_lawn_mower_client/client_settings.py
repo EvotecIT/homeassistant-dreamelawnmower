@@ -675,17 +675,12 @@ class _DreameLawnMowerClientSettingsMixin:
                     try:
                         # PREP can advance the PRE revision and change its values.
                         # Rebuild the settings write from that new snapshot.
-                        refreshed = self._sync_plan_app_mowing_preference_update(
+                        refreshed = self._sync_refresh_preference_after_mode_write(
                             map_index=map_index,
                             area_id=area_id,
-                            changes=setting_changes,
+                            setting_changes=setting_changes,
+                            requested_mode=requested_mode,
                         )
-                        if refreshed.get("mode") != requested_mode:
-                            raise DreameLawnMowerConnectionError(
-                                "The mower acknowledged the preference mode write "
-                                "but did not return the requested mode before the "
-                                "settings write. Refresh the mower before retrying."
-                            )
                         request["d"] = refreshed["payload"]
                         for key in (
                             "payload", "previous_preference", "updated_preference"
@@ -756,6 +751,46 @@ class _DreameLawnMowerClientSettingsMixin:
                     mark_write_attempted(err, fields=possibly_applied_fields)
                 raise
         return result
+
+    def _sync_refresh_preference_after_mode_write(
+        self,
+        *,
+        map_index: int,
+        area_id: int,
+        setting_changes: Mapping[str, Any],
+        requested_mode: int,
+    ) -> dict[str, Any]:
+        """Wait for an acknowledged PREP before rebuilding the settings write."""
+        last_error: Exception | None = None
+        for delay in _MOWING_PREFERENCE_READBACK_DELAYS_SECONDS:
+            if delay:
+                time.sleep(delay)
+            try:
+                refreshed = self._sync_plan_app_mowing_preference_update(
+                    map_index=map_index,
+                    area_id=area_id,
+                    changes=setting_changes,
+                )
+                if refreshed.get("mode") != requested_mode:
+                    raise DreameLawnMowerConnectionError(
+                        "The mower acknowledged the preference mode write "
+                        "but did not return the requested mode before the "
+                        "settings write. Refresh the mower before retrying."
+                    )
+                return refreshed
+            except (
+                DreameLawnMowerCommandRejectedError,
+                DreameLawnMowerConnectionError,
+                ValueError,
+            ) as err:
+                # Initial planning already validated the requested changes. A
+                # missing fresh area (including PRE/PREI mismatch) may be delayed.
+                last_error = err
+        if last_error is not None:
+            raise last_error
+        raise DreameLawnMowerConnectionError(
+            "The mower preference snapshot could not be refreshed after mode write."
+        )
 
     def _sync_verify_mowing_preference_readback(
         self,
