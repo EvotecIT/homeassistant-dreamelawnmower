@@ -2164,3 +2164,32 @@ def test_normal_dock_falls_back_when_preflight_refresh_fails() -> None:
 
     client.async_refresh.assert_awaited_once()
     client._async_call_device_method.assert_awaited_once_with("dock")
+
+
+@pytest.mark.parametrize(
+    ("task_status", "started"),
+    [
+        (DreameMowerTaskStatus.AUTO_CLEANING, True),
+        (DreameMowerTaskStatus.UNKNOWN, False),
+        (None, None),
+    ],
+)
+def test_scheduled_fresh_start_refuses_resume_or_unknown_at_dispatch(
+    task_status,
+    started,
+) -> None:
+    start_mowing = Mock()
+    client = object.__new__(DreameLawnMowerClient)
+    client._ensure_device = Mock(
+        return_value=SimpleNamespace(
+            status=SimpleNamespace(task_status=task_status, started=started),
+            start_mowing=start_mowing,
+        )
+    )
+    with pytest.raises(DreameLawnMowerCommandRejectedError, match="cannot resume"):
+        asyncio.run(
+            client._async_call_start_mowing_with_session_identity(
+                require_new_session=True,
+            )
+        )
+    start_mowing.assert_not_called()

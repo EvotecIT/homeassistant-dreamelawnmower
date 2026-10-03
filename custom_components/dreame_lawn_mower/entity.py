@@ -60,7 +60,9 @@ class DreameLawnMowerEntity(CoordinatorEntity[DreameLawnMowerCoordinator]):
         descriptor = snapshot.descriptor if snapshot is not None else self._descriptor
         return {
             "identifiers": {("dreame_lawn_mower", descriptor.unique_id)},
-            "manufacturer": "Dreametech",
+            "manufacturer": (
+                "MOVA" if descriptor.account_type == "mova" else "Dreametech"
+            ),
             "model": descriptor.display_model,
             "name": descriptor.name,
             "sw_version": getattr(snapshot, "firmware_version", None),

@@ -13,7 +13,7 @@ from homeassistant.components.lawn_mower import (
     LawnMowerEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.entity_platform import (
@@ -58,6 +58,7 @@ from .runtime_cache import (
     begin_runtime_mission_session,
     runtime_mission_session_generation,
 )
+from .scheduled_mowing import async_start_scheduled_mowing
 from .services import (
     ATTR_CONFIRM_PREFERENCE_WRITE,
     ATTR_EXECUTE,
@@ -128,6 +129,23 @@ async def async_setup_entry(
     """Set up the mower entity."""
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
     platform = async_get_current_platform()
+    platform.async_register_entity_service(
+        "start_scheduled_mowing",
+        {
+            vol.Optional("task_type", default="all"): vol.In(
+                ["all", "zone", "edge", "spot"],
+            ),
+            vol.Optional("minimum_battery", default=30): vol.All(
+                vol.Coerce(int), vol.Range(min=20, max=100),
+            ),
+            vol.Optional("map_index"): vol.All(vol.Coerce(int), vol.Range(min=0)),
+            vol.Optional("zone_ids"): [vol.All(vol.Coerce(int), vol.Range(min=0))],
+            vol.Optional("spot_ids"): [vol.All(vol.Coerce(int), vol.Range(min=0))],
+            vol.Optional("contour_ids"): vol.Any([], _validate_contour_ids),
+        },
+        "async_start_scheduled_mowing",
+        supports_response=SupportsResponse.OPTIONAL,
+    )
     platform.async_register_entity_service(
         "start_zone_mowing",
         {vol.Required("zone_ids"): [vol.Coerce(int)]},
@@ -325,6 +343,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
                 None,
             ),
             "task_resumable": getattr(snapshot, "task_resumable", None),
+            "last_scheduled_run": getattr(self.coordinator, "last_scheduled_run", None),
             "unknown_property_count": len(
                 getattr(device, "unknown_properties", {}) or {}
             ),
@@ -546,6 +565,10 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
                 session_started_at=time(),
             )
         await self.coordinator.async_request_refresh()
+
+    async def async_start_scheduled_mowing(self, **kwargs: Any) -> dict[str, Any]:
+        """Run an explicit scheduled task with refreshed eligibility evidence."""
+        return await async_start_scheduled_mowing(self, **kwargs)
 
     async def async_start_zone_mowing(self, zone_ids: list[int]) -> None:
         """Start mowing for one or more explicit current-map zones."""

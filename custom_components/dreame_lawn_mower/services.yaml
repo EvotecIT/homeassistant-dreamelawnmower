@@ -1,3 +1,56 @@
+start_scheduled_mowing:
+  name: Start guarded scheduled mowing
+  description: >-
+    Refresh eligibility and start an explicit task, or skip immediately with a
+    reason. Requires a docked, online mower, known inactive task and rain-delay
+    state, sufficient battery, and disabled native schedules on every map.
+    Does not queue a run or resume an existing task. Returns per-entity status
+    and reason when response data is requested.
+  target:
+    entity:
+      integration: dreame_lawn_mower
+      domain: lawn_mower
+  fields:
+    task_type:
+      name: Mowing task
+      default: all
+      selector:
+        select:
+          options: [all, zone, edge, spot]
+    minimum_battery:
+      name: Minimum battery
+      default: 30
+      selector:
+        number:
+          min: 20
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+    map_index:
+      name: Target map index
+      description: Required for zone, edge, and spot tasks; must be the current saved map.
+      example: 0
+      selector:
+        number:
+          min: 0
+          step: 1
+          mode: box
+    zone_ids:
+      name: Saved zone IDs
+      example: [1, 3]
+      selector:
+        object: {}
+    contour_ids:
+      name: Saved contour pairs
+      example: [[1, 0]]
+      selector:
+        object: {}
+    spot_ids:
+      name: Saved spot IDs
+      example: [2, 4]
+      selector:
+        object: {}
+
 start_zone_mowing:
   name: Start zone mowing
   description: >-

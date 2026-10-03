@@ -264,10 +264,7 @@ def merge_app_schedule_payload(
     resolved_fallback_versions = {
         version
         for version, indices in incoming_indices_by_version.items()
-        if (
-            cached_active_index_is_valid
-            and cached_active_index in indices
-        )
+        if (cached_active_index_is_valid and cached_active_index in indices)
         or (complete_refresh and len(indices) == 1)
     }
     active_version_indices = incoming_indices_by_version.get(
@@ -467,19 +464,31 @@ def merge_batch_schedule_payload(
     ):
         return None
 
+    table_indices = {
+        schedule.get("idx")
+        for schedule in existing_schedules
+        if isinstance(schedule, Mapping) and schedule.get("protocol") == "tables"
+    }
+    # Document versions cannot select or replace table schedules. In particular,
+    # cached vendor batch data must not restore a sibling table just disabled.
+    if table_indices and (
+        batch_schedule.get("idx") in table_indices
+        or not isinstance(batch_schedule.get("idx"), int)
+    ):
+        return None
+
     matching_schedules = [
         schedule
         for schedule in existing_schedules
-        if isinstance(schedule, Mapping)
-        and schedule.get("version") == batch_version
+        if isinstance(schedule, Mapping) and schedule.get("version") == batch_version
     ]
     hinted_index = batch_schedule.get("idx")
     hinted_index_is_valid = isinstance(hinted_index, int) and not isinstance(
         hinted_index,
         bool,
     )
-    hinted_index_is_allowed = (
-        hinted_index_is_valid and hinted_index in set(allowed_hint_indices)
+    hinted_index_is_allowed = hinted_index_is_valid and hinted_index in set(
+        allowed_hint_indices
     )
     numeric_matching_schedules = [
         schedule
@@ -569,10 +578,7 @@ def merge_batch_schedule_payload(
         normalized["schedules"] = [
             schedule
             for schedule in normalized["schedules"]
-            if not (
-                isinstance(schedule, Mapping)
-                and schedule.get("idx") is None
-            )
+            if not (isinstance(schedule, Mapping) and schedule.get("idx") is None)
         ]
         normalized["schedules"].append(batch_schedule)
     normalized["available"] = any(
@@ -601,3 +607,34 @@ def merge_batch_schedule_payload(
     normalized["captured_at"] = captured_at.isoformat()
     normalized["source"] = "app_action_schedule_with_batch_refresh"
     return normalized
+
+
+def select_table_schedule_for_map(
+    payload: dict[str, Any] | None,
+    map_index: int | None,
+) -> None:
+    """Select table schedules from current map evidence without version guessing."""
+    if not isinstance(payload, dict):
+        return
+    schedules = payload.get("schedules") or []
+    table_schedules = [
+        schedule
+        for schedule in schedules
+        if isinstance(schedule, Mapping) and schedule.get("protocol") == "tables"
+    ]
+    if not table_schedules:
+        return
+    target = next(
+        (schedule for schedule in table_schedules if schedule.get("idx") == map_index),
+        None,
+    )
+    if target is None and map_index is not None:
+        return  # A different current map can still use the document protocol.
+    payload.pop("active_schedule_version", None)
+    payload.pop("current_task", None)
+    payload["active_schedule_index"] = map_index
+    payload["active_selection_available"] = bool(
+        target is not None
+        and schedule_entry_has_usable_data(target)
+        and target.get("read_status") == "complete"
+    )

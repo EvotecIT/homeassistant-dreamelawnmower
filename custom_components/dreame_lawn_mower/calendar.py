@@ -181,10 +181,7 @@ def schedule_calendar_events(
         return []
 
     events: list[CalendarEvent] = []
-    if (
-        not include_all_schedules
-        and payload.get("active_selection_available") is False
-    ):
+    if not include_all_schedules and payload.get("active_selection_available") is False:
         return events
     active_version = (
         None if include_all_schedules else _active_schedule_version(payload)
@@ -247,18 +244,19 @@ def schedule_calendar_selection(
         not include_all_schedules and "active_schedule_index" in payload
     )
     active_selection_available = (
-        include_all_schedules
-        or payload.get("active_selection_available") is not False
+        include_all_schedules or payload.get("active_selection_available") is not False
     )
     included_schedules: list[dict[str, Any]] = []
     hidden_schedules: list[dict[str, Any]] = []
 
     for schedule in schedules:
         target = included_schedules
-        if not active_selection_available or (
-            active_version is not None and schedule.get("version") != active_version
-        ) or (
-            filter_active_index and schedule.get("idx") != active_index
+        if (
+            not active_selection_available
+            or (
+                active_version is not None and schedule.get("version") != active_version
+            )
+            or (filter_active_index and schedule.get("idx") != active_index)
         ):
             target = hidden_schedules
         target.append(_schedule_selection_entry(schedule))
@@ -363,16 +361,23 @@ def _task_events(
             continue
         start_minute = _schedule_minute(task.get("start"))
         end_minute = _schedule_minute(task.get("end"))
-        if start_minute is None or end_minute is None:
+        start_only = task.get("timing") == "start_only" and end_minute is None
+        if start_minute is None or (end_minute is None and not start_only):
             continue
         event_start = _combine_schedule_time(day, start_minute)
-        event_end = _combine_schedule_time(day, end_minute)
+        event_end = (
+            event_start + timedelta(minutes=1)
+            if start_only
+            else _combine_schedule_time(day, end_minute)
+        )
         if event_end <= event_start:
             event_end += timedelta(days=1)
         if event_end <= local_start or event_start >= local_end:
             continue
         type_name = str(task.get("type_name") or "mowing").replace("_", " ")
         summary = f"{type_name.capitalize()} ({map_label} plan {plan.get('plan_id')})"
+        if start_only:
+            summary += " — start"
         description = _event_description(
             mower_name=mower_name,
             map_label=map_label,
@@ -411,6 +416,10 @@ def _event_description(
         lines.append("Cyclic: yes")
     if task.get("regions"):
         lines.append(f"Regions: {task.get('regions')}")
+    if task.get("timing") == "start_only":
+        lines.append(
+            "Start marker only (one minute). The mower reports no scheduled end time."
+        )
     return "\n".join(lines)
 
 

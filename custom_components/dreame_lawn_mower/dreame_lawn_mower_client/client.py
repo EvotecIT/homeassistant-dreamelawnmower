@@ -86,9 +86,10 @@ from .client_maps import (
     _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS,
     _DreameLawnMowerClientMapsMixin,
 )
-from .client_settings import (
+from .client_schedules import (
     SCHEDULE_READ_TIMEOUT_SECONDS as _SCHEDULE_READ_TIMEOUT_SECONDS,
 )
+from .client_schedules import _DreameLawnMowerClientSchedulesMixin
 from .client_settings import _DreameLawnMowerClientSettingsMixin
 from .client_tracking import _DreameLawnMowerClientTrackingMixin
 from .deadline import DeadlineExceededError as DeadlineExceededError
@@ -522,6 +523,7 @@ class DreameLawnMowerClient(
     _DreameLawnMowerCameraMixin,
     _DreameLawnMowerClientCoreMixin,
     _DreameLawnMowerClientDeviceSettingsMixin,
+    _DreameLawnMowerClientSchedulesMixin,
     _DreameLawnMowerClientSettingsMixin,
     _DreameLawnMowerClientMapsMixin,
     _DreameLawnMowerClientTrackingMixin,
@@ -547,6 +549,8 @@ class DreameLawnMowerClient(
         self._descriptor = descriptor
         self._device: Any | None = None
         self._device_ownership_lock = _threading.Lock()
+        self._schedule_operation_lock = _threading.RLock()
+        self._schedule_protocols: dict[int, str] = {}
         self._closing = False
         self._update_callback: _typing.Callable[[], None] | None = None
         self._latest_snapshot: DreameLawnMowerSnapshot | None = None
@@ -712,6 +716,25 @@ class DreameLawnMowerClient(
     async def async_pause(self) -> None:
         """Pause mowing."""
         await self._async_call_device_method("pause")
+
+    async def async_start_fresh_mowing(self) -> bool | None:
+        """Start an explicit all-area task, refusing resumable or unknown sessions."""
+        baseline = await self.async_refresh_authoritative_snapshot()
+        if (
+            baseline.task_resumable is not False
+            or baseline.mowing_session_active is not False
+            or baseline.docked is not True
+        ):
+            raise _DreameLawnMowerCommandRejectedError(
+                "A fresh scheduled run requires a docked mower with no existing task."
+            )
+        return await self._async_call_start_mowing_with_session_identity(
+            require_new_session=True,
+        )
+
+    async def async_get_schedule_start_evidence(self) -> dict[str, Any]:
+        """Read native plans against a fresh authoritative map inventory."""
+        return await asyncio.to_thread(self._sync_get_schedule_start_evidence)
 
     async def async_cancel_current_task(self) -> bool:
         """End the current task and require authoritative inactive readback.

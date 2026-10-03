@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
 from .debug import sanitize_debug_data, sanitize_diagnostic_text
+from .dreame_lawn_mower_client.compatibility import build_compatibility_summary
 from .feature_capabilities import coordinator_feature_capabilities
 from .manual_control import maintenance_point_movement_block_reason
 
@@ -48,6 +49,18 @@ _MAINTENANCE_POINT_REJECTION_REASONS = frozenset(
 _MAINTENANCE_POINT_VALUE_TYPES = frozenset(
     {"array", "bool", "null", "number", "object", "string"}
 )
+
+
+def coordinator_compatibility_summary(coordinator: object) -> dict[str, Any]:
+    """Use the same privacy-safe support facts for entities and diagnostics."""
+    descriptor = getattr(getattr(coordinator, "client", None), "descriptor", None)
+    if descriptor is None:
+        return {"schedule_protocol": "unknown"}
+    return build_compatibility_summary(
+        descriptor, getattr(coordinator, "data", None),
+        features=coordinator_feature_capabilities(coordinator),
+        schedules=getattr(coordinator, "schedules", None),
+    )
 
 
 def build_report_context(
@@ -93,6 +106,8 @@ def build_coordinator_diagnostics(coordinator: object) -> dict[str, Any]:
     return {
         "last_update_success": getattr(coordinator, "last_update_success", None),
         "feature_capabilities": coordinator_feature_capabilities(coordinator),
+        "compatibility": coordinator_compatibility_summary(coordinator),
+        "last_scheduled_run": getattr(coordinator, "last_scheduled_run", None),
         "last_exception_type": (
             type(last_exception).__name__ if last_exception is not None else None
         ),
