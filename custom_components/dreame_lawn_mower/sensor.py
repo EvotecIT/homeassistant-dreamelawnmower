@@ -51,6 +51,7 @@ from .manual_control import remote_control_block_reason
 from .runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache as DreameLawnMowerRuntimeTelemetryCache,
 )
+from .sensor_compatibility import DreameLawnMowerCompatibilitySensor
 from .sensor_conditions import DreameLawnMowerConditionSensor
 
 # Keep historical ``sensor`` imports working while implementations live in
@@ -503,6 +504,7 @@ async def async_setup_entry(
         + [DreameLawnMowerAppMapObjectCountSensor(coordinator)]
         + [DreameLawnMowerFirmwareUpdateStatusSensor(coordinator)]
         + [DreameLawnMowerConfiguredScheduleCountSensor(coordinator)]
+        + [DreameLawnMowerCompatibilitySensor(coordinator)]
         + [DreameLawnMowerPreferenceMapCountSensor(coordinator)]
         + [DreameLawnMowerWeatherProtectionStatusSensor(coordinator)]
         + [DreameLawnMowerRainProtectionDurationSensor(coordinator)]

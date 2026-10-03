@@ -9,24 +9,44 @@ install an automatic mowing routine.
 
 ## Schedules And Multiple Maps
 
-Dreame A2 schedules can exist in more than one slot. Live captures have shown a
-default schedule plus per-map schedules. The normal Home Assistant `Schedule`
-calendar follows the active schedule version reported by the mower's `SCHDT`
-response, so hidden/default/other-map schedules do not appear as normal mowing
-events.
+Native schedules use either versioned documents or per-map tables. The client
+discovers the protocol from validated replies and remembers it per map. The
+account brand determines probe order; it does not establish protocol support.
+Failed or unrecognized reads remain unknown, while a valid empty inventory
+means no plans were reported.
+
+Dreame A2 captures show a default document plus per-map documents. The normal
+`Schedule` calendar follows the active version from the mower's current-task or
+batch evidence. Table schedules follow the known current map. When active
+selection is unknown, the normal calendar stays empty and the decoded plans
+remain available in the diagnostic calendar.
+
+Tables report task start times without scheduled end times. Their calendar
+events are one-minute markers labelled **start**; that minute is a display
+marker, not a mowing duration. Cyclic tasks, weekday assignments, saved zones,
+and edge contour pairs are retained in event details.
 
 Enable the disabled `All Schedules` calendar only when you intentionally want to
 inspect every decoded schedule slot.
 
 Each decoded plan is also exposed as a normal Home Assistant switch. Turning a
-plan on or off uses the mower-native schedule write, then reads the schedules
-again before updating the entity. These switches are suitable for dashboards,
+plan on or off uses the mower-native schedule write and refreshes the shared
+schedule cache. Table writes require fresh task data before enabling a plan,
+then confirm both table flags. If enabling one disables its sibling, both
+switches reflect the readback. Missing tasks prevent enabling; a known plan can
+still be disabled. An ignored or unconfirmed write raises an error.
+These switches are suitable for dashboards,
 automations, and voice assistants; no service flags are needed for an ordinary
 switch action.
 
 The guarded `dreame_lawn_mower.set_schedule_plan_enabled` service is dry-run
 first. It sends a write only when both `execute: true` and
 `confirm_schedule_write: true` are set.
+
+Full plan uploads are available for the document protocol. Table task creation
+and time editing use the vendor app; the integration rejects a full upload
+before sending a write when the map uses tables. For an HA-owned weekly
+routine, use the [guarded Schedule blueprint](notifications.md#guarded-weekly-mowing).
 
 `dreame_lawn_mower.plan_mowing_preference_update` is dry-run first. It reads
 the current app preference payload, applies the requested field changes
@@ -71,8 +91,8 @@ not one device-wide setting shared by every map. `Custom` edits the selected
 zone on that map. This prevents a dashboard from presenting a zone value as if
 it were a whole-lawn setting. These standard entities work with Home Assistant
 dashboards, automations, and voice assistants. The companion Lawn Mower Card
-can use them when explicitly configured; automatic discovery support is tracked
-in the card project. The guarded service remains available when you need to
+discovers supported preference controls automatically, and also accepts explicit
+entity configuration. The guarded service remains available when you need to
 inspect the complete candidate preference payload before sending it.
 
 ## Charging, Rain, And Anti-Theft Settings

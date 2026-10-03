@@ -219,7 +219,9 @@ class _DreameLawnMowerClientCoreMixin:
 
         return await asyncio.to_thread(read_session_identity)
 
-    async def _async_call_start_mowing_with_session_identity(self) -> bool | None:
+    async def _async_call_start_mowing_with_session_identity(
+        self, *, require_new_session: bool = False,
+    ) -> bool | None:
         """Invoke the fallback start and capture its cached-state decision."""
         device = await asyncio.to_thread(self._ensure_device)
         new_session: bool | None = None
@@ -233,6 +235,10 @@ class _DreameLawnMowerClientCoreMixin:
                 # Keep the identity decision and the device's own branch under
                 # the same lock used by MQTT state mutations.
                 new_session = _device_start_session_identity(device)
+                if require_new_session and new_session is not True:
+                    raise DreameLawnMowerCommandRejectedError(
+                        "Scheduled mowing cannot resume or replace an existing task."
+                    )
                 return device.start_mowing()
 
         try:

@@ -20,7 +20,18 @@ jobs:
           category: integration
 
   test:
+    name: Tests (HA ${{ matrix.home-assistant }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: "3.13"
+            home-assistant: "2026.2"
+            test-plugin: "0.13.316"
+          - python: "3.14"
+            home-assistant: "2026.9"
+            test-plugin: "0.13.367"
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -28,12 +39,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.13"
+          python-version: ${{ matrix.python }}
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e .[test]
+          python -m pip install -e .[test] "pytest-homeassistant-custom-component==${{ matrix.test-plugin }}"
 
       - name: Ruff
         run: ruff check .

@@ -94,6 +94,7 @@ from .schedule_cache import (
     merge_batch_schedule_payload,
     schedule_entry_has_usable_data,
     schedule_payload_has_usable_data,
+    select_table_schedule_for_map,
 )
 from .session_timing import observe_mowing_time
 
@@ -1166,6 +1167,9 @@ class DreameLawnMowerCoordinator(
                 self.schedules["active_selection_available"] = False
         if not self._schedule_refresh_is_current(refresh_generation):
             return self.schedules
+        select_table_schedule_for_map(
+            self.schedules, self._schedule_map_index_hint(),
+        )
         if (
             action_read_succeeded
             and not batch_read_succeeded
@@ -1304,6 +1308,18 @@ class DreameLawnMowerCoordinator(
                     pending_contradictions
                 )
             pending_contradictions.pop((map_index, plan_id), None)
+            confirmed_schedule = result.get("confirmed_schedule")
+            if result.get("confirmed") and isinstance(confirmed_schedule, Mapping):
+                self.schedules = merge_app_schedule_payload(
+                    self.schedules,
+                    {"schedules": [confirmed_schedule]},
+                    expected_indices=[map_index],
+                    partial_refresh=True,
+                )
+                for confirmed_plan in confirmed_schedule.get("plans", []):
+                    key = (map_index, confirmed_plan["plan_id"])
+                    pending_states[key] = (None, bool(confirmed_plan["enabled"]))
+                    pending_contradictions.pop(key, None)
             self._reconcile_cached_schedule_plan_enabled(
                 map_index=map_index,
                 plan_id=plan_id,

@@ -104,6 +104,8 @@ def test_coordinator_diagnostics_sanitize_last_failure() -> None:
 
     assert diagnostics == {
         "last_update_success": False,
+        "compatibility": {"schedule_protocol": "unknown"},
+        "last_scheduled_run": None,
         "last_exception_type": "RuntimeError",
         "last_exception": "refresh failed token=**REDACTED**",
         "update_interval_seconds": 30.0,

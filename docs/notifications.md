@@ -78,6 +78,13 @@ history. Integration-managed persistent notifications and the condition
 blueprint continue to follow the current warning; use this event automation
 when you want a separate action for each detection.
 
+History entries include `active: true` for an observed current condition,
+`active: false` and `cleared_at` after a readable snapshot confirms clearance,
+and `active: null` when current state is unknown. Offline snapshots preserve
+the message and observation time without claiming recovery. A timestamped
+human-detection occurrence remains unknown unless it also appears as a current
+warning. The five entries remain in memory until the integration reloads.
+
 ## Import the blueprint
 
 [Import the Dreame mower condition notifications blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2FEvotecIT%2Fhomeassistant-dreamelawnmower%2Fmain%2Fblueprints%2Fautomation%2Fdreame_lawn_mower%2Fmower_condition_notifications.yaml),
@@ -151,12 +158,56 @@ restarts. For stateful effects such as warning lights, call a script that owns
 its timeout or cleanup, or use Home Assistant's Alert integration. Persistent
 delivery is the self-cleaning option provided directly by this blueprint.
 
-## Safety boundary
+## Condition notification safety boundary
 
-The blueprint never starts, resumes, returns, or manually moves the mower.
+The condition notification blueprint never starts, resumes, returns, or manually moves the mower.
 A fault can describe a blocked wheel, lifted mower, positioning problem, or
 another condition that requires inspection. Automatically issuing a generic
 recovery command would be unsafe because Home Assistant cannot know that the
 physical cause has been removed. If you add a mower-control action yourself,
 make it specific to a condition you understand and include any physical safety
 checks required for your property and model.
+
+## Guarded weekly mowing
+
+The [guarded weekly schedule blueprint](../blueprints/automation/dreame_lawn_mower/guarded_schedule_mowing.yaml)
+uses a Home Assistant Schedule helper and requires HA 2026.7 or later. It
+triggers once when each block begins, including adjacent touching blocks.
+Block length does not define mowing duration, and block end sends no command.
+
+1. Disable native plans on every map in the vendor app or with the integration's
+   schedule switches. The action checks their current state before dispatch;
+   enabled or unknown native plans cause a skip.
+2. Create a weekly **Schedule** helper under **Settings → Devices & services →
+   Helpers** and choose its start blocks.
+3. Import the blueprint and select the mower, helper, task type, and minimum
+   battery. The default is explicit all-area mowing on the current map.
+4. For zone, edge, or spot tasks, enter the saved map index and target IDs from
+   mower attributes. The map must be current. The action does not switch maps.
+5. Choose persistent outcome notifications or add custom outcome actions.
+   Custom actions can read `scheduled_result.status` and
+   `scheduled_result.reason`.
+
+The integration refreshes map/native-plan evidence, rain-delay state, and mower
+state before starting. It requires an online, docked mower with known inactive
+and non-resumable task state, sufficient battery, no reported fault or child
+lock, and no active rain delay. Missing evidence produces a skip reason.
+Unsupported native-plan or rain-delay reads therefore prevent unattended starts.
+The eligibility checks cannot establish that the physical mowing area is clear;
+choose suitable times and keep the mower's protection settings enabled.
+
+Missed, blocked, or concurrent runs are skipped immediately. Reloading or
+restarting HA does not catch up on a block already in progress. There is no
+queue, automatic retry, or resume of an interrupted task. The default persistent
+notification is replaced by the next outcome for that mower.
+
+The `dreame_lawn_mower.start_scheduled_mowing` action also works in your own
+automation. It accepts `task_type` (`all`, `zone`, `edge`, `spot`),
+`minimum_battery` (20–100), and targeted-task `map_index` plus `zone_ids`,
+`contour_ids`, or `spot_ids`. With `response_variable`, its result is keyed by
+the mower entity ID. Status is `started` after observed confirmation,
+`submitted` when an all-area request is acknowledged but active state is not
+yet observed, `skipped` for an eligibility reason, or `failed` when a command
+cannot be confirmed. The result appears in the mower's `last_scheduled_run`
+attribute and the `dreame_lawn_mower_scheduled_run` event. The existing manual
+start action retains its start/resume behavior.

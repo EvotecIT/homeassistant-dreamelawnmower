@@ -13,7 +13,7 @@ from homeassistant.components.lawn_mower import (
     LawnMowerEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.entity_platform import (
@@ -58,6 +58,7 @@ from .runtime_cache import (
     begin_runtime_mission_session,
     runtime_mission_session_generation,
 )
+from .scheduled_mowing import async_start_scheduled_mowing
 from .services import (
     ATTR_CONFIRM_PREFERENCE_WRITE,
     ATTR_EXECUTE,
@@ -128,6 +129,24 @@ async def async_setup_entry(
     """Set up the mower entity."""
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
     platform = async_get_current_platform()
+    platform.async_register_entity_service(
+        "start_scheduled_mowing",
+        {
+            vol.Optional("task_type", default="all"): vol.In(
+                ["all", "zone", "edge", "spot"],
+            ),
+            vol.Optional("minimum_battery", default=30): vol.All(
+                vol.Coerce(int),
+                vol.Range(min=20, max=100),
+            ),
+            vol.Optional("map_index"): vol.All(vol.Coerce(int), vol.Range(min=0)),
+            vol.Optional("zone_ids"): [vol.All(vol.Coerce(int), vol.Range(min=0))],
+            vol.Optional("spot_ids"): [vol.All(vol.Coerce(int), vol.Range(min=0))],
+            vol.Optional("contour_ids"): vol.Any([], _validate_contour_ids),
+        },
+        "async_start_scheduled_mowing",
+        supports_response=SupportsResponse.OPTIONAL,
+    )
     platform.async_register_entity_service(
         "start_zone_mowing",
         {vol.Required("zone_ids"): [vol.Coerce(int)]},
@@ -325,6 +344,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
                 None,
             ),
             "task_resumable": getattr(snapshot, "task_resumable", None),
+            "last_scheduled_run": getattr(self.coordinator, "last_scheduled_run", None),
             "unknown_property_count": len(
                 getattr(device, "unknown_properties", {}) or {}
             ),
@@ -547,7 +567,13 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             )
         await self.coordinator.async_request_refresh()
 
-    async def async_start_zone_mowing(self, zone_ids: list[int]) -> None:
+    async def async_start_scheduled_mowing(self, **kwargs: Any) -> dict[str, Any]:
+        """Run an explicit scheduled task with refreshed eligibility evidence."""
+        return await async_start_scheduled_mowing(self, **kwargs)
+
+    async def async_start_zone_mowing(
+        self, zone_ids: list[int], *, require_inactive_task: bool = False
+    ) -> None:
         """Start mowing for one or more explicit current-map zones."""
         if not zone_ids:
             raise HomeAssistantError("At least one zone id is required.")
@@ -567,7 +593,10 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
         observed_generation = runtime_mission_session_generation(runtime_cache)
         await _async_run_targeted_mowing_command(
-            self.coordinator.client.async_start_zone_mowing(normalized)
+            self.coordinator.client.async_start_zone_mowing(
+                normalized,
+                **({"require_inactive_task": True} if require_inactive_task else {}),
+            )
         )
         self.coordinator.selected_mowing_action = MOWING_ACTION_ZONE
         self.coordinator.selected_zone_id = (
@@ -582,7 +611,9 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         )
         await self.coordinator.async_request_refresh()
 
-    async def async_start_spot_mowing(self, spot_ids: list[int]) -> None:
+    async def async_start_spot_mowing(
+        self, spot_ids: list[int], *, require_inactive_task: bool = False
+    ) -> None:
         """Start mowing for one or more explicit current-map spot ids."""
         if not spot_ids:
             raise HomeAssistantError("At least one spot id is required.")
@@ -601,7 +632,10 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
         observed_generation = runtime_mission_session_generation(runtime_cache)
         await _async_run_targeted_mowing_command(
-            self.coordinator.client.async_start_spot_mowing(normalized)
+            self.coordinator.client.async_start_spot_mowing(
+                normalized,
+                **({"require_inactive_task": True} if require_inactive_task else {}),
+            )
         )
         self.coordinator.selected_mowing_action = MOWING_ACTION_SPOT
         self.coordinator.selected_spot_id = (
@@ -616,7 +650,9 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         )
         await self.coordinator.async_request_refresh()
 
-    async def async_start_edge_mowing(self, contour_ids: list[list[int]]) -> None:
+    async def async_start_edge_mowing(
+        self, contour_ids: list[list[int]], *, require_inactive_task: bool = False
+    ) -> None:
         """Start mowing for one or more explicit current-map edge contour ids."""
         normalized = _normalize_contour_ids(contour_ids)
         self._ensure_selected_map_matches_active()
@@ -648,7 +684,10 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
         runtime_cache = getattr(self.coordinator, "runtime_telemetry_cache", None)
         observed_generation = runtime_mission_session_generation(runtime_cache)
         await _async_run_targeted_mowing_command(
-            self.coordinator.client.async_start_edge_mowing(normalized)
+            self.coordinator.client.async_start_edge_mowing(
+                normalized,
+                **({"require_inactive_task": True} if require_inactive_task else {}),
+            )
         )
         self.coordinator.selected_mowing_action = MOWING_ACTION_EDGE
         self.coordinator.selected_contour_id = (
@@ -948,9 +987,7 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
                     "obstacle_avoidance_ai_classes"
                 ),
                 "edge_mowing_safe": preference.get("edge_mowing_safe"),
-                "edge_cutting_attachment": preference.get(
-                    "edge_cutting_attachment"
-                ),
+                "edge_cutting_attachment": preference.get("edge_cutting_attachment"),
             }
             return {
                 key: value

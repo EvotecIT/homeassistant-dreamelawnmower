@@ -1249,6 +1249,41 @@ def test_targeted_task_preflight_rejects_same_active_task_before_dispatch(
     client._async_refresh_authoritative_snapshot.assert_awaited_once_with()
 
 
+@pytest.mark.parametrize(
+    ("method_name", "sync_name", "arguments"),
+    [
+        ("async_start_zone_mowing", "_sync_start_zone_mowing", ([2],)),
+        ("async_start_edge_mowing", "_sync_start_edge_mowing", ([[3, 0]],)),
+        ("async_start_spot_mowing", "_sync_start_spot_mowing", ([4],)),
+    ],
+)
+@pytest.mark.parametrize(
+    ("docked", "active", "resumable"),
+    [
+        (True, True, True),
+        (True, False, True),
+        (None, False, False),
+        (True, None, False),
+    ],
+)
+def test_scheduled_target_requires_fresh_inactive_evidence_before_dispatch(
+    method_name, sync_name, arguments, docked, active, resumable
+) -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    client._async_refresh_authoritative_snapshot = AsyncMock(
+        return_value=SimpleNamespace(
+            docked=docked, mowing_session_active=active, task_resumable=resumable,
+            task_operation=1, task_status="auto_cleaning",
+        )
+    )
+    setattr(client, sync_name, Mock())
+    with pytest.raises(DreameLawnMowerCommandRejectedError, match="no active or"):
+        asyncio.run(
+            getattr(client, method_name)(*arguments, require_inactive_task=True)
+        )
+    getattr(client, sync_name).assert_not_called()
+
+
 def test_lost_zone_acknowledgement_accepts_requested_task_transition() -> None:
     client = object.__new__(DreameLawnMowerClient)
     baseline = SimpleNamespace(
@@ -2164,3 +2199,32 @@ def test_normal_dock_falls_back_when_preflight_refresh_fails() -> None:
 
     client.async_refresh.assert_awaited_once()
     client._async_call_device_method.assert_awaited_once_with("dock")
+
+
+@pytest.mark.parametrize(
+    ("task_status", "started"),
+    [
+        (DreameMowerTaskStatus.AUTO_CLEANING, True),
+        (DreameMowerTaskStatus.UNKNOWN, False),
+        (None, None),
+    ],
+)
+def test_scheduled_fresh_start_refuses_resume_or_unknown_at_dispatch(
+    task_status,
+    started,
+) -> None:
+    start_mowing = Mock()
+    client = object.__new__(DreameLawnMowerClient)
+    client._ensure_device = Mock(
+        return_value=SimpleNamespace(
+            status=SimpleNamespace(task_status=task_status, started=started),
+            start_mowing=start_mowing,
+        )
+    )
+    with pytest.raises(DreameLawnMowerCommandRejectedError, match="cannot resume"):
+        asyncio.run(
+            client._async_call_start_mowing_with_session_identity(
+                require_new_session=True,
+            )
+        )
+    start_mowing.assert_not_called()

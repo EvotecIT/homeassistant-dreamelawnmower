@@ -1,0 +1,134 @@
+blueprint:
+  name: Dreame mower guarded weekly schedule
+  description: >-
+    Start an explicit mowing task once at each Schedule helper block boundary.
+    The integration refreshes mower, rain-delay, map, and native-plan evidence
+    before dispatch. Busy or resumable tasks, unknown state, low battery,
+    rain delays, and enabled native plans are skipped immediately. Disable
+    native plans in the mower app or integration before enabling this automation.
+    There is no catch-up after a restart, no queue, and no action at block end.
+    Configure one automation per mower schedule. The block length does not set
+    mowing duration. Targeted tasks require the saved map index and target IDs.
+  domain: automation
+  author: EvotecIT
+  source_url: https://github.com/EvotecIT/homeassistant-dreamelawnmower/blob/main/blueprints/automation/dreame_lawn_mower/guarded_schedule_mowing.yaml
+  homeassistant:
+    min_version: 2026.7.0
+  input:
+    mower_entity:
+      name: Mower
+      selector:
+        entity:
+          filter:
+            integration: dreame_lawn_mower
+            domain: lawn_mower
+    schedule_entity:
+      name: Weekly Schedule helper
+      selector:
+        entity:
+          filter:
+            domain: schedule
+    task_type:
+      name: Mowing task
+      default: all
+      selector:
+        select:
+          options:
+            - label: All areas
+              value: all
+            - label: Saved zones
+              value: zone
+            - label: Saved edge contours
+              value: edge
+            - label: Saved spots
+              value: spot
+    minimum_battery:
+      name: Minimum battery
+      default: 30
+      selector:
+        number:
+          min: 20
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: box
+    map_index:
+      name: Target map index
+      description: Must be current for zone, edge, and spot tasks. Read from mower attributes.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          mode: box
+    zone_ids:
+      name: Saved zone IDs
+      default: []
+      selector:
+        object: {}
+    contour_ids:
+      name: Saved contour pairs
+      description: For example [[1, 0], [2, 0]].
+      default: []
+      selector:
+        object: {}
+    spot_ids:
+      name: Saved spot IDs
+      default: []
+      selector:
+        object: {}
+    notify_outcome:
+      name: Show a persistent outcome notification
+      default: true
+      selector:
+        boolean: {}
+    outcome_actions:
+      name: Additional outcome actions
+      description: >-
+        Optional actions can use scheduled_result.status and scheduled_result.reason.
+        Outcomes are started, submitted, skipped, or failed. The result is also
+        visible in the automation trace and last_scheduled_run mower attribute.
+      default: []
+      selector:
+        action: {}
+
+mode: single
+max_exceeded: silent
+variables:
+  mower_id: !input mower_entity
+  selected_task: !input task_type
+  selected_map: !input map_index
+  notify_result: !input notify_outcome
+triggers:
+  - trigger: schedule.block_started
+    target:
+      entity_id: !input schedule_entity
+actions:
+  - action: dreame_lawn_mower.start_scheduled_mowing
+    continue_on_error: true
+    target:
+      entity_id: !input mower_entity
+    data:
+      task_type: !input task_type
+      minimum_battery: !input minimum_battery
+      map_index: "{{ selected_map | int }}"
+      zone_ids: !input zone_ids
+      contour_ids: !input contour_ids
+      spot_ids: !input spot_ids
+    response_variable: run_response
+  - variables:
+      scheduled_result: >-
+        {{ (run_response | default({})).get(mower_id,
+           {'status': 'failed', 'reason': 'mower_service_unavailable'}) }}
+  - if: "{{ notify_result }}"
+    then:
+      - action: persistent_notification.create
+        data:
+          title: "Mower schedule: {{ scheduled_result.status }}"
+          notification_id: "{{ mower_id }}_scheduled_run"
+          message: >-
+            {{ state_attr(mower_id, 'friendly_name') or mower_id }}:
+            {{ scheduled_result.reason | replace('_', ' ') }}.
+            Task: {{ selected_task }}. See the automation trace for details.
+  - sequence: !input outcome_actions

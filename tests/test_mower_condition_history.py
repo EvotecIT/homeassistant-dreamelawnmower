@@ -46,13 +46,15 @@ def test_fault_history_records_transitions_once_and_keeps_cleared_fault() -> Non
 
     assert history.observe(fault, observed_at=first_seen)
     assert not history.observe(fault, observed_at=first_seen)
-    assert not history.observe(_snapshot())
+    assert history.observe(_snapshot(), observed_at=first_seen)
     assert history.latest(severity="error") == {
         "severity": "error",
         "code": 23,
         "message": "Emergency stop",
         "source": "realtime",
         "observed_at": first_seen.isoformat(),
+        "active": False,
+        "cleared_at": first_seen.isoformat(),
     }
     assert history.observe(fault, observed_at=first_seen)
     assert len(history.recent()) == 2
@@ -83,7 +85,7 @@ def test_last_error_survives_warning_history_eviction() -> None:
     assert history.observe(
         _snapshot(activity="error", error_code=23, error_display="Emergency stop")
     )
-    assert not history.observe(_snapshot())
+    assert history.observe(_snapshot())
     for code in range(5):
         assert history.observe(
             _snapshot(
@@ -102,9 +104,26 @@ def test_offline_snapshot_does_not_repeat_a_still_active_condition() -> None:
     history = MowerConditionHistory()
     fault = _snapshot(activity="error", error_code=2, error_display="Mower stuck")
     assert history.observe(fault)
-    assert not history.observe(_snapshot(available=False))
-    assert not history.observe(fault)
+    assert history.observe(_snapshot(available=False))
+    assert history.latest()["active"] is None
+    assert "cleared_at" not in history.latest()
+    assert history.observe(fault)
+    assert history.latest()["active"] is True
     assert len(history.recent()) == 1
+
+
+def test_unknown_activity_preserves_fault_until_clearance_is_observed() -> None:
+    history = MowerConditionHistory()
+    history.observe(
+        _snapshot(activity="error", error_code=2, error_display="Mower stuck")
+    )
+    assert history.observe(_snapshot(activity=None))
+    assert history.latest()["active"] is None
+    assert "cleared_at" not in history.latest()
+    cleared = datetime(2026, 10, 3, 12, 0, tzinfo=UTC)
+    assert history.observe(_snapshot(), observed_at=cleared)
+    assert history.latest()["active"] is False
+    assert history.latest()["cleared_at"] == cleared.isoformat()
 
 
 def test_history_redacts_sensitive_text_before_exposing_sensor_state() -> None:
@@ -132,9 +151,7 @@ def test_published_snapshot_feeds_both_last_condition_sensors() -> None:
         descriptor=SimpleNamespace(unique_id="mower-1")
     )
     coordinator.data = _snapshot()
-    fault = _snapshot(
-        activity="error", error_code=12, error_display="LiDAR blocked"
-    )
+    fault = _snapshot(activity="error", error_code=12, error_display="LiDAR blocked")
 
     with patch.object(DataUpdateCoordinator, "async_set_updated_data") as publish:
         coordinator.async_set_updated_data(fault)

@@ -48,6 +48,21 @@ A download error for QuickJS-NG still needs the installer cause above.
 
 ## Collect integration diagnostics
 
+Enable the disabled **Compatibility** diagnostic sensor for a compact view of
+brand, account region, raw and display model, firmware, capability reasons, and
+the schedule protocol discovered per map. `unknown` means that support has not
+been established; it does not mean the feature is unsupported. The same summary
+is included in downloaded diagnostics without account credentials or device
+identifiers. Schedule reads distinguish complete, partial task reads, and failed
+discovery, which helps explain an empty calendar or a refused unattended start.
+
+Guarded schedule outcomes include a stable reason in `last_scheduled_run` and
+the automation trace. For example, `resumable_or_unknown_task` requires resolving
+the interrupted task deliberately; `rain_delay_unknown` requires a valid rain
+delay read; `native_schedule_enabled_or_unknown` requires disabling competing
+native plans or establishing their state. A `submitted` result is an
+acknowledgement, not proof that the mower started.
+
 Start with a fresh Home Assistant diagnostics capture:
 
 1. Reproduce the problem once.
