@@ -69,9 +69,11 @@ latest fault message, code, source, and observation time after the fault clears.
 **Last Mower Notification** retains the latest fault or actionable warning and
 lists up to five recent conditions in its `recent` attribute, newest first.
 These sensors work even when optional persistent notifications are off and remain
-readable while the mower is offline. The list is kept in memory and starts empty
-after an integration reload or Home Assistant restart; it is not a complete
-device notification log.
+readable while the mower is offline. The bounded list and last error survive an
+integration reload or Home Assistant restart for up to 30 days. A restored
+condition has unknown current status until a fresh snapshot confirms that it is
+active or cleared. This history records observations made by the integration;
+it is not a complete device notification log.
 
 **Person detection** publishes each fresh `human_detected` realtime announcement,
 even when the mower's current warning remains unchanged. Code `27` is a notice
@@ -116,7 +118,8 @@ Saved summaries older than 30 days are not restored.
 
 The integration overwrites one private checkpoint per mower, limited to 16 KiB
 including storage metadata. It contains only the current observation, one
-previous-run summary, and minimal retained position/map identity evidence. It
+previous-run summary, minimal retained position/map identity evidence, five
+recent conditions, the last error, and five scheduled-start outcomes. It
 does not contain routes, point clouds, images, credentials, or raw telemetry.
 
 Progress is checkpointed on a 60-second schedule while observations change.

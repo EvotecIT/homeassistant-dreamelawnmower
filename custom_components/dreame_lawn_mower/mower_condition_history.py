@@ -1,7 +1,8 @@
-"""Bounded, in-memory history of mower faults and actionable notices."""
+"""Bounded history of mower faults and actionable notices."""
 
 from __future__ import annotations
 
+import re
 from collections import deque
 from datetime import UTC, datetime
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 from .const import ACTIVITY_ERROR
 from .debug import sanitize_diagnostic_text
 from .dreame_lawn_mower_client.notice_events import MowerNoticeEventCursor
+from .dreame_lawn_mower_client.session_checkpoint import MAX_RUN_AGE_SECONDS
 
 ACTIONABLE_NOTICE_TIERS = frozenset({"alert", "attention", "unknown"})
 _HISTORY_LIMIT = 5
@@ -189,3 +191,100 @@ class MowerConditionHistory:
     def recent(self) -> list[dict[str, Any]]:
         """Return the five latest conditions, newest first."""
         return [self._copy(event) for event in self._events]
+
+    def checkpoint(self) -> dict[str, Any]:
+        """Preserve the last observed state, without claiming it is still current."""
+        return {
+            "events": [dict(event) for event in self._events],
+            "last_error": dict(self._last_error) if self._last_error else None,
+        }
+
+    def restore_checkpoint(self, record: Any, *, now: datetime) -> None:
+        """Retain valid history and reconcile active faults with a fresh snapshot."""
+        if not isinstance(record, dict) or set(record) != {"events", "last_error"}:
+            return
+        events = record["events"]
+        last_error = record["last_error"]
+        if not isinstance(events, list) or len(events) > _HISTORY_LIMIT:
+            return
+        self._events = deque(
+            (dict(event) for event in events if _valid_event(event, now)),
+            maxlen=_HISTORY_LIMIT,
+        )
+        if last_error is not None and (
+            not _valid_event(last_error, now) or last_error["severity"] != "error"
+        ):
+            last_error = None
+        if last_error is None:
+            last_error = next(
+                (event for event in self._events if event["severity"] == "error"),
+                None,
+            )
+        self._last_error = next(
+            (event for event in self._events if event == last_error),
+            dict(last_error) if last_error else None,
+        )
+        self._state_known = {"warning": False, "error": False}
+        for severity in self._current_event:
+            event = next(
+                (
+                    event
+                    for event in self._events
+                    if event["severity"] == severity and event["active"] is True
+                ),
+                self._last_error
+                if severity == "error"
+                and self._last_error
+                and self._last_error["active"] is True
+                else None,
+            )
+            self._current_event[severity] = event
+            self._active[severity] = (
+                (event["code"], event["message"], None) if event else None
+            )
+
+
+def _valid_event(event: Any, now: datetime) -> bool:
+    required = {"severity", "code", "message", "source", "observed_at", "active"}
+    if not isinstance(event, dict) or set(event) not in (
+        required,
+        required | {"cleared_at"},
+    ):
+        return False
+    if (
+        event["severity"] not in ("warning", "error")
+        or (
+            event["code"] is not None
+            and (type(event["code"]) is not int or not 0 <= event["code"] <= 65535)
+        )
+        or not isinstance(event["message"], str)
+        or not 1 <= len(event["message"]) <= _STATE_LIMIT
+        or sanitize_diagnostic_text(event["message"]).strip() != event["message"]
+        or (
+            event["source"] is not None
+            and (
+                not isinstance(event["source"], str)
+                or not re.fullmatch(
+                    r"(?:realtime|cloud|property|notification|runtime|status|unknown|realtime_property_[0-9]{1,3}\.[0-9]{1,3})",
+                    event["source"],
+                )
+            )
+        )
+        or (event["active"] is not None and type(event["active"]) is not bool)
+        or ("cleared_at" in event and event["active"] is not False)
+    ):
+        return False
+    try:
+        observed = datetime.fromisoformat(event["observed_at"])
+        if (
+            observed.tzinfo is None
+            or not 0 <= (now - observed).total_seconds() <= MAX_RUN_AGE_SECONDS
+        ):
+            return False
+        if "cleared_at" in event:
+            cleared = datetime.fromisoformat(event["cleared_at"])
+            if cleared.tzinfo is None or not observed <= cleared <= now:
+                return False
+    except (ValueError, TypeError, OverflowError):
+        return False
+    return True

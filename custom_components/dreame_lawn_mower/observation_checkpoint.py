@@ -15,7 +15,9 @@ from homeassistant.core import CoreState
 from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN
+from .dreame_lawn_mower_client.scheduled_run_history import ScheduledRunHistory
 from .dreame_lawn_mower_client.session_timing import ObservedMowingTimer
+from .mower_condition_history import MowerConditionHistory
 
 _LOGGER = logging.getLogger(__name__)
 MAX_CHECKPOINT_BYTES = 16 * 1024
@@ -42,9 +44,11 @@ class ObservationStore(Store):
         if self._checkpoint_write_error is not None:
             raise self._checkpoint_write_error
 
-    async def _async_write_data(self, data: dict) -> None:
+    async def _async_write_data(self, *args: Any) -> None:
+        # HA 2025.1 passes (path, data); newer HA passes only (data).
+        # Forward the host's arguments unchanged while retaining error evidence.
         try:
-            await super()._async_write_data(data)
+            await super()._async_write_data(*args)
         except Exception as err:
             self._checkpoint_write_error = err
             raise
@@ -104,6 +108,10 @@ class ObservationCheckpoint:
         self._last_write_at: float | None = None
         if getattr(coordinator, "observed_mowing_timer", None) is None:
             coordinator.observed_mowing_timer = ObservedMowingTimer()
+        if getattr(coordinator, "mower_condition_history", None) is None:
+            coordinator.mower_condition_history = MowerConditionHistory()
+        if getattr(coordinator, "scheduled_run_history", None) is None:
+            coordinator.scheduled_run_history = ScheduledRunHistory()
 
     async def async_load(self) -> None:
         """Load before first refresh; storage failures must not disable control."""
@@ -125,7 +133,18 @@ class ObservationCheckpoint:
         if (
             self._closed
             or not isinstance(record, dict)
-            or set(record) != {"scope", "saved_at", "timing", "position"}
+            or set(record)
+            not in (
+                {"scope", "saved_at", "timing", "position"},
+                {
+                    "scope",
+                    "saved_at",
+                    "timing",
+                    "position",
+                    "conditions",
+                    "scheduled_runs",
+                },
+            )
         ):
             return
         now = datetime.now(UTC)
@@ -145,6 +164,15 @@ class ObservationCheckpoint:
         self._coordinator.client._position_tracker.restore_checkpoint(
             record["position"], now=now
         )
+        self._coordinator.mower_condition_history.restore_checkpoint(
+            record.get("conditions"), now=now
+        )
+        self._coordinator.scheduled_run_history.restore_checkpoint(
+            record.get("scheduled_runs"), now=now
+        )
+        self._coordinator.last_scheduled_run = (
+            self._coordinator.scheduled_run_history.latest()
+        )
         self._last_signature = self._signature(self._capture())
 
     def _capture(self) -> dict[str, Any]:
@@ -152,6 +180,8 @@ class ObservationCheckpoint:
             "scope": self._scope,
             "timing": self._coordinator.observed_mowing_timer.checkpoint(),
             "position": self._coordinator.client._position_tracker.checkpoint(),
+            "conditions": self._coordinator.mower_condition_history.checkpoint(),
+            "scheduled_runs": self._coordinator.scheduled_run_history.recent(),
         }
 
     @staticmethod
@@ -166,13 +196,13 @@ class ObservationCheckpoint:
             timing["current"] = current
         return json.dumps({**record, "timing": timing}, sort_keys=True, allow_nan=False)
 
-    def async_schedule_save(self) -> None:
+    def async_schedule_save(self, *, urgent: bool = False) -> None:
         """Schedule one write; frequent updates cannot postpone it forever."""
         if self._closed:
             return
         timer = self._coordinator.observed_mowing_timer
         transition = (timer.generation, timer.state, timer.partial)
-        changed = self._transition != transition
+        changed = urgent or self._transition != transition
         self._transition = transition
         delay = (
             TRANSITION_DELAY_SECONDS

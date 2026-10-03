@@ -83,7 +83,9 @@ History entries include `active: true` for an observed current condition,
 and `active: null` when current state is unknown. Offline snapshots preserve
 the message and observation time without claiming recovery. A timestamped
 human-detection occurrence remains unknown unless it also appears as a current
-warning. The five entries remain in memory until the integration reloads.
+warning. The five entries and last error are restored after a reload or restart
+for up to 30 days. Restored active conditions remain unknown until a fresh
+snapshot establishes their current state.
 
 ## Import the blueprint
 
@@ -209,5 +211,11 @@ the mower entity ID. Status is `started` after observed confirmation,
 `submitted` when an all-area request is acknowledged but active state is not
 yet observed, `skipped` for an eligibility reason, or `failed` when a command
 cannot be confirmed. The result appears in the mower's `last_scheduled_run`
-attribute and the `dreame_lawn_mower_scheduled_run` event. The existing manual
+attribute and the `dreame_lawn_mower_scheduled_run` event. Each result includes
+its UTC `observed_at` time and map scope. Targeted runs include `target_ids`,
+`target_count`, and `targets_truncated`; at most 16 IDs or contour pairs are
+retained in each record. The mower's `recent_scheduled_runs` attribute keeps
+the five latest outcomes, newest first, including skipped attempts. These
+records survive reloads and restarts for up to 30 days and never trigger a
+retry. The existing manual
 start action retains its start/resume behavior.

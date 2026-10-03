@@ -9,6 +9,7 @@ from dataclasses import replace
 from hashlib import sha256
 from importlib import import_module
 from importlib.resources import files
+from inspect import signature
 from types import SimpleNamespace
 
 import pytest
@@ -309,9 +310,11 @@ def test_cloud_presence_throttles_failed_refresh_attempt(monkeypatch) -> None:
 
 def test_cloud_mqtt_client_trusts_vendor_ca_with_verified_tls(monkeypatch) -> None:
     mqtt_clients = []
+    constructor = signature(protocol.mqtt_client.Client)
 
     class _MqttClient:
         def __init__(self, *args, **kwargs) -> None:
+            constructor.bind(*args, **kwargs)
             self.tls_context = None
             self.tls_insecure = None
             self.connected_to = None

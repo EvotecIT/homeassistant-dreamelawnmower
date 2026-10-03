@@ -435,12 +435,16 @@ class DreameMowerDreameHomeCloudProtocol:
                         _LOGGER.debug("Connecting to the device client")
                         try:
                             host = self._host.split(":")
-                            self._client = mqtt_client.Client(
-                                mqtt_client.CallbackAPIVersion.VERSION1,
-                                f"{self._strings[53]}{self._uid}{self._strings[54]}{DreameMowerDreameHomeCloudProtocol.get_random_agent_id()}{self._strings[54]}{host[0]}",
-                                clean_session=True,
-                                userdata=self,
-                            )
+                            # HA 2025.1 supplies Paho 1.6; Paho 2 adds an
+                            # explicit callback version with the same handlers.
+                            client_options = {
+                                "client_id": f"{self._strings[53]}{self._uid}{self._strings[54]}{DreameMowerDreameHomeCloudProtocol.get_random_agent_id()}{self._strings[54]}{host[0]}",
+                                "clean_session": True,
+                                "userdata": self,
+                            }
+                            if hasattr(mqtt_client, "CallbackAPIVersion"):
+                                client_options["callback_api_version"] = mqtt_client.CallbackAPIVersion.VERSION1
+                            self._client = mqtt_client.Client(**client_options)
                             self._client.on_connect = DreameMowerDreameHomeCloudProtocol._on_client_connect
                             self._client.on_disconnect = DreameMowerDreameHomeCloudProtocol._on_client_disconnect
                             self._client.on_message = DreameMowerDreameHomeCloudProtocol._on_client_message

@@ -197,7 +197,9 @@ async def async_setup_entry(
 class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
     """Main mower entity."""
 
-    _unrecorded_attributes = frozenset({"observed_mowing_time_details"})
+    _unrecorded_attributes = frozenset(
+        {"observed_mowing_time_details", "recent_scheduled_runs"}
+    )
 
     _attr_supported_features = (
         LawnMowerEntityFeature.START_MOWING
@@ -345,6 +347,8 @@ class DreameLawnMower(DreameLawnMowerEntity, LawnMowerEntity):
             ),
             "task_resumable": getattr(snapshot, "task_resumable", None),
             "last_scheduled_run": getattr(self.coordinator, "last_scheduled_run", None),
+            "recent_scheduled_runs": self.coordinator.scheduled_run_history.recent()
+            if hasattr(self.coordinator, "scheduled_run_history") else [],
             "unknown_property_count": len(
                 getattr(device, "unknown_properties", {}) or {}
             ),
