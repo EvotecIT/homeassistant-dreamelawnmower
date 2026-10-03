@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from .dreame_lawn_mower_client.app_map_metadata import verified_app_map_zone_names
+
 MOWING_ACTION_ALL_AREA = "all_area"
 MOWING_ACTION_EDGE = "edge"
 MOWING_ACTION_ZONE = "zone"
@@ -139,11 +141,14 @@ def current_zone_entries(
         list(vector_zones) if vector_zones is not None else list(preferences_by_id)
     )
     vector_zones = vector_zones or {}
+    native_names = verified_app_map_zone_names(app_maps, current_idx)
 
     return [
         {
             "area_id": area_id,
-            "label": _zone_display_label(area_id, vector_zones.get(area_id)),
+            "label": _zone_display_label(
+                area_id, native_names.get(area_id, vector_zones.get(area_id)),
+            ),
             "map_index": current_idx,
             "preference": preferences_by_id.get(area_id, {}),
         }

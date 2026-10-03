@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from .app_map_metadata import app_map_zone_metadata
 from .app_map_rendering import (
     _app_map_area_label as _app_map_area_label,
 )
@@ -583,6 +584,7 @@ def _app_map_payload_summary(value: Any) -> dict[str, Any]:
         "total_area": total_area,
         "map_area_total": round(map_area_total, 2),
         "map_area_count": len(zone_maps),
+        "zones": app_map_zone_metadata(zone_maps),
         "boundary_point_count": boundary_point_count,
         "pathway_count": len(pathways),
         "pathway_boundary_point_count": pathway_boundary_point_count,
