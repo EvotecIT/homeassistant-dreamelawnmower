@@ -146,8 +146,11 @@ data:
 Use `entity_id` when the value starts with `lawn_mower.`. A Home Assistant
 `device_id` is a separate device-registry identifier and must not contain an
 entity ID. The lawn mower entity exposes `available_zone_ids`, and zone selects
-use names saved in the Dreame app when vector-map metadata provides them. An
-unnamed zone retains the stable `Zone #<id>` fallback.
+use names from the matching, hash-verified native map when available. A vendor-app
+rename appears after the next map refresh even if cloud vector metadata still
+has the old name. Vector metadata supplies the fallback when native names are
+unavailable. Clearing a native name restores the stable `Zone #<id>` label.
+Name refreshes retain the existing zone IDs and map scope.
 
 Zone, spot, and edge actions require both a mower acknowledgement and an
 authoritative task-type readback before Home Assistant reports success. If the

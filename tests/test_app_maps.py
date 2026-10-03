@@ -8,6 +8,7 @@ from io import BytesIO
 
 from PIL import Image
 
+from custom_components.dreame_lawn_mower.control_options import current_zone_entries
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_visuals import (
     map_render_style,
 )
@@ -332,6 +333,7 @@ def test_app_maps_downloads_chunks_and_summarizes_payload() -> None:
         "total_area": 12.5,
         "map_area_total": 12.5,
         "map_area_count": 1,
+        "zones": [],
         "boundary_point_count": 3,
         "pathway_count": 0,
         "pathway_boundary_point_count": 0,
@@ -726,6 +728,45 @@ def test_app_maps_refresh_changed_payload_and_never_reuse_failed_download():
     assert any(call["t"] == "MAPD" for call in cloud.calls)
     assert result["maps"][0]["payload"] == changed
     assert result["maps"][0]["payload_cached"] is False
+
+
+def test_native_zone_rename_refreshes_labels_when_cloud_names_remain_stale():
+    client = _client()
+    payload = {
+        "map": [
+            {"id": 7, "name": "Front", "data": [[1, 2]]},
+            {"id": 8, "name": "Deleted zone", "data": [[3, 4]]},
+            {"id": 9, "name": "Path", "type": 1, "data": [[5, 6]]},
+        ],
+    }
+    cloud = _FakeAppMapCloud(payload)
+    client._sync_get_cloud_protocol = lambda: cloud
+    vector_details = {"map_index": 0, "zones": [{"zone_id": 7, "name": "Front"}]}
+
+    first = client._sync_get_app_maps(include_payload=False, include_objects=False)
+    assert first["maps"][0]["summary"]["zones"] == [
+        {"zone_id": 7, "name": "Front"},
+        {"zone_id": 8, "name": "Deleted zone"},
+    ]
+    assert current_zone_entries(None, first, vector_details)[0]["label"] == "Front (#7)"
+    payload["map"][0]["name"] = "Courtyard"
+    cloud.payload_text = json.dumps(payload, separators=(",", ":"))
+    cloud.payload_hash = hashlib.md5(cloud.payload_text.encode()).hexdigest()
+    cloud.calls.clear()
+    refreshed = client._sync_get_app_maps(include_payload=False, include_objects=False)
+    entries = current_zone_entries(None, refreshed, vector_details)
+    assert [(entry["area_id"], entry["label"]) for entry in entries] == [
+        (7, "Courtyard (#7)"),
+    ]
+    assert any(call["t"] == "MAPD" for call in cloud.calls)
+    refreshed["maps"][0]["summary"]["zones"][0]["name"] = "Mutated by caller"
+    cloud.calls.clear()
+    cached = client._sync_get_app_maps(include_payload=False, include_objects=False)
+    assert (
+        current_zone_entries(None, cached, vector_details)[0]["label"]
+        == "Courtyard (#7)"
+    )
+    assert [call["t"] for call in cloud.calls] == ["MAPL", "MAPI"]
 
 
 def test_app_maps_without_hash_are_downloaded_on_every_refresh():
