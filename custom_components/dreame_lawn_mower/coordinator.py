@@ -1314,6 +1314,7 @@ class DreameLawnMowerCoordinator(
                     self.schedules,
                     {"schedules": [confirmed_schedule]},
                     expected_indices=[map_index],
+                    partial_refresh=True,
                 )
                 for confirmed_plan in confirmed_schedule.get("plans", []):
                     key = (map_index, confirmed_plan["plan_id"])

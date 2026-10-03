@@ -1249,6 +1249,41 @@ def test_targeted_task_preflight_rejects_same_active_task_before_dispatch(
     client._async_refresh_authoritative_snapshot.assert_awaited_once_with()
 
 
+@pytest.mark.parametrize(
+    ("method_name", "sync_name", "arguments"),
+    [
+        ("async_start_zone_mowing", "_sync_start_zone_mowing", ([2],)),
+        ("async_start_edge_mowing", "_sync_start_edge_mowing", ([[3, 0]],)),
+        ("async_start_spot_mowing", "_sync_start_spot_mowing", ([4],)),
+    ],
+)
+@pytest.mark.parametrize(
+    ("docked", "active", "resumable"),
+    [
+        (True, True, True),
+        (True, False, True),
+        (None, False, False),
+        (True, None, False),
+    ],
+)
+def test_scheduled_target_requires_fresh_inactive_evidence_before_dispatch(
+    method_name, sync_name, arguments, docked, active, resumable
+) -> None:
+    client = object.__new__(DreameLawnMowerClient)
+    client._async_refresh_authoritative_snapshot = AsyncMock(
+        return_value=SimpleNamespace(
+            docked=docked, mowing_session_active=active, task_resumable=resumable,
+            task_operation=1, task_status="auto_cleaning",
+        )
+    )
+    setattr(client, sync_name, Mock())
+    with pytest.raises(DreameLawnMowerCommandRejectedError, match="no active or"):
+        asyncio.run(
+            getattr(client, method_name)(*arguments, require_inactive_task=True)
+        )
+    getattr(client, sync_name).assert_not_called()
+
+
 def test_lost_zone_acknowledgement_accepts_requested_task_transition() -> None:
     client = object.__new__(DreameLawnMowerClient)
     baseline = SimpleNamespace(

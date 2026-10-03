@@ -6,12 +6,17 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
-import voluptuous_serialize
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+try:
+    # Follow the serializer used by each supported Home Assistant generation.
+    from probatio import to_field_list as serialize_schema
+except ImportError:
+    from voluptuous_serialize import convert as serialize_schema
 
 from custom_components.dreame_lawn_mower import async_migrate_entry
 from custom_components.dreame_lawn_mower.config_flow import (
@@ -100,7 +105,7 @@ async def _start_user_flow(hass):
 def _serialized_schema(result) -> dict[str, dict]:
     return {
         item["name"]: item
-        for item in voluptuous_serialize.convert(
+        for item in serialize_schema(
             result["data_schema"],
             custom_serializer=cv.custom_serializer,
         )
@@ -258,7 +263,7 @@ async def test_user_flow_lists_multiple_mowers_by_name(hass, monkeypatch) -> Non
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "device"
-    serialized_schema = voluptuous_serialize.convert(
+    serialized_schema = serialize_schema(
         result["data_schema"], custom_serializer=cv.custom_serializer
     )
     assert serialized_schema[0]["selector"]["select"]["options"] == [
@@ -292,7 +297,7 @@ async def test_user_flow_keeps_mowers_with_the_same_name_distinct(
 
     result = await _start_user_flow(hass)
 
-    serialized_schema = voluptuous_serialize.convert(
+    serialized_schema = serialize_schema(
         result["data_schema"], custom_serializer=cv.custom_serializer
     )
     assert serialized_schema[0]["selector"]["select"]["options"] == [

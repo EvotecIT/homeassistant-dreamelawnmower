@@ -78,6 +78,13 @@ history. Integration-managed persistent notifications and the condition
 blueprint continue to follow the current warning; use this event automation
 when you want a separate action for each detection.
 
+History entries include `active: true` for an observed current condition,
+`active: false` and `cleared_at` after a readable snapshot confirms clearance,
+and `active: null` when current state is unknown. Offline snapshots preserve
+the message and observation time without claiming recovery. A timestamped
+human-detection occurrence remains unknown unless it also appears as a current
+warning. The five entries remain in memory until the integration reloads.
+
 ## Import the blueprint
 
 [Import the Dreame mower condition notifications blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2FEvotecIT%2Fhomeassistant-dreamelawnmower%2Fmain%2Fblueprints%2Fautomation%2Fdreame_lawn_mower%2Fmower_condition_notifications.yaml),

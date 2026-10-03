@@ -238,8 +238,10 @@ def test_app_schedules_can_skip_optional_current_task_and_bound_plan_reads() -> 
     assert result["current_task"] is None
     assert [call["t"] for call in cloud.calls] == ["SCHDIV2", "SCHDDV2"]
     assert all(option["retry_count"] == 0 for option in cloud.request_options)
-    assert all(option["timeout"] == 5.0 for option in cloud.request_options)
-    assert cloud.request_options[0]["deadline"] == cloud.request_options[1]["deadline"]
+    assert all(0 < option["timeout"] <= 5.0 for option in cloud.request_options)
+    # Protocol discovery reserves alternate-protocol time for metadata, while
+    # a validated document can use the remaining slot for its payload.
+    assert cloud.request_options[0]["deadline"] < cloud.request_options[1]["deadline"]
 
 
 def test_app_schedules_allocate_shared_deadline_fairly_across_slots() -> None:
@@ -253,17 +255,17 @@ def test_app_schedules_allocate_shared_deadline_fairly_across_slots() -> None:
     )
 
     assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 0, 1]
-    metadata_deadlines = [
+    payload_deadlines = [
         options["deadline"]
         for call, options in zip(
             cloud.calls,
             cloud.request_options,
             strict=True,
         )
-        if call["t"] == "SCHDIV2"
+        if call["t"] == "SCHDDV2"
     ]
-    assert len(metadata_deadlines) == 3
-    assert metadata_deadlines[0] < metadata_deadlines[1] < metadata_deadlines[2]
+    assert len(payload_deadlines) == 3
+    assert payload_deadlines[0] < payload_deadlines[1] < payload_deadlines[2]
 
 
 def test_app_schedules_reserve_slot_time_when_map_discovery_times_out(

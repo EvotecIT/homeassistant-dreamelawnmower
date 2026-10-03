@@ -209,9 +209,10 @@ def test_history_reconnect_preserves_condition_until_fresh_notice_or_clear():
         device._message_callback(_message(11))
     assert history.observe(snapshot())
     original = history.recent()
-    assert not history.observe(snapshot(available=False))
+    assert history.observe(snapshot(available=False))
+    assert history.latest()["active"] is None
     device._connected_callback()
-    assert not history.observe(snapshot())
+    assert history.observe(snapshot())
     assert history.recent() == original
 
     with patch("time.time", return_value=200.0):
@@ -222,6 +223,7 @@ def test_history_reconnect_preserves_condition_until_fresh_notice_or_clear():
     assert not history.observe(snapshot())
 
     device._connected_callback()
-    assert not history.observe(snapshot(warning=False))
+    assert history.observe(snapshot(warning=False))
+    assert history.latest()["active"] is False
     assert history.observe(snapshot())
     assert len(history.recent()) == 3

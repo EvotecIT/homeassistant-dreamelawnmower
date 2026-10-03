@@ -299,6 +299,11 @@ def test_ha_consumers_keep_both_confirmed_flags_when_followup_read_fails():
         async_set_app_schedule_plan_enabled=AsyncMock(return_value=result),
     )
     coordinator.schedules = before
+    retained = [
+        {"idx": -1, "protocol": "document", "version": 21, "plans": []},
+        {"idx": 0, "protocol": "document", "version": 22, "plans": []},
+    ]
+    coordinator.schedules["schedules"].extend(deepcopy(retained))
     coordinator.async_refresh_schedules = AsyncMock(side_effect=TimeoutError)
     coordinator.async_update_listeners = lambda: None
     with pytest.raises(TimeoutError):
@@ -315,3 +320,31 @@ def test_ha_consumers_keep_both_confirmed_flags_when_followup_read_fails():
         False,
         True,
     ]
+    assert coordinator.schedules["schedules"][1:] == retained
+
+
+def test_document_timeout_still_probes_tables_and_remembers_the_supported_protocol(
+    monkeypatch,
+):
+    client, cloud = client_and_cloud()
+    client._account_type = "dreame"
+    cloud.tables = []
+    original = cloud.call_app_action
+    clock = [100.0]
+
+    def call(payload, **kwargs):
+        if payload["t"] == "SCHDIV2":
+            cloud.calls.append(deepcopy(payload))
+            clock[0] = kwargs["deadline"]
+            raise TimeoutError("Document protocol timed out")
+        return original(payload, **kwargs)
+
+    cloud.call_app_action = call
+    module = client._sync_get_app_schedule_slot.__func__.__globals__
+    monkeypatch.setattr(module["time"], "monotonic", lambda: clock[0])
+    result = client._sync_get_app_schedules(map_indices=[2], include_current_task=False)
+    assert result["schedules"][0]["protocol"] == "tables"
+    assert [call["t"] for call in cloud.calls] == ["SCHDIV2", "SCHDI"]
+    cloud.calls.clear()
+    client._sync_get_app_schedules(map_indices=[2], include_current_task=False)
+    assert [call["t"] for call in cloud.calls] == ["SCHDI"]

@@ -22,6 +22,11 @@ class MowerConditionHistory:
         self._events: deque[dict[str, Any]] = deque(maxlen=_HISTORY_LIMIT)
         self._last_error: dict[str, Any] | None = None
         self._notice_cursor = MowerNoticeEventCursor()
+        self._current_event: dict[str, dict[str, Any] | None] = {
+            "warning": None,
+            "error": None,
+        }
+        self._state_known = {"warning": True, "error": True}
         self._active: dict[
             str, tuple[int | None, str, tuple[str, int] | None] | None
         ] = {
@@ -32,9 +37,11 @@ class MowerConditionHistory:
     def observe(self, snapshot: Any, *, observed_at: datetime | None = None) -> bool:
         """Record newly observed conditions and return whether history changed."""
         if not getattr(snapshot, "available", True):
-            return False
+            return self._set_known("warning", False) | self._set_known("error", False)
 
-        changed = False
+        changed = self._set_known("warning", True) | self._set_known(
+            "error", getattr(snapshot, "activity", None) is not None
+        )
         for event in self._notice_cursor.new_events(
             getattr(snapshot, "notification_events", ())
         ):
@@ -46,6 +53,7 @@ class MowerConditionHistory:
                     event.source,
                     observed_at=datetime.fromtimestamp(event.received_at, UTC),
                     occurrence=(event.stream_id, event.sequence),
+                    active=None,
                 )
                 or changed
             )
@@ -74,7 +82,8 @@ class MowerConditionHistory:
 
         for severity, condition in (("warning", warning), ("error", error)):
             if condition is None:
-                self._active[severity] = None
+                if self._state_known[severity]:
+                    changed = self._clear(severity, observed_at) or changed
                 continue
             code, raw_message, source = condition
             changed = (
@@ -105,19 +114,25 @@ class MowerConditionHistory:
         *,
         observed_at: datetime | None = None,
         occurrence: tuple[str, int] | None = None,
+        active: bool | None = True,
     ) -> bool:
         """Keep transitions and timestamped occurrences without polling duplicates."""
         message = sanitize_diagnostic_text(raw_message).strip()[:_STATE_LIMIT]
         fingerprint = (code, message, occurrence)
-        active = self._active[severity]
+        prior = self._active[severity]
         if (
-            active is not None
-            and active[:2] == fingerprint[:2]
-            and (occurrence is None or occurrence == active[2])
+            prior is not None
+            and prior[:2] == fingerprint[:2]
+            and (occurrence is None or occurrence == prior[2])
         ):
             # A polling condition has no occurrence identity after reconnect.
             # Keep the active fingerprint until a fresh event or condition change.
+            event = self._current_event[severity]
+            if event is not None and active is True and event["active"] is None:
+                event["active"] = True
+                return True
             return False
+        self._clear(severity, observed_at)
         self._active[severity] = fingerprint
         event = {
             "severity": severity,
@@ -125,19 +140,46 @@ class MowerConditionHistory:
             "message": message,
             "source": source,
             "observed_at": (observed_at or datetime.now(UTC)).isoformat(),
+            "active": active,
         }
+        self._current_event[severity] = event
         self._events.appendleft(event)
         if severity == "error":
             self._last_error = event
         return True
 
+    def _clear(self, severity: str, observed_at: datetime | None) -> bool:
+        """Only a known current snapshot can establish that a condition cleared."""
+        event = self._current_event[severity]
+        self._active[severity] = None
+        self._current_event[severity] = None
+        if event is None or event["active"] is not True:
+            return False
+        event["active"] = False
+        event["cleared_at"] = (observed_at or datetime.now(UTC)).isoformat()
+        return True
+
+    def _set_known(self, severity: str, known: bool) -> bool:
+        event = self._current_event[severity]
+        changed = self._state_known[severity] != known
+        self._state_known[severity] = known
+        return changed and event is not None and event["active"] is True
+
+    def _copy(self, event: dict[str, Any]) -> dict[str, Any]:
+        result = dict(event)
+        if event["active"] is True and not self._state_known[event["severity"]]:
+            result["active"] = None
+        return result
+
     def latest(self, *, severity: str | None = None) -> dict[str, Any] | None:
         """Return a copy of the latest matching condition."""
         if severity == "error":
-            return dict(self._last_error) if self._last_error is not None else None
+            return (
+                self._copy(self._last_error) if self._last_error is not None else None
+            )
         return next(
             (
-                dict(event)
+                self._copy(event)
                 for event in self._events
                 if severity is None or event["severity"] == severity
             ),
@@ -146,4 +188,4 @@ class MowerConditionHistory:
 
     def recent(self) -> list[dict[str, Any]]:
         """Return the five latest conditions, newest first."""
-        return [dict(event) for event in self._events]
+        return [self._copy(event) for event in self._events]

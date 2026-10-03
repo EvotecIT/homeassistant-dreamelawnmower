@@ -869,7 +869,9 @@ class DreameLawnMowerClient(
         """Return to base while preserving a resumable mowing session."""
         await self._async_call_device_method("dock")
 
-    async def async_start_zone_mowing(self, zone_ids: Sequence[int]) -> Any:
+    async def async_start_zone_mowing(
+        self, zone_ids: Sequence[int], *, require_inactive_task: bool = False
+    ) -> Any:
         """Start mower-native zone mowing for explicit map area ids."""
         normalized_zone_ids = [int(zone_id) for zone_id in zone_ids]
         baseline = await self._async_refresh_authoritative_snapshot()
@@ -879,6 +881,7 @@ class DreameLawnMowerClient(
             baseline,
             _MOWING_TASK_ZONE,
             requested_target_ids=requested_zone_ids,
+            require_inactive_task=require_inactive_task,
         )
         try:
             response = await asyncio.to_thread(
@@ -909,6 +912,8 @@ class DreameLawnMowerClient(
     async def async_start_edge_mowing(
         self,
         contour_ids: Sequence[Sequence[int]],
+        *,
+        require_inactive_task: bool = False,
     ) -> Any:
         """Start edge mowing for one or more contour id pairs."""
         normalized_contour_ids = [
@@ -920,6 +925,7 @@ class DreameLawnMowerClient(
             "edge mowing",
             baseline,
             _MOWING_TASK_EDGE,
+            require_inactive_task=require_inactive_task,
         )
         try:
             response = await asyncio.to_thread(
@@ -945,7 +951,9 @@ class DreameLawnMowerClient(
         )
         return response
 
-    async def async_start_spot_mowing(self, spot_ids: Sequence[int]) -> Any:
+    async def async_start_spot_mowing(
+        self, spot_ids: Sequence[int], *, require_inactive_task: bool = False
+    ) -> Any:
         """Start mower-native spot mowing for explicit saved spot area ids."""
         normalized_spot_ids = [int(spot_id) for spot_id in spot_ids]
         requested_spot_ids = frozenset(normalized_spot_ids)
@@ -955,6 +963,7 @@ class DreameLawnMowerClient(
             baseline,
             _MOWING_TASK_SPOT,
             requested_target_ids=requested_spot_ids,
+            require_inactive_task=require_inactive_task,
         )
         try:
             response = await asyncio.to_thread(
@@ -989,8 +998,18 @@ class DreameLawnMowerClient(
         expected_operation: int,
         *,
         requested_target_ids: frozenset[int] | None = None,
+        require_inactive_task: bool = False,
     ) -> None:
         """Reject repeat targeted commands that lack new-task evidence."""
+        if require_inactive_task and (
+            baseline.docked is not True
+            or baseline.mowing_session_active is not False
+            or baseline.task_resumable is not False
+        ):
+            raise _DreameLawnMowerCommandRejectedError(
+                "Scheduled mowing requires a docked mower with no active or "
+                "resumable task at dispatch."
+            )
         if _targeted_task_matches_preflight(
             baseline,
             expected_operation,

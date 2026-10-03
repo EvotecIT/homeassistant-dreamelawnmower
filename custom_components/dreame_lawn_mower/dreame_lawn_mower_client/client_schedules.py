@@ -195,6 +195,7 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
                 chunk_size=chunk_size,
                 include_raw=include_raw,
                 deadline=retry_deadline,
+                reserve_alternate=False,
             )
             result["schedules"][position] = schedule_result
             prior_error = next(
@@ -222,6 +223,7 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
         chunk_size: int,
         include_raw: bool,
         deadline: float,
+        reserve_alternate: bool = True,
     ) -> tuple[dict[str, Any], Exception | None]:
         """Select a protocol from validated replies, using brand only for order."""
         preferred = self._schedule_protocols.get(map_index)
@@ -236,9 +238,10 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
         for position, protocol in enumerate(protocols):
             probe_deadline = deadline
             if (
-                protocol == "tables"
+                map_index >= 0
                 and position == 0
                 and map_index not in self._schedule_protocols
+                and reserve_alternate
             ):
                 now = time.monotonic()
                 probe_deadline = now + max(0.0, deadline - now) / 2
@@ -258,7 +261,8 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
                     map_index=map_index,
                     chunk_size=chunk_size,
                     include_raw=include_raw,
-                    deadline=probe_deadline,
+                    deadline=deadline,
+                    metadata_deadline=probe_deadline,
                 )
                 if error is None:
                     result["protocol"] = protocol
@@ -284,6 +288,7 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
         chunk_size: int,
         include_raw: bool,
         deadline: float,
+        metadata_deadline: float | None = None,
     ) -> tuple[dict[str, Any], Exception | None]:
         """Fetch one schedule slot within its assigned deadline."""
         schedule_result: dict[str, Any] = {
@@ -296,7 +301,9 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
                 {"m": "g", "t": "SCHDIV2", "d": {"i": map_index}},
                 retry_count=0,
                 timeout=SCHEDULE_READ_TIMEOUT_SECONDS,
-                deadline=deadline,
+                deadline=metadata_deadline
+                if metadata_deadline is not None
+                else deadline,
             )
             schedule_result["raw_info"] = _json_safe(info_result, max_depth=4)
             info = _app_action_data(info_result)

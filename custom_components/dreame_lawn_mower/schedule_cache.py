@@ -182,6 +182,7 @@ def merge_app_schedule_payload(
     *,
     expected_indices: Sequence[int],
     prune_unexpected_indices: bool = False,
+    partial_refresh: bool = False,
 ) -> dict[str, Any]:
     """Merge successful action slots while retaining cached failed slots."""
     if not isinstance(existing, Mapping):
@@ -240,7 +241,9 @@ def merge_app_schedule_payload(
         int,
     ) and not isinstance(cached_active_index, bool)
     expected_index_set = set(expected_indices)
-    complete_refresh = expected_index_set.issubset(usable_incoming_by_index)
+    complete_refresh = not partial_refresh and expected_index_set.issubset(
+        usable_incoming_by_index
+    )
     can_prune_unexpected_indices = complete_refresh or prune_unexpected_indices
     resolution_incoming_by_index = {
         index: schedule

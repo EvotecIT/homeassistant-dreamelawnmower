@@ -61,11 +61,17 @@ async def async_start_scheduled_mowing(
             if task_type == "all":
                 await client.async_start_fresh_mowing()
             elif task_type == "zone":
-                await entity.async_start_zone_mowing(zone_ids)
+                await entity.async_start_zone_mowing(
+                    zone_ids, require_inactive_task=True
+                )
             elif task_type == "spot":
-                await entity.async_start_spot_mowing(spot_ids)
+                await entity.async_start_spot_mowing(
+                    spot_ids, require_inactive_task=True
+                )
             elif task_type == "edge":
-                await entity.async_start_edge_mowing(contour_ids)
+                await entity.async_start_edge_mowing(
+                    contour_ids, require_inactive_task=True
+                )
             else:
                 raise ValueError("Unknown scheduled mowing task type.")
         except (DreameLawnMowerConnectionError, HomeAssistantError) as err:
