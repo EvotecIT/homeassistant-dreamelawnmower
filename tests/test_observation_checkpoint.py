@@ -245,7 +245,14 @@ def test_frequent_samples_cannot_starve_checkpoints_or_write_each_heartbeat(
         assert saved[-1]["timing"]["current"]["seconds"] == 182
         assert persistence.checkpoint_fits(saved[-1], checkpoint._key)
         assert len(json.dumps(saved[-1]).encode()) < 2048
-        assert set(saved[-1]) == {"scope", "saved_at", "timing", "position"}
+        assert set(saved[-1]) == {
+            "scope",
+            "saved_at",
+            "timing",
+            "position",
+            "conditions",
+            "scheduled_runs",
+        }
 
     asyncio.run(scenario())
 

@@ -405,7 +405,7 @@ async def test_blueprint_repeat_confirmation_keeps_the_condition_owner(
     script, variables = await _notification_blueprint_script(
         hass,
         delivery_mode="repeat",
-        onset_delay_seconds=0.05,
+        onset_delay_seconds=0.2,
         repeat_interval_minutes=30,
         notify_actions=[{"action": "test.notify"}],
     )

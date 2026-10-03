@@ -67,6 +67,23 @@ async def test_actual_checkpoint_file_survives_new_ha_owner_and_is_removed(tmp_p
     )
     first_store = ObservationCheckpoint(first_hass, "test-entry", first)
     second_store = ObservationCheckpoint(second_hass, "test-entry", second)
+    first.mower_condition_history.observe(
+        SimpleNamespace(
+            available=True,
+            activity="error",
+            error_code=23,
+            error_display="Emergency stop",
+        ),
+        observed_at=now,
+    )
+    first.scheduled_run_history.record(
+        "edge",
+        "skipped",
+        "rain_delay_active",
+        map_index=2,
+        targets=[[7, 0]],
+        observed_at=now,
+    )
     try:
         await first_store.async_close()
         path = tmp_path / ".storage" / first_store._key
@@ -77,6 +94,12 @@ async def test_actual_checkpoint_file_survives_new_ha_owner_and_is_removed(tmp_p
         assert envelope["version"] == 1
 
         await second_store.async_load()
+        assert second.mower_condition_history.latest()["active"] is None
+        assert second.mower_condition_history.latest()["message"] == "Emergency stop"
+        assert second.last_scheduled_run["reason"] == "rain_delay_active"
+        assert second.last_scheduled_run["map_index"] == 2
+        assert second.last_scheduled_run["target_ids"] == [[7, 0]]
+        assert second.last_scheduled_run["observed_at"] == now.isoformat()
         second.observed_mowing_timer.observe(
             generation=5,
             session_active=True,

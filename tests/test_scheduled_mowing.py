@@ -163,6 +163,9 @@ def test_skipped_run_refreshes_evidence_but_sends_no_mower_action():
     entity.coordinator.client.async_start_fresh_mowing.assert_not_awaited()
     entity.async_start_zone_mowing.assert_not_awaited()
     assert entity.coordinator.last_scheduled_run == result
+    assert result["map_index"] == 2
+    assert result["observed_at"]
+    assert entity.coordinator.scheduled_run_history.recent() == [result]
     assert (
         entity.hass.bus.async_fire.call_args.args[0]
         == "dreame_lawn_mower_scheduled_run"
@@ -188,6 +191,8 @@ def test_targeted_run_uses_explicit_command_and_bound_map(task_type, argument, t
         )
     )
     assert result["status"] == "started"
+    assert result["map_index"] == 2
+    assert result["target_ids"] == targets
     getattr(entity, f"async_start_{task_type}_mowing").assert_awaited_once_with(
         targets, require_inactive_task=True
     )

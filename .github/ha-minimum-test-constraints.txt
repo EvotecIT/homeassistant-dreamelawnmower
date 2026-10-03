@@ -1,0 +1,4 @@
+# Validate HA 2025.1 with its contemporary aiodns/pycares lifecycle. Later
+# pycares creates a shared shutdown thread that its old test harness rejects.
+# This pin is confined to the minimum-version validation job.
+pycares==4.5.0
