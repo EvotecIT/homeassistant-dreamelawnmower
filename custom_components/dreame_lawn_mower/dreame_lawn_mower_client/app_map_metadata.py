@@ -13,9 +13,11 @@ def app_map_zone_metadata(zone_records: Sequence[Any]) -> list[dict[str, Any]]:
         if not isinstance(record, Mapping):
             continue
         zone_id = record.get("id")
-        if type(zone_id) is not int or not 0 < zone_id < 200:
+        if type(zone_id) is not int or zone_id <= 0 or "name" not in record:
             continue
         name = record.get("name")
+        if name is not None and not isinstance(name, str):
+            continue
         result.append(
             {
                 "zone_id": zone_id,
@@ -66,7 +68,7 @@ def verified_app_map_zone_names(
         zone_id, name = zone.get("zone_id"), zone.get("name")
         if (
             type(zone_id) is not int
-            or not 0 < zone_id < 200
+            or zone_id <= 0
             or zone_id in result
             or (name is not None and (not isinstance(name, str) or len(name) > 200))
         ):

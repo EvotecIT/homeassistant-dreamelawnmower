@@ -6,6 +6,7 @@ import hashlib
 import json
 from io import BytesIO
 
+import pytest
 from PIL import Image
 
 from custom_components.dreame_lawn_mower.control_options import current_zone_entries
@@ -737,16 +738,22 @@ def test_native_zone_rename_refreshes_labels_when_cloud_names_remain_stale():
             {"id": 7, "name": "Front", "data": [[1, 2]]},
             {"id": 8, "name": "Deleted zone", "data": [[3, 4]]},
             {"id": 9, "name": "Path", "type": 1, "data": [[5, 6]]},
+            {"id": 200, "name": "Connector", "data": [[7, 8]]},
+            {"id": 300, "name": "Orchard", "data": [[9, 10]]},
         ],
     }
     cloud = _FakeAppMapCloud(payload)
     client._sync_get_cloud_protocol = lambda: cloud
-    vector_details = {"map_index": 0, "zones": [{"zone_id": 7, "name": "Front"}]}
+    vector_details = {"map_index": 0, "zones": [
+        {"zone_id": 7, "name": "Front"},
+        {"zone_id": 300, "name": "Stale orchard name"},
+    ]}
 
     first = client._sync_get_app_maps(include_payload=False, include_objects=False)
     assert first["maps"][0]["summary"]["zones"] == [
         {"zone_id": 7, "name": "Front"},
         {"zone_id": 8, "name": "Deleted zone"},
+        {"zone_id": 300, "name": "Orchard"},
     ]
     assert current_zone_entries(None, first, vector_details)[0]["label"] == "Front (#7)"
     payload["map"][0]["name"] = "Courtyard"
@@ -757,6 +764,7 @@ def test_native_zone_rename_refreshes_labels_when_cloud_names_remain_stale():
     entries = current_zone_entries(None, refreshed, vector_details)
     assert [(entry["area_id"], entry["label"]) for entry in entries] == [
         (7, "Courtyard (#7)"),
+        (300, "Orchard (#300)"),
     ]
     assert any(call["t"] == "MAPD" for call in cloud.calls)
     refreshed["maps"][0]["summary"]["zones"][0]["name"] = "Mutated by caller"
@@ -767,6 +775,24 @@ def test_native_zone_rename_refreshes_labels_when_cloud_names_remain_stale():
         == "Courtyard (#7)"
     )
     assert [call["t"] for call in cloud.calls] == ["MAPL", "MAPI"]
+
+
+@pytest.mark.parametrize(("name_fields", "expected"), [
+    ({}, "Front (#7)"),
+    ({"name": 42}, "Front (#7)"),
+    ({"name": None}, "Zone #7"),
+    ({"name": ""}, "Zone #7"),
+    ({"name": "  "}, "Zone #7"),
+])
+def test_native_zone_name_fallback_distinguishes_missing_from_explicit_clear(
+    name_fields, expected,
+):
+    client = _client()
+    cloud = _FakeAppMapCloud({"map": [{"id": 7, "data": [[1, 2]], **name_fields}]})
+    client._sync_get_cloud_protocol = lambda: cloud
+    maps = client._sync_get_app_maps(include_payload=False, include_objects=False)
+    vector = {"map_index": 0, "zones": [{"zone_id": 7, "name": "Front"}]}
+    assert current_zone_entries(None, maps, vector)[0]["label"] == expected
 
 
 def test_app_maps_without_hash_are_downloaded_on_every_refresh():
