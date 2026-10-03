@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -19,6 +20,7 @@ from homeassistant.helpers.script import Script
 from homeassistant.helpers.translation import async_get_translations
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
+    async_fire_time_changed,
     async_mock_service,
 )
 
@@ -396,6 +398,7 @@ async def test_blueprint_repeat_fault_keeps_one_owner_and_refreshes_message(
 @pytest.mark.asyncio
 async def test_blueprint_repeat_confirmation_keeps_the_condition_owner(
     hass,
+    monkeypatch,
     initial_detail: str,
     replacement_detail: str,
 ) -> None:
@@ -405,10 +408,20 @@ async def test_blueprint_repeat_confirmation_keeps_the_condition_owner(
     script, variables = await _notification_blueprint_script(
         hass,
         delivery_mode="repeat",
-        onset_delay_seconds=0.2,
+        onset_delay_seconds=60,
         repeat_interval_minutes=30,
         notify_actions=[{"action": "test.notify"}],
     )
+    confirmation_started = asyncio.Event()
+    call_later = hass.loop.call_later
+
+    def observe_timer(delay, callback, *args, **kwargs):
+        handle = call_later(delay, callback, *args, **kwargs)
+        if delay == 60:
+            confirmation_started.set()
+        return handle
+
+    monkeypatch.setattr(hass.loop, "call_later", observe_timer)
     hass.states.async_set("sensor.garden_error", initial_detail)
     hass.states.async_set("binary_sensor.garden_error_active", "on")
     onset = _state_trigger(
@@ -419,7 +432,7 @@ async def test_blueprint_repeat_confirmation_keeps_the_condition_owner(
     )
     original = asyncio.create_task(script.async_run({**variables, "trigger": onset}))
 
-    await asyncio.sleep(0.01)
+    await asyncio.wait_for(confirmation_started.wait(), timeout=5)
     hass.states.async_set("sensor.garden_error", replacement_detail)
     detail = _state_trigger(
         "fault_detail",
@@ -432,10 +445,10 @@ async def test_blueprint_repeat_confirmation_keeps_the_condition_owner(
         timeout=1,
     )
 
-    await asyncio.sleep(0.025)
     assert notify_calls == []
     assert not original.done()
 
+    async_fire_time_changed(hass, datetime.now(UTC) + timedelta(seconds=61))
     await _wait_for_calls(notify_calls, 1)
     assert not original.done()
 
