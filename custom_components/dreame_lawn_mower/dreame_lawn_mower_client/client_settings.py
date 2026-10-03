@@ -68,6 +68,7 @@ from .mowing_preferences import (
     MOWING_PREFERENCE_MODE_FIELD,
     MOWING_PREFERENCE_MODE_NAMES,
     MOWING_PREFERENCE_PROPERTY_KEY,
+    _mowing_preference_versions_match,
     apply_mowing_preference_changes,
     decode_mowing_preference_payload,
     encode_mowing_preference_payload,
@@ -670,6 +671,34 @@ class _DreameLawnMowerClientSettingsMixin:
             responses: list[Any] = []
             response_payloads: list[Any] = []
             for request in request_sequence:
+                if request.get("t") == "PRE" and mode_request is not None:
+                    try:
+                        # PREP can advance the PRE revision and change its values.
+                        # Rebuild the settings write from that new snapshot.
+                        refreshed = self._sync_plan_app_mowing_preference_update(
+                            map_index=map_index,
+                            area_id=area_id,
+                            changes=setting_changes,
+                        )
+                        if refreshed.get("mode") != requested_mode:
+                            raise DreameLawnMowerConnectionError(
+                                "The mower acknowledged the preference mode write "
+                                "but did not return the requested mode before the "
+                                "settings write. Refresh the mower before retrying."
+                            )
+                        request["d"] = refreshed["payload"]
+                        for key in (
+                            "payload", "previous_preference", "updated_preference"
+                        ):
+                            result[key] = refreshed[key]
+                        result["changed_fields"] = list(dict.fromkeys([
+                            *result["changed_fields"], *refreshed["changed_fields"]
+                        ]))
+                        result["changed"] = bool(result["changed_fields"])
+                        result["changes"].update(refreshed["changes"])
+                    except Exception as err:
+                        mark_write_attempted(err, fields=possibly_applied_fields)
+                        raise
                 request_fields = (
                     [MOWING_PREFERENCE_MODE_FIELD]
                     if request.get("t") == "PREP"
@@ -1052,7 +1081,9 @@ class _DreameLawnMowerClientSettingsMixin:
                                 "PRE/PREI returned missing preference version evidence "
                                 f"for map {map_index} area {area_id}."
                             )
-                        if version != reported_version:
+                        if not _mowing_preference_versions_match(
+                            version, reported_version
+                        ):
                             raise DreameLawnMowerConnectionError(
                                 "PRE returned preference version "
                                 f"{version} for map {map_index} area {area_id}, but "

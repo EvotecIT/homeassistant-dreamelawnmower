@@ -165,6 +165,29 @@ def decode_mowing_preference_payload(payload: Sequence[Any]) -> dict[str, Any]:
     return preference
 
 
+def _mowing_preference_versions_match(
+    version: int | None,
+    reported_version: int | None,
+) -> bool:
+    """Match PRE revisions against plain or packed PREI advertisements.
+
+    A2 firmware advertises additional high bytes in PREI while PRE carries a
+    byte revision. Preserve exact comparison for full-width PRE revisions.
+    """
+    if (
+        not isinstance(version, int)
+        or isinstance(version, bool)
+        or version < 0
+        or not isinstance(reported_version, int)
+        or isinstance(reported_version, bool)
+        or reported_version < 0
+    ):
+        return False
+    return version == reported_version or (
+        version <= 0xFF and version == (reported_version & 0xFF)
+    )
+
+
 def summarize_mowing_preference_info(info: Any) -> dict[str, Any]:
     """Return a compact summary of an app `PREI` response data object."""
     if not isinstance(info, dict):
