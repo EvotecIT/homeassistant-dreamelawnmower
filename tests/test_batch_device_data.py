@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import time
 
@@ -206,6 +207,21 @@ def test_decode_batch_schedule_payload_rejects_invalid_plan_list(
             "error": "missing_or_invalid_batch_schedule_plans",
         }
     ]
+
+
+def test_batch_schedule_does_not_publish_unsupported_task_data() -> None:
+    # Observed firmware header; zeroed body contains no household schedule data.
+    tasks = base64.b64encode(bytes.fromhex("aa0700920200ed") + bytes(42)).decode()
+    result = decode_batch_schedule_payload(
+        {"SCHEDULE.0": json.dumps({"v": 22, "d": [[0, 1, "", tasks]]})},
+        map_index_hint=0,
+    )
+
+    assert result["available"] is False
+    assert "active_schedule_version" not in result
+    assert "plans" not in result["schedules"][0]
+    assert result["errors"][0]["stage"] == "schedule"
+    assert "weekday" in result["schedules"][0]["error"]
 
 
 def test_decode_batch_mowing_preferences_decodes_map_settings() -> None:
