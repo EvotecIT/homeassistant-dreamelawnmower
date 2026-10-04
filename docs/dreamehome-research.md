@@ -111,6 +111,22 @@ action-style payload (`m:"a"`) and can change device state.
 
 ## Confirmed mower schedule commands
 
+Current A2 firmware also supports the `SCHDIV3` metadata and `SCHDDV3` chunk
+getters. A read-only firmware `4.3.6_0668` capture confirms that V3 returns the
+current schedule document while the V2 getter times out. The client negotiates
+both generations within the shared read deadline and remembers successful
+reads per map. Enable-status requests use the matching `SCHDSV2` or `SCHDSV3`
+command; a dry-run can inspect the request without sending it.
+
+Framed task records begin with `0xAA`, followed by their total byte length.
+The next byte carries weekday/type, and the following byte plus low nibble
+carry start minutes. Region bytes follow the fixed header; `0xED` terminates
+each frame. These records are read as start-only tasks: no scheduled end time
+is inferred from the remaining header fields. Invalid markers, lengths,
+weekdays, minutes and incomplete contour pairs reject the whole task payload.
+Full uploads remain unavailable for V3/framed documents because their write
+encoding and additional fields have not been qualified.
+
 The downloaded model plugin also exposes a schedule API through the same
 `siid=2`, `aiid=50` app action bridge. Confirmed read-only getter payloads:
 

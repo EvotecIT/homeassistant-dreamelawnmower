@@ -15,13 +15,17 @@ account brand determines probe order; it does not establish protocol support.
 Failed or unrecognized reads remain unknown, while a valid empty inventory
 means no plans were reported.
 
+Document reads support V2 and V3 firmware. The client remembers the confirmed
+generation for subsequent reads and enable/disable requests. Older firmware
+and table schedules retain their own command paths.
+
 Dreame A2 captures show a default document plus per-map documents. The normal
 `Schedule` calendar follows the active version from the mower's current-task or
 batch evidence. Table schedules follow the known current map. When active
 selection is unknown, the normal calendar stays empty and the decoded plans
 remain available in the diagnostic calendar.
 
-Tables report task start times without scheduled end times. Their calendar
+Tables and framed document tasks report start times without scheduled end times. Their calendar
 events are one-minute markers labelled **start**; that minute is a display
 marker, not a mowing duration. Cyclic tasks, weekday assignments, saved zones,
 and edge contour pairs are retained in event details.
@@ -43,9 +47,9 @@ The guarded `dreame_lawn_mower.set_schedule_plan_enabled` service is dry-run
 first. It sends a write only when both `execute: true` and
 `confirm_schedule_write: true` are set.
 
-Full plan uploads are available for the document protocol. Table task creation
-and time editing use the vendor app; the integration rejects a full upload
-before sending a write when the map uses tables. For an HA-owned weekly
+Full plan uploads are available for legacy V2 documents. V3/framed document
+tasks and table task creation or time editing use the vendor app; the integration
+rejects a full upload before sending a write for those formats. For an HA-owned weekly
 routine, use the [guarded Schedule blueprint](notifications.md#guarded-weekly-mowing).
 
 `dreame_lawn_mower.plan_mowing_preference_update` is dry-run first. It reads
