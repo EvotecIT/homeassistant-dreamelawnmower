@@ -17,6 +17,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 import custom_components.dreame_lawn_mower as integration_module
 import custom_components.dreame_lawn_mower.coordinator as coordinator_module
 from custom_components.dreame_lawn_mower import async_setup_entry
+from custom_components.dreame_lawn_mower.calendar import schedule_calendar_events
 from custom_components.dreame_lawn_mower.const import (
     CONF_ACCOUNT_TYPE,
     CONF_COUNTRY,
@@ -131,7 +132,10 @@ def test_batch_schedule_merge_prefers_explicit_hint_on_version_collision() -> No
     assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 2]
 
 
-def test_batch_schedule_merge_keeps_unknown_slot_on_unhinted_collision() -> None:
+@pytest.mark.parametrize("map_hint", [None, 3])
+def test_batch_schedule_merge_keeps_unknown_slot_on_unmatched_collision(
+    map_hint,
+) -> None:
     existing = {
         "schedules": [
             {
@@ -146,12 +150,13 @@ def test_batch_schedule_merge_keeps_unknown_slot_on_unhinted_collision() -> None
                 "version": 8,
                 "plans": [{"plan_id": 2, "name": "Garden"}],
             },
+            {"idx": 3, "available": True, "version": 9, "plans": []},
         ]
     }
     incoming = {
         "schedules": [
             {
-                "idx": None,
+                "idx": map_hint,
                 "available": True,
                 "version": 8,
                 "plans": [{"plan_id": 3, "name": "Batch"}],
@@ -165,11 +170,14 @@ def test_batch_schedule_merge_keeps_unknown_slot_on_unhinted_collision() -> None
         incoming,
         captured_at=datetime(2026, 7, 30, tzinfo=UTC),
         allow_unknown_slot=True,
+        allowed_hint_indices=[3],
     )
 
     assert result is not None
     assert result["active_schedule_index"] is None
-    assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 2, None]
+    assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 2, 3, None]
+    assert result["schedules"][2]["version"] == 9
+    assert result["schedules"][-1]["writable"] is False
     assert result["schedules"][-1]["plans"][0]["name"] == "Batch"
 
 
@@ -1043,7 +1051,7 @@ def test_schedule_refresh_reads_inactive_maps_instead_of_batch_fast_path() -> No
     )
 
 
-def test_initial_refresh_keeps_default_and_rejects_conflicting_batch_hint() -> None:
+def test_initial_refresh_selects_default_checksum_over_physical_map_hint() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator.schedules = None
     coordinator.schedules_refreshed_at = None
@@ -1054,7 +1062,17 @@ def test_initial_refresh_keeps_default_and_rejects_conflicting_batch_hint() -> N
     app_payload = {
         "source": "app_action_schedule",
         "schedules": [
-            {"idx": -1, "version": 10, "plans": []},
+            {
+                "idx": -1,
+                "version": 10,
+                "plans": [{
+                    "plan_id": 0, "enabled": True,
+                    "weeks": [{"week_day": 0, "tasks": [{
+                        "type_name": "all_area_mowing", "start": 658,
+                        "timing": "start_only",
+                    }]}],
+                }],
+            },
             {"idx": 2, "version": 11, "plans": []},
         ],
     }
@@ -1080,9 +1098,19 @@ def test_initial_refresh_keeps_default_and_rejects_conflicting_batch_hint() -> N
 
     result = asyncio.run(coordinator.async_refresh_schedules())
 
-    assert result["active_selection_available"] is False
-    assert "active_schedule_version" not in result
+    assert result["active_selection_available"] is True
+    assert result["active_schedule_version"] == 10
+    assert result["active_schedule_index"] == -1
     assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 2]
+    assert result["schedules"][1]["version"] == 11
+    events = schedule_calendar_events(
+        result,
+        datetime(2026, 4, 19, tzinfo=UTC),
+        datetime(2026, 4, 20, tzinfo=UTC),
+        mower_name="Bodzio",
+    )
+    assert len(events) == 1
+    assert events[0].start == datetime(2026, 4, 19, 10, 58, tzinfo=UTC)
     coordinator.client.async_get_batch_schedules.assert_awaited_once_with(
         include_raw=False,
         map_index_hint=2,
@@ -2059,8 +2087,9 @@ def test_schedule_refresh_keeps_native_document_on_conflicting_batch_hint() -> N
 
     result = asyncio.run(coordinator.async_refresh_schedules(force=True))
 
-    assert "active_schedule_version" not in result
-    assert result["active_selection_available"] is False
+    assert result["active_schedule_version"] == 22
+    assert result["active_schedule_index"] == 0
+    assert result["active_selection_available"] is True
     assert [schedule["version"] for schedule in result["schedules"]] == [
         20,
         22,
@@ -2070,7 +2099,10 @@ def test_schedule_refresh_keeps_native_document_on_conflicting_batch_hint() -> N
     assert result["schedules"][2]["plans"] == [{"plan_id": 1}]
 
 
-def test_partial_schedule_read_honors_validated_selected_map_hint() -> None:
+@pytest.mark.parametrize("batch_version,active_index", [(22, 0), (23, 1)])
+def test_partial_schedule_read_resolves_checksum_before_selected_map_hint(
+    batch_version, active_index,
+) -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator.schedules = {
         "source": "app_action_schedule",
@@ -2119,13 +2151,13 @@ def test_partial_schedule_read_honors_validated_selected_map_hint() -> None:
     batch = {
         "source": "batch_device_data_schedule",
         "available": True,
-        "active_schedule_version": 22,
+        "active_schedule_version": batch_version,
         "current_task": None,
         "schedules": [
             {
                 "idx": 1,
                 "available": True,
-                "version": 22,
+                "version": batch_version,
                 "plans": [{"plan_id": 9}],
             }
         ],
@@ -2138,13 +2170,15 @@ def test_partial_schedule_read_honors_validated_selected_map_hint() -> None:
 
     result = asyncio.run(coordinator.async_refresh_schedules(force=True))
 
-    assert result["active_schedule_version"] == 22
-    assert result["active_schedule_index"] == 1
+    assert result["active_schedule_version"] == batch_version
+    assert result["active_schedule_index"] == active_index
     assert result["active_selection_available"] is True
     assert result["schedules"][1]["idx"] == 0
     assert result["schedules"][1]["plans"] == [{"plan_id": 7}]
     assert result["schedules"][2]["idx"] == 1
-    assert result["schedules"][2]["plans"] == [{"plan_id": 9}]
+    assert result["schedules"][2]["plans"] == [
+        {"plan_id": 1 if active_index == 0 else 9}
+    ]
 
 
 def test_schedule_refresh_revalidates_maps_after_action_request() -> None:

@@ -1251,7 +1251,13 @@ class DreameLawnMowerCoordinator(
         if normalized is None:
             return False
         status_versions = getattr(self, "_pending_schedule_status_versions", {})
-        for map_index, (version, _) in tuple(status_versions.items()):
+        pending_states = getattr(self, "_pending_schedule_plan_states", {})
+        for map_index, (version, contradictions) in tuple(status_versions.items()):
+            # Batch convergence alone cannot retire the write guard. Native
+            # readback must clear every acknowledged flag without a conflicting
+            # checksum; repeated native contradictions have their own bound.
+            if contradictions or any(key[0] == map_index for key in pending_states):
+                continue
             if any(
                 isinstance(schedule, Mapping)
                 and schedule.get("idx") == map_index

@@ -508,28 +508,6 @@ def merge_batch_schedule_payload(
         # A checksum that no longer identifies a physical slot cannot select an
         # older unknown fallback over the documents just read or written.
         return None
-    effective_index = (
-        hinted_index if hinted_index_is_valid else existing.get("active_schedule_index")
-    )
-    if effective_index in confirmed_indices | preserved_indices:
-        authoritative_schedule = next(
-            (
-                schedule
-                for schedule in existing_schedules
-                if isinstance(schedule, Mapping)
-                and schedule.get("idx") == effective_index
-                and schedule_entry_has_usable_data(schedule)
-            ),
-            None,
-        )
-        if (
-            authoritative_schedule is not None
-            and authoritative_schedule.get("version") != batch_version
-        ):
-            # Batch data can lag an acknowledged write or this refresh's native
-            # read. Its map hint cannot replace a newer document or select it
-            # using the older checksum.
-            return None
     numeric_matching_schedules = [
         schedule
         for schedule in matching_schedules
@@ -545,7 +523,19 @@ def merge_batch_schedule_payload(
             ),
             None,
         )
-        if matching_schedule is None and hinted_index_is_allowed:
+        if matching_schedule is None and len(numeric_matching_schedules) == 1:
+            # The hint comes from the selected physical map, while the active
+            # checksum may identify the default or another existing document.
+            matching_schedule = numeric_matching_schedules[0]
+        if matching_schedule is None and numeric_matching_schedules:
+            # A contextual hint that matches none of the colliding checksums
+            # cannot identify another writable map.
+            hinted_index_is_allowed = False
+        if (
+            matching_schedule is None
+            and not numeric_matching_schedules
+            and hinted_index_is_allowed
+        ):
             matching_schedule = next(
                 (
                     schedule
@@ -555,8 +545,6 @@ def merge_batch_schedule_payload(
                 ),
                 None,
             )
-        if matching_schedule is None and len(numeric_matching_schedules) == 1:
-            matching_schedule = numeric_matching_schedules[0]
     else:
         matching_schedule = (
             numeric_matching_schedules[0]
@@ -570,6 +558,29 @@ def merge_batch_schedule_payload(
                 None,
             )
         )
+    effective_index = existing.get("active_schedule_index")
+    if matching_schedule is not None:
+        effective_index = matching_schedule.get("idx")
+    elif hinted_index_is_valid:
+        effective_index = hinted_index
+    if effective_index in confirmed_indices | preserved_indices:
+        authoritative_schedule = next(
+            (
+                schedule
+                for schedule in existing_schedules
+                if isinstance(schedule, Mapping)
+                and schedule.get("idx") == effective_index
+                and schedule_entry_has_usable_data(schedule)
+            ),
+            None,
+        )
+        if (
+            authoritative_schedule is not None
+            and authoritative_schedule.get("version") != batch_version
+        ):
+            # After resolving checksum identity, reject a lagging batch version
+            # that would replace the acknowledged or validated native document.
+            return None
     if (
         matching_schedule is None
         and not allow_unknown_slot

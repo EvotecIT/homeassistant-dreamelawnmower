@@ -458,6 +458,78 @@ def test_status_write_version_change_survives_stale_batch_readback(
     assert coordinator._pending_schedule_status_versions == {}
 
 
+@pytest.mark.parametrize("batch_has_map_hint", [False, True])
+def test_status_guard_waits_for_native_readback_when_batch_converges_first(
+    batch_has_map_hint,
+) -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._schedule_write_lock = asyncio.Lock()
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {"current_map_index": 0, "maps": [{"idx": 0}]}
+    coordinator.schedules_refreshed_at = None
+    coordinator.async_update_listeners = Mock()
+    old_slot = {
+        "idx": 0,
+        "available": True,
+        "protocol": "document",
+        "read_status": "complete",
+        "version": 23416,
+        "plans": [{"plan_id": 0, "enabled": True, "weeks": []}],
+    }
+    current_slot = {
+        **old_slot,
+        "version": 62089,
+        "plans": [{"plan_id": 0, "enabled": False, "weeks": []}],
+    }
+    coordinator.schedules = {
+        "active_schedule_index": 0,
+        "active_schedule_version": 23416,
+        "schedules": [deepcopy(old_slot)],
+    }
+    coordinator.client = SimpleNamespace(
+        async_set_app_schedule_plan_enabled=AsyncMock(return_value={
+            "executed": True,
+            "version": 62089,
+            "schedule": {"version": 23416},
+            "acknowledged_plan_states": [{"plan_id": 0, "enabled": False}],
+        }),
+        async_get_app_schedules=AsyncMock(return_value={
+            "schedules": [], "errors": [{"idx": 0, "error": "Read unavailable"}],
+        }),
+        async_get_batch_schedules=AsyncMock(return_value={
+            "schedules": [{
+                **current_slot, "idx": 0 if batch_has_map_hint else None,
+            }],
+            "errors": [],
+        }),
+    )
+
+    asyncio.run(coordinator.async_set_schedule_plan_enabled(
+        map_index=0, plan_id=0, enabled=False,
+    ))
+    assert coordinator._pending_schedule_status_versions == {0: (62089, 0)}
+    assert coordinator._pending_schedule_plan_states == {(0, 0): (62089, False)}
+
+    # Batch convergence cannot make the first delayed native response undo ACK.
+    coordinator.client.async_get_app_schedules.side_effect = None
+    coordinator.client.async_get_app_schedules.return_value = {
+        "schedules": [old_slot], "errors": [],
+    }
+    asyncio.run(coordinator.async_refresh_schedules(force=True))
+    assert schedule_plan_entries(coordinator.schedules)[0]["enabled"] is False
+    assert schedule_plan_entries(coordinator.schedules)[0]["version"] == 62089
+    assert coordinator._pending_schedule_status_versions == {0: (62089, 1)}
+
+    coordinator.client.async_get_app_schedules.return_value = {
+        "schedules": [current_slot], "errors": [],
+    }
+    asyncio.run(coordinator.async_refresh_schedules(force=True))
+    assert coordinator._pending_schedule_status_versions == {}
+    assert coordinator._pending_schedule_plan_states == {}
+    assert schedule_plan_entries(coordinator.schedules)[0]["enabled"] is False
+    assert coordinator.schedules["active_schedule_version"] == 62089
+
+
 def test_changed_status_checksum_yields_to_repeated_native_external_changes() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator._pending_schedule_status_versions = {0: (62089, 0)}
