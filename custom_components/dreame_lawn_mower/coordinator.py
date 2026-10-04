@@ -93,6 +93,7 @@ from .runtime_cache import (
 )
 from .schedule_cache import (
     ScheduleActionReadBackoff,
+    batch_schedule_version,
     has_complete_schedule_cache,
     invalidate_schedule_slot,
     merge_app_schedule_payload,
@@ -461,6 +462,7 @@ class DreameLawnMowerCoordinator(
             int,
         ] = {}
         self._pending_schedule_status_versions: dict[int, tuple[int, int]] = {}
+        self._pending_schedule_status_active_indices: set[int] = set()
         self._pending_schedule_uploads: dict[int, dict[str, Any]] = {}
         self._pending_schedule_upload_contradictions: dict[int, int] = {}
         self._pending_schedule_upload_active_indices: set[int] = set()
@@ -1161,20 +1163,6 @@ class DreameLawnMowerCoordinator(
                 read_generation=batch_read_generation,
                 preserve_indices=action_read_indices,
             )
-            batch_schedules = batch_payload.get("schedules")
-            if (
-                not batch_read_succeeded
-                and not allow_unknown_batch_slot
-                and not batch_payload.get("errors")
-                and isinstance(batch_schedules, Sequence)
-                and not isinstance(batch_schedules, str | bytes | bytearray)
-                and len(batch_schedules) == 1
-                and isinstance(batch_schedules[0], Mapping)
-                and isinstance(batch_schedules[0].get("version"), int)
-                and not isinstance(batch_schedules[0].get("version"), bool)
-                and isinstance(self.schedules, dict)
-            ):
-                self.schedules["active_selection_available"] = False
         if not self._schedule_refresh_is_current(refresh_generation):
             return self.schedules
         select_table_schedule_for_map(
@@ -1247,8 +1235,29 @@ class DreameLawnMowerCoordinator(
             confirmed_version_indices=list(
                 getattr(self, "_pending_schedule_status_versions", {})
             ),
+            confirmed_active_indices=list(
+                getattr(self, "_pending_schedule_status_active_indices", set())
+            ),
         )
         if normalized is None:
+            version = batch_schedule_version(payload)
+            active_index = self.schedules.get("active_schedule_index")
+            active_is_table = any(
+                isinstance(schedule, Mapping)
+                and schedule.get("idx") == active_index
+                and schedule.get("protocol") == "tables"
+                for schedule in self.schedules.get("schedules", [])
+            )
+            if (
+                version is not None
+                and version != self.schedules.get("active_schedule_version")
+                and not active_is_table
+            ):
+                # Preserve native plan content, but do not present its old
+                # selection as current after valid batch evidence contradicts it.
+                self.schedules = {
+                    **self.schedules, "active_selection_available": False,
+                }
             return False
         status_versions = getattr(self, "_pending_schedule_status_versions", {})
         pending_states = getattr(self, "_pending_schedule_plan_states", {})
@@ -1267,7 +1276,7 @@ class DreameLawnMowerCoordinator(
                 normalized.get("active_schedule_version") == version
                 and normalized.get("active_schedule_index") == map_index
             ):
-                status_versions.pop(map_index, None)
+                self._clear_pending_schedule_status_version(map_index)
         self.schedules = normalized
         self.schedules_refreshed_at = now
         if read_generation is not None:
@@ -1282,6 +1291,13 @@ class DreameLawnMowerCoordinator(
     ) -> bool:
         """Return whether default and every known physical map are represented."""
         return has_complete_schedule_cache(self.schedules, known_map_indices)
+
+    def _clear_pending_schedule_status_version(self, map_index: int) -> None:
+        """Retire an acknowledgement's checksum and active-slot binding together."""
+        getattr(self, "_pending_schedule_status_versions", {}).pop(map_index, None)
+        getattr(self, "_pending_schedule_status_active_indices", set()).discard(
+            map_index
+        )
 
     def _schedule_refresh_is_current(self, generation: int) -> bool:
         """Return whether a schedule read predates no confirmed write."""
@@ -1346,14 +1362,25 @@ class DreameLawnMowerCoordinator(
             if status_versions is None:
                 status_versions = {}
                 self._pending_schedule_status_versions = status_versions
+            active_indices = getattr(
+                self, "_pending_schedule_status_active_indices", None
+            )
+            if active_indices is None:
+                active_indices = set()
+                self._pending_schedule_status_active_indices = active_indices
             if (
                 schedule_version is not None
                 and previous_version is not None
                 and schedule_version != previous_version
             ):
                 status_versions[map_index] = (schedule_version, 0)
+                if (
+                    isinstance(self.schedules, Mapping)
+                    and self.schedules.get("active_schedule_index") == map_index
+                ):
+                    active_indices.add(map_index)
             else:
-                status_versions.pop(map_index, None)
+                self._clear_pending_schedule_status_version(map_index)
             pending_states = getattr(self, "_pending_schedule_plan_states", None)
             if pending_states is None:
                 pending_states = {}
@@ -1530,7 +1557,7 @@ class DreameLawnMowerCoordinator(
             if observed.get("version") == version:
                 status_versions[map_index] = (version, 0)
             elif contradictions >= PENDING_SCHEDULE_PLAN_MAX_CONTRADICTORY_READS:
-                status_versions.pop(map_index, None)
+                self._clear_pending_schedule_status_version(map_index)
             else:
                 status_versions[map_index] = (version, contradictions + 1)
         if not pending_states:
@@ -1667,7 +1694,7 @@ class DreameLawnMowerCoordinator(
         status_versions = getattr(self, "_pending_schedule_status_versions", {})
         for map_index in tuple(status_versions):
             if map_index not in valid_indices:
-                status_versions.pop(map_index, None)
+                self._clear_pending_schedule_status_version(map_index)
         pending_states = getattr(self, "_pending_schedule_plan_states", None)
         pending_state_contradictions = getattr(
             self,
@@ -1924,7 +1951,7 @@ class DreameLawnMowerCoordinator(
                 raise HomeAssistantError(str(err)) from err
             self.last_schedule_write_result = result
             self._invalidate_inflight_schedule_refreshes()
-            getattr(self, "_pending_schedule_status_versions", {}).pop(map_index, None)
+            self._clear_pending_schedule_status_version(map_index)
             pending_states = getattr(self, "_pending_schedule_plan_states", None)
             if pending_states:
                 pending_contradictions = getattr(
@@ -3189,6 +3216,7 @@ class DreameLawnMowerCoordinator(
     def _invalidate_schedule_map_hint(self) -> None:
         """Expire schedule selection tied to the previous active map."""
         self.schedules_refreshed_at = None
+        getattr(self, "_pending_schedule_status_active_indices", set()).clear()
         if isinstance(getattr(self, "schedules", None), dict):
             self.schedules.pop("active_schedule_version", None)
             self.schedules.pop("active_schedule_index", None)

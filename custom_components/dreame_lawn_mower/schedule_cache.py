@@ -435,6 +435,23 @@ def _initial_app_schedule_payload(
     return normalized
 
 
+def batch_schedule_version(payload: Mapping[str, Any]) -> int | None:
+    """Return active-version evidence from one successful batch schedule read."""
+    schedules = payload.get("schedules")
+    if (
+        not isinstance(schedules, Sequence)
+        or isinstance(schedules, str | bytes | bytearray)
+        or len(schedules) != 1
+        or payload.get("errors")
+        or not isinstance(schedules[0], Mapping)
+    ):
+        return None
+    version = schedules[0].get("version")
+    return (
+        version if isinstance(version, int) and not isinstance(version, bool) else None
+    )
+
+
 def merge_batch_schedule_payload(
     existing: Mapping[str, Any],
     incoming: Mapping[str, Any],
@@ -444,23 +461,13 @@ def merge_batch_schedule_payload(
     allowed_hint_indices: Sequence[int] = (),
     preserve_indices: Sequence[int] = (),
     confirmed_version_indices: Sequence[int] = (),
+    confirmed_active_indices: Sequence[int] = (),
 ) -> dict[str, Any] | None:
     """Merge one effective batch schedule without guessing its writable slot."""
-    schedules = incoming.get("schedules")
-    errors = incoming.get("errors")
-    if (
-        not isinstance(schedules, Sequence)
-        or isinstance(schedules, str | bytes | bytearray)
-        or len(schedules) != 1
-        or errors
-        or not isinstance(schedules[0], Mapping)
-    ):
+    batch_version = batch_schedule_version(incoming)
+    if batch_version is None:
         return None
-
-    batch_schedule = dict(schedules[0])
-    batch_version = batch_schedule.get("version")
-    if not isinstance(batch_version, int) or isinstance(batch_version, bool):
-        return None
+    batch_schedule = dict(incoming["schedules"][0])
     existing_schedules = existing.get("schedules")
     if not isinstance(existing_schedules, Sequence) or isinstance(
         existing_schedules,
@@ -496,6 +503,23 @@ def merge_batch_schedule_payload(
     )
     preserved_indices = set(preserve_indices)
     confirmed_indices = set(confirmed_version_indices)
+    for active_index in set(confirmed_active_indices) & confirmed_indices:
+        acknowledged_active = next(
+            (
+                schedule for schedule in existing_schedules
+                if isinstance(schedule, Mapping) and schedule.get("idx") == active_index
+                and schedule_entry_has_usable_data(schedule)
+            ),
+            None,
+        )
+        if (
+            acknowledged_active is not None
+            and acknowledged_active.get("version") != batch_version
+        ):
+            # A pending change to the known active document can make its old
+            # checksum appear unique to a sibling. That is not new selection
+            # evidence until the active write converges or its guard expires.
+            return None
     if (
         not hinted_index_is_valid
         and (confirmed_indices or preserved_indices)
