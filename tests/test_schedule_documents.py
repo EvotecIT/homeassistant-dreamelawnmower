@@ -78,7 +78,7 @@ class _DocumentCloud:
             }
         elif command == "SCHDT":
             response = []
-        elif command == "SCHDSV2" and payload["m"] == "s":
+        elif command == "SCHDSV3" and payload["m"] == "s":
             response = {"r": 0, "v": 42}
         else:
             raise AssertionError(f"Unexpected command {command}")
@@ -232,19 +232,19 @@ def test_framed_batch_recovery_and_calendar_share_the_same_daily_start_times():
     assert all("start" in event.summary for event in events)
 
 
-def test_v3_enable_dry_run_keeps_the_qualified_status_command_without_a_write():
+def test_v3_enable_dry_run_uses_the_qualified_status_command_without_a_write():
     client, cloud = _client_and_cloud()
     result = client._sync_set_app_schedule_plan_enabled(0, 1, False)
     assert result["request"] == {
         "m": "s",
-        "t": "SCHDSV2",
+        "t": "SCHDSV3",
         "d": {"i": 0, "v": 42, "s": [1, 0]},
     }
     assert result["executed"] is False and result["changed"] is False
     assert all(call["m"] == "g" for call in cloud.calls)
 
 
-def test_v3_document_read_does_not_invent_a_new_enable_status_command():
+def test_v3_document_write_uses_the_qualified_v3_status_command():
     client, cloud = _client_and_cloud()
     result = client._sync_set_app_schedule_plan_enabled(
         0, 1, False, execute=True, confirm_write=True
@@ -252,7 +252,7 @@ def test_v3_document_read_does_not_invent_a_new_enable_status_command():
     assert result["executed"] is True and result["changed"] is False
     assert result["response_data"] == {"r": 0, "v": 42}
     assert [call for call in cloud.calls if call["m"] == "s"] == [
-        {"m": "s", "t": "SCHDSV2", "d": {"i": 0, "v": 42, "s": [1, 0]}}
+        {"m": "s", "t": "SCHDSV3", "d": {"i": 0, "v": 42, "s": [1, 0]}}
     ]
     assert client._schedule_document_versions[0] == 3
 

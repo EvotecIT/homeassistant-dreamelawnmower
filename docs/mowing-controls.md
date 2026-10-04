@@ -16,9 +16,11 @@ Failed or unrecognized reads remain unknown, while a valid empty inventory
 means no plans were reported.
 
 Document reads support V2 and V3 firmware. The client remembers the confirmed
-generation for subsequent reads. Document enable/disable requests retain the
-separate `SCHDSV2` status command; a V3 getter does not establish a V3 setter.
-Older firmware and table schedules retain their own command paths.
+generation for subsequent reads and enable/disable requests: V2 documents use
+`SCHDSV2`, and V3 documents use the live-qualified `SCHDSV3` status command.
+Older firmware and table schedules retain their own command paths. Status writes
+require an explicit mower acknowledgement before the integration updates its
+schedule state.
 
 Dreame A2 captures show a default document plus per-map documents. The normal
 `Schedule` calendar follows the active version from the mower's current-task or

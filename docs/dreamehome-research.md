@@ -115,16 +115,18 @@ Current A2 firmware also supports the `SCHDIV3` metadata and `SCHDDV3` chunk
 getters. A read-only firmware `4.3.6_0668` capture confirms that V3 returns the
 current schedule document while the V2 getter times out. The client negotiates
 both generations within the shared read deadline and remembers successful
-reads per map. Enable-status requests retain the independently established
-`SCHDSV2` command; a dry-run can inspect the request without sending it. A V3
-getter does not establish a V3 setter. During qualification with an unfinished,
-paused task, firmware `4.3.6_0668` rejected an unchanged `SCHDSV3` request and
-did not explicitly acknowledge `SCHDSV2`. The vendor app also requires the
-current task to finish before plan editing, including when a partially completed
-job is paused or docked. These attempts do not establish which command that
-firmware accepts after task completion. The client checks fresh task state
-before executed schedule edits; successful status writes on this firmware
-remain unconfirmed until that precondition is satisfied.
+reads per map. Status writes use `SCHDSV2` for V2 documents and `SCHDSV3` for
+V3 documents; a dry-run inspects the request without sending it. Qualification
+on 2026-10-04 confirmed `SCHDSV3` on firmware `4.3.6_0668`: after the unfinished
+job was cleared, the mower acknowledged an unchanged status request, disabling
+the enabled seasonal plan, and restoring it. Fresh native reads confirmed each
+state and preserved the weekly task content. The old `SCHDSV2` command remained
+unacknowledged while idle, so it is not used for this V3 document.
+
+The vendor app requires the current task to finish before plan editing, including
+when a partially completed job is paused or docked. The client checks fresh task
+state before executed schedule edits and requires an explicit acknowledgement;
+being docked alone does not authorize a write.
 
 Framed task records begin with `0xAA`, followed by their total byte length.
 The next byte carries weekday/type, and the following byte plus low nibble
