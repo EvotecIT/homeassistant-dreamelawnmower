@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -91,28 +92,39 @@ def encode_schedule_plans(plans: list[Mapping[str, Any]]) -> list[list[Any]]:
 
 def decode_schedule_week_payload(payload: str) -> list[dict[str, Any]]:
     """Decode the base64 per-week schedule task payload used by the app."""
-    data = list(base64.b64decode(payload))
+    try:
+        data = list(base64.b64decode(payload, validate=True))
+    except (binascii.Error, ValueError) as err:
+        raise ValueError("Schedule task payload is not valid base64.") from err
     index = 0
     tasks_by_week: dict[int, list[dict[str, Any]]] = {}
 
     while index < len(data):
         if index + 7 > len(data):
-            break
+            raise ValueError("Schedule task header is truncated.")
         first = data[index]
         encoded_task_type = first & 0x0F
         week_day = first >> 4
+        if week_day not in SCHEDULE_WEEKDAY_NAMES:
+            raise ValueError("Unsupported schedule task weekday.")
         start = _read_12_bit(data[index + 1], data[index + 2], low_first=True)
         end = _read_12_bit(data[index + 2], data[index + 3], low_first=False)
+        _validate_schedule_minute(start, "start")
+        _validate_schedule_minute(end, "end")
         real_end = _read_12_bit(data[index + 4], data[index + 5], low_first=True)
         if real_end == 0x0FFF:
             real_end = -1
         element_count = _read_12_bit(data[index + 5], data[index + 6], low_first=False)
         element_start = index + 7
         element_end = element_start + element_count
+        if element_end > len(data):
+            raise ValueError("Schedule task regions are truncated.")
         raw_elements = data[element_start:element_end]
         index = element_end
 
         task_type = encoded_task_type % _CYCLIC_TASK_OFFSET
+        if task_type in (2, 3) and element_count % 2:
+            raise ValueError("Edge/cruise schedule regions must contain pairs.")
         tasks_by_week.setdefault(week_day, []).append(
             {
                 "type": task_type,
@@ -149,7 +161,7 @@ def encode_schedule_week_payload(weeks: Sequence[Mapping[str, Any]]) -> str:
             _required_int(week.get("week_day"), "week_day"),
             "week_day",
             0,
-            0x0F,
+            max(SCHEDULE_WEEKDAY_NAMES),
         )
         tasks = week.get("tasks")
         if not isinstance(tasks, Sequence) or isinstance(tasks, str | bytes):

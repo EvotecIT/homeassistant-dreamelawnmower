@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+
 import pytest
 
 from dreame_lawn_mower_client import (
@@ -12,6 +14,7 @@ from dreame_lawn_mower_client import (
     encode_schedule_payload_text,
 )
 from dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
+from dreame_lawn_mower_client.schedule import decode_schedule_week_payload
 
 
 class _FakeAppScheduleCloud:
@@ -26,7 +29,7 @@ class _FakeAppScheduleCloud:
             0: {
                 "version": 19383,
                 "text": (
-                    '{"d":[[0,1,"","AJKSTiIDABCSkk7/DwAgkpJO/w8="],'
+                    '{"d":[[0,1,"","AJKSTiIDABCSkk7/DwA="],'
                     '[1,0,""]]}'
                 ),
             },
@@ -465,6 +468,32 @@ def test_schedule_payload_round_trips(payload_text: str) -> None:
     plans = decode_schedule_payload_text(payload_text)
 
     assert encode_schedule_payload_text(plans) == payload_text
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ("!!!!!", "base64"),
+        (base64.b64encode(bytes.fromhex("10000000ff0f001000")).decode(), "header"),
+        (base64.b64encode(bytes.fromhex("70000000ff0f00")).decode(), "weekday"),
+        (base64.b64encode(bytes.fromhex("10a00500ff0f00")).decode(), "start"),
+        (base64.b64encode(bytes.fromhex("1000005aff0f00")).decode(), "end"),
+        (base64.b64encode(bytes.fromhex("10000000ff1f00")).decode(), "regions"),
+        (base64.b64encode(bytes.fromhex("12000000ff1f0001")).decode(), "pairs"),
+    ],
+)
+def test_schedule_task_payload_rejects_unreadable_records(
+    payload: str, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        decode_schedule_week_payload(payload)
+
+
+def test_schedule_upload_rejects_non_weekly_day() -> None:
+    with pytest.raises(ValueError, match="week_day"):
+        encode_schedule_payload_text(
+            [{"plan_id": 0, "enabled": True, "weeks": [{"week_day": 7, "tasks": []}]}]
+        )
 
 
 def test_schedule_upload_requests_chunk_payload() -> None:
