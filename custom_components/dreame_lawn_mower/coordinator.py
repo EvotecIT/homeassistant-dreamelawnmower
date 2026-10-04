@@ -460,6 +460,7 @@ class DreameLawnMowerCoordinator(
             tuple[int, int],
             int,
         ] = {}
+        self._pending_schedule_status_versions: dict[int, tuple[int, int]] = {}
         self._pending_schedule_uploads: dict[int, dict[str, Any]] = {}
         self._pending_schedule_upload_contradictions: dict[int, int] = {}
         self._pending_schedule_upload_active_indices: set[int] = set()
@@ -1233,9 +1234,24 @@ class DreameLawnMowerCoordinator(
                 else ([] if allow_incomplete else [-1, *known_map_indices])
             ),
             preserve_indices=preserve_indices,
+            confirmed_version_indices=list(
+                getattr(self, "_pending_schedule_status_versions", {})
+            ),
         )
         if normalized is None:
             return False
+        status_versions = getattr(self, "_pending_schedule_status_versions", {})
+        for map_index, (version, _) in tuple(status_versions.items()):
+            if any(
+                isinstance(schedule, Mapping)
+                and schedule.get("idx") == map_index
+                and schedule.get("version") == version
+                for schedule in normalized.get("schedules", [])
+            ) and (
+                normalized.get("active_schedule_version") == version
+                and normalized.get("active_schedule_index") == map_index
+            ):
+                status_versions.pop(map_index, None)
         self.schedules = normalized
         self.schedules_refreshed_at = now
         if read_generation is not None:
@@ -1301,6 +1317,19 @@ class DreameLawnMowerCoordinator(
             self.last_schedule_write_result = result
             self._invalidate_inflight_schedule_refreshes()
             schedule_version = _schedule_write_version(result)
+            previous_version = _schedule_write_version(result.get("schedule") or {})
+            status_versions = getattr(self, "_pending_schedule_status_versions", None)
+            if status_versions is None:
+                status_versions = {}
+                self._pending_schedule_status_versions = status_versions
+            if (
+                schedule_version is not None
+                and previous_version is not None
+                and schedule_version != previous_version
+            ):
+                status_versions[map_index] = (schedule_version, 0)
+            else:
+                status_versions.pop(map_index, None)
             pending_states = getattr(self, "_pending_schedule_plan_states", None)
             if pending_states is None:
                 pending_states = {}
@@ -1337,6 +1366,7 @@ class DreameLawnMowerCoordinator(
                 plan_id=plan_id,
                 enabled=enabled,
                 schedule_version=schedule_version,
+                previous_version=previous_version,
             )
             try:
                 await self.async_refresh_schedules(force=True)
@@ -1353,6 +1383,7 @@ class DreameLawnMowerCoordinator(
         plan_id: int,
         enabled: bool,
         schedule_version: int | None = None,
+        previous_version: int | None = None,
     ) -> None:
         """Apply a confirmed schedule write to the shared cache."""
         schedules = (
@@ -1362,11 +1393,14 @@ class DreameLawnMowerCoordinator(
         )
         if not isinstance(schedules, list):
             return
+        source_version = (
+            previous_version if previous_version is not None else schedule_version
+        )
         matching_numeric_indices = {
             schedule.get("idx")
             for schedule in schedules
             if isinstance(schedule, Mapping)
-            and schedule.get("version") == schedule_version
+            and schedule.get("version") == source_version
             and isinstance(schedule.get("idx"), int)
             and not isinstance(schedule.get("idx"), bool)
         }
@@ -1379,7 +1413,7 @@ class DreameLawnMowerCoordinator(
                 or (
                     schedule_version is not None
                     and schedule.get("idx") is None
-                    and schedule.get("version") == schedule_version
+                    and schedule.get("version") == source_version
                     and unknown_slot_is_unambiguous
                 )
             ):
@@ -1390,6 +1424,16 @@ class DreameLawnMowerCoordinator(
             for plan in plans:
                 if isinstance(plan, dict) and plan.get("plan_id") == plan_id:
                     plan["enabled"] = enabled
+                    if schedule_version is not None:
+                        schedule["version"] = schedule_version
+                        if (
+                            self.schedules.get("active_schedule_index") == map_index
+                            and self.schedules.get("active_schedule_version")
+                            != schedule_version
+                        ):
+                            # The effective batch must confirm active selection at
+                            # the new checksum before calendar consumers use it.
+                            self.schedules["active_selection_available"] = False
                     schedule["enabled_plan_count"] = sum(
                         1
                         for cached_plan in plans
@@ -1418,7 +1462,29 @@ class DreameLawnMowerCoordinator(
         """Clear confirmed writes once an action read observes their result."""
         pending_states = getattr(self, "_pending_schedule_plan_states", None)
         schedules = payload.get("schedules")
-        if not pending_states or not isinstance(schedules, Sequence):
+        if not isinstance(schedules, Sequence):
+            return
+        status_versions = getattr(self, "_pending_schedule_status_versions", {})
+        for map_index, (version, contradictions) in tuple(status_versions.items()):
+            observed = next(
+                (
+                    entry
+                    for entry in schedules
+                    if isinstance(entry, Mapping)
+                    and entry.get("idx") == map_index
+                    and schedule_entry_has_usable_data(entry)
+                ),
+                None,
+            )
+            if observed is None:
+                continue
+            if observed.get("version") == version:
+                status_versions[map_index] = (version, 0)
+            elif contradictions >= PENDING_SCHEDULE_PLAN_MAX_CONTRADICTORY_READS:
+                status_versions.pop(map_index, None)
+            else:
+                status_versions[map_index] = (version, contradictions + 1)
+        if not pending_states:
             return
         pending_contradictions = getattr(
             self,
@@ -1442,7 +1508,11 @@ class DreameLawnMowerCoordinator(
             )
             if schedule is None:
                 continue
-            if version is not None and schedule.get("version") != version:
+            if (
+                version is not None
+                and schedule.get("version") != version
+                and map_index not in status_versions
+            ):
                 pending_states.pop(key, None)
                 pending_contradictions.pop(key, None)
                 continue
@@ -1500,7 +1570,13 @@ class DreameLawnMowerCoordinator(
                 ):
                     continue
                 if version is not None and schedule.get("version") != version:
-                    continue
+                    if map_index not in getattr(
+                        self, "_pending_schedule_status_versions", {}
+                    ):
+                        continue
+                    schedule["version"] = version
+                    if self.schedules.get("active_schedule_index") == map_index:
+                        self.schedules["active_selection_available"] = False
                 plans = schedule.get("plans")
                 if not isinstance(plans, Sequence):
                     continue
@@ -1535,6 +1611,10 @@ class DreameLawnMowerCoordinator(
     ) -> None:
         """Drop pending writes for maps absent from authoritative app metadata."""
         valid_indices = {-1, *known_map_indices}
+        status_versions = getattr(self, "_pending_schedule_status_versions", {})
+        for map_index in tuple(status_versions):
+            if map_index not in valid_indices:
+                status_versions.pop(map_index, None)
         pending_states = getattr(self, "_pending_schedule_plan_states", None)
         pending_state_contradictions = getattr(
             self,
@@ -1791,6 +1871,7 @@ class DreameLawnMowerCoordinator(
                 raise HomeAssistantError(str(err)) from err
             self.last_schedule_write_result = result
             self._invalidate_inflight_schedule_refreshes()
+            getattr(self, "_pending_schedule_status_versions", {}).pop(map_index, None)
             pending_states = getattr(self, "_pending_schedule_plan_states", None)
             if pending_states:
                 pending_contradictions = getattr(

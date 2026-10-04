@@ -443,6 +443,7 @@ def merge_batch_schedule_payload(
     allow_unknown_slot: bool,
     allowed_hint_indices: Sequence[int] = (),
     preserve_indices: Sequence[int] = (),
+    confirmed_version_indices: Sequence[int] = (),
 ) -> dict[str, Any] | None:
     """Merge one effective batch schedule without guessing its writable slot."""
     schedules = incoming.get("schedules")
@@ -493,6 +494,42 @@ def merge_batch_schedule_payload(
     hinted_index_is_allowed = hinted_index_is_valid and hinted_index in set(
         allowed_hint_indices
     )
+    preserved_indices = set(preserve_indices)
+    confirmed_indices = set(confirmed_version_indices)
+    if (
+        not hinted_index_is_valid
+        and confirmed_indices
+        and not any(
+            isinstance(schedule.get("idx"), int)
+            and not isinstance(schedule.get("idx"), bool)
+            for schedule in matching_schedules
+        )
+    ):
+        # A checksum that no longer identifies a physical slot cannot select an
+        # older unknown fallback over the documents just read or written.
+        return None
+    effective_index = (
+        hinted_index if hinted_index_is_valid else existing.get("active_schedule_index")
+    )
+    if effective_index in confirmed_indices:
+        authoritative_schedule = next(
+            (
+                schedule
+                for schedule in existing_schedules
+                if isinstance(schedule, Mapping)
+                and schedule.get("idx") == effective_index
+                and schedule_entry_has_usable_data(schedule)
+            ),
+            None,
+        )
+        if (
+            authoritative_schedule is not None
+            and authoritative_schedule.get("version") != batch_version
+        ):
+            # Batch data can lag an acknowledged write or this refresh's native
+            # read. Its map hint cannot replace a newer document or select it
+            # using the older checksum.
+            return None
     numeric_matching_schedules = [
         schedule
         for schedule in matching_schedules
@@ -548,7 +585,6 @@ def merge_batch_schedule_payload(
         batch_schedule["label"] = "active_schedule"
         batch_schedule["writable"] = False
 
-    preserved_indices = set(preserve_indices)
     replacement_schedule = batch_schedule
     if (
         matching_schedule is not None

@@ -901,6 +901,27 @@ def test_set_app_schedule_plan_enabled_can_execute_when_confirmed() -> None:
     ]
 
 
+def test_schedule_status_result_reports_the_acknowledged_document_version() -> None:
+    client = _client()
+    cloud = _FakeAppScheduleCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+    normal_call = client._sync_call_app_action
+
+    def changed_version(payload: dict[str, object], **kwargs: object) -> object:
+        if payload["t"] == "SCHDSV2":
+            return {"m": "r", "r": 0, "d": {"r": 0, "v": 62089}}
+        return normal_call(payload, **kwargs)
+
+    client._sync_call_app_action = changed_version
+    result = client._sync_set_app_schedule_plan_enabled(
+        map_index=0, plan_id=1, enabled=True, execute=True, confirm_write=True
+    )
+
+    assert result["request"]["d"]["v"] == 19383
+    assert result["schedule"]["version"] == 19383
+    assert result["version"] == 62089
+
+
 def test_set_app_schedule_plan_enabled_rejects_failed_write_response() -> None:
     client = _client()
     cloud = _FakeAppScheduleCloud()
