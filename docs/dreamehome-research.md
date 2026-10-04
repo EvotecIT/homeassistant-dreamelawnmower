@@ -115,8 +115,12 @@ Current A2 firmware also supports the `SCHDIV3` metadata and `SCHDDV3` chunk
 getters. A read-only firmware `4.3.6_0668` capture confirms that V3 returns the
 current schedule document while the V2 getter times out. The client negotiates
 both generations within the shared read deadline and remembers successful
-reads per map. Enable-status requests use the matching `SCHDSV2` or `SCHDSV3`
-command; a dry-run can inspect the request without sending it.
+reads per map. Enable-status requests retain the independently established
+`SCHDSV2` command; a dry-run can inspect the request without sending it. A V3
+getter does not establish a V3 setter. Firmware `4.3.6_0668` rejected an
+unchanged `SCHDSV3` status request. `SCHDSV2` did not return an explicit
+acknowledgement during that firmware's follow-up qualification, so successful
+status writes on that firmware remain unconfirmed.
 
 Framed task records begin with `0xAA`, followed by their total byte length.
 The next byte carries weekday/type, and the following byte plus low nibble

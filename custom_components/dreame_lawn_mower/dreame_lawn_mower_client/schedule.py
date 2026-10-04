@@ -286,14 +286,11 @@ def build_schedule_enable_status_request(
     map_index: int,
     version: int,
     plans: Sequence[Mapping[str, Any]],
-    document_version: int = 2,
 ) -> dict[str, Any]:
-    """Build the app action request that toggles schedule plan enabled flags."""
-    if document_version not in (2, 3):
-        raise ValueError("Unsupported schedule document generation.")
+    """Build the qualified status command independently of document getters."""
     return {
         "m": "s",
-        "t": f"SCHDSV{document_version}",
+        "t": "SCHDSV2",
         "d": {
             "i": int(map_index),
             "v": int(version),
