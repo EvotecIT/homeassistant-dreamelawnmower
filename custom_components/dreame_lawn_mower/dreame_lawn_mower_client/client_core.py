@@ -29,6 +29,7 @@ from .client_core_helpers import (
 from .client_shared_helpers import (
     _property_entry_received_at,
 )
+from .device_types import DreameMowerTaskStatus
 from .exceptions import (
     DeviceCommandRejectedException,
     DeviceException,
@@ -220,7 +221,9 @@ class _DreameLawnMowerClientCoreMixin:
         return await asyncio.to_thread(read_session_identity)
 
     async def _async_call_start_mowing_with_session_identity(
-        self, *, require_new_session: bool = False,
+        self,
+        *,
+        require_new_session: bool = False,
     ) -> bool | None:
         """Invoke the fallback start and capture its cached-state decision."""
         device = await asyncio.to_thread(self._ensure_device)
@@ -292,7 +295,11 @@ class _DreameLawnMowerClientCoreMixin:
                 True,
                 deadline=deadline,
             )
-        return await asyncio.to_thread(self._snapshot_from_device, device)
+        return await asyncio.to_thread(
+            self._snapshot_from_device,
+            device,
+            fresh_task_state=True,
+        )
 
     async def _async_cached_authoritative_snapshot(self) -> DreameLawnMowerSnapshot:
         """Apply heartbeat reconciliation to the current in-memory device state."""
@@ -324,7 +331,12 @@ class _DreameLawnMowerClientCoreMixin:
             raise DreameLawnMowerConnectionError(str(err)) from err
         return device
 
-    def _snapshot_from_device(self, device: Any) -> DreameLawnMowerSnapshot:
+    def _snapshot_from_device(
+        self,
+        device: Any,
+        *,
+        fresh_task_state: bool = False,
+    ) -> DreameLawnMowerSnapshot:
         """Normalize one coherent device state and retain recovery context."""
         state_lock = getattr(device, "_state_lock", None)
         state_context = state_lock if state_lock is not None else nullcontext()
@@ -344,10 +356,53 @@ class _DreameLawnMowerClientCoreMixin:
                 "_raw_runtime_state_observed_at",
                 observed_at,
             )
-            status_blob = _decoded_realtime_status_blob(
-                device,
-                MOWER_RAW_STATUS_PROPERTY_KEY,
-            )
+            status_blob = None
+            if fresh_task_state:
+                evidence = getattr(device, "_fresh_task_state", None)
+                if not isinstance(evidence, Mapping):
+                    raise DreameLawnMowerConnectionError(
+                        "Fresh mower task state was not acquired."
+                    )
+                heartbeat = evidence.get("heartbeat")
+                if isinstance(heartbeat, Mapping):
+                    status_blob = decode_mower_status_blob(
+                        heartbeat.get("value"),
+                        source="property_read",
+                        property_key=MOWER_RAW_STATUS_PROPERTY_KEY,
+                    )
+                    if status_blob is not None:
+                        status_blob = replace(
+                            status_blob,
+                            received_at=_property_entry_received_at(
+                                {"last_seen": evidence.get("received_at")}
+                            ),
+                        )
+                        active_state_observed_at = evidence["received_at"]
+                else:
+                    # An older idle heartbeat must not clear newly read legacy
+                    # paused tasks merely because the physical mower is docked.
+                    try:
+                        legacy_task = DreameMowerTaskStatus(
+                            evidence.get("legacy_task_status")
+                        )
+                    except (ValueError, TypeError):
+                        legacy_task = DreameMowerTaskStatus.UNKNOWN
+                    active = (
+                        None
+                        if legacy_task is DreameMowerTaskStatus.UNKNOWN
+                        else legacy_task is not DreameMowerTaskStatus.COMPLETED
+                    )
+                    snapshot = replace(
+                        snapshot,
+                        mowing_session_active=active,
+                        task_resumable=active,
+                        task_status_source="fresh_legacy_properties",
+                    )
+            else:
+                status_blob = _decoded_realtime_status_blob(
+                    device,
+                    MOWER_RAW_STATUS_PROPERTY_KEY,
+                )
             if status_blob is not None:
                 snapshot = snapshot_with_heartbeat_task_state(
                     snapshot,

@@ -6,6 +6,8 @@ import base64
 import json
 from copy import deepcopy
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -76,6 +78,8 @@ class _DocumentCloud:
             }
         elif command == "SCHDT":
             response = []
+        elif command == "SCHDSV2" and payload["m"] == "s":
+            response = {"r": 0, "v": 42}
         else:
             raise AssertionError(f"Unexpected command {command}")
         return {"out": [{"m": "r", "r": 0, "d": response}]}
@@ -98,6 +102,16 @@ def _client_and_cloud():
     )
     cloud = _DocumentCloud()
     client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+    client._sync_update_device = Mock(
+        return_value=SimpleNamespace(
+            available=True,
+            activity="docked",
+            state="idle",
+            mowing_session_active=False,
+            task_resumable=False,
+        )
+    )
+    client._snapshot_from_device = lambda device, **kwargs: device
     return client, cloud
 
 
@@ -218,16 +232,29 @@ def test_framed_batch_recovery_and_calendar_share_the_same_daily_start_times():
     assert all("start" in event.summary for event in events)
 
 
-def test_v3_enable_dry_run_uses_the_negotiated_generation_without_sending_a_write():
+def test_v3_enable_dry_run_keeps_the_qualified_status_command_without_a_write():
     client, cloud = _client_and_cloud()
     result = client._sync_set_app_schedule_plan_enabled(0, 1, False)
     assert result["request"] == {
         "m": "s",
-        "t": "SCHDSV3",
+        "t": "SCHDSV2",
         "d": {"i": 0, "v": 42, "s": [1, 0]},
     }
     assert result["executed"] is False and result["changed"] is False
     assert all(call["m"] == "g" for call in cloud.calls)
+
+
+def test_v3_document_read_does_not_invent_a_new_enable_status_command():
+    client, cloud = _client_and_cloud()
+    result = client._sync_set_app_schedule_plan_enabled(
+        0, 1, False, execute=True, confirm_write=True
+    )
+    assert result["executed"] is True and result["changed"] is False
+    assert result["response_data"] == {"r": 0, "v": 42}
+    assert [call for call in cloud.calls if call["m"] == "s"] == [
+        {"m": "s", "t": "SCHDSV2", "d": {"i": 0, "v": 42, "s": [1, 0]}}
+    ]
+    assert client._schedule_document_versions[0] == 3
 
 
 def test_v3_full_upload_cannot_convert_to_legacy_task_encoding():

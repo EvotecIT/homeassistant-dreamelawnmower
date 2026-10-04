@@ -7,11 +7,48 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.dreame_lawn_mower.coordinator import (
     DreameLawnMowerCoordinator,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
+    DreameLawnMowerCommandRejectedError,
+)
 from custom_components.dreame_lawn_mower.switch import schedule_plan_entries
+
+
+@pytest.mark.parametrize("upload", [False, True])
+def test_schedule_task_rejection_is_visible_without_changing_cached_plans(upload):
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._schedule_write_lock = asyncio.Lock()
+    reason = "Finish the current mower task before editing schedules."
+    rejected = AsyncMock(side_effect=DreameLawnMowerCommandRejectedError(reason))
+    coordinator.client = SimpleNamespace(
+        async_set_app_schedule_plan_enabled=rejected,
+        async_plan_app_schedule_upload=rejected,
+    )
+    cached = {"schedules": [{"idx": 0, "plans": [{"plan_id": 1, "enabled": True}]}]}
+    coordinator.schedules = cached
+    coordinator.last_schedule_write_result = None
+    coordinator.async_refresh_schedules = AsyncMock()
+    coordinator.async_update_listeners = Mock()
+    call = (
+        coordinator.async_plan_schedule_upload(
+            map_index=0, plans=[], chunk_size=100, execute=True, confirm_write=True
+        )
+        if upload
+        else coordinator.async_set_schedule_plan_enabled(
+            map_index=0, plan_id=1, enabled=False
+        )
+    )
+    with pytest.raises(HomeAssistantError, match=reason):
+        asyncio.run(call)
+    assert coordinator.schedules is cached
+    assert cached["schedules"][0]["plans"][0]["enabled"] is True
+    assert coordinator.last_schedule_write_result is None
+    coordinator.async_refresh_schedules.assert_not_awaited()
+    coordinator.async_update_listeners.assert_not_called()
 
 
 def test_schedule_plan_entries_flatten_stable_switch_metadata() -> None:
@@ -217,9 +254,7 @@ def test_schedule_write_keeps_confirmed_toggle_when_batch_readback_lags() -> Non
                     {"idx": -1, "available": True, "version": 7, "plans": []},
                     {"idx": 1, "available": False, "error": "timed out"},
                 ],
-                "errors": [
-                    {"idx": 1, "stage": "schedule", "error": "timed out"}
-                ],
+                "errors": [{"idx": 1, "stage": "schedule", "error": "timed out"}],
             }
         ),
         async_get_batch_schedules=AsyncMock(
@@ -319,18 +354,14 @@ def test_pending_schedule_toggle_expires_after_repeated_contradictory_reads() ->
         ]
     }
 
-    coordinator._acknowledge_pending_schedule_plan_states(
-        contradictory_payload
-    )
+    coordinator._acknowledge_pending_schedule_plan_states(contradictory_payload)
     coordinator._apply_pending_schedule_plan_states()
 
     assert coordinator._pending_schedule_plan_states == {(1, 2): (8, False)}
     assert coordinator.schedules["schedules"][0]["plans"][0]["enabled"] is False
 
     coordinator.schedules = contradictory_payload
-    coordinator._acknowledge_pending_schedule_plan_states(
-        contradictory_payload
-    )
+    coordinator._acknowledge_pending_schedule_plan_states(contradictory_payload)
     coordinator._apply_pending_schedule_plan_states()
 
     assert coordinator._pending_schedule_plan_states == {}
@@ -497,9 +528,7 @@ def test_schedule_upload_force_refreshes_shared_cache_after_execution() -> None:
                     {"idx": 0, "available": False, "error": "timed out"},
                     {"idx": 1, "available": True, "version": 10, "plans": []},
                 ],
-                "errors": [
-                    {"idx": 0, "stage": "schedule", "error": "timed out"}
-                ],
+                "errors": [{"idx": 0, "stage": "schedule", "error": "timed out"}],
             }
         ),
         async_get_batch_schedules=AsyncMock(side_effect=TimeoutError),
@@ -602,9 +631,7 @@ def test_schedule_upload_overrides_lagging_batch_readback() -> None:
                     {"idx": -1, "available": True, "version": 7, "plans": []},
                     {"idx": 0, "available": False, "error": "timed out"},
                 ],
-                "errors": [
-                    {"idx": 0, "stage": "schedule", "error": "timed out"}
-                ],
+                "errors": [{"idx": 0, "stage": "schedule", "error": "timed out"}],
             }
         ),
         async_get_batch_schedules=AsyncMock(
@@ -830,9 +857,7 @@ def test_schedule_upload_discards_refresh_started_before_confirmed_write() -> No
                     {"idx": 0, "available": False, "error": "timed out"},
                     {"idx": 1, "available": True, "version": 10, "plans": []},
                 ],
-                "errors": [
-                    {"idx": 0, "stage": "schedule", "error": "timed out"}
-                ],
+                "errors": [{"idx": 0, "stage": "schedule", "error": "timed out"}],
             }
 
         coordinator.client = SimpleNamespace(

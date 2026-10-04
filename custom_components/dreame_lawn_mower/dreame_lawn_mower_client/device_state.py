@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 from .app_protocol import (
     MOWER_BLUETOOTH_PROPERTY_KEY,
+    MOWER_RAW_STATUS_PROPERTY_KEY,
     MOWER_RUNTIME_STATUS_PROPERTY_KEY,
     MOWER_STATE_PROPERTY_KEY,
     MOWER_TASK_PROPERTY_KEY,
@@ -23,6 +24,7 @@ from .app_protocol import (
     mower_realtime_property_name,
     mower_state_key,
 )
+from .device_property_read import TASK_DECISION_PROPERTIES, require_fresh_task_properties
 from .device_code_semantics import (
     MowerDeviceCodeTier,
     mower_device_code_definition,
@@ -521,6 +523,7 @@ class _DreameMowerDeviceStateMixin:
         properties: list[DreameMowerProperty] = None,
         *,
         deadline: float | None = None,
+        require_fresh_state: bool = False,
     ) -> bool:
         """Request properties from the device."""
         if not properties:
@@ -531,14 +534,35 @@ class _DreameMowerDeviceStateMixin:
             if prop in self.property_mapping:
                 mapping = self.property_mapping[prop]
                 # Do not include properties that are not exists on the device
-                if "aiid" not in mapping and (not self._ready or prop.value in self.data):
+                if "aiid" not in mapping and (
+                    not self._ready or prop.value in self.data
+                    or (require_fresh_state and prop in TASK_DECISION_PROPERTIES)
+                ):
                     property_list.append({"did": str(prop.value), **mapping})
+        if require_fresh_state:
+            # Current mower firmware carries task state in its native heartbeat
+            # instead of the older 4.x properties. Ask through the same device
+            # read transport, so cached MQTT evidence cannot authorize an edit.
+            property_list.append({"did": "100001", "siid": 1, "piid": 1})
 
         results = (
             self._protocol.get_properties(property_list)
             if deadline is None
             else self._protocol.get_properties(property_list, deadline=deadline)
         )
+        if require_fresh_state:
+            evidence = require_fresh_task_properties(results, self.property_mapping)
+            with self._state_lock:
+                observed_at = time.time()
+                self._fresh_task_state = {**copy.deepcopy(evidence), "received_at": observed_at}
+                heartbeat = evidence.get("heartbeat")
+                if heartbeat is not None:
+                    self.realtime_properties[MOWER_RAW_STATUS_PROPERTY_KEY] = {
+                        **copy.deepcopy(heartbeat),
+                        "received_at": observed_at,
+                        "last_seen": observed_at,
+                    }
+                return self._handle_properties(results)
         return self._handle_properties(results)
 
     def _update_status(self, task_status: DreameMowerTaskStatus, status: DreameMowerStatus) -> None:

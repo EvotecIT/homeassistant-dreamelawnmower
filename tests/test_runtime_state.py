@@ -83,6 +83,71 @@ def _snapshot(
     )
 
 
+@pytest.mark.parametrize("task_code, active", [(0, False), (6, True), (-1, None)])
+def test_fresh_legacy_task_does_not_reuse_retained_idle_heartbeat(task_code, active):
+    device_types = load_internal_module("device_types")
+    device_type = load_internal_module("device").DreameMowerDevice
+    prop = device_types.DreameMowerProperty
+    values = {
+        prop.STATE: 6,
+        prop.STATUS: 6,
+        prop.TASK_STATUS: task_code,
+        prop.CLEANING_PAUSED: 0,
+    }
+    retained = {"value": list(_A3_STANDBY_FRAME), "last_seen": 100.0}
+    device = SimpleNamespace(
+        _ready=True,
+        _state_lock=RLock(),
+        _protocol=SimpleNamespace(
+            get_properties=Mock(
+                return_value=[
+                    {
+                        "did": str(key.value),
+                        **device_types.DreameMowerPropertyMapping[key],
+                        "code": 0,
+                        "value": value,
+                    }
+                    for key, value in values.items()
+                ]
+            )
+        ),
+        property_mapping=device_types.DreameMowerPropertyMapping,
+        data={key.value: value for key, value in values.items()},
+        get_property=lambda key: values.get(key),
+        _handle_properties=Mock(return_value=False),
+        available=True,
+        device_connected=True,
+        cloud_connected=True,
+        info=SimpleNamespace(raw={}),
+        capability=SimpleNamespace(list=[]),
+        status=SimpleNamespace(
+            state=device_types.DreameMowerState.CHARGING,
+            task_status=device_types.DreameMowerTaskStatus(task_code),
+            attributes={"started": task_code == 6, "charging": True},
+            docked=True,
+            paused=False,
+            running=False,
+            returning=False,
+        ),
+        realtime_properties={MOWER_RAW_STATUS_PROPERTY_KEY: retained},
+        unknown_properties={},
+        last_realtime_message=None,
+    )
+    client = object.__new__(DreameLawnMowerClient)
+    client._descriptor = _snapshot().descriptor
+    client._latest_snapshot = None
+    with patch.object(client_core_module.time, "time", return_value=101.0):
+        cached = client._snapshot_from_device(device)
+        device_type._request_properties(device, list(values), require_fresh_state=True)
+        fresh = client._snapshot_from_device(device, fresh_task_state=True)
+    assert cached.mowing_session_active is False
+    assert fresh.activity == "docked" and fresh.started is False
+    assert fresh.mowing_session_active is active and fresh.task_resumable is active
+    assert device.realtime_properties[MOWER_RAW_STATUS_PROPERTY_KEY] is retained
+    reason = load_internal_module("schedule").schedule_write_block_reason(fresh)
+    assert reason is None if active is False else reason is not None
+
+
 @pytest.mark.parametrize(
     ("model", "display_model"),
     [
@@ -225,6 +290,7 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
     client._latest_snapshot = None
     client._ensure_device = lambda: device
     client._sync_update_device = lambda force=False: device  # noqa: ARG005
+    device._fresh_task_state = {"legacy_task_status": 6, "received_at": 101.0}
     client._sync_switch_current_map = Mock(
         side_effect=lambda map_index: {"map_index": map_index}
     )
@@ -253,6 +319,10 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
     device.realtime_properties[MOWER_RAW_STATUS_PROPERTY_KEY]["last_seen"] = (
         heartbeat_received_at
     )
+    device._fresh_task_state = {
+        "heartbeat": {"value": list(_A3_STANDBY_FRAME)},
+        "received_at": 256.614,
+    }
     # The reporter's unchanged A3 standby frame arrived every five minutes.
     # At diagnostic capture it was 154 seconds old, beyond the generic
     # two-refresh freshness window but still the current supervised frame.
@@ -310,6 +380,7 @@ def test_authoritative_preflight_snapshot_applies_newer_idle_heartbeat() -> None
     client._descriptor = raw_snapshot.descriptor
     client._latest_snapshot = None
     client._ensure_device = Mock(return_value=device)
+    device._fresh_task_state = {"legacy_task_status": 6, "received_at": 101.0}
 
     with (
         patch.object(
@@ -323,6 +394,10 @@ def test_authoritative_preflight_snapshot_applies_newer_idle_heartbeat() -> None
 
     assert first_snapshot.activity == "paused"
     device.realtime_properties[MOWER_RAW_STATUS_PROPERTY_KEY]["last_seen"] = 102.0
+    device._fresh_task_state = {
+        "heartbeat": {"value": list(_A3_STANDBY_FRAME)},
+        "received_at": 103.0,
+    }
 
     with (
         patch.object(
@@ -561,6 +636,7 @@ def test_expired_a3_heartbeat_cannot_bypass_map_switch_guard() -> None:
     client._descriptor = raw_snapshot.descriptor
     client._latest_snapshot = None
     client._sync_update_device = lambda force=False: device  # noqa: ARG005
+    device._fresh_task_state = {"legacy_task_status": 6, "received_at": time.time()}
     client._sync_switch_current_map = Mock()
 
     with patch.object(

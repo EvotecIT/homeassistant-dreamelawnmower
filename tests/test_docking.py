@@ -1146,7 +1146,7 @@ def test_authoritative_confirmation_forces_device_property_request() -> None:
 
     assert result is snapshot
     device.update.assert_called_once_with(force_request_properties=True)
-    client._snapshot_from_device.assert_called_once_with(device)
+    client._snapshot_from_device.assert_called_once_with(device, fresh_task_state=True)
 
 
 def test_authoritative_confirmation_forwards_shared_deadline() -> None:
@@ -1165,7 +1165,7 @@ def test_authoritative_confirmation_forwards_shared_deadline() -> None:
         force_request_properties=True,
         deadline=123.0,
     )
-    client._snapshot_from_device.assert_called_once_with(device)
+    client._snapshot_from_device.assert_called_once_with(device, fresh_task_state=True)
 
 
 @pytest.mark.parametrize(

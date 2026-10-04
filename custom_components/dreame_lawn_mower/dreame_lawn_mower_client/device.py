@@ -556,7 +556,13 @@ class DreameMowerDevice(
         _LOGGER.debug("Device update: %s", self._update_interval)
 
         if self._update_running:
+            if force_request_properties:
+                raise DeviceUpdateFailedException(
+                    "Fresh mower task state is unavailable while another update is running."
+                )
             return
+
+        require_fresh_state = bool(force_request_properties)
 
         if not self.cloud_connected and deadline is None:
             self.connect_cloud()
@@ -649,7 +655,11 @@ class DreameMowerDevice(
                 force_request_properties = True
 
             if not self._protocol.dreame_cloud or force_request_properties:
-                if deadline is None:
+                if require_fresh_state:
+                    self._request_properties(
+                        properties, deadline=deadline, require_fresh_state=True,
+                    )
+                elif deadline is None:
                     self._request_properties(properties)
                 else:
                     self._request_properties(properties, deadline=deadline)

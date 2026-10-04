@@ -6,7 +6,7 @@ import asyncio
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -100,6 +100,16 @@ def client_and_cloud():
     )
     cloud = TableCloud()
     client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+    client._sync_update_device = Mock(
+        return_value=SimpleNamespace(
+            available=True,
+            activity="docked",
+            state="idle",
+            mowing_session_active=False,
+            task_resumable=False,
+        )
+    )
+    client._snapshot_from_device = lambda device, **kwargs: device
     return client, cloud
 
 
@@ -195,6 +205,22 @@ def test_table_toggle_confirms_target_and_mower_disabled_sibling():
         True,
     ]
     assert cloud.calls[-1]["t"] == "SCHDI"
+
+
+def test_table_toggle_cannot_edit_an_unfinished_docked_task():
+    client, cloud = client_and_cloud()
+    client._sync_update_device.return_value.task_resumable = True
+    with pytest.raises(DreameLawnMowerConnectionError, match="Finish the current"):
+        asyncio.run(
+            client.async_set_app_schedule_plan_enabled(
+                map_index=2,
+                plan_id=1,
+                enabled=False,
+                execute=True,
+                confirm_write=True,
+            )
+        )
+    assert all(call["m"] == "g" for call in cloud.calls)
 
 
 def test_acknowledged_but_ignored_table_toggle_is_not_reported_successful():

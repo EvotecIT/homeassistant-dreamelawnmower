@@ -16,8 +16,9 @@ Failed or unrecognized reads remain unknown, while a valid empty inventory
 means no plans were reported.
 
 Document reads support V2 and V3 firmware. The client remembers the confirmed
-generation for subsequent reads and enable/disable requests. Older firmware
-and table schedules retain their own command paths.
+generation for subsequent reads. Document enable/disable requests retain the
+separate `SCHDSV2` status command; a V3 getter does not establish a V3 setter.
+Older firmware and table schedules retain their own command paths.
 
 Dreame A2 captures show a default document plus per-map documents. The normal
 `Schedule` calendar follows the active version from the mower's current-task or
@@ -42,6 +43,12 @@ still be disabled. An ignored or unconfirmed write raises an error.
 These switches are suitable for dashboards,
 automations, and voice assistants; no service flags are needed for an ordinary
 switch action.
+
+Schedule edits require fresh mower state confirming there is no unfinished
+task. Pausing or docking a partially completed job does not finish it. While a
+task remains active or resumable, the integration rejects edits with a clear
+message before sending a schedule write. Plan reading and dry-runs remain
+available. Unknown task state also prevents an executed edit.
 
 The guarded `dreame_lawn_mower.set_schedule_plan_enabled` service is dry-run
 first. It sends a write only when both `execute: true` and

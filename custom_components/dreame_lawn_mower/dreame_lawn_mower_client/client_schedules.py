@@ -22,7 +22,10 @@ from .client_shared_helpers import (
     _ensure_app_write_succeeded,
     _positive_int,
 )
-from .exceptions import DreameLawnMowerConnectionError
+from .exceptions import (
+    DreameLawnMowerCommandRejectedError,
+    DreameLawnMowerConnectionError,
+)
 from .payload_utils import _json_safe
 from .schedule import (
     EMPTY_SCHEDULE_VERSION,
@@ -32,6 +35,7 @@ from .schedule import (
     decode_schedule_payload_text,
     encode_schedule_payload_text,
     schedule_task_summary,
+    schedule_write_block_reason,
 )
 
 SCHEDULE_CURRENT_TASK_TIMEOUT_SECONDS = 5.0
@@ -52,6 +56,14 @@ def _serialized_schedule_operation(method):
 
 class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
     """Own schedule protocol operations independently of other settings."""
+
+    def _sync_require_schedule_write_allowed(self) -> None:
+        """Check fresh normalized task state inside the schedule operation lock."""
+        device = self._sync_update_device(force_request_properties=True)
+        snapshot = self._snapshot_from_device(device, fresh_task_state=True)
+        reason = schedule_write_block_reason(snapshot)
+        if reason is not None:
+            raise DreameLawnMowerCommandRejectedError(reason)
 
     @_serialized_schedule_operation
     def _sync_get_schedule_start_evidence(self) -> dict[str, Any]:
@@ -437,6 +449,8 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
                 f"No schedule metadata returned for map index {map_index}."
             )
         schedule = schedules["schedules"][0]
+        if execute:
+            self._sync_require_schedule_write_allowed()
         if schedule.get("protocol") == "tables":
             return self._sync_set_schedule_table_enabled(
                 schedule=schedule,
@@ -476,7 +490,6 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
             map_index=map_index,
             version=version,
             plans=updated_plans,
-            document_version=schedule.get("document_version", 2),
         )
         target_enabled = bool(enabled)
         result: dict[str, Any] = {
@@ -601,6 +614,7 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
             "request": request_candidate,
         }
         if execute:
+            self._sync_require_schedule_write_allowed()
             responses: list[Any] = []
             response_data_items: list[Any] = []
             for request in requests:
