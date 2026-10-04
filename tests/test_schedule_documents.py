@@ -6,6 +6,8 @@ import base64
 import json
 from copy import deepcopy
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -100,6 +102,16 @@ def _client_and_cloud():
     )
     cloud = _DocumentCloud()
     client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+    client._sync_update_device = Mock(
+        return_value=SimpleNamespace(
+            available=True,
+            activity="docked",
+            state="idle",
+            mowing_session_active=False,
+            task_resumable=False,
+        )
+    )
+    client._snapshot_from_device = lambda device: device
     return client, cloud
 
 

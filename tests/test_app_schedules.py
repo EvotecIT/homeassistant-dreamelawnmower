@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
 from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
+    DreameLawnMowerCommandRejectedError,
     DreameLawnMowerConnectionError,
     build_schedule_upload_requests,
     decode_schedule_payload_text,
@@ -28,10 +32,7 @@ class _FakeAppScheduleCloud:
             -1: {"version": 31345, "text": '{"d":[[0,1,"","EODBJwAAADDgwScAAAA="]]}'},
             0: {
                 "version": 19383,
-                "text": (
-                    '{"d":[[0,1,"","AJKSTiIDABCSkk7/DwA="],'
-                    '[1,0,""]]}'
-                ),
+                "text": ('{"d":[[0,1,"","AJKSTiIDABCSkk7/DwA="],[1,0,""]]}'),
             },
             1: {"version": 4760, "text": '{"d":[[0,0,""]]}'},
         }
@@ -134,7 +135,7 @@ class _FakeAppScheduleCloud:
 
 
 def _client() -> DreameLawnMowerClient:
-    return DreameLawnMowerClient(
+    client = DreameLawnMowerClient(
         username="user@example.invalid",
         password="secret",
         country="eu",
@@ -148,6 +149,86 @@ def _client() -> DreameLawnMowerClient:
             country="eu",
         ),
     )
+    client._sync_update_device = Mock(
+        return_value=SimpleNamespace(
+            available=True,
+            activity="docked",
+            state="idle",
+            mowing_session_active=False,
+            task_resumable=False,
+        )
+    )
+    client._snapshot_from_device = lambda device: device
+    return client
+
+
+@pytest.mark.parametrize("upload", [False, True])
+@pytest.mark.parametrize(
+    "state_changes",
+    [
+        {"task_resumable": True, "mowing_session_active": True, "state": "paused"},
+        {"activity": "mowing", "mowing_session_active": True},
+        {"task_resumable": None},
+        {"mowing_session_active": None},
+    ],
+)
+def test_public_schedule_writes_require_a_fresh_finished_task(upload, state_changes):
+    client = _client()
+    cloud = _FakeAppScheduleCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+    # Cached idle data must not override the forced property read.
+    client._latest_snapshot = SimpleNamespace(task_resumable=False)
+    vars(client._sync_update_device.return_value).update(state_changes)
+    plans = decode_schedule_payload_text(cloud.payloads[0]["text"])
+    call = (
+        client.async_plan_app_schedule_upload(
+            map_index=0, plans=plans, execute=True, confirm_write=True
+        )
+        if upload
+        else client.async_set_app_schedule_plan_enabled(
+            map_index=0, plan_id=1, enabled=False, execute=True, confirm_write=True
+        )
+    )
+    with pytest.raises(DreameLawnMowerCommandRejectedError, match="task"):
+        asyncio.run(call)
+    client._sync_update_device.assert_called_once_with(force_request_properties=True)
+    assert all(request["m"] == "g" for request in cloud.calls)
+
+
+@pytest.mark.parametrize("upload", [False, True])
+def test_public_schedule_preview_does_not_require_finished_task(upload):
+    client = _client()
+    cloud = _FakeAppScheduleCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+    client._sync_update_device.side_effect = AssertionError("Preview read task state")
+    plans = decode_schedule_payload_text(cloud.payloads[0]["text"])
+    call = (
+        client.async_plan_app_schedule_upload(map_index=0, plans=plans)
+        if upload
+        else client.async_set_app_schedule_plan_enabled(
+            map_index=0, plan_id=1, enabled=False
+        )
+    )
+    assert asyncio.run(call)["executed"] is False
+    assert all(request["m"] == "g" for request in cloud.calls)
+
+
+def test_fresh_task_read_failure_prevents_schedule_dispatch():
+    client = _client()
+    cloud = _FakeAppScheduleCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+    client._sync_update_device.side_effect = DreameLawnMowerConnectionError("Offline")
+    with pytest.raises(DreameLawnMowerConnectionError, match="Offline"):
+        asyncio.run(
+            client.async_set_app_schedule_plan_enabled(
+                map_index=0,
+                plan_id=1,
+                enabled=True,
+                execute=True,
+                confirm_write=True,
+            )
+        )
+    assert all(request["m"] == "g" for request in cloud.calls)
 
 
 def test_app_schedules_decode_plans_and_current_task() -> None:
@@ -390,11 +471,14 @@ def test_app_schedules_retry_early_slot_with_unused_shared_budget(
     ]
     assert default_deadlines[0] < default_deadlines[1]
     assert default_deadlines[1] >= default_deadlines[0] + 3
-    assert max(
-        option["deadline"]
-        for option in cloud.request_options
-        if option["deadline"] is not None
-    ) <= 110.0
+    assert (
+        max(
+            option["deadline"]
+            for option in cloud.request_options
+            if option["deadline"] is not None
+        )
+        <= 110.0
+    )
 
 
 def test_app_schedules_rotate_reserved_recovery_across_slow_slots(

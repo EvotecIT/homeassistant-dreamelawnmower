@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .api import (
@@ -43,7 +44,10 @@ from .coordinator_refresh import (
     runtime_tracking_active,
 )
 from .diagnostic_events import DreameLawnMowerDiagnosticEventStore
-from .dreame_lawn_mower_client.exceptions import attempted_write_fields
+from .dreame_lawn_mower_client.exceptions import (
+    DreameLawnMowerCommandRejectedError,
+    attempted_write_fields,
+)
 from .dreame_lawn_mower_client.feature_capabilities import (
     FEATURE_LIVE_VIDEO,
     FEATURE_POINT_CLOUD,
@@ -1284,13 +1288,16 @@ class DreameLawnMowerCoordinator(
     ) -> dict[str, Any]:
         """Write one schedule plan and reconcile every schedule consumer."""
         async with self._schedule_write_lock:
-            result = await self.client.async_set_app_schedule_plan_enabled(
-                map_index=map_index,
-                plan_id=plan_id,
-                enabled=enabled,
-                execute=True,
-                confirm_write=True,
-            )
+            try:
+                result = await self.client.async_set_app_schedule_plan_enabled(
+                    map_index=map_index,
+                    plan_id=plan_id,
+                    enabled=enabled,
+                    execute=True,
+                    confirm_write=True,
+                )
+            except DreameLawnMowerCommandRejectedError as err:
+                raise HomeAssistantError(str(err)) from err
             self.last_schedule_write_result = result
             self._invalidate_inflight_schedule_refreshes()
             schedule_version = _schedule_write_version(result)
@@ -1772,13 +1779,16 @@ class DreameLawnMowerCoordinator(
             return result
 
         async with self._schedule_write_lock:
-            result = await self.client.async_plan_app_schedule_upload(
-                map_index=map_index,
-                plans=plans,
-                chunk_size=chunk_size,
-                execute=True,
-                confirm_write=confirm_write,
-            )
+            try:
+                result = await self.client.async_plan_app_schedule_upload(
+                    map_index=map_index,
+                    plans=plans,
+                    chunk_size=chunk_size,
+                    execute=True,
+                    confirm_write=confirm_write,
+                )
+            except DreameLawnMowerCommandRejectedError as err:
+                raise HomeAssistantError(str(err)) from err
             self.last_schedule_write_result = result
             self._invalidate_inflight_schedule_refreshes()
             pending_states = getattr(self, "_pending_schedule_plan_states", None)

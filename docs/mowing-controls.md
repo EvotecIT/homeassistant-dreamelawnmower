@@ -44,6 +44,12 @@ These switches are suitable for dashboards,
 automations, and voice assistants; no service flags are needed for an ordinary
 switch action.
 
+Schedule edits require fresh mower state confirming there is no unfinished
+task. Pausing or docking a partially completed job does not finish it. While a
+task remains active or resumable, the integration rejects edits with a clear
+message before sending a schedule write. Plan reading and dry-runs remain
+available. Unknown task state also prevents an executed edit.
+
 The guarded `dreame_lawn_mower.set_schedule_plan_enabled` service is dry-run
 first. It sends a write only when both `execute: true` and
 `confirm_schedule_write: true` are set.

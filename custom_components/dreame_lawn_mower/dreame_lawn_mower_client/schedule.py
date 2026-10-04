@@ -33,6 +33,34 @@ _FRAMED_TASK_END = 0xED
 _FRAMED_TASK_MINIMUM_LENGTH = 7
 
 
+def schedule_write_block_reason(snapshot: Any) -> str | None:
+    """Require a known idle mower with no unfinished task before plan edits."""
+    if snapshot is None or getattr(snapshot, "available", None) is not True:
+        return "Schedule edits require a fresh, available mower state."
+    activity = str(getattr(snapshot, "activity", None) or "").casefold()
+    state = str(getattr(snapshot, "state", None) or "").casefold()
+    session_active = getattr(snapshot, "mowing_session_active", None)
+    resumable = getattr(snapshot, "task_resumable", None)
+    if (
+        session_active is True
+        or resumable is True
+        or activity in {"mowing", "paused", "returning"}
+        or any(
+            getattr(snapshot, flag, False)
+            for flag in ("started", "mowing", "paused", "returning")
+        )
+    ):
+        return (
+            "Finish the current mower task before editing schedules. "
+            "A paused or docked task can still be unfinished."
+        )
+    if session_active is not False or resumable is not False:
+        return "Schedule edits are blocked because the current task state is unknown."
+    if activity not in {"docked", "idle"} or state == "repositioning":
+        return "The mower must be idle or docked before editing schedules."
+    return None
+
+
 def minute_text(value: int | None) -> str | None:
     """Return HH:MM text for a minute-of-day value."""
     if value is None or value < 0:
