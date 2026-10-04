@@ -176,6 +176,8 @@ class DreameLawnMowerLastScheduleWriteSensor(
 def _schedule_write_state(result: dict[str, Any] | None) -> str:
     if not result:
         return "none"
+    if result.get("confirmed") and not result.get("executed"):
+        return "unchanged"
     return "executed" if result.get("executed") else "dry_run"
 
 
@@ -197,6 +199,11 @@ def schedule_write_result_attributes(
         "changed": result.get("changed"),
         "map_index": result.get("map_index"),
         "plan_id": result.get("plan_id"),
+        "confirmed": result.get("confirmed"),
+        "week_day": result.get("week_day"),
+        "task_index": result.get("task_index"),
+        "previous_start": result.get("previous_start"),
+        "start_time": result.get("start_time"),
         "previous_enabled": result.get("previous_enabled"),
         "enabled": result.get("enabled"),
         "version": result.get("version"),

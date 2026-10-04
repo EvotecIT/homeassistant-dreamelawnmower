@@ -1983,6 +1983,108 @@ class DreameLawnMowerCoordinator(
                 self.async_update_listeners()
             return result
 
+    async def async_set_schedule_task_start_time(
+        self, *, map_index: int, plan_id: int, week_day: int,
+        task_index: int, start: int, execute: bool, confirm_write: bool,
+    ) -> dict[str, Any]:
+        """Keep a dispatched write and its reconciliation alive on cancellation."""
+        operation = asyncio.create_task(self._async_set_schedule_task_start_time(
+            map_index=map_index, plan_id=plan_id, week_day=week_day,
+            task_index=task_index, start=start, execute=execute,
+            confirm_write=confirm_write,
+        ))
+        try:
+            return await asyncio.shield(operation)
+        except asyncio.CancelledError:
+            drain = asyncio.gather(operation, return_exceptions=True)
+            while not drain.done():
+                try:
+                    await asyncio.shield(drain)
+                except asyncio.CancelledError:
+                    # Repeated caller cancellation must not reach the worker.
+                    continue
+            raise
+
+    async def _async_set_schedule_task_start_time(
+        self, *, map_index: int, plan_id: int, week_day: int,
+        task_index: int, start: int, execute: bool, confirm_write: bool,
+    ) -> dict[str, Any]:
+        """Publish native readback from an existing task's guarded time edit."""
+        async with self._schedule_write_lock:
+            known_active = (
+                isinstance(self.schedules, Mapping)
+                and self.schedules.get("active_schedule_index") == map_index
+                and self.schedules.get("active_selection_available") is not False
+            )
+            try:
+                result = await self.client.async_set_app_schedule_task_start_time(
+                    map_index=map_index, plan_id=plan_id, week_day=week_day,
+                    task_index=task_index, start=start, execute=execute,
+                    confirm_write=confirm_write,
+                )
+            except Exception as err:
+                # A final failure can follow accepted chunks; refresh real state.
+                if execute and attempted_write_fields(err):
+                    self._invalidate_inflight_schedule_refreshes()
+                    self._clear_schedule_time_edit_overlays(map_index)
+                    self.schedules = invalidate_schedule_slot(
+                        self.schedules, map_index
+                    )
+                    self.schedules_refreshed_at = None
+                    try:
+                        await self.async_refresh_schedules(force=True)
+                    finally:
+                        self.async_update_listeners()
+                raise HomeAssistantError(str(err)) from err
+            self.last_schedule_write_result = result
+            if result.get("confirmed") and result.get("executed"):
+                self._invalidate_inflight_schedule_refreshes()
+                self._clear_schedule_time_edit_overlays(map_index)
+                versions = getattr(self, "_pending_schedule_status_versions", None)
+                if versions is None:
+                    versions = {}
+                    self._pending_schedule_status_versions = versions
+                versions[map_index] = (result["version"], 0)
+                active_indices = getattr(
+                    self, "_pending_schedule_status_active_indices", None
+                )
+                if active_indices is None:
+                    active_indices = set()
+                    self._pending_schedule_status_active_indices = active_indices
+                if known_active:
+                    active_indices.add(map_index)
+                self.schedules = merge_app_schedule_payload(
+                    self.schedules,
+                    {"schedules": [result["confirmed_schedule"]]},
+                    expected_indices=[map_index], partial_refresh=True,
+                )
+                self.schedules_refreshed_at = None
+                try:
+                    await self.async_refresh_schedules(force=True)
+                finally:
+                    self.async_update_listeners()
+            self.async_update_listeners()
+            return result
+
+    def _clear_schedule_time_edit_overlays(self, map_index: int) -> None:
+        """Retire pre-edit confirmations before publishing a new native row."""
+        self._clear_pending_schedule_status_version(map_index)
+        for attribute in (
+            "_pending_schedule_uploads", "_pending_schedule_upload_contradictions",
+        ):
+            getattr(self, attribute, {}).pop(map_index, None)
+        getattr(self, "_pending_schedule_upload_active_indices", set()).discard(
+            map_index
+        )
+        for attribute in (
+            "_pending_schedule_plan_states",
+            "_pending_schedule_plan_state_contradictions",
+        ):
+            cache = getattr(self, attribute, {})
+            for key in tuple(cache):
+                if key[0] == map_index:
+                    cache.pop(key, None)
+
     async def async_refresh_batch_device_data(
         self,
         *,
