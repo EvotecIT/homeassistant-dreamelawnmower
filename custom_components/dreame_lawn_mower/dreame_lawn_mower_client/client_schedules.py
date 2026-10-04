@@ -524,6 +524,21 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
             result["executed"] = True
             result["response"] = _json_safe(response, max_depth=4)
             result["response_data"] = _json_safe(response_data, max_depth=4)
+            result["acknowledged_plan_states"] = [
+                {"plan_id": plan["plan_id"], "enabled": bool(plan.get("enabled"))}
+                for plan in updated_plans
+            ]
+            acknowledged_version = (
+                response_data.get("v") if isinstance(response_data, Mapping) else None
+            )
+            if (
+                isinstance(acknowledged_version, int)
+                and not isinstance(acknowledged_version, bool)
+                and 0 <= acknowledged_version < EMPTY_SCHEDULE_VERSION
+            ):
+                # Enabling a plan changes the document checksum on newer firmware.
+                # Keep the submitted version in the request and schedule overview.
+                result["version"] = acknowledged_version
         return result
 
     @_serialized_schedule_operation

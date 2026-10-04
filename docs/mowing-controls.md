@@ -22,6 +22,11 @@ Older firmware and table schedules retain their own command paths. Status writes
 require an explicit mower acknowledgement before the integration updates its
 schedule state.
 
+Document status writes can change the checksum. Switches use the acknowledged
+checksum and complete plan-status list. Validated native documents remain
+authoritative when batch data reports a different checksum; the normal calendar
+waits for matching active-version evidence instead of showing an older plan.
+
 Dreame A2 captures show a default document plus per-map documents. The normal
 `Schedule` calendar follows the active version from the mower's current-task or
 batch evidence. Table schedules follow the known current map. When active

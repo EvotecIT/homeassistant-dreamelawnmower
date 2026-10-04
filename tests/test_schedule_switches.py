@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
+from custom_components.dreame_lawn_mower.calendar import schedule_calendar_events
 from custom_components.dreame_lawn_mower.coordinator import (
     DreameLawnMowerCoordinator,
 )
@@ -366,6 +369,528 @@ def test_pending_schedule_toggle_expires_after_repeated_contradictory_reads() ->
 
     assert coordinator._pending_schedule_plan_states == {}
     assert coordinator.schedules["schedules"][0]["plans"][0]["enabled"] is True
+
+
+@pytest.mark.parametrize("action_read_succeeds", [False, True])
+@pytest.mark.parametrize("batch_has_map_hint", [False, True])
+def test_status_write_version_change_survives_stale_batch_readback(
+    action_read_succeeds, batch_has_map_hint
+) -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._schedule_write_lock = asyncio.Lock()
+    old_slot = {
+        "idx": 0,
+        "available": True,
+        "version": 23416,
+        "plans": [{"plan_id": 0, "enabled": True, "weeks": []}],
+    }
+    current_slot = {
+        **old_slot,
+        "version": 62089,
+        "plans": [{"plan_id": 0, "enabled": False, "weeks": []}],
+    }
+    coordinator.client = SimpleNamespace(
+        async_set_app_schedule_plan_enabled=AsyncMock(
+            return_value={
+                "executed": True,
+                "enabled": False,
+                "version": 62089,
+                "schedule": {"version": 23416},
+                "response_data": {"r": 0, "v": 62089},
+            }
+        ),
+        async_get_app_schedules=AsyncMock(
+            return_value={
+                "source": "app_action_schedule",
+                "schedules": [current_slot] if action_read_succeeds else [],
+                "errors": [] if action_read_succeeds else [{"idx": 0}],
+            }
+        ),
+        async_get_batch_schedules=AsyncMock(
+            return_value={
+                "source": "batch_device_data_schedule",
+                "schedules": [
+                    {**old_slot, "idx": 0 if batch_has_map_hint else None}
+                ],
+                "errors": [],
+            }
+        ),
+    )
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {"current_map_index": 0, "maps": [{"idx": 0}]}
+    coordinator.schedules_refreshed_at = None
+    coordinator.async_update_listeners = Mock()
+    coordinator.schedules = {
+        "active_schedule_index": 0,
+        "active_schedule_version": 23416,
+        "schedules": [deepcopy(old_slot)],
+    }
+
+    asyncio.run(
+        coordinator.async_set_schedule_plan_enabled(
+            map_index=0, plan_id=0, enabled=False
+        )
+    )
+
+    entries = schedule_plan_entries(coordinator.schedules)
+    assert len(entries) == 1
+    assert entries[0]["enabled"] is False
+    assert entries[0]["version"] == 62089
+    assert coordinator.schedules["active_selection_available"] is False
+    assert coordinator._pending_schedule_status_versions == {0: (62089, 0)}
+    assert coordinator._cache_batch_schedules(
+        coordinator.client.async_get_batch_schedules.return_value,
+        now=datetime.now(UTC),
+        allow_incomplete=True,
+    ) is False
+    assert schedule_plan_entries(coordinator.schedules)[0]["enabled"] is False
+
+    # Once the effective batch catches up, active calendar selection is safe.
+    coordinator.client.async_get_app_schedules.return_value = {
+        "schedules": [current_slot], "errors": []
+    }
+    coordinator.client.async_get_batch_schedules.return_value = {
+        "schedules": [current_slot], "errors": []
+    }
+    asyncio.run(coordinator.async_refresh_schedules(force=True))
+    assert coordinator.schedules["active_schedule_version"] == 62089
+    assert coordinator.schedules["active_selection_available"] is True
+    assert coordinator._pending_schedule_plan_states == {}
+    assert coordinator._pending_schedule_status_versions == {}
+
+
+@pytest.mark.parametrize("batch_has_map_hint", [False, True])
+def test_status_guard_waits_for_native_readback_when_batch_converges_first(
+    batch_has_map_hint,
+) -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._schedule_write_lock = asyncio.Lock()
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {"current_map_index": 0, "maps": [{"idx": 0}]}
+    coordinator.schedules_refreshed_at = None
+    coordinator.async_update_listeners = Mock()
+    old_slot = {
+        "idx": 0,
+        "available": True,
+        "protocol": "document",
+        "read_status": "complete",
+        "version": 23416,
+        "plans": [{"plan_id": 0, "enabled": True, "weeks": []}],
+    }
+    current_slot = {
+        **old_slot,
+        "version": 62089,
+        "plans": [{"plan_id": 0, "enabled": False, "weeks": []}],
+    }
+    coordinator.schedules = {
+        "active_schedule_index": 0,
+        "active_schedule_version": 23416,
+        "schedules": [deepcopy(old_slot)],
+    }
+    coordinator.client = SimpleNamespace(
+        async_set_app_schedule_plan_enabled=AsyncMock(return_value={
+            "executed": True,
+            "version": 62089,
+            "schedule": {"version": 23416},
+            "acknowledged_plan_states": [{"plan_id": 0, "enabled": False}],
+        }),
+        async_get_app_schedules=AsyncMock(return_value={
+            "schedules": [], "errors": [{"idx": 0, "error": "Read unavailable"}],
+        }),
+        async_get_batch_schedules=AsyncMock(return_value={
+            "schedules": [{
+                **current_slot, "idx": 0 if batch_has_map_hint else None,
+            }],
+            "errors": [],
+        }),
+    )
+
+    asyncio.run(coordinator.async_set_schedule_plan_enabled(
+        map_index=0, plan_id=0, enabled=False,
+    ))
+    assert coordinator._pending_schedule_status_versions == {0: (62089, 0)}
+    assert coordinator._pending_schedule_plan_states == {(0, 0): (62089, False)}
+
+    # Batch convergence cannot make the first delayed native response undo ACK.
+    coordinator.client.async_get_app_schedules.side_effect = None
+    coordinator.client.async_get_app_schedules.return_value = {
+        "schedules": [old_slot], "errors": [],
+    }
+    asyncio.run(coordinator.async_refresh_schedules(force=True))
+    assert schedule_plan_entries(coordinator.schedules)[0]["enabled"] is False
+    assert schedule_plan_entries(coordinator.schedules)[0]["version"] == 62089
+    assert coordinator._pending_schedule_status_versions == {0: (62089, 1)}
+
+    coordinator.client.async_get_app_schedules.return_value = {
+        "schedules": [current_slot], "errors": [],
+    }
+    asyncio.run(coordinator.async_refresh_schedules(force=True))
+    assert coordinator._pending_schedule_status_versions == {}
+    assert coordinator._pending_schedule_plan_states == {}
+    assert schedule_plan_entries(coordinator.schedules)[0]["enabled"] is False
+    assert coordinator.schedules["active_schedule_version"] == 62089
+
+
+def test_changed_status_checksum_yields_to_repeated_native_external_changes() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._pending_schedule_status_versions = {0: (62089, 0)}
+    coordinator._pending_schedule_status_active_indices = {0}
+    coordinator._pending_schedule_plan_states = {(0, 0): (62089, False)}
+    remote = {
+        "active_schedule_index": 0,
+        "active_schedule_version": 23416,
+        "schedules": [
+            {
+                "idx": 0,
+                "available": True,
+                "version": 23416,
+                "plans": [{"plan_id": 0, "enabled": True}],
+            }
+        ],
+    }
+    coordinator.schedules = deepcopy(remote)
+    coordinator._acknowledge_pending_schedule_plan_states(remote)
+    coordinator._apply_pending_schedule_plan_states()
+    assert schedule_plan_entries(coordinator.schedules)[0]["enabled"] is False
+    assert schedule_plan_entries(coordinator.schedules)[0]["version"] == 62089
+
+    coordinator.schedules = deepcopy(remote)
+    coordinator._acknowledge_pending_schedule_plan_states(remote)
+    coordinator._apply_pending_schedule_plan_states()
+    assert coordinator._pending_schedule_status_versions == {}
+    assert coordinator._pending_schedule_status_active_indices == set()
+    assert coordinator._pending_schedule_plan_states == {}
+    assert schedule_plan_entries(coordinator.schedules)[0]["enabled"] is True
+    assert schedule_plan_entries(coordinator.schedules)[0]["version"] == 23416
+
+
+def test_successive_plan_toggles_keep_the_latest_acknowledged_vector() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._schedule_write_lock = asyncio.Lock()
+    coordinator.schedules_refreshed_at = None
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {"current_map_index": 0, "maps": [{"idx": 0}]}
+    coordinator.async_update_listeners = Mock()
+    coordinator.schedules = {
+        "schedules": [{
+            "idx": 0, "version": 1, "available": True,
+            "plans": [
+                {"plan_id": 0, "enabled": True},
+                {"plan_id": 1, "enabled": True},
+            ],
+        }]
+    }
+    results = [
+        {
+            "executed": True, "version": version,
+            "schedule": {"version": version - 1},
+            "acknowledged_plan_states": [
+                {"plan_id": 0, "enabled": flags[0]},
+                {"plan_id": 1, "enabled": flags[1]},
+            ],
+        }
+        for version, flags in [
+            (2, [False, True]), (3, [False, False]), (4, [True, False])
+        ]
+    ]
+    coordinator.client = SimpleNamespace(
+        async_set_app_schedule_plan_enabled=AsyncMock(side_effect=results),
+        async_get_app_schedules=AsyncMock(return_value={"schedules": [], "errors": []}),
+        async_get_batch_schedules=AsyncMock(
+            return_value={"schedules": [], "errors": []}
+        ),
+    )
+    for plan_id, enabled in [(0, False), (1, False), (0, True)]:
+        asyncio.run(coordinator.async_set_schedule_plan_enabled(
+            map_index=0, plan_id=plan_id, enabled=enabled
+        ))
+    entries = schedule_plan_entries(coordinator.schedules)
+    assert [entry["enabled"] for entry in entries] == [True, False]
+    assert [entry["version"] for entry in entries] == [4, 4]
+    assert coordinator._pending_schedule_plan_states == {
+        (0, 0): (4, True), (0, 1): (4, False)
+    }
+
+
+@pytest.mark.parametrize(
+    "protocol,errors,version",
+    [("tables", [], 12), ("document", ["read failed"], 12), ("document", [], True)],
+)
+def test_unusable_batch_evidence_preserves_existing_calendar_selection(
+    protocol, errors, version,
+) -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.app_maps = {"current_map_index": 0, "maps": [{"idx": 0}]}
+    coordinator.schedules = {
+        "active_schedule_index": 0, "active_schedule_version": 11,
+        "active_selection_available": True,
+        "schedules": [
+            {"idx": -1, "version": 10, "plans": []},
+            {"idx": 0, "version": 11, "plans": [],
+             "protocol": protocol, "read_status": "complete"},
+        ],
+    }
+    assert coordinator._cache_batch_schedules(
+        {"schedules": [{"idx": 0, "version": version, "plans": []}], "errors": errors},
+        now=datetime.now(UTC),
+    ) is False
+    assert coordinator.schedules["active_selection_available"] is True
+    assert coordinator.schedules["active_schedule_version"] == 11
+
+
+@pytest.mark.parametrize("forced_native_refresh", [False, True])
+def test_mismatched_batch_hides_old_calendar_during_native_read_failure(
+    forced_native_refresh,
+) -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.schedules_refreshed_at = None
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {
+        "current_map_index": 0, "map_list_valid": True,
+        "maps": [{"idx": 0, "created": True}],
+    }
+    coordinator.app_maps_refresh_succeeded = True
+    default_slot = {
+        "idx": -1, "version": 10, "available": True,
+        "protocol": "document", "read_status": "complete", "plans": [],
+    }
+    old_slot = {
+        **default_slot, "idx": 0, "version": 11,
+        "plans": [{
+            "plan_id": 0, "enabled": True,
+            "weeks": [{"week_day": 0, "tasks": [{
+                "type_name": "all_area_mowing", "start": 658,
+                "timing": "start_only",
+            }]}],
+        }],
+    }
+    current_slot = deepcopy(old_slot)
+    current_slot["version"] = 12
+    current_slot["plans"][0]["enabled"] = False
+    coordinator.schedules = {
+        "active_schedule_index": 0, "active_schedule_version": 11,
+        "active_selection_available": True,
+        "schedules": [default_slot, deepcopy(old_slot)],
+    }
+    coordinator.client = SimpleNamespace(
+        async_get_app_schedules=AsyncMock(return_value={
+            "schedules": [default_slot, {"idx": 0, "error": "timed out"}],
+            "errors": [{"idx": 0, "error": "timed out"}],
+        }),
+        async_get_batch_schedules=AsyncMock(return_value={
+            "schedules": [current_slot], "errors": [],
+        }),
+    )
+    if forced_native_refresh:
+        asyncio.run(coordinator.async_refresh_schedules(force=True))
+    else:
+        assert coordinator._cache_batch_schedules(
+            coordinator.client.async_get_batch_schedules.return_value,
+            now=datetime.now(UTC),
+        ) is False
+    assert coordinator.schedules["active_selection_available"] is False
+    assert coordinator.schedules["schedules"][1] == old_slot
+    assert schedule_calendar_events(
+        coordinator.schedules,
+        datetime(2026, 4, 19, tzinfo=UTC),
+        datetime(2026, 4, 20, tzinfo=UTC),
+        mower_name="Bodzio",
+    ) == []
+    if not forced_native_refresh:
+        assert coordinator.schedules_refreshed_at is None
+
+    coordinator.client.async_get_app_schedules.return_value = {
+        "schedules": [default_slot, current_slot], "errors": [],
+    }
+    asyncio.run(coordinator.async_refresh_schedules(force=True))
+    assert coordinator.schedules["active_selection_available"] is True
+    assert coordinator.schedules["active_schedule_version"] == 12
+    assert schedule_plan_entries(coordinator.schedules)[0]["enabled"] is False
+
+
+@pytest.mark.parametrize("native_read_converged", [False, True])
+@pytest.mark.parametrize("batch_has_map_hint", [False, True])
+@pytest.mark.parametrize("active_index", [0, -1])
+def test_pending_toggle_preserves_active_slot_through_checksum_collision(
+    native_read_converged, batch_has_map_hint, active_index,
+) -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._schedule_write_lock = asyncio.Lock()
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {
+        "current_map_index": 0, "map_list_valid": True,
+        "maps": [{"idx": 0, "created": True}, {"idx": 1, "created": True}],
+    }
+    coordinator.app_maps_refresh_succeeded = True
+    coordinator.schedules_refreshed_at = None
+    coordinator.async_update_listeners = Mock()
+    default_slot = {
+        "idx": -1, "version": 10, "available": True,
+        "protocol": "document", "read_status": "complete", "plans": [],
+    }
+    old_slot = {
+        **default_slot, "idx": 0, "version": 11,
+        "plans": [{
+            "plan_id": 0, "enabled": True,
+            "weeks": [{"week_day": 0, "tasks": [{
+                "type_name": "all_area_mowing", "start": 658,
+                "timing": "start_only",
+            }]}],
+        }],
+    }
+    sibling_slot = {**deepcopy(old_slot), "idx": 1}
+    if active_index == -1:
+        default_slot["plans"] = deepcopy(old_slot["plans"])
+    current_slot = deepcopy(old_slot)
+    current_slot["version"] = 12
+    current_slot["plans"][0]["enabled"] = False
+    coordinator.schedules = {
+        "active_schedule_index": active_index,
+        "active_schedule_version": 10 if active_index == -1 else 11,
+        "active_selection_available": True,
+        "schedules": [default_slot, deepcopy(old_slot), sibling_slot],
+    }
+    coordinator.client = SimpleNamespace(
+        async_set_app_schedule_plan_enabled=AsyncMock(return_value={
+            "executed": True, "version": 12, "schedule": {"version": 11},
+            "acknowledged_plan_states": [{"plan_id": 0, "enabled": False}],
+        }),
+        async_get_app_schedules=AsyncMock(return_value={
+            "schedules": deepcopy([
+                default_slot,
+                current_slot if native_read_converged else old_slot,
+                sibling_slot,
+            ]),
+            "errors": [],
+        }),
+        async_get_batch_schedules=AsyncMock(return_value={
+            "schedules": [{
+                **deepcopy(default_slot if active_index == -1 else old_slot),
+                "idx": 0 if batch_has_map_hint else None,
+            }],
+            "errors": [],
+        }),
+    )
+    asyncio.run(coordinator.async_set_schedule_plan_enabled(
+        map_index=0, plan_id=0, enabled=False,
+    ))
+    if active_index == 0:
+        assert coordinator.schedules.get("active_schedule_index") in (None, 0)
+        assert coordinator.schedules["active_selection_available"] is False
+    else:
+        assert coordinator.schedules["active_schedule_index"] == -1
+        assert coordinator.schedules["active_selection_available"] is True
+    written_plan = next(
+        plan for plan in schedule_plan_entries(coordinator.schedules)
+        if plan["map_index"] == 0
+    )
+    assert written_plan["enabled"] is False
+    events = schedule_calendar_events(
+        coordinator.schedules,
+        datetime(2026, 4, 19, tzinfo=UTC),
+        datetime(2026, 4, 20, tzinfo=UTC),
+        mower_name="Bodzio",
+    )
+    assert len(events) == (1 if active_index == -1 else 0)
+    if events:
+        assert events[0].start == datetime(2026, 4, 19, 10, 58, tzinfo=UTC)
+
+    coordinator.client.async_get_app_schedules.return_value = {
+        "schedules": deepcopy([default_slot, current_slot, sibling_slot]), "errors": [],
+    }
+    coordinator.client.async_get_batch_schedules.return_value = {
+        "schedules": [deepcopy(current_slot)], "errors": [],
+    }
+    asyncio.run(coordinator.async_refresh_schedules(force=True))
+    assert coordinator.schedules["active_schedule_index"] == 0
+    assert coordinator.schedules["active_schedule_version"] == 12
+    assert coordinator.schedules["active_selection_available"] is True
+    assert coordinator._pending_schedule_status_versions == {}
+    assert coordinator._pending_schedule_status_active_indices == set()
+
+
+def test_native_vendor_edit_survives_stale_batch_after_ack_guard_retires() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.schedules_refreshed_at = None
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {
+        "current_map_index": 0, "map_list_valid": True,
+        "maps": [{"idx": 0, "created": True}],
+    }
+    coordinator.app_maps_refresh_succeeded = True
+    coordinator._pending_schedule_status_versions = {0: (20, 0)}
+    old = {
+        "idx": 0, "available": True, "version": 20,
+        "protocol": "document", "read_status": "complete",
+        "plans": [{"plan_id": 0, "enabled": False, "name": "Before edit"}],
+    }
+    edited = {
+        **old, "version": 30,
+        "plans": [{"plan_id": 0, "enabled": False, "name": "Vendor edit"}],
+    }
+    coordinator.schedules = {"schedules": [deepcopy(old)]}
+    coordinator.client = SimpleNamespace(
+        async_get_app_schedules=AsyncMock(return_value={
+            "schedules": [edited], "errors": []
+        }),
+        async_get_batch_schedules=AsyncMock(return_value={
+            "schedules": [old], "errors": []
+        }),
+    )
+    for _ in range(2):
+        asyncio.run(coordinator.async_refresh_schedules(force=True))
+        entries = schedule_plan_entries(coordinator.schedules)
+        assert entries[0]["name"] == "Vendor edit"
+        assert entries[0]["version"] == 30
+    assert coordinator._pending_schedule_status_versions == {}
+    assert coordinator._cache_batch_schedules(
+        coordinator.client.async_get_batch_schedules.return_value,
+        now=datetime.now(UTC), allow_incomplete=True, allowed_hint_indices=[0],
+    ) is False
+    assert schedule_plan_entries(coordinator.schedules)[0]["name"] == "Vendor edit"
+
+
+@pytest.mark.parametrize("toggle_version", [11, 12])
+def test_later_status_ack_supersedes_pending_full_upload(toggle_version) -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._schedule_write_lock = asyncio.Lock()
+    coordinator.schedules_refreshed_at = None
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {"current_map_index": 0, "maps": [{"idx": 0}]}
+    coordinator.async_update_listeners = Mock()
+    plans = [{"plan_id": 0, "enabled": True, "name": "Uploaded", "weeks": []}]
+    coordinator.schedules = {
+        "schedules": [{
+            "idx": 0, "version": 10, "available": True, "plans": deepcopy(plans)
+        }]
+    }
+    coordinator.client = SimpleNamespace(
+        async_plan_app_schedule_upload=AsyncMock(
+            return_value={"executed": True, "version": 11, "request_count": 2}
+        ),
+        async_set_app_schedule_plan_enabled=AsyncMock(return_value={
+            "executed": True, "version": toggle_version,
+            "schedule": {"version": 11},
+            "acknowledged_plan_states": [{"plan_id": 0, "enabled": False}],
+        }),
+        async_get_app_schedules=AsyncMock(return_value={"schedules": [], "errors": []}),
+        async_get_batch_schedules=AsyncMock(
+            return_value={"schedules": [], "errors": []}
+        ),
+    )
+    asyncio.run(coordinator.async_plan_schedule_upload(
+        map_index=0, plans=plans, chunk_size=100, execute=True, confirm_write=True
+    ))
+    assert coordinator._pending_schedule_uploads[0]["plans"][0]["enabled"] is True
+    asyncio.run(coordinator.async_set_schedule_plan_enabled(
+        map_index=0, plan_id=0, enabled=False
+    ))
+    entries = schedule_plan_entries(coordinator.schedules)
+    assert entries[0]["enabled"] is False
+    assert entries[0]["version"] == toggle_version
+    assert coordinator._pending_schedule_uploads == {}
+    assert coordinator._pending_schedule_upload_contradictions == {}
+    assert coordinator._pending_schedule_upload_active_indices == set()
 
 
 def test_pending_toggle_does_not_mutate_ambiguous_active_fallback() -> None:
