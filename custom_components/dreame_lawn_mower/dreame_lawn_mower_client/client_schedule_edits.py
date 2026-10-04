@@ -10,7 +10,7 @@ from copy import deepcopy
 from typing import Any
 
 from .client_shared_helpers import _ensure_app_write_succeeded
-from .exceptions import DreameLawnMowerConnectionError
+from .exceptions import DreameLawnMowerConnectionError, mark_write_attempted
 from .schedule import build_schedule_upload_requests, decode_schedule_payload_text
 
 
@@ -126,28 +126,40 @@ class _DreameLawnMowerScheduleEditsMixin:
                 raise DreameLawnMowerConnectionError(
                     "The native schedule changed during preparation; refresh and retry."
                 )
-            for request in requests:
+            try:
+                for request in requests:
+                    response = self._sync_call_app_action(
+                        request, retry_count=0, timeout=5.0
+                    )
+                    _ensure_app_write_succeeded(
+                        response, operation="Schedule time edit",
+                        require_inner_ack=request["t"] != "SCHDIV3",
+                    )
+                _, transferred_native = self._read_schedule_edit_document()
+                self._require_exact_schedule_edit(transferred_native, target)
+                # Use the returned document token for the status leg.
+                self._sync_require_schedule_write_allowed()
+                status = {
+                    "m": "s",
+                    "t": "SCHDSV3",
+                    "d": {
+                        "i": map_index,
+                        "v": transferred_native["v"],
+                        "s": [row[1] for row in native["d"]],
+                    },
+                }
                 response = self._sync_call_app_action(
-                    request, retry_count=0, timeout=5.0
+                    status, retry_count=0, timeout=5.0
                 )
-                _ensure_app_write_succeeded(response, operation="Schedule time edit")
-            _, transferred_native = self._read_schedule_edit_document()
-            self._require_exact_schedule_edit(transferred_native, target)
-            # A returned document token replaces the transfer id for the status leg.
-            self._sync_require_schedule_write_allowed()
-            status = {
-                "m": "s",
-                "t": "SCHDSV3",
-                "d": {
-                    "i": map_index,
-                    "v": transferred_native["v"],
-                    "s": [row[1] for row in native["d"]],
-                },
-            }
-            response = self._sync_call_app_action(status, retry_count=0, timeout=5.0)
-            _ensure_app_write_succeeded(response, operation="Schedule time edit")
-            confirmed, confirmed_native = self._read_schedule_edit_document()
-            self._require_exact_schedule_edit(confirmed_native, target)
+                _ensure_app_write_succeeded(
+                    response, operation="Schedule time edit", require_inner_ack=True
+                )
+                confirmed, confirmed_native = self._read_schedule_edit_document()
+                self._require_exact_schedule_edit(confirmed_native, target)
+            except Exception as err:
+                # Validation can also fail after the mower accepted a row.
+                mark_write_attempted(err, fields=["schedule"])
+                raise
             result.update(
                 executed=True,
                 confirmed=True,

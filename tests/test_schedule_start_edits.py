@@ -22,7 +22,10 @@ from tests.test_schedule_documents import _client_and_cloud, _frame
 class _RowTransport:
     logged_in = True
 
-    def __init__(self, *, reject_last=False, contradict_readback=False):
+    def __init__(
+        self, *, reject_last=False, contradict_readback=False,
+        missing_ack=None, malformed_ack=None, changed_shape=False,
+    ):
         blob = bytearray(b"".join(_frame(day, 658) for day in range(7)))
         for offset in range(0, len(blob), 7):
             blob[offset + 4] |= 0xC0
@@ -38,6 +41,9 @@ class _RowTransport:
         self.calls = []
         self.reject_last = reject_last
         self.contradict_readback = contradict_readback
+        self.missing_ack = missing_ack
+        self.malformed_ack = malformed_ack
+        self.changed_shape = changed_shape
         self.transfer = bytearray()
         self.transfer_token = None
         self.transfer_length = None
@@ -85,12 +91,18 @@ class _RowTransport:
                     self.native["v"] = 43168
                     if self.contradict_readback:
                         self.native["d"][1][2] = "External edit"
+                    if self.changed_shape:
+                        self.native["d"].pop()
                 answer = {"r": 0, "v": self.native["v"]}
         elif command == "SCHDSV3":
             assert data == {"i": 0, "v": self.native["v"], "s": [1, 0]}
             answer = {"r": 0, "v": self.native["v"]}
         else:
             raise AssertionError(command)
+        if payload["m"] == "s" and command == self.missing_ack:
+            answer = {}
+        if payload["m"] == "s" and command == "SCHDSV3" and self.malformed_ack:
+            answer = {"null": None, "boolean": {"r": False}}[self.malformed_ack]
         return {"out": [{"r": 0, "d": answer}]}
 
 
@@ -178,6 +190,70 @@ def test_ack_without_exact_native_readback_stops_before_status_commit():
     assert not any(call["t"] == "SCHDSV3" for call in peer.calls)
 
 
+@pytest.mark.parametrize("command", ["SCHDDV3", "SCHDSV3"])
+def test_chunk_and_status_require_explicit_inner_ack(command):
+    client, _ = _peer(missing_ack=command)
+    with pytest.raises(Exception, match="did not acknowledge"):
+        _edit(client)
+
+
+@pytest.mark.parametrize("shape", ["null", "boolean"])
+def test_status_malformed_ack_does_not_claim_confirmed_edit(shape):
+    client, _ = _peer(malformed_ack=shape)
+    with pytest.raises(Exception, match="did not acknowledge"):
+        _edit(client)
+
+
+def test_changed_readback_shape_after_upload_reconciles_coordinator_cache():
+    client, peer = _peer(changed_shape=True)
+    coordinator = _coordinator(client)
+    coordinator._invalidate_inflight_schedule_refreshes = Mock()
+    coordinator._pending_schedule_status_versions = {0: (13626, 0)}
+    coordinator._pending_schedule_plan_states = {(0, 0): True}
+    with pytest.raises(Exception, match="seasonal plan"):
+        asyncio.run(coordinator.async_set_schedule_task_start_time(
+            map_index=0, plan_id=0, week_day=2, task_index=0,
+            start=663, execute=True, confirm_write=True,
+        ))
+    assert peer.native != peer.original
+    coordinator.async_refresh_schedules.assert_awaited_once_with(force=True)
+    coordinator.async_update_listeners.assert_called()
+    assert coordinator.schedules_refreshed_at is None
+    assert not coordinator.schedules["schedules"]
+    assert not coordinator._pending_schedule_plan_states
+    assert not coordinator._pending_schedule_status_versions
+
+
+def test_cancelled_service_waits_for_write_reconciliation_and_releases_lock():
+    async def run():
+        client, _ = _peer()
+        coordinator = _coordinator(client)
+        dispatched, finish = asyncio.Event(), asyncio.Event()
+
+        async def writer(**kwargs):
+            dispatched.set()
+            await finish.wait()
+            return {"executed": False, "confirmed": True}
+
+        client.async_set_app_schedule_task_start_time = writer
+        task = asyncio.create_task(coordinator.async_set_schedule_task_start_time(
+            map_index=0, plan_id=0, week_day=2, task_index=0,
+            start=663, execute=True, confirm_write=True,
+        ))
+        await dispatched.wait()
+        task.cancel()
+        await asyncio.sleep(0)
+        assert coordinator._schedule_write_lock.locked()
+        assert not task.done()
+        finish.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        coordinator.async_update_listeners.assert_called()
+        assert not coordinator._schedule_write_lock.locked()
+
+    asyncio.run(run())
+
+
 def test_paused_unfinished_task_blocks_before_any_setter():
     client, peer = _peer()
     client._sync_update_device.return_value.task_resumable = True
@@ -200,11 +276,7 @@ def test_home_assistant_schema_preserves_whole_minute_time_and_sunday_index():
     assert parsed["execute"] is False and parsed["confirm_schedule_write"] is False
 
 
-@pytest.mark.parametrize("known_active", [False, True])
-def test_time_edit_shared_cache_preserves_readback_and_existing_active_ownership(
-    known_active,
-):
-    client, _ = _peer()
+def _coordinator(client, known_active=False):
     before = client._sync_get_app_schedules(
         include_raw=False, map_indices=[0], include_current_task=False
     )
@@ -227,6 +299,16 @@ def test_time_edit_shared_cache_preserves_readback_and_existing_active_ownership
     coordinator.schedules_refreshed_at = None
     coordinator.async_refresh_schedules = AsyncMock()
     coordinator.async_update_listeners = Mock()
+    return coordinator
+
+
+@pytest.mark.parametrize("known_active", [False, True])
+def test_time_edit_shared_cache_preserves_readback_and_existing_active_ownership(
+    known_active,
+):
+    client, _ = _peer()
+    coordinator = _coordinator(client, known_active)
+    before = deepcopy(coordinator.schedules)
     result = asyncio.run(
         coordinator.async_set_schedule_task_start_time(
             map_index=0,

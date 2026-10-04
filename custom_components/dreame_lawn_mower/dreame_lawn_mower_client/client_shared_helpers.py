@@ -77,9 +77,10 @@ def _ensure_app_write_succeeded(
     *,
     operation: str,
     allow_missing_data: bool = False,
+    require_inner_ack: bool = False,
 ) -> Any:
     """Require an explicit mower acknowledgement for a state-changing request."""
-    if not isinstance(value, Mapping) or value.get("r") is None:
+    if not isinstance(value, Mapping) or type(value.get("r")) is not int:
         raise DreameLawnMowerConnectionError(
             f"{operation} failed: the mower did not acknowledge the request."
         )
@@ -92,6 +93,14 @@ def _ensure_app_write_succeeded(
             f"{operation} failed: the mower did not acknowledge the request."
         )
     data = value.get("d")
+    if require_inner_ack and (
+        type(value["r"]) is not int
+        or not isinstance(data, Mapping)
+        or type(data.get("r")) is not int
+    ):
+        raise DreameLawnMowerConnectionError(
+            f"{operation} failed: the mower did not acknowledge the request."
+        )
     if isinstance(data, Mapping) and data.get("r") not in (None, 0):
         raise DreameLawnMowerCommandRejectedError(
             f"{operation} failed: the mower rejected the request."
