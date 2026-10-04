@@ -42,8 +42,10 @@ automatic `Schedule` calendar cannot establish active selection.
 
 Map calendars describe saved plans; they do not assert that the mower currently
 uses that map. Other maps and the default template are excluded. A valid empty
-schedule has no events; a missing or incomplete native schedule is unavailable.
-These calendars are read-only and do not start mowing or select a map.
+schedule has no events. A map calendar is unavailable when no complete native
+schedule is cached. Failed refreshes can retain the last validated saved plans
+until a successful read or cache invalidation. These calendars are read-only
+and do not start mowing or select a map.
 
 Tables and framed document tasks report start times without scheduled end times. Their calendar
 events are one-minute markers labelled **start**; that minute is a display

@@ -19,6 +19,9 @@ from custom_components.dreame_lawn_mower.calendar import (
     schedule_calendar_selection,
 )
 from custom_components.dreame_lawn_mower.const import DOMAIN
+from custom_components.dreame_lawn_mower.schedule_cache import (
+    merge_app_schedule_payload,
+)
 from dreame_lawn_mower_client import decode_schedule_payload_text
 from tests.test_schedule_documents import _frame
 
@@ -75,6 +78,21 @@ def test_map_calendar_renders_native_starts_without_active_selection() -> None:
     assert selection["native_schedule_available"] is True
     assert [schedule["idx"] for schedule in selection["included_schedules"]] == [0]
     assert payload == before
+
+    edited = {**_native_schedule(0, 663), "version": 43168}
+    refreshed = merge_app_schedule_payload(
+        payload, {"schedules": [edited]},
+        expected_indices=[-1, 0, 1],
+    )
+    edited_events = schedule_calendar_events(refreshed, start, end, map_index=0)
+    assert len(edited_events) == 7
+    assert all((event.start.hour, event.start.minute) == (11, 3)
+               for event in edited_events)
+    failed = merge_app_schedule_payload(
+        refreshed, {"schedules": [{"idx": 0, "error": "Timed out"}]},
+        expected_indices=[-1, 0, 1],
+    )
+    assert schedule_calendar_events(failed, start, end, map_index=0) == edited_events
 
 
 @pytest.mark.parametrize(
