@@ -627,10 +627,18 @@ def _schedule_write_notification(result: dict[str, Any]) -> tuple[str, str]:
         action = "Built dry-run"
 
     if result.get("action") == "set_schedule_task_start_time":
+        if (
+            result.get("confirmed")
+            and not result.get("dry_run")
+            and not result.get("executed")
+        ):
+            title = "Dreame Lawn Mower Schedule Unchanged"
+            action = "Verified unchanged"
+            change_text = "was already matched"
         message = (
             f"{action} start-time edit for {schedule_label} {plan_name}: "
             f"day={result.get('week_day')}, task={result.get('task_index')}, "
-            f"start={result.get('start')} minutes since midnight ({change_text}). "
+            f"start={result.get('start_time')} ({change_text}). "
             f"Native readback confirmed={result.get('confirmed', False)}."
         )
     elif result.get("action") == "upload_schedule_plans":

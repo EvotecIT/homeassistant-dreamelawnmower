@@ -1996,7 +1996,13 @@ class DreameLawnMowerCoordinator(
         try:
             return await asyncio.shield(operation)
         except asyncio.CancelledError:
-            await asyncio.gather(operation, return_exceptions=True)
+            drain = asyncio.gather(operation, return_exceptions=True)
+            while not drain.done():
+                try:
+                    await asyncio.shield(drain)
+                except asyncio.CancelledError:
+                    # Repeated caller cancellation must not reach the worker.
+                    continue
             raise
 
     async def _async_set_schedule_task_start_time(

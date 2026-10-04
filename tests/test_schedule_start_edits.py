@@ -224,7 +224,10 @@ def test_changed_readback_shape_after_upload_reconciles_coordinator_cache():
     assert not coordinator._pending_schedule_status_versions
 
 
-def test_cancelled_service_waits_for_write_reconciliation_and_releases_lock():
+@pytest.mark.parametrize("cancel_count", [1, 2])
+def test_cancelled_service_waits_for_write_reconciliation_and_releases_lock(
+    cancel_count,
+):
     async def run():
         client, _ = _peer()
         coordinator = _coordinator(client)
@@ -233,7 +236,7 @@ def test_cancelled_service_waits_for_write_reconciliation_and_releases_lock():
         async def writer(**kwargs):
             dispatched.set()
             await finish.wait()
-            return {"executed": False, "confirmed": True}
+            return _edit(client)
 
         client.async_set_app_schedule_task_start_time = writer
         task = asyncio.create_task(coordinator.async_set_schedule_task_start_time(
@@ -241,7 +244,9 @@ def test_cancelled_service_waits_for_write_reconciliation_and_releases_lock():
             start=663, execute=True, confirm_write=True,
         ))
         await dispatched.wait()
-        task.cancel()
+        for _ in range(cancel_count):
+            task.cancel()
+            await asyncio.sleep(0)
         await asyncio.sleep(0)
         assert coordinator._schedule_write_lock.locked()
         assert not task.done()
@@ -249,6 +254,7 @@ def test_cancelled_service_waits_for_write_reconciliation_and_releases_lock():
         with pytest.raises(asyncio.CancelledError):
             await task
         coordinator.async_update_listeners.assert_called()
+        coordinator.async_refresh_schedules.assert_awaited_once_with(force=True)
         assert not coordinator._schedule_write_lock.locked()
 
     asyncio.run(run())

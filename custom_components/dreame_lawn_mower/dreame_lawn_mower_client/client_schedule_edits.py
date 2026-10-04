@@ -110,6 +110,8 @@ class _DreameLawnMowerScheduleEditsMixin:
                 "task_index": task_index,
                 "previous_start": previous_start,
                 "start": start,
+                "start_time": f"{start // 60:02}:{start % 60:02}",
+                "target_plan": before["plans"][0],
                 "version": native["v"],
                 "schedule": before,
                 "request": {"sequence": requests},
