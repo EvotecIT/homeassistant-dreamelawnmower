@@ -12,6 +12,10 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from custom_components.dreame_lawn_mower.coordinator import DreameLawnMowerCoordinator
+from custom_components.dreame_lawn_mower.sensor_operations import (
+    _schedule_write_state,
+    schedule_write_result_attributes,
+)
 from custom_components.dreame_lawn_mower.services import (
     SET_SCHEDULE_TASK_START_TIME_SCHEMA,
 )
@@ -153,6 +157,11 @@ def test_dry_run_and_unchanged_target_send_no_physical_setter():
     assert not preview["executed"] and preview["changed"]
     matched = _edit(client, start=658)
     assert matched["confirmed"] and not matched["executed"]
+    assert _schedule_write_state(matched) == "unchanged"
+    attributes = schedule_write_result_attributes(matched)
+    assert attributes["confirmed"] is True
+    assert attributes["start_time"] == "10:58"
+    assert attributes["week_day"] == 2 and attributes["task_index"] == 0
     assert all(call["m"] == "g" for call in peer.calls)
 
 
