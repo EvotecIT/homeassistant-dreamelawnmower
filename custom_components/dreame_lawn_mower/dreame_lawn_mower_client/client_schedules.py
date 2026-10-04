@@ -263,6 +263,7 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
                     include_raw=include_raw,
                     deadline=deadline,
                     metadata_deadline=probe_deadline,
+                    reserve_generation=reserve_alternate,
                 )
                 if error is None:
                     result["protocol"] = protocol
@@ -289,8 +290,65 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
         include_raw: bool,
         deadline: float,
         metadata_deadline: float | None = None,
+        reserve_generation: bool = True,
     ) -> tuple[dict[str, Any], Exception | None]:
-        """Fetch one schedule slot within its assigned deadline."""
+        """Negotiate document generations without consuming the next slot's budget."""
+        preferred = self._schedule_document_versions.get(map_index, 2)
+        if not reserve_generation:
+            # Give slow metadata a full recovery window, rotating that window
+            # across generations after failure instead of repeatedly letting
+            # an unsupported generation consume it. A remembered generation
+            # already failed the first pass, so try its alternate first.
+            recovery_generation = preferred
+            if map_index in self._schedule_document_versions:
+                recovery_generation = 3 if preferred == 2 else 2
+            preferred = self._schedule_document_retry_versions.get(
+                map_index, recovery_generation
+            )
+        generations = [preferred, 3 if preferred == 2 else 2]
+        metadata_end = metadata_deadline if metadata_deadline is not None else deadline
+        errors: list[str] = []
+        for position, generation in enumerate(generations):
+            now = time.monotonic()
+            if now >= metadata_end:
+                break
+            probe_end = metadata_end
+            if reserve_generation and map_index not in self._schedule_document_versions:
+                probe_end = now + (metadata_end - now) / (len(generations) - position)
+            result, error = self._sync_get_document_schedule_generation(
+                map_index=map_index,
+                chunk_size=chunk_size,
+                include_raw=include_raw,
+                deadline=deadline,
+                metadata_deadline=probe_end,
+                generation=generation,
+            )
+            if error is None:
+                self._schedule_document_versions[map_index] = generation
+                self._schedule_document_retry_versions.pop(map_index, None)
+                result["document_version"] = generation
+                return result, None
+            errors.append(f"V{generation}: {error}")
+        if not reserve_generation:
+            self._schedule_document_retry_versions[map_index] = (
+                3 if preferred == 2 else 2
+            )
+        error = DreameLawnMowerConnectionError(
+            "; ".join(errors) or "Schedule read timed out."
+        )
+        return {"idx": map_index, "available": False, "error": str(error)}, error
+
+    def _sync_get_document_schedule_generation(
+        self,
+        *,
+        map_index: int,
+        chunk_size: int,
+        include_raw: bool,
+        deadline: float,
+        metadata_deadline: float,
+        generation: int,
+    ) -> tuple[dict[str, Any], Exception | None]:
+        """Read metadata and chunks from one internally consistent generation."""
         schedule_result: dict[str, Any] = {
             "idx": map_index,
             "label": "default" if map_index == -1 else f"map_{map_index}",
@@ -298,18 +356,16 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
         }
         try:
             info_result = self._sync_call_app_action(
-                {"m": "g", "t": "SCHDIV2", "d": {"i": map_index}},
+                {"m": "g", "t": f"SCHDIV{generation}", "d": {"i": map_index}},
                 retry_count=0,
                 timeout=SCHEDULE_READ_TIMEOUT_SECONDS,
-                deadline=metadata_deadline
-                if metadata_deadline is not None
-                else deadline,
+                deadline=metadata_deadline,
             )
             schedule_result["raw_info"] = _json_safe(info_result, max_depth=4)
             info = _app_action_data(info_result)
             if not isinstance(info, Mapping) or "l" not in info or "v" not in info:
                 raise DreameLawnMowerConnectionError(
-                    "SCHDIV2 returned invalid schedule metadata."
+                    f"SCHDIV{generation} returned invalid schedule metadata."
                 )
             size = _positive_int(info.get("l"))
             version = _positive_int(info.get("v"))
@@ -322,7 +378,8 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
                 or ("i" in info and info["i"] != map_index)
             ):
                 raise DreameLawnMowerConnectionError(
-                    "SCHDIV2 returned invalid schedule identity, size, or version."
+                    f"SCHDIV{generation} returned invalid schedule identity, "
+                    "size, or version."
                 )
             schedule_result["size"] = size
             schedule_result["version"] = version
@@ -335,6 +392,7 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
                 version=version,
                 chunk_size=chunk_size,
                 deadline=deadline,
+                document_version=generation,
             )
             plans = decode_schedule_payload_text(payload_text)
             schedule_result.update(
@@ -371,7 +429,9 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
                 "Schedule writes require confirm_write=True when execute=True."
             )
 
-        schedules = self._sync_get_app_schedules(map_indices=[map_index])
+        schedules = self._sync_get_app_schedules(
+            map_indices=[map_index], include_current_task=False
+        )
         if not schedules.get("schedules"):
             raise DreameLawnMowerConnectionError(
                 f"No schedule metadata returned for map index {map_index}."
@@ -416,6 +476,7 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
             map_index=map_index,
             version=version,
             plans=updated_plans,
+            document_version=schedule.get("document_version", 2),
         )
         target_enabled = bool(enabled)
         result: dict[str, Any] = {
@@ -470,7 +531,9 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
         if not isinstance(plans, Sequence) or isinstance(plans, str | bytes):
             raise ValueError("plans must be a sequence of schedule plan mappings.")
 
-        schedules = self._sync_get_app_schedules(map_indices=[map_index])
+        schedules = self._sync_get_app_schedules(
+            map_indices=[map_index], include_current_task=False
+        )
         if not schedules.get("schedules"):
             raise DreameLawnMowerConnectionError(
                 f"No schedule metadata returned for map index {map_index}."
@@ -490,6 +553,16 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
         if not isinstance(current_plans, list):
             raise DreameLawnMowerConnectionError(
                 f"No decoded schedule plans returned for map index {map_index}."
+            )
+
+        if schedule.get("document_version") == 3 or any(
+            plan.get("task_payload_format") == "framed"
+            for plan in current_plans
+            if isinstance(plan, Mapping)
+        ):
+            raise ValueError(
+                "Full plan upload is unavailable for V3/framed schedules. "
+                "Edit task times in the vendor app or use a Home Assistant schedule."
             )
 
         try:
@@ -586,6 +659,7 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
         version: int,
         chunk_size: int = SCHEDULE_CHUNK_SIZE,
         deadline: float | None = None,
+        document_version: int = 2,
     ) -> tuple[str, int, int]:
         chunks = bytearray()
         offset = 0
@@ -595,7 +669,7 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
             chunk_result = self._sync_call_app_action(
                 {
                     "m": "g",
-                    "t": "SCHDDV2",
+                    "t": f"SCHDDV{document_version}",
                     "d": {"s": offset, "l": request_size, "v": version},
                 },
                 retry_count=0,
@@ -605,18 +679,36 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
             data = _app_action_data(chunk_result)
             if not isinstance(data, Mapping) or "d" not in data:
                 raise DreameLawnMowerConnectionError(
-                    f"SCHDDV2 returned invalid chunk at offset {offset}."
+                    f"SCHDDV{document_version} returned invalid chunk "
+                    f"at offset {offset}."
                 )
             text = str(data.get("d") or "")
             encoded = text.encode("utf-8")
             returned_size = _positive_int(data.get("l"))
+            if any(
+                key in data
+                and (
+                    isinstance(data[key], bool) or _positive_int(data[key]) != expected
+                )
+                for key, expected in (("s", offset), ("v", version))
+            ):
+                raise DreameLawnMowerConnectionError(
+                    f"SCHDDV{document_version} returned a mismatched chunk identity."
+                )
+            if "l" in data and (
+                isinstance(data["l"], bool) or returned_size != len(encoded)
+            ):
+                raise DreameLawnMowerConnectionError(
+                    f"SCHDDV{document_version} returned an invalid chunk size."
+                )
             if not encoded:
                 raise DreameLawnMowerConnectionError(
-                    f"SCHDDV2 returned empty data at offset {offset}."
+                    f"SCHDDV{document_version} returned empty data at offset {offset}."
                 )
             if len(chunks) + len(encoded) > size:
                 raise DreameLawnMowerConnectionError(
-                    f"SCHDDV2 returned too much data at offset {offset}."
+                    f"SCHDDV{document_version} returned too much data "
+                    f"at offset {offset}."
                 )
             chunks.extend(encoded)
             offset += returned_size if returned_size else len(encoded)

@@ -221,7 +221,7 @@ def test_batch_schedule_does_not_publish_unsupported_task_data() -> None:
     assert "active_schedule_version" not in result
     assert "plans" not in result["schedules"][0]
     assert result["errors"][0]["stage"] == "schedule"
-    assert "weekday" in result["schedules"][0]["error"]
+    assert "marker" in result["schedules"][0]["error"]
 
 
 def test_decode_batch_mowing_preferences_decodes_map_settings() -> None:

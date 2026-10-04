@@ -28,6 +28,9 @@ SCHEDULE_WEEKDAY_NAMES = {
 }
 
 _CYCLIC_TASK_OFFSET = 8
+_FRAMED_TASK_START = 0xAA
+_FRAMED_TASK_END = 0xED
+_FRAMED_TASK_MINIMUM_LENGTH = 7
 
 
 def minute_text(value: int | None) -> str | None:
@@ -68,7 +71,10 @@ def decode_schedule_plans(raw_plans: list[Any]) -> list[dict[str, Any]]:
             "weeks": [],
         }
         if len(raw_plan) > 3 and raw_plan[3]:
-            plan["weeks"] = decode_schedule_week_payload(str(raw_plan[3]))
+            data = _schedule_task_bytes(str(raw_plan[3]))
+            plan["weeks"] = _decode_schedule_task_data(data)
+            if data and data[0] == _FRAMED_TASK_START:
+                plan["task_payload_format"] = "framed"
         plans.append(plan)
     return plans
 
@@ -77,6 +83,8 @@ def encode_schedule_plans(plans: list[Mapping[str, Any]]) -> list[list[Any]]:
     """Encode readable schedule plans into the app action protocol shape."""
     raw_plans: list[list[Any]] = []
     for plan in plans:
+        if plan.get("task_payload_format") == "framed":
+            raise ValueError("Full plan upload is unavailable for framed schedules.")
         enabled = 1 if plan.get("enabled") else 0
         raw_plan = [
             _required_int(plan.get("plan_id"), "plan_id"),
@@ -92,10 +100,19 @@ def encode_schedule_plans(plans: list[Mapping[str, Any]]) -> list[list[Any]]:
 
 def decode_schedule_week_payload(payload: str) -> list[dict[str, Any]]:
     """Decode the base64 per-week schedule task payload used by the app."""
+    return _decode_schedule_task_data(_schedule_task_bytes(payload))
+
+
+def _schedule_task_bytes(payload: str) -> list[int]:
     try:
-        data = list(base64.b64decode(payload, validate=True))
+        return list(base64.b64decode(payload, validate=True))
     except (binascii.Error, ValueError) as err:
         raise ValueError("Schedule task payload is not valid base64.") from err
+
+
+def _decode_schedule_task_data(data: list[int]) -> list[dict[str, Any]]:
+    if data and data[0] == _FRAMED_TASK_START:
+        return _decode_framed_schedule_tasks(data)
     index = 0
     tasks_by_week: dict[int, list[dict[str, Any]]] = {}
 
@@ -150,6 +167,56 @@ def decode_schedule_week_payload(payload: str) -> list[dict[str, Any]]:
             "tasks": tasks,
         }
         for week_day, tasks in sorted(tasks_by_week.items())
+    ]
+
+
+def _decode_framed_schedule_tasks(data: list[int]) -> list[dict[str, Any]]:
+    """Read length-delimited app tasks without inferring an unreported end time."""
+    weeks: dict[int, list[dict[str, Any]]] = {}
+    offset = 0
+    while offset < len(data):
+        if len(data) - offset < _FRAMED_TASK_MINIMUM_LENGTH:
+            raise ValueError("Framed schedule task header is truncated.")
+        if data[offset] != _FRAMED_TASK_START:
+            raise ValueError("Framed schedule task start marker is invalid.")
+        length = data[offset + 1]
+        end = offset + length
+        if length < _FRAMED_TASK_MINIMUM_LENGTH or end > len(data):
+            raise ValueError("Framed schedule task length is invalid.")
+        if data[end - 1] != _FRAMED_TASK_END:
+            raise ValueError("Framed schedule task end marker is invalid.")
+        day_and_type = data[offset + 2]
+        day = day_and_type >> 4
+        if day not in SCHEDULE_WEEKDAY_NAMES:
+            raise ValueError("Unsupported schedule task weekday.")
+        encoded_type = day_and_type & 0x0F
+        task_type = encoded_type % _CYCLIC_TASK_OFFSET
+        start = _read_12_bit(data[offset + 3], data[offset + 4], low_first=True)
+        _validate_schedule_minute(start, "start")
+        elements = data[offset + 6 : end - 1]
+        if task_type in (2, 3) and len(elements) % 2:
+            raise ValueError("Edge/cruise schedule regions must contain pairs.")
+        weeks.setdefault(day, []).append(
+            {
+                "type": task_type,
+                "type_name": SCHEDULE_TASK_TYPE_NAMES.get(
+                    task_type, f"unknown_{task_type}"
+                ),
+                "cyclic": encoded_type >= _CYCLIC_TASK_OFFSET,
+                "start": start,
+                "start_time": minute_text(start),
+                "end": None,
+                "end_time": None,
+                "real_end": None,
+                "real_end_time": None,
+                "timing": "start_only",
+                "regions": _decode_regions(task_type, elements),
+            }
+        )
+        offset = end
+    return [
+        {"week_day": day, "week_day_name": SCHEDULE_WEEKDAY_NAMES[day], "tasks": tasks}
+        for day, tasks in sorted(weeks.items())
     ]
 
 
@@ -219,11 +286,14 @@ def build_schedule_enable_status_request(
     map_index: int,
     version: int,
     plans: Sequence[Mapping[str, Any]],
+    document_version: int = 2,
 ) -> dict[str, Any]:
     """Build the app action request that toggles schedule plan enabled flags."""
+    if document_version not in (2, 3):
+        raise ValueError("Unsupported schedule document generation.")
     return {
         "m": "s",
-        "t": "SCHDSV2",
+        "t": f"SCHDSV{document_version}",
         "d": {
             "i": int(map_index),
             "v": int(version),

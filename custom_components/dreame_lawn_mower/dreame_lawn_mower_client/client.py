@@ -551,6 +551,8 @@ class DreameLawnMowerClient(
         self._device_ownership_lock = _threading.Lock()
         self._schedule_operation_lock = _threading.RLock()
         self._schedule_protocols: dict[int, str] = {}
+        self._schedule_document_versions: dict[int, int] = {}
+        self._schedule_document_retry_versions: dict[int, int] = {}
         self._closing = False
         self._update_callback: _typing.Callable[[], None] | None = None
         self._latest_snapshot: DreameLawnMowerSnapshot | None = None

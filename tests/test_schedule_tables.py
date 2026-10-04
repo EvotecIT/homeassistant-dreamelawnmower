@@ -344,7 +344,7 @@ def test_document_timeout_still_probes_tables_and_remembers_the_supported_protoc
     monkeypatch.setattr(module["time"], "monotonic", lambda: clock[0])
     result = client._sync_get_app_schedules(map_indices=[2], include_current_task=False)
     assert result["schedules"][0]["protocol"] == "tables"
-    assert [call["t"] for call in cloud.calls] == ["SCHDIV2", "SCHDI"]
+    assert [call["t"] for call in cloud.calls] == ["SCHDIV2", "SCHDIV3", "SCHDI"]
     cloud.calls.clear()
     client._sync_get_app_schedules(map_indices=[2], include_current_task=False)
     assert [call["t"] for call in cloud.calls] == ["SCHDI"]
