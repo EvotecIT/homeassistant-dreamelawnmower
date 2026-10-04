@@ -314,11 +314,14 @@ def build_schedule_enable_status_request(
     map_index: int,
     version: int,
     plans: Sequence[Mapping[str, Any]],
+    document_version: int = 2,
 ) -> dict[str, Any]:
-    """Build the qualified status command independently of document getters."""
+    """Build the qualified status command for a supported document generation."""
+    if type(document_version) is not int or document_version not in (2, 3):
+        raise ValueError("Schedule status writes require document version 2 or 3.")
     return {
         "m": "s",
-        "t": "SCHDSV2",
+        "t": f"SCHDSV{document_version}",
         "d": {
             "i": int(map_index),
             "v": int(version),

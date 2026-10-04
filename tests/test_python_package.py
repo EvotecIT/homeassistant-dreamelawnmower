@@ -256,6 +256,12 @@ def test_public_package_exports_schedule_helpers() -> None:
         version=123,
         plans=plans,
     ) == {"m": "s", "t": "SCHDSV2", "d": {"i": 0, "v": 123, "s": [1]}}
+    assert build_schedule_enable_status_request(
+        map_index=0,
+        version=123,
+        plans=plans,
+        document_version=3,
+    ) == {"m": "s", "t": "SCHDSV3", "d": {"i": 0, "v": 123, "s": [1]}}
     assert build_schedule_upload_requests(
         map_index=0,
         payload_text='{"d":[]}',

@@ -490,6 +490,7 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
             map_index=map_index,
             version=version,
             plans=updated_plans,
+            document_version=schedule.get("document_version", 2),
         )
         target_enabled = bool(enabled)
         result: dict[str, Any] = {
