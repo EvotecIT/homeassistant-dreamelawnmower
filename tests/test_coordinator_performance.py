@@ -1043,7 +1043,7 @@ def test_schedule_refresh_reads_inactive_maps_instead_of_batch_fast_path() -> No
     )
 
 
-def test_initial_single_map_schedule_refresh_keeps_default_app_schedule() -> None:
+def test_initial_refresh_keeps_default_and_rejects_conflicting_batch_hint() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator.schedules = None
     coordinator.schedules_refreshed_at = None
@@ -1080,7 +1080,8 @@ def test_initial_single_map_schedule_refresh_keeps_default_app_schedule() -> Non
 
     result = asyncio.run(coordinator.async_refresh_schedules())
 
-    assert result["active_schedule_version"] == 10
+    assert result["active_selection_available"] is False
+    assert "active_schedule_version" not in result
     assert [schedule["idx"] for schedule in result["schedules"]] == [-1, 2]
     coordinator.client.async_get_batch_schedules.assert_awaited_once_with(
         include_raw=False,
@@ -1982,7 +1983,7 @@ def test_schedule_refresh_hides_stale_selection_for_unhinted_batch_version() -> 
     assert [schedule["version"] for schedule in result["schedules"]] == [20, 21]
 
 
-def test_schedule_refresh_accepts_newer_batch_version_for_known_hinted_map() -> None:
+def test_schedule_refresh_keeps_native_document_on_conflicting_batch_hint() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator.schedules = {
         "source": "app_action_schedule_with_batch_refresh",
@@ -2036,7 +2037,7 @@ def test_schedule_refresh_accepts_newer_batch_version_for_known_hinted_map() -> 
         ],
         "errors": [],
     }
-    newer_batch = {
+    conflicting_batch = {
         "source": "batch_device_data_schedule",
         "available": True,
         "active_schedule_version": 22,
@@ -2053,21 +2054,20 @@ def test_schedule_refresh_accepts_newer_batch_version_for_known_hinted_map() -> 
     }
     coordinator.client = SimpleNamespace(
         async_get_app_schedules=AsyncMock(return_value=incoming),
-        async_get_batch_schedules=AsyncMock(return_value=newer_batch),
+        async_get_batch_schedules=AsyncMock(return_value=conflicting_batch),
     )
 
     result = asyncio.run(coordinator.async_refresh_schedules(force=True))
 
-    assert result["active_schedule_version"] == 22
-    assert result["active_schedule_index"] == 1
-    assert result["active_selection_available"] is True
+    assert "active_schedule_version" not in result
+    assert result["active_selection_available"] is False
     assert [schedule["version"] for schedule in result["schedules"]] == [
         20,
         22,
-        22,
+        21,
     ]
     assert result["schedules"][1]["plans"] == [{"plan_id": 7}]
-    assert result["schedules"][2]["plans"] == [{"plan_id": 9}]
+    assert result["schedules"][2]["plans"] == [{"plan_id": 1}]
 
 
 def test_partial_schedule_read_honors_validated_selected_map_hint() -> None:

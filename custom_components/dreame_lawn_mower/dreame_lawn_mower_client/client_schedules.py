@@ -524,6 +524,10 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
             result["executed"] = True
             result["response"] = _json_safe(response, max_depth=4)
             result["response_data"] = _json_safe(response_data, max_depth=4)
+            result["acknowledged_plan_states"] = [
+                {"plan_id": plan["plan_id"], "enabled": bool(plan.get("enabled"))}
+                for plan in updated_plans
+            ]
             acknowledged_version = (
                 response_data.get("v") if isinstance(response_data, Mapping) else None
             )

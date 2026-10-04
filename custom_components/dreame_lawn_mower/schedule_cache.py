@@ -498,7 +498,7 @@ def merge_batch_schedule_payload(
     confirmed_indices = set(confirmed_version_indices)
     if (
         not hinted_index_is_valid
-        and confirmed_indices
+        and (confirmed_indices or preserved_indices)
         and not any(
             isinstance(schedule.get("idx"), int)
             and not isinstance(schedule.get("idx"), bool)
@@ -511,7 +511,7 @@ def merge_batch_schedule_payload(
     effective_index = (
         hinted_index if hinted_index_is_valid else existing.get("active_schedule_index")
     )
-    if effective_index in confirmed_indices:
+    if effective_index in confirmed_indices | preserved_indices:
         authoritative_schedule = next(
             (
                 schedule

@@ -920,6 +920,10 @@ def test_schedule_status_result_reports_the_acknowledged_document_version() -> N
     assert result["request"]["d"]["v"] == 19383
     assert result["schedule"]["version"] == 19383
     assert result["version"] == 62089
+    assert result["acknowledged_plan_states"] == [
+        {"plan_id": 0, "enabled": True},
+        {"plan_id": 1, "enabled": True},
+    ]
 
 
 def test_set_app_schedule_plan_enabled_rejects_failed_write_response() -> None:

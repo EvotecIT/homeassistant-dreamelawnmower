@@ -1233,7 +1233,17 @@ class DreameLawnMowerCoordinator(
                 if allowed_hint_indices is not None
                 else ([] if allow_incomplete else [-1, *known_map_indices])
             ),
-            preserve_indices=preserve_indices,
+            preserve_indices=[
+                *preserve_indices,
+                *(
+                    schedule["idx"]
+                    for schedule in self.schedules.get("schedules", [])
+                    if isinstance(schedule, Mapping)
+                    and schedule.get("protocol") == "document"
+                    and schedule.get("read_status") == "complete"
+                    and type(schedule.get("idx")) is int
+                ),
+            ],
             confirmed_version_indices=list(
                 getattr(self, "_pending_schedule_status_versions", {})
             ),
@@ -1334,6 +1344,23 @@ class DreameLawnMowerCoordinator(
             if pending_states is None:
                 pending_states = {}
                 self._pending_schedule_plan_states = pending_states
+            plan_states = {
+                state["plan_id"]: state["enabled"]
+                for state in result.get("acknowledged_plan_states", [])
+                if isinstance(state, Mapping)
+                and type(state.get("plan_id")) is int
+                and isinstance(state.get("enabled"), bool)
+            }
+            if plan_states:
+                # The status command acknowledges the complete flag vector.
+                # Older per-plan ACKs no longer describe this document.
+                for key in tuple(pending_states):
+                    if key[0] == map_index:
+                        pending_states.pop(key)
+                for acknowledged_id, acknowledged_enabled in plan_states.items():
+                    pending_states[(map_index, acknowledged_id)] = (
+                        schedule_version, acknowledged_enabled
+                    )
             pending_states[(map_index, plan_id)] = (
                 schedule_version,
                 bool(enabled),
@@ -1348,7 +1375,9 @@ class DreameLawnMowerCoordinator(
                 self._pending_schedule_plan_state_contradictions = (
                     pending_contradictions
                 )
-            pending_contradictions.pop((map_index, plan_id), None)
+            for key in tuple(pending_contradictions):
+                if key[0] == map_index:
+                    pending_contradictions.pop(key)
             confirmed_schedule = result.get("confirmed_schedule")
             if result.get("confirmed") and isinstance(confirmed_schedule, Mapping):
                 self.schedules = merge_app_schedule_payload(
@@ -1367,6 +1396,7 @@ class DreameLawnMowerCoordinator(
                 enabled=enabled,
                 schedule_version=schedule_version,
                 previous_version=previous_version,
+                plan_states=plan_states,
             )
             try:
                 await self.async_refresh_schedules(force=True)
@@ -1384,6 +1414,7 @@ class DreameLawnMowerCoordinator(
         enabled: bool,
         schedule_version: int | None = None,
         previous_version: int | None = None,
+        plan_states: Mapping[int, bool] | None = None,
     ) -> None:
         """Apply a confirmed schedule write to the shared cache."""
         schedules = (
@@ -1421,6 +1452,10 @@ class DreameLawnMowerCoordinator(
             plans = schedule.get("plans")
             if not isinstance(plans, list):
                 return
+            if plan_states:
+                for plan in plans:
+                    if isinstance(plan, dict) and plan.get("plan_id") in plan_states:
+                        plan["enabled"] = plan_states[plan["plan_id"]]
             for plan in plans:
                 if isinstance(plan, dict) and plan.get("plan_id") == plan_id:
                     plan["enabled"] = enabled
@@ -1574,7 +1609,11 @@ class DreameLawnMowerCoordinator(
                         self, "_pending_schedule_status_versions", {}
                     ):
                         continue
-                    schedule["version"] = version
+                    # A map's latest acknowledgement governs its checksum,
+                    # independently of older pending plan insertion order.
+                    schedule["version"] = getattr(
+                        self, "_pending_schedule_status_versions", {}
+                    )[map_index][0]
                     if self.schedules.get("active_schedule_index") == map_index:
                         self.schedules["active_selection_available"] = False
                 plans = schedule.get("plans")

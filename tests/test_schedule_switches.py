@@ -489,6 +489,95 @@ def test_changed_status_checksum_yields_to_repeated_native_external_changes() ->
     assert schedule_plan_entries(coordinator.schedules)[0]["version"] == 23416
 
 
+def test_successive_plan_toggles_keep_the_latest_acknowledged_vector() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._schedule_write_lock = asyncio.Lock()
+    coordinator.schedules_refreshed_at = None
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {"current_map_index": 0, "maps": [{"idx": 0}]}
+    coordinator.async_update_listeners = Mock()
+    coordinator.schedules = {
+        "schedules": [{
+            "idx": 0, "version": 1, "available": True,
+            "plans": [
+                {"plan_id": 0, "enabled": True},
+                {"plan_id": 1, "enabled": True},
+            ],
+        }]
+    }
+    results = [
+        {
+            "executed": True, "version": version,
+            "schedule": {"version": version - 1},
+            "acknowledged_plan_states": [
+                {"plan_id": 0, "enabled": flags[0]},
+                {"plan_id": 1, "enabled": flags[1]},
+            ],
+        }
+        for version, flags in [
+            (2, [False, True]), (3, [False, False]), (4, [True, False])
+        ]
+    ]
+    coordinator.client = SimpleNamespace(
+        async_set_app_schedule_plan_enabled=AsyncMock(side_effect=results),
+        async_get_app_schedules=AsyncMock(return_value={"schedules": [], "errors": []}),
+        async_get_batch_schedules=AsyncMock(
+            return_value={"schedules": [], "errors": []}
+        ),
+    )
+    for plan_id, enabled in [(0, False), (1, False), (0, True)]:
+        asyncio.run(coordinator.async_set_schedule_plan_enabled(
+            map_index=0, plan_id=plan_id, enabled=enabled
+        ))
+    entries = schedule_plan_entries(coordinator.schedules)
+    assert [entry["enabled"] for entry in entries] == [True, False]
+    assert [entry["version"] for entry in entries] == [4, 4]
+    assert coordinator._pending_schedule_plan_states == {
+        (0, 0): (4, True), (0, 1): (4, False)
+    }
+
+
+def test_native_vendor_edit_survives_stale_batch_after_ack_guard_retires() -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator.schedules_refreshed_at = None
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {
+        "current_map_index": 0, "map_list_valid": True,
+        "maps": [{"idx": 0, "created": True}],
+    }
+    coordinator.app_maps_refresh_succeeded = True
+    coordinator._pending_schedule_status_versions = {0: (20, 0)}
+    old = {
+        "idx": 0, "available": True, "version": 20,
+        "protocol": "document", "read_status": "complete",
+        "plans": [{"plan_id": 0, "enabled": False, "name": "Before edit"}],
+    }
+    edited = {
+        **old, "version": 30,
+        "plans": [{"plan_id": 0, "enabled": False, "name": "Vendor edit"}],
+    }
+    coordinator.schedules = {"schedules": [deepcopy(old)]}
+    coordinator.client = SimpleNamespace(
+        async_get_app_schedules=AsyncMock(return_value={
+            "schedules": [edited], "errors": []
+        }),
+        async_get_batch_schedules=AsyncMock(return_value={
+            "schedules": [old], "errors": []
+        }),
+    )
+    for _ in range(2):
+        asyncio.run(coordinator.async_refresh_schedules(force=True))
+        entries = schedule_plan_entries(coordinator.schedules)
+        assert entries[0]["name"] == "Vendor edit"
+        assert entries[0]["version"] == 30
+    assert coordinator._pending_schedule_status_versions == {}
+    assert coordinator._cache_batch_schedules(
+        coordinator.client.async_get_batch_schedules.return_value,
+        now=datetime.now(UTC), allow_incomplete=True, allowed_hint_indices=[0],
+    ) is False
+    assert schedule_plan_entries(coordinator.schedules)[0]["name"] == "Vendor edit"
+
+
 def test_pending_toggle_does_not_mutate_ambiguous_active_fallback() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator._pending_schedule_plan_states = {(0, 1): (8, True)}
