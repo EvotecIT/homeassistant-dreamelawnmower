@@ -9,7 +9,7 @@ from typing import Any
 
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
@@ -19,6 +19,7 @@ from .coordinator import DreameLawnMowerCoordinator
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
 from .entity import DreameLawnMowerEntity
+from .schedule_cache import schedule_entry_has_usable_data
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,6 +39,26 @@ async def async_setup_entry(
             DreameLawnMowerAllSchedulesCalendar(coordinator),
         ]
     )
+    known_map_indices: set[int] = set()
+
+    @callback
+    def async_add_map_calendars() -> None:
+        new_entities = []
+        for schedule in (coordinator.schedules or {}).get("schedules") or []:
+            if not _is_native_map_schedule(schedule):
+                continue
+            map_index = schedule["idx"]
+            if map_index in known_map_indices:
+                continue
+            known_map_indices.add(map_index)
+            new_entities.append(
+                DreameLawnMowerMapScheduleCalendar(coordinator, map_index)
+            )
+        if new_entities:
+            async_add_entities(new_entities)
+
+    async_add_map_calendars()
+    entry.async_on_unload(coordinator.async_add_listener(async_add_map_calendars))
 
 
 class DreameLawnMowerScheduleCalendar(DreameLawnMowerEntity, CalendarEntity):
@@ -47,6 +68,7 @@ class DreameLawnMowerScheduleCalendar(DreameLawnMowerEntity, CalendarEntity):
     _attr_icon = "mdi:calendar-clock"
     _include_all_schedules = False
     _unique_id_suffix = "schedule_calendar"
+    _map_index: int | None = None
 
     def __init__(self, coordinator: DreameLawnMowerCoordinator) -> None:
         super().__init__(coordinator)
@@ -104,6 +126,7 @@ class DreameLawnMowerScheduleCalendar(DreameLawnMowerEntity, CalendarEntity):
         self._cached_selection = schedule_calendar_selection(
             payload,
             include_all_schedules=self._include_all_schedules,
+            map_index=self._map_index,
         )
         events = schedule_calendar_events(
             payload,
@@ -111,6 +134,7 @@ class DreameLawnMowerScheduleCalendar(DreameLawnMowerEntity, CalendarEntity):
             start + timedelta(days=SCHEDULE_LOOKAHEAD_DAYS),
             include_all_schedules=self._include_all_schedules,
             mower_name=self._descriptor.name,
+            map_index=self._map_index,
         )
         self._cached_event_count = len(events)
         self._cached_event = events[0] if events else None
@@ -142,6 +166,7 @@ class DreameLawnMowerScheduleCalendar(DreameLawnMowerEntity, CalendarEntity):
         self._cached_selection = schedule_calendar_selection(
             payload,
             include_all_schedules=self._include_all_schedules,
+            map_index=self._map_index,
         )
         events = schedule_calendar_events(
             payload,
@@ -149,6 +174,7 @@ class DreameLawnMowerScheduleCalendar(DreameLawnMowerEntity, CalendarEntity):
             end_date,
             include_all_schedules=self._include_all_schedules,
             mower_name=self._descriptor.name,
+            map_index=self._map_index,
         )
         self._cached_event_count = len(events)
         self._cached_event = events[0] if events else None
@@ -166,6 +192,53 @@ class DreameLawnMowerAllSchedulesCalendar(DreameLawnMowerScheduleCalendar):
     _unique_id_suffix = "all_schedules_calendar"
 
 
+class DreameLawnMowerMapScheduleCalendar(DreameLawnMowerScheduleCalendar):
+    """Read the saved plans of one map without claiming it is the active map."""
+
+    def __init__(self, coordinator: DreameLawnMowerCoordinator, map_index: int) -> None:
+        self._map_index = map_index
+        self._unique_id_suffix = f"map_{map_index}_schedule_calendar"
+        super().__init__(coordinator)
+        self._attr_name = f"Map {map_index} Schedule"
+
+    @property
+    def available(self) -> bool:
+        """Distinguish a missing native document from a valid empty schedule."""
+        return super().available and bool(
+            _map_calendar_payload(self.coordinator.schedules or {}, self._map_index)[
+                "active_selection_available"
+            ]
+        )
+
+
+def _is_native_map_schedule(schedule: Any) -> bool:
+    """Exclude default templates, cloud hints, and failed or incomplete reads."""
+    return (
+        isinstance(schedule, Mapping)
+        and isinstance(schedule.get("idx"), int)
+        and not isinstance(schedule.get("idx"), bool)
+        and schedule["idx"] >= 0
+        and schedule.get("protocol") in {"document", "tables"}
+        and schedule.get("read_status") == "complete"
+        and schedule_entry_has_usable_data(schedule)
+    )
+
+
+def _map_calendar_payload(payload: Mapping[str, Any], map_index: int) -> dict[str, Any]:
+    """Scope native content before using the shared event renderer."""
+    schedules = [
+        schedule
+        for schedule in payload.get("schedules") or []
+        if _is_native_map_schedule(schedule) and schedule["idx"] == map_index
+    ]
+    usable = len(schedules) == 1
+    return {
+        "schedules": schedules if usable else [],
+        "active_selection_available": usable,
+        "active_schedule_index": map_index,
+    }
+
+
 def schedule_calendar_events(
     payload: Mapping[str, Any],
     start_date: datetime,
@@ -173,8 +246,12 @@ def schedule_calendar_events(
     *,
     include_all_schedules: bool = False,
     mower_name: str | None = None,
+    map_index: int | None = None,
 ) -> list[CalendarEvent]:
     """Build Home Assistant calendar events from decoded app schedule data."""
+    if map_index is not None:
+        payload = _map_calendar_payload(payload, map_index)
+        include_all_schedules = False
     local_start = _as_local(start_date)
     local_end = _as_local(end_date)
     if local_end <= local_start:
@@ -229,8 +306,12 @@ def schedule_calendar_selection(
     payload: Mapping[str, Any],
     *,
     include_all_schedules: bool = False,
+    map_index: int | None = None,
 ) -> dict[str, Any]:
     """Return why schedule slots are included or hidden by the calendar."""
+    if map_index is not None:
+        payload = _map_calendar_payload(payload, map_index)
+        include_all_schedules = False
     schedules = [
         schedule
         for schedule in payload.get("schedules") or []
@@ -280,6 +361,18 @@ def schedule_calendar_selection(
     current_task = payload.get("current_task")
     if isinstance(current_task, Mapping):
         selection["current_task"] = dict(current_task)
+    if map_index is not None:
+        selection["mode"] = "map_schedule"
+        selection["map_index"] = map_index
+        selection["native_schedule_available"] = active_selection_available
+        # A saved map's plans do not establish the mower's active document.
+        for key in (
+            "active_version",
+            "active_version_filter_applied",
+            "active_index",
+            "active_selection_available",
+        ):
+            selection.pop(key, None)
     return selection
 
 
