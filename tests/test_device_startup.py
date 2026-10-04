@@ -98,7 +98,10 @@ def test_bounded_update_skips_reconnection_and_attempts_http_readback() -> None:
 
     mower.connect_cloud.assert_not_called()
     mower.connect_device.assert_not_called()
-    assert mower._request_properties.call_args.kwargs == {"deadline": 123.0}
+    assert mower._request_properties.call_args.kwargs == {
+        "deadline": 123.0,
+        "require_fresh_state": True,
+    }
 
 
 def test_background_map_failure_still_schedules_next_refresh(monkeypatch) -> None:
@@ -118,6 +121,13 @@ def test_background_map_failure_still_schedules_next_refresh(monkeypatch) -> Non
 
     update_timer.cancel.assert_called_once_with()
     manager.schedule_update.assert_called_once_with(29.0)
+
+
+def test_authoritative_read_does_not_silently_skip_a_busy_device_update():
+    mower = SimpleNamespace(_update_running=True, _update_interval=10)
+    with pytest.raises(DeviceUpdateFailedException, match="another update"):
+        DreameMowerDevice.update(mower, force_request_properties=True)
+    assert DreameMowerDevice.update(mower) is None
 
 
 def test_disconnect_quiesces_map_before_protocol_teardown() -> None:

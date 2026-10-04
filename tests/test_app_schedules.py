@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from threading import RLock
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -17,8 +18,15 @@ from dreame_lawn_mower_client import (
     decode_schedule_payload_text,
     encode_schedule_payload_text,
 )
+from dreame_lawn_mower_client._loader import load_internal_module
 from dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
 from dreame_lawn_mower_client.schedule import decode_schedule_week_payload
+
+DreameMowerDevice = load_internal_module("device").DreameMowerDevice
+DreameMowerProperty = load_internal_module("device_types").DreameMowerProperty
+DreameMowerPropertyMapping = load_internal_module(
+    "device_types"
+).DreameMowerPropertyMapping
 
 
 class _FakeAppScheduleCloud:
@@ -229,6 +237,207 @@ def test_fresh_task_read_failure_prevents_schedule_dispatch():
             )
         )
     assert all(request["m"] == "g" for request in cloud.calls)
+
+
+@pytest.mark.parametrize("upload", [False, True])
+@pytest.mark.parametrize(
+    "failure", ["none", "empty", "missing", "rejected", "duplicate"]
+)
+def test_failed_property_read_cannot_reuse_cached_idle_for_schedule_write(
+    upload, failure
+):
+    client = _client()
+    cloud = _FakeAppScheduleCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+    required = [
+        DreameMowerProperty.STATE,
+        DreameMowerProperty.STATUS,
+        DreameMowerProperty.TASK_STATUS,
+        DreameMowerProperty.CLEANING_PAUSED,
+    ]
+    rows = [
+        {
+            "did": str(prop.value),
+            **DreameMowerPropertyMapping[prop],
+            "code": 0,
+            "value": 0,
+        }
+        for prop in required
+    ]
+    if failure == "none":
+        rows = None
+    elif failure == "empty":
+        rows = []
+    elif failure == "missing":
+        rows.pop()
+    elif failure == "rejected":
+        rows[-1]["code"] = -1
+    elif failure == "duplicate":
+        rows.append(dict(rows[-1]))
+    cached_data = {prop.value: 0 for prop in required}
+    device = SimpleNamespace(
+        _update_running=False,
+        _update_interval=10,
+        available=True,
+        cloud_connected=True,
+        device_connected=True,
+        capability=SimpleNamespace(backup_map=False),
+        status=SimpleNamespace(active=False),
+        _consumable_change=False,
+        _last_settings_request=10**20,
+        _map_manager=None,
+        _ready=True,
+        data=cached_data,
+        property_mapping=DreameMowerPropertyMapping,
+        _protocol=SimpleNamespace(
+            dreame_cloud=True, get_properties=Mock(return_value=rows)
+        ),
+        _handle_properties=Mock(),
+    )
+    device._request_properties = lambda *args, **kwargs: (
+        DreameMowerDevice._request_properties(device, *args, **kwargs)
+    )
+    device.update = lambda **kwargs: DreameMowerDevice.update(device, **kwargs)
+    client._ensure_device = lambda: device
+    client._sync_update_device = lambda **kwargs: (
+        DreameLawnMowerClient._sync_update_device(client, **kwargs)
+    )
+    client._snapshot_from_device = Mock(
+        return_value=SimpleNamespace(
+            available=True,
+            activity="docked",
+            state="idle",
+            mowing_session_active=False,
+            task_resumable=False,
+        )
+    )
+    plans = decode_schedule_payload_text(cloud.payloads[0]["text"])
+    call = (
+        client.async_plan_app_schedule_upload(
+            map_index=0, plans=plans, execute=True, confirm_write=True
+        )
+        if upload
+        else client.async_set_app_schedule_plan_enabled(
+            map_index=0, plan_id=1, enabled=True, execute=True, confirm_write=True
+        )
+    )
+    with pytest.raises(
+        DreameLawnMowerConnectionError, match="Fresh mower task properties"
+    ):
+        asyncio.run(call)
+    client._snapshot_from_device.assert_not_called()
+    device._handle_properties.assert_not_called()
+    assert device.data is cached_data and device.available is True
+    assert all(request["m"] == "g" for request in cloud.calls)
+
+
+def test_unchanged_fresh_properties_accept_unknown_optional_fields():
+    required = [
+        DreameMowerProperty.STATE,
+        DreameMowerProperty.STATUS,
+        DreameMowerProperty.TASK_STATUS,
+        DreameMowerProperty.CLEANING_PAUSED,
+    ]
+    rows = [
+        {
+            "did": str(prop.value),
+            **DreameMowerPropertyMapping[prop],
+            "code": 0,
+            "value": 0,
+        }
+        for prop in required
+    ]
+    rows.append({"did": "9999", "code": -1})
+    device = SimpleNamespace(
+        _ready=True,
+        data={},
+        _state_lock=RLock(),
+        property_mapping=DreameMowerPropertyMapping,
+        _protocol=SimpleNamespace(get_properties=Mock(return_value=rows)),
+        _handle_properties=Mock(return_value=False),
+    )
+    assert (
+        DreameMowerDevice._request_properties(
+            device, required, require_fresh_state=True
+        )
+        is False
+    )
+    device._handle_properties.assert_called_once_with(rows)
+    assert len(device._protocol.get_properties.call_args.args[0]) == 5
+
+
+@pytest.mark.parametrize("failure", [None, "bad_frame", "state_rejected"])
+def test_native_heartbeat_is_fresh_task_evidence_without_legacy_properties(failure):
+    # Supported current firmware heartbeat, with known idle task/docking fields.
+    frame = [
+        206,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        5,
+        0,
+        0,
+        0,
+        50,
+        177,
+        255,
+        0,
+        0,
+        128,
+        200,
+        186,
+        0,
+        128,
+        206,
+    ]
+    if failure == "bad_frame":
+        frame[-1] = 0
+    rows = [
+        {
+            "did": str(DreameMowerProperty.STATE.value),
+            "siid": 2,
+            "piid": 1,
+            "code": -1 if failure == "state_rejected" else 0,
+            "value": 1,
+        },
+        {"did": "100001", "siid": 1, "piid": 1, "code": 0, "value": frame},
+    ]
+    retained = {"value": [206, 0, 206], "received_at": 1.0}
+    device = SimpleNamespace(
+        _ready=True,
+        data={},
+        _state_lock=RLock(),
+        property_mapping=DreameMowerPropertyMapping,
+        realtime_properties={"1.1": retained},
+        _protocol=SimpleNamespace(get_properties=Mock(return_value=rows)),
+        _handle_properties=Mock(return_value=False),
+    )
+    if failure:
+        error_type = load_internal_module("exceptions").DeviceUpdateFailedException
+        with pytest.raises(error_type, match="incomplete or rejected"):
+            DreameMowerDevice._request_properties(
+                device, [DreameMowerProperty.STATE], require_fresh_state=True
+            )
+        assert device.realtime_properties["1.1"] is retained
+        device._handle_properties.assert_not_called()
+    else:
+        assert (
+            DreameMowerDevice._request_properties(
+                device, [DreameMowerProperty.STATE], require_fresh_state=True
+            )
+            is False
+        )
+        decoded = load_internal_module("client_core")._decoded_realtime_status_blob(
+            device, "1.1"
+        )
+        assert (
+            decoded.mowing_session_active is False and decoded.task_resumable is False
+        )
+        assert device.realtime_properties["1.1"]["received_at"] > 1.0
+        device._handle_properties.assert_called_once_with(rows)
 
 
 def test_app_schedules_decode_plans_and_current_task() -> None:
