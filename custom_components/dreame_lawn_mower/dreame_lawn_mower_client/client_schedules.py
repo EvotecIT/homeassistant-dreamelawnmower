@@ -60,7 +60,7 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
     def _sync_require_schedule_write_allowed(self) -> None:
         """Check fresh normalized task state inside the schedule operation lock."""
         device = self._sync_update_device(force_request_properties=True)
-        snapshot = self._snapshot_from_device(device)
+        snapshot = self._snapshot_from_device(device, fresh_task_state=True)
         reason = schedule_write_block_reason(snapshot)
         if reason is not None:
             raise DreameLawnMowerCommandRejectedError(reason)

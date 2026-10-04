@@ -111,7 +111,7 @@ def _client_and_cloud():
             task_resumable=False,
         )
     )
-    client._snapshot_from_device = lambda device: device
+    client._snapshot_from_device = lambda device, **kwargs: device
     return client, cloud
 
 

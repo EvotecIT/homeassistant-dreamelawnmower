@@ -551,10 +551,12 @@ class _DreameMowerDeviceStateMixin:
             else self._protocol.get_properties(property_list, deadline=deadline)
         )
         if require_fresh_state:
-            heartbeat = require_fresh_task_properties(results, self.property_mapping)
+            evidence = require_fresh_task_properties(results, self.property_mapping)
             with self._state_lock:
+                observed_at = time.time()
+                self._fresh_task_state = {**copy.deepcopy(evidence), "received_at": observed_at}
+                heartbeat = evidence.get("heartbeat")
                 if heartbeat is not None:
-                    observed_at = time.time()
                     self.realtime_properties[MOWER_RAW_STATUS_PROPERTY_KEY] = {
                         **copy.deepcopy(heartbeat),
                         "received_at": observed_at,

@@ -63,9 +63,25 @@ def require_fresh_task_properties(results, property_mapping):
             and decoded.mowing_session_active is not None
             and decoded.task_resumable is not None
         ):
-            return heartbeat_rows[0]
+            return {"heartbeat": heartbeat_rows[0]}
     if successful == TASK_DECISION_PROPERTIES:
-        return None
+        task_mapping = property_mapping[DreameMowerProperty.TASK_STATUS]
+        task_row = next(
+            row
+            for row in results
+            if isinstance(row, dict)
+            and (
+                (row.get("siid"), row.get("piid"))
+                == (task_mapping["siid"], task_mapping["piid"])
+                or (
+                    "siid" not in row
+                    and "piid" not in row
+                    and str(row.get("did"))
+                    == str(DreameMowerProperty.TASK_STATUS.value)
+                )
+            )
+        )
+        return {"legacy_task_status": task_row["value"]}
     raise DeviceUpdateFailedException(
         "Fresh mower task properties were incomplete or rejected."
     )

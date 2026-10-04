@@ -45,7 +45,7 @@ from .coordinator_refresh import (
 )
 from .diagnostic_events import DreameLawnMowerDiagnosticEventStore
 from .dreame_lawn_mower_client.exceptions import (
-    DreameLawnMowerCommandRejectedError,
+    DreameLawnMowerConnectionError,
     attempted_write_fields,
 )
 from .dreame_lawn_mower_client.feature_capabilities import (
@@ -1296,7 +1296,7 @@ class DreameLawnMowerCoordinator(
                     execute=True,
                     confirm_write=True,
                 )
-            except DreameLawnMowerCommandRejectedError as err:
+            except DreameLawnMowerConnectionError as err:
                 raise HomeAssistantError(str(err)) from err
             self.last_schedule_write_result = result
             self._invalidate_inflight_schedule_refreshes()
@@ -1787,7 +1787,7 @@ class DreameLawnMowerCoordinator(
                     execute=True,
                     confirm_write=confirm_write,
                 )
-            except DreameLawnMowerCommandRejectedError as err:
+            except DreameLawnMowerConnectionError as err:
                 raise HomeAssistantError(str(err)) from err
             self.last_schedule_write_result = result
             self._invalidate_inflight_schedule_refreshes()
