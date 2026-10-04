@@ -1326,6 +1326,14 @@ class DreameLawnMowerCoordinator(
                 raise HomeAssistantError(str(err)) from err
             self.last_schedule_write_result = result
             self._invalidate_inflight_schedule_refreshes()
+            # A later status ACK supersedes any earlier full-document overlay.
+            getattr(self, "_pending_schedule_uploads", {}).pop(map_index, None)
+            getattr(self, "_pending_schedule_upload_contradictions", {}).pop(
+                map_index, None
+            )
+            getattr(self, "_pending_schedule_upload_active_indices", set()).discard(
+                map_index
+            )
             schedule_version = _schedule_write_version(result)
             previous_version = _schedule_write_version(result.get("schedule") or {})
             status_versions = getattr(self, "_pending_schedule_status_versions", None)

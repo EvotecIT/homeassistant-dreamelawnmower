@@ -578,6 +578,49 @@ def test_native_vendor_edit_survives_stale_batch_after_ack_guard_retires() -> No
     assert schedule_plan_entries(coordinator.schedules)[0]["name"] == "Vendor edit"
 
 
+@pytest.mark.parametrize("toggle_version", [11, 12])
+def test_later_status_ack_supersedes_pending_full_upload(toggle_version) -> None:
+    coordinator = object.__new__(DreameLawnMowerCoordinator)
+    coordinator._schedule_write_lock = asyncio.Lock()
+    coordinator.schedules_refreshed_at = None
+    coordinator.selected_map_index = 0
+    coordinator.app_maps = {"current_map_index": 0, "maps": [{"idx": 0}]}
+    coordinator.async_update_listeners = Mock()
+    plans = [{"plan_id": 0, "enabled": True, "name": "Uploaded", "weeks": []}]
+    coordinator.schedules = {
+        "schedules": [{
+            "idx": 0, "version": 10, "available": True, "plans": deepcopy(plans)
+        }]
+    }
+    coordinator.client = SimpleNamespace(
+        async_plan_app_schedule_upload=AsyncMock(
+            return_value={"executed": True, "version": 11, "request_count": 2}
+        ),
+        async_set_app_schedule_plan_enabled=AsyncMock(return_value={
+            "executed": True, "version": toggle_version,
+            "schedule": {"version": 11},
+            "acknowledged_plan_states": [{"plan_id": 0, "enabled": False}],
+        }),
+        async_get_app_schedules=AsyncMock(return_value={"schedules": [], "errors": []}),
+        async_get_batch_schedules=AsyncMock(
+            return_value={"schedules": [], "errors": []}
+        ),
+    )
+    asyncio.run(coordinator.async_plan_schedule_upload(
+        map_index=0, plans=plans, chunk_size=100, execute=True, confirm_write=True
+    ))
+    assert coordinator._pending_schedule_uploads[0]["plans"][0]["enabled"] is True
+    asyncio.run(coordinator.async_set_schedule_plan_enabled(
+        map_index=0, plan_id=0, enabled=False
+    ))
+    entries = schedule_plan_entries(coordinator.schedules)
+    assert entries[0]["enabled"] is False
+    assert entries[0]["version"] == toggle_version
+    assert coordinator._pending_schedule_uploads == {}
+    assert coordinator._pending_schedule_upload_contradictions == {}
+    assert coordinator._pending_schedule_upload_active_indices == set()
+
+
 def test_pending_toggle_does_not_mutate_ambiguous_active_fallback() -> None:
     coordinator = object.__new__(DreameLawnMowerCoordinator)
     coordinator._pending_schedule_plan_states = {(0, 1): (8, True)}
