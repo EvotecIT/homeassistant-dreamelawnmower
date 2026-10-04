@@ -33,6 +33,20 @@ batch evidence. Table schedules follow the known current map. When active
 selection is unknown, the normal calendar stays empty and the decoded plans
 remain available in the diagnostic calendar.
 
+Each map with a complete native schedule read also has a `Map N Schedule`
+calendar. Select the calendar for the map whose saved plans you want to view.
+It uses that map's native document or tables, including changes made in the
+Dreame app, and does not depend on the cloud's active-version reference. For
+example, `Map 0 Schedule` shows map 0's enabled weekly starts even when the
+automatic `Schedule` calendar cannot establish active selection.
+
+Map calendars describe saved plans; they do not assert that the mower currently
+uses that map. Other maps and the default template are excluded. A valid empty
+schedule has no events. A map calendar is unavailable when no complete native
+schedule is cached. Failed refreshes can retain the last validated saved plans
+until a successful read or cache invalidation. These calendars are read-only
+and do not start mowing or select a map.
+
 Tables and framed document tasks report start times without scheduled end times. Their calendar
 events are one-minute markers labelled **start**; that minute is a display
 marker, not a mowing duration. Cyclic tasks, weekday assignments, saved zones,
