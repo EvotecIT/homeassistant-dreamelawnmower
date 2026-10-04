@@ -294,6 +294,17 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
     ) -> tuple[dict[str, Any], Exception | None]:
         """Negotiate document generations without consuming the next slot's budget."""
         preferred = self._schedule_document_versions.get(map_index, 2)
+        if not reserve_generation:
+            # Give slow metadata a full recovery window, rotating that window
+            # across generations after failure instead of repeatedly letting
+            # an unsupported generation consume it. A remembered generation
+            # already failed the first pass, so try its alternate first.
+            recovery_generation = preferred
+            if map_index in self._schedule_document_versions:
+                recovery_generation = 3 if preferred == 2 else 2
+            preferred = self._schedule_document_retry_versions.get(
+                map_index, recovery_generation
+            )
         generations = [preferred, 3 if preferred == 2 else 2]
         metadata_end = metadata_deadline if metadata_deadline is not None else deadline
         errors: list[str] = []
@@ -314,9 +325,14 @@ class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
             )
             if error is None:
                 self._schedule_document_versions[map_index] = generation
+                self._schedule_document_retry_versions.pop(map_index, None)
                 result["document_version"] = generation
                 return result, None
             errors.append(f"V{generation}: {error}")
+        if not reserve_generation:
+            self._schedule_document_retry_versions[map_index] = (
+                3 if preferred == 2 else 2
+            )
         error = DreameLawnMowerConnectionError(
             "; ".join(errors) or "Schedule read timed out."
         )

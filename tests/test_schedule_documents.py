@@ -123,6 +123,83 @@ def test_v3_read_recovers_two_plans_and_remembers_the_successful_generation():
     assert all(call["t"] != "SCHDIV2" for call in cloud.calls)
 
 
+def test_slow_v3_metadata_gets_a_full_rotating_recovery_window(monkeypatch):
+    client, _cloud = _client_and_cloud()
+    clock = [100.0]
+    deadlines = []
+
+    class _SlowV3Cloud(_DocumentCloud):
+        def call_app_action(self, payload, **kwargs):
+            deadline = float(kwargs["deadline"])
+            deadlines.append(deadline)
+            if payload["t"] == "SCHDIV2":
+                clock[0] = deadline
+                raise TimeoutError("Unsupported generation consumes its deadline.")
+            if payload["t"] == "SCHDIV3" and payload["d"]["i"] == -1:
+                if deadline - clock[0] < 3.0:
+                    clock[0] = deadline
+                    raise TimeoutError("Metadata needs three seconds.")
+                clock[0] += 3.0
+            return super().call_app_action(payload, **kwargs)
+
+    cloud = _SlowV3Cloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+    schedule_time = client._sync_get_app_schedules.__func__.__globals__["time"]
+    monkeypatch.setattr(schedule_time, "monotonic", lambda: clock[0])
+
+    first = client._sync_get_app_schedules(
+        map_indices=[-1, 0, 1], include_current_task=False
+    )
+    assert first["schedules"][0]["available"] is False
+    assert max(deadlines) <= 110.0 and clock[0] <= 110.0
+    deadlines.clear()
+    second_started = clock[0]
+    second = client._sync_get_app_schedules(
+        map_indices=[-1, 0, 1], include_current_task=False
+    )
+    assert second["errors"] == []
+    assert second["schedules"][0]["document_version"] == 3
+    assert len(second["schedules"][0]["plans"][0]["weeks"]) == 7
+    assert max(deadlines) <= second_started + 10.0
+    assert clock[0] <= second_started + 10.0
+
+
+@pytest.mark.parametrize("map_indices", [[0], [-1, 0, 1]])
+def test_remembered_v2_can_renegotiate_after_elapsed_timeout(monkeypatch, map_indices):
+    client, _cloud = _client_and_cloud()
+    clock = [100.0]
+
+    class _ChangingCloud(_DocumentCloud):
+        generation = 2
+
+        def call_app_action(self, payload, **kwargs):
+            if payload["t"] in {"SCHDIV2", "SCHDDV2"}:
+                if self.generation == 3:
+                    clock[0] = min(
+                        float(kwargs["deadline"]), clock[0] + float(kwargs["timeout"])
+                    )
+                    raise TimeoutError("Previous generation no longer responds.")
+                payload = {**payload, "t": payload["t"][:-1] + "3"}
+            return super().call_app_action(payload, **kwargs)
+
+    cloud = _ChangingCloud()
+    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+    schedule_time = client._sync_get_app_schedules.__func__.__globals__["time"]
+    monkeypatch.setattr(schedule_time, "monotonic", lambda: clock[0])
+    first = client._sync_get_app_schedules(
+        map_indices=map_indices, include_current_task=False
+    )
+    assert first["schedules"][0]["document_version"] == 2
+    cloud.generation = 3
+    second = client._sync_get_app_schedules(
+        map_indices=map_indices, include_current_task=False
+    )
+    assert second["errors"] == []
+    assert second["schedules"][0]["document_version"] == 3
+    assert client._schedule_document_versions[0] == 3
+    assert clock[0] <= 110.0
+
+
 def test_framed_batch_recovery_and_calendar_share_the_same_daily_start_times():
     _client, cloud = _client_and_cloud()
     payload = decode_batch_schedule_payload(
