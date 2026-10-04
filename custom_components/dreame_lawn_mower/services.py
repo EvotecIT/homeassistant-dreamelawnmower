@@ -69,6 +69,7 @@ SERVICE_PLAN_SCHEDULE_UPLOAD = "plan_schedule_upload"
 SERVICE_REMOTE_CONTROL_STEP = "remote_control_step"
 SERVICE_REMOTE_CONTROL_STOP = "remote_control_stop"
 SERVICE_SET_SCHEDULE_PLAN_ENABLED = "set_schedule_plan_enabled"
+SERVICE_SET_SCHEDULE_TASK_START_TIME = "set_schedule_task_start_time"
 
 _SERVICES_REGISTERED = "__services_registered"
 
@@ -181,6 +182,21 @@ PLAN_SCHEDULE_UPLOAD_SCHEMA = vol.Schema(
             name=ATTR_CHUNK_SIZE,
             minimum=1,
         ),
+        vol.Optional(ATTR_EXECUTE, default=False): cv.boolean,
+        vol.Optional(ATTR_CONFIRM_SCHEDULE_WRITE, default=False): cv.boolean,
+    }
+)
+
+SET_SCHEDULE_TASK_START_TIME_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Required(ATTR_MAP_INDEX): _int_range(name=ATTR_MAP_INDEX, minimum=0),
+        vol.Required(ATTR_PLAN_ID): _int_range(name=ATTR_PLAN_ID, minimum=0),
+        vol.Required("week_day"): _int_range(name="week_day", minimum=0, maximum=6),
+        vol.Optional("task_index", default=0): _int_range(
+            name="task_index", minimum=0
+        ),
+        vol.Required("start_time"): cv.time,
         vol.Optional(ATTR_EXECUTE, default=False): cv.boolean,
         vol.Optional(ATTR_CONFIRM_SCHEDULE_WRITE, default=False): cv.boolean,
     }
@@ -313,6 +329,21 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             await coordinator.async_request_refresh()
         _notify_schedule_plan_enabled(coordinator, result)
 
+    async def async_handle_set_schedule_task_start_time(call: ServiceCall) -> None:
+        coordinator = _coordinator_from_call(hass, call)
+        _guard_schedule_write_request(call)
+        start_time = call.data["start_time"]
+        if start_time.second or start_time.microsecond:
+            raise HomeAssistantError("Schedule start times require whole minutes.")
+        result = await coordinator.async_set_schedule_task_start_time(
+            map_index=call.data[ATTR_MAP_INDEX], plan_id=call.data[ATTR_PLAN_ID],
+            week_day=call.data["week_day"], task_index=call.data["task_index"],
+            start=start_time.hour * 60 + start_time.minute,
+            execute=call.data[ATTR_EXECUTE],
+            confirm_write=call.data[ATTR_CONFIRM_SCHEDULE_WRITE],
+        )
+        _notify_schedule_plan_enabled(coordinator, result)
+
     async def async_handle_plan_mowing_preference_update(
         call: ServiceCall,
     ) -> None:
@@ -386,6 +417,11 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         schema=PLAN_SCHEDULE_UPLOAD_SCHEMA,
     )
     hass.services.async_register(
+        DOMAIN, SERVICE_SET_SCHEDULE_TASK_START_TIME,
+        async_handle_set_schedule_task_start_time,
+        schema=SET_SCHEDULE_TASK_START_TIME_SCHEMA,
+    )
+    hass.services.async_register(
         DOMAIN,
         SERVICE_PLAN_MOWING_PREFERENCE_UPDATE,
         async_handle_plan_mowing_preference_update,
@@ -409,6 +445,7 @@ async def async_unload_services(hass: HomeAssistant) -> None:
     hass.services.async_remove(DOMAIN, SERVICE_REMOTE_CONTROL_STEP)
     hass.services.async_remove(DOMAIN, SERVICE_REMOTE_CONTROL_STOP)
     hass.services.async_remove(DOMAIN, SERVICE_SET_SCHEDULE_PLAN_ENABLED)
+    hass.services.async_remove(DOMAIN, SERVICE_SET_SCHEDULE_TASK_START_TIME)
     hass.services.async_remove(DOMAIN, SERVICE_PLAN_SCHEDULE_UPLOAD)
     hass.services.async_remove(DOMAIN, SERVICE_PLAN_MOWING_PREFERENCE_UPDATE)
     hass.services.async_remove(DOMAIN, SERVICE_PLAN_MAINTENANCE_RESET)
@@ -589,7 +626,14 @@ def _schedule_write_notification(result: dict[str, Any]) -> tuple[str, str]:
         title = "Dreame Lawn Mower Schedule Dry Run"
         action = "Built dry-run"
 
-    if result.get("action") == "upload_schedule_plans":
+    if result.get("action") == "set_schedule_task_start_time":
+        message = (
+            f"{action} start-time edit for {schedule_label} {plan_name}: "
+            f"day={result.get('week_day')}, task={result.get('task_index')}, "
+            f"start={result.get('start')} minutes since midnight ({change_text}). "
+            f"Native readback confirmed={result.get('confirmed', False)}."
+        )
+    elif result.get("action") == "upload_schedule_plans":
         target_plan_count = (
             target_schedule.get("plan_count")
             if isinstance(target_schedule, dict)

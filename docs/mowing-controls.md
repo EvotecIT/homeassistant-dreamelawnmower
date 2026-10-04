@@ -61,9 +61,31 @@ The guarded `dreame_lawn_mower.set_schedule_plan_enabled` service is dry-run
 first. It sends a write only when both `execute: true` and
 `confirm_schedule_write: true` are set.
 
-Full plan uploads are available for legacy V2 documents. V3/framed document
-tasks and table task creation or time editing use the vendor app; the integration
-rejects a full upload before sending a write for those formats. For an HA-owned weekly
+The `dreame_lawn_mower.set_schedule_task_start_time` action edits an existing
+all-area start on the A2's V3 map 0, plan 0 schedule. Choose the weekday
+(Sunday 0 through Saturday 6), the zero-based task position within that day,
+and a whole-minute time in the mower's local timezone. It preserves other
+tasks, names, enable flags and native fields, and reports success only after
+the mower acknowledges the upload and its native schedule matches the edit.
+The mower must have finished its current task, including any paused remainder.
+
+```yaml
+action: dreame_lawn_mower.set_schedule_task_start_time
+data:
+  map_index: 0
+  plan_id: 0
+  week_day: 1
+  task_index: 0
+  start_time: "10:58:00"
+  execute: true
+  confirm_schedule_write: true
+```
+
+Omit `execute` and `confirm_schedule_write` to preview without a physical write.
+Creating tasks, changing weekdays or editing zone/edge targets requires the
+vendor app. Other models, maps and seasonal slots are not qualified for this
+start-time action. Full plan uploads are available for legacy V2 documents;
+the integration rejects full uploads for V3/framed and table schedules. For an HA-owned weekly
 routine, use the [guarded Schedule blueprint](notifications.md#guarded-weekly-mowing).
 
 `dreame_lawn_mower.plan_mowing_preference_update` is dry-run first. It reads

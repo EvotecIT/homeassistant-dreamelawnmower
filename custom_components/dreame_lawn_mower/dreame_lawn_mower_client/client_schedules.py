@@ -9,6 +9,7 @@ from typing import Any
 
 from .batch_device_data import decode_batch_schedule_payload
 from .client_map_helpers import _app_map_entries_are_valid, _normalize_app_map_entries
+from .client_schedule_edits import _DreameLawnMowerScheduleEditsMixin
 from .client_schedule_tables import _DreameLawnMowerScheduleTablesMixin
 from .client_settings_helpers import (
     _batch_schedule_keys,
@@ -54,7 +55,9 @@ def _serialized_schedule_operation(method):
     return serialized
 
 
-class _DreameLawnMowerClientSchedulesMixin(_DreameLawnMowerScheduleTablesMixin):
+class _DreameLawnMowerClientSchedulesMixin(
+    _DreameLawnMowerScheduleTablesMixin, _DreameLawnMowerScheduleEditsMixin
+):
     """Own schedule protocol operations independently of other settings."""
 
     def _sync_require_schedule_write_allowed(self) -> None:

@@ -441,6 +441,74 @@ set_schedule_plan_enabled:
       selector:
         boolean: {}
 
+set_schedule_task_start_time:
+  name: Set existing schedule start time
+  description: >-
+    Preview or change one existing all-area mowing start on an A2 V3 schedule.
+    Qualified for map 0, plan 0. Preserves other tasks, names and enable flags.
+    The mower must have finished its current task. Defaults to a dry run;
+    sending requires execute and confirm_schedule_write. Creation, weekday
+    changes and area edits remain unavailable.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Required only when multiple Dreame lawn mower entries are loaded.
+      selector:
+        text: {}
+    map_index:
+      name: Map index
+      required: true
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 0
+          mode: box
+    plan_id:
+      name: Plan ID
+      required: true
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 0
+          mode: box
+    week_day:
+      name: Weekday
+      description: Sunday is 0, Monday is 1, and Saturday is 6.
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 6
+          step: 1
+          mode: box
+    task_index:
+      name: Task index
+      description: Zero-based position among the selected day's existing tasks.
+      default: 0
+      selector:
+        number:
+          min: 0
+          step: 1
+          mode: box
+    start_time:
+      name: Start time
+      description: Local mower time with whole-minute precision.
+      required: true
+      selector:
+        time: {}
+    execute:
+      name: Execute
+      default: false
+      selector:
+        boolean: {}
+    confirm_schedule_write:
+      name: Confirm schedule write
+      default: false
+      selector:
+        boolean: {}
+
 plan_schedule_upload:
   name: Plan schedule upload
   description: >-

@@ -336,15 +336,18 @@ def build_schedule_upload_requests(
     payload_text: str,
     version: int,
     chunk_size: int = SCHEDULE_CHUNK_SIZE,
+    document_version: int = 2,
 ) -> list[dict[str, Any]]:
     """Build app action requests for a full schedule payload upload."""
     if chunk_size <= 0:
         raise ValueError("chunk_size must be greater than zero.")
+    if type(document_version) is not int or document_version not in (2, 3):
+        raise ValueError("Schedule uploads require document version 2 or 3.")
     payload_bytes = payload_text.encode("utf-8")
     requests = [
         {
             "m": "s",
-            "t": "SCHDIV2",
+            "t": f"SCHDIV{document_version}",
             "d": {"i": int(map_index), "l": len(payload_bytes), "v": int(version)},
         }
     ]
@@ -352,7 +355,7 @@ def build_schedule_upload_requests(
         requests.append(
             {
                 "m": "s",
-                "t": "SCHDDV2",
+                "t": f"SCHDDV{document_version}",
                 "d": {
                     "s": offset,
                     "l": chunk_byte_size,
