@@ -1169,7 +1169,7 @@ class _DreameMowerDeviceStateMixin(_DreameMowerDeviceContext):
         if self._map_manager.ready:
             self._property_changed()
 
-    def _update_failed(self, ex) -> None:
+    def _update_failed(self, ex: Exception) -> None:
         """Call external listener when update failed"""
         if self._error_callback:
             self._error_callback(ex)
@@ -1177,7 +1177,7 @@ class _DreameMowerDeviceStateMixin(_DreameMowerDeviceContext):
     def _action_update_task(self) -> None:
         self._update_task(True)
 
-    def _update_task(self, force_request_properties=False) -> None:
+    def _update_task(self, force_request_properties: bool = False) -> None:
         """Timer task for updating properties periodically"""
         self._update_timer = None
         try:

@@ -10,7 +10,8 @@ import traceback
 from datetime import datetime
 from random import randrange
 from threading import RLock, Timer
-from typing import Any, Optional
+from collections.abc import Callable
+from typing import Any, Optional, overload
 
 from .app_protocol import mower_realtime_property_name
 from .device_code_semantics import (
@@ -181,13 +182,13 @@ class DreameMowerDevice(
         self.token: str | None = None  # Local api token
         self.host: str | None = None  # IP address or host name of the device
         # Dictionary for storing the current property values
-        self.data: dict[DreameMowerProperty, Any] = {}
+        self.data: dict[int, Any] = {}
         self.unknown_properties: dict[int, dict[str, Any]] = {}
         self.realtime_properties: dict[str, dict[str, Any]] = {}
         self.last_realtime_message: dict[str, Any] | None = None
         self._state_lock = RLock()
-        self.auto_switch_data: dict[DreameMowerAutoSwitchProperty, Any] = None
-        self.ai_data: dict[DreameMowerStrAIProperty | DreameMowerAIProperty, Any] = None
+        self.auto_switch_data: dict[str, Any] | None = None
+        self.ai_data: dict[str, Any] | None = None
         self.available: bool = False  # Last update is successful or not
         self.disconnected: bool = False
 
@@ -477,7 +478,19 @@ class DreameMowerDevice(
         self._protocol.disconnect()
         self._property_changed()
 
-    def listen(self, callback, property: DreameMowerProperty = None) -> None:
+    @overload
+    def listen(self, callback: Callable[[], None] | None, property: None = None) -> None: ...
+
+    @overload
+    def listen(
+        self, callback: Callable[[Any], None] | None, property: DreameMowerProperty
+    ) -> None: ...
+
+    def listen(
+        self,
+        callback: Callable[..., None] | None,
+        property: DreameMowerProperty | None = None,
+    ) -> None:
         """Set callback functions for external listeners"""
         if callback is None:
             self._update_callback = None
@@ -491,11 +504,13 @@ class DreameMowerDevice(
                 self._property_update_callback[property.value] = []
             self._property_update_callback[property.value].append(callback)
 
-    def listen_error(self, callback) -> None:
+    def listen_error(self, callback: Callable[[Exception], None] | None) -> None:
         """Set error callback function for external listeners"""
         self._error_callback = callback
 
-    def schedule_update(self, wait: float = None, force_request_properties=False) -> None:
+    def schedule_update(
+        self, wait: float | None = None, force_request_properties: bool = False
+    ) -> None:
         """Schedule a device update for future"""
         if wait == None:
             wait = self._update_interval
@@ -526,14 +541,14 @@ class DreameMowerDevice(
             return self.data[prop.value]
         return None
 
-    def get_auto_switch_property(self, prop: DreameMowerAutoSwitchProperty) -> int:
+    def get_auto_switch_property(self, prop: DreameMowerAutoSwitchProperty) -> int | None:
         """Get a device auto switch property from memory"""
         if self.capability.auto_switch_settings and self.auto_switch_data:
             if prop is not None and prop.name in self.auto_switch_data:
                 return int(self.auto_switch_data[prop.name])
         return None
 
-    def get_ai_property(self, prop: DreameMowerStrAIProperty | DreameMowerAIProperty) -> bool:
+    def get_ai_property(self, prop: DreameMowerStrAIProperty | DreameMowerAIProperty) -> bool | None:
         """Get a device AI property from memory"""
         if self.capability.ai_detection and self.ai_data:
             if prop is not None and prop.name in self.ai_data:

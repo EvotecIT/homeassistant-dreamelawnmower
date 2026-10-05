@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from threading import Timer
@@ -48,3 +49,9 @@ class _DreameMowerDeviceContext:
     _discard_timeout: float
     _restore_timeout: float
     _update_timer: Timer | None
+    _update_callback: Callable[[], None] | None
+    _error_callback: Callable[[Exception], None] | None
+    _property_update_callback: dict[int, list[Callable[[Any], None]]]
+    data: dict[int, Any]
+    auto_switch_data: dict[str, Any] | None
+    ai_data: dict[str, Any] | None
