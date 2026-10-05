@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import logging
 import zlib
 
@@ -95,12 +96,13 @@ def test_rejected_map_payload_keeps_decoder_result_shape(payload: str) -> None:
     assert map_decoder.DreameMowerMapDecoder.decode_saved_map(payload, False) is None
 
 
-def test_invalid_optional_metadata_does_not_hide_decoded_header() -> None:
+@pytest.mark.parametrize("value", ["invalid", None, [], {}])
+def test_invalid_optional_metadata_does_not_hide_decoded_header(value: object) -> None:
     header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
     header[0:2] = (7).to_bytes(2, byteorder="little", signed=True)
     header[4] = 73
     payload = base64.b64encode(
-        zlib.compress(bytes(header) + b'{"mra":"invalid"}')
+        zlib.compress(bytes(header) + json.dumps({"mra": value}).encode())
     ).decode()
 
     decoded, saved = map_decoder.DreameMowerMapDecoder.decode_map(payload, False)
@@ -245,3 +247,29 @@ def test_complete_image_without_optional_metadata_is_accepted() -> None:
     assert decoded.dimensions == MapImageDimensions(0, 0, 2, 2, 50)
     assert decoded.data == bytes(4)
     assert saved is None
+
+
+@pytest.mark.parametrize(
+    "value, expected", [(42, 42), (42.9, 42), ("42", 42), (True, 1), (-42, -42)]
+)
+def test_numeric_map_metadata_preserves_wire_conversion(
+    value: object, expected: int,
+) -> None:
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[4] = 73
+    metadata = {key: value for key in (
+        "timestamp_ms", "mra", "cs", "ct", "wm", "clean_finish_remain_electricity"
+    )}
+    payload = base64.b64encode(
+        zlib.compress(bytes(header) + json.dumps(metadata).encode())
+    ).decode()
+
+    decoded, _ = map_decoder.DreameMowerMapDecoder.decode_map(payload, False)
+
+    assert decoded is not None
+    assert decoded.timestamp_ms == expected
+    assert decoded.rotation == expected
+    assert decoded.cleaned_area == expected
+    assert decoded.cleaning_time == expected
+    assert decoded.work_status == expected
+    assert decoded.remaining_battery == expected

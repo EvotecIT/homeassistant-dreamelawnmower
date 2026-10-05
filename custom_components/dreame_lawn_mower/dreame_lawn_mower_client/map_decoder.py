@@ -52,6 +52,13 @@ class DreameMowerMapDecoder:
     HEADER_SIZE = 27
 
     @staticmethod
+    def _metadata_int(value: object) -> int:
+        """Convert JSON numeric metadata without changing legacy int semantics."""
+        if not isinstance(value, str | int | float):
+            raise TypeError("Map integer metadata must be a number or numeric string")
+        return int(value)
+
+    @staticmethod
     def _read_int_8(data: bytes, offset: int = 0) -> int:
         return int.from_bytes(data[offset : offset + 1], byteorder="big", signed=True)
 
@@ -271,7 +278,9 @@ class DreameMowerMapDecoder:
             if not isinstance(data_json, dict):
                 return partial_map
             if data_json.get("timestamp_ms"):
-                partial_map.timestamp_ms = int(data_json["timestamp_ms"])
+                partial_map.timestamp_ms = DreameMowerMapDecoder._metadata_int(
+                    data_json["timestamp_ms"]
+                )
 
             partial_map.data_json = data_json
         except Exception:
@@ -357,22 +366,30 @@ class DreameMowerMapDecoder:
 
             if map_data.frame_type != MapFrameType.W.value:
                 if "mra" in data_json:
-                    map_data.rotation = int(data_json["mra"])
+                    map_data.rotation = DreameMowerMapDecoder._metadata_int(
+                        data_json["mra"]
+                    )
 
                 if "cs" in data_json:
-                    map_data.cleaned_area = int(data_json["cs"])
+                    map_data.cleaned_area = DreameMowerMapDecoder._metadata_int(
+                        data_json["cs"]
+                    )
 
                 if "ct" in data_json:
-                    map_data.cleaning_time = int(data_json["ct"])
+                    map_data.cleaning_time = DreameMowerMapDecoder._metadata_int(
+                        data_json["ct"]
+                    )
 
                 if "wm" in data_json:
-                    map_data.work_status = int(data_json["wm"])
+                    map_data.work_status = DreameMowerMapDecoder._metadata_int(
+                        data_json["wm"]
+                    )
 
                 if "cf" in data_json:
                     map_data.completed = bool(data_json["cf"] == 1)
 
                 if "clean_finish_remain_electricity" in data_json:
-                    map_data.remaining_battery = int(
+                    map_data.remaining_battery = DreameMowerMapDecoder._metadata_int(
                         data_json["clean_finish_remain_electricity"]
                     )
 
