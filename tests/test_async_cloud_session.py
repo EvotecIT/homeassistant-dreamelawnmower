@@ -256,13 +256,22 @@ def test_rejected_refresh_token_falls_back_once_to_credentials(monkeypatch):
     ]
 
 
-def test_auth_rejection_does_not_expose_server_secrets(monkeypatch, caplog):
+@pytest.mark.parametrize("status", [400, 401, 403])
+@pytest.mark.parametrize(
+    "body",
+    [b'{"error_description":"private-password"}', b"", b"private-password", b"[]"],
+)
+def test_auth_rejection_does_not_expose_server_secrets(
+    monkeypatch, caplog, status, body
+):
     async def handler(request):
-        return web.json_response({"error_description": "private-password"}, status=403)
+        return web.Response(body=body, status=status)
 
     async def scenario():
         async with server(monkeypatch, handler), ClientSession() as session:
-            with pytest.raises(DreameLawnMowerAuthError, match="HTTP 403") as error:
+            with pytest.raises(
+                DreameLawnMowerAuthError, match=f"HTTP {status}"
+            ) as error:
                 await DreameCloudSession(session, **OPTIONS).async_login()
             assert "private-password" not in str(error.value)
             assert not session.closed
@@ -774,3 +783,32 @@ def test_cancelled_close_still_disconnects_legacy_device(monkeypatch, borrowed):
                 await client.async_close()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("status", [400, 403, 500])
+@pytest.mark.parametrize("paged", [False, True])
+def test_inventory_http_failure_stays_a_connection_error(monkeypatch, status, paged):
+    strings = cloud_strings("dreame")
+    calls = []
+
+    async def handler(request):
+        calls.append(request.path)
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        return web.Response(status=status, text="private-response")
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            cloud = DreameCloudSession(session, **OPTIONS)
+            read = (
+                cloud.async_get_device_list_page if paged else cloud.async_get_devices
+            )
+            with pytest.raises(
+                DreameLawnMowerConnectionError, match=f"HTTP {status}"
+            ) as error:
+                await read()
+            assert "private-response" not in str(error.value)
+            assert not session.closed
+
+    asyncio.run(scenario())
+    assert len(calls) == 2

@@ -542,18 +542,25 @@ async def test_discovery_receives_home_assistant_shared_session(hass, monkeypatc
 
 
 @pytest.mark.parametrize("source", ["user", "reauth"])
-async def test_native_connection_failure_preserves_saved_entry(
-    hass, monkeypatch, source,
+@pytest.mark.parametrize("authentication", [False, True])
+async def test_native_discovery_failure_preserves_saved_entry(
+    hass, monkeypatch, source, authentication,
 ):
     from unittest.mock import AsyncMock
 
     from custom_components.dreame_lawn_mower.api import (
+        DreameLawnMowerAuthError,
         DreameLawnMowerClient,
         DreameLawnMowerConnectionError,
     )
 
     hass.config.components.add("stream")
-    discover = AsyncMock(side_effect=DreameLawnMowerConnectionError("Cloud timed out"))
+
+    failure = (
+        DreameLawnMowerAuthError("Cloud authentication failed: HTTP 403")
+        if authentication else DreameLawnMowerConnectionError("Cloud timed out")
+    )
+    discover = AsyncMock(side_effect=failure)
     monkeypatch.setattr(DreameLawnMowerClient, "async_discover_devices", discover)
     original = {
         CONF_ACCOUNT_TYPE: ACCOUNT_TYPE_DREAME, CONF_COUNTRY: "eu",
@@ -575,5 +582,6 @@ async def test_native_connection_failure_preserves_saved_entry(
              CONF_USERNAME: "replacement@example.invalid"},
         )
     assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {"base": "cannot_connect"}
+    expected = "cannot_auth" if authentication else "cannot_connect"
+    assert result["errors"] == {"base": expected}
     assert entry.data == original

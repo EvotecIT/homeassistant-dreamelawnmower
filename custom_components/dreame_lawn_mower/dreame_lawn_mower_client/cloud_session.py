@@ -276,15 +276,15 @@ class DreameCloudSession:
             try:
                 payload = json.loads(body)
             except (ValueError, UnicodeError) as err:
-                if response.status == 401:
-                    # Inventory authentication is status-based; proxies may
-                    # return an empty or plain-text body for an expired token.
+                if response.status >= 400:
+                    # Callers classify HTTP failures by status. Login and
+                    # inventory endpoints may return empty or plain-text errors.
                     return response.status, {}
                 raise DreameLawnMowerConnectionError(
                     "Cloud response is not valid JSON"
                 ) from err
             if not isinstance(payload, dict):
-                if response.status == 401:
+                if response.status >= 400:
                     return response.status, {}
                 raise DreameLawnMowerConnectionError("Cloud response is not an object")
             return response.status, payload
