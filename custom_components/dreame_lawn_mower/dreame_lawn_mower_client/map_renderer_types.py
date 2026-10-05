@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Any, Final
 
+type _RGBA = tuple[int, int, int, int]
+
 
 @dataclass
 class MapRendererConfig:
@@ -35,40 +37,40 @@ class MapRendererConfig:
 
 @dataclass
 class MapRendererColorScheme:
-    floor: tuple[int] = (221, 221, 221, 255)
-    outside: tuple[int] = (0, 0, 0, 0)
-    wall: tuple[int] = (159, 159, 159, 255)
-    passive_segment: tuple[int] = (200, 200, 200, 255)
-    hidden_segment: tuple[int] = (226, 226, 226, 255)
-    new_segment: tuple[int] = (153, 191, 255, 255)
-    cleaned_area: tuple[int] = (158, 240, 117, 255)
-    dirty_area: tuple[int] = (247, 135, 106, 255)
-    clean_area: tuple[int] = (156, 202, 250, 255)
-    second_clean_area: tuple[int] = (123, 148, 172, 255)
-    neglected_segment: tuple[int] = (255, 159, 10, 110)
-    no_go: tuple[int] = (177, 0, 0, 50)
-    no_go_outline: tuple[int] = (199, 0, 0, 200)
-    virtual_wall: tuple[int] = (199, 0, 0, 200)
-    pathway: tuple[int] = (23, 111, 244, 200)
-    active_area: tuple[int] = (255, 255, 255, 80)
-    active_area_outline: tuple[int] = (34, 109, 242, 255)  # (103, 156, 244, 200)
-    active_point: tuple[int] = (255, 255, 255, 80)
-    active_point_outline: tuple[int] = (34, 109, 242, 255)  # (103, 156, 244, 200)
-    path: tuple[int] = (255, 255, 255, 255)
-    segment: tuple[list[tuple[int]]] = (
+    floor: _RGBA = (221, 221, 221, 255)
+    outside: _RGBA = (0, 0, 0, 0)
+    wall: _RGBA = (159, 159, 159, 255)
+    passive_segment: _RGBA = (200, 200, 200, 255)
+    hidden_segment: _RGBA = (226, 226, 226, 255)
+    new_segment: _RGBA = (153, 191, 255, 255)
+    cleaned_area: _RGBA = (158, 240, 117, 255)
+    dirty_area: _RGBA = (247, 135, 106, 255)
+    clean_area: _RGBA = (156, 202, 250, 255)
+    second_clean_area: _RGBA = (123, 148, 172, 255)
+    neglected_segment: _RGBA = (255, 159, 10, 110)
+    no_go: _RGBA = (177, 0, 0, 50)
+    no_go_outline: _RGBA = (199, 0, 0, 200)
+    virtual_wall: _RGBA = (199, 0, 0, 200)
+    pathway: _RGBA = (23, 111, 244, 200)
+    active_area: _RGBA = (255, 255, 255, 80)
+    active_area_outline: _RGBA = (34, 109, 242, 255)  # (103, 156, 244, 200)
+    active_point: _RGBA = (255, 255, 255, 80)
+    active_point_outline: _RGBA = (34, 109, 242, 255)  # (103, 156, 244, 200)
+    path: _RGBA = (255, 255, 255, 255)
+    segment: tuple[list[_RGBA], ...] = (
         [(171, 199, 248, 255), (121, 170, 255, 255)],
         [(249, 224, 125, 255), (255, 211, 38, 255)],
         [(184, 227, 255, 255), (141, 210, 255, 255)],
         [(184, 217, 141, 255), (150, 217, 141, 255)],
     )
-    obstacle_bg: tuple[int] = (34, 109, 242, 255)
-    icon_background: tuple[int] = (0, 0, 0, 100)
-    settings_background: tuple[int] = (255, 255, 255, 175)
-    settings_icon_background: tuple[int] = (255, 255, 255, 205)
-    material_color: tuple[int] = (0, 0, 0, 20)
-    text: tuple[int] = (255, 255, 255, 255)
-    order: tuple[int] = (255, 255, 255, 255)
-    text_stroke: tuple[int] = (240, 240, 240, 200)
+    obstacle_bg: _RGBA = (34, 109, 242, 255)
+    icon_background: _RGBA = (0, 0, 0, 100)
+    settings_background: _RGBA = (255, 255, 255, 175)
+    settings_icon_background: _RGBA = (255, 255, 255, 205)
+    material_color: _RGBA = (0, 0, 0, 20)
+    text: _RGBA = (255, 255, 255, 255)
+    order: _RGBA = (255, 255, 255, 255)
+    text_stroke: _RGBA = (240, 240, 240, 200)
     invert: bool = False
     dark: bool = False
 
@@ -211,8 +213,8 @@ class MapRendererLayer(IntEnum):
 
 @dataclass
 class Line:
-    x: int | list[int] = None
-    y: int | list[int] = None
+    x: int | list[int] | None = None
+    y: int | list[int] | None = None
     ishorizontal: bool = False
     direction: int = 0
 
@@ -249,40 +251,40 @@ class MapRendererResources:
     renderer: str = ""
     icon_set: int = 0
     robot_type: int = 0
-    robot: str = None
-    charger: str = None
-    charging: str = None
-    cleaning: str = None
-    warning: str = None
-    sleeping: str = None
-    cleaning_direction: str = None
-    selected_segment: str = None
-    cruise_point_background: str = None
-    segment: dict[int, dict[str, str]] = None
-    default_map_image: str = None
-    font: str = None
-    repeats: list[str] = None
-    cleaning_mode: list[str] = None
-    cleaning_route: list[str] = None
-    emptying: str = None
-    cruise_path_point_background: str = None
-    obstacle_background: str = None
-    obstacle_hidden_background: str = None
-    obstacle: dict[int, dict[str, str]] = None
-    furniture: dict[int, dict[str, str]] = None
-    rotate: str = None
-    delete: str = None
-    resize: str = None
-    move: str = None
-    problem: str = None
-    wifi: str = None
+    robot: str | None = None
+    charger: str | None = None
+    charging: str | None = None
+    cleaning: str | None = None
+    warning: str | None = None
+    sleeping: str | None = None
+    cleaning_direction: str | None = None
+    selected_segment: str | None = None
+    cruise_point_background: str | None = None
+    segment: dict[int, dict[str, str]] | None = None
+    default_map_image: str | None = None
+    font: str | None = None
+    repeats: list[str] | None = None
+    cleaning_mode: list[str] | None = None
+    cleaning_route: list[str] | None = None
+    emptying: str | None = None
+    cruise_path_point_background: str | None = None
+    obstacle_background: str | None = None
+    obstacle_hidden_background: str | None = None
+    obstacle: dict[int, dict[str, str]] | None = None
+    furniture: dict[int, dict[str, str]] | None = None
+    rotate: str | None = None
+    delete: str | None = None
+    resize: str | None = None
+    move: str | None = None
+    problem: str | None = None
+    wifi: str | None = None
     version: int = 1
 
 
 @dataclass
 class MapRendererData:
     data: dict[int, list[int]]
-    size: list[int] = None
+    size: list[int] | None = None
     frame_id: int = 0
     saved_map: bool = False
     wifi_map: bool = False
@@ -330,7 +332,7 @@ class MapRendererData:
     cleanset: bool = False
     docked: bool = True
     work_status: int = 0
-    resources: MapRendererResources = None
+    resources: MapRendererResources | None = None
     version: int = 1
 
 

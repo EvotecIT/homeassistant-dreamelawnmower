@@ -82,7 +82,7 @@ not establish installed, cloud, native-runtime, or physical-device behavior.
 | --- | --- | --- |
 | async-dependency | Gap | The cloud protocol owns synchronous requests, queues, locks, and threads. Modernize the owning client with real async cancellation and resource ownership; executor wrapping alone does not qualify. |
 | inject-websession | Gap | Cloud HTTP uses its own synchronous session. Design injected async session ownership in the reusable client, including standalone callers. |
-| strict-typing | Gap | After platform annotation fixes, mypy 2.4.0 reports 3,559 errors in 96 of 244 production modules. Fix the full integration and bundled client before enabling a passing strict CI gate. |
+| strict-typing | Gap | After platform and map-model annotation fixes, mypy 2.4.0 reports 3,323 errors in 94 of 244 production modules. Fix the full integration and bundled client before enabling a passing strict CI gate. |
 
 ## Qualification baseline
 
@@ -93,9 +93,18 @@ At source revision 5bd1e96 (version 0.2.120), on HA 2026.9.4/Python 3.14.5:
 - Strict typing checks 244 production modules and reports 3,581 errors.
 - These results establish a source baseline, not a Platinum claim.
 
-Platform metadata and update annotations now use HA's declared types and canonical
-imports. The same unit/component suites pass after this batch; strict typing
-remains incomplete at 3,559 errors in 96 modules.
+Platform metadata and update annotations use HA's declared types and canonical
+imports. Map renderer models describe RGBA tuples and optional resources;
+geometry and map-state annotations match the values produced by the decoder.
+Map values follow Python's equality protocol for unrelated objects, and obstacle
+object names use their vendor ID when available. Regression tests cover both
+contracts. Strict typing remains incomplete at 3,323 errors in 94 modules;
+`map_renderer_types.py` passes strict checking on its own.
+
+After these changes, 2,560 unit tests pass with one skipped. Component/translation
+tests pass on HA 2025.1 (73 passed, one version-specific skip) and HA 2026.9.4
+(74 passed). No physical-device or frontend-rendering claim follows from these
+local tests.
 
 ## Release qualification
 

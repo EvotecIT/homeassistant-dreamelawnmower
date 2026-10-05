@@ -87,7 +87,7 @@ from .device_types import (
 
 
 class Point:
-    def __init__(self, x: float, y: float, a=None) -> None:
+    def __init__(self, x: float, y: float, a: float | None = None) -> None:
         self.x = x
         self.y = y
         self.a = a
@@ -100,10 +100,11 @@ class Point:
     def __repr__(self) -> str:
         return self.__str__()
 
-    def __eq__(self: Point, other: Point) -> bool:
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Point):
+            return NotImplemented
         return (
-            other is not None
-            and self.x == other.x
+            self.x == other.x
             and self.y == other.y
             and self.a == other.a
         )
@@ -113,13 +114,17 @@ class Point:
             return {ATTR_X: self.x, ATTR_Y: self.y}
         return {ATTR_X: self.x, ATTR_Y: self.y, ATTR_A: self.a}
 
-    def to_img(self, image_dimensions, offset=True) -> Point:
+    def to_img(
+        self, image_dimensions: MapImageDimensions, offset: bool = True
+    ) -> Point:
         return image_dimensions.to_img(self, offset)
 
-    def to_coord(self, image_dimensions, offset=True) -> Point:
+    def to_coord(
+        self, image_dimensions: MapImageDimensions, offset: bool = True
+    ) -> Point:
         return image_dimensions.to_coord(self, offset)
 
-    def rotated(self, image_dimensions, degree) -> Point:
+    def rotated(self, image_dimensions: MapImageDimensions, degree: int) -> Point:
         w = int(
             (image_dimensions.width * image_dimensions.scale)
             + image_dimensions.padding[0]
@@ -146,10 +151,10 @@ class Point:
             degree = degree - 90
         return Point(x, y)
 
-    def __mul__(self, other) -> Point:
+    def __mul__(self, other: float) -> Point:
         return Point(self.x * other, self.y * other, self.a)
 
-    def __truediv__(self, other) -> Point:
+    def __truediv__(self, other: float) -> Point:
         return Point(self.x / other, self.y / other, self.a)
 
 
@@ -172,13 +177,13 @@ class Obstacle(Point):
         y: float,
         type: int,
         possibility: int,
-        object_id: int = None,
-        file_name: str = None,
-        key: int = None,
-        pos_x: float = None,
-        pos_y: float = None,
-        width: float = None,
-        height: float = None,
+        object_id: int | None = None,
+        file_name: str | None = None,
+        key: int | None = None,
+        pos_x: float | None = None,
+        pos_y: float | None = None,
+        width: float | None = None,
+        height: float | None = None,
         picture_status: int = 0,
         ignore_status: int = 0,
     ) -> None:
@@ -215,10 +220,10 @@ class Obstacle(Point):
             self.object_name = file_name.split("/")[-1]
             if "-" in self.object_name:
                 self.object_name = self.object_name.split("-")[0]
-        if id:
-            self.object_name = f"{id}-{self.object_name}"
+        if object_id is not None and self.object_name is not None:
+            self.object_name = f"{object_id}-{self.object_name}"
 
-        self.segment = None
+        self.segment: str | None = None
 
     def set_segment(self, map_data):
         if map_data and map_data.segments and map_data.pixel_type is not None:
@@ -259,10 +264,11 @@ class Obstacle(Point):
             attributes[ATTR_ZONE] = self.segment
         return attributes
 
-    def __eq__(self: Obstacle, other: Obstacle) -> bool:
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Obstacle):
+            return NotImplemented
         return not (
-            other is None
-            or self.x != other.x
+            self.x != other.x
             or self.y != other.y
             or self.type != other.type
             or self.possibility != other.possibility
@@ -287,10 +293,11 @@ class Zone:
     def __str__(self) -> str:
         return f"[{self.x0}, {self.y0}, {self.x1}, {self.y1}]"
 
-    def __eq__(self: Zone, other: Zone) -> bool:
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Zone):
+            return NotImplemented
         return (
-            other is not None
-            and self.x0 == other.x0
+            self.x0 == other.x0
             and self.y0 == other.y0
             and self.x1 == other.x1
             and self.y1 == other.y1
@@ -307,17 +314,19 @@ class Zone:
             self.x0, self.y0, self.x0, self.y1, self.x1, self.y1, self.x1, self.y0
         )
 
-    def to_img(self, image_dimensions, offset=True) -> Zone:
+    def to_img(self, image_dimensions: MapImageDimensions, offset: bool = True) -> Zone:
         p0 = Point(self.x0, self.y0).to_img(image_dimensions, offset)
         p1 = Point(self.x1, self.y1).to_img(image_dimensions, offset)
         return Zone(p0.x, p0.y, p1.x, p1.y)
 
-    def to_coord(self, image_dimensions, offset=True) -> Zone:
+    def to_coord(
+        self, image_dimensions: MapImageDimensions, offset: bool = True
+    ) -> Zone:
         p0 = Point(self.x0, self.y0).to_coord(image_dimensions, offset)
         p1 = Point(self.x1, self.y1).to_coord(image_dimensions, offset)
         return Zone(p0.x, p0.y, p1.x, p1.y)
 
-    def check_point(self, x, y, size) -> bool:
+    def check_point(self, x: float, y: float, size: float) -> bool:
         return self.as_area().check_point(x, y, size)
 
 
@@ -331,15 +340,15 @@ class Segment(Zone):
         y1: float | None = None,
         x: int | None = None,
         y: int | None = None,
-        name: str = None,
-        custom_name: str = None,
+        name: str | None = None,
+        custom_name: str | None = None,
         index: int = 0,
         type: int = 0,
-        icon: str = None,
+        icon: str | None = None,
         neighbors: list[int] | None = None,
-        cleaning_times: int = None,
-        cleaning_mode: int = None,
-        order: int = None,
+        cleaning_times: int | None = None,
+        cleaning_mode: int | None = None,
+        order: int | None = None,
     ) -> None:
         super().__init__(x0, y0, x1, y1)
         self.segment_id = segment_id
@@ -473,10 +482,11 @@ class Segment(Zone):
 
         return attributes
 
-    def __eq__(self: Segment, other: Segment) -> bool:
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Segment):
+            return NotImplemented
         return not (
-            other is None
-            or self.x0 != other.x0
+            self.x0 != other.x0
             or self.y0 != other.y0
             or self.x1 != other.x1
             or self.y1 != other.y1
@@ -513,10 +523,11 @@ class Wall:
         self.x1 = x1
         self.y1 = y1
 
-    def __eq__(self: Wall, other: Wall) -> bool:
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Wall):
+            return NotImplemented
         return (
-            other is not None
-            and self.x0 == other.x0
+            self.x0 == other.x0
             and self.y0 == other.y0
             and self.x1 == other.x1
             and self.y1 == other.y1
@@ -531,12 +542,14 @@ class Wall:
     def as_dict(self) -> dict[str, Any]:
         return {ATTR_X0: self.x0, ATTR_Y0: self.y0, ATTR_X1: self.x1, ATTR_Y1: self.y1}
 
-    def to_img(self, image_dimensions, offset=True) -> Wall:
+    def to_img(self, image_dimensions: MapImageDimensions, offset: bool = True) -> Wall:
         p0 = Point(self.x0, self.y0).to_img(image_dimensions, offset)
         p1 = Point(self.x1, self.y1).to_img(image_dimensions, offset)
         return Wall(p0.x, p0.y, p1.x, p1.y)
 
-    def to_coord(self, image_dimensions, offset=True) -> Wall:
+    def to_coord(
+        self, image_dimensions: MapImageDimensions, offset: bool = True
+    ) -> Wall:
         p0 = Point(self.x0, self.y0).to_coord(image_dimensions, offset)
         p1 = Point(self.x1, self.y1).to_coord(image_dimensions, offset)
         return Wall(p0.x, p0.y, p1.x, p1.y)
@@ -566,10 +579,11 @@ class Area:
         self.x3 = x3
         self.y3 = y3
 
-    def __eq__(self: Area, other: Area) -> bool:
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Area):
+            return NotImplemented
         return (
-            other is not None
-            and self.x0 == other.x0
+            self.x0 == other.x0
             and self.y0 == other.y0
             and self.x1 == other.x1
             and self.y1 == other.y1
@@ -603,24 +617,26 @@ class Area:
     def as_list(self) -> list[float]:
         return [self.x0, self.y0, self.x1, self.y1, self.x2, self.y2, self.x3, self.y3]
 
-    def to_img(self, image_dimensions, offset=True) -> Area:
+    def to_img(self, image_dimensions: MapImageDimensions, offset: bool = True) -> Area:
         p0 = Point(self.x0, self.y0).to_img(image_dimensions, offset)
         p1 = Point(self.x1, self.y1).to_img(image_dimensions, offset)
         p2 = Point(self.x2, self.y2).to_img(image_dimensions, offset)
         p3 = Point(self.x3, self.y3).to_img(image_dimensions, offset)
         return Area(p0.x, p0.y, p1.x, p1.y, p2.x, p2.y, p3.x, p3.y)
 
-    def to_coord(self, image_dimensions, offset=True) -> Area:
+    def to_coord(
+        self, image_dimensions: MapImageDimensions, offset: bool = True
+    ) -> Area:
         p0 = Point(self.x0, self.y0).to_coord(image_dimensions, offset)
         p1 = Point(self.x1, self.y1).to_coord(image_dimensions, offset)
         p2 = Point(self.x2, self.y2).to_coord(image_dimensions, offset)
         p3 = Point(self.x3, self.y3).to_coord(image_dimensions, offset)
         return Area(p0.x, p0.y, p1.x, p1.y, p2.x, p2.y, p3.x, p3.y)
 
-    def check_size(self, size) -> bool:
+    def check_size(self, size: float) -> bool:
         return self.x2 - self.x0 == size and self.y2 - self.y1 == size
 
-    def check_point(self, x, y, size) -> bool:
+    def check_point(self, x: float, y: float, size: float) -> bool:
         x_coords = [self.x0, self.x1, self.x2, self.x3]
         y_coords = [self.y0, self.y1, self.y2, self.y3]
 
@@ -649,8 +665,8 @@ class Furniture(Point):
         size_type: int,
         angle: float = 0,
         scale: float = 1.0,
-        furniture_id: int = None,
-        segment_id: int = None,
+        furniture_id: int | None = None,
+        segment_id: int | None = None,
     ) -> None:
         super().__init__(x, y)
         self.x0 = x0
@@ -703,10 +719,11 @@ class Furniture(Point):
         attributes[ATTR_SCALE] = self.scale
         return attributes
 
-    def __eq__(self: Furniture, other: Furniture) -> bool:
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Furniture):
+            return NotImplemented
         return not (
-            other is None
-            or self.x != other.x
+            self.x != other.x
             or self.y != other.y
             or self.x0 != other.x0
             or self.y0 != other.y0
@@ -733,10 +750,11 @@ class Coordinate(Point):
             attributes[ATTR_COMPLETED] = self.completed
         return attributes
 
-    def __eq__(self: Coordinate, other: Coordinate) -> bool:
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Coordinate):
+            return NotImplemented
         return not (
-            other is None
-            or self.x != other.x
+            self.x != other.x
             or self.y != other.y
             or self.type != other.type
             or self.completed != other.completed
@@ -757,9 +775,9 @@ class MapImageDimensions:
         self.crop = [0, 0, 0, 0]
         self.bounds = None
 
-    def to_img(self, point: Point, offset=True) -> Point:
-        left = self.left
-        top = self.top
+    def to_img(self, point: Point, offset: bool = True) -> Point:
+        left: float = self.left
+        top: float = self.top
         if not offset and (left % self.grid_size != 0 or top % self.grid_size != 0):
             left = left + (self.grid_size / 2)
             top = top - (self.grid_size / 2)
@@ -774,9 +792,9 @@ class MapImageDimensions:
             - self.crop[1],
         )
 
-    def to_coord(self, point: Point, offset=True) -> Point:
-        left = self.left
-        top = self.top
+    def to_coord(self, point: Point, offset: bool = True) -> Point:
+        left: float = self.left
+        top: float = self.top
         if not offset and (left % self.grid_size != 0 or top % self.grid_size != 0):
             left = left + (self.grid_size / 2)
             top = top - (self.grid_size / 2)
@@ -786,10 +804,11 @@ class MapImageDimensions:
             (((self.height - 1) * self.grid_size - (point.y - top)) / self.grid_size),
         )
 
-    def __eq__(self: MapImageDimensions, other: MapImageDimensions) -> bool:
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, MapImageDimensions):
+            return NotImplemented
         return (
-            other is not None
-            and self.top == other.top
+            self.top == other.top
             and self.left == other.left
             and self.height == other.height
             and self.width == other.width
@@ -799,24 +818,24 @@ class MapImageDimensions:
 
 class CleaningHistory:
     def __init__(self, history_data, property_mapping) -> None:
-        self.date: datetime = None
-        self.status: DreameMowerStatus = None
+        self.date: datetime | None = None
+        self.status: DreameMowerStatus | None = None
         self.cleaning_time: int = 0
         self.cleaned_area: int = 0
-        self.file_name: str = None
+        self.file_name: str | None = None
         self.key = None
         self.object_name = None
-        self.completed: bool = None
-        self.map_index: int = None
-        self.map_name: str = None
-        self.cruise_type: int = None
-        self.cleanup_method: CleanupMethod = None
-        self.second_cleaning: int = None
-        self.multiple_cleaning_time: str = None
-        self.pet_focused_cleaning: int = None
-        self.task_interrupt_reason: TaskInterruptReason = None
-        self.neglected_segments: dict[int, int] = None
-        self.clean_again: int = None
+        self.completed: bool | None = None
+        self.map_index: int | None = None
+        self.map_name: str | None = None
+        self.cruise_type: int | None = None
+        self.cleanup_method: CleanupMethod | None = None
+        self.second_cleaning: int | None = None
+        self.multiple_cleaning_time: str | None = None
+        self.pet_focused_cleaning: int | None = None
+        self.task_interrupt_reason: TaskInterruptReason | None = None
+        self.neglected_segments: dict[int, int] | None = None
+        self.clean_again: int | None = None
 
         for history_data_item in history_data:
             pid = history_data_item[piid]
@@ -892,7 +911,7 @@ class RecoveryMapInfo:
         self.date = map_info.get("time")
         self.raw_map: str = map_info.get("thb")
         self.object_name: str = map_info.get("objname")
-        self.map_data: MapData = None
+        self.map_data: MapData | None = None
         self.map_id: int = map_id
 
         map_type = map_info.get("first", -1)
@@ -1004,8 +1023,8 @@ class MapData:
         self.no_go_areas: list[Area] | None = None  # Data json: vw.rect
         self.virtual_walls: list[Wall] | None = None  # Data json: vw.line
         self.pathways: list[Wall] | None = None  # Data json: vws.vwsl
-        self.path: Path | None = None  # Data json: tr
-        self.active_segments: int | None = None  # Data json: sa
+        self.path: list[Path] | None = None  # Data json: tr
+        self.active_segments: list[int] | None = None  # Data json: sa
         self.active_areas: list[Area] | None = None  # Data json: da2
         self.active_points: list[Point] | None = None  # Data json: sp
         # Data json: rism.map_header.map_id
@@ -1076,7 +1095,7 @@ class MapData:
         # Data json: tpointinfo
         self.task_cruise_points: list[Coordinate] | None = None
         # Generated from pixel_type and robot poisiton
-        self.hidden_segments: int | None = None  # Data json: delsr
+        self.hidden_segments: list[int] | None = None  # Data json: delsr
         self.robot_segment: int | None = None
         # For renderer to detect changes
         self.last_updated: float | None = None
@@ -1091,10 +1110,9 @@ class MapData:
         self.walls_info: Any | None = None
         self.walls_info_new: Any | None = None
 
-    def __eq__(self: MapData, other: MapData) -> bool:
-        if other is None:
-            return False
-
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, MapData):
+            return NotImplemented
         if self.map_id != other.map_id:
             return False
 
@@ -1182,7 +1200,7 @@ class MapData:
         return True
 
     def as_dict(self) -> dict[str, Any]:
-        attributes_list = {}
+        attributes_list: dict[str, Any] = {}
         if self.charger_position is not None:
             attributes_list[ATTR_CHARGER] = (
                 self.optimized_charger_position
