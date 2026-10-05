@@ -1040,7 +1040,7 @@ class MapData:
         self.cleaned_area: int | None = None  # Data json: cs
         self.cleaning_time: int | None = None  # Data json: ct
         self.completed: bool | None = None  # Data json: cf
-        self.neglected_segments: list[int] | None = None  #
+        self.neglected_segments: dict[int, int] | None = None
         self.second_cleaning: bool | None = None  #
         # Data json: clean_finish_remain_electricity
         self.remaining_battery: int | None = None

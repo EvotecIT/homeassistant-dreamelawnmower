@@ -284,7 +284,7 @@ class MapRendererResources:
 @dataclass
 class MapRendererData:
     data: dict[int, list[int]]
-    size: list[int] | None = None
+    size: list[int | list[int] | None] | None = None
     frame_id: int = 0
     saved_map: bool = False
     wifi_map: bool = False
@@ -304,9 +304,9 @@ class MapRendererData:
     obstacles: list[list[int | float]] = field(default_factory=lambda: [])
     furnitures: list[list[int | float]] | None = None
     path: list[list[int]] = field(default_factory=lambda: [])
-    floor_material: dict[int, list[int]] | None = None
-    hidden_segments: dict[int, list[int]] | None = None
-    neglected_segments: dict[int, list[int]] | None = None
+    floor_material: dict[int, int] | None = None
+    hidden_segments: list[int] | None = None
+    neglected_segments: dict[int, int] | None = None
     robot_position: list[int] | None = None
     charger_position: list[int] | None = None
     router_position: list[int] | None = None
