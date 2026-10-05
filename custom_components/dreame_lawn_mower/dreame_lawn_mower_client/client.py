@@ -1914,22 +1914,26 @@ class DreameLawnMowerClient(
             if reads:
                 await asyncio.gather(*reads, return_exceptions=True)
         finally:
-            if self._owns_http_session and self._http_session is not None:
-                await self._http_session.close()
-        with self._device_ownership_lock:
-            device = self._device
-            self._device = None
-        if device is not None:
             try:
-                device.listen(None)
-                await self._async_disconnect_device(device)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
+                if self._owns_http_session and self._http_session is not None:
+                    await self._http_session.close()
+            finally:
+                # Cancellation or a pool-close failure must still initiate
+                # cleanup of the legacy device's listener and MQTT resources.
                 with self._device_ownership_lock:
-                    if self._device is None:
-                        self._device = device
-                raise
+                    device = self._device
+                    self._device = None
+                if device is not None:
+                    try:
+                        device.listen(None)
+                        await self._async_disconnect_device(device)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        with self._device_ownership_lock:
+                            if self._device is None:
+                                self._device = device
+                        raise
 
     async def _async_disconnect_device(self, device: Any) -> None:
         """Bound device disconnect without retaining HA's default executor."""

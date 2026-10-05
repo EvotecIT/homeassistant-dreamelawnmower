@@ -717,3 +717,60 @@ def test_client_close_cancels_active_native_read(
                 await client.async_close()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("borrowed", [True, False])
+def test_cancelled_close_still_disconnects_legacy_device(monkeypatch, borrowed):
+    async def scenario():
+        started = asyncio.Event()
+        cleanup_started = asyncio.Event()
+        cleanup_release = asyncio.Event()
+        device_events = []
+
+        async def stalled_read(self, **kwargs):
+            started.set()
+            try:
+                await asyncio.Future()
+            finally:
+                cleanup_started.set()
+                await cleanup_release.wait()
+
+        class Device:
+            def listen(self, callback):
+                assert callback is None
+                device_events.append("detached")
+
+            def disconnect(self):
+                device_events.append("disconnected")
+
+        monkeypatch.setattr(
+            DreameCloudSession, "async_get_device_list_page", stalled_read,
+        )
+        async with ClientSession() as shared:
+            client = DreameLawnMowerClient(
+                **OPTIONS,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type="dreame", country="eu",
+                ),
+                session=shared if borrowed else None,
+            )
+            client._device = Device()
+            read = asyncio.create_task(client.async_get_cloud_device_list_page())
+            try:
+                await asyncio.wait_for(started.wait(), timeout=1)
+                used_session = client._http_session
+                closing = asyncio.create_task(client.async_close())
+                await asyncio.wait_for(cleanup_started.wait(), timeout=1)
+                closing.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await closing
+                assert device_events == ["detached", "disconnected"]
+                assert used_session.closed is (not borrowed)
+                assert not shared.closed
+            finally:
+                cleanup_release.set()
+                await asyncio.gather(read, return_exceptions=True)
+                await client.async_close()
+
+    asyncio.run(scenario())
