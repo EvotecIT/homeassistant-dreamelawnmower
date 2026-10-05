@@ -19,7 +19,9 @@ from Crypto.Cipher import ARC4
 from miio.miioprotocol import MiIOProtocol
 
 from .exceptions import DeviceException, DreameLawnMowerCloudAPIError
-from .cloud_wire import cloud_headers, cloud_login_data, cloud_strings
+from .cloud_wire import (
+    DEVICE_LIST_PATH, cloud_device_list_data, cloud_headers, cloud_login_data, cloud_strings,
+)
 from .deadline import DeadlineExceededError, run_with_deadline
 from .mqtt_tls import create_cloud_mqtt_ssl_context
 
@@ -597,20 +599,9 @@ class DreameMowerDreameHomeCloudProtocol:
         master: bool | None = None,
         shared_status: int | None = None,
     ) -> Any:
-        params = {
-            "current": current,
-            "size": size,
-        }
-        if lang:
-            params["lang"] = lang
-        if master is not None:
-            params["master"] = master
-        if shared_status is not None:
-            params["sharedStatus"] = shared_status
-
         response = self.request(
-            f"{self.get_api_url()}/dreame-user-iot/iotuserbind/device/listV2",
-            json.dumps(params, separators=(",", ":")),
+            f"{self.get_api_url()}{DEVICE_LIST_PATH}",
+            cloud_device_list_data(current, size, lang, master, shared_status),
         )
         if response and "data" in response and response["code"] == 0:
             data = response["data"]

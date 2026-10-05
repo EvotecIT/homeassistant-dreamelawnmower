@@ -26,6 +26,9 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions imp
     DreameLawnMowerAuthError,
     DreameLawnMowerConnectionError,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
+    DreameLawnMowerDescriptor,
+)
 
 OPTIONS = {
     "username": "account@example.invalid",
@@ -515,3 +518,202 @@ def test_owned_session_uses_environment_proxy_and_vendor_auth(monkeypatch, tmp_p
 
     asyncio.run(scenario())
     assert seen == [("127.0.0.2", True), ("127.0.0.2", True)]
+
+
+@pytest.mark.parametrize("account_type", ["dreame", "mova"])
+@pytest.mark.parametrize("wrapped", [True, False])
+def test_device_page_preserves_filters_and_reuses_auth(
+    monkeypatch, account_type, wrapped,
+):
+    strings = cloud_strings(account_type)
+    calls = []
+    page = {"records": [{"did": "42"}], "current": 2, "pages": 3}
+
+    async def handler(request):
+        calls.append(request.path)
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        assert request.path == "/dreame-user-iot/iotuserbind/device/listV2"
+        assert await request.json() == {
+            "current": 2, "size": 5, "lang": "pl", "master": False,
+            "sharedStatus": 0,
+        }
+        assert request.headers[strings[46]] == "access-secret"
+        return web.json_response(
+            {"code": 0, "data": {"page": page} if wrapped else page}
+        )
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            cloud = DreameCloudSession(
+                session, **{**OPTIONS, "account_type": account_type}
+            )
+            for _ in range(2):
+                assert await cloud.async_get_device_list_page(
+                    current=2, size=5, language="pl", master=False, shared_status=0,
+                ) == page
+            assert not session.closed
+
+    asyncio.run(scenario())
+    assert calls.count(strings[17]) == 1
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("payload", [[], {"page": []}, {"page": None}])
+def test_device_page_rejects_malformed_page(monkeypatch, payload):
+    strings = cloud_strings("dreame")
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        return web.json_response({"code": 0, "data": payload})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            cloud = DreameCloudSession(session, **OPTIONS)
+            with pytest.raises(DreameLawnMowerConnectionError, match="page is invalid"):
+                await cloud.async_get_device_list_page()
+
+    asyncio.run(scenario())
+
+
+def test_cancelled_page_releases_response_and_allows_next_read(monkeypatch):
+    strings = cloud_strings("dreame")
+
+    async def scenario():
+        started = asyncio.Event()
+        finish = asyncio.Event()
+        page_calls = 0
+
+        async def handler(request):
+            nonlocal page_calls
+            if request.path == strings[17]:
+                return web.json_response(login_response(strings))
+            page_calls += 1
+            if page_calls == 1:
+                response = web.StreamResponse()
+                await response.prepare(request)
+                started.set()
+                await finish.wait()
+                return response
+            return web.json_response({"code": 0, "data": {"records": []}})
+
+        async with server(monkeypatch, handler), ClientSession() as session:
+            cloud = DreameCloudSession(session, **OPTIONS)
+            first = asyncio.create_task(cloud.async_get_device_list_page())
+            await started.wait()
+            first.cancel()
+            try:
+                with pytest.raises(asyncio.CancelledError):
+                    await first
+                assert await cloud.async_get_device_list_page(timeout=1) == {
+                    "records": []
+                }
+                assert not session.closed
+            finally:
+                finish.set()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("borrowed", [True, False])
+def test_client_page_reads_own_only_standalone_session(monkeypatch, borrowed):
+    strings = cloud_strings("dreame")
+    calls = []
+
+    async def handler(request):
+        calls.append(request.path)
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        assert await request.json() == {"current": 3, "size": 7, "lang": "en"}
+        return web.json_response({"code": 0, "data": {"page": {"records": []}}})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as shared:
+            client = DreameLawnMowerClient(
+                **OPTIONS,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type="dreame", country="eu",
+                ),
+                session=shared if borrowed else None,
+            )
+            try:
+                for _ in range(2):
+                    assert await client.async_get_cloud_device_list_page(
+                        current=3, size=7,
+                    ) == {"records": []}
+                used_session = client._http_session
+                if borrowed:
+                    assert used_session is shared
+                else:
+                    assert used_session is not shared
+            finally:
+                await client.async_close()
+            assert used_session.closed is (not borrowed)
+            assert not shared.closed
+            with pytest.raises(DreameLawnMowerConnectionError, match="closing"):
+                await client.async_get_cloud_device_list_page()
+            await client.async_close()
+
+    asyncio.run(scenario())
+    assert calls.count(strings[17]) == 1
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("borrowed", [True, False])
+@pytest.mark.parametrize("caller_continues", [True, False])
+def test_client_close_cancels_active_native_read(
+    monkeypatch, borrowed, caller_continues,
+):
+    strings = cloud_strings("dreame")
+
+    async def scenario():
+        started = asyncio.Event()
+        release = asyncio.Event()
+        caller_release = asyncio.Event()
+
+        async def handler(request):
+            if request.path == strings[17]:
+                return web.json_response(login_response(strings))
+            response = web.StreamResponse()
+            await response.prepare(request)
+            started.set()
+            await release.wait()
+            return response
+
+        async with server(monkeypatch, handler), ClientSession() as shared:
+            client = DreameLawnMowerClient(
+                **OPTIONS,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type="dreame", country="eu",
+                ),
+                session=shared if borrowed else None,
+            )
+            async def read_then_continue():
+                try:
+                    await client.async_get_cloud_device_list_page()
+                except asyncio.CancelledError:
+                    if not caller_continues:
+                        raise
+                    await caller_release.wait()
+
+            task = asyncio.create_task(read_then_continue())
+            try:
+                await asyncio.wait_for(started.wait(), timeout=2)
+                used_session = client._http_session
+                await asyncio.wait_for(client.async_close(), timeout=1)
+                if caller_continues:
+                    assert not task.done()
+                else:
+                    assert task.cancelled()
+                assert used_session.closed is (not borrowed)
+                assert not shared.closed
+            finally:
+                release.set()
+                caller_release.set()
+                await asyncio.gather(task, return_exceptions=True)
+                await client.async_close()
+
+    asyncio.run(scenario())

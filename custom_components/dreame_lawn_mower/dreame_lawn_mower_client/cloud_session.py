@@ -12,7 +12,13 @@ from typing import Any
 
 from aiohttp import BasicAuth, ClientError, ClientSession, ClientTimeout
 
-from .cloud_wire import cloud_headers, cloud_login_data, cloud_strings
+from .cloud_wire import (
+    DEVICE_LIST_PATH,
+    cloud_device_list_data,
+    cloud_headers,
+    cloud_login_data,
+    cloud_strings,
+)
 from .exceptions import DreameLawnMowerAuthError, DreameLawnMowerConnectionError
 
 MAX_CLOUD_RESPONSE_BYTES = 1024 * 1024
@@ -88,13 +94,53 @@ class DreameCloudSession:
         deadline: float | None = None,
     ) -> Any:
         """Read the account inventory, including authentication in the deadline."""
+        path = "/".join(self._strings[index] for index in (23, 24, 27, 28))
+        return await self._async_read(
+            f"/{path}", None, timeout=timeout, deadline=deadline,
+        )
+
+    async def async_get_device_list_page(
+        self,
+        *,
+        current: int = 1,
+        size: int = 20,
+        language: str | None = None,
+        master: bool | None = None,
+        shared_status: int | None = None,
+        timeout: float = 20,
+        deadline: float | None = None,
+    ) -> dict[str, Any] | None:
+        """Read one account page with the same filters as the synchronous client."""
+        result = await self._async_read(
+            DEVICE_LIST_PATH,
+            cloud_device_list_data(current, size, language, master, shared_status),
+            timeout=timeout,
+            deadline=deadline,
+        )
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise DreameLawnMowerConnectionError("Cloud device page is invalid")
+        page = result.get("page", result)
+        if not isinstance(page, dict):
+            raise DreameLawnMowerConnectionError("Cloud device page is invalid")
+        return page
+
+    async def _async_read(
+        self,
+        path: str,
+        data: str | None,
+        *,
+        timeout: float,
+        deadline: float | None,
+    ) -> Any:
+        """Serialize a read-only request, authentication, and bounded retries."""
         end = self._deadline(timeout, deadline)
         try:
             async with asyncio.timeout(self._remaining(end)):
                 async with self._lock:
                     if self._token is None or time.time() >= self._expires_at:
                         await self._login(end)
-                    path = "/".join(self._strings[index] for index in (23, 24, 27, 28))
                     for attempt in range(2):
                         headers = cloud_headers(
                             self._strings,
@@ -104,9 +150,10 @@ class DreameCloudSession:
                         headers[self._strings[51]] = self._strings[52]
                         assert self._token is not None
                         headers[self._strings[46]] = self._token
-                        status, payload = await self._post_inventory(
-                            f"{self._base_url}/{path}",
+                        status, payload = await self._post_read(
+                            f"{self._base_url}{path}",
                             headers,
+                            data,
                             end,
                         )
                         if status == 401 and attempt == 0:
@@ -179,16 +226,17 @@ class DreameCloudSession:
             return
         raise DreameLawnMowerAuthError("Cloud authentication failed")
 
-    async def _post_inventory(
+    async def _post_read(
         self,
         url: str,
         headers: Mapping[str, str],
+        data: str | None,
         deadline: float,
     ) -> tuple[int, dict[str, Any]]:
-        """Retry only the read-only inventory request within its shared deadline."""
+        """Retry only read-only account requests within their shared deadline."""
         for attempt in range(3):
             try:
-                return await self._post(url, headers, None, deadline)
+                return await self._post(url, headers, data, deadline)
             except (ClientError, TimeoutError):
                 if attempt == 2:
                     raise

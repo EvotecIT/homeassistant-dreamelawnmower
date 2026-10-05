@@ -12,6 +12,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .api import (
@@ -425,6 +426,7 @@ class DreameLawnMowerCoordinator(
             country=entry.data[CONF_COUNTRY],
             account_type=entry.data[CONF_ACCOUNT_TYPE],
             descriptor=descriptor,
+            session=async_get_clientsession(hass),
         )
         self.entry = entry
         self.app_map_objects: dict[str, Any] | None = None

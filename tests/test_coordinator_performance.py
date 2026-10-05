@@ -60,23 +60,32 @@ def test_coordinator_registers_its_config_entry_with_home_assistant() -> None:
         options={},
     )
     client = Mock()
+    shared_session = Mock()
+    hass = Mock()
 
     with (
         patch.object(
             coordinator_module,
             "DreameLawnMowerClient",
             return_value=client,
-        ),
+        ) as client_factory,
+        patch.object(
+            coordinator_module,
+            "async_get_clientsession",
+            return_value=shared_session,
+        ) as session_factory,
         patch.object(
             DataUpdateCoordinator,
             "__init__",
             return_value=None,
         ) as coordinator_init,
     ):
-        coordinator = DreameLawnMowerCoordinator(Mock(), entry)
+        coordinator = DreameLawnMowerCoordinator(hass, entry)
 
     assert coordinator.entry is entry
     assert coordinator_init.call_args.kwargs["config_entry"] is entry
+    session_factory.assert_called_once_with(hass)
+    assert client_factory.call_args.kwargs["session"] is shared_session
     client.set_update_callback.assert_called_once_with(
         coordinator._handle_client_update
     )

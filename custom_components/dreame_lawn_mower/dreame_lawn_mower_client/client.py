@@ -94,6 +94,7 @@ from .client_schedules import (
 from .client_schedules import _DreameLawnMowerClientSchedulesMixin
 from .client_settings import _DreameLawnMowerClientSettingsMixin
 from .client_tracking import _DreameLawnMowerClientTrackingMixin
+from .cloud_session import DreameCloudSession as _DreameCloudSession
 from .deadline import DeadlineExceededError as DeadlineExceededError
 from .deadline import run_with_deadline as run_with_deadline
 from .debug_ota_catalog import (
@@ -540,6 +541,7 @@ class DreameLawnMowerClient(
         country: str,
         account_type: str,
         descriptor: DreameLawnMowerDescriptor,
+        session: _ClientSession | None = None,
     ) -> None:
         if account_type not in SUPPORTED_ACCOUNT_TYPES:
             raise ValueError(f"Unsupported account type: {account_type}")
@@ -549,6 +551,10 @@ class DreameLawnMowerClient(
         self._country = country
         self._account_type = account_type
         self._descriptor = descriptor
+        self._http_session = session
+        self._owns_http_session = session is None
+        self._async_cloud: _DreameCloudSession | None = None
+        self._cloud_read_tasks: set[asyncio.Task[Any]] = set()
         self._device: Any | None = None
         self._device_ownership_lock = _threading.Lock()
         self._schedule_operation_lock = _threading.RLock()
@@ -1844,14 +1850,30 @@ class DreameLawnMowerClient(
         shared_status: int | None = None,
     ) -> dict[str, Any] | None:
         """Fetch the raw cloud `device/listV2` page used by the mobile app."""
-        return await asyncio.to_thread(
-            self._sync_get_cloud_device_list_page,
-            current,
-            size,
-            language,
-            master,
-            shared_status,
-        )
+        if self._closing:
+            raise DreameLawnMowerConnectionError("Client is closing")
+        if self._async_cloud is None:
+            if self._http_session is None:
+                self._http_session = _ClientSession(trust_env=True)
+            self._async_cloud = _DreameCloudSession(
+                self._http_session,
+                username=self._username,
+                password=self._password,
+                country=self._country,
+                account_type=self._account_type,
+            )
+        task = asyncio.create_task(self._async_cloud.async_get_device_list_page(
+            current=current,
+            size=size,
+            language=language,
+            master=master,
+            shared_status=shared_status,
+        ))
+        self._cloud_read_tasks.add(task)
+        try:
+            return await task
+        finally:
+            self._cloud_read_tasks.discard(task)
 
     async def async_get_cloud_key_definition(
         self,
@@ -1883,6 +1905,18 @@ class DreameLawnMowerClient(
         """Disconnect long-lived device resources."""
         with self._device_ownership_lock:
             self._closing = True
+        # Stop native reads before releasing an owned pool. A borrowed HA pool
+        # remains usable by other integrations after this client has closed.
+        reads = tuple(self._cloud_read_tasks)
+        for task in reads:
+            task.cancel()
+        try:
+            if reads:
+                await asyncio.gather(*reads, return_exceptions=True)
+        finally:
+            if self._owns_http_session and self._http_session is not None:
+                await self._http_session.close()
+        with self._device_ownership_lock:
             device = self._device
             self._device = None
         if device is not None:

@@ -22,7 +22,7 @@ Then import the public package:
 from dreame_lawn_mower_client import DreameLawnMowerClient
 ```
 
-## Discovery Sessions
+## HTTP Sessions
 
 Account discovery uses native async HTTP through aiohttp. Supply an existing
 session with `DreameLawnMowerClient.async_discover_devices(..., session=session)`
@@ -44,8 +44,19 @@ Login and inventory responses have a one MiB decoded-body limit, a total
 operation deadline, cancellation cleanup, and no automatic redirect following.
 Only read-only inventory requests retry transport failures.
 
-Mower commands, polling, and map downloads still use the existing worker-based
-protocol paths. Session injection for discovery does not yet cover those paths.
+The client constructor also accepts `session=session` for native account-page
+reads through `async_get_cloud_device_list_page()`. Without an injected session,
+the first page read opens a session that is reused until `await client.async_close()`.
+Always close the client when finished. Closing cancels outstanding native reads,
+awaits their cleanup, and closes only a session the client created. A closed client
+rejects further page reads. Page filters and pagination retain the same wire format
+as the synchronous transport; malformed pages and rejected requests raise
+`DreameLawnMowerConnectionError`.
+
+Home Assistant lends its shared session to each client. Mower commands, polling,
+and map downloads still use the existing worker-based protocol paths and their
+existing HTTP/MQTT authentication owner. Native account reads do not replace that
+device owner or establish complete async qualification.
 
 ## Minimal Example
 

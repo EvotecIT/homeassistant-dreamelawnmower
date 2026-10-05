@@ -11,6 +11,26 @@ from collections.abc import Sequence
 from .const import DREAME_STRINGS, MOVA_STRINGS
 from .exceptions import DreameLawnMowerAuthError
 
+DEVICE_LIST_PATH = "/dreame-user-iot/iotuserbind/device/listV2"
+
+
+def cloud_device_list_data(
+    current: int,
+    size: int,
+    language: str | None,
+    master: bool | None,
+    shared_status: int | None,
+) -> str:
+    """Encode account-page filters for both cloud transports."""
+    params: dict[str, int | str | bool] = {"current": current, "size": size}
+    if language:
+        params["lang"] = language
+    if master is not None:
+        params["master"] = master
+    if shared_status is not None:
+        params["sharedStatus"] = shared_status
+    return json.dumps(params, separators=(",", ":"))
+
 
 def cloud_strings(account_type: str) -> tuple[str, ...]:
     """Decode the existing account-specific protocol constants."""
