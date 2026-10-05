@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeGuard
 
 CMS_GET_REQUEST: dict[str, str] = {"m": "g", "t": "CMS"}
 MAINTENANCE_WARNING_PERCENT = 20.0
@@ -221,7 +221,7 @@ def _maintenance_item_status(
     }
 
 
-def _looks_like_counter_values(value: Any) -> bool:
+def _looks_like_counter_values(value: object) -> TypeGuard[Sequence[int]]:
     if not isinstance(value, Sequence) or isinstance(value, str | bytes | bytearray):
         return False
     if len(value) < len(MAINTENANCE_ITEMS):
