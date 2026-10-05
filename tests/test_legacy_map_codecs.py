@@ -27,6 +27,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map import (
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_types import (
     MapData,
+    MapDataPartial,
     MapImageDimensions,
     Point,
     Segment,
@@ -201,3 +202,46 @@ def test_segment_extraction_converts_pixel_bounds_and_centers(
         300, 100, 350, 150
     )
     assert (segments[2].x, segments[2].y) == (300, 150)
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "pixels"), [(2, 2, b"\x01\x01\x01"), (-1, 2, b"")]
+)
+def test_map_decoder_rejects_incomplete_or_negative_image_bounds(
+    width: int, height: int, pixels: bytes
+) -> None:
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[19:21] = width.to_bytes(2, "little", signed=True)
+    header[21:23] = height.to_bytes(2, "little", signed=True)
+    raw = bytes(header) + pixels
+    encoded = base64.b64encode(zlib.compress(raw)).decode()
+
+    assert map_decoder.DreameMowerMapDecoder.decode_map_partial(encoded) is None
+    partial = MapDataPartial()
+    partial.raw = raw
+    assert map_decoder.DreameMowerMapDecoder.decode_map_data_from_partial(
+        partial, False
+    ) == (None, None)
+
+
+def test_map_decoder_partial_without_binary_data_is_unavailable() -> None:
+    assert map_decoder.DreameMowerMapDecoder.decode_map_data_from_partial(
+        MapDataPartial(), False
+    ) == (None, None)
+
+
+def test_complete_image_without_optional_metadata_is_accepted() -> None:
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[4] = 73
+    header[17:19] = (50).to_bytes(2, "little", signed=True)
+    header[19:21] = (2).to_bytes(2, "little", signed=True)
+    header[21:23] = (2).to_bytes(2, "little", signed=True)
+    raw = bytes(header) + bytes(4)
+    encoded = base64.b64encode(zlib.compress(raw)).decode()
+
+    decoded, saved = map_decoder.DreameMowerMapDecoder.decode_map(encoded, False)
+
+    assert decoded is not None
+    assert decoded.dimensions == MapImageDimensions(0, 0, 2, 2, 50)
+    assert decoded.data == bytes(4)
+    assert saved is None

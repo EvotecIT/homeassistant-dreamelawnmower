@@ -203,6 +203,18 @@ class DreameMowerMapDecoder:
         return None
 
     @staticmethod
+    def _map_image_size(raw: bytes) -> int | None:
+        """Return the metadata offset only for a complete map image."""
+        if len(raw) < DreameMowerMapDecoder.HEADER_SIZE:
+            return None
+        width = DreameMowerMapDecoder._read_int_16_le(raw, 19)
+        height = DreameMowerMapDecoder._read_int_16_le(raw, 21)
+        if width < 0 or height < 0:
+            return None
+        size = DreameMowerMapDecoder.HEADER_SIZE + width * height
+        return size if size <= len(raw) else None
+
+    @staticmethod
     def decode_map_partial(
         raw_map: str, iv: str | None = None, key: str | None = None
     ) -> MapDataPartial | None:
@@ -241,8 +253,9 @@ class DreameMowerMapDecoder:
 
         try:
             raw_bytes = zlib.decompress(raw_bytes)
-            if not raw_bytes or len(raw_bytes) < DreameMowerMapDecoder.HEADER_SIZE:
-                _LOGGER.error("Wrong header size for map")
+            image_size = DreameMowerMapDecoder._map_image_size(raw_bytes)
+            if image_size is None:
+                _LOGGER.error("Incomplete map image or invalid image bounds")
                 return None
         except Exception as ex:
             _LOGGER.error("Map data decompression failed: %s", ex)
@@ -253,21 +266,16 @@ class DreameMowerMapDecoder:
         partial_map.frame_id = DreameMowerMapDecoder._read_int_16_le(raw_bytes, 2)
         partial_map.frame_type = DreameMowerMapDecoder._read_int_8(raw_bytes, 4)
         partial_map.raw = raw_bytes
-        image_size = DreameMowerMapDecoder.HEADER_SIZE + (
-            DreameMowerMapDecoder._read_int_16_le(raw_bytes, 19)
-            * DreameMowerMapDecoder._read_int_16_le(raw_bytes, 21)
-        )
-        if len(raw_bytes) >= image_size:
-            try:
-                data_json = json.loads(raw_bytes[image_size:].decode("utf8"))
-                if not isinstance(data_json, dict):
-                    return partial_map
-                if data_json.get("timestamp_ms"):
-                    partial_map.timestamp_ms = int(data_json["timestamp_ms"])
+        try:
+            data_json = json.loads(raw_bytes[image_size:].decode("utf8"))
+            if not isinstance(data_json, dict):
+                return partial_map
+            if data_json.get("timestamp_ms"):
+                partial_map.timestamp_ms = int(data_json["timestamp_ms"])
 
-                partial_map.data_json = data_json
-            except Exception:
-                pass
+            partial_map.data_json = data_json
+        except Exception:
+            pass
         return partial_map
 
     @staticmethod
@@ -294,7 +302,12 @@ class DreameMowerMapDecoder:
     def decode_map_data_from_partial(
         partial_map: MapDataPartial | None, vslam_map: bool, rotation: int = 0
     ) -> tuple[MapData | None, MapData | None]:
-        if partial_map is None:
+        if partial_map is None or partial_map.raw is None:
+            return None, None
+
+        raw = partial_map.raw
+        image_size = DreameMowerMapDecoder._map_image_size(raw)
+        if image_size is None:
             return None, None
 
         map_data = MapData()
@@ -304,7 +317,6 @@ class DreameMowerMapDecoder:
         map_data.frame_type = partial_map.frame_type
         map_data.timestamp_ms = partial_map.timestamp_ms
 
-        raw = partial_map.raw
         map_data.robot_position = Point(
             DreameMowerMapDecoder._read_int_16_le(raw, 5),
             DreameMowerMapDecoder._read_int_16_le(raw, 7),
@@ -322,7 +334,6 @@ class DreameMowerMapDecoder:
         left = DreameMowerMapDecoder._read_int_16_le(raw, 23)
         top = DreameMowerMapDecoder._read_int_16_le(raw, 25)
 
-        image_size = DreameMowerMapDecoder.HEADER_SIZE + width * height
         data_json = partial_map.data_json
         if data_json is None:
             data_json = {}
