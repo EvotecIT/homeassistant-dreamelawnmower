@@ -23,6 +23,11 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map import (
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_optimizer import (
     DreameMowerMapOptimizer,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_types import (
+    MapData,
+    MapDataPartial,
+    MapFrameType,
+)
 
 
 class _DummyProtocol:
@@ -121,3 +126,30 @@ def test_map_url_failed_signing_can_retry(monkeypatch: pytest.MonkeyPatch) -> No
         "https://maps.example/map?signature=recovered"
     )
     assert cloud.get_interim_file_url.call_count == 2
+
+
+@pytest.mark.parametrize("request_pending", [False, True])
+@pytest.mark.parametrize("restored_map", [False, True])
+def test_partial_frame_waits_for_base_map(
+    monkeypatch: pytest.MonkeyPatch, request_pending: bool, restored_map: bool
+) -> None:
+    manager = DreameMapMowerMapManager(_DummyProtocol())
+    manager._latest_map_id = 7
+    manager._map_request_time = 1000 if request_pending else None
+    if restored_map:
+        manager._map_data = MapData()
+        manager._map_data.restored_map = True
+        manager._current_map_id = 7
+        manager._current_frame_id = 1
+    partial = MapDataPartial()
+    partial.map_id = 7
+    partial.frame_id = 2
+    partial.frame_type = MapFrameType.P.value
+    request_base = Mock(return_value=True)
+    monkeypatch.setattr(manager, "_request_i_map", request_base)
+
+    assert manager._add_map_data(partial) is True
+    assert manager._unqueue_partial_map(7, 2) is partial
+    assert manager._map_data is None
+    assert manager._current_frame_id is None
+    assert request_base.call_count == (0 if request_pending else 1)

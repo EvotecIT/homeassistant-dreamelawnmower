@@ -716,7 +716,7 @@ class DreameMapMowerMapManager:
     def _add_raw_map_data(self, raw_map: str, timestamp=None, key=None) -> bool:
         return self._add_map_data(self._decode_map_partial(raw_map, timestamp, key))
 
-    def _add_map_data(self, partial_map: MapDataPartial) -> None:
+    def _add_map_data(self, partial_map: MapDataPartial | None) -> bool:
         if partial_map is None:
             return False
 
@@ -788,7 +788,7 @@ class DreameMapMowerMapManager:
 
                 if self._map_request_time is None:
                     self._request_i_map()
-                    return True
+                return True
 
             if partial_map.frame_id != self._current_frame_id + 1:
                 if partial_map.frame_id <= self._current_frame_id:
