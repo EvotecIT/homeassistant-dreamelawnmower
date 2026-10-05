@@ -220,7 +220,11 @@ class DreameMowerDeviceStatus:
         self.off_peak_charging_config = None
         self.shortcuts = None
 
-    def _get_property(self, prop: DreameMowerProperty) -> Any:
+    def _get_property(
+        self,
+        prop: DreameMowerProperty | DreameMowerAutoSwitchProperty
+        | DreameMowerStrAIProperty | DreameMowerAIProperty,
+    ) -> Any:
         """Helper function for accessing a property from device"""
         _LOGGER.debug("Getting property: %s", prop)
         result = self._device.get_property(prop)
@@ -250,6 +254,8 @@ class DreameMowerDeviceStatus:
     @property
     def cleaning_mode_name(self) -> str:
         """Return cleaning mode as string for translation."""
+        if self.cleaning_mode is None:
+            return STATE_UNKNOWN
         return CLEANING_MODE_CODE_TO_NAME.get(self.cleaning_mode, STATE_UNKNOWN)
 
     @property
@@ -378,6 +384,8 @@ class DreameMowerDeviceStatus:
     @property
     def stream_status_name(self) -> str:
         """Return camera stream status as string for translation."""
+        if self.stream_status is None:
+            return STATE_UNKNOWN
         return STREAM_STATUS_TO_NAME.get(self.stream_status, STATE_UNKNOWN)
 
     @property
@@ -503,13 +511,13 @@ class DreameMowerDeviceStatus:
         return mower_device_code_name(value, model=self._device_model) or STATE_UNKNOWN
 
     @property
-    def error_description(self) -> str:
+    def error_description(self) -> list[str]:
         """Return a mower-native device-code description."""
         name = self.error_name
         return [name.replace("_", " ").capitalize(), ""] if name else [STATE_UNKNOWN, ""]
 
     @property
-    def error_image(self) -> str:
+    def error_image(self) -> None:
         """Return no image; bundled images belong to vacuum fault meanings."""
         return None
 
@@ -570,7 +578,7 @@ class DreameMowerDeviceStatus:
                 return int(brightness)
 
     @property
-    def dnd_remaining(self) -> bool:
+    def dnd_remaining(self) -> int | None:
         """Returns remaining seconds to DND period to end."""
         if self.dnd:
             dnd_start = self.dnd_start
@@ -580,7 +588,7 @@ class DreameMowerDeviceStatus:
                 if len(end_time) == 2:
                     now = datetime.now()
                     hour = now.hour
-                    minute = now.minute
+                    minute: int | str = now.minute
                     if minute < 10:
                         minute = f"0{minute}"
 

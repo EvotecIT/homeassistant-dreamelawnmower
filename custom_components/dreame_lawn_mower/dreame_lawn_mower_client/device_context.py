@@ -15,6 +15,7 @@ if TYPE_CHECKING:
         DreameMowerDeviceCapability,
         DreameMowerProperty,
     )
+    from .map_manager import DreameMapMowerMapManager
     from .protocol import DreameMowerProtocol
 
 
@@ -28,6 +29,7 @@ class _DreameMowerDeviceContext:
     status: DreameMowerDeviceStatus
     capability: DreameMowerDeviceCapability
     _protocol: DreameMowerProtocol
+    _map_manager: DreameMapMowerMapManager | None
     property_mapping: dict[DreameMowerProperty, dict[str, int]]
     action_mapping: dict[DreameMowerAction, dict[str, int]]
 

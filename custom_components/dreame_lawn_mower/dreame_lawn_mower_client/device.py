@@ -206,7 +206,7 @@ class DreameMowerDevice(
         self._update_fail_count: int = 0  # Update failed counter
         self._map_select_time: float | None = None
         # Map Manager object. Only available when cloud connection is present
-        self._map_manager: DreameMapMowerMapManager = None
+        self._map_manager: DreameMapMowerMapManager | None = None
         self._update_callback = None  # External update callback for device
         self._error_callback = None  # External update failed callback
         # External update callbacks for specific device property
