@@ -28,7 +28,7 @@ from PIL import (
     PngImagePlugin,
     ImageFilter,
 )
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 from time import sleep
 from io import BytesIO
 from typing import Optional, Tuple
@@ -152,13 +152,13 @@ _LOGGER = logging.getLogger(__name__)
 
 class DreameMapMowerMapManager:
     def __init__(self, _protocol: DreameMowerProtocol) -> None:
-        self._map_list_object_name: str = None
-        self._map_list_md5: str = None
-        self._recovery_map_list_object_name: str = None
-        self._update_callback = None
-        self._change_callback = None
-        self._error_callback = None
-        self._update_timer: Timer = None
+        self._map_list_object_name: str | None = None
+        self._map_list_md5: str | None = None
+        self._recovery_map_list_object_name: str | None = None
+        self._update_callback: Callable[[], None] | None = None
+        self._change_callback: Callable[[], None] | None = None
+        self._error_callback: Callable[[Exception], None] | None = None
+        self._update_timer: Timer | None = None
         self._update_running: bool = False
         self._update_interval: float = 10
         self._device_running: bool = False
@@ -176,33 +176,33 @@ class DreameMapMowerMapManager:
         self.optimizer = DreameMowerMapOptimizer()
 
     def _init_data(self) -> None:
-        self._map_data: MapData = None
-        self._current_frame_id: int = None
-        self._current_map_id: int = None
-        self._current_timestamp_ms: int = None
+        self._map_data: MapData | None = None
+        self._current_frame_id: int | None = None
+        self._current_map_id: int | None = None
+        self._current_timestamp_ms: int | None = None
         self._file_urls: dict[str, str] = {}
         self._saved_map_data: dict[int, MapData] = {}
         self._map_list: list[int] = []
         self._need_map_request: bool = False
-        self._need_map_list_request: bool = None
-        self._need_recovery_map_list_request: bool = None
-        self._map_data_queue: dict[int, MapData] = {}
-        self._updated_frame_id: int = None
-        self._selected_map_id: int = None
+        self._need_map_list_request: bool | None = None
+        self._need_recovery_map_list_request: bool | None = None
+        self._map_data_queue: dict[int, dict[int, MapDataPartial]] = {}
+        self._updated_frame_id: int | None = None
+        self._selected_map_id: int | None = None
         self._request_queue: dict[str, bool] = {}
-        self._latest_map_data_time: int = None
-        self._latest_object_name_time: int = None
-        self._latest_map_timestamp_ms: int = None
-        self._latest_map_id: int = None
-        self._last_p_request_map_id: int = None
-        self._last_p_request_frame_id: int = None
-        self._last_p_request_time: int = None
-        self._last_robot_time: int = None
-        self._map_request_time: int = None
+        self._latest_map_data_time: int | None = None
+        self._latest_object_name_time: int | None = None
+        self._latest_map_timestamp_ms: int | None = None
+        self._latest_map_id: int | None = None
+        self._last_p_request_map_id: int | None = None
+        self._last_p_request_frame_id: int | None = None
+        self._last_p_request_time: float | None = None
+        self._last_robot_time: int | None = None
+        self._map_request_time: int | None = None
         self._map_request_count: int = 0
-        self._new_map_request_time: int = None
-        self._aes_iv: str = None
-        self._capability: DreameMowerDeviceCapability = None
+        self._new_map_request_time: float | None = None
+        self._aes_iv: str | None = None
+        self._capability: DreameMowerDeviceCapability | None = None
 
     def _request_map_from_cloud(self) -> bool:
         if self._protocol.cloud.dreame_cloud:
@@ -499,7 +499,7 @@ class DreameMapMowerMapManager:
         finally:
             self.schedule_update(max(self._update_interval - (time.time() - start), 1))
 
-    def _queue_partial_map(self, map_data) -> None:
+    def _queue_partial_map(self, map_data: MapDataPartial) -> None:
         if map_data.map_id != self._latest_map_id:
             return
         next_frame_id = 0
@@ -535,7 +535,7 @@ class DreameMapMowerMapManager:
             if k <= frame_id:
                 del self._map_data_queue[self._latest_map_id][k]
 
-    def _unqueue_next_partial_map(self) -> MapData | None:
+    def _unqueue_next_partial_map(self) -> MapDataPartial | None:
         if (
             self._latest_map_id is None
             or self._current_frame_id is None
@@ -557,7 +557,7 @@ class DreameMapMowerMapManager:
             del self._map_data_queue[self._latest_map_id][frame_id]
             return map_data
 
-    def _unqueue_partial_map(self, map_id: int, frame_id: int) -> MapData | None:
+    def _unqueue_partial_map(self, map_id: int, frame_id: int) -> MapDataPartial | None:
         if (
             map_id in self._map_data_queue
             and self._map_data_queue[map_id]
@@ -1204,11 +1204,15 @@ class DreameMapMowerMapManager:
                         )
         return None, None, None
 
-    def listen(self, change_callback, update_callback) -> None:
+    def listen(
+        self,
+        change_callback: Callable[[], None] | None,
+        update_callback: Callable[[], None] | None,
+    ) -> None:
         self._change_callback = change_callback
         self._update_callback = update_callback
 
-    def listen_error(self, callback) -> None:
+    def listen_error(self, callback: Callable[[Exception], None] | None) -> None:
         self._error_callback = callback
 
     def disconnect(self) -> None:
@@ -1219,7 +1223,7 @@ class DreameMapMowerMapManager:
         self._change_callback = None
         self._error_callback = None
 
-    def schedule_update(self, wait: float = None) -> None:
+    def schedule_update(self, wait: float | None = None) -> None:
         if wait == None:
             wait = self._update_interval
         if self._update_timer is not None:
@@ -1323,7 +1327,7 @@ class DreameMapMowerMapManager:
         if aes_iv:
             self._aes_iv = aes_iv
 
-    def set_capability(self, capability) -> None:
+    def set_capability(self, capability: DreameMowerDeviceCapability) -> None:
         if capability:
             self._capability = capability
             if not capability.lidar_navigation:
@@ -1400,7 +1404,7 @@ class DreameMapMowerMapManager:
     def request_next_recovery_map_list(self) -> None:
         self._need_recovery_map_list_request = True
 
-    def set_map_list_object_name(self, object_name: str, md5: str = None) -> bool:
+    def set_map_list_object_name(self, object_name: str, md5: str | None = None) -> bool:
         if object_name and object_name != "":
             if self._map_list_object_name != object_name or self._map_list_md5 != md5:
                 self._map_list_object_name = object_name
