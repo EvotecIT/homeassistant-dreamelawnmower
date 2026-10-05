@@ -199,19 +199,20 @@ class DreameMowerMapDecoder:
         return None
 
     @staticmethod
-    def decode_map_partial(raw_map, iv=None, key=None) -> MapDataPartial | None:
-        _LOGGER.debug("raw_map: %s", raw_map)
-        raw_map = raw_map.replace("_", "/").replace("-", "+")
-
-        if len(raw_map) < 3:
-            return None
-
+    def decode_map_partial(
+        raw_map: str, iv: str | None = None, key: str | None = None
+    ) -> MapDataPartial | None:
+        _LOGGER.debug("Decoding map frame (%d encoded characters)", len(raw_map))
         if "," in raw_map and key is None:
             values = raw_map.split(",")
             key = values[1]
             raw_map = values[0]
 
-        raw_map = base64.decodebytes(raw_map.encode("utf8"))
+        raw_map = raw_map.replace("_", "/").replace("-", "+")
+        if len(raw_map) < 3:
+            return None
+
+        raw_bytes = base64.decodebytes(raw_map.encode("utf8"))
 
         if key is not None:
             if iv is None:
@@ -225,7 +226,7 @@ class DreameMowerMapDecoder:
                     backend=default_backend(),
                 )
                 decryptor = cipher.decryptor()
-                raw_map = decryptor.update(raw_map) + decryptor.finalize()
+                raw_bytes = decryptor.update(raw_bytes) + decryptor.finalize()
             except Exception as ex:
                 _LOGGER.error(
                     "Map data decryption failed: %s. Private key might be missing. "
@@ -235,8 +236,8 @@ class DreameMowerMapDecoder:
                 return None
 
         try:
-            raw_map = zlib.decompress(raw_map)
-            if not raw_map or len(raw_map) < DreameMowerMapDecoder.HEADER_SIZE:
+            raw_bytes = zlib.decompress(raw_bytes)
+            if not raw_bytes or len(raw_bytes) < DreameMowerMapDecoder.HEADER_SIZE:
                 _LOGGER.error("Wrong header size for map")
                 return None
         except Exception as ex:
@@ -244,17 +245,17 @@ class DreameMowerMapDecoder:
             return None
 
         partial_map = MapDataPartial()
-        partial_map.map_id = DreameMowerMapDecoder._read_int_16_le(raw_map)
-        partial_map.frame_id = DreameMowerMapDecoder._read_int_16_le(raw_map, 2)
-        partial_map.frame_type = DreameMowerMapDecoder._read_int_8(raw_map, 4)
-        partial_map.raw = raw_map
+        partial_map.map_id = DreameMowerMapDecoder._read_int_16_le(raw_bytes)
+        partial_map.frame_id = DreameMowerMapDecoder._read_int_16_le(raw_bytes, 2)
+        partial_map.frame_type = DreameMowerMapDecoder._read_int_8(raw_bytes, 4)
+        partial_map.raw = raw_bytes
         image_size = DreameMowerMapDecoder.HEADER_SIZE + (
-            DreameMowerMapDecoder._read_int_16_le(raw_map, 19)
-            * DreameMowerMapDecoder._read_int_16_le(raw_map, 21)
+            DreameMowerMapDecoder._read_int_16_le(raw_bytes, 19)
+            * DreameMowerMapDecoder._read_int_16_le(raw_bytes, 21)
         )
-        if len(raw_map) >= image_size:
+        if len(raw_bytes) >= image_size:
             try:
-                data_json = json.loads(raw_map[image_size:].decode("utf8"))
+                data_json = json.loads(raw_bytes[image_size:].decode("utf8"))
                 if data_json.get("timestamp_ms"):
                     partial_map.timestamp_ms = int(data_json["timestamp_ms"])
 

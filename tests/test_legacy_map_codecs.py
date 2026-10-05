@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import logging
 import zlib
 
 import pytest
+from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     device as device_module,
@@ -77,3 +81,39 @@ def test_invalid_optional_metadata_does_not_hide_decoded_header() -> None:
     assert decoded is not None
     assert decoded.map_id == 7
     assert saved is None
+
+
+@pytest.mark.parametrize("inline_key", [False, True])
+def test_map_decoder_decrypts_explicit_and_inline_keys(
+    inline_key: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    key = "unit_test-map-key"
+    iv = "0123456789abcdef"
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[0:2] = (7).to_bytes(2, "little", signed=True)
+    header[2:4] = (11).to_bytes(2, "little", signed=True)
+    header[4] = 73
+    raw = bytes(header) + b'{"timestamp_ms":1700000000000}'
+    padder = padding.PKCS7(128).padder()
+    padded = padder.update(zlib.compress(raw)) + padder.finalize()
+    cipher = Cipher(
+        algorithms.AES(hashlib.sha256(key.encode()).hexdigest()[:32].encode()),
+        modes.CBC(iv.encode()),
+    )
+    encryptor = cipher.encryptor()
+    encoded = base64.b64encode(
+        encryptor.update(padded) + encryptor.finalize()
+    ).decode()
+    payload = f"{encoded},{key}" if inline_key else encoded
+
+    with caplog.at_level(logging.DEBUG, logger=map_decoder.__name__):
+        partial = map_decoder.DreameMowerMapDecoder.decode_map_partial(
+            payload, iv, None if inline_key else key
+        )
+
+    assert partial is not None
+    assert partial.raw == raw
+    assert (partial.map_id, partial.frame_id) == (7, 11)
+    assert partial.timestamp_ms == 1700000000000
+    assert key not in caplog.text
+    assert encoded not in caplog.text
