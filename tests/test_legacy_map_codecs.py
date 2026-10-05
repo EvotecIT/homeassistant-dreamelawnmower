@@ -153,3 +153,32 @@ def test_robot_segment_outside_pixels_uses_geometry_fallback(
     map_decoder.DreameMowerMapDecoder.set_robot_segment(map_data)
 
     assert map_data.robot_segment == expected
+
+
+def test_segment_extraction_without_geometry_has_no_segments() -> None:
+    assert map_decoder.DreameMowerMapDecoder.get_segments(MapData(), False) == {}
+
+
+@pytest.mark.parametrize(
+    ("saved", "raw_available"), [(False, True), (True, True), (True, False)]
+)
+def test_segment_extraction_converts_pixel_bounds_and_centers(
+    saved: bool, raw_available: bool
+) -> None:
+    map_data = MapData()
+    map_data.saved_map = saved
+    map_data.dimensions = MapImageDimensions(100, 200, 2, 3, 50)
+    map_data.pixel_type = np.array([[1, 1], [1, 1], [0, 2]], dtype=np.uint8)
+    map_data.data = bytes([1, 1, 0, 1, 1, 2]) if raw_available else None
+
+    segments = map_decoder.DreameMowerMapDecoder.get_segments(map_data, False)
+
+    assert set(segments) == {1, 2}
+    assert (segments[1].x0, segments[1].y0, segments[1].x1, segments[1].y1) == (
+        200, 50, 300, 150
+    )
+    assert (segments[1].x, segments[1].y) == (250, 150)
+    assert (segments[2].x0, segments[2].y0, segments[2].x1, segments[2].y1) == (
+        300, 100, 350, 150
+    )
+    assert (segments[2].x, segments[2].y) == (300, 150)

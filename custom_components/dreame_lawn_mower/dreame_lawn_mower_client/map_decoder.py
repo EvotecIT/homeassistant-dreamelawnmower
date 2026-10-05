@@ -148,6 +148,11 @@ class DreameMowerMapDecoder:
     def _get_segment_center(
         map_data: MapData, segment_id: int, center: int, vertical: bool
     ) -> int | None:
+        dimensions = map_data.dimensions
+        data = map_data.data
+        if dimensions is None or data is None:
+            return None
+
         # Find center point implemented as on the app
         lines = []
         zero_pixels = -1
@@ -155,13 +160,13 @@ class DreameMowerMapDecoder:
         line = None
 
         for k in range(
-            map_data.dimensions.height if vertical else map_data.dimensions.width
+            dimensions.height if vertical else dimensions.width
         ):
             pixel_type = (
-                map_data.data[
-                    (k * map_data.dimensions.width + center)
+                data[
+                    (k * dimensions.width + center)
                     if vertical
-                    else (center * map_data.dimensions.width + k)
+                    else (center * dimensions.width + k)
                 ]
                 & 0x3F
             )
@@ -1399,10 +1404,15 @@ class DreameMowerMapDecoder:
 
     @staticmethod
     def get_segments(map_data: MapData, vslam_map: bool) -> dict[int, Segment]:
+        dimensions = map_data.dimensions
+        pixels = map_data.pixel_type
+        if dimensions is None or pixels is None:
+            return {}
+
         segments: dict[int, Segment] = {}
-        for y in range(map_data.dimensions.height):
-            for x in range(map_data.dimensions.width):
-                segment_id = int(map_data.pixel_type[x, y])
+        for y in range(dimensions.height):
+            for x in range(dimensions.width):
+                segment_id = int(pixels[x, y])
                 if segment_id > 0 and segment_id < 64:
                     if segment_id not in segments:
                         segments[segment_id] = Segment(segment_id, x, y, x, y)
@@ -1425,15 +1435,15 @@ class DreameMowerMapDecoder:
 
                 if map_data.saved_map:
                     if vslam_map:
-                        if map_data.pixel_type[x, y] != k:
+                        if pixels[x, y] != k:
                             startI = -1
                             endI = -1
-                            for i in range(map_data.dimensions.width):
-                                value = map_data.pixel_type[i, y]
+                            for i in range(dimensions.width):
+                                value = pixels[i, y]
                                 if startI == -1:
                                     if value == k:
                                         startI = i
-                                elif value != k or i == (map_data.dimensions.width - 1):
+                                elif value != k or i == (dimensions.width - 1):
                                     endI = i - 1
                                     break
 
@@ -1452,26 +1462,26 @@ class DreameMowerMapDecoder:
                                 y = center_y
 
                 segments[k].x0 = int(
-                    map_data.dimensions.left + (v.x0 * map_data.dimensions.grid_size)
+                    dimensions.left + (v.x0 * dimensions.grid_size)
                 )
                 segments[k].y0 = int(
-                    map_data.dimensions.top
-                    + (v.y0 * map_data.dimensions.grid_size)
-                    - map_data.dimensions.grid_size
+                    dimensions.top
+                    + (v.y0 * dimensions.grid_size)
+                    - dimensions.grid_size
                 )
                 segments[k].x1 = int(
-                    map_data.dimensions.left
-                    + (v.x1 * map_data.dimensions.grid_size)
-                    + map_data.dimensions.grid_size
+                    dimensions.left
+                    + (v.x1 * dimensions.grid_size)
+                    + dimensions.grid_size
                 )
                 segments[k].y1 = int(
-                    map_data.dimensions.top + (v.y1 * map_data.dimensions.grid_size)
+                    dimensions.top + (v.y1 * dimensions.grid_size)
                 )
                 segments[k].x = int(
-                    map_data.dimensions.left + (x * map_data.dimensions.grid_size)
+                    dimensions.left + (x * dimensions.grid_size)
                 )
                 segments[k].y = int(
-                    map_data.dimensions.top + (y * map_data.dimensions.grid_size)
+                    dimensions.top + (y * dimensions.grid_size)
                 )
                 segments[k].set_name()
         return segments
