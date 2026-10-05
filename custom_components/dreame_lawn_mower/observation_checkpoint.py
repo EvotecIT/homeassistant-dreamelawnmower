@@ -18,6 +18,7 @@ from .const import DOMAIN
 from .dreame_lawn_mower_client.scheduled_run_history import ScheduledRunHistory
 from .dreame_lawn_mower_client.session_timing import ObservedMowingTimer
 from .mower_condition_history import MowerConditionHistory
+from .runtime_data import get_coordinator
 
 _LOGGER = logging.getLogger(__name__)
 MAX_CHECKPOINT_BYTES = 16 * 1024
@@ -292,7 +293,7 @@ class ObservationCheckpoint:
 
 async def async_remove_observation_checkpoint(hass: Any, entry_id: str) -> None:
     """Remove evidence even when the config entry failed to load."""
-    coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
+    coordinator = get_coordinator(hass, entry_id)
     checkpoint = getattr(coordinator, "observation_checkpoint", None)
     if isinstance(checkpoint, ObservationCheckpoint):
         await checkpoint.async_remove()

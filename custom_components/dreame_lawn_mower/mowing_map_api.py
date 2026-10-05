@@ -19,6 +19,7 @@ from .control_options import active_map_index
 from .dreame_lawn_mower_client.client_maps import _app_map_inventory_identity
 from .dreame_lawn_mower_client.mowing_map import MowingMapScene
 from .map_presentation import map_style
+from .runtime_data import get_coordinator
 
 MOWING_MAP_API_KEY = "mowing_map_api"
 MOWING_MAP_API_PATH = f"/api/{DOMAIN}/mowing-map"
@@ -57,7 +58,7 @@ class MowingMapAPI:
 
     def coordinator(self, entry_id: str) -> Any:
         """Resolve a loaded integration, never a cached unloaded instance."""
-        coordinator = self.hass.data.get(DOMAIN, {}).get(entry_id)
+        coordinator = get_coordinator(self.hass, entry_id)
         if coordinator is None or not hasattr(coordinator, "client"):
             raise web.HTTPNotFound()
         return coordinator

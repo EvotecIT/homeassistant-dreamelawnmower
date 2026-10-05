@@ -12,12 +12,10 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
 from .control_options import (  # noqa: F401
     MOWING_ACTION_EDGE,
     MOWING_ACTION_SPOT,
@@ -51,6 +49,7 @@ from .manual_control import remote_control_block_reason
 from .runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache as DreameLawnMowerRuntimeTelemetryCache,
 )
+from .runtime_data import DreameLawnMowerConfigEntry
 from .sensor_compatibility import DreameLawnMowerCompatibilitySensor
 from .sensor_conditions import DreameLawnMowerConditionSensor
 
@@ -444,11 +443,11 @@ _SPECIALIZED_SENSOR_KEYS = frozenset({"current_cleaned_area", "current_zone"})
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up mower sensors."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     async_add_entities(
         [
             DreameLawnMowerSensor(coordinator, description)

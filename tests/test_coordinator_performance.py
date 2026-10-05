@@ -3368,7 +3368,7 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
                 raise AssertionError("setup failure was not propagated")
 
         coordinator.async_shutdown.assert_awaited_once_with()
-        assert "entry-1" not in hass.data[DOMAIN]
+        assert not hasattr(entry, "runtime_data")
         sample = performance.as_dict()["latest_by_operation"]["setup"]
         assert sample["outcome"] == "RuntimeError"
 

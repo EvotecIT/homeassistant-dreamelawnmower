@@ -28,6 +28,7 @@ from dreame_lawn_mower_client.models import (
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
 )
+from tests.runtime_fixtures import runtime_hass
 
 
 def test_primary_map_camera_is_the_only_map_camera_enabled_by_default() -> None:
@@ -87,8 +88,9 @@ def test_camera_setup_only_omits_definitively_unsupported_video(
         ),
     )
     entry = SimpleNamespace(entry_id="entry-1")
-    hass = SimpleNamespace(
-        data={camera_module.DOMAIN: {entry.entry_id: coordinator}},
+    entry.runtime_data = coordinator
+    hass = runtime_hass(
+        coordinators={entry.entry_id: coordinator},
     )
     added: list[object] = []
 

@@ -49,24 +49,22 @@ async def test_signed_scene_and_background_are_private_and_path_scoped(
         async_get_mowing_map_scene=AsyncMock(return_value=scene),
         mowing_map_runtime_overlay=Mock(return_value={"position": None, "trail": []}),
     )
-    hass.data[DOMAIN] = {
-        entry.entry_id: SimpleNamespace(
-            client=client,
-            entry=entry,
-            app_maps={
-                "map_list_valid": True,
-                "current_map_index": 0,
-                "maps": [
-                    {
-                        "idx": 0,
-                        "current": True,
-                        "created": True,
-                        "info": {"hash": "garden-a", "size": 100},
-                    }
-                ],
-            },
-        )
-    }
+    entry.runtime_data = SimpleNamespace(
+        client=client,
+        entry=entry,
+        app_maps={
+            "map_list_valid": True,
+            "current_map_index": 0,
+            "maps": [
+                {
+                    "idx": 0,
+                    "current": True,
+                    "created": True,
+                    "info": {"hash": "garden-a", "size": 100},
+                }
+            ],
+        },
+    )
     async_setup_mowing_map_api(hass)
     http = await hass_client_no_auth()
     path = mowing_map_api_path(entry.entry_id)

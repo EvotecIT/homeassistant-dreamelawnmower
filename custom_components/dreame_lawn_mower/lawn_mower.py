@@ -12,7 +12,6 @@ from homeassistant.components.lawn_mower import (
     LawnMowerEntity,
     LawnMowerEntityFeature,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
@@ -28,7 +27,6 @@ from .const import (
     ACTIVITY_MOWING,
     ACTIVITY_PAUSED,
     ACTIVITY_RETURNING,
-    DOMAIN,
 )
 from .control_options import (
     MOWING_ACTION_EDGE,
@@ -58,6 +56,7 @@ from .runtime_cache import (
     begin_runtime_mission_session,
     runtime_mission_session_generation,
 )
+from .runtime_data import DreameLawnMowerConfigEntry
 from .scheduled_mowing import async_start_scheduled_mowing
 from .services import (
     ATTR_CONFIRM_PREFERENCE_WRITE,
@@ -123,11 +122,11 @@ def _validate_preference_mode(preference_mode: Any) -> int:
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the mower entity."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     platform = async_get_current_platform()
     platform.async_register_entity_service(
         "start_scheduled_mowing",

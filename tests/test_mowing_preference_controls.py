@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
-from custom_components.dreame_lawn_mower.const import DOMAIN
 from custom_components.dreame_lawn_mower.coordinator import (
     _app_map_index_hints,
     _app_map_slot_index_hints,
@@ -43,6 +42,7 @@ from custom_components.dreame_lawn_mower.preference_switch import (
 from custom_components.dreame_lawn_mower.select import (
     DreameLawnMowerSelectedMapPreferenceModeSelect,
 )
+from tests.runtime_fixtures import runtime_hass
 
 
 def _coordinator(
@@ -290,8 +290,9 @@ def test_number_setup_exposes_height_only_for_electronic_models(
     model: str, display_model: str, has_height_controls: bool
 ) -> None:
     coordinator = _coordinator(model=model, display_model=display_model)
-    hass = SimpleNamespace(data={DOMAIN: {"test-entry": coordinator}})
+    hass = runtime_hass(coordinators={"test-entry": coordinator})
     entry = SimpleNamespace(entry_id="test-entry")
+    entry.runtime_data = coordinator
     added: list[object] = []
 
     asyncio.run(async_setup_number_entry(hass, entry, added.extend))

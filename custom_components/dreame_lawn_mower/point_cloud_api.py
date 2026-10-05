@@ -26,6 +26,7 @@ from .dreame_lawn_mower_client import (
 from .dreame_lawn_mower_client.feature_capabilities import FEATURE_POINT_CLOUD
 from .feature_capabilities import coordinator_feature_capabilities
 from .performance import format_performance_sample
+from .runtime_data import get_coordinator
 
 if TYPE_CHECKING:
     from .coordinator import DreameLawnMowerCoordinator
@@ -555,7 +556,7 @@ class DreameLawnMowerPointCloudAPI:
             task.exception()
 
     def _coordinator(self, entry_id: str) -> DreameLawnMowerCoordinator:
-        coordinator = self._hass.data.get(DOMAIN, {}).get(entry_id)
+        coordinator = get_coordinator(self._hass, entry_id)
         if coordinator is None or not hasattr(coordinator, "client"):
             raise web.HTTPNotFound(text="Dreame lawn mower entry not found.")
         return coordinator

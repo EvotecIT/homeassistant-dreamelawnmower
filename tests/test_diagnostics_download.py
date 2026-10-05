@@ -8,7 +8,6 @@ from enum import IntFlag
 from types import SimpleNamespace
 
 from custom_components.dreame_lawn_mower import diagnostics as diagnostics_module
-from custom_components.dreame_lawn_mower.const import DOMAIN
 from custom_components.dreame_lawn_mower.diagnostic_events import (
     DreameLawnMowerDiagnosticEventStore,
 )
@@ -16,6 +15,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import 
     DreameLawnMowerDescriptor,
     DreameLawnMowerSnapshot,
 )
+from tests.runtime_fixtures import runtime_hass
 
 
 class _AnonymousFeature(IntFlag):
@@ -114,8 +114,8 @@ def test_downloaded_diagnostics_combines_report_entities_and_recent_events(
             "last_stream_error": "accessToken=secret failed",
         },
     )
-    hass = SimpleNamespace(
-        data={DOMAIN: {"entry-1": coordinator}},
+    hass = runtime_hass(
+        coordinators={"entry-1": coordinator},
         states=SimpleNamespace(get=lambda _entity_id: state),
     )
     entry = SimpleNamespace(
@@ -130,6 +130,7 @@ def test_downloaded_diagnostics_combines_report_entities_and_recent_events(
         version=1,
         minor_version=2,
     )
+    entry.runtime_data = coordinator
     registry_entry = SimpleNamespace(
         entity_id="camera.garden_live_video",
         original_name="Live Video",

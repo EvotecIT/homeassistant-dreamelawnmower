@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.select import SelectEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -14,7 +13,6 @@ from .const import (
     CONF_MAP_ROTATION,
     CONF_MAP_ROTATIONS,
     DEFAULT_MAP_ROTATION,
-    DOMAIN,
     MAP_ROTATION_OPTIONS,
 )
 from .control_options import (
@@ -55,15 +53,16 @@ from .preference_select import (
     PREFERENCE_SELECTS,
     DreameLawnMowerPreferenceSelect,
 )
+from .runtime_data import DreameLawnMowerConfigEntry
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up current-map mower selects."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     async_add_entities(
         [
             DreameLawnMowerVoiceLanguageSelect(coordinator),

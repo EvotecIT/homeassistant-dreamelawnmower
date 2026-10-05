@@ -22,6 +22,19 @@ small and the reverse-engineering notes in docs or ignored local captures.
 - `docs`
   User guides, open development work, and protocol research.
 
+## Integration Runtime Ownership
+
+Each configured mower owns its coordinator in typed `ConfigEntry.runtime_data`.
+Platforms and diagnostics use that entry directly. Shared map APIs and actions
+resolve runtime data through `runtime_data.py`, which rejects entries belonging
+to another integration.
+
+Setup assigns the coordinator after the first refresh. A setup failure clears
+that assignment and shuts down the coordinator. A failed platform unload retains
+ownership; successful unloading removes API access, purges per-entry map caches,
+and shuts down the coordinator. Integration-wide API instances and the action
+registration marker remain in `hass.data`.
+
 ## Client Package Layout
 
 This repo follows the same shape as the sister Home Assistant repositories:

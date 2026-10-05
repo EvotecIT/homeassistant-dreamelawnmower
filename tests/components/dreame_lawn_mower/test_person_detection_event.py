@@ -13,7 +13,6 @@ from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.setup import async_setup_component
 
-from custom_components.dreame_lawn_mower.const import DOMAIN
 from custom_components.dreame_lawn_mower.coordinator import DreameLawnMowerCoordinator
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device import (
     DreameMowerDevice,
@@ -61,9 +60,9 @@ def _coordinator(hass, model="mova.mower.g2529b"):
     [("mova.mower.g2529b", 1), ("dreame.mower.q2501a", 1), ("dreame.mower.p2255", 0)],
 )
 async def test_event_platform_only_creates_supported_models(hass, model, expected):
-    hass.data[DOMAIN] = {"test": _coordinator(hass, model)}
+    entry = SimpleNamespace(entry_id="test", runtime_data=_coordinator(hass, model))
     entities = []
-    await async_setup_entry(hass, SimpleNamespace(entry_id="test"), entities.extend)
+    await async_setup_entry(hass, entry, entities.extend)
     assert len(entities) == expected
 
 

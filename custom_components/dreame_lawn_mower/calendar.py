@@ -8,17 +8,16 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from homeassistant.components.calendar import CalendarEntity, CalendarEvent
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
 from .entity import DreameLawnMowerEntity
+from .runtime_data import DreameLawnMowerConfigEntry
 from .schedule_cache import schedule_entry_has_usable_data
 
 _LOGGER = logging.getLogger(__name__)
@@ -28,11 +27,11 @@ SCHEDULE_LOOKAHEAD_DAYS = 14
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up mower schedule calendar."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     async_add_entities(
         [
             DreameLawnMowerScheduleCalendar(coordinator),

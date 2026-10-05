@@ -12,7 +12,6 @@ from time import monotonic
 from typing import Any
 
 from homeassistant.components.camera import Camera
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import MATCH_ALL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
@@ -73,6 +72,7 @@ from .map_presentation import map_rotation, map_style
 from .map_preview import CONF_MAP_RESTART_PREVIEW, RestartMapPreview, preview_scope
 from .mowing_map_api import mowing_map_api_path
 from .point_cloud_api import current_point_cloud_api_path
+from .runtime_data import DreameLawnMowerConfigEntry
 from .video_camera import DreameLawnMowerVideoCamera
 
 _LOGGER = logging.getLogger(__name__)
@@ -84,11 +84,11 @@ _MAP_ACTIVE_REFRESH_WINDOW_SECONDS = 90.0
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the mower map camera."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     map_cache = DreameLawnMowerMapCameraCache(ttl=_MAP_CACHE_TTL)
     live_map_cache = DreameLawnMowerMapCameraCache(ttl=_MAP_CACHE_TTL)
     all_maps_cache = DreameLawnMowerMapCameraCache(ttl=_MAP_CACHE_TTL)

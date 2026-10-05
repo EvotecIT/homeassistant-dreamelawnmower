@@ -9,25 +9,24 @@ from homeassistant.components.update import (
     UpdateEntity,
     UpdateEntityFeature,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity
+from .runtime_data import DreameLawnMowerConfigEntry
 
 FIRMWARE_INSTALL_ASSUMED_IN_PROGRESS = timedelta(hours=24)
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up mower firmware update entities."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     async_add_entities([DreameLawnMowerFirmwareUpdateEntity(coordinator)])
 
 

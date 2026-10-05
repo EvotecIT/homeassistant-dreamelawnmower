@@ -10,7 +10,6 @@ from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -20,12 +19,12 @@ from .const import (
     ACTIVITY_MOWING,
     ACTIVITY_PAUSED,
     ACTIVITY_RETURNING,
-    DOMAIN,
 )
 from .coordinator import DreameLawnMowerCoordinator
 from .dreame_lawn_mower_client.maintenance import maintenance_status_attributes
 from .entity import DreameLawnMowerEntity
 from .manual_control import remote_control_state_safe
+from .runtime_data import DreameLawnMowerConfigEntry
 from .sensor import (
     _current_vector_map_summary,
     batch_ota_attributes,
@@ -265,11 +264,11 @@ BINARY_SENSORS = [
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up mower binary sensors."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     async_add_entities(
         [
             DreameLawnMowerBinarySensor(coordinator, description)

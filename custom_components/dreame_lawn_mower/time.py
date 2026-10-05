@@ -5,12 +5,10 @@ from __future__ import annotations
 from datetime import time
 
 from homeassistant.components.time import TimeEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .device_settings_control import (
     device_settings_section,
@@ -18,15 +16,16 @@ from .device_settings_control import (
     time_to_minutes,
 )
 from .entity import DreameLawnMowerEntity
+from .runtime_data import DreameLawnMowerConfigEntry
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up charging-period time entities."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     entities_added = False
 
     @callback

@@ -5,13 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.number import NumberEntity, NumberMode
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity
 from .mowing_height import (
@@ -33,15 +31,16 @@ from .mowing_preference_control import (
     selected_zone_mowing_height,
     selected_zone_preference_attributes,
 )
+from .runtime_data import DreameLawnMowerConfigEntry
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Dreame mower number entities."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: DreameLawnMowerCoordinator = entry.runtime_data
     descriptor = coordinator.client.descriptor
     entities = [DreameLawnMowerVoiceVolumeNumber(coordinator)]
     if mowing_height_adjustment_supported(

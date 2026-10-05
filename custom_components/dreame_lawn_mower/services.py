@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
 from typing import Any
 
 import voluptuous as vol
@@ -29,6 +28,7 @@ from .dreame_lawn_mower_client.schedule import (
     encode_schedule_payload_text,
 )
 from .manual_control import remote_control_block_reason
+from .runtime_data import get_coordinator, iter_coordinators
 
 ATTR_ENTRY_ID = "entry_id"
 ATTR_CHUNK_SIZE = "chunk_size"
@@ -452,13 +452,6 @@ async def async_unload_services(hass: HomeAssistant) -> None:
     domain_data.pop(_SERVICES_REGISTERED, None)
 
 
-def _coordinator_values(hass: HomeAssistant) -> Iterable[DreameLawnMowerCoordinator]:
-    """Yield configured mower coordinators from domain data."""
-    for value in hass.data.get(DOMAIN, {}).values():
-        if isinstance(value, DreameLawnMowerCoordinator):
-            yield value
-
-
 def _coordinator_from_call(
     hass: HomeAssistant,
     call: ServiceCall,
@@ -466,12 +459,12 @@ def _coordinator_from_call(
     """Return the coordinator targeted by a service call."""
     entry_id = call.data.get(ATTR_ENTRY_ID)
     if entry_id:
-        coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
+        coordinator = get_coordinator(hass, entry_id)
         if isinstance(coordinator, DreameLawnMowerCoordinator):
             return coordinator
         raise HomeAssistantError(f"No Dreame lawn mower entry found for {entry_id}.")
 
-    coordinators = list(_coordinator_values(hass))
+    coordinators = list(iter_coordinators(hass))
     if len(coordinators) == 1:
         return coordinators[0]
     if not coordinators:
