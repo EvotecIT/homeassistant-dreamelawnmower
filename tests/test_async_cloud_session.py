@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
 from contextlib import asynccontextmanager
 
 import pytest
@@ -109,14 +110,30 @@ def test_discovery_uses_borrowed_session_and_shared_wire(monkeypatch, account_ty
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("mode", ["oversized", "malformed", "wrong_shape", "redirect"])
-def test_bad_responses_fail_closed_without_closing_session(monkeypatch, mode, caplog):
+@pytest.mark.parametrize(
+    ("mode", "message"),
+    [
+        ("oversized", "size limit"),
+        ("gzip_oversized", "size limit"),
+        ("malformed", "not valid JSON"),
+        ("wrong_shape", "not an object"),
+        ("redirect", "not valid JSON"),
+    ],
+)
+def test_bad_responses_fail_closed_without_closing_session(
+    monkeypatch, mode, message, caplog
+):
     calls = []
 
     async def handler(request):
         calls.append(request.path)
         if mode == "oversized":
             return web.Response(body=b"x" * (MAX_CLOUD_RESPONSE_BYTES + 1))
+        if mode == "gzip_oversized":
+            return web.Response(
+                body=gzip.compress(b"x" * (MAX_CLOUD_RESPONSE_BYTES + 1)),
+                headers={"Content-Encoding": "gzip"},
+            )
         if mode == "wrong_shape":
             return web.json_response(["private-response"])
         if mode == "redirect":
@@ -128,7 +145,7 @@ def test_bad_responses_fail_closed_without_closing_session(monkeypatch, mode, ca
     async def scenario():
         async with server(monkeypatch, handler), ClientSession() as session:
             cloud = DreameCloudSession(session, **OPTIONS)
-            with pytest.raises(DreameLawnMowerConnectionError):
+            with pytest.raises(DreameLawnMowerConnectionError, match=message):
                 await cloud.async_login()
             assert not session.closed
 
@@ -247,6 +264,38 @@ def test_auth_rejection_does_not_expose_server_secrets(monkeypatch, caplog):
 
     asyncio.run(scenario())
     assert "private-password" not in caplog.text
+
+
+def test_inventory_reauthentication_uses_new_token_and_tenant(monkeypatch):
+    strings = cloud_strings("dreame")
+    login_payloads = []
+    inventory_headers = []
+
+    async def handler(request):
+        if request.path == strings[17]:
+            login_payloads.append(await request.text())
+            response = login_response(strings, token=f"token-{len(login_payloads)}")
+            response[strings[22]] = f"tenant-{len(login_payloads)}"
+            return web.json_response(response)
+        inventory_headers.append(
+            (request.headers[strings[46]], request.headers[strings[50]])
+        )
+        if len(inventory_headers) == 1:
+            return web.json_response({"code": 401}, status=401)
+        return web.json_response({"code": 0, "data": [{"did": "42"}]})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            result = await DreameCloudSession(session, **OPTIONS).async_get_devices()
+            assert result == [{"did": "42"}]
+            assert not session.closed
+
+    asyncio.run(scenario())
+    assert inventory_headers == [("token-1", "tenant-1"), ("token-2", "tenant-2")]
+    assert login_payloads == [
+        cloud_login_data(strings, OPTIONS["username"], OPTIONS["password"], None),
+        cloud_login_data(strings, "", "", "refresh-secret"),
+    ]
 
 
 @pytest.mark.parametrize("reject", [False, True])
