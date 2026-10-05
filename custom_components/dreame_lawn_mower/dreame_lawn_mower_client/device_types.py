@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum, IntEnum
 from typing import Any, Final
@@ -1126,17 +1127,25 @@ ACTION_AVAILABILITY: Final = {
 
 
 def PIID(
-    property: DreameMowerProperty, mapping=DreameMowerPropertyMapping
+    property: DreameMowerProperty,
+    mapping: Mapping[DreameMowerProperty, Mapping[str, int]] = (
+        DreameMowerPropertyMapping
+    ),
 ) -> int | None:
     if property in mapping:
         return mapping[property][piid]
+    return None
 
 
 def DIID(
-    property: DreameMowerProperty, mapping=DreameMowerPropertyMapping
+    property: DreameMowerProperty,
+    mapping: Mapping[DreameMowerProperty, Mapping[str, int]] = (
+        DreameMowerPropertyMapping
+    ),
 ) -> str | None:
     if property in mapping:
         return f"{mapping[property][siid]}.{mapping[property][piid]}"
+    return None
 
 
 class RobotType(IntEnum):
@@ -1274,7 +1283,7 @@ class DeviceCapability(IntEnum):
 
 class DreameMowerDeviceCapability:
     def __init__(self, device) -> None:
-        self.list = None
+        self.list: list[str] | None = None
         self.lidar_navigation = True
         self.multi_floor_map = True
         self.ai_detection = False
@@ -1477,30 +1486,30 @@ class DreameMowerDeviceCapability:
 class DirtyData:
     value: Any = None
     previous_value: Any = None
-    update_time: float = None
+    update_time: float | None = None
 
 
 @dataclass
 class Shortcut:
     id: int = -1
-    name: str = None
-    map_id: int = None
+    name: str | None = None
+    map_id: int | None = None
     running: bool = False
-    tasks: list[list[ShortcutTask]] = None
+    tasks: list[list[ShortcutTask]] | None = None
 
 
 @dataclass
 class ShortcutTask:
-    segment_id: int = None
-    cleaning_times: int = None
-    cleaning_mode: int = None
+    segment_id: int | None = None
+    cleaning_times: int | None = None
+    cleaning_mode: int | None = None
 
 
 @dataclass
 class DNDTask:
     id: int = -1
-    start_time: str = None
-    end_time: str = None
+    start_time: str | None = None
+    end_time: str | None = None
     enabled: bool = False
     weekdays: int = 127
     st: int = 0
@@ -1508,10 +1517,10 @@ class DNDTask:
 
 @dataclass
 class GoToZoneSettings:
-    x: int = None
-    y: int = None
+    x: int | None = None
+    y: int | None = None
     stop: bool = False
-    cleaning_mode: int = None
+    cleaning_mode: int | None = None
     size: int = 50
 
 
