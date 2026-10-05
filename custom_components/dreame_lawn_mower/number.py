@@ -6,9 +6,9 @@ from typing import Any
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -43,7 +43,7 @@ async def async_setup_entry(
     """Set up Dreame mower number entities."""
     coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
     descriptor = coordinator.client.descriptor
-    entities = [DreameLawnMowerVoiceVolumeNumber(coordinator)]
+    entities: list[NumberEntity] = [DreameLawnMowerVoiceVolumeNumber(coordinator)]
     if mowing_height_adjustment_supported(
         descriptor.model, getattr(descriptor, "display_model", None)
     ):

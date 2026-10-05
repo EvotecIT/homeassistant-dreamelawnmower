@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from homeassistant.components.update import (
     UpdateDeviceClass,
@@ -82,7 +83,7 @@ class DreameLawnMowerFirmwareUpdateEntity(
         return self.installed_version
 
     @property
-    def in_progress(self) -> bool | int | None:
+    def in_progress(self) -> bool | None:
         """Return whether the mower reports an update in progress."""
         live_in_progress = _snapshot_update_in_progress(self.coordinator)
         if live_in_progress is True:
@@ -117,6 +118,9 @@ class DreameLawnMowerFirmwareUpdateEntity(
         support = self.coordinator.firmware_update_support
         if support is None:
             return {}
+        install_requested_at: datetime | None = getattr(
+            self, "_install_requested_at", None,
+        )
         return {
             "update_available": support.update_available,
             "update_state": support.update_state,
@@ -131,8 +135,8 @@ class DreameLawnMowerFirmwareUpdateEntity(
             "release_summary_available": support.release_summary_available,
             "install_assumed_in_progress": self._assumed_install_in_progress(),
             "install_requested_at": (
-                getattr(self, "_install_requested_at", None).isoformat()
-                if getattr(self, "_install_requested_at", None) is not None
+                install_requested_at.isoformat()
+                if install_requested_at is not None
                 else None
             ),
             "install_target_version": getattr(self, "_install_target_version", None),
@@ -144,7 +148,7 @@ class DreameLawnMowerFirmwareUpdateEntity(
         self,
         version: str | None,
         backup: bool,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """Trigger the cloud firmware approval step."""
         support = self.coordinator.firmware_update_support

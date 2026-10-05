@@ -82,7 +82,7 @@ not establish installed, cloud, native-runtime, or physical-device behavior.
 | --- | --- | --- |
 | async-dependency | Gap | The cloud protocol owns synchronous requests, queues, locks, and threads. Modernize the owning client with real async cancellation and resource ownership; executor wrapping alone does not qualify. |
 | inject-websession | Gap | Cloud HTTP uses its own synchronous session. Design injected async session ownership in the reusable client, including standalone callers. |
-| strict-typing | Gap | mypy 2.4.0 strict baseline reports 3,581 errors in 106 of 244 production modules. Fix the full integration and bundled client before enabling a passing strict CI gate. |
+| strict-typing | Gap | After platform annotation fixes, mypy 2.4.0 reports 3,559 errors in 96 of 244 production modules. Fix the full integration and bundled client before enabling a passing strict CI gate. |
 
 ## Qualification baseline
 
@@ -92,6 +92,10 @@ At source revision 5bd1e96 (version 0.2.120), on HA 2026.9.4/Python 3.14.5:
 - Combined coverage is 67%, including the bundled protocol client.
 - Strict typing checks 244 production modules and reports 3,581 errors.
 - These results establish a source baseline, not a Platinum claim.
+
+Platform metadata and update annotations now use HA's declared types and canonical
+imports. The same unit/component suites pass after this batch; strict typing
+remains incomplete at 3,559 errors in 96 modules.
 
 ## Release qualification
 
