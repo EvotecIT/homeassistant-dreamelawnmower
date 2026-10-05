@@ -221,3 +221,26 @@ def test_lower_frame_without_comparable_timestamps_preserves_current_map(
     assert manager._add_map_data(partial) is True
     assert manager._map_data is current_map
     assert manager._current_frame_id == 11
+
+
+@pytest.mark.parametrize("empty_map", [True, False])
+def test_timestamp_free_map_refreshes_while_running(
+    monkeypatch: pytest.MonkeyPatch, empty_map: bool,
+) -> None:
+    protocol = SimpleNamespace(
+        dreame_cloud=False, cloud=SimpleNamespace(logged_in=True)
+    )
+    manager = DreameMapMowerMapManager(protocol)
+    assert manager._add_raw_map_data(_encoded_map_frame(None)) is True
+    assert manager._map_data is not None
+    assert manager._current_timestamp_ms is None
+    manager._map_data.empty_map = empty_map
+    manager._device_running = True
+    manager._available = True
+    request_map = Mock(return_value=True)
+    monkeypatch.setattr(manager, "_request_current_map", request_map)
+
+    manager.update()
+
+    request_map.assert_called_once_with()
+    assert manager._available is True

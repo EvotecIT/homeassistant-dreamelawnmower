@@ -1286,10 +1286,18 @@ class DreameMapMowerMapManager:
             elif not self._protocol.dreame_cloud:
                 if self._map_data is None or (
                     self._device_running
-                    and (time.time() - (self._current_timestamp_ms / 1000.0) > 15 or self._map_data.empty_map)
+                    and (
+                        self._current_timestamp_ms is None
+                        or time.time() - (self._current_timestamp_ms / 1000.0) > 15
+                        or self._map_data.empty_map
+                    )
                 ):
                     self._updated_frame_id = None
-                    if self._map_data and not self._map_data.empty_map:
+                    if (
+                        self._map_data
+                        and not self._map_data.empty_map
+                        and self._current_timestamp_ms is not None
+                    ):
                         _LOGGER.info(
                             "Need map request: %.2f",
                             time.time() - (self._current_timestamp_ms / 1000.0),
