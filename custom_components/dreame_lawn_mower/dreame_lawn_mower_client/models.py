@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, TypeGuard
 
 from .device_code_semantics import (
     MOWER_MOWING_STATES,
@@ -81,7 +81,7 @@ def _canonical_display_name(value: str | None) -> str | None:
     return DISPLAY_NAME_ALIASES.get(normalized, text)
 
 
-def _is_supported_model(model: str | None) -> bool:
+def _is_supported_model(model: str | None) -> TypeGuard[str]:
     """Return whether a raw cloud model identifier looks like a mower."""
     return bool(model and SUPPORTED_MODEL_MARKER in model)
 
@@ -231,8 +231,11 @@ def _realtime_property_last_seen(device: Any, key: str) -> float | None:
     entry = realtime_properties.get(key)
     if not isinstance(entry, Mapping):
         return None
+    last_seen = entry.get("last_seen")
+    if last_seen is None:
+        return None
     try:
-        return float(entry.get("last_seen"))
+        return float(last_seen)
     except (TypeError, ValueError):
         return None
 
@@ -1407,7 +1410,7 @@ def snapshot_from_device(
         device,
         activity=activity,
     )
-    active_segments = active_task_regions
+    active_segments: Sequence[object] | None = active_task_regions
     if active_segments is None and activity in {"mowing", "paused"}:
         active_segments = _coerce_sequence(
             status_attributes.get("active_segments"),
