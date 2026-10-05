@@ -73,7 +73,7 @@ class DreameMowerMapDecoder:
         )
 
     @staticmethod
-    def _compare_segment_neighbors(r1: Segment, r2: Segment) -> bool:
+    def _compare_segment_neighbors(r1: Segment, r2: Segment) -> int:
         alen = 0
         blen = 0
         if r1.neighbors:
@@ -87,13 +87,13 @@ class DreameMowerMapDecoder:
         return blen - alen
 
     @staticmethod
-    def _compare_colors(c1: list[int], c2: list[int]) -> bool:
+    def _compare_colors(c1: list[int], c2: list[int]) -> int:
         return c1[1] - c2[1] if c1[1] != c2[1] else c1[0] - c2[0]
 
     @staticmethod
     def _get_pixel_type(
-        map_data: MapData, pixel, vslam_map: bool = False
-    ) -> MapPixelType:
+        map_data: MapData, pixel: int, vslam_map: bool = False
+    ) -> int:
         if map_data.frame_map:
             segment_id = pixel >> 2
 
@@ -268,9 +268,9 @@ class DreameMowerMapDecoder:
         raw_map: str,
         vslam_map: bool,
         rotation: int = 0,
-        iv: str = None,
-        key: str = None,
-    ) -> tuple[MapData, MapData | None]:
+        iv: str | None = None,
+        key: str | None = None,
+    ) -> tuple[MapData | None, MapData | None]:
         return DreameMowerMapDecoder.decode_map_data_from_partial(
             DreameMowerMapDecoder.decode_map_partial(raw_map, iv, key),
             vslam_map,
@@ -279,18 +279,19 @@ class DreameMowerMapDecoder:
 
     @staticmethod
     def decode_saved_map(
-        raw_map: str, vslam_map: bool, rotation: int = 0, iv: str = None
+        raw_map: str, vslam_map: bool, rotation: int = 0, iv: str | None = None
     ) -> MapData | None:
         return DreameMowerMapDecoder.decode_map(raw_map, vslam_map, rotation, iv)[0]
 
     @staticmethod
     def decode_map_data_from_partial(
-        partial_map: MapDataPartial, vslam_map: bool, rotation: int = 0
-    ) -> MapData | None:
+        partial_map: MapDataPartial | None, vslam_map: bool, rotation: int = 0
+    ) -> tuple[MapData | None, MapData | None]:
         if partial_map is None:
-            return
+            return None, None
 
         map_data = MapData()
+        saved_map_data: MapData | None = None
         map_data.map_id = partial_map.map_id
         map_data.frame_id = partial_map.frame_id
         map_data.frame_type = partial_map.frame_type
@@ -646,7 +647,6 @@ class DreameMowerMapDecoder:
                 map_data.data = None
                 return map_data, None
 
-            saved_map_data = None
             restored_map = map_data.restored_map
 
             if "whmp" in data_json:

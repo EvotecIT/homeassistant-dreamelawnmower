@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import zlib
 
+import pytest
+
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     device as device_module,
 )
@@ -50,3 +52,28 @@ def test_json_renderer_packages_default_map_png() -> None:
     renderer = map_json_renderer.DreameMowerMapDataJsonRenderer()
 
     assert renderer.render_map(None).startswith(b"\x89PNG\r\n\x1a\n")
+
+
+@pytest.mark.parametrize(
+    "payload", ["", base64.b64encode(zlib.compress(b"short header")).decode()]
+)
+def test_rejected_map_payload_keeps_decoder_result_shape(payload: str) -> None:
+    assert map_decoder.DreameMowerMapDecoder.decode_map(payload, False) == (
+        None, None
+    )
+    assert map_decoder.DreameMowerMapDecoder.decode_saved_map(payload, False) is None
+
+
+def test_invalid_optional_metadata_does_not_hide_decoded_header() -> None:
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[0:2] = (7).to_bytes(2, byteorder="little", signed=True)
+    header[4] = 73
+    payload = base64.b64encode(
+        zlib.compress(bytes(header) + b'{"mra":"invalid"}')
+    ).decode()
+
+    decoded, saved = map_decoder.DreameMowerMapDecoder.decode_map(payload, False)
+
+    assert decoded is not None
+    assert decoded.map_id == 7
+    assert saved is None
