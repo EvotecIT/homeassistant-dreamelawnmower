@@ -167,19 +167,19 @@ class DreameMowerDevice(
         name: str,
         host: str,
         token: str,
-        mac: str = None,
-        username: str = None,
-        password: str = None,
-        country: str = None,
+        mac: str | None = None,
+        username: str | None = None,
+        password: str | None = None,
+        country: str | None = None,
         prefer_cloud: bool = True,
         account_type: str = "dreame",
-        device_id: str = None,
+        device_id: str | None = None,
     ) -> None:
         # Used for easy filtering the device from cloud device list and generating unique ids
         self.info = None
-        self.mac: str = None
-        self.token: str = None  # Local api token
-        self.host: str = None  # IP address or host name of the device
+        self.mac: str | None = None
+        self.token: str | None = None  # Local api token
+        self.host: str | None = None  # IP address or host name of the device
         # Dictionary for storing the current property values
         self.data: dict[DreameMowerProperty, Any] = {}
         self.unknown_properties: dict[int, dict[str, Any]] = {}
@@ -192,7 +192,7 @@ class DreameMowerDevice(
         self.disconnected: bool = False
 
         self._update_running: bool = False  # Update is running
-        self._previous_cleaning_mode: DreameMowerCleaningMode = None
+        self._previous_cleaning_mode: DreameMowerCleaningMode | None = None
         # Device do not request properties that returned -1 as result. This property used for overriding that behavior at first connection
         self._ready: bool = False
         # Last settings properties requested time
@@ -200,17 +200,17 @@ class DreameMowerDevice(
         self._last_map_list_request: float = 0  # Last map list property requested time
         self._last_map_request: float = 0  # Last map request trigger time
         self._last_change: float = 0  # Last property change time
-        self._last_update_failed: float = 0  # Last update failed time
+        self._last_update_failed: float | None = 0  # Last update failed time
         self._cleaning_history_update: float = 0  # Cleaning history update time
         self._update_fail_count: int = 0  # Update failed counter
-        self._map_select_time: float = None
+        self._map_select_time: float | None = None
         # Map Manager object. Only available when cloud connection is present
         self._map_manager: DreameMapMowerMapManager = None
         self._update_callback = None  # External update callback for device
         self._error_callback = None  # External update failed callback
         # External update callbacks for specific device property
         self._property_update_callback = {}
-        self._update_timer: Timer = None  # Update schedule timer
+        self._update_timer: Timer | None = None  # Update schedule timer
         # Used for requesting consumable properties after reset action otherwise they will only requested when cleaning completed
         self._consumable_change: bool = False
         self._remote_control: bool = False
@@ -430,7 +430,7 @@ class DreameMowerDevice(
                             response = self._protocol.cloud.get_batch_device_datas([prop])
                             if response and prop in response and response[prop]:
                                 value = json.loads(response[prop])
-                                self.status.ai_policy_acepted = (
+                                self.status.ai_policy_accepted = (
                                     value.get("privacyAuthed")
                                     if "privacyAuthed" in value
                                     else value.get("aiPrivacyAuthed")

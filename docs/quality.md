@@ -82,7 +82,7 @@ not establish installed, cloud, native-runtime, or physical-device behavior.
 | --- | --- | --- |
 | async-dependency | Gap | The cloud protocol owns synchronous requests, queues, locks, and threads. Modernize the owning client with real async cancellation and resource ownership; executor wrapping alone does not qualify. |
 | inject-websession | Gap | Cloud HTTP uses its own synchronous session. Design injected async session ownership in the reusable client, including standalone callers. |
-| strict-typing | Gap | After platform and map-model annotation fixes, mypy 2.4.0 reports 2,890 errors in 89 of 245 production modules. Fix the full integration and bundled client before enabling a passing strict CI gate. |
+| strict-typing | Gap | After platform and map-model annotation fixes, mypy 2.4.0 reports 2,857 errors in 89 of 245 production modules. Fix the full integration and bundled client before enabling a passing strict CI gate. |
 
 ## Qualification baseline
 
@@ -98,7 +98,7 @@ imports. Map renderer models describe RGBA tuples and optional resources;
 geometry and map-state annotations match the values produced by the decoder.
 Map values follow Python's equality protocol for unrelated objects, and obstacle
 object names use their vendor ID when available. Regression tests cover both
-contracts. Strict typing remains incomplete at 2,890 errors in 89 modules;
+contracts. Strict typing remains incomplete at 2,857 errors in 89 modules;
 `map_renderer_types.py` passes strict checking on its own. Renderer payload
 annotations match the nested crop data, hidden-segment list, and per-segment
 material/status dictionaries; 32 focused map tests pass after these declaration
@@ -115,8 +115,11 @@ full strict run, while their accepted payload shapes remain unchanged. A private
 shared declaration base gives the state, command, and map mixins their concrete
 status, capability, protocol, and property/action mapping types. The assembled
 device retains initialization and mapping values; the base supplies no behavior.
+Shared state declarations also cover existing identity, lifecycle flags, timestamps,
+and optional timers. Startup cloud privacy readback updates the status flag used
+by AI commands; regression tests cover both vendor keys and explicit rejection.
 
-After these changes, 2,560 unit tests pass with one skipped. Component/translation
+After these changes, 2,565 unit tests pass with one skipped. Component/translation
 tests pass on HA 2025.1 (73 passed, one version-specific skip) and HA 2026.9.4
 (74 passed). No physical-device or frontend-rendering claim follows from these
 local tests.

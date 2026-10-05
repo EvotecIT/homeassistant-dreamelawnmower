@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -66,6 +67,44 @@ def test_connect_device_defers_initial_map_request(monkeypatch) -> None:
     map_manager.update.assert_not_called()
     assert mower.available is True
     assert mower._ready is True
+
+
+@pytest.mark.parametrize(
+    ("payload", "accepted"),
+    [
+        ({"privacyAuthed": True}, True),
+        ({"privacyAuthed": False}, False),
+        ({"aiPrivacyAuthed": True}, True),
+        ({"aiPrivacyAuthed": False}, False),
+        ({"privacyAuthed": False, "aiPrivacyAuthed": True}, False),
+    ],
+)
+def test_connect_device_updates_ai_policy_status(
+    monkeypatch, payload, accepted,
+) -> None:
+    """Cloud readback updates the flag used by AI command authorization."""
+    cloud = Mock(connected=True)
+    cloud.get_batch_device_datas.return_value = {
+        "prop.s_ai_config": json.dumps(payload)
+    }
+    protocol = Mock(cloud=cloud, connected=True, dreame_cloud=True)
+    protocol.connect.return_value = {
+        "model": "dreame.mower.g2408",
+        "fw_ver": "4.3.6_0320",
+    }
+    monkeypatch.setattr(
+        device_module, "DreameMowerProtocol", Mock(return_value=protocol)
+    )
+    monkeypatch.setattr(device_module, "DreameMapMowerMapManager", Mock())
+    mower = DreameMowerDevice("Test mower", "192.0.2.1", "test-token")
+    mower._map_manager = None
+    mower._request_properties = Mock()
+    mower.status.ai_policy_accepted = not accepted
+
+    mower.connect_device()
+
+    assert mower.status.ai_policy_accepted is accepted
+    cloud.get_batch_device_datas.assert_called_once_with(["prop.s_ai_config"])
 
 
 def test_bounded_update_skips_reconnection_and_attempts_http_readback() -> None:
