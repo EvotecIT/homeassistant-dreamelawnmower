@@ -4,6 +4,9 @@ This repository is both a Home Assistant custom integration and the current
 home of the reusable Dreame/MOVA mower protocol client. Keep the public surface
 small and the reverse-engineering notes in docs or ignored local captures.
 
+The [quality qualification ledger](quality.md) tracks the complete self-assessed
+Home Assistant rule set, measured source baselines, and remaining release proof.
+
 ## Repository Layout
 
 - `custom_components/dreame_lawn_mower`
@@ -73,6 +76,18 @@ When using the lighter local setup, the common broad suite is:
 ```bash
 pytest tests --ignore=tests/components/dreame_lawn_mower/test_config_flow.py
 ```
+
+## Strict typing qualification
+
+The development extra pins mypy 2.4.0. Run the complete production scope:
+
+```bash
+python -m mypy --strict custom_components/dreame_lawn_mower
+```
+
+This currently reports the gaps recorded in the [quality ledger](quality.md).
+It includes the bundled client; it is not yet a passing CI gate. Keep fixes in
+the owning client or integration module instead of excluding failing modules.
 
 ## Live Probe Safety
 

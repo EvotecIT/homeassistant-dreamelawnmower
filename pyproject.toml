@@ -26,15 +26,17 @@ test = [
   "pytest>=8.3.0",
   "pytest-asyncio>=0.24.0",
   "pytest-homeassistant-custom-component>=0.13.201",
-  "ruff>=0.11.0"
+  "ruff>=0.11.0",
+  "mypy==2.4.0"
 ]
 
 [tool.setuptools.packages.find]
 include = [
   "custom_components*",
-  "dreame_lawn_mower_client*",
-  "tests*"
+  "dreame_lawn_mower_client*"
 ]
+
+exclude = ["tests*"]
 
 [tool.setuptools.package-data]
 "custom_components.dreame_lawn_mower" = [
