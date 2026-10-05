@@ -12,7 +12,6 @@ import re
 import traceback
 import zlib
 from functools import cmp_to_key
-from typing import Any
 
 import numpy as np
 from cryptography.hazmat.backends import default_backend
@@ -147,7 +146,7 @@ class DreameMowerMapDecoder:
 
     @staticmethod
     def _get_segment_center(
-        map_data, segment_id: int, center: int, vertical: bool
+        map_data: MapData, segment_id: int, center: int, vertical: bool
     ) -> int | None:
         # Find center point implemented as on the app
         lines = []
@@ -1399,8 +1398,8 @@ class DreameMowerMapDecoder:
         return cleaning_map
 
     @staticmethod
-    def get_segments(map_data: MapData, vslam_map: bool) -> dict[str, Any]:
-        segments = {}
+    def get_segments(map_data: MapData, vslam_map: bool) -> dict[int, Segment]:
+        segments: dict[int, Segment] = {}
         for y in range(map_data.dimensions.height):
             for x in range(map_data.dimensions.width):
                 segment_id = int(map_data.pixel_type[x, y])

@@ -7,7 +7,11 @@ import math
 import time
 from datetime import datetime
 from enum import IntEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import numpy as np
+    from numpy.typing import NDArray
 
 from .device_types import (
     ATTR_A,
@@ -1016,7 +1020,7 @@ class MapData:
         self.dimensions: MapImageDimensions | None = None
         self.optimized_dimensions: MapImageDimensions | None = None
         self.combined_dimensions: MapImageDimensions | None = None
-        self.data: Any | None = None  # Raw image data for handling P frames
+        self.data: bytes | None = None  # Raw image data for handling P frames
         # Data json
         self.timestamp_ms: int | None = None  # Data json: timestamp_ms
         self.rotation: int | None = None  # Data json: mra
@@ -1068,9 +1072,9 @@ class MapData:
         self.map_index: int | None = None  # Generated from saved map list
         self.map_name: str | None = None  # Generated map name for map list
         # Generated pixel map for rendering colors
-        self.pixel_type: Any | None = None
-        self.optimized_pixel_type: Any | None = None
-        self.combined_pixel_type: Any | None = None
+        self.pixel_type: NDArray[np.uint8] | None = None
+        self.optimized_pixel_type: NDArray[np.uint8] | None = None
+        self.combined_pixel_type: NDArray[np.uint8] | None = None
         # Generated segments from pixel_type
         self.segments: dict[int, Segment] | None = None
         # Generated from seg_inf.material
