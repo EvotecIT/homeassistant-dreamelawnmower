@@ -28,7 +28,7 @@ from PIL import (
     PngImagePlugin,
     ImageFilter,
 )
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, TypedDict
 from time import sleep
 from io import BytesIO
 from typing import Optional, Tuple
@@ -150,6 +150,13 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+class _CachedMapUrl(TypedDict):
+    """Signed map URL and its local expiry timestamp in seconds."""
+
+    url: str
+    expires_time: int
+
+
 class DreameMapMowerMapManager:
     def __init__(self, _protocol: DreameMowerProtocol) -> None:
         self._map_list_object_name: str | None = None
@@ -180,7 +187,7 @@ class DreameMapMowerMapManager:
         self._current_frame_id: int | None = None
         self._current_map_id: int | None = None
         self._current_timestamp_ms: int | None = None
-        self._file_urls: dict[str, str] = {}
+        self._file_urls: dict[str, _CachedMapUrl] = {}
         self._saved_map_data: dict[int, MapData] = {}
         self._map_list: list[int] = []
         self._need_map_request: bool = False
@@ -619,9 +626,9 @@ class DreameMapMowerMapManager:
         url = None
         now = int(round(time.time()))
         if self._file_urls and self._file_urls.get(object_name):
-            object = self._file_urls[object_name]
-            if object[MAP_PARAMETER_EXPIRES_TIME] - now > 60:
-                url = f"{object[MAP_PARAMETER_URL]}&current={str(now)}"
+            cached_url = self._file_urls[object_name]
+            if cached_url[MAP_PARAMETER_EXPIRES_TIME] - now > 60:
+                url = f"{cached_url[MAP_PARAMETER_URL]}&current={str(now)}"
 
         if url is None:
             response = (
