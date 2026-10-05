@@ -10,7 +10,7 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from aiohttp import ClientError, ClientSession, ClientTimeout
+from aiohttp import BasicAuth, ClientError, ClientSession, ClientTimeout
 
 from .cloud_wire import cloud_headers, cloud_login_data, cloud_strings
 from .exceptions import DreameLawnMowerAuthError, DreameLawnMowerConnectionError
@@ -35,6 +35,15 @@ class DreameCloudSession:
         country: str,
         account_type: str,
     ) -> None:
+        # aiohttp 3.11 cannot send absolute URLs with base_url configured. Its
+        # public API has no base_url accessor; inspect only, never mutate it.
+        if session._base_url is not None:
+            raise ValueError("Cloud discovery requires a session without base_url")
+        if "Authorization" in session.headers:
+            raise ValueError(
+                "Cloud discovery requires a session "
+                "without a default Authorization header"
+            )
         country = country.lower()
         if re.fullmatch(r"[a-z]{2}", country) is None:
             raise DreameLawnMowerAuthError("Invalid cloud country")
@@ -195,9 +204,14 @@ class DreameCloudSession:
         data: str | None,
         deadline: float,
     ) -> tuple[int, dict[str, Any]]:
+        request_headers = dict(headers)
+        # Explicit auth overrides both borrowed defaults and environment netrc
+        # credentials while preserving the shared vendor wire representation.
+        auth = BasicAuth.decode(request_headers.pop("Authorization"))
         async with self._session.post(
             url,
-            headers=headers,
+            headers=request_headers,
+            auth=auth,
             data=data,
             timeout=ClientTimeout(total=self._remaining(deadline)),
             allow_redirects=False,

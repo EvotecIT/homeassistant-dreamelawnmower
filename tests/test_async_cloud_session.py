@@ -8,7 +8,7 @@ import json
 from contextlib import asynccontextmanager
 
 import pytest
-from aiohttp import ClientSession, web
+from aiohttp import BasicAuth, ClientSession, web
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import (
     DreameLawnMowerClient,
@@ -18,6 +18,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.cloud_session 
     DreameCloudSession,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.cloud_wire import (
+    cloud_headers,
     cloud_login_data,
     cloud_strings,
 )
@@ -49,7 +50,7 @@ async def server(monkeypatch, handler):
         property(lambda _: f"http://127.0.0.1:{port}"),
     )
     try:
-        yield
+        yield f"http://127.0.0.1:{port}"
     finally:
         await runner.cleanup()
 
@@ -344,8 +345,8 @@ def test_standalone_discovery_closes_only_its_owned_session(monkeypatch, reject)
     strings = cloud_strings("dreame")
     sessions = []
 
-    def create_session():
-        session = ClientSession()
+    def create_session(**kwargs):
+        session = ClientSession(**kwargs)
         sessions.append(session)
         return session
 
@@ -416,3 +417,101 @@ def test_slow_response_body_obeys_total_deadline(monkeypatch):
                 finish.set()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("account_type", ["dreame", "mova"])
+def test_borrowed_default_auth_is_overridden_without_mutating_session(
+    monkeypatch, account_type
+):
+    strings = cloud_strings(account_type)
+    expected = cloud_headers(strings, "eu", None)["Authorization"]
+    seen = []
+
+    async def handler(request):
+        seen.append(request.headers.get("Authorization") == expected)
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        return web.json_response({"code": 0, "data": []})
+
+    async def scenario():
+        default_auth = BasicAuth("unrelated-user", "unrelated-password")
+        async with (
+            server(monkeypatch, handler),
+            ClientSession(auth=default_auth) as session,
+        ):
+            assert await DreameLawnMowerClient.async_discover_devices(
+                **{**OPTIONS, "account_type": account_type}, session=session
+            ) == []
+            assert session.auth == default_auth
+            assert not session.closed
+
+    asyncio.run(scenario())
+    assert seen == [True, True]
+
+
+@pytest.mark.parametrize(
+    ("session_options", "message"),
+    [
+        ({"base_url": "http://127.0.0.1:1"}, "without base_url"),
+        ({"headers": {"Authorization": "Bearer unrelated-token"}},
+         "without a default Authorization header"),
+    ],
+)
+def test_incompatible_borrowed_session_is_rejected_before_http(
+    monkeypatch, session_options, message
+):
+    calls = []
+    strings = cloud_strings("dreame")
+
+    async def handler(request):
+        calls.append(request.path)
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        return web.json_response({"code": 0, "data": []})
+
+    async def scenario():
+        async with (
+            server(monkeypatch, handler),
+            ClientSession(**session_options) as session,
+        ):
+            with pytest.raises(ValueError, match=message):
+                await DreameLawnMowerClient.async_discover_devices(
+                    **OPTIONS, session=session
+                )
+            assert not session.closed
+            assert calls == []
+
+    asyncio.run(scenario())
+
+
+def test_owned_session_uses_environment_proxy_and_vendor_auth(monkeypatch, tmp_path):
+    strings = cloud_strings("dreame")
+    expected = cloud_headers(strings, "eu", None)["Authorization"]
+    seen = []
+    netrc = tmp_path / "test.netrc"
+    netrc.write_text(
+        "machine 127.0.0.2 login unrelated-user password unrelated-password\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("NETRC", str(netrc))
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.setenv(name, "")
+
+    async def handler(request):
+        seen.append((request.host, request.headers.get("Authorization") == expected))
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        return web.json_response({"code": 0, "data": []})
+
+    async def scenario():
+        async with server(monkeypatch, handler) as proxy_url:
+            for name in ("HTTP_PROXY", "http_proxy"):
+                monkeypatch.setenv(name, proxy_url)
+            monkeypatch.setattr(
+                DreameCloudSession, "_base_url",
+                property(lambda _: "http://127.0.0.2:1"),
+            )
+            assert await DreameLawnMowerClient.async_discover_devices(**OPTIONS) == []
+
+    asyncio.run(scenario())
+    assert seen == [("127.0.0.2", True), ("127.0.0.2", True)]

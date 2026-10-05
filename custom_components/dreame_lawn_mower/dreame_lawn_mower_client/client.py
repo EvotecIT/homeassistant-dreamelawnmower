@@ -618,7 +618,7 @@ class DreameLawnMowerClient(
         }
         if session is not None:
             return await _async_discover_devices(session, **options)
-        async with _ClientSession() as owned_session:
+        async with _ClientSession(trust_env=True) as owned_session:
             return await _async_discover_devices(owned_session, **options)
 
     async def async_refresh_authoritative_snapshot(

@@ -27,7 +27,17 @@ from dreame_lawn_mower_client import DreameLawnMowerClient
 Account discovery uses native async HTTP through aiohttp. Supply an existing
 session with `DreameLawnMowerClient.async_discover_devices(..., session=session)`
 to share its connection pool. The caller owns that session; discovery never
-closes it. When omitted, discovery opens and closes a temporary session.
+closes it. Supply a session without `base_url` or a default `Authorization`
+header; incompatible sessions raise `ValueError` before any request. Discovery
+sets vendor authentication per request, overriding a session's default `auth`
+without changing the borrowed session. It also controls status handling and
+decompression so authentication failures and decoded response limits remain
+consistent.
+
+When the session is omitted, discovery opens and closes a temporary session
+that honors environment proxies (`HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`).
+Borrowed sessions retain their own proxy policy. Environment credentials cannot
+override vendor authentication.
 
 Home Assistant supplies its shared session during setup and credential repair.
 Login and inventory responses have a one MiB decoded-body limit, a total
