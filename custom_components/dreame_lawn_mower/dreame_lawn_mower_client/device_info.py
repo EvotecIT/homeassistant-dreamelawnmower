@@ -11,16 +11,16 @@ _LOGGER = logging.getLogger(__name__)
 class DreameMowerDeviceInfo:
     """Container of device information."""
 
-    def __init__(self, data):
+    def __init__(self, data: dict[str, Any]) -> None:
         self.data = data
         self.version = 0
         firmware_version = self.firmware_version
         if firmware_version is not None:
-            firmware_version = firmware_version.split("_")
-            if len(firmware_version) == 2:
-                self.version = int(firmware_version[1])
+            firmware_parts = firmware_version.split("_")
+            if len(firmware_parts) == 2:
+                self.version = int(firmware_parts[1])
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         local_ip = (
             self.network_interface.get("localIp", "") if self.network_interface else ""
         )
