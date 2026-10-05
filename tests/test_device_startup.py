@@ -14,6 +14,12 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device import (
     DreameMowerDevice,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device_types import (
+    DreameMowerAutoSwitchProperty,
+    DreameMowerCleaningMode,
+    DreameMowerCleaningRoute,
+    DreameMowerProperty,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
     DeviceUpdateFailedException,
 )
@@ -105,6 +111,86 @@ def test_connect_device_updates_ai_policy_status(
 
     assert mower.status.ai_policy_accepted is accepted
     cloud.get_batch_device_datas.assert_called_once_with(["prop.s_ai_config"])
+
+
+@pytest.mark.parametrize(
+    ("reported", "expected"),
+    [
+        (0, DreameMowerCleaningMode.MOWING),
+        (-1, DreameMowerCleaningMode.UNKNOWN),
+        (17, None),
+        (None, None),
+        (False, None),
+        ("0", None),
+    ],
+)
+def test_cleaning_mode_tracks_reported_property(
+    monkeypatch, reported, expected,
+) -> None:
+    """Known modes reach status; unsupported or missing values stay unavailable."""
+    monkeypatch.setattr(
+        device_module, "DreameMowerProtocol", Mock(return_value=Mock(cloud=None))
+    )
+    mower = DreameMowerDevice("Test mower", "192.0.2.1", "test-token")
+    mower.data[DreameMowerProperty.CLEANING_MODE] = reported
+    mower.status.cleaning_mode = (
+        DreameMowerCleaningMode.UNKNOWN
+        if expected is DreameMowerCleaningMode.MOWING
+        else DreameMowerCleaningMode.MOWING
+    )
+
+    mower._cleaning_mode_changed()
+
+    assert mower.status.cleaning_mode is expected
+
+
+@pytest.mark.parametrize(
+    ("reported_mode", "route", "normalize"),
+    [
+        (0, DreameMowerCleaningRoute.QUICK, False),
+        (0, DreameMowerCleaningRoute.STANDARD, False),
+        (0, DreameMowerCleaningRoute.DEEP, True),
+        (0, DreameMowerCleaningRoute.INTENSIVE, True),
+        (0, DreameMowerCleaningRoute.UNKNOWN, False),
+        (0, DreameMowerCleaningRoute.NOT_SET, False),
+        (0, None, False),
+        (0, 17, False),
+        (17, DreameMowerCleaningRoute.DEEP, False),
+        (None, DreameMowerCleaningRoute.DEEP, False),
+        (-1, DreameMowerCleaningRoute.DEEP, False),
+    ],
+)
+def test_mowing_mode_only_resets_an_unsupported_route(
+    monkeypatch, reported_mode, route, normalize,
+) -> None:
+    """Only a known incompatible route on a known mowing mode may be changed."""
+    monkeypatch.setattr(
+        device_module, "DreameMowerProtocol", Mock(return_value=Mock(cloud=None))
+    )
+    mower = DreameMowerDevice("Test mower", "192.0.2.1", "test-token")
+    mower._ready = True
+    mower.capability.cleaning_route = True
+    mower.capability.auto_switch_settings = True
+    mower.auto_switch_data = (
+        {} if route is None
+        else {DreameMowerAutoSwitchProperty.CLEANING_ROUTE.name: route}
+    )
+    mower.data[DreameMowerProperty.CLEANING_MODE] = reported_mode
+    mower.status.cleaning_mode = (
+        DreameMowerCleaningMode.UNKNOWN
+        if reported_mode == 0 else DreameMowerCleaningMode.MOWING
+    )
+    mower.set_auto_switch_property = Mock()
+
+    mower._cleaning_mode_changed()
+
+    if normalize:
+        mower.set_auto_switch_property.assert_called_once_with(
+            DreameMowerAutoSwitchProperty.CLEANING_ROUTE,
+            DreameMowerCleaningRoute.STANDARD.value,
+        )
+    else:
+        mower.set_auto_switch_property.assert_not_called()
 
 
 def test_bounded_update_skips_reconnection_and_attempts_http_readback() -> None:

@@ -662,7 +662,13 @@ class _DreameMowerDeviceStateMixin(_DreameMowerDeviceContext):
 
     def _cleaning_mode_changed(self, previous_cleaning_mode: Any = None) -> None:
         value = self.get_property(DreameMowerProperty.CLEANING_MODE)
-        new_cleaning_mode = None
+        new_cleaning_mode = (
+            DreameMowerCleaningMode(value)
+            if isinstance(value, int)
+            and not isinstance(value, bool)
+            and value in DreameMowerCleaningMode._value2member_map_
+            else None
+        )
 
         if previous_cleaning_mode is not None and self.status.go_to_zone:
             self.status.go_to_zone.cleaning_mode = None
@@ -679,7 +685,14 @@ class _DreameMowerDeviceStateMixin(_DreameMowerDeviceContext):
                     new_list.pop(DreameMowerCleaningRoute.INTENSIVE)
                 self.status.cleaning_route_list = {v: k for k, v in new_list.items()}
 
-                if self.status.cleaning_route and self.status.cleaning_route not in self.status.cleaning_route_list:
+                if (
+                    new_cleaning_mode is DreameMowerCleaningMode.MOWING
+                    and self.status.cleaning_route
+                    in (
+                        DreameMowerCleaningRoute.DEEP,
+                        DreameMowerCleaningRoute.INTENSIVE,
+                    )
+                ):
                     self.set_auto_switch_property(
                         DreameMowerAutoSwitchProperty.CLEANING_ROUTE,
                         DreameMowerCleaningRoute.STANDARD.value,

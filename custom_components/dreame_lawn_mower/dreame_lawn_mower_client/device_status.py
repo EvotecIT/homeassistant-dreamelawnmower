@@ -12,7 +12,10 @@ import traceback
 from datetime import datetime
 from random import randrange
 from threading import RLock, Timer
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
+
+if TYPE_CHECKING:
+    from .device import DreameMowerDevice
 
 from .app_protocol import mower_realtime_property_name, mower_state_override
 from .device_code_semantics import (
@@ -182,7 +185,7 @@ class DreameMowerDeviceStatus:
     Almost of the rules are extracted from mobile app that has a similar class with same purpose.
     """
 
-    def __init__(self, device):
+    def __init__(self, device: DreameMowerDevice) -> None:
         self._device: DreameMowerDevice = device
         self._cleaning_history = None
         self._cleaning_history_attrs = None
@@ -202,15 +205,15 @@ class DreameMowerDeviceStatus:
         self.floor_material_direction_list = {v: k for k, v in FLOOR_MATERIAL_DIRECTION_CODE_TO_NAME.items()}
         self.visibility_list = {v: k for k, v in SEGMENT_VISIBILITY_CODE_TO_NAME.items()}
         self.voice_assistant_language_list = {v: k for k, v in VOICE_ASSISTANT_LANGUAGE_TO_NAME.items()}
-        self.segment_cleaning_mode_list = {}
-        self.segment_cleaning_route_list = {}
-        self.cleaning_mode = None
+        self.segment_cleaning_mode_list: dict[str, DreameMowerCleaningMode] = {}
+        self.segment_cleaning_route_list: dict[str, DreameMowerCleaningRoute] = {}
+        self.cleaning_mode: DreameMowerCleaningMode | None = None
         self.ai_policy_accepted = False
-        self.go_to_zone: GoToZoneSettings = None
+        self.go_to_zone: GoToZoneSettings | Literal[False] | None = None
         self.cleanup_completed: bool = False
         self.cleanup_started: bool = False
 
-        self.stream_status = None
+        self.stream_status: DreameMowerStreamStatus | None = None
         self.stream_session = None
 
         self.dnd_tasks = None

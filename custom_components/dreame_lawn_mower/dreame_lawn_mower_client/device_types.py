@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum, IntEnum
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
+
+if TYPE_CHECKING:
+    from .device import DreameMowerDevice
 
 SEGMENT_TYPE_CODE_TO_NAME: Final = {
     0: "Zone",
@@ -1282,7 +1285,7 @@ class DeviceCapability(IntEnum):
 
 
 class DreameMowerDeviceCapability:
-    def __init__(self, device) -> None:
+    def __init__(self, device: DreameMowerDevice) -> None:
         self.list: list[str] | None = None
         self.lidar_navigation = True
         self.multi_floor_map = True
@@ -1328,7 +1331,9 @@ class DreameMowerDeviceCapability:
         self._custom_cleaning_mode = False
         self._device = device
 
-    def refresh(self, device_capabilities):
+    def refresh(
+        self, device_capabilities: Mapping[str, str | Sequence[Sequence[int]]]
+    ) -> None:
         self.lidar_navigation = bool(
             self._device.get_property(DreameMowerProperty.MAP_SAVING) is None
         )
