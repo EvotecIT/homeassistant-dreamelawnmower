@@ -6,13 +6,16 @@ from collections import Counter
 from typing import Any
 
 import voluptuous as vol
+from aiohttp import ClientSession
 from homeassistant.config_entries import ConfigFlow, OptionsFlow
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import (
     DreameLawnMowerAuthError,
     DreameLawnMowerClient,
+    DreameLawnMowerConnectionError,
     DreameLawnMowerDescriptor,
     DreameLawnMowerTwoFactorRequiredError,
 )
@@ -86,6 +89,7 @@ async def async_discover_devices(
     password: str,
     country: str,
     account_type: str,
+    session: ClientSession,
 ) -> list[DreameLawnMowerDescriptor]:
     """Helper for device discovery, separated for easier testing."""
     return list(
@@ -94,6 +98,7 @@ async def async_discover_devices(
             password=password,
             country=country,
             account_type=account_type,
+            session=session,
         )
     )
 
@@ -160,11 +165,14 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
                     password=self._password,
                     country=self._country,
                     account_type=self._account_type,
+                    session=async_get_clientsession(self.hass),
                 )
             except DreameLawnMowerTwoFactorRequiredError:
                 self._errors["base"] = "2fa_required"
             except DreameLawnMowerAuthError as err:
                 self._errors["base"] = auth_error_key(err)
+            except DreameLawnMowerConnectionError:
+                self._errors["base"] = "cannot_connect"
             else:
                 if not devices:
                     self._errors["base"] = "no_devices"
@@ -256,11 +264,14 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
                     password=user_input[CONF_PASSWORD],
                     country=user_input[CONF_COUNTRY],
                     account_type=entry.data[CONF_ACCOUNT_TYPE],
+                    session=async_get_clientsession(self.hass),
                 )
             except DreameLawnMowerTwoFactorRequiredError:
                 self._errors["base"] = "2fa_required"
             except DreameLawnMowerAuthError as err:
                 self._errors["base"] = auth_error_key(err)
+            except DreameLawnMowerConnectionError:
+                self._errors["base"] = "cannot_connect"
             else:
                 selected = next(
                     (item for item in devices if item.did == entry.data[CONF_DID]),

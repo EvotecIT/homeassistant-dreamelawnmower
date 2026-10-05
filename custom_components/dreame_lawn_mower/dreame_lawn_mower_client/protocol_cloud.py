@@ -2,12 +2,9 @@
 
 import logging
 import random
-import hashlib
 import json
-import base64
 import hmac
 import requests
-import zlib
 import queue
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -22,7 +19,7 @@ from Crypto.Cipher import ARC4
 from miio.miioprotocol import MiIOProtocol
 
 from .exceptions import DeviceException, DreameLawnMowerCloudAPIError
-from .const import DREAME_STRINGS, MOVA_STRINGS
+from .cloud_wire import cloud_headers, cloud_login_data, cloud_strings
 from .deadline import DeadlineExceededError, run_with_deadline
 from .mqtt_tls import create_cloud_mqtt_ssl_context
 
@@ -490,31 +487,13 @@ class DreameMowerDreameHomeCloudProtocol:
         self._logged_in = False
 
         if self._strings is None:
-            if self._account_type == "dreame":
-                self._strings = json.loads(zlib.decompress(
-                    base64.b64decode(DREAME_STRINGS), zlib.MAX_WBITS | 32))
-            if self._account_type == "mova":
-                self._strings = json.loads(zlib.decompress(
-                    base64.b64decode(MOVA_STRINGS), zlib.MAX_WBITS | 32))
+            self._strings = cloud_strings(self._account_type)
 
         try:
-            if self._secondary_key:
-                data = f"{self._strings[12]}{self._strings[13]}{self._secondary_key}"
-            else:
-                data = f"{self._strings[12]}{self._strings[14]}{self._username}{self._strings[15]}{hashlib.md5((self._password + self._strings[2]).encode('utf-8')).hexdigest()}{self._strings[16]}"
-
-            headers = {
-                "Accept": "*/*",
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Accept-Language": "en-US;q=0.8",
-                "Accept-Encoding": "gzip, deflate",
-                self._strings[47]: self._strings[3],
-                self._strings[49]: self._strings[5],
-                self._strings[50]: self._ti if self._ti else self._strings[6],
-            }
-
-            if self._country == "cn":
-                headers[self._strings[48]] = self._strings[4]
+            data = cloud_login_data(
+                self._strings, self._username, self._password, self._secondary_key
+            )
+            headers = cloud_headers(self._strings, self._country, self._ti)
 
             request_timeout = timeout
             if deadline is not None:
@@ -1325,19 +1304,9 @@ class DreameMowerDreameHomeCloudProtocol:
                                 "the response deadline."
                             )
 
-                headers = {
-                    "Accept": "*/*",
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Accept-Language": "en-US;q=0.8",
-                    "Accept-Encoding": "gzip, deflate",
-                    self._strings[47]: self._strings[3],
-                    self._strings[49]: self._strings[5],
-                    self._strings[50]: self._ti if self._ti else self._strings[6],
-                    self._strings[51]: self._strings[52],
-                    self._strings[46]: self._key,
-                }
-                if self._country == "cn":
-                    headers[self._strings[48]] = self._strings[4]
+                headers = cloud_headers(self._strings, self._country, self._ti)
+                headers[self._strings[51]] = self._strings[52]
+                headers[self._strings[46]] = self._key
 
                 request_options = {
                     "headers": headers,

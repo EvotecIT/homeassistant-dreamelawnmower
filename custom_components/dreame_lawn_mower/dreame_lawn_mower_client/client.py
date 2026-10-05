@@ -20,6 +20,7 @@ from datetime import datetime as datetime
 from io import BytesIO as BytesIO
 from typing import Any
 
+from aiohttp import ClientSession as _ClientSession
 from requests.exceptions import Timeout as _RequestsTimeout
 
 from . import client_camera as _client_camera
@@ -79,6 +80,7 @@ from .client_core_helpers import (
 from .client_core_helpers import (
     _FIRMWARE_DESCRIPTION_PREFERRED_KEYS as _FIRMWARE_DESCRIPTION_PREFERRED_KEYS,
 )
+from .client_core_helpers import async_discover_devices as _async_discover_devices
 from .client_device_settings import _DreameLawnMowerClientDeviceSettingsMixin
 from .client_maps import (
     _POINT_CLOUD_CLOUD_SETUP_TIMEOUT_SECONDS,
@@ -607,15 +609,17 @@ class DreameLawnMowerClient(
         password: str,
         country: str,
         account_type: str,
+        session: _ClientSession | None = None,
     ) -> Sequence[DreameLawnMowerDescriptor]:
-        """Log in and return mower devices from the user's account."""
-        return await asyncio.to_thread(
-            _sync_discover_devices,
-            username,
-            password,
-            country,
-            account_type,
-        )
+        """Discover mowers using a borrowed session, or a temporary owned session."""
+        options = {
+            "username": username, "password": password,
+            "country": country, "account_type": account_type,
+        }
+        if session is not None:
+            return await _async_discover_devices(session, **options)
+        async with _ClientSession() as owned_session:
+            return await _async_discover_devices(owned_session, **options)
 
     async def async_refresh_authoritative_snapshot(
         self,

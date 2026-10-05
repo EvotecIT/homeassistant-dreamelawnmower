@@ -22,6 +22,21 @@ Then import the public package:
 from dreame_lawn_mower_client import DreameLawnMowerClient
 ```
 
+## Discovery Sessions
+
+Account discovery uses native async HTTP through aiohttp. Supply an existing
+session with `DreameLawnMowerClient.async_discover_devices(..., session=session)`
+to share its connection pool. The caller owns that session; discovery never
+closes it. When omitted, discovery opens and closes a temporary session.
+
+Home Assistant supplies its shared session during setup and credential repair.
+Login and inventory responses have a one MiB decoded-body limit, a total
+operation deadline, cancellation cleanup, and no automatic redirect following.
+Only read-only inventory requests retry transport failures.
+
+Mower commands, polling, and map downloads still use the existing worker-based
+protocol paths. Session injection for discovery does not yet cover those paths.
+
 ## Minimal Example
 
 Credentials should come from environment variables or another secret store. Do

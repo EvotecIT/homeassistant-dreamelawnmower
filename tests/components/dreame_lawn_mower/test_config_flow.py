@@ -522,3 +522,58 @@ async def test_opt_out_removes_saved_preview_without_loaded_coordinator(hass):
     result = await flow.async_step_init({"map_restart_preview": False})
     assert result["data"]["map_restart_preview"] is False
     assert await preview_store(hass, entry.entry_id).async_load() is None
+
+
+async def test_discovery_receives_home_assistant_shared_session(hass, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+    from custom_components.dreame_lawn_mower.api import DreameLawnMowerClient
+
+    discover = AsyncMock(return_value=[])
+    monkeypatch.setattr(DreameLawnMowerClient, "async_discover_devices", discover)
+    result = await _start_user_flow(hass)
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "no_devices"}
+    shared = async_get_clientsession(hass)
+    assert discover.await_args.kwargs["session"] is shared
+    assert not shared.closed
+
+
+@pytest.mark.parametrize("source", ["user", "reauth"])
+async def test_native_connection_failure_preserves_saved_entry(
+    hass, monkeypatch, source,
+):
+    from unittest.mock import AsyncMock
+
+    from custom_components.dreame_lawn_mower.api import (
+        DreameLawnMowerClient,
+        DreameLawnMowerConnectionError,
+    )
+
+    hass.config.components.add("stream")
+    discover = AsyncMock(side_effect=DreameLawnMowerConnectionError("Cloud timed out"))
+    monkeypatch.setattr(DreameLawnMowerClient, "async_discover_devices", discover)
+    original = {
+        CONF_ACCOUNT_TYPE: ACCOUNT_TYPE_DREAME, CONF_COUNTRY: "eu",
+        CONF_PASSWORD: "saved", CONF_USERNAME: "saved@example.invalid",
+        CONF_DID: "device-1",
+    }
+    entry = MockConfigEntry(domain=DOMAIN, data=original, unique_id="device-1")
+    if source == "user":
+        result = await _start_user_flow(hass)
+    else:
+        entry.add_to_hass(hass)
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": "reauth", "entry_id": entry.entry_id},
+            data=original,
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {CONF_COUNTRY: "eu", CONF_PASSWORD: "unverified",
+             CONF_USERNAME: "replacement@example.invalid"},
+        )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "cannot_connect"}
+    assert entry.data == original
