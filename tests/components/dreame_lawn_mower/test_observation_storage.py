@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from homeassistant.config_entries import ConfigEntries
 from homeassistant.const import (
     EVENT_HOMEASSISTANT_FINAL_WRITE,
     EVENT_HOMEASSISTANT_STOP,
@@ -47,9 +46,7 @@ def coordinator():
 async def test_actual_checkpoint_file_survives_new_ha_owner_and_is_removed(tmp_path):
     """Use actual disk IO, not the normal in-memory hass_storage fixture."""
     first_hass = HomeAssistant(str(tmp_path))
-    first_hass.config_entries = ConfigEntries(first_hass, {})
     second_hass = HomeAssistant(str(tmp_path))
-    second_hass.config_entries = ConfigEntries(second_hass, {})
     first, second = coordinator(), coordinator()
     now = datetime.now(UTC) - timedelta(minutes=10)
     first.observed_mowing_timer.observe(
@@ -130,7 +127,6 @@ async def test_actual_checkpoint_file_survives_new_ha_owner_and_is_removed(tmp_p
 
 async def test_invalid_checkpoint_cannot_prevent_a_new_observation(tmp_path):
     hass = HomeAssistant(str(tmp_path))
-    hass.config_entries = ConfigEntries(hass, {})
     owner = coordinator()
     checkpoint = ObservationCheckpoint(hass, "test-entry", owner)
     try:
@@ -154,7 +150,6 @@ async def test_invalid_checkpoint_cannot_prevent_a_new_observation(tmp_path):
 
 async def test_orderly_ha_stop_flushes_progress_before_the_periodic_save(tmp_path):
     hass = HomeAssistant(str(tmp_path))
-    hass.config_entries = ConfigEntries(hass, {})
     owner = coordinator()
     checkpoint = ObservationCheckpoint(hass, "test-entry", owner)
     now = datetime.now(UTC) - timedelta(minutes=5)
@@ -192,7 +187,6 @@ async def test_orderly_ha_stop_flushes_progress_before_the_periodic_save(tmp_pat
 
 async def test_failed_atomic_replace_preserves_the_previous_checkpoint(tmp_path):
     hass = HomeAssistant(str(tmp_path))
-    hass.config_entries = ConfigEntries(hass, {})
     owner = coordinator()
     checkpoint = ObservationCheckpoint(hass, "test-entry", owner)
     now = datetime.now(UTC) - timedelta(minutes=5)
@@ -231,7 +225,6 @@ async def test_failed_atomic_replace_preserves_the_previous_checkpoint(tmp_path)
 
 async def test_shutdown_then_fallback_removal_cannot_recreate_checkpoint(tmp_path):
     hass = HomeAssistant(str(tmp_path))
-    hass.config_entries = ConfigEntries(hass, {})
     checkpoint = ObservationCheckpoint(hass, "test-entry", coordinator())
     path = tmp_path / ".storage" / checkpoint._key
     try:
@@ -248,4 +241,27 @@ async def test_shutdown_then_fallback_removal_cannot_recreate_checkpoint(tmp_pat
         assert not await hass.async_add_executor_job(path.exists)
     finally:
         hass.set_state(CoreState.not_running)
+        await hass.async_stop()
+
+
+async def test_retained_owner_cannot_recreate_checkpoint_after_entry_removal(tmp_path):
+    """A removed entry can retain runtime data when platform unloading failed."""
+    hass = HomeAssistant(str(tmp_path))
+    owner = coordinator()
+    checkpoint = ObservationCheckpoint(hass, "test-entry", owner)
+    owner.observation_checkpoint = checkpoint
+    entry = SimpleNamespace(entry_id="test-entry", runtime_data=owner)
+    path = tmp_path / ".storage" / checkpoint._key
+    try:
+        await checkpoint.async_flush()
+        assert await hass.async_add_executor_job(path.exists)
+        checkpoint.async_schedule_save()
+        await async_remove_entry(hass, entry)
+        checkpoint.async_schedule_save()
+        await checkpoint.async_flush()
+        await checkpoint.async_close()
+        await hass.async_block_till_done()
+        assert not await hass.async_add_executor_job(path.exists)
+    finally:
+        await checkpoint.async_close()
         await hass.async_stop()

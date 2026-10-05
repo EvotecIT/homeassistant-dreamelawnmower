@@ -18,7 +18,7 @@ from .const import DOMAIN
 from .dreame_lawn_mower_client.scheduled_run_history import ScheduledRunHistory
 from .dreame_lawn_mower_client.session_timing import ObservedMowingTimer
 from .mower_condition_history import MowerConditionHistory
-from .runtime_data import get_coordinator
+from .runtime_data import DreameLawnMowerConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 MAX_CHECKPOINT_BYTES = 16 * 1024
@@ -291,11 +291,13 @@ class ObservationCheckpoint:
             await self._store.async_remove()
 
 
-async def async_remove_observation_checkpoint(hass: Any, entry_id: str) -> None:
+async def async_remove_observation_checkpoint(
+    hass: Any, entry: DreameLawnMowerConfigEntry,
+) -> None:
     """Remove evidence even when the config entry failed to load."""
-    coordinator = get_coordinator(hass, entry_id)
+    coordinator = getattr(entry, "runtime_data", None)
     checkpoint = getattr(coordinator, "observation_checkpoint", None)
     if isinstance(checkpoint, ObservationCheckpoint):
         await checkpoint.async_remove()
     else:
-        await checkpoint_store(hass, entry_id).async_remove()
+        await checkpoint_store(hass, entry.entry_id).async_remove()

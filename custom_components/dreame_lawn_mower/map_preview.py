@@ -15,7 +15,7 @@ from homeassistant.helpers.storage import Store
 from PIL import Image
 
 from .const import DOMAIN
-from .runtime_data import get_coordinator
+from .runtime_data import DreameLawnMowerConfigEntry
 
 CONF_MAP_RESTART_PREVIEW = "map_restart_preview"
 MAX_PREVIEW_BYTES = 2 * 1024 * 1024
@@ -33,14 +33,16 @@ def preview_scope(device_id: str, render_context: tuple[Any, ...]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-async def async_remove_restart_preview(hass: Any, entry_id: str) -> None:
+async def async_remove_restart_preview(
+    hass: Any, entry: DreameLawnMowerConfigEntry,
+) -> None:
     """Honor opt-out without requiring a successfully loaded coordinator."""
-    coordinator = get_coordinator(hass, entry_id)
+    coordinator = getattr(entry, "runtime_data", None)
     preview = getattr(coordinator, "map_restart_preview", None)
     if isinstance(preview, RestartMapPreview):
         await preview.async_remove()
     else:
-        await preview_store(hass, entry_id).async_remove()
+        await preview_store(hass, entry.entry_id).async_remove()
 
 
 def encode_preview(

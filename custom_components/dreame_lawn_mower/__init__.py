@@ -85,7 +85,7 @@ async def async_setup_entry(
 ) -> bool:
     """Set up Dreame lawn mower from a config entry."""
     if not entry.options.get(CONF_MAP_RESTART_PREVIEW):
-        await async_remove_restart_preview(hass, entry.entry_id)
+        await async_remove_restart_preview(hass, entry)
     coordinator = DreameLawnMowerCoordinator(hass, entry)
     coordinator.applied_entry_update = EntryUpdateSnapshot.capture(entry)
 
@@ -241,7 +241,7 @@ async def _async_update_listener(
             and applied.options.get(CONF_MAP_RESTART_PREVIEW)
             and not entry.options.get(CONF_MAP_RESTART_PREVIEW)
         ):
-            await async_remove_restart_preview(hass, entry.entry_id)
+            await async_remove_restart_preview(hass, entry)
         await hass.config_entries.async_reload(entry.entry_id)
         return
     changed = applied.changed_options(entry.options)
@@ -260,5 +260,5 @@ async def async_remove_entry(
     hass: HomeAssistant, entry: DreameLawnMowerConfigEntry,
 ) -> None:
     """Remove private cached evidence when its entry is deleted."""
-    await async_remove_restart_preview(hass, entry.entry_id)
-    await async_remove_observation_checkpoint(hass, entry.entry_id)
+    await async_remove_restart_preview(hass, entry)
+    await async_remove_observation_checkpoint(hass, entry)

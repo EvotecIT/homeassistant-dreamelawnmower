@@ -84,3 +84,26 @@ async def test_service_targets_use_only_current_integration_entries(hass):
     del entry.runtime_data
     with pytest.raises(HomeAssistantError):
         _coordinator_from_call(hass, ServiceCall(hass, DOMAIN, "test", {}))
+
+
+async def test_remove_after_failed_unload_drains_retained_storage_owners(hass):
+    from homeassistant.config_entries import ConfigEntryState
+
+    from custom_components.dreame_lawn_mower.map_preview import RestartMapPreview
+    from custom_components.dreame_lawn_mower.observation_checkpoint import (
+        ObservationCheckpoint,
+    )
+
+    entry = MockConfigEntry(domain=DOMAIN, state=ConfigEntryState.FAILED_UNLOAD)
+    entry.add_to_hass(hass)
+    preview = Mock(spec=RestartMapPreview)
+    checkpoint = Mock(spec=ObservationCheckpoint)
+    entry.runtime_data = SimpleNamespace(
+        map_restart_preview=preview,
+        observation_checkpoint=checkpoint,
+    )
+    result = await hass.config_entries.async_remove(entry.entry_id)
+    assert result["require_restart"]
+    assert hass.config_entries.async_get_entry(entry.entry_id) is None
+    preview.async_remove.assert_awaited_once_with()
+    checkpoint.async_remove.assert_awaited_once_with()

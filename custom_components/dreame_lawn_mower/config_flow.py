@@ -348,7 +348,7 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                 CONF_MAP_RESTART_PREVIEW
             ):
                 await async_remove_restart_preview(
-                    self.hass, self._source_entry.entry_id
+                    self.hass, self._source_entry
                 )
             return self.async_create_entry(title="", data=options)
 
