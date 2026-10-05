@@ -82,7 +82,7 @@ not establish installed, cloud, native-runtime, or physical-device behavior.
 | --- | --- | --- |
 | async-dependency | Gap | The cloud protocol owns synchronous requests, queues, locks, and threads. Modernize the owning client with real async cancellation and resource ownership; executor wrapping alone does not qualify. |
 | inject-websession | Gap | Cloud HTTP uses its own synchronous session. Design injected async session ownership in the reusable client, including standalone callers. |
-| strict-typing | Gap | After platform and map-model annotation fixes, mypy 2.4.0 reports 2,696 errors in 88 of 245 production modules. Fix the full integration and bundled client before enabling a passing strict CI gate. |
+| strict-typing | Gap | After platform and map-model annotation fixes, mypy 2.4.0 reports 2,659 errors in 88 of 245 production modules. Fix the full integration and bundled client before enabling a passing strict CI gate. |
 
 ## Qualification baseline
 
@@ -98,7 +98,7 @@ imports. Map renderer models describe RGBA tuples and optional resources;
 geometry and map-state annotations match the values produced by the decoder.
 Map values follow Python's equality protocol for unrelated objects, and obstacle
 object names use their vendor ID when available. Regression tests cover both
-contracts. Strict typing remains incomplete at 2,696 errors in 88 modules;
+contracts. Strict typing remains incomplete at 2,659 errors in 88 modules;
 `map_renderer_types.py` passes strict checking on its own. Renderer payload
 annotations match the nested crop data, hidden-segment list, and per-segment
 material/status dictionaries; 32 focused map tests pass after these declaration
@@ -124,6 +124,9 @@ requires a known Mowing mode and a known Deep or Intensive route. Missing or
 unrecognized route data does not trigger a route-setting command.
 Shared declarations include the optional map-manager owner; status results describe
 their existing list, absent-image, and optional-duration values.
+The map editor identifies its manager through a type-only import. Saved maps and
+active cruise points are declared as ID-keyed dictionaries, matching the manager,
+decoder, editor, and renderer's existing data contracts.
 
 After these changes, 2,582 unit tests pass with one skipped. Component/translation
 tests pass on HA 2025.1 (73 passed, one version-specific skip) and HA 2026.9.4

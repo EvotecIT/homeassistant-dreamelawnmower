@@ -28,7 +28,7 @@ from PIL import (
     PngImagePlugin,
     ImageFilter,
 )
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 from time import sleep
 from io import BytesIO
 from typing import Optional, Tuple
@@ -149,18 +149,22 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+if TYPE_CHECKING:
+    from .map_manager import DreameMapMowerMapManager
+
+
 class DreameMapMowerMapEditor:
     """Every map change must be handled on memory before actually requesting it to the device because it takes too much time to get the updated map from the cloud.
     This class handles user edits on stored map data like updating customized cleaning settings or setting active segments on segment cleaning.
     Original app has a similar class to handle the same issue (Works optimistically)"""
 
-    def __init__(self, map_manager) -> None:
+    def __init__(self, map_manager: DreameMapMowerMapManager) -> None:
         self.map_manager = map_manager
 
     def _set_updated_frame_id(self, frame_id) -> None:
         self.map_manager._updated_frame_id = frame_id
 
-    def refresh_map(self, map_id: int = None) -> None:
+    def refresh_map(self, map_id: int | None = None) -> None:
         if map_id:
             if self._saved_map_data and map_id in self._saved_map_data:
                 self._saved_map_data[map_id].last_updated = time.time()
@@ -870,7 +874,7 @@ class DreameMapMowerMapEditor:
         return self.map_manager._map_data
 
     @property
-    def _saved_map_data(self) -> MapData | None:
+    def _saved_map_data(self) -> dict[int, MapData]:
         return self.map_manager._saved_map_data
 
     @property

@@ -1089,7 +1089,7 @@ class MapData:
         # Generated from recovery map list
         self.recovery_map_list: list[RecoveryMapInfo] | None = None
         # Data json: pointinfo.tpoint
-        self.active_cruise_points: list[Coordinate] | None = None
+        self.active_cruise_points: dict[int, Coordinate] | None = None
         # Data json: pointinfo.spoint
         self.predefined_points: dict[int, Coordinate] | None = None
         # Data json: tpointinfo
