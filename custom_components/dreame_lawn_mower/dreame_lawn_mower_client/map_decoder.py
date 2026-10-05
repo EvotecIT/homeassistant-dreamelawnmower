@@ -260,6 +260,8 @@ class DreameMowerMapDecoder:
         if len(raw_bytes) >= image_size:
             try:
                 data_json = json.loads(raw_bytes[image_size:].decode("utf8"))
+                if not isinstance(data_json, dict):
+                    return partial_map
                 if data_json.get("timestamp_ms"):
                     partial_map.timestamp_ms = int(data_json["timestamp_ms"])
 

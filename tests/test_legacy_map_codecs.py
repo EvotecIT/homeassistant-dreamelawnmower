@@ -47,7 +47,7 @@ def test_map_decoder_reads_compressed_header_and_metadata() -> None:
     header[0:2] = (7).to_bytes(2, byteorder="little", signed=True)
     header[2:4] = (11).to_bytes(2, byteorder="little", signed=True)
     header[4] = 1
-    raw_map = bytes(header) + b'{"timestamp_ms":123456}'
+    raw_map = bytes(header) + b'{"timestamp_ms":123456,"seg_inf":{"7":{"nei_id":[8]}}}'
     payload = base64.b64encode(zlib.compress(raw_map)).decode()
 
     partial = map_decoder.DreameMowerMapDecoder.decode_map_partial(payload)
@@ -57,6 +57,25 @@ def test_map_decoder_reads_compressed_header_and_metadata() -> None:
     assert partial.frame_id == 11
     assert partial.frame_type == 1
     assert partial.timestamp_ms == 123456
+    assert partial.data_json == {
+        "timestamp_ms": 123456, "seg_inf": {"7": {"nei_id": [8]}}
+    }
+
+
+@pytest.mark.parametrize("metadata", [b"null", b"[]", b'{"timestamp_ms":"bad"}'])
+def test_map_decoder_keeps_header_when_optional_metadata_is_invalid(
+    metadata: bytes,
+) -> None:
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[0:2] = (7).to_bytes(2, "little", signed=True)
+    payload = base64.b64encode(zlib.compress(bytes(header) + metadata)).decode()
+
+    partial = map_decoder.DreameMowerMapDecoder.decode_map_partial(payload)
+
+    assert partial is not None
+    assert partial.map_id == 7
+    assert partial.timestamp_ms is None
+    assert partial.data_json == {}
 
 
 def test_json_renderer_packages_default_map_png() -> None:

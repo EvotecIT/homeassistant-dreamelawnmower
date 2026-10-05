@@ -1001,7 +1001,7 @@ class MapDataPartial:
         self.frame_type: int | None = None  # Map header: frame_type
         self.timestamp_ms: int | None = None  # Data json: timestamp_ms
         self.raw: bytes | None = None  # Unzipped raw map
-        self.data_json: object | None = {}  # Data json
+        self.data_json: dict[str, object] | None = {}  # Data json
 
 
 class MapData:
