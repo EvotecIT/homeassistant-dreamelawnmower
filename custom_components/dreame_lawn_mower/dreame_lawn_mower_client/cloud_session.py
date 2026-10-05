@@ -201,6 +201,8 @@ class DreameCloudSession:
             data=data,
             timeout=ClientTimeout(total=self._remaining(deadline)),
             allow_redirects=False,
+            raise_for_status=False,
+            auto_decompress=True,
         ) as response:
             body = bytearray()
             async for chunk in response.content.iter_chunked(8192):
@@ -212,10 +214,16 @@ class DreameCloudSession:
             try:
                 payload = json.loads(body)
             except (ValueError, UnicodeError) as err:
+                if response.status == 401:
+                    # Inventory authentication is status-based; proxies may
+                    # return an empty or plain-text body for an expired token.
+                    return response.status, {}
                 raise DreameLawnMowerConnectionError(
                     "Cloud response is not valid JSON"
                 ) from err
             if not isinstance(payload, dict):
+                if response.status == 401:
+                    return response.status, {}
                 raise DreameLawnMowerConnectionError("Cloud response is not an object")
             return response.status, payload
 

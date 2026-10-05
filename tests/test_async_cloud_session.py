@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import gzip
+import json
 from contextlib import asynccontextmanager
 
 import pytest
@@ -266,7 +267,11 @@ def test_auth_rejection_does_not_expose_server_secrets(monkeypatch, caplog):
     assert "private-password" not in caplog.text
 
 
-def test_inventory_reauthentication_uses_new_token_and_tenant(monkeypatch):
+@pytest.mark.parametrize("body", [b'{"code":401}', b"", b"Unauthorized", b"[]"])
+@pytest.mark.parametrize("raise_status", [False, True])
+def test_inventory_reauthentication_uses_new_token_and_tenant(
+    monkeypatch, body, raise_status
+):
     strings = cloud_strings("dreame")
     login_payloads = []
     inventory_headers = []
@@ -281,11 +286,14 @@ def test_inventory_reauthentication_uses_new_token_and_tenant(monkeypatch):
             (request.headers[strings[46]], request.headers[strings[50]])
         )
         if len(inventory_headers) == 1:
-            return web.json_response({"code": 401}, status=401)
+            return web.Response(body=body, status=401)
         return web.json_response({"code": 0, "data": [{"did": "42"}]})
 
     async def scenario():
-        async with server(monkeypatch, handler), ClientSession() as session:
+        async with (
+            server(monkeypatch, handler),
+            ClientSession(raise_for_status=raise_status) as session,
+        ):
             result = await DreameCloudSession(session, **OPTIONS).async_get_devices()
             assert result == [{"did": "42"}]
             assert not session.closed
@@ -296,6 +304,37 @@ def test_inventory_reauthentication_uses_new_token_and_tenant(monkeypatch):
         cloud_login_data(strings, OPTIONS["username"], OPTIONS["password"], None),
         cloud_login_data(strings, "", "", "refresh-secret"),
     ]
+
+
+@pytest.mark.parametrize("oversized", [False, True])
+def test_borrowed_session_cannot_disable_decoded_response_contract(
+    monkeypatch, oversized
+):
+    strings = cloud_strings("dreame")
+
+    async def handler(request):
+        body = (
+            b"x" * (MAX_CLOUD_RESPONSE_BYTES + 1)
+            if oversized else json.dumps(login_response(strings)).encode()
+        )
+        return web.Response(
+            body=gzip.compress(body), headers={"Content-Encoding": "gzip"}
+        )
+
+    async def scenario():
+        async with (
+            server(monkeypatch, handler),
+            ClientSession(auto_decompress=False) as session,
+        ):
+            cloud = DreameCloudSession(session, **OPTIONS)
+            if oversized:
+                with pytest.raises(DreameLawnMowerConnectionError, match="size limit"):
+                    await cloud.async_login()
+            else:
+                await cloud.async_login()
+            assert not session.closed
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("reject", [False, True])
