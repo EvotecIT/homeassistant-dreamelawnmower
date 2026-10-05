@@ -1478,28 +1478,30 @@ class DreameMowerMapDecoder:
 
     @staticmethod
     def set_robot_segment(map_data: MapData) -> None:
+        dimensions = map_data.dimensions
+        pixels = map_data.pixel_type
         if (
             map_data.segments
             and map_data.saved_map_status == 2
             and map_data.robot_position is not None
+            and dimensions is not None
+            and dimensions.grid_size > 0
+            and pixels is not None
         ):
-            map_data.robot_segment = map_data.pixel_type[
-                int(
-                    (map_data.robot_position.x - map_data.dimensions.left)
-                    / map_data.dimensions.grid_size
-                ),
-                int(
-                    (map_data.robot_position.y - map_data.dimensions.top)
-                    / map_data.dimensions.grid_size
-                ),
-            ]
+            x = (map_data.robot_position.x - dimensions.left) / dimensions.grid_size
+            y = (map_data.robot_position.y - dimensions.top) / dimensions.grid_size
+            map_data.robot_segment = (
+                int(pixels[int(x), int(y)])
+                if 0 <= x < pixels.shape[0] and 0 <= y < pixels.shape[1]
+                else 0
+            )
             if map_data.robot_segment not in map_data.segments:
                 map_data.robot_segment = 0
                 for k, v in map_data.segments.items():
                     if v.check_point(
                         map_data.robot_position.x,
                         map_data.robot_position.y,
-                        map_data.dimensions.grid_size * 4,
+                        dimensions.grid_size * 4,
                     ):
                         map_data.robot_segment = k
                         break

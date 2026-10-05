@@ -7,6 +7,7 @@ import hashlib
 import logging
 import zlib
 
+import numpy as np
 import pytest
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -23,6 +24,12 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map import (
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map import (
     DreameMowerMapDecoder as LegacyMapDecoder,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_types import (
+    MapData,
+    MapImageDimensions,
+    Point,
+    Segment,
 )
 
 
@@ -117,3 +124,32 @@ def test_map_decoder_decrypts_explicit_and_inline_keys(
     assert partial.timestamp_ms == 1700000000000
     assert key not in caplog.text
     assert encoded not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("position", "expected"),
+    [
+        (Point(10, 10), 1),
+        (Point(-50, -50), 1),
+        (Point(-500, -500), 0),
+        (Point(1000, 1000), 0),
+    ],
+)
+def test_robot_segment_outside_pixels_uses_geometry_fallback(
+    position: Point, expected: int
+) -> None:
+    map_data = MapData()
+    map_data.saved_map_status = 2
+    map_data.dimensions = MapImageDimensions(0, 0, 10, 10, 50)
+    map_data.pixel_type = np.zeros((10, 10), dtype=np.uint8)
+    map_data.pixel_type[0, 0] = 1
+    map_data.pixel_type[9, 9] = 2
+    map_data.segments = {
+        1: Segment(1, 0, 0, 50, 50),
+        2: Segment(2, 400, 400, 450, 450),
+    }
+    map_data.robot_position = position
+
+    map_decoder.DreameMowerMapDecoder.set_robot_segment(map_data)
+
+    assert map_data.robot_segment == expected
