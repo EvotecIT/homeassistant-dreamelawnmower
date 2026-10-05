@@ -644,7 +644,9 @@ class DreameMapMowerMapManager:
                 url = self._file_urls[object_name][MAP_PARAMETER_URL]
         return url
 
-    def _decode_map_partial(self, raw_map, timestamp=None, key=None) -> MapDataPartial | None:
+    def _decode_map_partial(
+        self, raw_map: str, timestamp: int | None = None, key: str | None = None
+    ) -> MapDataPartial | None:
         partial_map = DreameMowerMapDecoder.decode_map_partial(raw_map, self._aes_iv, key)
         if partial_map is not None:
             # After restart or unsuccessful start robot returns timestamp_ms as uptime and that messes up with the latest map/frame id detection.
@@ -653,7 +655,10 @@ class DreameMapMowerMapManager:
             if timestamp and (partial_map.timestamp_ms is None or partial_map.timestamp_ms < 1577826000000):
                 partial_map.timestamp_ms = timestamp
 
-            if self._latest_map_timestamp_ms is None or partial_map.timestamp_ms > self._latest_map_timestamp_ms:
+            if self._latest_map_timestamp_ms is None or (
+                partial_map.timestamp_ms is not None
+                and partial_map.timestamp_ms > self._latest_map_timestamp_ms
+            ):
                 self._latest_map_timestamp_ms = partial_map.timestamp_ms
                 self._latest_map_id = partial_map.map_id
 
@@ -708,12 +713,14 @@ class DreameMapMowerMapManager:
                             else:
                                 self.request_new_map()
 
-    def _add_map_data_file(self, object_name: str, timestamp) -> None:
+    def _add_map_data_file(self, object_name: str, timestamp: int | None) -> None:
         response, key = self._get_object_file_data(object_name, timestamp)
         if response is not None:
             self._add_raw_map_data(response.decode(), timestamp, key)
 
-    def _add_raw_map_data(self, raw_map: str, timestamp=None, key=None) -> bool:
+    def _add_raw_map_data(
+        self, raw_map: str, timestamp: int | None = None, key: str | None = None
+    ) -> bool:
         return self._add_map_data(self._decode_map_partial(raw_map, timestamp, key))
 
     def _add_map_data(self, partial_map: MapDataPartial | None) -> bool:
@@ -759,11 +766,13 @@ class DreameMapMowerMapManager:
 
         if (
             self._current_frame_id is not None
-            and self._current_frame_id is not None
+            and partial_map.frame_id is not None
             and partial_map.frame_id < self._current_frame_id
         ):
             if (
                 partial_map.frame_type != MapFrameType.I.value
+                or partial_map.timestamp_ms is None
+                or self._current_timestamp_ms is None
                 or partial_map.timestamp_ms <= self._current_timestamp_ms
             ):
                 _LOGGER.info(

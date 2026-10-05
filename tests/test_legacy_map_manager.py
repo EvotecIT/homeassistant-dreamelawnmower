@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import base64
+import json
+import zlib
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -32,6 +35,17 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_types impo
 
 class _DummyProtocol:
     """Minimal protocol stand-in for map-manager unit checks."""
+
+
+def _encoded_map_frame(timestamp: int | None, frame_id: int = 10) -> str:
+    header = bytearray(map_manager_module.DreameMowerMapDecoder.HEADER_SIZE)
+    header[0:2] = (7).to_bytes(2, "little", signed=True)
+    header[2:4] = frame_id.to_bytes(2, "little", signed=True)
+    header[4] = MapFrameType.I.value
+    metadata = {} if timestamp is None else {"timestamp_ms": timestamp}
+    return base64.b64encode(
+        zlib.compress(bytes(header) + json.dumps(metadata).encode())
+    ).decode()
 
 
 def test_map_optimizer_keeps_historical_import_and_manager_contract() -> None:
@@ -153,3 +167,57 @@ def test_partial_frame_waits_for_base_map(
     assert manager._map_data is None
     assert manager._current_frame_id is None
     assert request_base.call_count == (0 if request_pending else 1)
+
+
+@pytest.mark.parametrize("latest_timestamp", [None, 1700000000000])
+def test_map_without_timestamp_preserves_known_ordering(
+    latest_timestamp: int | None,
+) -> None:
+    manager = DreameMapMowerMapManager(_DummyProtocol())
+    manager._latest_map_timestamp_ms = latest_timestamp
+    manager._latest_map_id = 8 if latest_timestamp is not None else None
+
+    partial = manager._decode_map_partial(_encoded_map_frame(None))
+
+    assert partial is not None
+    assert partial.timestamp_ms is None
+    assert partial.map_id == 7
+    assert manager._latest_map_timestamp_ms == latest_timestamp
+    assert manager._latest_map_id == (8 if latest_timestamp is not None else 7)
+
+
+@pytest.mark.parametrize("wire_timestamp", [None, 1000])
+def test_map_timestamp_uses_request_time_when_missing_or_uptime(
+    wire_timestamp: int | None,
+) -> None:
+    manager = DreameMapMowerMapManager(_DummyProtocol())
+    partial = manager._decode_map_partial(
+        _encoded_map_frame(wire_timestamp), 1700000000000
+    )
+
+    assert partial is not None
+    assert partial.timestamp_ms == 1700000000000
+    assert manager._latest_map_timestamp_ms == 1700000000000
+    assert manager._latest_map_id == 7
+
+
+@pytest.mark.parametrize(
+    ("current_timestamp", "incoming_timestamp"),
+    [(1700000000000, None), (None, 1700000000000), (None, None)],
+)
+def test_lower_frame_without_comparable_timestamps_preserves_current_map(
+    current_timestamp: int | None, incoming_timestamp: int | None
+) -> None:
+    manager = DreameMapMowerMapManager(_DummyProtocol())
+    current_map = MapData()
+    manager._map_data = current_map
+    manager._current_map_id = manager._latest_map_id = 7
+    manager._current_frame_id = 11
+    manager._current_timestamp_ms = current_timestamp
+    partial = map_manager_module.DreameMowerMapDecoder.decode_map_partial(
+        _encoded_map_frame(incoming_timestamp)
+    )
+
+    assert manager._add_map_data(partial) is True
+    assert manager._map_data is current_map
+    assert manager._current_frame_id == 11
