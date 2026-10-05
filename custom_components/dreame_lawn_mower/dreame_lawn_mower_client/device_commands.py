@@ -15,6 +15,7 @@ from threading import RLock, Timer
 from typing import Any, Optional
 
 from .app_protocol import mower_realtime_property_name
+from .device_context import _DreameMowerDeviceContext
 from .device_code_semantics import (
     MowerDeviceCodeTier,
     mower_device_code_definition,
@@ -147,7 +148,7 @@ from .map_decoder import DreameMowerMapDecoder
 
 _LOGGER = logging.getLogger(__name__)
 
-class _DreameMowerDeviceCommandMixin:
+class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
     def _set_go_to_zone(self, x, y, size):
         current_cleaning_mode = int(self.status.cleaning_mode.value)
 

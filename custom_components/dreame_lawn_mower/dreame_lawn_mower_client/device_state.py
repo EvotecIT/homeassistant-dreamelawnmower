@@ -13,6 +13,7 @@ from datetime import datetime
 from random import randrange
 from threading import RLock, Timer
 from typing import Any, Optional
+from .device_context import _DreameMowerDeviceContext
 
 from .app_protocol import (
     MOWER_BLUETOOTH_PROPERTY_KEY,
@@ -174,7 +175,7 @@ _EXTERNAL_REALTIME_ANNOUNCEMENT_KEYS = frozenset(
 )
 
 
-class _DreameMowerDeviceStateMixin:
+class _DreameMowerDeviceStateMixin(_DreameMowerDeviceContext):
     def _connected_callback(self):
         if not self._ready:
             return

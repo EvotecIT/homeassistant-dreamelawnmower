@@ -15,6 +15,7 @@ from threading import RLock, Timer
 from typing import Any, Optional
 
 from .app_protocol import mower_realtime_property_name
+from .device_context import _DreameMowerDeviceContext
 from .device_code_semantics import (
     MowerDeviceCodeTier,
     mower_device_code_definition,
@@ -149,7 +150,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 
-class _DreameMowerDeviceMapMixin:
+class _DreameMowerDeviceMapMixin(_DreameMowerDeviceContext):
     def get_map_for_render(self, map_data: MapData) -> MapData | None:
         """Makes changes on map data for device related properties for renderer.
         Map manager does not need any device property for parsing and storing map data but map renderer does.
