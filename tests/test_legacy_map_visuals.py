@@ -82,12 +82,15 @@ def test_legacy_map_png_keeps_map_metadata_on_styled_image() -> None:
 
 
 @pytest.mark.parametrize("scale", [1, 2])
-def test_legacy_mowing_trail_draws_segments_without_bridging(scale: int) -> None:
+@pytest.mark.parametrize("start_type", [kind for kind in PathType if kind != PathType.LINE])
+def test_legacy_mowing_trail_draws_segments_without_bridging(
+    scale: int, start_type: PathType,
+) -> None:
     renderer = legacy_map_visuals._legacy_renderer(
         style=map_render_style("dark"), label_scale=1.0
     )
     trail = [
-        Path(10, 80, PathType.SWEEP),
+        Path(10, 80, start_type),
         Path(40, 80, PathType.LINE),
         Path(40, 60, PathType.LINE),
         Path(60, 20, PathType.SWEEP),

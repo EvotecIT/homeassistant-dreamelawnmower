@@ -180,6 +180,12 @@ empty and single-point trails remain transparent. Local layer and composed
 light/dark PNGs were inspected, and an independent read-only review accepted this
 renderer change. This is synthetic image evidence, not installed HA UI proof.
 
+The path model preserves all three start operators already accepted by the wire
+decoder and serializer (`S`, `W`, `M`). Both restored operators have compressed
+payload regressions covering following coordinates and metadata. The subsequent
+operator compatibility change passes 85 focused tests, with composed light/dark
+PNGs inspected for both values; the full-suite count above predates that change.
+
 ## Release qualification
 
 - [ ] Complete every applicable rule with evidence or a justified exemption.

@@ -318,3 +318,24 @@ def test_invalid_trajectory_does_not_discard_later_map_metadata(
     assert decoded is not None
     assert not decoded.path
     assert decoded.hidden_segments == [3]
+
+
+@pytest.mark.parametrize("operator", ["W", "M"])
+def test_legacy_trajectory_operators_preserve_path_and_later_metadata(
+    operator: str,
+) -> None:
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[4] = 73
+    metadata = {"tr": f"{operator}10,20L5,-3S40,50L2,4", "delsr": [3]}
+    payload = base64.b64encode(
+        zlib.compress(bytes(header) + json.dumps(metadata).encode())
+    ).decode()
+
+    decoded, _ = map_decoder.DreameMowerMapDecoder.decode_map(payload, False)
+
+    assert decoded is not None
+    assert decoded.path is not None
+    assert [(p.x, p.y, p.path_type.value) for p in decoded.path] == [
+        (10, 20, operator), (15, 17, "L"), (40, 50, "S"), (42, 54, "L"),
+    ]
+    assert decoded.hidden_segments == [3]
