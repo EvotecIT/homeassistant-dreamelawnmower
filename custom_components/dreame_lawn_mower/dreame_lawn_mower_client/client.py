@@ -1939,17 +1939,12 @@ class DreameLawnMowerClient(
         include_key_definition: bool = True,
     ) -> dict[str, Any]:
         """Scan cloud properties in chunks and return normalized results."""
-        return await asyncio.to_thread(
-            self._sync_scan_cloud_properties,
-            keys,
-            siids,
-            piid_start,
-            piid_end,
-            chunk_size,
-            language,
-            only_values,
-            include_key_definition,
-            None,
+        from .client_property_scan import async_scan_properties
+
+        return await async_scan_properties(
+            self, keys=keys, siids=siids, piid_start=piid_start, piid_end=piid_end,
+            chunk_size=chunk_size, language=language, only_values=only_values,
+            include_key_definition=include_key_definition,
         )
 
     async def async_get_cloud_device_list_page(

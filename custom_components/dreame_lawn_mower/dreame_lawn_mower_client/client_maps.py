@@ -41,6 +41,7 @@ from .client_map_helpers import (
     _validate_positive_number,
 )
 from .client_mowing_map import _DreameLawnMowerClientMowingMapMixin
+from .client_property_scan import cloud_property_scan_result
 from .client_shared_helpers import (
     _property_entry_received_at,
 )
@@ -2063,32 +2064,10 @@ class _DreameLawnMowerClientMapsMixin(
             except DreameLawnMowerConnectionError:
                 cloud_key_definition = None
 
-        rendered = all_entries
-        if only_values:
-            rendered = [
-                entry for entry in rendered if self._entry_has_meaningful_value(entry)
-            ]
-
-        rendered = [
-            self._annotate_cloud_property_entry(
-                entry,
-                language=language,
-                key_definition=cloud_key_definition,
-                model=self._descriptor.model,
-            )
-            for entry in sorted(
-                rendered,
-                key=lambda item: str(item.get("key", "")),
-            )
-        ]
-        result = {
-            "requested_key_count": len(normalized_keys),
-            "returned_entry_count": len(all_entries),
-            "displayed_entry_count": len(rendered),
-            "entries": rendered,
-        }
-        result["summary"] = build_cloud_property_summary(result)
-        return result
+        return cloud_property_scan_result(
+            self, len(normalized_keys), all_entries, language=language,
+            only_values=only_values, key_definition=cloud_key_definition,
+        )
 
     def _sync_get_cloud_device_list_page(
         self,
