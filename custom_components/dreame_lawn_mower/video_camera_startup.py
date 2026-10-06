@@ -37,11 +37,11 @@ from .dreame_lawn_mower_client.video_runtime import (
     DreameLawnMowerXp2pLiveStreamSession,
 )
 from .video_cached_xp2p import async_start_cached_xp2p as _async_start_cached_xp2p
+from .video_camera_configuration import _VideoCameraConfiguration
 from .video_camera_types import (
     _DreameVideoRuntime,
     _facade_binding,
     _FacadeModuleProxy,
-    _VideoCameraState,
 )
 from .video_startup_timing import VideoStartupTiming
 
@@ -110,7 +110,7 @@ def _runtime_inputs_not_ready_message(
     )
 
 
-class DreameLawnMowerVideoStartupMixin(_VideoCameraState):
+class DreameLawnMowerVideoStartupMixin(_VideoCameraConfiguration):
     """Start and adopt LAN, cached XP2P, or cloud video sessions."""
 
     async def _async_start_stream(

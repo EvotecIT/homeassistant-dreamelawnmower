@@ -22,7 +22,8 @@ from .dreame_lawn_mower_client.models import (
 from .dreame_lawn_mower_client.video_runtime import (
     DreameLawnMowerXp2pLiveStreamSession,
 )
-from .video_camera_types import _facade_binding, _FacadeModuleProxy, _VideoCameraState
+from .video_camera_configuration import _VideoCameraConfiguration
+from .video_camera_types import _facade_binding, _FacadeModuleProxy
 
 video_helpers = _FacadeModuleProxy("video_helpers", _video_helpers)
 
@@ -43,7 +44,7 @@ def snapshot_advertises_video(snapshot: Any) -> bool:
     )(snapshot)
 
 
-class DreameLawnMowerVideoStateMixin(_VideoCameraState):
+class DreameLawnMowerVideoStateMixin(_VideoCameraConfiguration):
     """Expose mower video capability, availability, and diagnostics."""
 
     def _resolved_video_capability(self) -> DreameLawnMowerFeatureCapability:
