@@ -9,7 +9,6 @@ import json
 import zlib
 import re
 import logging
-import traceback
 import copy
 import numpy as np
 import hashlib
@@ -296,7 +295,7 @@ class DreameMapMowerMapManager:
             mapping = DreameMowerActionMapping[DreameMowerAction.REQUEST_MAP]
             return self._protocol.action(mapping["siid"], mapping["aiid"], payload, 0)
         except Exception as ex:
-            _LOGGER.warning("DreameMapMowerMapManager._request_map failed: %s", ex)
+            _LOGGER.warning("DreameMapMowerMapManager._request_map failed: %s", type(ex).__name__)
         return None
 
     def _map_action_succeeded(self, result: Any) -> bool:
@@ -467,7 +466,7 @@ class DreameMapMowerMapManager:
             mapping = DreameMowerActionMapping[DreameMowerAction.WIFI_MAP]
             return self._protocol.action(mapping["siid"], mapping["aiid"], None, 0)
         except Exception as ex:
-            _LOGGER.warning("Send _request_w_map failed: %s", ex)
+            _LOGGER.warning("Send _request_w_map failed: %s", type(ex).__name__)
         return None
 
     def _request_current_map(self, map_request_time: int = None) -> bool:
@@ -495,7 +494,7 @@ class DreameMapMowerMapManager:
         try:
             self.update()
         except Exception as ex:
-            _LOGGER.warning("Background map update failed: %s", ex)
+            _LOGGER.warning("Background map update failed: %s", type(ex).__name__)
         finally:
             self.schedule_update(max(self._update_interval - (time.time() - start), 1))
 
@@ -607,11 +606,11 @@ class DreameMapMowerMapManager:
 
             url = self._get_file_url(object_name)
             if url:
-                _LOGGER.info("Request map data from cloud %s", url)
+                _LOGGER.info("Request map data from cloud")
                 response = self._protocol.cloud.get_file(url)
                 if response is not None:
                     return response
-                _LOGGER.warning("Request map data from cloud failed %s", url)
+                _LOGGER.warning("Request map data from cloud failed")
                 if self._file_urls.get(object_name):
                     del self._file_urls[object_name]
 
@@ -1132,7 +1131,7 @@ class DreameMapMowerMapManager:
                     _LOGGER.warning(
                         "Obstacle (%s) image decryption failed: %s",
                         index,
-                        traceback.format_exc(),
+                        type(ex).__name__,
                     )
         return (None, None)
 
@@ -1160,7 +1159,7 @@ class DreameMapMowerMapManager:
             except Exception as ex:
                 _LOGGER.warning(
                     "History map decoding failed: %s",
-                    traceback.format_exc(),
+                    type(ex).__name__,
                 )
 
     def get_recovery_map(self, map_id, index):
@@ -1195,7 +1194,7 @@ class DreameMapMowerMapManager:
                         object_name,
                         not (object_name.endswith("mb.tbz2") and not self._protocol.dreame_cloud),
                     )
-                    _LOGGER.info("Recovery map file url: %s = %s", object_name, map_url)
+                    _LOGGER.info("Recovery map download URL available: %s", bool(map_url))
                     if map_url:
                         return (
                             self._protocol.cloud.get_file(map_url),
@@ -1311,7 +1310,7 @@ class DreameMapMowerMapManager:
                 self._map_data_changed()
         except Exception as ex:
             if self._available:
-                _LOGGER.warning("Map update Failed: %s", traceback.format_exc())
+                _LOGGER.warning("Map update Failed: %s", type(ex).__name__)
                 self._available = False
                 if self._error_callback:
                     self._error_callback(DeviceUpdateFailedException(ex))
@@ -1425,7 +1424,7 @@ class DreameMapMowerMapManager:
             try:
                 response = self._get_interim_file_data(self._map_list_object_name)
             except Exception as ex:
-                _LOGGER.warn("Get Map List failed: %s", ex)
+                _LOGGER.warning("Get Map List failed: %s", type(ex).__name__)
                 return
 
             if response:

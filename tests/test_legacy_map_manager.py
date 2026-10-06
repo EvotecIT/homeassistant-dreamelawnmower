@@ -65,3 +65,49 @@ def test_request_i_map_ignores_non_mapping_response() -> None:
     manager._request_map_from_cloud = lambda: False
 
     assert manager._request_i_map() is False
+
+
+def test_map_download_logs_do_not_disclose_signed_urls(caplog):
+    import logging
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    signed_url = "https://example.invalid/map?token=private-map-token"
+    cloud = SimpleNamespace(logged_in=True, get_file=Mock(return_value=b"map"))
+    protocol = SimpleNamespace(cloud=cloud, dreame_cloud=True)
+    manager = DreameMapMowerMapManager(protocol)
+    manager._get_file_url = Mock(return_value=signed_url)
+    caplog.set_level(logging.INFO)
+
+    assert manager._get_interim_file_data("map-object") == b"map"
+    cloud.get_file.assert_called_with(signed_url)
+    cloud.get_file.return_value = None
+    assert manager._get_interim_file_data("map-object") is None
+
+    manager._map_list = [1]
+    manager._saved_map_data[1] = SimpleNamespace(
+        recovery_map_list=[SimpleNamespace(object_name="recovery-object")],
+    )
+    cloud.get_file.return_value = b"recovery"
+    assert manager.get_recovery_map_file(1, 1) == (
+        b"recovery", signed_url, "recovery-object",
+    )
+    assert "Request map data" in caplog.text
+    assert "private-map-token" not in caplog.text
+    assert signed_url not in caplog.text
+
+
+def test_map_download_failure_logs_only_exception_type(caplog):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    secret = "https://example.invalid/map?token=private-map-token"
+    manager = DreameMapMowerMapManager(
+        SimpleNamespace(cloud=SimpleNamespace(logged_in=True)),
+    )
+    manager._map_list_object_name = "map-object"
+    manager._get_interim_file_data = Mock(side_effect=RuntimeError(secret))
+    manager.request_map_list()
+    assert "RuntimeError" in caplog.text
+    assert secret not in caplog.text
+    assert manager._need_map_list_request is None
