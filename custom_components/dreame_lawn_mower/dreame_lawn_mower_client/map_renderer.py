@@ -30,7 +30,7 @@ from PIL import (
     PngImagePlugin,
     ImageFilter,
 )
-from typing import Any, Mapping, Sequence
+from typing import Any, Container, Mapping, Sequence
 from time import sleep
 from io import BytesIO
 from typing import Optional, Tuple
@@ -1699,11 +1699,11 @@ class DreameMowerMapRenderer:
     @staticmethod
     def _segments_layer_needs_update(
         *,
-        cache_enabled,
-        previous_map,
-        map_data,
-        has_cached_layer,
-    ):
+        cache_enabled: bool,
+        previous_map: MapData | None,
+        map_data: MapData,
+        has_cached_layer: bool,
+    ) -> bool:
         return (
             not cache_enabled
             or previous_map is None
@@ -1736,13 +1736,13 @@ class DreameMowerMapRenderer:
     @staticmethod
     def _segment_needs_render(
         *,
-        cache_enabled,
-        previous_map,
-        cached_segments,
-        map_data,
-        segment_id,
-        segment,
-    ):
+        cache_enabled: bool,
+        previous_map: MapData | None,
+        cached_segments: Container[int],
+        map_data: MapData,
+        segment_id: int,
+        segment: Segment,
+    ) -> bool:
         if not cache_enabled or previous_map is None:
             return True
 
