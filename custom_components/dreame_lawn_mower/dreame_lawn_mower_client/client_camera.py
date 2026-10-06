@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
 from dataclasses import replace
 from typing import Any
 from typing import cast as _cast
@@ -303,16 +303,6 @@ class _DreameLawnMowerCameraMixin:
             payload_mode,
         )
 
-    async def async_get_camera_stream_inputs(self) -> dict[str, Any]:
-        """Fetch the cloud TX/XP2P inputs needed by Dreame's video runtime."""
-        return await asyncio.to_thread(self._sync_get_camera_stream_inputs)
-
-    async def async_get_camera_stream_runtime_inputs(
-        self,
-    ) -> DreameLawnMowerCameraStreamRuntimeInputs:
-        """Fetch the normalized XP2P runtime contract for live video."""
-        return await asyncio.to_thread(self._sync_get_camera_stream_runtime_inputs)
-
     def _sync_get_camera_feature_support(
         self,
         refresh: bool = False,
@@ -512,6 +502,38 @@ class _DreameLawnMowerCameraMixin:
         )
 
     def _sync_get_camera_stream_inputs(self) -> dict[str, Any]:
+        """Run the shared credential policy with the synchronous transport."""
+        plan = self._camera_stream_inputs_plan()
+        cloud = None
+        try:
+            method, arguments = next(plan)
+            while True:
+                try:
+                    if method == "setup":
+                        cloud = self._sync_get_cloud_protocol()
+                        response = {
+                            "logged_in": bool(getattr(cloud, "logged_in", False)),
+                            "methods": {name for name in (
+                                "get_tx_video_access_token",
+                                "get_tx_video_device_identity",
+                                "get_tx_video_p2p_info",
+                                "get_tx_video_user_eligibility",
+                            ) if hasattr(cloud, name)},
+                        }
+                    else:
+                        response = getattr(cloud, method)(**arguments)
+                except Exception as error:
+                    method, arguments = plan.throw(error)
+                else:
+                    method, arguments = plan.send(response)
+        except StopIteration as completed:
+            return _cast(dict[str, Any], completed.value)
+        finally:
+            plan.close()
+
+    def _camera_stream_inputs_plan(
+        self,
+    ) -> Generator[tuple[str, dict[str, Any]], Any, dict[str, Any]]:
         """Fetch and normalize the cloud data used by TXVideoSdk video startup."""
         diagnostics: dict[str, Any] = {
             "operation": "camera_stream_inputs",
@@ -554,7 +576,7 @@ class _DreameLawnMowerCameraMixin:
 
         setup_request = {"device_initialized": self._device is not None}
         try:
-            cloud = self._sync_get_cloud_protocol()
+            cloud = yield "setup", {}
         except Exception as err:
             record_stage(
                 "cloud_setup",
@@ -569,17 +591,17 @@ class _DreameLawnMowerCameraMixin:
             request=setup_request,
             result={
                 "available": True,
-                "logged_in": bool(getattr(cloud, "logged_in", False)),
+                "logged_in": bool(cloud["logged_in"]),
             },
             include_response=False,
         )
 
         try:
             access_token = None
-            if hasattr(cloud, "get_tx_video_access_token"):
+            if "get_tx_video_access_token" in cloud["methods"]:
                 current_stage = "cloud_access_token"
                 current_request = {"os": 1}
-                access = cloud.get_tx_video_access_token(os=1)
+                access = yield "get_tx_video_access_token", {"os": 1}
                 output["raw"]["access_token"] = _json_safe(access, max_depth=4)
                 access_token = _find_text_by_key(
                     access,
@@ -600,17 +622,16 @@ class _DreameLawnMowerCameraMixin:
                     result={"available": False},
                     include_response=False,
                 )
-            if hasattr(cloud, "get_tx_video_device_identity"):
+            if "get_tx_video_device_identity" in cloud["methods"]:
                 current_stage = "cloud_device_identity"
                 current_request = {
                     "did_present": bool(self._descriptor.did),
                     "access_token_present": bool(access_token),
                     "os": 1,
                 }
-                identity = cloud.get_tx_video_device_identity(
-                    access_token=access_token,
-                    os=1,
-                )
+                identity = yield "get_tx_video_device_identity", {
+                    "access_token": access_token, "os": 1,
+                }
                 output["raw"]["identity"] = _json_safe(identity, max_depth=5)
                 output["tx_rtc_info"] = _normalize_tx_rtc_info(
                     identity,
@@ -655,17 +676,16 @@ class _DreameLawnMowerCameraMixin:
                     result={"available": False},
                     include_response=False,
                 )
-            if hasattr(cloud, "get_tx_video_p2p_info"):
+            if "get_tx_video_p2p_info" in cloud["methods"]:
                 current_stage = "cloud_p2p_info"
                 current_request = {
                     "did_present": bool(self._descriptor.did),
                     "access_token_present": bool(access_token),
                     "os": 1,
                 }
-                p2p_info = cloud.get_tx_video_p2p_info(
-                    access_token=access_token,
-                    os=1,
-                )
+                p2p_info = yield "get_tx_video_p2p_info", {
+                    "access_token": access_token, "os": 1,
+                }
                 output["raw"]["p2p_info"] = _json_safe(p2p_info, max_depth=5)
                 output["p2p_info"] = _normalize_tx_p2p_info(p2p_info)
                 record_stage(
@@ -713,20 +733,17 @@ class _DreameLawnMowerCameraMixin:
         runtime_inputs = _camera_stream_runtime_inputs_from_cloud_payload(output)
         diagnostics["ready"] = runtime_inputs.ready
         diagnostics["missing_required"] = runtime_inputs.missing_required
-        if runtime_inputs.missing_required and hasattr(
-            cloud,
-            "get_tx_video_user_eligibility",
-        ):
+        if (runtime_inputs.missing_required
+                and "get_tx_video_user_eligibility" in cloud["methods"]):
             eligibility_request = {
                 "did_present": bool(self._descriptor.did),
                 "access_token_present": bool(access_token),
                 "os": 1,
             }
             try:
-                eligibility = cloud.get_tx_video_user_eligibility(
-                    access_token=access_token,
-                    os=1,
-                )
+                eligibility = yield "get_tx_video_user_eligibility", {
+                    "access_token": access_token, "os": 1,
+                }
             except Exception as err:
                 record_stage(
                     "cloud_user_eligibility",

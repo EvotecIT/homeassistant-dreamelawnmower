@@ -16,6 +16,12 @@ from aiohttp import BasicAuth, ClientError, ClientSession, ClientTimeout
 from .cloud_auth import CloudAuthentication, parse_cloud_authentication
 from .cloud_files import interim_file_params, interim_file_result
 from .cloud_history import history_params, history_result
+from .cloud_video import (
+    VIDEO_READ_PATHS,
+    VideoReadKind,
+    video_read_params,
+    video_read_result,
+)
 from .cloud_wire import (
     APP_PLUGIN_PATH,
     DEVICE_INFO_PATH,
@@ -89,6 +95,23 @@ class DreameCloudSession:
     @property
     def _base_url(self) -> str:
         return f"https://{self._country}{self._strings[0]}:{self._strings[1]}"
+
+    async def async_get_video_data(
+        self, kind: VideoReadKind, did: str, *,
+        access_token: str | None = None, os: int = 1,
+        uid: str | None = None, model: str | None = None,
+        deadline: float | None = None,
+    ) -> Any:
+        """Read provisioning data; callers resolve device identity before this call."""
+        response = await self._async_read_response(
+            VIDEO_READ_PATHS[kind],
+            json.dumps(video_read_params(
+                kind, did, access_token, os, uid, model,
+            ), separators=(",", ":")),
+            timeout=5 if kind == "eligibility" else 20,
+            deadline=deadline, retry=kind != "eligibility",
+        )
+        return video_read_result(response)
 
     async def async_get_property_history(
         self, did: str, key: str, *, limit: int = 3, time_start: int = 0,
@@ -518,6 +541,7 @@ class DreameCloudSession:
         timeout: float,
         deadline: float | None,
         http_method: Literal["GET", "POST"] = "POST",
+        retry: bool = True,
     ) -> dict[str, Any]:
         """Serialize a read-only request, authentication, and bounded retries."""
         end = self._deadline(timeout, deadline)
@@ -526,16 +550,19 @@ class DreameCloudSession:
                 async with self._lock:
                     if self._token is None or time.time() >= self._expires_at:
                         await self._login(end)
-                    for attempt in range(2):
+                    for attempt in range(2 if retry else 1):
                         headers = self._authenticated_headers()
-                        status, payload = await self._request_read(
+                        request = self._request_read if retry else self._request_json
+                        status, payload = await request(
                             f"{self._base_url}{path}",
                             headers,
                             data() if callable(data) else data,
                             end,
                             http_method=http_method,
                         )
-                        if status == 401 and attempt == 0:
+                        if status == 401 and not retry:
+                            self._token = None
+                        if status == 401 and attempt == 0 and retry:
                             await self._login(end)
                             continue
                         if status != 200:

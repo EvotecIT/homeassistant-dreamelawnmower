@@ -26,6 +26,7 @@ from .exceptions import (
 from .cloud_auth import CloudAuthentication, parse_cloud_authentication
 from .cloud_files import interim_file_params, interim_file_result
 from .cloud_history import history_params, history_result
+from .cloud_video import VIDEO_READ_PATHS, video_read_params, video_read_result
 from .cloud_wire import (
     FIRMWARE_APPROVAL_PATH,
     APP_PLUGIN_PATH, DEVICE_INFO_PATH, DEVICE_LIST_PATH, DEVICE_METADATA_PATHS,
@@ -744,12 +745,12 @@ class DreameMowerDreameHomeCloudProtocol:
 
     def get_tx_video_access_token(self, os: int = 1) -> Any:
         response = self.request(
-            f"{self.get_api_url()}/dreame-third-video/tx/user/accesstoken",
-            json.dumps({"os": os}, separators=(",", ":")),
+            f"{self.get_api_url()}{VIDEO_READ_PATHS['access_token']}",
+            json.dumps(video_read_params(
+                "access_token", "", os=os,
+            ), separators=(",", ":")),
         )
-        if response and "data" in response and response.get("code", 0) == 0:
-            return response["data"]
-        return response
+        return video_read_result(response)
 
     def get_tx_video_device_identity(
         self,
@@ -758,22 +759,13 @@ class DreameMowerDreameHomeCloudProtocol:
     ) -> Any:
         if not self._uid:
             self.get_device_info_v2()
-        params = {"did": self._did, "os": os}
-        if access_token:
-            params["accesstoken"] = access_token
-            params["accessToken"] = access_token
-        if self._uid:
-            params["uid"] = str(self._uid)
-        if self._model:
-            params["model"] = self._model
-
         response = self.request(
-            f"{self.get_api_url()}/dreame-third-video/tx/mgr/dev/getIdentity",
-            json.dumps(params, separators=(",", ":")),
+            f"{self.get_api_url()}{VIDEO_READ_PATHS['identity']}",
+            json.dumps(video_read_params(
+                "identity", self._did, access_token, os, self._uid, self._model,
+            ), separators=(",", ":")),
         )
-        if response and "data" in response and response.get("code", 0) == 0:
-            return response["data"]
-        return response
+        return video_read_result(response)
 
     def pair_tx_video_device(
         self,
@@ -805,36 +797,27 @@ class DreameMowerDreameHomeCloudProtocol:
         os: int = 1,
     ) -> Any:
         """Return the read-only TX video eligibility response for this device."""
-        params = {"did": self._did, "os": os}
-        if access_token:
-            params["accesstoken"] = access_token
-            params["accessToken"] = access_token
         response = self.request(
-            f"{self.get_api_url()}/dreame-third-video/tx/dev/isDevUser",
-            json.dumps(params, separators=(",", ":")),
-            retry_count=0,
-            timeout=5,
+            f"{self.get_api_url()}{VIDEO_READ_PATHS['eligibility']}",
+            json.dumps(video_read_params(
+                "eligibility", self._did, access_token, os,
+            ), separators=(",", ":")),
+            retry_count=0, timeout=5,
         )
-        if response and "data" in response and response.get("code", 0) == 0:
-            return response["data"]
-        return response
+        return video_read_result(response)
 
     def get_tx_video_p2p_info(
         self,
         access_token: str | None = None,
         os: int = 1,
     ) -> Any:
-        params = {"did": self._did, "os": os}
-        if access_token:
-            params["accesstoken"] = access_token
-            params["accessToken"] = access_token
         response = self.request(
-            f"{self.get_api_url()}/dreame-third-video/tx/dev/getP2PInfo",
-            json.dumps(params, separators=(",", ":")),
+            f"{self.get_api_url()}{VIDEO_READ_PATHS['p2p']}",
+            json.dumps(video_read_params(
+                "p2p", self._did, access_token, os,
+            ), separators=(",", ":")),
         )
-        if response and "data" in response and response.get("code", 0) == 0:
-            return response["data"]
-        return response
+        return video_read_result(response)
 
     def get_app_plugin_version(
         self,

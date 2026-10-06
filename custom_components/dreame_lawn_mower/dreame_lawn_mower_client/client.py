@@ -229,6 +229,7 @@ from .vector_map import vector_map_to_summary as vector_map_to_summary
 if _typing.TYPE_CHECKING:
     from .map_visuals import MapRenderStyle
     from .models import DreameLawnMowerCameraFeatureSupport as _CameraFeatureSupport
+    from .models import DreameLawnMowerCameraStreamRuntimeInputs as _CameraRuntimeInputs
     from .mowing_map import MowingMapScene
     from .work_log import DreameLawnMowerWorkLogTotals
 
@@ -1796,6 +1797,20 @@ class DreameLawnMowerClient(
                 cancelled.set()
 
         return await self._async_cloud_read(read)
+
+    async def async_get_camera_stream_inputs(self) -> dict[str, Any]:
+        """Fetch camera provisioning through native owned cloud HTTP."""
+        from .client_camera_credentials import async_camera_stream_inputs
+
+        return await async_camera_stream_inputs(self)
+
+    async def async_get_camera_stream_runtime_inputs(
+        self,
+    ) -> _CameraRuntimeInputs:
+        """Normalize native provisioning with the shared runtime-input contract."""
+        return _camera_stream_runtime_inputs_from_cloud_payload(
+            await self.async_get_camera_stream_inputs()
+        )
 
     async def async_probe_camera_sources(
         self, *, language: str = "en", request_device_properties: bool = True,
