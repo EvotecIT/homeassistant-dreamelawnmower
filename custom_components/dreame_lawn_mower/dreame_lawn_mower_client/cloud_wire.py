@@ -11,7 +11,16 @@ from collections.abc import Sequence
 from .const import DREAME_STRINGS, MOVA_STRINGS
 from .exceptions import DreameLawnMowerAuthError
 
+DEVICE_INFO_PATH = "/dreame-user-iot/iotuserbind/device/info"
 DEVICE_LIST_PATH = "/dreame-user-iot/iotuserbind/device/listV2"
+
+
+def cloud_device_info_data(did: str | None, language: str | None) -> str:
+    """Encode device identity and optional language for both cloud transports."""
+    params = {"did": did}
+    if language:
+        params["lang"] = language
+    return json.dumps(params, separators=(",", ":"))
 
 
 def cloud_device_list_data(

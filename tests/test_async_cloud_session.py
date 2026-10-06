@@ -812,3 +812,38 @@ def test_inventory_http_failure_stays_a_connection_error(monkeypatch, status, pa
 
     asyncio.run(scenario())
     assert len(calls) == 2
+
+
+@pytest.mark.parametrize("account_type", ["dreame", "mova"])
+@pytest.mark.parametrize("language", [None, "pl"])
+def test_device_info_preserves_identity_language_and_borrowed_session(
+    monkeypatch, account_type, language,
+):
+    strings = cloud_strings(account_type)
+    calls = []
+    info = {"did": "42", "online": True}
+
+    async def handler(request):
+        calls.append(request.path)
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        assert request.path == "/dreame-user-iot/iotuserbind/device/info"
+        expected = {"did": "42"}
+        if language:
+            expected["lang"] = language
+        assert await request.json() == expected
+        return web.json_response({"code": 0, "data": info})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            cloud = DreameCloudSession(
+                session, **{**OPTIONS, "account_type": account_type}
+            )
+            for _ in range(2):
+                result = await cloud.async_get_device_info("42", language=language)
+                assert result == info
+            assert not session.closed
+
+    asyncio.run(scenario())
+    assert calls.count(strings[17]) == 1
+    assert len(calls) == 3

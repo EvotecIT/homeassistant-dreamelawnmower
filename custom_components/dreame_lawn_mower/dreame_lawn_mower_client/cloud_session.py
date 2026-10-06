@@ -13,7 +13,9 @@ from typing import Any
 from aiohttp import BasicAuth, ClientError, ClientSession, ClientTimeout
 
 from .cloud_wire import (
+    DEVICE_INFO_PATH,
     DEVICE_LIST_PATH,
+    cloud_device_info_data,
     cloud_device_list_data,
     cloud_headers,
     cloud_login_data,
@@ -125,6 +127,25 @@ class DreameCloudSession:
         if not isinstance(page, dict):
             raise DreameLawnMowerConnectionError("Cloud device page is invalid")
         return page
+
+    async def async_get_device_info(
+        self,
+        did: str,
+        *,
+        language: str | None = None,
+        timeout: float = 20,
+        deadline: float | None = None,
+    ) -> dict[str, Any] | None:
+        """Read device metadata without mutating the separate MQTT owner."""
+        result = await self._async_read(
+            DEVICE_INFO_PATH, cloud_device_info_data(did, language),
+            timeout=timeout, deadline=deadline,
+        )
+        if result is None:
+            return None
+        if not isinstance(result, dict):
+            raise DreameLawnMowerConnectionError("Cloud device info is invalid")
+        return result
 
     async def _async_read(
         self,
