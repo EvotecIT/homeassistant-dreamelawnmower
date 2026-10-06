@@ -497,11 +497,22 @@ class DreameMowerMapDecoder:
 
                         map_data.path.append(current_position)
 
-                if data_json.get("sa") and isinstance(data_json["sa"], list):
-                    map_data.active_segments = [sa[0] for sa in data_json["sa"]]
+                active_segments = data_json.get("sa")
+                if isinstance(active_segments, list) and active_segments:
+                    map_data.active_segments = [
+                        entry[0] for entry in active_segments
+                        if isinstance(entry, list) and entry
+                        and isinstance(entry[0], int)
+                    ]
 
-                if "delsr" in data_json:
-                    map_data.hidden_segments = data_json["delsr"]
+                hidden_segments = data_json.get("delsr")
+                if isinstance(hidden_segments, list) and all(
+                    isinstance(segment, int) for segment in hidden_segments
+                ):
+                    map_data.hidden_segments = [
+                        segment for segment in hidden_segments
+                        if isinstance(segment, int)
+                    ]
 
                 if data_json.get("da2"):
                     if data_json["da2"].get("areas"):
@@ -522,10 +533,13 @@ class DreameMowerMapDecoder:
                                 )
                             )
 
-                if data_json.get("sp"):
+                active_points = data_json.get("sp")
+                if isinstance(active_points, list) and active_points:
                     map_data.active_points = []
-                    for point in data_json["sp"]:
-                        map_data.active_points.append(Point(point[0], point[1]))
+                    for point in active_points:
+                        coordinates = DreameMowerMapDecoder._metadata_coordinates(point)
+                        if coordinates is not None:
+                            map_data.active_points.append(Point(*coordinates))
 
                 if "cleanset" in data_json:
                     map_data.cleanset = data_json["cleanset"]

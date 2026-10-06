@@ -406,3 +406,37 @@ def test_valid_embedded_wifi_map_keeps_router_position() -> None:
     assert decoded is not None and decoded.wifi_map_data is not None
     assert decoded.wifi_map_data.map_id == 7
     assert decoded.wifi_map_data.router_position == Point(120, -60)
+
+
+def test_map_collections_preserve_valid_entries_and_later_metadata() -> None:
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[4] = 73
+    metadata = {
+        "sa": [[3, 1], [], "invalid", [4, 2]],
+        "delsr": [5, 6],
+        "sp": [[10.5, -20], [1], "invalid", [30, 40]],
+        "whmp": [120, -60],
+    }
+    payload = base64.b64encode(
+        zlib.compress(bytes(header) + json.dumps(metadata).encode())
+    ).decode()
+    decoded, _ = map_decoder.DreameMowerMapDecoder.decode_map(payload, False)
+    assert decoded is not None
+    assert decoded.active_segments == [3, 4]
+    assert decoded.hidden_segments == [5, 6]
+    assert decoded.active_points == [Point(10.5, -20), Point(30, 40)]
+    assert decoded.router_position == Point(120, -60)
+
+
+@pytest.mark.parametrize("value", ["invalid", [1, "bad"]])
+def test_invalid_hidden_segments_do_not_enter_map_model(value: object) -> None:
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[4] = 73
+    metadata = {"delsr": value, "whmp": [120, -60]}
+    payload = base64.b64encode(
+        zlib.compress(bytes(header) + json.dumps(metadata).encode())
+    ).decode()
+    decoded, _ = map_decoder.DreameMowerMapDecoder.decode_map(payload, False)
+    assert decoded is not None
+    assert decoded.hidden_segments is None
+    assert decoded.router_position == Point(120, -60)
