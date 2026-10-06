@@ -20,9 +20,54 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
     MapImageDimensions,
     MapPixelType,
     MapRendererResources,
+    Obstacle,
     Point,
     Segment,
 )
+
+
+def test_obstacle_box_bottom_clip_preserves_horizontal_extent() -> None:
+    source = BytesIO()
+    Image.new("RGB", (400, 200), "white").save(source, format="PNG")
+    obstacle = Obstacle(0, 0, 0, 100, pos_x=10, pos_y=90, width=10, height=30)
+    rendered = DreameMowerMapRenderer().render_obstacle_image(
+        source.getvalue(), obstacle, False,
+    )
+    with Image.open(BytesIO(rendered)) as image:
+        assert image.size == (400, 200)
+        # Outside the true right edge must remain white, despite bottom clipping.
+        assert min(image.getpixel((160, 180))) > 245
+        red, _, blue = image.getpixel((60, 199))
+        assert blue - red > 50
+
+
+def test_obstacle_corner_loading_recovers_after_partial_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = BytesIO()
+    Image.new("RGB", (400, 200), "white").save(source, format="PNG")
+    obstacle = Obstacle(0, 0, 0, 100, pos_x=20, pos_y=20, width=20, height=20)
+    renderer = DreameMowerMapRenderer()
+    open_image = Image.open
+    calls = 0
+
+    def interrupted_open(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            raise OSError("Interrupted corner image load")
+        return open_image(*args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Image, "open", interrupted_open)
+        with pytest.raises(OSError, match="Interrupted corner image load"):
+            renderer.render_obstacle_image(source.getvalue(), obstacle, False)
+
+    recovered = renderer.render_obstacle_image(source.getvalue(), obstacle, False)
+    fresh = DreameMowerMapRenderer().render_obstacle_image(
+        source.getvalue(), obstacle, False,
+    )
+    assert recovered == fresh
 
 
 def test_layer_composition_uses_key_order_and_preserves_source_images() -> None:

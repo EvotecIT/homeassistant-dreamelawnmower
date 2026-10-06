@@ -879,12 +879,12 @@ class DreameMowerMapRenderer:
 
     def render_obstacle_image(
         self,
-        image_bytes,
-        obstacle: Obstacle,
+        image_bytes: bytes | None,
+        obstacle: Obstacle | None,
         ai_image_crop: bool,
         render_box: bool = True,
         crop_image: bool = False,
-    ):
+    ) -> bytes | None:
         if image_bytes:
             if not obstacle or not (
                 obstacle.width and obstacle.height and obstacle.pos_x != None and obstacle.pos_y != None
@@ -921,12 +921,15 @@ class DreameMowerMapRenderer:
                     self._obstacle_bottom_left_icon = Image.open(
                         BytesIO(base64.b64decode(MAP_ROBOT_OBSTACLE_BOTTOM_LEFT_IMAGE))
                     ).convert("RGBA")
+                if self._obstacle_top_left_icon is None:
                     self._obstacle_top_left_icon = Image.open(
                         BytesIO(base64.b64decode(MAP_ROBOT_OBSTACLE_TOP_LEFT_IMAGE))
                     ).convert("RGBA")
+                if self._obstacle_bottom_right_icon is None:
                     self._obstacle_bottom_right_icon = Image.open(
                         BytesIO(base64.b64decode(MAP_ROBOT_OBSTACLE_BOTTOM_RIGHT_IMAGE))
                     ).convert("RGBA")
+                if self._obstacle_top_right_icon is None:
                     self._obstacle_top_right_icon = Image.open(
                         BytesIO(base64.b64decode(MAP_ROBOT_OBSTACLE_TOP_RIGHT_IMAGE))
                     ).convert("RGBA")
@@ -961,7 +964,7 @@ class DreameMowerMapRenderer:
                 if x1 >= w:
                     x1 = w - int(w * 0.5 / 100.0)
                 if y1 >= h:
-                    x1 = h - int(h * 0.5 / 100.0)
+                    y1 = h - int(h * 0.5 / 100.0)
 
                 new_layer = Image.new("RGBA", image.size, (255, 255, 255, 0))
                 draw = ImageDraw.Draw(new_layer, "RGBA")
@@ -1014,6 +1017,7 @@ class DreameMowerMapRenderer:
             buffer = io.BytesIO()
             image.convert("RGB").save(buffer, format="JPEG")
             return buffer.getvalue()
+        return None
 
     def render_map(
         self,
