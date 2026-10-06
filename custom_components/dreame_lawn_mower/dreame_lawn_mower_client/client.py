@@ -1157,7 +1157,9 @@ class DreameLawnMowerClient(
 
     async def async_get_vector_map_details(self) -> dict[str, Any]:
         """Return JSON-safe parsed batch vector-map details."""
-        return await asyncio.to_thread(self._sync_get_vector_map_details)
+        from .client_vector_reads import async_vector_details
+
+        return await async_vector_details(self)
 
     async def async_get_remote_control_support(
         self,
@@ -1342,12 +1344,11 @@ class DreameLawnMowerClient(
         style: MapRenderStyle | None = None,
     ) -> DreameLawnMowerMapView:
         """Try to refresh map data and return metadata plus rendered image bytes."""
-        return await asyncio.to_thread(
-            self._sync_refresh_map_view,
-            timeout,
-            interval,
-            label_scale,
-            style,
+        from .client_map_views import async_map_view
+
+        return await async_map_view(
+            self, timeout=timeout, interval=interval,
+            label_scale=label_scale, style=style,
         )
 
     async def async_refresh_vector_map_view(
@@ -1358,9 +1359,10 @@ class DreameLawnMowerClient(
         style: MapRenderStyle | None = None,
     ) -> DreameLawnMowerMapView:
         """Refresh the batch/vector map path used for live mowing overlays."""
-        return await asyncio.to_thread(
-            self._sync_refresh_vector_map_view,
-            label_scale=label_scale,
+        from .client_vector_reads import async_vector_view
+
+        return await async_vector_view(
+            self, label_scale=label_scale,
             current_map_index=current_map_index,
             style=style,
         )

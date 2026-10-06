@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from threading import Event
 from typing import TYPE_CHECKING, Any
 
-from .client_refresh import _run_state_worker
 from .client_state_reads import async_read_device_state
 
 if TYPE_CHECKING:
@@ -27,8 +25,6 @@ async def async_capture_operation_snapshot(
     language: str | None,
 ) -> dict[str, Any]:
     """Refresh once, retaining partial evidence and owning optional legacy work."""
-    cancelled = Event()
-
     async def read(_cloud: DreameCloudSession) -> dict[str, Any]:
         payload = await async_read_device_state(
             client,
@@ -56,11 +52,8 @@ async def async_capture_operation_snapshot(
                 errors.append({"section": "remote_control_support", "error": str(err)})
         if include_map_view:
             try:
-                # Map transport migration is separate; keep its existing worker
-                # owned until it finishes before shutdown releases the device.
-                view = await _run_state_worker(
-                    lambda: client._sync_refresh_map_view(map_timeout, map_interval),
-                    cancelled,
+                view = await client.async_refresh_map_view(
+                    timeout=map_timeout, interval=map_interval,
                 )
                 payload["map_view"] = view.as_dict()
             except Exception as err:  # noqa: BLE001 - diagnostics retain partial evidence

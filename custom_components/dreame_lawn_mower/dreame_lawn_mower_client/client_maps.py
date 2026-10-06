@@ -24,33 +24,27 @@ from .app_protocol import (
     mower_state_key,
     mower_state_label,
 )
+from .client_app_map_view import app_map_view, preferred_map_view
 from .client_app_maps import _DreameLawnMowerClientAppMapsMixin
 from .client_map_helpers import (
-    _app_map_view_details,
-    _app_map_view_summary,
-    _app_maps_view_metadata,
     _app_object_extension,
-    _coordinate_path_length_m,
     _current_app_map_index,
     _download_point_cloud_content_with_identity,
     _key_define_from_device_list_page,
     _key_define_from_mapping,
     _map_view_current_app_map_index,
-    _map_view_has_live_path,
     _point_cloud_action_data,
     _point_cloud_download_url,
     _point_cloud_object_name,
     _PointCloudObjectIdentity,
-    _render_app_map_payload_png,
-    _select_app_map_payload,
     _validate_point_cloud_map_index,
     _validate_positive_number,
 )
 from .client_mowing_map import _DreameLawnMowerClientMowingMapMixin
-from .client_position import apply_position_metadata, vector_map_position
 from .client_shared_helpers import (
     _property_entry_received_at,
 )
+from .client_vector_map_view import vector_map_details, vector_map_view
 from .exceptions import (
     DeviceException,
     DreameLawnMowerCloudAPIError,
@@ -98,13 +92,6 @@ from .point_cloud_diagnostics import (
     value_shape,
 )
 from .point_cloud_trace import record_point_cloud_stage
-from .vector_map import (
-    filter_runtime_track_segments,
-    parse_batch_vector_map,
-    render_vector_map_png,
-    vector_map_to_details,
-    vector_map_to_summary,
-)
 
 if TYPE_CHECKING:
     from .map_visuals import MapRenderStyle
@@ -223,21 +210,7 @@ class _DreameLawnMowerClientMapsMixin(
                 "error": str(err),
             }
 
-        vector_map = parse_batch_vector_map(
-            batch_data,
-            current_map_index=self._sync_get_current_app_map_index(),
-        )
-        if vector_map is None:
-            return {
-                "available": False,
-                "source": "batch_vector_map",
-                "error": "No vector map data returned by the batch map path.",
-            }
-
-        details = vector_map_to_details(vector_map)
-        details["available"] = True
-        details["source"] = "batch_vector_map"
-        return details
+        return vector_map_details(batch_data, self._sync_get_current_app_map_index())
 
     def _sync_refresh_map_summary(
         self,
@@ -282,23 +255,9 @@ class _DreameLawnMowerClientMapsMixin(
             ),
             app_view,
         )
-        if _map_view_has_live_path(vector_view) or (
-            isinstance(vector_view.details, Mapping)
-            and vector_view.details.get("position_status")
-            in {"current", "known_dock", "last_known"}
-        ):
-            return vector_view
-
-        if app_view.available and app_view.image_png is not None:
-            return self._with_runtime_position_details(app_view, vector_view)
-
-        if vector_view.available and vector_view.image_png is not None:
-            return vector_view
-
-        if _map_view_current_app_map_index(app_view) is not None:
-            # Legacy snapshots cannot establish app-slot identity. Preserve the
-            # current-map error instead of showing an unverifiable older lawn.
-            return app_view
+        preferred = preferred_map_view(self, app_view, vector_view)
+        if preferred is not None:
+            return preferred
 
         legacy_view = self._sync_refresh_legacy_map_view(
             timeout,
@@ -333,131 +292,10 @@ class _DreameLawnMowerClientMapsMixin(
                 ),
             )
 
-        vector_map = parse_batch_vector_map(
-            batch_data,
-            current_map_index=(
-                current_map_index
-                if current_map_index is not None
-                else self._sync_get_current_app_map_index()
-            ),
-        )
-        if vector_map is None:
-            return DreameLawnMowerMapView(
-                source=source,
-                error="No vector map data returned by the batch map path.",
-                diagnostics=self._safe_map_diagnostics(
-                    source=source,
-                    reason="batch_vector_map_empty",
-                ),
-            )
-
-        self._expire_runtime_live_tracking()
-        runtime_blob = self._latest_runtime_status_blob
-        if self._runtime_session_active is False:
-            vector_map.mow_paths = ()
-        summary = vector_map_to_summary(vector_map)
-        details = vector_map_to_details(vector_map)
-        details["render_rotation"] = style.rotation if style else 0
-        runtime_context_matches = self._runtime_live_map_index == vector_map.map_index
-        runtime_track_segments = (
-            filter_runtime_track_segments(
-                vector_map,
-                self._runtime_live_track_segments,
-            )
-            if runtime_context_matches
-            else ()
-        )
-        runtime_track_point_count = sum(
-            len(segment) for segment in runtime_track_segments
-        )
-        runtime_pose_x = getattr(runtime_blob, "candidate_runtime_pose_x", None)
-        runtime_pose_y = getattr(runtime_blob, "candidate_runtime_pose_y", None)
-        position = vector_map_position(self, vector_map)
-        runtime_position = (position.x, position.y) if position is not None else None
-        runtime_position_valid = position is not None and position.status == "current"
-        summary = apply_position_metadata(
-            position, snapshot=self._latest_snapshot, details=details, summary=summary
-        )
-        if runtime_pose_x is not None and runtime_pose_y is not None:
-            details["runtime_pose_x"] = runtime_pose_x
-            details["runtime_pose_y"] = runtime_pose_y
-            details["runtime_position_valid"] = runtime_position_valid
-            details["runtime_heading_deg"] = getattr(
-                runtime_blob,
-                "candidate_runtime_heading_deg",
-                None,
-            )
-            details["runtime_region_id"] = getattr(
-                runtime_blob,
-                "candidate_runtime_region_id",
-                None,
-            )
-            details["runtime_position_updated_at"] = getattr(
-                runtime_blob,
-                "received_at",
-                None,
-            )
-        if runtime_track_point_count:
-            details["runtime_track_segment_count"] = len(runtime_track_segments)
-            details["runtime_track_point_count"] = runtime_track_point_count
-            details["runtime_track_length_m"] = round(
-                sum(
-                    _coordinate_path_length_m(segment)
-                    for segment in runtime_track_segments
-                ),
-                2,
-            )
-            details["has_live_path"] = True
-            if summary is not None:
-                summary = replace(
-                    summary,
-                    path_point_count=summary.path_point_count
-                    + runtime_track_point_count,
-                )
-        try:
-            image_png = render_vector_map_png(
-                vector_map,
-                label_scale=label_scale,
-                runtime_track_segments=runtime_track_segments,
-                runtime_position=runtime_position,
-                position_status=(
-                    position.status if position is not None else "unavailable"
-                ),
-                style=style,
-            )
-        except Exception as err:  # noqa: BLE001 - diagnostics path
-            return DreameLawnMowerMapView(
-                source=source,
-                summary=summary,
-                details=details,
-                error=f"Failed to render vector map data: {err}",
-                diagnostics=self._safe_map_diagnostics(
-                    source=source,
-                    reason="batch_vector_map_render_failed",
-                ),
-            )
-
-        if image_png is None:
-            return DreameLawnMowerMapView(
-                source=source,
-                summary=summary,
-                details=details,
-                error="Vector map renderer did not produce an image.",
-                diagnostics=self._safe_map_diagnostics(
-                    source=source,
-                    reason="batch_vector_map_render_empty",
-                ),
-            )
-
-        return DreameLawnMowerMapView(
-            source=source,
-            summary=summary,
-            image_png=image_png,
-            details=details,
-            diagnostics=self._safe_map_diagnostics(
-                source=source,
-                reason="batch_vector_map_rendered",
-            ),
+        return vector_map_view(
+            self, batch_data, label_scale=label_scale, style=style,
+            current_map_index=(current_map_index if current_map_index is not None
+                               else self._sync_get_current_app_map_index()),
         )
 
     def _sync_refresh_legacy_map_view(
@@ -543,37 +381,9 @@ class _DreameLawnMowerClientMapsMixin(
                 include_objects=True,
                 include_object_urls=False,
             )
-            selected = _select_app_map_payload(app_maps)
-            if selected is None:
-                error = legacy_error or "No app-map payload was returned."
-                return DreameLawnMowerMapView(
-                    source=source,
-                    error=error,
-                    app_maps=_app_maps_view_metadata(app_maps),
-                    diagnostics=self._safe_map_diagnostics(
-                        source=source,
-                        reason=legacy_reason,
-                    ),
-                )
-            payload = selected.get("payload")
-            image_png, width, height = _render_app_map_payload_png(
-                payload,
-                label_scale=label_scale,
-                style=style,
-            )
-            return DreameLawnMowerMapView(
-                source=source,
-                summary=_app_map_view_summary(selected, payload, width, height),
-                image_png=image_png,
-                details={
-                    **_app_map_view_details(selected, payload),
-                    "render_rotation": style.rotation if style else 0,
-                },
-                app_maps=_app_maps_view_metadata(app_maps),
-                diagnostics=self._safe_map_diagnostics(
-                    source=source,
-                    reason="app_action_map_rendered",
-                ),
+            return app_map_view(
+                self, app_maps, legacy_error=legacy_error, legacy_reason=legacy_reason,
+                label_scale=label_scale, style=style,
             )
         except Exception as err:  # noqa: BLE001 - map view keeps diagnostics visible
             error = f"{legacy_error or 'Legacy map unavailable'}; app map failed: {err}"

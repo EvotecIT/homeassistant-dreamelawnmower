@@ -14,6 +14,9 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     device as device_module,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import device_types
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
+    DreameLawnMowerMapView,
+)
 
 from .test_async_app_preferences import make_client
 from .test_async_cloud_session import cloud_strings, login_response, server
@@ -112,18 +115,22 @@ def test_operation_snapshot_cancellation_drains_map_and_stops_later_sections(
             return web.json_response(login_response(strings))
         return refresh_response()
 
-    def read_map(timeout, interval):
+    def read_map(timeout, interval, **kwargs):
         assert (timeout, interval) == (2, 0.1)
         started.set()
         assert release.wait(5)
         finished.set()
-        return SimpleNamespace(as_dict=lambda: {"available": False})
+        return DreameLawnMowerMapView(source="legacy_current_map")
 
     async def scenario():
         async with server(monkeypatch, handler), ClientSession() as session:
             client = make_client(session)
             device = ready_device(monkeypatch, client)
-            client._sync_refresh_map_view = read_map
+            client._sync_refresh_legacy_map_view = read_map
+            client.async_get_app_maps = AsyncMock(return_value={"maps": []})
+            client.async_refresh_vector_map_view = AsyncMock(
+                return_value=DreameLawnMowerMapView(source="batch_vector_map"),
+            )
             client.async_get_firmware_update_support = AsyncMock()
             task = asyncio.create_task(client.async_capture_operation_snapshot(
                 include_status_blob=False, include_remote_control=False,
