@@ -85,3 +85,31 @@ def test_segment_cleaning_mode_clears_when_new_record_omits_it() -> None:
     assert segment.cleaning_mode is None
     assert segment.cleaning_times == 1
     assert segment.order == 0
+
+
+@pytest.mark.parametrize("material,direction,rotation,code,rotated", [
+    (0, None, 0, 0, None), (2, None, 0, 3, None),
+    (1, 0, 0, 1, 0), (1, 0, 90, 1, 90), (1, 90, 90, 2, 0),
+])
+def test_floor_material_preserves_codes_and_rotated_direction(
+    material: int, direction: int | None, rotation: int,
+    code: int, rotated: int | None,
+) -> None:
+    data = MapData()
+    segment = Segment(3, x0=0, y0=0, x1=100, y1=50)
+    segment.floor_material = material
+    segment.floor_material_direction = direction
+    data.segments = {3: segment}
+    data.rotation = rotation
+    map_decoder.DreameMowerMapDecoder.set_floor_material(data)
+    assert data.floor_material == {3: code}
+    assert segment.floor_material_rotated_direction == rotated
+
+
+def test_floor_material_does_not_infer_direction_without_bounds() -> None:
+    data = MapData()
+    segment = Segment(3)
+    segment.floor_material = 1
+    data.segments = {3: segment}
+    map_decoder.DreameMowerMapDecoder.set_floor_material(data)
+    assert data.floor_material is None

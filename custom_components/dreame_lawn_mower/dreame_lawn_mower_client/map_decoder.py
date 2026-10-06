@@ -1704,52 +1704,40 @@ class DreameMowerMapDecoder:
 
     @staticmethod
     def set_segment_floor_material(
-        map_data: MapData, segment_id: int, floor_material
+        map_data: MapData, segment_id: int, floor_material: dict[int, int] | None
     ) -> None:
-        if (
-            floor_material is not None
-            and map_data.segments
-            and segment_id in map_data.segments
+        segments = map_data.segments
+        if floor_material is None or not segments or segment_id not in segments:
+            return
+        segment = segments[segment_id]
+        material = segment.floor_material
+        direction = segment.floor_material_direction
+        if material is None:
+            return
+        if direction is not None:
+            segment.floor_material_rotated_direction = (
+                direction if map_data.rotation in (0, 180)
+                else 90 if direction == 0 else 0
+            )
+        if material <= 0 or material > 2:
+            floor_material[segment_id] = 0
+        elif material == 2:
+            floor_material[segment_id] = 3
+        elif direction == 90:
+            floor_material[segment_id] = 2
+        elif (
+            segment.x0 is not None and segment.x1 is not None
+            and segment.y0 is not None and segment.y1 is not None
         ):
-            if map_data.segments[segment_id].floor_material is not None:
-                if map_data.segments[segment_id].floor_material_direction is not None:
-                    map_data.segments[segment_id].floor_material_rotated_direction = (
-                        map_data.segments[segment_id].floor_material_direction
-                        if map_data.rotation == 0 or map_data.rotation == 180
-                        else 90
-                        if map_data.segments[segment_id].floor_material_direction == 0
-                        else 0
-                    )
-
-                floor_material[segment_id] = (
-                    0
-                    if map_data.segments[segment_id].floor_material <= 0
-                    or map_data.segments[segment_id].floor_material > 2
-                    else (
-                        3
-                        if map_data.segments[segment_id].floor_material == 2
-                        else (
-                            2
-                            if map_data.segments[segment_id].floor_material_direction
-                            == 90
-                            or (
-                                map_data.segments[segment_id].x1
-                                - map_data.segments[segment_id].x0
-                            )
-                            <= (
-                                map_data.segments[segment_id].y1
-                                - map_data.segments[segment_id].y0
-                            )
-                            else 1
-                        )
-                    )
-                )
+            floor_material[segment_id] = (
+                2 if segment.x1 - segment.x0 <= segment.y1 - segment.y0 else 1
+            )
 
     @staticmethod
     def set_floor_material(map_data: MapData) -> None:
         if map_data.segments:
-            floor_material = {}
-            for k in map_data.segments.keys():
+            floor_material: dict[int, int] = {}
+            for k in map_data.segments:
                 DreameMowerMapDecoder.set_segment_floor_material(
                     map_data, k, floor_material
                 )

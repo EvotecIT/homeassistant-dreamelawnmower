@@ -370,9 +370,9 @@ class Segment(Zone):
         self.cleaning_mode = cleaning_mode
         self.cleaning_route = None
         self.color_index = None
-        self.floor_material = None
-        self.floor_material_direction = None
-        self.floor_material_rotated_direction = None
+        self.floor_material: int | None = None
+        self.floor_material_direction: int | None = None
+        self.floor_material_rotated_direction: int | None = None
         self.visibility = None
         self.cleanset_type = CleansetType.NONE
         self.set_name()
