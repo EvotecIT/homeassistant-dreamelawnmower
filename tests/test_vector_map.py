@@ -522,6 +522,7 @@ def test_current_map_readback_uses_only_map_list() -> None:
 
 def test_async_map_switch_requires_idle_state_and_confirmed_readback() -> None:
     client = _client()
+    client._async_cloud_read = lambda read: read(None)
     client.async_refresh_authoritative_snapshot = AsyncMock(
         return_value=SimpleNamespace(
             activity="idle",
@@ -544,6 +545,7 @@ def test_async_map_switch_requires_idle_state_and_confirmed_readback() -> None:
 
 def test_async_map_switch_rejects_active_task_before_write() -> None:
     client = _client()
+    client._async_cloud_read = lambda read: read(None)
     client.async_refresh_authoritative_snapshot = AsyncMock(
         return_value=SimpleNamespace(
             mowing_session_active=True,
@@ -562,6 +564,7 @@ def test_async_map_switch_rejects_active_task_before_write() -> None:
 
 def test_async_map_switch_rejects_non_mowing_started_task_before_write() -> None:
     client = _client()
+    client._async_cloud_read = lambda read: read(None)
     client.async_refresh_authoritative_snapshot = AsyncMock(
         return_value=SimpleNamespace(
             state="remote_control",
@@ -583,6 +586,7 @@ def test_async_map_switch_rejects_non_mowing_started_task_before_write() -> None
 
 def test_async_map_switch_rejects_fast_mapping_before_write() -> None:
     client = _client()
+    client._async_cloud_read = lambda read: read(None)
     client.async_refresh_authoritative_snapshot = AsyncMock(
         return_value=SimpleNamespace(
             state="idle",
@@ -606,6 +610,7 @@ def test_async_map_switch_rejects_fast_mapping_before_write() -> None:
 
 def test_async_map_switch_rejects_repositioning_before_write() -> None:
     client = _client()
+    client._async_cloud_read = lambda read: read(None)
     client.async_refresh_authoritative_snapshot = AsyncMock(
         return_value=SimpleNamespace(
             activity="idle",
@@ -626,6 +631,7 @@ def test_async_map_switch_rejects_repositioning_before_write() -> None:
 
 def test_async_map_switch_rejects_resumable_task_at_dock() -> None:
     client = _client()
+    client._async_cloud_read = lambda read: read(None)
     client.async_refresh_authoritative_snapshot = AsyncMock(
         return_value=SimpleNamespace(
             state="charging",
@@ -653,6 +659,7 @@ def test_async_map_switch_rejects_resumable_task_at_dock() -> None:
 
 def test_async_map_switch_rejects_non_idle_activity_with_inactive_session() -> None:
     client = _client()
+    client._async_cloud_read = lambda read: read(None)
     client.async_refresh_authoritative_snapshot = AsyncMock(
         return_value=SimpleNamespace(
             activity="returning",
@@ -711,6 +718,7 @@ def test_maintenance_point_allows_authoritatively_inactive_paused_report() -> No
 
 def test_async_map_switch_allows_docked_snapshot_with_unknown_session_flag() -> None:
     client = _client()
+    client._async_cloud_read = lambda read: read(None)
     client.async_refresh_authoritative_snapshot = AsyncMock(
         return_value=SimpleNamespace(
             activity="docked",
@@ -730,6 +738,7 @@ def test_async_map_switch_allows_docked_snapshot_with_unknown_session_flag() -> 
 
 def test_async_map_switch_honors_dock_evidence_over_stale_returning_state() -> None:
     client = _client()
+    client._async_cloud_read = lambda read: read(None)
     client.async_refresh_authoritative_snapshot = AsyncMock(
         return_value=SimpleNamespace(
             state="returning",
@@ -757,6 +766,7 @@ def test_async_map_switch_honors_dock_evidence_over_stale_returning_state() -> N
 
 def test_async_map_switch_rejects_acknowledged_but_ignored_switch() -> None:
     client = _client()
+    client._async_cloud_read = lambda read: read(None)
     client.async_refresh_authoritative_snapshot = AsyncMock(
         return_value=SimpleNamespace(
             activity="idle",

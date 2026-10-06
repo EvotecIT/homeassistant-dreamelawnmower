@@ -106,7 +106,13 @@ def test_native_map_commands(monkeypatch, account_type, kind, reply):
 
 
 @pytest.mark.parametrize(
-    "kind,stage", [("map", "command"), ("map", "readback"), ("maintenance", "command")]
+    "kind,stage",
+    [
+        ("map", "command"),
+        ("map", "readback"),
+        ("map", "retry"),
+        ("maintenance", "command"),
+    ],
 )
 @pytest.mark.parametrize("stop", ["cancel", "close"])
 def test_native_map_command_cancellation_stops_followups(
@@ -124,11 +130,14 @@ def test_native_map_command_cancellation_stops_followups(
             action = (await request.json())["data"]["params"]["in"][0]
             actions.append(action)
             if (stage == "command" and action["m"] == "a") or (
-                stage == "readback" and action["m"] == "g"
+                stage in {"readback", "retry"} and action["m"] == "g"
             ):
                 entered.set()
-                await release.wait()
+                if stage != "retry":
+                    await release.wait()
             result = {"out": [{"r": 0, "d": {}}]}
+            if stage == "retry" and action["m"] == "g":
+                result = {"out": [{"r": 0, "d": [[0, 1, 1, 1, 0]]}]}
             return web.json_response({"code": 0, "data": {"result": result}})
 
         async with server(monkeypatch, handler), ClientSession() as session:
@@ -141,13 +150,15 @@ def test_native_map_command_cancellation_stops_followups(
             )
             try:
                 await asyncio.wait_for(entered.wait(), 2)
+                if stage == "retry":
+                    await asyncio.sleep(0.1)
                 count = len(actions)
                 if stop == "close":
                     await asyncio.wait_for(client.async_close(), 2)
                 else:
                     operation.cancel()
                 with pytest.raises(asyncio.CancelledError):
-                    await operation
+                    await asyncio.wait_for(operation, 0.5)
                 release.set()
                 await client.async_close()
                 assert len(actions) == count
