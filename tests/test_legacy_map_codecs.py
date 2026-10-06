@@ -370,3 +370,39 @@ def test_invalid_coordinate_metadata_retains_binary_geometry(value: object) -> N
     assert (decoded.dimensions.left, decoded.dimensions.top) == (10, -20)
     assert decoded.cleaned_area == 42
     assert decoded.router_position is None
+
+
+@pytest.mark.parametrize("wifi_payload", [12, [1, 2], {"map": "invalid"}])
+def test_invalid_optional_wifi_map_does_not_block_embedded_saved_map(
+    wifi_payload: object,
+) -> None:
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[4] = 73
+    header[0:2] = (7).to_bytes(2, "little", signed=True)
+    embedded = base64.b64encode(zlib.compress(bytes(header))).decode()
+    header[0:2] = (1).to_bytes(2, "little", signed=True)
+    metadata = {"whm": wifi_payload, "rism": embedded}
+    payload = base64.b64encode(
+        zlib.compress(bytes(header) + json.dumps(metadata).encode())
+    ).decode()
+    decoded, saved = map_decoder.DreameMowerMapDecoder.decode_map(payload, False)
+    assert decoded is not None
+    assert saved is not None and saved.map_id == 7
+    assert decoded.saved_map_id == 7
+    assert decoded.wifi_map_data is None
+
+
+def test_valid_embedded_wifi_map_keeps_router_position() -> None:
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[4] = 73
+    header[0:2] = (7).to_bytes(2, "little", signed=True)
+    embedded = base64.b64encode(zlib.compress(bytes(header))).decode()
+    header[0:2] = (1).to_bytes(2, "little", signed=True)
+    metadata = {"whm": embedded, "whmp": [120, -60]}
+    payload = base64.b64encode(
+        zlib.compress(bytes(header) + json.dumps(metadata).encode())
+    ).decode()
+    decoded, _ = map_decoder.DreameMowerMapDecoder.decode_map(payload, False)
+    assert decoded is not None and decoded.wifi_map_data is not None
+    assert decoded.wifi_map_data.map_id == 7
+    assert decoded.wifi_map_data.router_position == Point(120, -60)

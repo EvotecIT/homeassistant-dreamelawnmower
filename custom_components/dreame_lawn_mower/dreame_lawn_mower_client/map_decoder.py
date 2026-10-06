@@ -708,9 +708,9 @@ class DreameMowerMapDecoder:
                 map_data.router_position = Point(*router_position)
 
             wifi_map = data_json.get("whm")
-            if map_data.saved_map and wifi_map and len(wifi_map) > 1:
+            if map_data.saved_map and isinstance(wifi_map, str) and len(wifi_map) > 1:
                 wifi_map_data = DreameMowerMapDecoder.decode_saved_map(
-                    data_json["whm"], False, map_data.rotation
+                    wifi_map, False, map_data.rotation
                 )
                 if wifi_map_data:
                     map_data.wifi_map_data = wifi_map_data
@@ -719,9 +719,10 @@ class DreameMowerMapDecoder:
                             map_data.router_position
                         )
 
-            if "rism" in data_json:
+            embedded_saved_map = data_json.get("rism")
+            if isinstance(embedded_saved_map, str):
                 saved_map_data = DreameMowerMapDecoder.decode_saved_map(
-                    data_json["rism"],
+                    embedded_saved_map,
                     vslam_map,
                     map_data.rotation,
                 )
