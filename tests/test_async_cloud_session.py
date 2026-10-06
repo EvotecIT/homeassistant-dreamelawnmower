@@ -1108,7 +1108,8 @@ def test_native_device_read_preserves_rpc_envelope_and_absent_results(
     asyncio.run(scenario())
 
 
-def test_native_device_read_rejects_failed_rpc_even_with_result(monkeypatch):
+@pytest.mark.parametrize("read_kind", ["properties", "app_action"])
+def test_native_device_read_rejects_failed_rpc_even_with_result(monkeypatch, read_kind):
     strings = cloud_strings("dreame")
 
     async def handler(request):
@@ -1120,7 +1121,68 @@ def test_native_device_read_rejects_failed_rpc_even_with_result(monkeypatch):
         async with server(monkeypatch, handler), ClientSession() as session:
             cloud = DreameCloudSession(session, **OPTIONS)
             with pytest.raises(DreameLawnMowerConnectionError, match="rejected"):
-                await cloud.async_read_device_properties("42", None, 1, [])
+                if read_kind == "properties":
+                    await cloud.async_read_device_properties("42", None, 1, [])
+                else:
+                    await cloud.async_read_app_action(
+                        "42", None, 1, {"m": "g", "t": "MAPL"},
+                    )
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("account_type", ["dreame", "mova"])
+@pytest.mark.parametrize("result,expected", [
+    ({"out": [{"r": 0, "d": [1, 2]}]}, {"r": 0, "d": [1, 2]}),
+    ({"out": []}, None),
+    ({"r": 5}, {"r": 5}),
+    (None, None),
+])
+def test_native_app_read_preserves_wire_and_unwraps_result(
+    monkeypatch, account_type, result, expected,
+):
+    strings = cloud_strings(account_type)
+    action = {"m": "g", "t": "SCHDT", "d": {"t": 0}}
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        assert request.path == f"/{strings[37]}-hub/{strings[27]}/{strings[38]}"
+        assert await request.json() == {
+            "did": "42", "id": 19,
+            "data": {
+                "did": "42", "id": 19, "method": "action",
+                "params": {"did": "42", "siid": 2, "aiid": 50, "in": [action]},
+            },
+        }
+        return web.json_response({"code": 0, "data": {"result": result}})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            cloud = DreameCloudSession(
+                session, **{**OPTIONS, "account_type": account_type},
+            )
+            assert await cloud.async_read_app_action(
+                "42", "hub.example.invalid", 19, action,
+            ) == expected
+            assert not session.closed
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("action", [{}, {"m": "s", "t": "SCHDT"}, {"m": "a"}])
+def test_native_app_read_rejects_mutation_before_http(monkeypatch, action):
+    async def unexpected_request(*args, **kwargs):
+        pytest.fail("Mutation reached retryable HTTP transport")
+
+    monkeypatch.setattr(DreameCloudSession, "_async_read_response", unexpected_request)
+
+    async def scenario():
+        async with ClientSession() as session:
+            cloud = DreameCloudSession(session, **OPTIONS)
+            with pytest.raises(ValueError, match="requires"):
+                await cloud.async_read_app_action("42", None, 1, action)
+            assert cloud._token is None
 
     asyncio.run(scenario())
 

@@ -246,12 +246,51 @@ class DreameCloudSession:
         deadline: float | None = None,
     ) -> Any:
         """Send only a property-read RPC; the device owner supplies its request ID."""
+        return await self._async_read_rpc(
+            did, host, request_id, "get_properties",
+            [dict(row) for row in properties], timeout=timeout, deadline=deadline,
+        )
+
+    async def async_read_app_action(
+        self,
+        did: str,
+        host: str | None,
+        request_id: int,
+        action: Mapping[str, Any],
+        *,
+        timeout: float = 20,
+        deadline: float | None = None,
+    ) -> Any:
+        """Read the mower app bridge without permitting retryable mutations."""
+        if action.get("m") != "g":
+            raise ValueError("App action read requires m='g'")
+        result = await self._async_read_rpc(
+            did, host, request_id, "action",
+            {"did": str(did), "siid": 2, "aiid": 50, "in": [dict(action)]},
+            timeout=timeout, deadline=deadline,
+        )
+        out = result.get("out") if isinstance(result, Mapping) else None
+        if isinstance(out, Sequence) and not isinstance(out, str | bytes | bytearray):
+            return out[0] if out else None
+        return result
+
+    async def _async_read_rpc(
+        self,
+        did: str,
+        host: str | None,
+        request_id: int,
+        method: str,
+        parameters: object,
+        *,
+        timeout: float,
+        deadline: float | None,
+    ) -> Any:
+        """Apply the common cloud RPC envelope and absent-result semantics."""
         payload = await self._async_read_response(
             f"/{cloud_rpc_path(self._strings, host)}",
             json.dumps(
                 cloud_rpc_params(
-                    did, request_id, "get_properties",
-                    [dict(row) for row in properties],
+                    did, request_id, method, parameters,
                 ),
                 separators=(",", ":"),
             ),
@@ -260,7 +299,7 @@ class DreameCloudSession:
         if payload.get("code") == 80001:
             return None
         if payload.get("code") != 0:
-            raise DreameLawnMowerConnectionError("Device property read was rejected")
+            raise DreameLawnMowerConnectionError("Device read was rejected")
         data = payload.get("data")
         return data.get("result") if isinstance(data, Mapping) else None
 
