@@ -1801,7 +1801,17 @@ class DreameMowerMapRenderer:
             or segment_is_neglected != previous_segment_was_neglected
         )
 
-    def render_objects(self, cached_layers, map_data, robot_status, station_status, map_image, scale):
+    def render_objects(
+        self,
+        cached_layers,
+        map_data: MapData,
+        robot_status: int,
+        station_status: int,
+        map_image: Image.Image,
+        scale: int,
+    ) -> Image.Image:
+        if map_data.dimensions is None:
+            raise ValueError("Map dimensions are required to render objects")
         layer_size = (int(map_image.size[0] * scale), int(map_image.size[1] * scale))
         line_width = max(
             1,
@@ -2048,18 +2058,18 @@ class DreameMowerMapRenderer:
 
                 changed = False
                 for k in sorted(map_data.segments.keys()):
-                    v = map_data.segments[k]
+                    segment = map_data.segments[k]
                     if self._segment_needs_render(
                         cache_enabled=self._cache,
                         previous_map=self._map_data,
                         cached_segments=cached_layers[MapRendererLayer.SEGMENT],
                         map_data=map_data,
                         segment_id=k,
-                        segment=v,
+                        segment=segment,
                     ):
                         changed = True
                         cached_layers[MapRendererLayer.SEGMENT][k] = self.render_segment(
-                            v,
+                            segment,
                             bool((not map_data.saved_map or map_data.recovery_map) and map_data.cleanset),
                             layer_size,
                             map_data.dimensions,
@@ -2365,10 +2375,10 @@ class DreameMowerMapRenderer:
                             del cached_layers[MapRendererLayer.OBSTACLE][k]
 
                 changed = False
-                for k, v in map_data.obstacles.items():
-                    if not self.config.obstacle and v.type != ObstacleType.PET:
+                for k, obstacle in map_data.obstacles.items():
+                    if not self.config.obstacle and obstacle.type != ObstacleType.PET:
                         continue
-                    elif not self.config.pet and v.type == ObstacleType.PET:
+                    elif not self.config.pet and obstacle.type == ObstacleType.PET:
                         continue
 
                     if (
@@ -2377,11 +2387,11 @@ class DreameMowerMapRenderer:
                         or k not in cached_layers[MapRendererLayer.OBSTACLE]
                         or not self._map_data.obstacles
                         or k not in self._map_data.obstacles
-                        or self._map_data.obstacles[k] != v
+                        or self._map_data.obstacles[k] != obstacle
                         or self._map_data.rotation != map_data.rotation
                     ):
                         obstacle_image = self.render_obstacle(
-                            v,
+                            obstacle,
                             layer_size,
                             map_data.dimensions,
                             int((icon_size * 1.2) * map_data.dimensions.scale),
@@ -2421,19 +2431,19 @@ class DreameMowerMapRenderer:
                             del cached_layers[MapRendererLayer.CRUISE_POINT][k]
 
                 changed = False
-                for k, v in map_data.active_cruise_points.items():
+                for k, cruise_point in map_data.active_cruise_points.items():
                     if (
                         self._map_data is None
                         or k not in cached_layers[MapRendererLayer.CRUISE_POINT]
                         or not self._map_data.active_cruise_points
                         or k not in self._map_data.active_cruise_points
-                        or self._map_data.active_cruise_points[k] != v
+                        or self._map_data.active_cruise_points[k] != cruise_point
                         or self._map_data.rotation != map_data.rotation
                     ):
                         changed = True
                         cached_layers[MapRendererLayer.CRUISE_POINT][k] = self.render_cruise_point(
                             k,
-                            v,
+                            cruise_point,
                             layer_size,
                             map_data.dimensions,
                             int(round(icon_size * 1.25 * map_data.dimensions.scale)),
