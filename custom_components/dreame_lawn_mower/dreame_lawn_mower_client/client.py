@@ -1666,12 +1666,11 @@ class DreameLawnMowerClient(
         include_object_urls: bool = False,
     ) -> dict[str, Any]:
         """Fetch mower-native app map payloads through read-only app commands."""
-        return await asyncio.to_thread(
-            self._sync_get_app_maps,
-            chunk_size,
-            include_payload,
-            include_objects,
-            include_object_urls,
+        from .client_map_reads import async_read_maps
+
+        return await async_read_maps(
+            self, chunk_size=chunk_size, include_payload=include_payload,
+            include_objects=include_objects, include_object_urls=include_object_urls,
         )
 
     async def async_get_current_app_map_index(self) -> int | None:

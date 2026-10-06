@@ -600,10 +600,14 @@ class _DreameLawnMowerClientMapsMixin(
         """Invalidate private object names when the owning map changes."""
         identity = _app_map_inventory_identity(maps)
         with self._app_map_object_cache_lock:
-            if identity != self._latest_app_map_inventory_identity:
-                self._latest_app_map_object_names = ()
-                self._latest_app_map_object_inventory_identity = None
-            self._latest_app_map_inventory_identity = identity
+            self._set_app_map_inventory_identity(identity)
+
+    def _set_app_map_inventory_identity(self, identity: str | None) -> None:
+        """Apply inventory identity while the caller owns the object-cache lock."""
+        if identity != self._latest_app_map_inventory_identity:
+            self._latest_app_map_object_names = ()
+            self._latest_app_map_object_inventory_identity = None
+        self._latest_app_map_inventory_identity = identity
 
     def _sync_get_app_map_objects(
         self,
