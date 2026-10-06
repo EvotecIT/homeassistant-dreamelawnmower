@@ -3588,13 +3588,13 @@ class DreameMowerMapRenderer:
 
     def render_router(
         self,
-        router_position,
-        layer_size,
-        dimensions,
-        size,
-        rotation,
-        scale,
-    ):
+        router_position: Point,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        size: float,
+        rotation: int | None,
+        scale: int,
+    ) -> Image.Image:
         new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(new_layer, "RGBA")
         icon_size = int(size * scale)
@@ -3602,7 +3602,6 @@ class DreameMowerMapRenderer:
             self._wifi_icon = (
                 Image.open(BytesIO(base64.b64decode(MAP_WIFI_IMAGE_DREAME)))
                 .convert("RGBA")
-                .resize((icon_size, icon_size), resample=Image.Resampling.NEAREST)
             )
 
         point = router_position.to_img(dimensions)
@@ -3616,7 +3615,9 @@ class DreameMowerMapRenderer:
             ],
             fill=(34, 98, 211, 255) if self.color_scheme.dark else (34, 109, 242, 255),
         )
-        wifi_icon = self._wifi_icon.rotate(-rotation, expand=1)
+        wifi_icon = self._wifi_icon.resize(
+            (icon_size, icon_size), resample=Image.Resampling.NEAREST,
+        ).rotate(-(rotation or 0), expand=1)
         new_layer.paste(
             wifi_icon,
             (

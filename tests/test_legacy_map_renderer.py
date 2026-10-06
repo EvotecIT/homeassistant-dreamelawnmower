@@ -49,6 +49,18 @@ def test_mower_unknown_heading_preserves_marker_without_direction(
     assert point.a is None
 
 
+def test_router_icon_resizes_when_reusing_renderer() -> None:
+    renderer = DreameMowerMapRenderer()
+    position = Point(2500, 2500)
+    dimensions = MapImageDimensions(0, 0, 100, 100, 50)
+    renderer.render_router(position, (100, 100), dimensions, 10, 0, 1)
+    resized = renderer.render_router(position, (100, 100), dimensions, 30, 0, 1)
+    fresh = DreameMowerMapRenderer().render_router(
+        position, (100, 100), dimensions, 30, 0, 1,
+    )
+    assert resized.tobytes() == fresh.tobytes()
+
+
 @pytest.mark.parametrize("icon_set", [0, 1, 2, 3])
 def test_charger_without_heading_keeps_reported_location(
     icon_set: int, caplog: pytest.LogCaptureFixture,
