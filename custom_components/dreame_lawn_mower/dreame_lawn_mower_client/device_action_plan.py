@@ -5,7 +5,7 @@ import logging
 import time
 from collections.abc import Generator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from .device_types import ACTION_AVAILABILITY, DreameMowerAction, DreameMowerProperty
 from .exceptions import (
@@ -168,9 +168,9 @@ def run_device_action(
     ))
 
 
-def run_device_plan(
-    device: Any, plan: Generator[ActionDelay | ActionRequest, Any, Any],
-) -> Any:
+def run_device_plan[Result](
+    device: Any, plan: Generator[ActionDelay | ActionRequest, Any, Result],
+) -> Result:
     """Execute state policy with legacy sleeps and RPC calls."""
     try:
         effect = next(plan)
@@ -188,6 +188,6 @@ def run_device_plan(
             else:
                 effect = plan.send(response)
     except StopIteration as completed:
-        return completed.value
+        return cast(Result, completed.value)
     finally:
         plan.close()

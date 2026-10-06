@@ -759,7 +759,7 @@ class _DreameMowerDeviceCommandMixin:
 
     def _stop_plan(
         self, *, authoritative_task_active: bool = False,
-    ) -> Generator[ActionDelay | ActionRequest, Any, Any]:
+    ) -> Generator[ActionDelay | ActionRequest, Any, dict[str, Any] | None]:
         """Share STOP acknowledgement and subsequent local task cleanup."""
         from .device_action_plan import device_action_plan
 
