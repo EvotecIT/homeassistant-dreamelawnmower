@@ -1391,13 +1391,13 @@ class DreameLawnMowerClient(
         confirm_write: bool = False,
     ) -> dict[str, Any]:
         """Build or execute the app action request to toggle a schedule plan."""
-        return await asyncio.to_thread(
-            self._sync_set_app_schedule_plan_enabled,
-            map_index,
-            plan_id,
-            enabled,
-            execute,
-            confirm_write,
+        from .client_schedule_writes import async_run_schedule_write
+        from .schedule_write_plan import plan_schedule_enabled
+
+        return await async_run_schedule_write(
+            self, plan_schedule_enabled(
+                map_index, plan_id, enabled, execute, confirm_write
+            ),
         )
 
     async def async_plan_app_schedule_upload(
@@ -1410,13 +1410,13 @@ class DreameLawnMowerClient(
         chunk_size: int = SCHEDULE_CHUNK_SIZE,
     ) -> dict[str, Any]:
         """Build or execute a full schedule upload from readable plans."""
-        return await asyncio.to_thread(
-            self._sync_plan_app_schedule_upload,
-            map_index,
-            plans,
-            execute,
-            confirm_write,
-            chunk_size,
+        from .client_schedule_writes import async_run_schedule_write
+        from .schedule_write_plan import plan_schedule_upload
+
+        return await async_run_schedule_write(
+            self, plan_schedule_upload(
+                map_index, plans, execute, confirm_write, chunk_size
+            ),
         )
 
     async def async_get_mowing_preferences(

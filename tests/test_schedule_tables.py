@@ -211,15 +211,11 @@ def test_table_toggle_cannot_edit_an_unfinished_docked_task():
     client, cloud = client_and_cloud()
     client._sync_update_device.return_value.task_resumable = True
     with pytest.raises(DreameLawnMowerConnectionError, match="Finish the current"):
-        asyncio.run(
-            client.async_set_app_schedule_plan_enabled(
-                map_index=2,
-                plan_id=1,
-                enabled=False,
-                execute=True,
-                confirm_write=True,
+        (
+            lambda: client._sync_set_app_schedule_plan_enabled(
+                map_index=2, plan_id=1, enabled=False, execute=True, confirm_write=True
             )
-        )
+        )()
     assert all(call["m"] == "g" for call in cloud.calls)
 
 

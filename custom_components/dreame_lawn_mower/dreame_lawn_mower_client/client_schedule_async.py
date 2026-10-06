@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Generator, Sequence
+from collections.abc import Callable, Coroutine, Generator, Sequence
 from typing import TYPE_CHECKING, Any
 
 from .app_read_transport import AppReadRequest
@@ -48,7 +48,16 @@ async def _run_serialized_plan(
     client: DreameLawnMowerClient,
     plan: Generator[AppReadRequest, Any, dict[str, Any]],
 ) -> dict[str, Any]:
-    async def read(_cloud: DreameCloudSession) -> dict[str, Any]:
+    return await async_schedule_operation(
+        client, lambda: async_run_app_read(client, plan)
+    )
+
+
+async def async_schedule_operation[T](
+    client: DreameLawnMowerClient, operation: Callable[[], Coroutine[Any, Any, T]],
+) -> T:
+    """Share transaction ownership across native schedule reads and writes."""
+    async def read(_cloud: DreameCloudSession) -> T:
         gate = client._schedule_async_gate
         lock = client._schedule_operation_lock
         gate_acquired = False
@@ -67,7 +76,7 @@ async def _run_serialized_plan(
                 raise DreameLawnMowerConnectionError(
                     "Schedule read timed out waiting for another operation."
                 ) from error
-            return await async_run_app_read(client, plan)
+            return await operation()
         finally:
             if lock_acquired:
                 lock.release()

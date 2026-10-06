@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 from threading import RLock
 from types import SimpleNamespace
@@ -180,44 +179,45 @@ def _client() -> DreameLawnMowerClient:
         {"mowing_session_active": None},
     ],
 )
-def test_public_schedule_writes_require_a_fresh_finished_task(upload, state_changes):
+def test_sync_schedule_writes_require_a_fresh_finished_task(upload, state_changes):
     client = _client()
     cloud = _FakeAppScheduleCloud()
     client._sync_get_cloud_protocol = lambda **_kwargs: cloud
-    # Cached idle data must not override the forced property read.
     client._latest_snapshot = SimpleNamespace(task_resumable=False)
     vars(client._sync_update_device.return_value).update(state_changes)
     plans = decode_schedule_payload_text(cloud.payloads[0]["text"])
     call = (
-        client.async_plan_app_schedule_upload(
-            map_index=0, plans=plans, execute=True, confirm_write=True
+        (
+            lambda: client._sync_plan_app_schedule_upload(
+                map_index=0, plans=plans, execute=True, confirm_write=True
+            )
         )
         if upload
-        else client.async_set_app_schedule_plan_enabled(
+        else lambda: client._sync_set_app_schedule_plan_enabled(
             map_index=0, plan_id=1, enabled=False, execute=True, confirm_write=True
         )
     )
     with pytest.raises(DreameLawnMowerCommandRejectedError, match="task"):
-        asyncio.run(call)
+        call()
     client._sync_update_device.assert_called_once_with(force_request_properties=True)
     assert all(request["m"] == "g" for request in cloud.calls)
 
 
 @pytest.mark.parametrize("upload", [False, True])
-def test_public_schedule_preview_does_not_require_finished_task(upload):
+def test_sync_schedule_preview_does_not_require_finished_task(upload):
     client = _client()
     cloud = _FakeAppScheduleCloud()
     client._sync_get_cloud_protocol = lambda **_kwargs: cloud
     client._sync_update_device.side_effect = AssertionError("Preview read task state")
     plans = decode_schedule_payload_text(cloud.payloads[0]["text"])
     call = (
-        client.async_plan_app_schedule_upload(map_index=0, plans=plans)
+        (lambda: client._sync_plan_app_schedule_upload(map_index=0, plans=plans))
         if upload
-        else client.async_set_app_schedule_plan_enabled(
+        else lambda: client._sync_set_app_schedule_plan_enabled(
             map_index=0, plan_id=1, enabled=False
         )
     )
-    assert asyncio.run(call)["executed"] is False
+    assert call()["executed"] is False
     assert all(request["m"] == "g" for request in cloud.calls)
 
 
@@ -227,15 +227,11 @@ def test_fresh_task_read_failure_prevents_schedule_dispatch():
     client._sync_get_cloud_protocol = lambda **_kwargs: cloud
     client._sync_update_device.side_effect = DreameLawnMowerConnectionError("Offline")
     with pytest.raises(DreameLawnMowerConnectionError, match="Offline"):
-        asyncio.run(
-            client.async_set_app_schedule_plan_enabled(
-                map_index=0,
-                plan_id=1,
-                enabled=True,
-                execute=True,
-                confirm_write=True,
+        (
+            lambda: client._sync_set_app_schedule_plan_enabled(
+                map_index=0, plan_id=1, enabled=True, execute=True, confirm_write=True
             )
-        )
+        )()
     assert all(request["m"] == "g" for request in cloud.calls)
 
 
@@ -300,7 +296,6 @@ def test_failed_property_read_cannot_reuse_cached_idle_for_schedule_write(
     device._select_update_properties = lambda: (
         DreameMowerDevice._select_update_properties(device)
     )
-
     device.update = lambda **kwargs: DreameMowerDevice.update(device, **kwargs)
     client._ensure_device = lambda: device
     client._sync_update_device = lambda **kwargs: (
@@ -317,18 +312,20 @@ def test_failed_property_read_cannot_reuse_cached_idle_for_schedule_write(
     )
     plans = decode_schedule_payload_text(cloud.payloads[0]["text"])
     call = (
-        client.async_plan_app_schedule_upload(
-            map_index=0, plans=plans, execute=True, confirm_write=True
+        (
+            lambda: client._sync_plan_app_schedule_upload(
+                map_index=0, plans=plans, execute=True, confirm_write=True
+            )
         )
         if upload
-        else client.async_set_app_schedule_plan_enabled(
+        else lambda: client._sync_set_app_schedule_plan_enabled(
             map_index=0, plan_id=1, enabled=True, execute=True, confirm_write=True
         )
     )
     with pytest.raises(
         DreameLawnMowerConnectionError, match="Fresh mower task properties"
     ):
-        asyncio.run(call)
+        call()
     client._snapshot_from_device.assert_not_called()
     device._handle_properties.assert_not_called()
     assert device.data is cached_data and device.available is True
