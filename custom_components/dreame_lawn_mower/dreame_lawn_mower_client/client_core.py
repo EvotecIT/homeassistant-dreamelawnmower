@@ -212,15 +212,11 @@ class _DreameLawnMowerClientCoreMixin:
 
     async def _async_get_cached_start_mowing_session_identity(self) -> bool | None:
         """Read the device's current start branch under its MQTT state lock."""
-        device = await asyncio.to_thread(self._ensure_device)
+        from .client_state_reads import async_read_device_state
 
-        def read_session_identity() -> bool | None:
-            state_lock = getattr(device, "_state_lock", None)
-            state_context = state_lock if state_lock is not None else nullcontext()
-            with state_context:
-                return _device_start_session_identity(device)
-
-        return await asyncio.to_thread(read_session_identity)
+        return await async_read_device_state(
+            self, _device_start_session_identity, refresh=False,
+        )
 
     async def _async_call_start_mowing_with_session_identity(
         self,
@@ -290,6 +286,7 @@ class _DreameLawnMowerClientCoreMixin:
     ) -> DreameLawnMowerSnapshot:
         """Force properties and apply heartbeat reconciliation before decisions."""
         from .client_refresh import _run_state_worker
+        from .client_state_reads import read_locked_device_state
 
         cancelled = Event()
 
@@ -299,14 +296,26 @@ class _DreameLawnMowerClientCoreMixin:
                     force_request_properties=True, deadline=deadline,
                 )
 
-                def build_snapshot() -> DreameLawnMowerSnapshot:
+                def require_active() -> None:
                     if cancelled.is_set() or self._closing:
                         raise DreameLawnMowerConnectionError("Client is closing")
                     if deadline is not None and time.monotonic() >= deadline:
                         raise DreameLawnMowerConnectionError(
                             "Authoritative snapshot timed out"
                         )
-                    return self._snapshot_from_device(device, fresh_task_state=True)
+                    if self._device is not device:
+                        raise DreameLawnMowerConnectionError(
+                            "Device changed during snapshot"
+                        )
+
+                def build_snapshot() -> DreameLawnMowerSnapshot:
+                    return read_locked_device_state(
+                        device,
+                        lambda current: self._snapshot_from_device(
+                            current, fresh_task_state=True,
+                        ),
+                        require_active,
+                    )
 
                 async with asyncio.timeout(
                     None if deadline is None else max(0, deadline - time.monotonic())
@@ -330,8 +339,11 @@ class _DreameLawnMowerClientCoreMixin:
 
     async def _async_cached_authoritative_snapshot(self) -> DreameLawnMowerSnapshot:
         """Apply heartbeat reconciliation to the current in-memory device state."""
-        device = await asyncio.to_thread(self._ensure_device)
-        return await asyncio.to_thread(self._snapshot_from_device, device)
+        from .client_state_reads import async_read_device_state
+
+        return await async_read_device_state(
+            self, self._snapshot_from_device, refresh=False,
+        )
 
     async def _async_update_device(
         self, *, force_request_properties: bool = False,

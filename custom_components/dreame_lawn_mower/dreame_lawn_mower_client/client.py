@@ -708,20 +708,25 @@ class DreameLawnMowerClient(
         except DreameLawnMowerConnectionError:
             status_blob = None
         if status_blob is not None and status_blob.task_resumable:
-            try:
-                await asyncio.to_thread(self._sync_resume_mowing)
-            except _DreameLawnMowerCommandRejectedError:
-                raise
-            except DreameLawnMowerConnectionError as err:
-                await self._async_reconcile_ambiguous_mutation(
-                    "resume mowing",
-                    err,
-                    lambda snapshot: bool(
-                        snapshot_session_control_state(snapshot) == "mowing"
-                        and not getattr(snapshot, "task_resumable", False)
-                    ),
-                )
-            return False
+            async def resume(_cloud: _DreameCloudSession) -> bool:
+                try:
+                    await self._async_call_mowing_task(
+                            RESUME_MOWING_REQUEST, task_name="resume mowing",
+                        )
+                except _DreameLawnMowerCommandRejectedError:
+                    raise
+                except DreameLawnMowerConnectionError as err:
+                    await self._async_reconcile_ambiguous_mutation(
+                        "resume mowing",
+                        err,
+                        lambda snapshot: bool(
+                            snapshot_session_control_state(snapshot) == "mowing"
+                            and not getattr(snapshot, "task_resumable", False)
+                        ),
+                    )
+                return False
+
+            return await self._async_cloud_read(resume)
         if (
             status_blob is not None
             and status_blob.mowing_session_active is True

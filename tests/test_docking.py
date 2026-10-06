@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from threading import RLock
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -698,10 +699,11 @@ def test_cancel_current_task_ends_resumable_task_at_dock() -> None:
 
 def test_start_resumes_heartbeat_confirmed_paused_session() -> None:
     client = object.__new__(DreameLawnMowerClient)
+    client._async_cloud_read = lambda read: read(None)
     client.async_get_status_blob = AsyncMock(
         return_value=SimpleNamespace(task_resumable=True)
     )
-    client._sync_resume_mowing = Mock(return_value={"r": 0})
+    client._async_call_mowing_task = AsyncMock(return_value={"r": 0})
     client._async_call_device_method = AsyncMock()
 
     started_new_session = asyncio.run(client.async_start_mowing())
@@ -710,17 +712,20 @@ def test_start_resumes_heartbeat_confirmed_paused_session() -> None:
         refresh=True,
         include_cloud=True,
     )
-    client._sync_resume_mowing.assert_called_once_with()
+    client._async_call_mowing_task.assert_awaited_once_with(
+        {"m": "a", "p": 0, "o": 5}, task_name="resume mowing",
+    )
     client._async_call_device_method.assert_not_awaited()
     assert started_new_session is False
 
 
 def test_lost_resume_acknowledgement_requires_transition_out_of_paused() -> None:
     client = object.__new__(DreameLawnMowerClient)
+    client._async_cloud_read = lambda read: read(None)
     client.async_get_status_blob = AsyncMock(
         return_value=SimpleNamespace(task_resumable=True)
     )
-    client._sync_resume_mowing = Mock(
+    client._async_call_mowing_task = AsyncMock(
         side_effect=DreameLawnMowerConnectionError("resume reply lost")
     )
     client._async_refresh_authoritative_snapshot = AsyncMock(
@@ -747,16 +752,19 @@ def test_lost_resume_acknowledgement_requires_transition_out_of_paused() -> None
     ):
         asyncio.run(client.async_start_mowing())
 
-    client._sync_resume_mowing.assert_called_once_with()
+    client._async_call_mowing_task.assert_awaited_once_with(
+        {"m": "a", "p": 0, "o": 5}, task_name="resume mowing",
+    )
     assert client._async_refresh_authoritative_snapshot.await_count == 3
 
 
 def test_lost_resume_acknowledgement_accepts_active_mowing_transition() -> None:
     client = object.__new__(DreameLawnMowerClient)
+    client._async_cloud_read = lambda read: read(None)
     client.async_get_status_blob = AsyncMock(
         return_value=SimpleNamespace(task_resumable=True)
     )
-    client._sync_resume_mowing = Mock(
+    client._async_call_mowing_task = AsyncMock(
         side_effect=DreameLawnMowerConnectionError("resume reply lost")
     )
     client._async_refresh_authoritative_snapshot = AsyncMock(
@@ -777,7 +785,9 @@ def test_lost_resume_acknowledgement_accepts_active_mowing_transition() -> None:
     ):
         asyncio.run(client.async_start_mowing())
 
-    client._sync_resume_mowing.assert_called_once_with()
+    client._async_call_mowing_task.assert_awaited_once_with(
+        {"m": "a", "p": 0, "o": 5}, task_name="resume mowing",
+    )
     client._async_refresh_authoritative_snapshot.assert_awaited_once_with()
 
 
@@ -895,6 +905,10 @@ def test_stale_active_heartbeat_cannot_hide_fresh_device_start() -> None:
         )
     )
 
+    client._closing = False
+    client._async_cloud_read = lambda read: read(None)
+    client._device = client._ensure_device.return_value
+    client._device._state_lock = RLock()
     started_new_session = asyncio.run(client.async_start_mowing())
 
     start_mowing.assert_called_once_with()
@@ -1147,7 +1161,8 @@ def test_authoritative_confirmation_forces_device_property_request() -> None:
     client = object.__new__(DreameLawnMowerClient)
     client._closing = False
     client._async_cloud_read = lambda read: read(None)
-    device = SimpleNamespace(update=Mock())
+    device = SimpleNamespace(update=Mock(), _state_lock=RLock())
+    client._device = device
     snapshot = SimpleNamespace(state="paused")
     client._async_update_device = AsyncMock(return_value=device)
     client._snapshot_from_device = Mock(return_value=snapshot)
@@ -1166,7 +1181,8 @@ def test_authoritative_confirmation_forwards_shared_deadline() -> None:
     client._async_cloud_read = lambda read: read(None)
     client._closing = False
     client._async_cloud_read = lambda read: read(None)
-    device = SimpleNamespace(update=Mock())
+    device = SimpleNamespace(update=Mock(), _state_lock=RLock())
+    client._device = device
     snapshot = SimpleNamespace(state="paused")
     client._async_update_device = AsyncMock(return_value=device)
     client._snapshot_from_device = Mock(return_value=snapshot)

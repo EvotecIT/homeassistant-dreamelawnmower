@@ -242,7 +242,9 @@ def test_remote_cancel_drains_preparation_without_dispatch(monkeypatch, stop):
                 await client.async_close()
     asyncio.run(scenario())
 
-@pytest.mark.parametrize("kind", ["remote", "refresh"])
+@pytest.mark.parametrize(
+    "kind", ["remote", "refresh", "authoritative", "cached", "identity"],
+)
 @pytest.mark.parametrize("stop", ["cancel", "close"])
 def test_state_lock_wait_is_cancellable_before_holder_releases(monkeypatch, kind, stop):
     import threading
@@ -267,9 +269,14 @@ def test_state_lock_wait_is_cancellable_before_holder_releases(monkeypatch, kind
             operation = None
             try:
                 assert await asyncio.to_thread(held.wait, 1)
-                operation = asyncio.create_task(
-                    client.async_remote_control_stop() if kind == "remote"
-                    else client.async_refresh())
+                methods = {
+                    "remote": client.async_remote_control_stop,
+                    "refresh": client.async_refresh,
+                    "authoritative": client.async_refresh_authoritative_snapshot,
+                    "cached": client._async_cached_authoritative_snapshot,
+                    "identity": client._async_get_cached_start_mowing_session_identity,
+                }
+                operation = asyncio.create_task(methods[kind]())
                 await asyncio.sleep(0.05)
                 assert not operation.done()
                 if stop == "close":
