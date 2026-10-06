@@ -41,6 +41,7 @@ from .video_camera_types import (
     _DreameVideoRuntime,
     _facade_binding,
     _FacadeModuleProxy,
+    _VideoCameraState,
 )
 from .video_startup_timing import VideoStartupTiming
 
@@ -109,7 +110,7 @@ def _runtime_inputs_not_ready_message(
     )
 
 
-class DreameLawnMowerVideoStartupMixin:
+class DreameLawnMowerVideoStartupMixin(_VideoCameraState):
     """Start and adopt LAN, cached XP2P, or cloud video sessions."""
 
     async def _async_start_stream(
