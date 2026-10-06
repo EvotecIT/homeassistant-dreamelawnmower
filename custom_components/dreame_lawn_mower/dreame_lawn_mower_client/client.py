@@ -803,6 +803,26 @@ class DreameLawnMowerClient(
         ``True`` after a dispatched stop is confirmed. The stop command is never
         retried after dispatch, even when its response is lost.
         """
+        async def cancel(_cloud: _DreameCloudSession) -> bool:
+            return await self._async_cancel_current_task()
+
+        return await self._async_cloud_read(cancel)
+
+    async def _async_stop_current_task(self) -> None:
+        """Dispatch guarded native STOP; the caller owns task settlement."""
+        from .client_device_actions import async_run_device_plan
+
+        try:
+            await async_run_device_plan(
+                self, lambda device: device._stop_plan(authoritative_task_active=True),
+            )
+        except _DeviceCommandRejectedException as error:
+            raise _DreameLawnMowerCommandRejectedError(str(error)) from error
+        except DeviceException as error:
+            raise DreameLawnMowerConnectionError(str(error)) from error
+
+    async def _async_cancel_current_task(self) -> bool:
+        """Keep authoritative preflight, dispatch and settlement in one lifetime."""
         baseline = await self.async_refresh_authoritative_snapshot()
         if _snapshot_is_fast_mapping(baseline):
             raise _DreameLawnMowerCommandRejectedError(
@@ -815,11 +835,7 @@ class DreameLawnMowerClient(
 
         ambiguous_stop_error: DreameLawnMowerConnectionError | None = None
         try:
-            await self._async_call_device_method(
-                "stop",
-                reconcile_ambiguous=False,
-                method_kwargs={"authoritative_task_active": True},
-            )
+            await self._async_stop_current_task()
         except (
             _DreameLawnMowerCommandRejectedError,
             InvalidActionException,

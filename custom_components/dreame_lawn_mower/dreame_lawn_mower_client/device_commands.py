@@ -749,13 +749,32 @@ class _DreameMowerDeviceCommandMixin:
                 )
             return self.return_to_base()
 
+        from .device_action_plan import run_device_plan
+
+        return run_device_plan(
+            self, _DreameMowerDeviceCommandMixin._stop_plan(
+                self, authoritative_task_active=authoritative_task_active,
+            ),
+        )
+
+    def _stop_plan(
+        self, *, authoritative_task_active: bool = False,
+    ) -> Generator[ActionDelay | ActionRequest, Any, Any]:
+        """Share STOP acknowledgement and subsequent local task cleanup."""
+        from .device_action_plan import device_action_plan
+
+        if self.status.fast_mapping:
+            raise InvalidActionException(
+                "Cannot cancel the current task while fast mapping"
+            )
+
         self.schedule_update(10, True)
         # Dispatch before updating the optimistic local state. Updating the
         # status first makes ``ACTION_AVAILABILITY`` see an idle mower and
         # reject the STOP action locally, so the command never reaches the
         # device.
-        response = self.call_action(
-            DreameMowerAction.STOP,
+        response = yield from device_action_plan(
+            self, DreameMowerAction.STOP,
             enforce_availability=not authoritative_task_active,
         )
 
