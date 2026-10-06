@@ -1426,16 +1426,27 @@ class DreameLawnMowerClient(
             confirm_write,
         )
 
+    async def async_get_device_settings(
+        self, *, include_raw: bool = False,
+    ) -> dict[str, Any]:
+        """Return decoded mower-native device settings."""
+        from .client_app_reads import async_run_app_read
+        from .device_settings_read_plan import read_device_settings
+
+        return await async_run_app_read(self, read_device_settings(include_raw))
+
     async def async_get_weather_protection(
         self,
         *,
         include_raw: bool = False,
     ) -> dict[str, Any]:
         """Return read-only weather/rain protection settings from app actions."""
-        return await asyncio.to_thread(
-            self._sync_get_weather_protection,
-            include_raw,
-        )
+        from .client_app_reads import async_run_app_read
+        from .device_settings_read_plan import read_device_settings
+
+        result = await async_run_app_read(self, read_device_settings(include_raw))
+        result["source"] = "app_action_weather_protection"
+        return result
 
     async def async_get_work_log_totals(self) -> DreameLawnMowerWorkLogTotals:
         """Return mower-owned lifetime area, time, and session totals."""
@@ -1447,10 +1458,11 @@ class DreameLawnMowerClient(
         include_raw: bool = False,
     ) -> dict[str, Any]:
         """Return read-only CMS maintenance counter state from app actions."""
-        return await asyncio.to_thread(
-            self._sync_get_maintenance_status,
-            include_raw,
-        )
+        from .client_app_reads import async_run_app_read
+        from .device_settings_read_plan import read_maintenance
+
+        result = await async_run_app_read(self, read_maintenance(include_raw))
+        return result
 
     async def async_plan_maintenance_reset(
         self,
@@ -1473,10 +1485,11 @@ class DreameLawnMowerClient(
         include_raw: bool = False,
     ) -> dict[str, Any]:
         """Return read-only voice and language settings from app actions."""
-        return await asyncio.to_thread(
-            self._sync_get_voice_settings,
-            include_raw,
-        )
+        from .client_app_reads import async_run_app_read
+        from .device_settings_read_plan import read_voice
+
+        result = await async_run_app_read(self, read_voice(include_raw))
+        return result
 
     async def async_set_voice_language(self, voice_language: int) -> dict[str, Any]:
         """Set the mower voice language by app language-pack index."""

@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from functools import wraps
 from typing import Any
 
+from .app_read_transport import run_app_read
 from .batch_device_data import decode_batch_schedule_payload
 from .client_schedule_edits import _DreameLawnMowerScheduleEditsMixin
 from .client_schedule_tables import _DreameLawnMowerScheduleTablesMixin
@@ -43,7 +44,6 @@ from .schedule_read_plan import (
     read_slot,
     read_start_evidence,
 )
-from .schedule_read_transport import run_schedule_read
 
 SCHEDULE_CURRENT_TASK_TIMEOUT_SECONDS = 5.0
 SCHEDULE_READ_DEADLINE_SECONDS = 10.0
@@ -77,7 +77,7 @@ class _DreameLawnMowerClientSchedulesMixin(
     @_serialized_schedule_operation
     def _sync_get_schedule_start_evidence(self) -> dict[str, Any]:
         """Never replace failed map discovery with likely-slot guesses for a start."""
-        return run_schedule_read(
+        return run_app_read(
             read_start_evidence(self), self._sync_call_app_action,
         )
 
@@ -89,7 +89,7 @@ class _DreameLawnMowerClientSchedulesMixin(
         chunk_size: int = SCHEDULE_CHUNK_SIZE,
         include_current_task: bool = True,
     ) -> dict[str, Any]:
-        return run_schedule_read(
+        return run_app_read(
             read_schedules(
                 self, include_raw, map_indices, chunk_size, include_current_task
             ),
@@ -105,7 +105,7 @@ class _DreameLawnMowerClientSchedulesMixin(
         deadline: float,
         reserve_alternate: bool = True,
     ) -> tuple[dict[str, Any], Exception | None]:
-        return run_schedule_read(
+        return run_app_read(
             read_slot(
                 self,
                 map_index=map_index,
@@ -127,7 +127,7 @@ class _DreameLawnMowerClientSchedulesMixin(
         metadata_deadline: float | None = None,
         reserve_generation: bool = True,
     ) -> tuple[dict[str, Any], Exception | None]:
-        return run_schedule_read(
+        return run_app_read(
             read_document_slot(
                 self,
                 map_index=map_index,
@@ -150,7 +150,7 @@ class _DreameLawnMowerClientSchedulesMixin(
         metadata_deadline: float,
         generation: int,
     ) -> tuple[dict[str, Any], Exception | None]:
-        return run_schedule_read(
+        return run_app_read(
             read_document_generation(
                 self,
                 map_index=map_index,
@@ -415,7 +415,7 @@ class _DreameLawnMowerClientSchedulesMixin(
         deadline: float | None = None,
         document_version: int = 2,
     ) -> tuple[str, int, int]:
-        return run_schedule_read(
+        return run_app_read(
             read_document_text(
                 self,
                 size=size,
@@ -430,7 +430,7 @@ class _DreameLawnMowerClientSchedulesMixin(
     def _app_schedule_map_indices(
         self, map_indices: Sequence[int] | None, *, deadline: float | None = None
     ) -> list[int]:
-        return run_schedule_read(
+        return run_app_read(
             read_map_indices(self, map_indices, deadline=deadline),
             self._sync_call_app_action,
         )

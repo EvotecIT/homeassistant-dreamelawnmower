@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from collections.abc import Generator, Sequence
 from typing import TYPE_CHECKING, Any
 
-from .client_app_reads import async_read_app_action
+from .app_read_transport import AppReadRequest
+from .client_app_reads import async_run_app_read
 from .exceptions import DreameLawnMowerConnectionError
 from .schedule_read_plan import read_schedules, read_start_evidence
-from .schedule_read_transport import ScheduleReadRequest, capture_schedule_result
 
 if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
@@ -47,7 +46,7 @@ async def async_read_start_evidence(
 
 async def _run_serialized_plan(
     client: DreameLawnMowerClient,
-    plan: Generator[ScheduleReadRequest, Any, dict[str, Any]],
+    plan: Generator[AppReadRequest, Any, dict[str, Any]],
 ) -> dict[str, Any]:
     async def read(_cloud: DreameCloudSession) -> dict[str, Any]:
         gate = client._schedule_async_gate
@@ -68,28 +67,7 @@ async def _run_serialized_plan(
                 raise DreameLawnMowerConnectionError(
                     "Schedule read timed out waiting for another operation."
                 ) from error
-            result: list[dict[str, Any]] = []
-            plan_with_result = capture_schedule_result(plan, result)
-            try:
-                request = next(plan_with_result)
-                while True:
-                    deadline = time.monotonic() + request.timeout
-                    if request.deadline is not None:
-                        deadline = min(deadline, request.deadline)
-                    try:
-                        response = await async_read_app_action(
-                            client,
-                            request.action,
-                            deadline=deadline,
-                        )
-                    except Exception as error:
-                        request = plan_with_result.throw(error)
-                    else:
-                        request = plan_with_result.send(response)
-            except StopIteration:
-                return result[0]
-            finally:
-                plan_with_result.close()
+            return await async_run_app_read(client, plan)
         finally:
             if lock_acquired:
                 lock.release()

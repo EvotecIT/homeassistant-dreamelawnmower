@@ -409,7 +409,7 @@ def test_cloud_mqtt_client_trusts_vendor_ca_with_verified_tls(monkeypatch) -> No
 
 def test_get_voice_settings_does_not_synthesize_prompt_flags() -> None:
     client = _client()
-    client._sync_call_app_action = lambda payload: {  # type: ignore[method-assign]
+    client._sync_call_app_action = lambda payload, **kwargs: {  # type: ignore[method-assign]
         "m": "r",
         "r": 0,
         "d": {"LANG": [8, 13], "VOL": 100},
@@ -427,7 +427,7 @@ def test_get_voice_settings_does_not_synthesize_prompt_flags() -> None:
 
 def test_get_voice_settings_requires_supported_keys() -> None:
     client = _client()
-    client._sync_call_app_action = lambda payload: {  # type: ignore[method-assign]
+    client._sync_call_app_action = lambda payload, **kwargs: {  # type: ignore[method-assign]
         "m": "r",
         "r": 0,
         "d": {"OTHER": 1},

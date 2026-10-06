@@ -2356,3 +2356,136 @@ def test_native_schedule_start_requires_authoritative_inventory(monkeypatch, inv
             assert not session.closed
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("method,scenario_name", [
+    ("device_settings", "valid"), ("weather_protection", "valid"),
+    ("weather_protection", "partial"), ("weather_protection", "unavailable"),
+    ("maintenance_status", "valid"), ("maintenance_status", "fallback"),
+    ("voice_settings", "valid"), ("voice_settings", "fallback"),
+])
+def test_native_settings_preserve_read_evidence(monkeypatch, method, scenario_name):
+    strings = cloud_strings("dreame")
+    seen = []
+    config = {
+        "BAT": [15, 95, 1, 0, 1080, 480], "WRF": 1, "WRP": [1, 8, 1],
+        "CMS": [4896, 16752, 6849, -1], "LANG": [8, 13], "VOL": 75,
+    }
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        body = await request.json()
+        action = body["data"]["params"]["in"][0]
+        assert action["m"] == "g"
+        command = action["t"]
+        seen.append(command)
+        response = {"r": 0, "d": config}
+        if command == "RPET":
+            response = {"r": 0, "d": {"endTime": 12345}}
+        elif command == "CMS":
+            response = {"r": 0, "d": {"value": config["CMS"]}}
+        if scenario_name == "unavailable":
+            response = {"r": -1}
+        elif scenario_name == "partial" and command == "CFG":
+            response = {"r": -1}
+        elif scenario_name == "fallback" and len(seen) == 1:
+            response = {"r": 0, "d": None}
+        return web.json_response({"code": 0, "data": {"result": {"out": [response]}}})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **OPTIONS, session=session,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type="dreame", country="eu",
+                ),
+            )
+            client._ensure_device()._protocol.cloud._host = "hub.example.invalid"
+            try:
+                result = await getattr(client, "async_get_" + method)(include_raw=True)
+                assert result["available"] is (scenario_name != "unavailable")
+                if method in {"device_settings", "weather_protection"}:
+                    assert result["source"] == "app_action_" + method
+                    assert seen == ["CFG", "RPET"]
+                    if scenario_name == "valid":
+                        assert result["recharge_battery_level"] == 15
+                        assert result["charging_period_enabled"] is False
+                        assert result["raw_config"]["d"]["WRP"] == [1, 8, 1]
+                    else:
+                        assert result["errors"][0]["stage"] == "config"
+                    if scenario_name == "unavailable":
+                        assert result["warnings"][0]["stage"] == "rain_end_time"
+                    else:
+                        assert result["rain_protect_end_time"] == 12345
+                elif method == "maintenance_status":
+                    assert result["raw_cms"] == config["CMS"]
+                    assert result["due_items"] == ["robot"]
+                    assert seen == (["CMS", "CFG"] if scenario_name == "fallback"
+                                    else ["CMS"])
+                else:
+                    assert result["volume"] == 75
+                    assert result["present_config_keys"] == ["LANG", "VOL"]
+                    assert "voice_prompt_flags" not in result
+                    assert seen == (["CFG", "CFG", "RPET"]
+                                    if scenario_name == "fallback" else ["CFG"])
+                assert not client._cloud_read_tasks
+            finally:
+                await client.async_close()
+            assert not session.closed
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("stop", ["cancel", "close"])
+@pytest.mark.parametrize("phase", ["CFG", "RPET"])
+def test_native_settings_cancel_without_followup_reads(monkeypatch, stop, phase):
+    strings = cloud_strings("dreame")
+
+    async def scenario():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        seen = []
+
+        async def handler(request):
+            if request.path == strings[17]:
+                return web.json_response(login_response(strings))
+            body = await request.json()
+            command = body["data"]["params"]["in"][0]["t"]
+            seen.append(command)
+            if command == phase:
+                entered.set()
+                await release.wait()
+            return web.json_response({"code": 0, "data": {"result": {"out": [
+                {"r": 0, "d": {}},
+            ]}}})
+
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **OPTIONS, session=session,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type="dreame", country="eu",
+                ),
+            )
+            client._ensure_device()._protocol.cloud._host = "hub.example.invalid"
+            task = asyncio.create_task(client.async_get_device_settings())
+            try:
+                await asyncio.wait_for(entered.wait(), 2)
+                if stop == "close":
+                    await asyncio.wait_for(client.async_close(), 2)
+                else:
+                    task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, 2)
+                assert seen == (["CFG"] if phase == "CFG" else ["CFG", "RPET"])
+                assert not client._cloud_read_tasks
+                assert not session.closed
+            finally:
+                release.set()
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                await client.async_close()
+
+    asyncio.run(scenario())

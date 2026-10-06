@@ -3,24 +3,22 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
 from typing import Any
 
-from .client_settings_helpers import _weather_protection_active_summary
-from .client_shared_helpers import _app_action_data, _ensure_app_write_succeeded
+from .app_read_transport import run_app_read
+from .client_shared_helpers import _ensure_app_write_succeeded
 from .device_settings import (
     build_anti_theft_settings_request,
     build_charging_period_request,
     build_rain_protection_request,
-    decode_device_settings,
     validate_rain_delay,
     validate_time_of_day,
 )
+from .device_settings_read_plan import read_device_settings
 from .exceptions import (
     DreameLawnMowerCommandRejectedError,
     DreameLawnMowerConnectionError,
 )
-from .payload_utils import _json_safe
 
 
 class _DreameLawnMowerClientDeviceSettingsMixin:
@@ -30,71 +28,10 @@ class _DreameLawnMowerClientDeviceSettingsMixin:
         include_rain_end_time: bool = True,
     ) -> dict[str, Any]:
         """Read CFG once and decode all settings owned by this integration."""
-        result: dict[str, Any] = {
-            "source": "app_action_device_settings",
-            "available": False,
-            "config_keys": ["ATA", "BAT", "WRF", "WRP"],
-            "fault_hint": "INFO_BAD_WEATHER_PROTECTING",
-            "rain_end_time_command": "RPET",
-            "errors": [],
-            "warnings": [],
-        }
-        try:
-            config_result = self._sync_call_app_action({"m": "g", "t": "CFG"})
-            if include_raw:
-                result["raw_config"] = _json_safe(config_result, max_depth=4)
-            config = _app_action_data(config_result)
-            if not isinstance(config, Mapping):
-                raise DreameLawnMowerConnectionError(
-                    "CFG returned no device-settings record."
-                )
-            result["present_config_keys"] = [
-                key for key in result["config_keys"] if key in config
-            ]
-            result.update(decode_device_settings(config))
-            rain_end_time = config.get("rainProtectEndTime")
-            if rain_end_time is None:
-                rain_end_time = config.get("rain_protect_end_time")
-            if rain_end_time is not None:
-                result["rain_protect_end_time"] = rain_end_time
-                result["rain_protect_end_time_present"] = True
-            result["available"] = True
-        except Exception as err:  # noqa: BLE001 - return partial diagnostic evidence
-            result["errors"].append({"stage": "config", "error": str(err)})
-
-        if include_rain_end_time:
-            try:
-                rain_end_result = self._sync_call_app_action({"m": "g", "t": "RPET"})
-                if include_raw:
-                    result["raw_rain_end_time"] = _json_safe(
-                        rain_end_result,
-                        max_depth=4,
-                    )
-                rain_end_data = _app_action_data(rain_end_result)
-                if isinstance(rain_end_data, Mapping):
-                    end_time = rain_end_data.get("endTime")
-                    if end_time is None:
-                        end_time = rain_end_data.get("end_time")
-                    result["rain_protect_end_time_present"] = end_time is not None
-                    if end_time is not None:
-                        result["rain_protect_end_time"] = end_time
-                        result["available"] = True
-                elif rain_end_data is None:
-                    result["rain_protect_end_time_present"] = False
-                else:
-                    result["warnings"].append(
-                        {
-                            "stage": "rain_end_time",
-                            "warning": "RPET returned unexpected data.",
-                        }
-                    )
-            except Exception as err:  # noqa: BLE001 - RPET may be conditionally available
-                result["warnings"].append(
-                    {"stage": "rain_end_time", "warning": str(err)}
-                )
-
-        result.update(_weather_protection_active_summary(result))
-        return result
+        return run_app_read(
+            read_device_settings(include_raw, include_rain_end_time),
+            self._sync_call_app_action,
+        )
 
     def _sync_get_weather_protection(
         self,
@@ -241,22 +178,6 @@ class _DreameLawnMowerClientDeviceSettingsMixin:
                 "confirm the requested values."
             )
         return refreshed
-
-    async def async_get_device_settings(
-        self,
-        *,
-        include_raw: bool = False,
-    ) -> dict[str, Any]:
-        """Return decoded mower-native device settings."""
-        return await asyncio.to_thread(self._sync_get_device_settings, include_raw)
-
-    async def async_get_weather_protection(
-        self,
-        *,
-        include_raw: bool = False,
-    ) -> dict[str, Any]:
-        """Keep the historical weather read API over the CFG settings owner."""
-        return await asyncio.to_thread(self._sync_get_weather_protection, include_raw)
 
     async def async_set_charging_period(
         self,

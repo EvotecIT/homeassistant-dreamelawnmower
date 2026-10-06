@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import math
 import time
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping
 from threading import Event
 from typing import TYPE_CHECKING, Any
 
+from .app_read_transport import AppReadRequest, capture_app_result
 from .client_refresh import _run_state_worker
 from .cloud_wire import cloud_strings
 from .exceptions import DreameLawnMowerConnectionError
@@ -87,5 +88,37 @@ async def async_read_app_action(
             raise DreameLawnMowerConnectionError("App read timed out") from err
         finally:
             cancelled.set()
+
+    return await client._async_cloud_read(read)
+
+
+async def async_run_app_read(
+    client: DreameLawnMowerClient,
+    plan: Generator[AppReadRequest, Any, dict[str, Any]],
+) -> dict[str, Any]:
+    """Own all requests and cleanup in one read-only protocol plan."""
+    async def read(_cloud: DreameCloudSession) -> dict[str, Any]:
+        result: list[dict[str, Any]] = []
+        plan_with_result = capture_app_result(plan, result)
+        try:
+            request = next(plan_with_result)
+            while True:
+                deadline = time.monotonic() + request.timeout
+                if request.deadline is not None:
+                    deadline = min(deadline, request.deadline)
+                try:
+                    response = await async_read_app_action(
+                        client,
+                        request.action,
+                        deadline=deadline,
+                    )
+                except Exception as error:
+                    request = plan_with_result.throw(error)
+                else:
+                    request = plan_with_result.send(response)
+        except StopIteration:
+            return result[0]
+        finally:
+            plan_with_result.close()
 
     return await client._async_cloud_read(read)

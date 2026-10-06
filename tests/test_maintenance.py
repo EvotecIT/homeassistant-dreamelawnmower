@@ -29,6 +29,8 @@ class _FakeMaintenanceCloud:
         *,
         siid: int = 2,
         aiid: int = 50,
+        retry_count: int | None = None,
+        timeout: float | None = None,
     ) -> dict[str, object]:
         assert siid == 2
         assert aiid == 50

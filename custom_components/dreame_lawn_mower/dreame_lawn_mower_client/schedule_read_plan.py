@@ -10,6 +10,7 @@ import time
 from collections.abc import Generator, Mapping, Sequence
 from typing import Any, Protocol
 
+from .app_read_transport import AppReadRequest
 from .client_map_helpers import _app_map_entries_are_valid, _normalize_app_map_entries
 from .client_settings_helpers import _dedupe_ints
 from .client_shared_helpers import _app_action_data, _positive_int
@@ -22,7 +23,6 @@ from .schedule import (
     schedule_task_summary,
 )
 from .schedule_document import ScheduleDocumentReader
-from .schedule_read_transport import ScheduleReadRequest
 from .schedule_tables import (
     combine_schedule_table_weeks,
     decode_schedule_table_task,
@@ -48,9 +48,9 @@ class ScheduleReadState(Protocol):
 
 def read_start_evidence(
     self: ScheduleReadState,
-) -> Generator[ScheduleReadRequest, Any, dict[str, Any]]:
+) -> Generator[AppReadRequest, Any, dict[str, Any]]:
     """Read start evidence only from a validated fresh map inventory."""
-    response = yield ScheduleReadRequest(
+    response = yield AppReadRequest(
         {"m": "g", "t": "MAPL"},
         retry_count=0,
         timeout=5.0,
@@ -86,7 +86,7 @@ def read_schedules(
     map_indices: Sequence[int] | None = None,
     chunk_size: int = SCHEDULE_CHUNK_SIZE,
     include_current_task: bool = True,
-) -> Generator[ScheduleReadRequest, Any, dict[str, Any]]:
+) -> Generator[AppReadRequest, Any, dict[str, Any]]:
     """Fetch and decode mower schedules through read-only app actions."""
     if chunk_size <= 0:
         raise ValueError("chunk_size must be greater than zero.")
@@ -102,7 +102,7 @@ def read_schedules(
             current_task_deadline = (
                 time.monotonic() + SCHEDULE_CURRENT_TASK_TIMEOUT_SECONDS
             )
-            task_result = yield ScheduleReadRequest(
+            task_result = yield AppReadRequest(
                 {"m": "g", "t": "SCHDT", "d": {"t": 0}},
                 retry_count=0,
                 timeout=SCHEDULE_CURRENT_TASK_TIMEOUT_SECONDS,
@@ -203,7 +203,7 @@ def read_slot(
     include_raw: bool,
     deadline: float,
     reserve_alternate: bool = True,
-) -> Generator[ScheduleReadRequest, Any, tuple[dict[str, Any], Exception | None]]:
+) -> Generator[AppReadRequest, Any, tuple[dict[str, Any], Exception | None]]:
     """Select a protocol from validated replies, using brand only for order."""
     preferred = self._schedule_protocols.get(map_index)
     if preferred is None:
@@ -275,7 +275,7 @@ def read_document_slot(
     deadline: float,
     metadata_deadline: float | None = None,
     reserve_generation: bool = True,
-) -> Generator[ScheduleReadRequest, Any, tuple[dict[str, Any], Exception | None]]:
+) -> Generator[AppReadRequest, Any, tuple[dict[str, Any], Exception | None]]:
     """Negotiate document generations without consuming the next slot's budget."""
     preferred = self._schedule_document_versions.get(map_index, 2)
     if not reserve_generation:
@@ -327,7 +327,7 @@ def read_document_generation(
     deadline: float,
     metadata_deadline: float,
     generation: int,
-) -> Generator[ScheduleReadRequest, Any, tuple[dict[str, Any], Exception | None]]:
+) -> Generator[AppReadRequest, Any, tuple[dict[str, Any], Exception | None]]:
     """Read metadata and chunks from one internally consistent generation."""
     schedule_result: dict[str, Any] = {
         "idx": map_index,
@@ -335,7 +335,7 @@ def read_document_generation(
         "available": False,
     }
     try:
-        info_result = yield ScheduleReadRequest(
+        info_result = yield AppReadRequest(
             {"m": "g", "t": f"SCHDIV{generation}", "d": {"i": map_index}},
             retry_count=0,
             timeout=SCHEDULE_READ_TIMEOUT_SECONDS,
@@ -401,7 +401,7 @@ def read_document_text(
     chunk_size: int = SCHEDULE_CHUNK_SIZE,
     deadline: float | None = None,
     document_version: int = 2,
-) -> Generator[ScheduleReadRequest, Any, tuple[str, int, int]]:
+) -> Generator[AppReadRequest, Any, tuple[str, int, int]]:
     reader = ScheduleDocumentReader(
         size=size,
         version=version,
@@ -409,7 +409,7 @@ def read_document_text(
         document_version=document_version,
     )
     while not reader.complete:
-        response = yield ScheduleReadRequest(
+        response = yield AppReadRequest(
             reader.request(),
             retry_count=0,
             timeout=SCHEDULE_READ_TIMEOUT_SECONDS,
@@ -425,8 +425,8 @@ def read_tables(
     deadline: float,
     include_raw: bool = False,
     include_tasks: bool = True,
-) -> Generator[ScheduleReadRequest, Any, dict[str, Any]]:
-    response = yield ScheduleReadRequest(
+) -> Generator[AppReadRequest, Any, dict[str, Any]]:
+    response = yield AppReadRequest(
         {"m": "g", "t": "SCHDI", "d": list(schedule_table_ids(map_index))},
         retry_count=0,
         timeout=5.0,
@@ -439,7 +439,7 @@ def read_tables(
         if include_tasks:
             for task_id in plan["task_references"]:
                 try:
-                    task_response = yield ScheduleReadRequest(
+                    task_response = yield AppReadRequest(
                         {"m": "g", "t": "SCHDC", "d": [plan["table_id"], task_id]},
                         retry_count=0,
                         timeout=5.0,
@@ -483,11 +483,11 @@ def read_map_indices(
     map_indices: Sequence[int] | None,
     *,
     deadline: float | None = None,
-) -> Generator[ScheduleReadRequest, Any, list[int]]:
+) -> Generator[AppReadRequest, Any, list[int]]:
     if map_indices is not None:
         return _dedupe_ints(map_indices)
     try:
-        response = yield ScheduleReadRequest(
+        response = yield AppReadRequest(
             {"m": "g", "t": "MAPL"},
             deadline=deadline,
         )

@@ -1,4 +1,4 @@
-"""Read-only requests and synchronous driver for the shared schedule plan."""
+"""Read-only requests and synchronous driver for the shared app read plans."""
 
 from __future__ import annotations
 
@@ -8,14 +8,14 @@ from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
-class ScheduleReadRequest:
+class AppReadRequest:
     action: Mapping[str, Any]
     retry_count: int = 0
     timeout: float = 5.0
     deadline: float | None = None
 
 
-class ScheduleReadDispatch(Protocol):
+class AppReadDispatch(Protocol):
     def __call__(
         self,
         action: Mapping[str, Any],
@@ -27,20 +27,20 @@ class ScheduleReadDispatch(Protocol):
     ) -> Any: ...
 
 
-def capture_schedule_result[T](
-    plan: Generator[ScheduleReadRequest, Any, T], result: list[T],
-) -> Generator[ScheduleReadRequest, Any]:
+def capture_app_result[T](
+    plan: Generator[AppReadRequest, Any, T], result: list[T],
+) -> Generator[AppReadRequest, Any]:
     """Retain the typed return value instead of erasing it in StopIteration."""
     result.append((yield from plan))
 
 
-def run_schedule_read[T](
-    plan: Generator[ScheduleReadRequest, Any, T],
-    dispatch: ScheduleReadDispatch,
+def run_app_read[T](
+    plan: Generator[AppReadRequest, Any, T],
+    dispatch: AppReadDispatch,
 ) -> T:
     """Feed transport results or errors back into the shared protocol plan."""
     result: list[T] = []
-    plan_with_result = capture_schedule_result(plan, result)
+    plan_with_result = capture_app_result(plan, result)
     try:
         request = next(plan_with_result)
         while True:

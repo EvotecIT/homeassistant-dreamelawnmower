@@ -10,6 +10,7 @@ import urllib.request
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from .app_read_transport import run_app_read
 from .batch_device_data import (
     decode_batch_mowing_preferences,
     decode_batch_ota_info,
@@ -33,7 +34,6 @@ from .client_settings_helpers import (
     _mowing_preference_map_overview,
     _mowing_preference_overview,
     _normalize_voice_prompt_flags,
-    _voice_settings_summary,
 )
 from .client_shared_helpers import (
     _app_action_data,
@@ -44,6 +44,7 @@ from .debug_ota_catalog import (
     build_debug_ota_catalog_url,
     normalize_debug_ota_catalog_payload,
 )
+from .device_settings_read_plan import read_maintenance, read_voice
 from .exceptions import (
     DreameLawnMowerCommandRejectedError,
     DreameLawnMowerConnectionError,
@@ -53,7 +54,6 @@ from .exceptions import (
     DreameLawnMowerError as DreameLawnMowerError,
 )
 from .maintenance import (
-    CMS_GET_REQUEST,
     build_cms_set_request,
     maintenance_item_status,
     maintenance_status_from_app_data,
@@ -837,44 +837,7 @@ class _DreameLawnMowerClientSettingsMixin:
         include_raw: bool = False,
     ) -> dict[str, Any]:
         """Fetch read-only CMS maintenance counter state."""
-        result: dict[str, Any] = {
-            "source": "app_action_maintenance_cms",
-            "available": False,
-            "items": [],
-            "raw_cms": None,
-            "errors": [],
-        }
-
-        try:
-            cms_result = self._sync_call_app_action(CMS_GET_REQUEST)
-            if include_raw:
-                result["raw_cms_response"] = _json_safe(cms_result, max_depth=4)
-            cms_data = _app_action_data(cms_result)
-            result.update(
-                maintenance_status_from_app_data(
-                    cms_data,
-                    source="app_action_maintenance_cms",
-                )
-            )
-            if result.get("available"):
-                return result
-        except Exception as err:  # noqa: BLE001 - fallback to CFG may still work
-            result["errors"].append({"stage": "cms", "error": str(err)})
-
-        try:
-            config_result = self._sync_call_app_action({"m": "g", "t": "CFG"})
-            if include_raw:
-                result["raw_config_response"] = _json_safe(config_result, max_depth=4)
-            config = _app_action_data(config_result)
-            result.update(
-                maintenance_status_from_app_data(
-                    config,
-                    source="app_action_config_cms",
-                )
-            )
-        except Exception as err:  # noqa: BLE001 - diagnostic probe returns evidence
-            result["errors"].append({"stage": "config", "error": str(err)})
-        return result
+        return run_app_read(read_maintenance(include_raw), self._sync_call_app_action)
 
     def _sync_plan_maintenance_reset(
         self,
@@ -946,43 +909,7 @@ class _DreameLawnMowerClientSettingsMixin:
         include_raw: bool = False,
     ) -> dict[str, Any]:
         """Fetch read-only voice and language settings from CFG."""
-        result: dict[str, Any] = {
-            "source": "app_action_voice_settings",
-            "available": False,
-            "config_keys": ["LANG", "VOL", "VOICE"],
-            "errors": [],
-            "warnings": [],
-        }
-
-        try:
-            config_result = self._sync_call_app_action({"m": "g", "t": "CFG"})
-            config = _app_action_data(config_result)
-            if not isinstance(config, Mapping):
-                weather_result = self._sync_get_weather_protection(include_raw=True)
-                weather_raw_config = (
-                    weather_result.get("raw_config")
-                    if isinstance(weather_result, Mapping)
-                    else None
-                )
-                weather_data = _app_action_data(weather_raw_config)
-                if isinstance(weather_data, Mapping):
-                    config_result = weather_raw_config
-                    config = weather_data
-            if include_raw:
-                result["raw_config"] = _json_safe(config_result, max_depth=4)
-            if not isinstance(config, Mapping):
-                raise DreameLawnMowerConnectionError(
-                    f"CFG returned invalid voice config: {config_result}"
-                )
-            result["present_config_keys"] = [
-                key for key in result["config_keys"] if key in config
-            ]
-            result.update(_voice_settings_summary(config))
-            result["available"] = bool(result["present_config_keys"])
-        except Exception as err:  # noqa: BLE001 - diagnostic probe should return evidence
-            result["errors"].append({"stage": "config", "error": str(err)})
-
-        return result
+        return run_app_read(read_voice(include_raw), self._sync_call_app_action)
 
     def _sync_set_voice_language(self, voice_language: int) -> dict[str, Any]:
         """Set the mower voice language and return the confirmed response."""

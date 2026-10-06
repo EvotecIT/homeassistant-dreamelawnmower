@@ -6,10 +6,10 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
+from .app_read_transport import run_app_read
 from .client_shared_helpers import _ensure_app_write_succeeded
 from .exceptions import DreameLawnMowerConnectionError, mark_write_attempted
 from .schedule_read_plan import read_tables
-from .schedule_read_transport import run_schedule_read
 from .schedule_tables import (
     schedule_table_ids,
 )
@@ -26,7 +26,7 @@ class _DreameLawnMowerScheduleTablesMixin:
         include_raw: bool = False,
         include_tasks: bool = True,
     ) -> dict[str, Any]:
-        return run_schedule_read(
+        return run_app_read(
             read_tables(
                 map_index=map_index,
                 deadline=deadline,
