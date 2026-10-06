@@ -28,6 +28,27 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
 )
 
 
+@pytest.mark.parametrize("icon_set", [0, 1, 2, 3])
+def test_charger_without_heading_keeps_reported_location(
+    icon_set: int, caplog: pytest.LogCaptureFixture,
+) -> None:
+    data = MapData()
+    data.map_id = data.frame_id = 1
+    data.empty_map = False
+    data.rotation = 0
+    data.charger_position = Point(100, 100)
+    data.dimensions = MapImageDimensions(0, 0, 8, 8, 50)
+    data.pixel_type = np.full((8, 8), MapPixelType.FLOOR.value)
+    data.data = bytes([MapPixelType.FLOOR.value] * 64)
+    data.segments = {}
+    renderer = DreameMowerMapRenderer(cache=False, map_objects=["charger"])
+    renderer.icon_set = icon_set
+    actual = renderer.render_map(data)
+    assert actual != renderer.default_map_image
+    assert "Map render Failed" not in caplog.text
+    assert data.charger_position == Point(100, 100)
+
+
 @pytest.mark.parametrize("charger", [None, Point(50, 50)])
 def test_docked_marker_preserves_reported_position_without_charger_heading(
     charger: Point | None, caplog: pytest.LogCaptureFixture,

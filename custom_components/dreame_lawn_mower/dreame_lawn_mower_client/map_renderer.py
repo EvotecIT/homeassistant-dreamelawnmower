@@ -2233,7 +2233,7 @@ class DreameMowerMapRenderer:
                 elif self._robot_type == RobotType.VSLAM and self.icon_set == 3:
                     offset = int(-robot_icon_size * 18)
 
-                if offset:
+                if offset and charger_position.a is not None:
                     charger_position = Point(
                         charger_position.x - offset * math.cos(charger_position.a * math.pi / 180),
                         charger_position.y - offset * math.sin(charger_position.a * math.pi / 180),
@@ -2593,14 +2593,14 @@ class DreameMowerMapRenderer:
 
     def render_charger(
         self,
-        charger_position,
-        station_status,
-        layer_size,
-        dimensions,
-        size,
-        map_rotation,
-        scale,
-    ):
+        charger_position: Point,
+        station_status: int,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        size: float,
+        map_rotation: int | None,
+        scale: int,
+    ) -> Image.Image:
         new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         icon_size = int(size * scale)
         if self.icon_set == 3:
@@ -2635,12 +2635,12 @@ class DreameMowerMapRenderer:
 
         charger_icon = self._charger_icon.resize((icon_size, icon_size), resample=Image.Resampling.NEAREST).rotate(
             (
-                charger_position.a
+                (charger_position.a if charger_position.a is not None else 0)
                 if self._robot_type == RobotType.VSLAM
                 or self.icon_set == 0
                 or self.icon_set == 2
                 or self.icon_set == 3
-                else (-map_rotation)
+                else (-(map_rotation or 0))
             ),
             expand=1,
         )
