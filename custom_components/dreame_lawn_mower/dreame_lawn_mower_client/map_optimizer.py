@@ -463,9 +463,12 @@ class DreameMowerMapOptimizer:
                         data[nIndex] = 1
         return weight
 
-    def _add_line(self, line, covertlines, allLines):
+    def _add_line(
+        self, line: CLine, covertlines: list[ALine], allLines: list[CLine]
+    ) -> None:
         aLine = ALine()
         if line.ishorizontal:
+            assert isinstance(line.x, list) and isinstance(line.y, int)
             aLine.p0.y = line.y
             aLine.p1.y = line.y
             if line.findEnd:
@@ -476,6 +479,7 @@ class DreameMowerMapOptimizer:
                 aLine.p1.x = line.x[0]
             aLine.length = abs(line.x[1] - line.x[0])
         else:
+            assert isinstance(line.x, int) and isinstance(line.y, list)
             aLine.p0.x = line.x
             aLine.p1.x = line.x
             aLine.length = abs(line.y[1] - line.y[0])
@@ -488,24 +492,33 @@ class DreameMowerMapOptimizer:
         covertlines.append(aLine)
         allLines.append(line)
 
-    def _find_bounds(self, data, width, horizontalLines, verticalLines) -> list[Paths]:
+    def _find_bounds(
+        self, data: list[int], width: int,
+        horizontalLines: list[CLine], verticalLines: list[CLine],
+    ) -> list[Paths]:
         paths = []
         size = len(data)
 
         while horizontalLines:
             startLine = horizontalLines.pop(0)
+            assert isinstance(startLine.x, list)
+            assert isinstance(startLine.y, int)
             startLine.findEnd = True
-            covertlines = []
-            allLines = []
+            covertlines: list[ALine] = []
+            allLines: list[CLine] = []
             self._add_line(startLine, covertlines, allLines)
             while True:
                 lastLine = allLines[len(allLines) - 1]
                 if lastLine.ishorizontal:
+                    assert isinstance(lastLine.x, list)
+                    assert isinstance(lastLine.y, int)
                     hasFind = False
 
                     lines = verticalLines.copy()
                     for i in range(len(lines)):
                         vLine = lines[i]
+                        assert isinstance(vLine.x, int)
+                        assert isinstance(vLine.y, list)
 
                         x = lastLine.x[0]
                         if lastLine.findEnd:
@@ -550,6 +563,8 @@ class DreameMowerMapOptimizer:
                     if not hasFind:
                         break
                 else:
+                    assert isinstance(lastLine.x, int)
+                    assert isinstance(lastLine.y, list)
                     hasFind = False
                     _y = lastLine.y[0]
                     if lastLine.findEnd:
@@ -561,6 +576,8 @@ class DreameMowerMapOptimizer:
                     lines = horizontalLines.copy()
                     for i in range(len(lines)):
                         hLine = lines[i]
+                        assert isinstance(hLine.x, list)
+                        assert isinstance(hLine.y, int)
 
                         y = lastLine.y[0]
                         if lastLine.findEnd:
@@ -633,7 +650,10 @@ class DreameMowerMapOptimizer:
             elif data[i] == 255:
                 data[i] = 0
 
-    def _link_adjacent_areas(self, original_data, data, width, height, stroke):
+    def _link_adjacent_areas(
+        self, original_data: list[int], data: list[int],
+        width: int, height: int, stroke: int,
+    ) -> None:
         horizontalLines = []
         verticalLines = []
         DIR_LEFT = 1
@@ -826,7 +846,9 @@ class DreameMowerMapOptimizer:
             self._update_border_value(data, width, height, stroke)
             self._fill_cross_line(data, width, height, stroke)
 
-    def _fill_angle(self, data, width, stroke, angle):
+    def _fill_angle(
+        self, data: list[int], width: int, stroke: int, angle: Angle
+    ) -> Angle:
         bottom = 5
         right = 6
         top = 7
@@ -847,6 +869,7 @@ class DreameMowerMapOptimizer:
         maxx = None
         maxy = None
         if l1.ishorizontal:
+            assert isinstance(l1.x, list) and isinstance(l1.y, int)
             if angle.horizontalDir == right:
                 minx = l1.x[1]
             else:
@@ -858,6 +881,7 @@ class DreameMowerMapOptimizer:
                 maxy = l1.y
 
             if l2.ishorizontal:
+                assert isinstance(l2.x, list) and isinstance(l2.y, int)
                 if angle.horizontalDir == right:
                     maxx = l2.x[0]
                 else:
@@ -868,6 +892,7 @@ class DreameMowerMapOptimizer:
                 else:
                     miny = l2.y
             else:
+                assert isinstance(l2.x, int) and isinstance(l2.y, list)
                 if angle.horizontalDir == right:
                     maxx = l2.x
                 else:
@@ -877,6 +902,7 @@ class DreameMowerMapOptimizer:
                 else:
                     miny = l2.y[1]
         else:
+            assert isinstance(l1.x, int) and isinstance(l1.y, list)
             if angle.verticalDir == top:
                 miny = l1.y[1]
             else:
@@ -888,6 +914,7 @@ class DreameMowerMapOptimizer:
                 maxx = l1.x
 
             if l2.ishorizontal:
+                assert isinstance(l2.x, list) and isinstance(l2.y, int)
                 if angle.horizontalDir == right:
                     maxx = l2.x[0]
                 else:
@@ -898,6 +925,7 @@ class DreameMowerMapOptimizer:
                     miny = l2.y
 
             else:
+                assert isinstance(l2.x, int) and isinstance(l2.y, list)
                 if angle.horizontalDir == right:
                     maxx = l2.x
                 else:
@@ -917,6 +945,7 @@ class DreameMowerMapOptimizer:
             return nextAngle
 
         if l1.ishorizontal and l2.ishorizontal and ((maxy - miny) <= 3):
+            assert isinstance(l1.x, list) and isinstance(l2.x, list)
             if angle.horizontalDir == right:
                 minx = l1.x[0]
                 maxx = l2.x[1]
@@ -924,6 +953,7 @@ class DreameMowerMapOptimizer:
                 minx = l2.x[0]
                 maxx = l1.x[1]
         elif not l1.ishorizontal and not l2.ishorizontal and ((maxx - minx) <= 3):
+            assert isinstance(l1.y, list) and isinstance(l2.y, list)
             if angle.verticalDir == top:
                 miny = l1.y[0]
                 maxy = l2.y[1]
@@ -952,7 +982,9 @@ class DreameMowerMapOptimizer:
             nextAngle.verticalDir = top if l2.findEnd else bottom
         return nextAngle
 
-    def _find_outline(self, data, width, height, stroke, first):
+    def _find_outline(
+        self, data: list[int], width: int, height: int, stroke: int, first: bool
+    ) -> bool:
         horizontalLines = []
         verticalLines = []
         size = len(data)
@@ -1075,6 +1107,7 @@ class DreameMowerMapOptimizer:
                 pos = clearPos.pop()
                 x = pos[0]
                 y = pos[1]
+                assert isinstance(x, int) and isinstance(y, int)
                 data[y * width + x] = 0
                 for _i in range(x - 1, x + 2):
                     for _j in range(y - 1, y + 2):
@@ -1124,7 +1157,9 @@ class DreameMowerMapOptimizer:
 
         return True
 
-    def _find_obstacle_border(self, data, width, height, stroke):
+    def _find_obstacle_border(
+        self, data: list[int], width: int, height: int, stroke: int
+    ) -> None:
         size = len(data)
         for j in range(height):
             for i in range(width):
@@ -1150,7 +1185,9 @@ class DreameMowerMapOptimizer:
                     if hasFind:
                         data[index] = 2
 
-    def _clean_small_obstacle(self, data, width, height, stroke):
+    def _clean_small_obstacle(
+        self, data: list[int], width: int, height: int, stroke: int
+    ) -> None:
         for i in range(width):
             startY = -1
             for j in range(height):
