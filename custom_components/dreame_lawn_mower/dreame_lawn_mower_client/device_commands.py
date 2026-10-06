@@ -12,7 +12,11 @@ import traceback
 from datetime import datetime
 from random import randrange
 from threading import RLock, Timer
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
+from collections.abc import Generator
+
+if TYPE_CHECKING:
+    from .device_action_plan import ActionDelay, ActionRequest
 
 from .app_protocol import mower_realtime_property_name
 from .device_privacy import AI_POLICY_PROPERTY, decode_ai_policy_acceptance
@@ -447,121 +451,11 @@ class _DreameMowerDeviceCommandMixin:
         enforce_availability: bool = True,
     ) -> dict[str, Any] | None:
         """Call an action."""
-        if not enforce_availability and action is not DreameMowerAction.STOP:
-            raise InvalidActionException(
-                "Availability can only be bypassed for an authoritative STOP"
-            )
-        if action not in self.action_mapping:
-            raise InvalidActionException(f"Unable to find {action} in the action mapping")
+        from .device_action_plan import run_device_action
 
-        mapping = self.action_mapping[action]
-        if "siid" not in mapping or "aiid" not in mapping:
-            raise InvalidActionException(f"{action} is not an action (missing siid or aiid)")
-
-        map_action = bool(action is DreameMowerAction.REQUEST_MAP or action is DreameMowerAction.UPDATE_MAP_DATA)
-
-        if not map_action:
-            self.schedule_update(10, True)
-
-        cleaning_action = bool(
-            action
-            in [
-                DreameMowerAction.START_MOWING,
-                DreameMowerAction.PAUSE,
-                DreameMowerAction.DOCK,
-            ]
+        return run_device_action(
+            self, action, parameters, enforce_availability=enforce_availability,
         )
-
-        if not cleaning_action and enforce_availability:
-            available_fn = ACTION_AVAILABILITY.get(action.name)
-            if available_fn and not available_fn(self):
-                raise InvalidActionException("Action unavailable")
-        elif self._map_select_time:
-            elapsed = time.time() - self._map_select_time
-            self._map_select_time = None
-            if elapsed < 5:
-                time.sleep(5 - elapsed)
-
-        # Reset consumable on memory
-        if action is DreameMowerAction.RESET_BLADES:
-            self._consumable_change = True
-            self._update_property(DreameMowerProperty.BLADES_LEFT, 100)
-            self._update_property(DreameMowerProperty.BLADES_TIME_LEFT, 300)
-        elif action is DreameMowerAction.RESET_SIDE_BRUSH:
-            self._consumable_change = True
-            self._update_property(DreameMowerProperty.SIDE_BRUSH_LEFT, 100)
-            self._update_property(DreameMowerProperty.SIDE_BRUSH_TIME_LEFT, 200)
-        elif action is DreameMowerAction.RESET_FILTER:
-            self._consumable_change = True
-            self._update_property(DreameMowerProperty.FILTER_LEFT, 100)
-            self._update_property(DreameMowerProperty.FILTER_TIME_LEFT, 150)
-        elif action is DreameMowerAction.RESET_SENSOR:
-            self._consumable_change = True
-            self._update_property(DreameMowerProperty.SENSOR_DIRTY_LEFT, 100)
-            self._update_property(DreameMowerProperty.SENSOR_DIRTY_TIME_LEFT, 30)
-        elif action is DreameMowerAction.RESET_TANK_FILTER:
-            self._consumable_change = True
-            self._update_property(DreameMowerProperty.TANK_FILTER_LEFT, 100)
-            self._update_property(DreameMowerProperty.TANK_FILTER_TIME_LEFT, 30)
-        elif action is DreameMowerAction.RESET_SILVER_ION:
-            self._consumable_change = True
-            self._update_property(DreameMowerProperty.SILVER_ION_LEFT, 100)
-            self._update_property(DreameMowerProperty.SILVER_ION_TIME_LEFT, 365)
-        elif action is DreameMowerAction.RESET_LENSBRUSH:
-            parameters['in'] = {
-                "CMS": {
-                    "type": "set",
-                    "value": [
-                        1,
-                        0,
-                        1
-                    ]
-                }
-            }
-            self._consumable_change = True
-            self._update_property(DreameMowerProperty.LENSBRUSH_LEFT, 100)
-            self._update_property(DreameMowerProperty.LENSBRUSH_TIME_LEFT, 18)
-        elif action is DreameMowerAction.RESET_SQUEEGEE:
-            self._consumable_change = True
-            self._update_property(DreameMowerProperty.SQUEEGEE_LEFT, 100)
-            self._update_property(DreameMowerProperty.SQUEEGEE_TIME_LEFT, 100)
-        elif action is DreameMowerAction.CLEAR_WARNING:
-            # Mower property 2.2 uses -1 for no active device code. Vacuum
-            # clients used 0, but the A2 catalog assigns 0 to robot lifted.
-            self._update_property(DreameMowerProperty.ERROR, -1)
-
-        # Update listeners
-        if cleaning_action or self._consumable_change:
-            self._property_changed()
-
-        try:
-            result = self._protocol.action(mapping["siid"], mapping["aiid"], parameters)
-        except Exception as ex:
-            _LOGGER.error("Send action failed %s: %s", action.name, ex)
-            self.schedule_update(1, True)
-            raise DeviceUpdateFailedException(
-                f"Send action failed {action.name}: {ex}"
-            ) from ex
-
-        # Schedule update for retrieving new properties after action sent
-        self.schedule_update(6, bool(not map_action and self._protocol.dreame_cloud))
-        if result and result.get("code") == 0:
-            _LOGGER.info("Send action %s %s", action.name, parameters)
-            self._last_change = time.time()
-            if not map_action:
-                self._last_settings_request = 0
-        else:
-            _LOGGER.error("Send action failed %s (%s): %s", action.name, parameters, result)
-            error_type = (
-                DeviceCommandRejectedException
-                if result is not None
-                else DeviceUpdateFailedException
-            )
-            raise error_type(
-                f"The mower did not acknowledge action {action.name}."
-            )
-
-        return result
 
     def send_command(self, command: str, parameters: dict[str, Any] = None) -> dict[str, Any] | None:
         """Send a raw command to the device. This is mostly useful when trying out
@@ -881,6 +775,14 @@ class _DreameMowerDeviceCommandMixin:
         """Pause the cleaning task."""
 
 
+        from .device_action_plan import run_device_plan
+
+        return run_device_plan(self, self._pause_plan())
+
+    def _pause_plan(self) -> Generator[ActionDelay | ActionRequest, Any, Any]:
+        """Share pause state transitions and action policy across transports."""
+        from .device_action_plan import device_action_plan
+
         self.schedule_update(10, True)
 
         if not self.status.paused and self.status.started:
@@ -898,7 +800,7 @@ class _DreameMowerDeviceCommandMixin:
                     DreameMowerTaskStatus.CRUISING_POINT_PAUSED.value,
                 )
 
-        return self.call_action(DreameMowerAction.PAUSE)
+        return (yield from device_action_plan(self, DreameMowerAction.PAUSE))
 
     def return_to_base(self) -> dict[str, Any] | None:
         """Set the mower cleaner to return to the dock."""

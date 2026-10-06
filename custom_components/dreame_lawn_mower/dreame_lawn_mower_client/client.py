@@ -100,6 +100,9 @@ from .debug_ota_catalog import (
 )
 from .docking import SESSION_STATES_TO_END as _SESSION_STATES_TO_END
 from .docking import async_stop_then_dock
+from .exceptions import (
+    DeviceCommandRejectedException as _DeviceCommandRejectedException,
+)
 from .exceptions import DeviceException as DeviceException
 from .exceptions import (
     DreameLawnMowerAuthError as DreameLawnMowerAuthError,
@@ -755,7 +758,22 @@ class DreameLawnMowerClient(
 
     async def async_pause(self) -> None:
         """Pause mowing."""
-        await self._async_call_device_method("pause")
+        from .client_device_actions import async_run_device_plan
+
+        async def pause(_cloud: _DreameCloudSession) -> None:
+            try:
+                await async_run_device_plan(self, lambda device: device._pause_plan())
+            except _DeviceCommandRejectedException as error:
+                raise _DreameLawnMowerCommandRejectedError(str(error)) from error
+            except DeviceException as error:
+                await self._async_reconcile_ambiguous_mutation(
+                    "pause mowing", DreameLawnMowerConnectionError(str(error)),
+                    lambda snapshot: bool(
+                        snapshot.paused or snapshot.task_status == "paused"
+                    ),
+                )
+
+        await self._async_cloud_read(pause)
 
     async def async_start_fresh_mowing(self) -> bool | None:
         """Start an explicit all-area task, refusing resumable or unknown sessions."""

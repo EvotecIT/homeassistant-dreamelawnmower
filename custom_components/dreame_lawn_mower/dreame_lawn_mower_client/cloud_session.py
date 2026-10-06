@@ -361,6 +361,19 @@ class DreameCloudSession:
             deadline=deadline,
         )
 
+    async def async_command_device_action(
+        self, did: str, host: str | None, request_id: int,
+        siid: int, aiid: int, parameters: Any, *, deadline: float,
+    ) -> Any:
+        """Dispatch one mapped device action without replay after sending."""
+        return await self._async_rpc(
+            did, host, request_id, "action",
+            {"did": str(did), "siid": siid, "aiid": aiid,
+             "in": [] if parameters is None else parameters},
+            timeout=max(0.001, deadline - time.monotonic()),
+            deadline=deadline, command=True,
+        )
+
     async def async_command_device_property(
         self, did: str, host: str | None, request_id: int,
         siid: int, piid: int, value: Any, *, deadline: float,
