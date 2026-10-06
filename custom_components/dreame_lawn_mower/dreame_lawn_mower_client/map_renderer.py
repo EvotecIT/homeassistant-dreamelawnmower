@@ -1073,9 +1073,9 @@ class DreameMowerMapRenderer:
             )
             object_scale = 2
 
-            render_material = False
+            render_material: dict[int, int] | None = None
             if (map_data.saved_map_status == 2 or map_data.saved_map) and not map_data.wifi_map:
-                render_material = self.config.material and map_data.floor_material
+                render_material = map_data.floor_material if self.config.material else None
 
             if scale == 3 and (render_material):
                 scale = 2 if info_text else 4
@@ -1300,7 +1300,7 @@ class DreameMowerMapRenderer:
                     if render_material:
                         floor_material = self.render_floor_material(
                             pixels,
-                            map_data.floor_material,
+                            render_material,
                             map_data.pixel_type,
                             self.color_scheme.material_color,
                             map_data.dimensions,
@@ -1311,7 +1311,7 @@ class DreameMowerMapRenderer:
                             _LOGGER.debug("Render MATERIAL")
 
                     if scale != floor_scale:
-                        pixels = pixels.repeat(scale / floor_scale, axis=0).repeat(scale / floor_scale, axis=1)
+                        pixels = pixels.repeat(scale // floor_scale, axis=0).repeat(scale // floor_scale, axis=1)
                 else:
                     pixels = pixels.repeat(scale, axis=0).repeat(scale, axis=1)
 
@@ -3559,13 +3559,21 @@ class DreameMowerMapRenderer:
 
         return new_layer
 
-    def render_floor_material(self, image, floor_material, pixel_type, color, dimensions, scale):
+    def render_floor_material(
+        self,
+        image: NDArray[np.uint8],
+        floor_material: Mapping[int, int],
+        pixel_type: NDArray[np.uint8],
+        color: _RGBA,
+        dimensions: MapImageDimensions,
+        scale: int,
+    ) -> NDArray[np.uint8] | None:
         tile_w = 12
         floor_w = 4
         floor_h = 16
 
         height = dimensions.height * scale
-        tiles = {}
+        tiles: dict[int, list[int]] = {}
         for k, v in floor_material.items():
             if v > 0 and v < 4:
                 if v not in tiles:
@@ -3574,7 +3582,7 @@ class DreameMowerMapRenderer:
                     tiles[v].append(k)
 
         if tiles:
-            color_map = {}
+            color_map: dict[int, _RGBA] = {}
             for floor_type, tile in tiles.items():
                 if tile:
                     if floor_type == 1:
@@ -3583,7 +3591,7 @@ class DreameMowerMapRenderer:
                         y_start = 1
                         x_start = 0
                         x_multiplier = floor_h / 2
-                        y_multiplier = floor_w
+                        y_multiplier: float = floor_w
                     elif floor_type == 2:
                         w = math.floor(dimensions.width / floor_w)
                         h = math.floor(2 * dimensions.height / floor_h)
@@ -3646,6 +3654,7 @@ class DreameMowerMapRenderer:
                                     x_index = x_index + 1
                                     image[y_index, x_index] = cc
             return image
+        return None
 
     def render_neglected_segments(
         self,
