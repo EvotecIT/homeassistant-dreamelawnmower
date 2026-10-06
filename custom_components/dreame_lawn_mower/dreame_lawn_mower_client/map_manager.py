@@ -27,7 +27,7 @@ from PIL import (
     PngImagePlugin,
     ImageFilter,
 )
-from typing import Any, Mapping
+from typing import Any, Mapping, Callable
 from time import sleep
 from io import BytesIO
 from typing import Optional, Tuple
@@ -164,6 +164,7 @@ class DreameMapMowerMapManager:
         self._device_docked: bool = False
         self._available: bool = False
         self._disconnected: bool = False
+        self._native_list_request: Callable[[bool], None] | None = None
         self._ready: bool = False
         self._connected: bool = True
         self._vslam_map: bool = False
@@ -1419,6 +1420,9 @@ class DreameMapMowerMapManager:
         return False
 
     def request_map_list(self) -> None:
+        if self._native_list_request is not None:
+            self._native_list_request(False)
+            return
         if self._map_list_object_name and self._protocol.cloud.logged_in:
             _LOGGER.info("Get Map List: %s", self._map_list_object_name)
             try:
@@ -1427,122 +1431,133 @@ class DreameMapMowerMapManager:
                 _LOGGER.warning("Get Map List failed: %s", type(ex).__name__)
                 return
 
-            if response:
-                self._need_map_list_request = False
-                raw_map = response.decode()
+            self._apply_map_list(response)
 
-                try:
-                    map_info = json.loads(raw_map)
-                except:
-                    _LOGGER.warn("Get Map List json parse failed")
-                    return
+    def _apply_map_list(self, response: bytes | None) -> None:
+        """Apply downloaded map-list data using the shared reconciliation policy."""
+        if response:
+            self._need_map_list_request = False
+            raw_map = response.decode()
 
-                saved_map_list = map_info[MAP_PARAMETER_MAPSTR]
-                changed = False
-                now = time.time()
-                map_list = {}
-                if saved_map_list:
-                    for v in saved_map_list:
-                        if v.get(MAP_PARAMETER_MAP):
-                            saved_map_data = DreameMowerMapDecoder.decode_saved_map(
-                                v[MAP_PARAMETER_MAP],
-                                self._vslam_map,
-                                int(v[MAP_PARAMETER_ANGLE]) if v.get(MAP_PARAMETER_ANGLE) else 0,
-                                self._aes_iv,
-                            )
-                            if saved_map_data is not None:
-                                name = v.get(MAP_PARAMETER_NAME)
-                                if name:
-                                    saved_map_data.custom_name = name
-                                    saved_map_data.map_name = name
-                                map_list[saved_map_data.map_id] = saved_map_data
+            try:
+                map_info = json.loads(raw_map)
+            except:
+                _LOGGER.warn("Get Map List json parse failed")
+                return
 
-                    for map_id, saved_map_data in sorted(map_list.items()):
-                        if map_id in self._saved_map_data:
-                            if self._selected_map_id == map_id and self._map_data:
-                                saved_map_data.cleanset = self._map_data.cleanset
-                            else:
-                                saved_map_data.cleanset = self._saved_map_data[map_id].cleanset
+            saved_map_list = map_info[MAP_PARAMETER_MAPSTR]
+            changed = False
+            now = time.time()
+            map_list = {}
+            if saved_map_list:
+                for v in saved_map_list:
+                    if v.get(MAP_PARAMETER_MAP):
+                        saved_map_data = DreameMowerMapDecoder.decode_saved_map(
+                            v[MAP_PARAMETER_MAP],
+                            self._vslam_map,
+                            int(v[MAP_PARAMETER_ANGLE]) if v.get(MAP_PARAMETER_ANGLE) else 0,
+                            self._aes_iv,
+                        )
+                        if saved_map_data is not None:
+                            name = v.get(MAP_PARAMETER_NAME)
+                            if name:
+                                saved_map_data.custom_name = name
+                                saved_map_data.map_name = name
+                            map_list[saved_map_data.map_id] = saved_map_data
 
-                            if self._saved_map_data[map_id] != saved_map_data:
-                                _LOGGER.info("Saved map changed: %s", map_id)
-                                changed = True
-                                saved_map_data.last_updated = now
-                                if saved_map_data.wifi_map_data:
-                                    saved_map_data.wifi_map_data.last_updated = saved_map_data.last_updated
-                                saved_map_data.recovery_map_list = self._saved_map_data[map_id].recovery_map_list
-                                if self._map_data is None or self._selected_map_id != map_id:
-                                    self._saved_map_data[map_id] = saved_map_data
-                                else:
-                                    self._saved_map_data[map_id].custom_name = saved_map_data.custom_name
-                                    self._saved_map_data[map_id].rotation = saved_map_data.rotation
-                            else:
-                                _LOGGER.info("Saved map not changed: %s", map_id)
+                for map_id, saved_map_data in sorted(map_list.items()):
+                    if map_id in self._saved_map_data:
+                        if self._selected_map_id == map_id and self._map_data:
+                            saved_map_data.cleanset = self._map_data.cleanset
                         else:
+                            saved_map_data.cleanset = self._saved_map_data[map_id].cleanset
+
+                        if self._saved_map_data[map_id] != saved_map_data:
+                            _LOGGER.info("Saved map changed: %s", map_id)
+                            changed = True
                             saved_map_data.last_updated = now
                             if saved_map_data.wifi_map_data:
                                 saved_map_data.wifi_map_data.last_updated = saved_map_data.last_updated
-                            self._saved_map_data[map_id] = saved_map_data
-                            _LOGGER.info("Add saved map: %s", map_id)
-                            changed = True
-
-                current_map_list = self._saved_map_data.copy()
-                for map_id in current_map_list.keys():
-                    if map_id not in map_list:
-                        del self._saved_map_data[map_id]
+                            saved_map_data.recovery_map_list = self._saved_map_data[map_id].recovery_map_list
+                            if self._map_data is None or self._selected_map_id != map_id:
+                                self._saved_map_data[map_id] = saved_map_data
+                            else:
+                                self._saved_map_data[map_id].custom_name = saved_map_data.custom_name
+                                self._saved_map_data[map_id].rotation = saved_map_data.rotation
+                        else:
+                            _LOGGER.info("Saved map not changed: %s", map_id)
+                    else:
+                        saved_map_data.last_updated = now
+                        if saved_map_data.wifi_map_data:
+                            saved_map_data.wifi_map_data.last_updated = saved_map_data.last_updated
+                        self._saved_map_data[map_id] = saved_map_data
+                        _LOGGER.info("Add saved map: %s", map_id)
                         changed = True
 
-                selected_map_id = map_info[MAP_PARAMETER_CURR_ID]
-                if selected_map_id in self._saved_map_data and self._selected_map_id != selected_map_id:
-                    self._selected_map_id = selected_map_id
+            current_map_list = self._saved_map_data.copy()
+            for map_id in current_map_list.keys():
+                if map_id not in map_list:
+                    del self._saved_map_data[map_id]
                     changed = True
 
-                if changed == True:
-                    self._refresh_map_list()
-                    if self._map_data:
-                        self._map_data_changed()
+            selected_map_id = map_info[MAP_PARAMETER_CURR_ID]
+            if selected_map_id in self._saved_map_data and self._selected_map_id != selected_map_id:
+                self._selected_map_id = selected_map_id
+                changed = True
+
+            if changed == True:
+                self._refresh_map_list()
+                if self._map_data:
+                    self._map_data_changed()
 
     def request_recovery_map_list(self) -> None:
+        if self._native_list_request is not None:
+            self._native_list_request(True)
+            return
         if self._recovery_map_list_object_name:
             _LOGGER.info("Get Recovery Map List: %s", self._recovery_map_list_object_name)
             response = self._get_file_url(self._recovery_map_list_object_name)
             if response:
                 self._need_recovery_map_list_request = False
                 response = self._protocol.cloud.get_file(response)
-                if response:
-                    try:
-                        recovery_map_list = json.loads(response.decode())
-                    except:
-                        _LOGGER.warn("Get Recovery Map List json parse failed")
-                        return
+                self._apply_recovery_map_list(response)
 
-                    changed = False
-                    for recovery_map in recovery_map_list:
-                        map_id = recovery_map["id"]
-                        if map_id in self._map_list:
-                            recovery_map_list = []
-                            map_info_list = recovery_map["info"]
-                            for map_info in map_info_list:
-                                recovery_map_list.append(RecoveryMapInfo(map_id, map_info))
-                            if len(recovery_map_list) > 2:
-                                recovery_map_list.sort(
-                                    key=cmp_to_key(
-                                        lambda a, b: (
-                                            int(a.map_type) - int(b.map_type)
-                                            if int(a.map_type == 0) and int(b.map_type == 2)
-                                            else 0
-                                        )
-                                    )
+    def _apply_recovery_map_list(self, response: bytes | None) -> None:
+        """Apply recovery metadata after transport completes."""
+        if response:
+            try:
+                recovery_map_list = json.loads(response.decode())
+            except:
+                _LOGGER.warn("Get Recovery Map List json parse failed")
+                return
+
+            changed = False
+            for recovery_map in recovery_map_list:
+                map_id = recovery_map["id"]
+                if map_id in self._map_list:
+                    recovery_map_list = []
+                    map_info_list = recovery_map["info"]
+                    for map_info in map_info_list:
+                        recovery_map_list.append(RecoveryMapInfo(map_id, map_info))
+                    if len(recovery_map_list) > 2:
+                        recovery_map_list.sort(
+                            key=cmp_to_key(
+                                lambda a, b: (
+                                    int(a.map_type) - int(b.map_type)
+                                    if int(a.map_type == 0) and int(b.map_type == 2)
+                                    else 0
                                 )
-                            if self._saved_map_data[map_id].recovery_map_list != recovery_map_list:
-                                self._saved_map_data[map_id].recovery_map_list = recovery_map_list
-                                _LOGGER.info("Saved recovery map list changed: %s", map_id)
-                                changed = True
+                            )
+                        )
+                    if self._saved_map_data[map_id].recovery_map_list != recovery_map_list:
+                        self._saved_map_data[map_id].recovery_map_list = recovery_map_list
+                        _LOGGER.info("Saved recovery map list changed: %s", map_id)
+                        changed = True
 
-                    if changed:
-                        self._refresh_recovery_map_list()
-                        if self._connected:
-                            self._map_data_changed()
+            if changed:
+                self._refresh_recovery_map_list()
+                if self._connected:
+                    self._map_data_changed()
 
     @property
     def _request_i_map_available(self) -> bool:

@@ -25,10 +25,14 @@ async def async_start_device(
     cloud: DreameCloudSession, *, deadline: float, cancelled: Event,
 ) -> None:
     """Reuse native login and metadata before starting the existing MQTT owner."""
+    from .client_map_maintenance import NativeMapLists
     from .client_mqtt_auth import NativeMqttAuthentication
     from .client_refresh import _run_state_worker
 
     mqtt_protocol = device._protocol.cloud
+    manager = device._map_manager
+    if manager is not None and manager._native_list_request is None:
+        manager._native_list_request = NativeMapLists(client, device).request
     if mqtt_protocol._native_authentication_request is None:
         mqtt_protocol._native_authentication_request = NativeMqttAuthentication(
             client, device, mqtt_protocol,
