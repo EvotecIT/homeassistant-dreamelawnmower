@@ -26,18 +26,17 @@ from .app_protocol import (
 )
 from .client_app_maps import _DreameLawnMowerClientAppMapsMixin
 from .client_map_helpers import (
-    _app_map_entries_are_valid,
     _app_map_view_details,
     _app_map_view_summary,
     _app_maps_view_metadata,
     _app_object_extension,
     _coordinate_path_length_m,
+    _current_app_map_index,
     _download_point_cloud_content_with_identity,
     _key_define_from_device_list_page,
     _key_define_from_mapping,
     _map_view_current_app_map_index,
     _map_view_has_live_path,
-    _normalize_app_map_entries,
     _point_cloud_action_data,
     _point_cloud_download_url,
     _point_cloud_object_name,
@@ -182,15 +181,7 @@ class _DreameLawnMowerClientMapsMixin(
             map_list_result = self._sync_call_app_action({"m": "g", "t": "MAPL"})
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
-        entries = _normalize_app_map_entries(map_list_result)
-        if not _app_map_entries_are_valid(map_list_result, entries):
-            raise DreameLawnMowerConnectionError(
-                "MAPL returned an incomplete or ambiguous map list."
-            )
-        for entry in entries:
-            if entry.get("created") is not False and entry.get("current") is True:
-                return int(entry["idx"])
-        return None
+        return _current_app_map_index(map_list_result)
 
     def _sync_switch_current_map(self, map_index: int) -> Any:
         """Switch the active mower map by app map index."""

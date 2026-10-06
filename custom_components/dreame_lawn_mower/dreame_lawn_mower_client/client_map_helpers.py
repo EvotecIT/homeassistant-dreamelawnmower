@@ -56,6 +56,7 @@ from .client_shared_helpers import (
     _positive_int,
 )
 from .deadline import DeadlineExceededError, run_with_deadline
+from .exceptions import DreameLawnMowerConnectionError
 from .exceptions import (
     DreameLawnMowerError as DreameLawnMowerError,
 )
@@ -425,6 +426,19 @@ def _set_point_cloud_response_timeout(response: Any, timeout: float) -> None:
         "The point-cloud download deadline could not be enforced.",
         diagnostic_context={"download_reason": "deadline_unavailable"},
     )
+
+
+def _current_app_map_index(response: Any) -> int | None:
+    """Return the current map only from a complete, unambiguous inventory."""
+    entries = _normalize_app_map_entries(response)
+    if not _app_map_entries_are_valid(response, entries):
+        raise DreameLawnMowerConnectionError(
+            "MAPL returned an incomplete or ambiguous map list."
+        )
+    for entry in entries:
+        if entry.get("created") is not False and entry.get("current") is True:
+            return int(entry["idx"])
+    return None
 
 
 def _normalize_app_map_entries(value: Any) -> list[dict[str, Any]]:

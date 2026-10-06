@@ -38,6 +38,129 @@ OPTIONS = {
 }
 
 
+@pytest.mark.parametrize("account_type", ["dreame", "mova"])
+@pytest.mark.parametrize("cached_host", [False, True])
+def test_public_current_map_read_uses_native_http(
+    monkeypatch, account_type, cached_host,
+):
+    strings = cloud_strings(account_type)
+    seen = []
+
+    async def handler(request):
+        seen.append(request.path)
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        if request.path.endswith("/device/info"):
+            return web.json_response({"code": 0, "data": {
+                "did": "42", strings[8]: "user", strings[35]: "dreame.mower.g2408",
+                strings[9]: "hub.example.invalid", strings[10]: "{}",
+            }})
+        assert request.path == f"/{strings[37]}-hub/{strings[27]}/{strings[38]}"
+        body = await request.json()
+        assert body["id"] == 101
+        assert body["data"]["params"] == {
+            "did": "42", "siid": 2, "aiid": 50, "in": [{"m": "g", "t": "MAPL"}],
+        }
+        return web.json_response({"code": 0, "data": {"result": {"out": [
+            {"r": 0, "d": [[0, 0, 1, 1, 0], [1, 1, 1, 1, 0]]},
+        ]}}})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **{**OPTIONS, "account_type": account_type},
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type=account_type, country="eu",
+                ), session=session,
+            )
+            device = client._ensure_device()
+            protocol = device._protocol.cloud
+            protocol._id = 100
+            if cached_host:
+                protocol._host = "hub.example.invalid"
+
+            def unexpected_sync(*args, **kwargs):
+                pytest.fail("Native map read used synchronous HTTP or MQTT startup")
+
+            monkeypatch.setattr(protocol, "request", unexpected_sync)
+            monkeypatch.setattr(protocol, "connect", unexpected_sync)
+            try:
+                assert await client.async_get_current_app_map_index() == 1
+                assert protocol._id == 101
+                assert len(seen) == (2 if cached_host else 3)
+                assert not client._cloud_read_tasks
+            finally:
+                await client.async_close()
+            assert not session.closed
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("stop", ["cancel", "close", "deadline"])
+def test_native_map_read_releases_ownership_when_interrupted(monkeypatch, stop):
+    import time
+
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        client_app_reads,
+    )
+
+    async def scenario():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        strings = cloud_strings("dreame")
+
+        async def handler(request):
+            if request.path == strings[17]:
+                return web.json_response(login_response(strings))
+            entered.set()
+            await release.wait()
+            return web.json_response({"code": 0, "data": {"result": None}})
+
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **OPTIONS, session=session,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type="dreame", country="eu",
+                ),
+            )
+            protocol = client._ensure_device()._protocol.cloud
+            protocol._host = "hub.example.invalid"
+            task = asyncio.create_task(client_app_reads.async_read_app_action(
+                client, {"m": "g", "t": "MAPL"},
+                deadline=time.monotonic() + (0.5 if stop == "deadline" else 5),
+            ))
+            try:
+                await asyncio.wait_for(entered.wait(), 3)
+                if stop == "close":
+                    await asyncio.wait_for(client.async_close(), 3)
+                elif stop == "cancel":
+                    task.cancel()
+                expected = (
+                    DreameLawnMowerConnectionError if stop == "deadline"
+                    else asyncio.CancelledError
+                )
+                with pytest.raises(expected):
+                    await task
+                assert not client._cloud_read_tasks
+                assert not protocol._async_rpc_gate.locked()
+
+                def can_acquire():
+                    acquired = protocol._operation_lock().acquire(blocking=False)
+                    if acquired:
+                        protocol._operation_lock().release()
+                    return acquired
+
+                assert await asyncio.to_thread(can_acquire)
+                assert not session.closed
+            finally:
+                release.set()
+                await client.async_close()
+
+    asyncio.run(scenario())
+
+
 @asynccontextmanager
 async def server(monkeypatch, handler):
     app = web.Application()

@@ -1603,9 +1603,13 @@ class DreameLawnMowerClient(
 
     async def async_get_current_app_map_index(self) -> int | None:
         """Read the active map index without downloading map payloads."""
-        return await asyncio.to_thread(
-            self._sync_get_current_app_map_index_readback,
+        from .client_app_reads import async_read_app_action
+        from .client_map_helpers import _current_app_map_index
+
+        response = await async_read_app_action(
+            self, {"m": "g", "t": "MAPL"}, deadline=time.monotonic() + 20,
         )
+        return _current_app_map_index(response)
 
     async def async_get_batch_schedules(
         self,
