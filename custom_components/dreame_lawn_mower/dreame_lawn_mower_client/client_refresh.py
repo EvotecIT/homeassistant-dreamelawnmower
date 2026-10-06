@@ -6,7 +6,7 @@ import asyncio
 import math
 import time
 from collections.abc import Callable
-from threading import Event
+from threading import Event, Lock
 from typing import TYPE_CHECKING
 
 from .client_startup import async_start_device
@@ -29,13 +29,30 @@ if TYPE_CHECKING:
 
 async def _run_state_worker[T](operation: Callable[[], T], cancelled: Event) -> T:
     """Keep an already-started callback owned until it finishes on cancellation."""
-    worker = asyncio.create_task(asyncio.to_thread(operation))
+    start_lock = Lock()
+    started = False
+
+    def run() -> T:
+        nonlocal started
+        with start_lock:
+            if cancelled.is_set():
+                raise asyncio.CancelledError
+            started = True
+        return operation()
+
+    worker = asyncio.create_task(asyncio.to_thread(run))
     interrupted = False
     while not worker.done():
         try:
             await asyncio.shield(worker)
         except asyncio.CancelledError:
-            cancelled.set()
+            with start_lock:
+                cancelled.set()
+                if not started:
+                    # A queued operation can be cancelled without waiting for
+                    # an unrelated occupied executor. The gate also prevents
+                    # its body starting if the executor races cancellation.
+                    worker.cancel()
             interrupted = True
         except Exception:
             if not interrupted:

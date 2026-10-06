@@ -1266,7 +1266,9 @@ def test_public_device_info_uses_native_http_and_updates_mqtt(
     assert len(calls) == 3
 
 
-def test_cancelled_device_info_cannot_apply_after_device_lock_releases(monkeypatch):
+@pytest.mark.parametrize("entrypoint", ["direct", "firmware"])
+@pytest.mark.parametrize("stop", ["cancel", "close"])
+def test_cancelled_device_info_drains_before_return(monkeypatch, entrypoint, stop):
     from threading import Event
 
     strings = cloud_strings("dreame")
@@ -1309,16 +1311,34 @@ def test_cancelled_device_info_cannot_apply_after_device_lock_releases(monkeypat
             )
             lock = cloud._operation_lock()
             lock.acquire()
-            task = asyncio.create_task(client.async_get_cloud_device_info())
+            task = asyncio.create_task(
+                client.async_get_cloud_device_info() if entrypoint == "direct"
+                else client.async_get_firmware_update_support()
+            )
+            close = None
+            released = False
             try:
                 assert await asyncio.to_thread(entered.wait, 2)
-                task.cancel()
+                if stop == "cancel":
+                    task.cancel()
+                else:
+                    close = asyncio.create_task(client.async_close())
+                await asyncio.sleep(0.02)
+                assert not task.done()
+                assert client._cloud_read_tasks
+                if close is not None:
+                    assert not close.done()
+                lock.release()
+                released = True
                 with pytest.raises(asyncio.CancelledError):
                     await task
+                assert finished.is_set()
             finally:
-                lock.release()
+                if not released:
+                    lock.release()
                 await asyncio.gather(task, return_exceptions=True)
-                assert await asyncio.to_thread(finished.wait, 2)
+                if close is not None:
+                    await asyncio.gather(close, return_exceptions=True)
                 await client.async_close()
             assert cloud._did == "42"
             assert cloud._host is None

@@ -1506,6 +1506,8 @@ class DreameLawnMowerClient(
         language: str | None = None,
     ) -> dict[str, Any] | None:
         """Fetch the raw cloud `device/info` payload used by the mobile app."""
+        from .client_refresh import _run_state_worker
+
         deadline = time.monotonic() + 20
         cancelled = _threading.Event()
 
@@ -1517,9 +1519,11 @@ class DreameLawnMowerClient(
                 if info:
                     try:
                         async with asyncio.timeout(max(0, deadline - time.monotonic())):
-                            await asyncio.to_thread(
-                                self._sync_apply_cloud_device_info,
-                                info, cancelled, deadline,
+                            await _run_state_worker(
+                                lambda: self._sync_apply_cloud_device_info(
+                                    info, cancelled, deadline,
+                                ),
+                                cancelled,
                             )
                     except TimeoutError as err:
                         raise DreameLawnMowerConnectionError(
