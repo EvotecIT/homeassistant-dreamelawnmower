@@ -2659,14 +2659,14 @@ class DreameMowerMapRenderer:
 
     def render_mower(
         self,
-        robot_position,
-        robot_status,
-        layer_size,
-        dimensions,
-        size,
-        map_rotation,
-        scale,
-    ):
+        robot_position: Point,
+        robot_status: int,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        size: float,
+        map_rotation: int | None,
+        scale: int,
+    ) -> Image.Image:
         new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         icon_size = int(size * scale)
         robot_icon_size = (
@@ -2709,7 +2709,7 @@ class DreameMowerMapRenderer:
         icon = self._robot_icon.resize(
             (robot_icon_size, robot_icon_size),
             resample=Image.Resampling.NEAREST,
-        ).rotate(robot_position.a, expand=1)
+        ).rotate(robot_position.a if robot_position.a is not None else 0, expand=1)
         point = robot_position.to_img(dimensions)
 
         if not self._low_memory:
@@ -2731,7 +2731,7 @@ class DreameMowerMapRenderer:
                     )
                 status_icon = self._robot_cleaning_icon
 
-                if self.config.cleaning_direction:
+                if self.config.cleaning_direction and robot_position.a is not None:
                     if self._robot_cleaning_direction_icon is None:
                         self._robot_cleaning_direction_icon = (
                             Image.open(BytesIO(base64.b64decode(MAP_ROBOT_CLEANING_DIRECTION_IMAGE)))
@@ -2803,7 +2803,7 @@ class DreameMowerMapRenderer:
                 sleeping_icon = (
                     Image.open(BytesIO(base64.b64decode(MAP_ROBOT_SLEEPING_IMAGE)))
                     .convert("RGBA")
-                    .rotate(-map_rotation, expand=1)
+                    .rotate(-(map_rotation or 0), expand=1)
                 )
                 enhancer = ImageEnhance.Brightness(sleeping_icon)
                 if not self.color_scheme.dark:

@@ -29,6 +29,27 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
 
 
 @pytest.mark.parametrize("icon_set", [0, 1, 2, 3])
+def test_mower_unknown_heading_preserves_marker_without_direction(
+    icon_set: int,
+) -> None:
+    renderer = DreameMowerMapRenderer()
+    renderer.icon_set = icon_set
+    renderer.config.cleaning_direction = True
+    point = Point(2500, 2500)
+    dimensions = MapImageDimensions(0, 0, 100, 100, 50)
+    actual = renderer.render_mower(point, 1, (100, 100), dimensions, 20, 0, 1)
+    reference = DreameMowerMapRenderer()
+    reference.icon_set = icon_set
+    reference.config.cleaning_direction = False
+    expected = reference.render_mower(
+        Point(2500, 2500, 0), 1, (100, 100), dimensions, 20, 0, 1,
+    )
+    assert actual.getbbox() is not None
+    assert actual.tobytes() == expected.tobytes()
+    assert point.a is None
+
+
+@pytest.mark.parametrize("icon_set", [0, 1, 2, 3])
 def test_charger_without_heading_keeps_reported_location(
     icon_set: int, caplog: pytest.LogCaptureFixture,
 ) -> None:
