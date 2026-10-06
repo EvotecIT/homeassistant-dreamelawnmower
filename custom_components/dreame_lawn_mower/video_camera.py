@@ -109,8 +109,6 @@ _PENDING_RUNTIME_STOPS: dict[str, set[asyncio.Future[Any]]] = {}
 class DreameLawnMowerVideoCamera(
     DreameLawnMowerVideoStartupMixin,
     DreameLawnMowerVideoStateMixin,
-    CoordinatorEntity[DreameLawnMowerCoordinator],
-    Camera,
 ):
     """Live stream camera backed by a configured XP2P runtime."""
 

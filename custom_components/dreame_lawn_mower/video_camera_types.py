@@ -5,6 +5,10 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING, Any, Protocol
 
+from homeassistant.components.camera import Camera
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from .coordinator import DreameLawnMowerCoordinator
 from .dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
 )
@@ -16,9 +20,7 @@ if TYPE_CHECKING:
     import asyncio
 
     from homeassistant.config_entries import ConfigEntry
-    from homeassistant.core import HomeAssistant
 
-    from .coordinator import DreameLawnMowerCoordinator
     from .dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
     from .video_flv_relay import DreameLawnMowerFlvRelay
     from .video_lan_cache import DreameLawnMowerVideoLanCache
@@ -61,14 +63,12 @@ class _DreameVideoRuntime(Protocol):
         """Stop a previously started stream session."""
 
 
-class _VideoCameraState:
+class _VideoCameraState(CoordinatorEntity[DreameLawnMowerCoordinator], Camera):
     """State initialized by the camera and shared by its lifecycle mixins.
 
     Declarations supply no defaults and do not create sessions or tasks.
     """
 
-    coordinator: DreameLawnMowerCoordinator
-    hass: HomeAssistant
     _entry: ConfigEntry
     _descriptor: DreameLawnMowerDescriptor
     _stream_lock: asyncio.Lock

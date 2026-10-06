@@ -5,6 +5,8 @@ from __future__ import annotations
 from time import monotonic
 from typing import Any
 
+from homeassistant.helpers.device_registry import DeviceInfo
+
 from . import video_stream_helpers as _video_helpers
 from .const import DOMAIN
 from .dreame_lawn_mower_client.feature_capabilities import (
@@ -141,7 +143,7 @@ class DreameLawnMowerVideoStateMixin(_VideoCameraConfiguration):
         return self._resolved_video_capability().state == CAPABILITY_SUPPORTED
 
     @property
-    def device_info(self) -> dict[str, Any]:
+    def device_info(self) -> DeviceInfo:
         """Return dynamic device metadata for the registry."""
         snapshot = self.coordinator.data
         descriptor = snapshot.descriptor if snapshot is not None else self._descriptor
