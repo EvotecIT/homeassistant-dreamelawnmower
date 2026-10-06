@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from io import BytesIO
 
 import numpy as np
@@ -15,8 +16,35 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
     MapData,
     MapImageDimensions,
     MapPixelType,
+    MapRendererResources,
     Segment,
 )
+
+
+@pytest.mark.parametrize("has_dimensions", [False, True])
+def test_incomplete_map_returns_empty_output_and_preserves_resources(
+    has_dimensions: bool,
+) -> None:
+    renderer = DreameMowerMapRenderer()
+    data = MapData()
+    if has_dimensions:
+        data.dimensions = MapImageDimensions(0, 0, 4, 4, 50)
+    assert renderer.render_map(data) == renderer.default_map_image
+    assert renderer.get_data_string(data) == "{}"
+    resources = MapRendererResources(renderer="test", robot="robot-image")
+    result = json.loads(renderer.get_data_string(data, resources=resources))
+    assert result["resources"]["renderer"] == "test"
+    assert result["resources"]["robot"] == "robot-image"
+    assert "charger" not in result["resources"]
+    assert renderer._calculate_calibration_points(data) is None
+
+
+def test_empty_map_json_serializes_optional_resources() -> None:
+    data = MapData()
+    data.empty_map = True
+    resources = MapRendererResources(renderer="test")
+    result = json.loads(DreameMowerMapRenderer().get_data_string(data, resources))
+    assert result["resources"]["renderer"] == "test"
 
 
 @pytest.mark.parametrize(

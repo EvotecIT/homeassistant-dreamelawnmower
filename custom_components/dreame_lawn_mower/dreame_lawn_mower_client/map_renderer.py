@@ -488,6 +488,8 @@ class DreameMowerMapRenderer:
 
     @staticmethod
     def _calculate_calibration_points(map_data: MapData) -> _CalibrationPoints | None:
+        if map_data.dimensions is None or map_data.rotation is None:
+            return None
         if (map_data.dimensions.width * map_data.dimensions.height) > 0:
             calibration_points: _CalibrationPoints = []
             for point in [Point(0, 0), Point(1000, 0), Point(0, 1000)]:
@@ -505,6 +507,7 @@ class DreameMowerMapRenderer:
                     }
                 )
             return calibration_points
+        return None
 
     @staticmethod
     def _alpha_composite(source, destination):
@@ -527,15 +530,27 @@ class DreameMowerMapRenderer:
 
     def get_data_string(
         self,
-        map_data: MapData,
+        map_data: MapData | None,
         resources: MapRendererResources | None = None,
         robot_status: int = 0,
         station_status: int = 0,
     ) -> str:
-        if not map_data or map_data.empty_map or (map_data.dimensions.width * map_data.dimensions.height) < 2:
+        if (
+            map_data is None
+            or map_data.empty_map
+            or map_data.dimensions is None
+            or map_data.pixel_type is None
+            or (map_data.dimensions.width * map_data.dimensions.height) < 2
+        ):
             return (
                 json.dumps(
-                    {"resources": resources},
+                    {
+                        "resources": {
+                            key: value
+                            for key, value in vars(resources).items()
+                            if value is not None
+                        }
+                    },
                     separators=(",", ":"),
                 )
                 if resources
@@ -994,7 +1009,13 @@ class DreameMowerMapRenderer:
         station_status: int = 0,
         info_text: bool = False,
     ) -> bytes:
-        if map_data is None or map_data.empty_map or (map_data.dimensions.width * map_data.dimensions.height) < 2:
+        if (
+            map_data is None
+            or map_data.empty_map
+            or map_data.dimensions is None
+            or map_data.pixel_type is None
+            or (map_data.dimensions.width * map_data.dimensions.height) < 2
+        ):
             return self.default_map_image
 
         self.render_complete = False
