@@ -632,22 +632,22 @@ class DreameMowerMapRenderer:
             pixels[layer] = compressed_pixels[3:]
 
         path_types = {"S": 1, "W": 2, "M": 3}
-        paths = None
+        paths: list[list[float | None]] | None = None
         if map_data.path:
             paths = []
-            coords = [
+            path_coords: list[float | None] = [
                 path_types.get(map_data.path[0].path_type),
                 map_data.path[0].x,
                 map_data.path[0].y,
             ]
             for path in map_data.path[1:]:
                 if path.path_type.value != "L":
-                    paths.append(coords)
-                    coords = [path_types.get(path.path_type)]
-                coords.extend([path.x, path.y])
+                    paths.append(path_coords)
+                    path_coords = [path_types.get(path.path_type)]
+                path_coords.extend([path.x, path.y])
 
-            if len(coords) > 2:
-                paths.append(coords)
+            if len(path_coords) > 2:
+                paths.append(path_coords)
 
         map_data_json = MapRendererData(
             data=pixels,
@@ -849,7 +849,7 @@ class DreameMowerMapRenderer:
             resources=resources,
         )
 
-        map_data_json = json.dumps(
+        serialized_map = json.dumps(
             map_data_json,
             default=lambda o: dict((key, value) for key, value in o.__dict__.items() if value is not None),
             allow_nan=False,
@@ -862,7 +862,7 @@ class DreameMowerMapRenderer:
             map_data.frame_id,
             time.time() - now,
         )
-        return map_data_json
+        return serialized_map
 
     def render_obstacle_image(
         self,

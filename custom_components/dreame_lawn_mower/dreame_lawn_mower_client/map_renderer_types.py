@@ -292,7 +292,7 @@ class MapRendererData:
     wifi_map: bool | None = False
     history_map: bool | None = False
     recovery_map: bool | None = False
-    segments: dict[int, list[int | str]] | None = None
+    segments: list[list[float | str | list[float] | None]] | None = None
     active_segments: list[int] | None = field(default_factory=lambda: [])
     active_areas: list[list[float]] = field(default_factory=lambda: [])
     active_points: list[list[float]] = field(default_factory=lambda: [])
@@ -303,9 +303,9 @@ class MapRendererData:
     no_go: list[list[float]] = field(default_factory=lambda: [])
     virtual_walls: list[list[float]] = field(default_factory=lambda: [])
     pathways: list[list[float]] | None = None
-    obstacles: list[list[int | float]] = field(default_factory=lambda: [])
+    obstacles: list[list[float | str | None]] = field(default_factory=lambda: [])
     furnitures: list[list[int | float]] | None = None
-    path: list[list[int]] = field(default_factory=lambda: [])
+    path: list[list[float | None]] | None = field(default_factory=lambda: [])
     floor_material: dict[int, int] | None = None
     hidden_segments: list[int] | None = None
     neglected_segments: dict[int, int] | None = None
