@@ -56,7 +56,10 @@ def read_start_evidence(
         timeout=5.0,
     )
     entries = _normalize_app_map_entries(response)
-    if response.get("r") != 0 or not _app_map_entries_are_valid(response, entries):
+    if (
+        not isinstance(response, Mapping) or response.get("r") != 0
+        or not _app_map_entries_are_valid(response, entries)
+    ):
         raise DreameLawnMowerConnectionError(
             "Native schedule map inventory is unknown."
         )

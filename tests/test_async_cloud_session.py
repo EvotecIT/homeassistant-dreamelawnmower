@@ -2293,6 +2293,8 @@ def test_native_schedule_serializes_threads_and_tasks(
     {"r": 0, "d": []},
     {"r": -1, "d": [[0, 1, 1, 1, 0]]},
     {"r": 0, "d": "unknown"},
+    None,
+    42,
 ])
 def test_native_schedule_start_requires_authoritative_inventory(monkeypatch, inventory):
     strings = cloud_strings("dreame")
@@ -2308,7 +2310,8 @@ def test_native_schedule_start_requires_authoritative_inventory(monkeypatch, inv
         response = inventory if action["t"] == "MAPL" else {
             "r": 0, "d": {"i": action["d"]["i"], "l": 0, "v": 65535},
         }
-        return web.json_response({"code": 0, "data": {"result": {"out": [response]}}})
+        output = [] if response is None else [response]
+        return web.json_response({"code": 0, "data": {"result": {"out": output}}})
 
     async def scenario():
         async with server(monkeypatch, handler), ClientSession() as session:
@@ -2321,7 +2324,10 @@ def test_native_schedule_start_requires_authoritative_inventory(monkeypatch, inv
             )
             client._ensure_device()._protocol.cloud._host = "hub.example.invalid"
             try:
-                if inventory["r"] != 0 or inventory["d"] == "unknown":
+                if (
+                    not isinstance(inventory, dict) or inventory["r"] != 0
+                    or inventory["d"] == "unknown"
+                ):
                     with pytest.raises(
                         DreameLawnMowerConnectionError,
                         match="inventory is unknown|App action failed",
