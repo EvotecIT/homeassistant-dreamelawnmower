@@ -406,15 +406,27 @@ class DreameMowerDreameHomeCloudProtocol:
         return result_str
 
     def _handle_device_info(self, info):
-        self._uid = info[self._strings[8]]
-        self._did = info["did"]
-        self._model = info[self._strings[35]]
-        self._host = info[self._strings[9]]
-        prop = info[self._strings[10]]
-        if prop and prop != "":
-            prop = json.loads(prop)
-            if self._strings[11] in prop:
-                self._stream_key = prop[self._strings[11]]
+        # Native HTTP can supply device info before the legacy MQTT login.
+        strings = self._strings or cloud_strings(self._account_type)
+        uid = info[strings[8]]
+        did = info["did"]
+        model = info[strings[35]]
+        host = info[strings[9]]
+        prop = info[strings[10]]
+        properties = json.loads(prop) if prop else {}
+        # Parse the complete response before changing the current identity.
+        # Missing stream credentials intentionally retain the last known key.
+        has_stream_key = strings[11] in properties
+        stream_key = properties[strings[11]] if has_stream_key else None
+        with self._operation_lock():
+            if self._shutdown_is_requested():
+                return
+            self._uid = uid
+            self._did = did
+            self._model = model
+            self._host = host
+            if has_stream_key:
+                self._stream_key = stream_key
 
     def connect(self, message_callback=None, connected_callback=None):
         with self._operation_lock():
