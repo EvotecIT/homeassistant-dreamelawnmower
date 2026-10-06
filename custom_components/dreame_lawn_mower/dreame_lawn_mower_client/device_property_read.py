@@ -1,5 +1,7 @@
 """Fresh property evidence required before state-changing command decisions."""
 
+from collections.abc import Mapping, Sequence
+
 from .app_protocol import MOWER_RAW_STATUS_PROPERTY_KEY, decode_mower_status_blob
 from .device_types import DreameMowerProperty
 from .exceptions import DeviceUpdateFailedException
@@ -12,6 +14,30 @@ TASK_DECISION_PROPERTIES = frozenset(
         DreameMowerProperty.CLEANING_PAUSED,
     }
 )
+
+
+def build_device_property_request(
+    properties: Sequence[DreameMowerProperty],
+    property_mapping: Mapping[DreameMowerProperty, Mapping[str, int]],
+    known_properties: Mapping[int, object],
+    *,
+    ready: bool,
+    require_fresh_state: bool,
+) -> list[dict[str, int | str]]:
+    """Select readable properties and preserve mandatory fresh-task evidence."""
+    requests: list[dict[str, int | str]] = []
+    for prop in properties:
+        mapping = property_mapping.get(prop)
+        if mapping is not None and "aiid" not in mapping and (
+            not ready or prop.value in known_properties
+            or (require_fresh_state and prop in TASK_DECISION_PROPERTIES)
+        ):
+            requests.append({"did": str(prop.value), **mapping})
+    if require_fresh_state:
+        # Current firmware carries task evidence in the native heartbeat. A
+        # fresh read must request it even when no prior MQTT value was cached.
+        requests.append({"did": "100001", "siid": 1, "piid": 1})
+    return requests
 
 
 def _successful_row(rows):
