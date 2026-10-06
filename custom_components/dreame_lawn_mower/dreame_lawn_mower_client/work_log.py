@@ -32,9 +32,11 @@ class DreameLawnMowerWorkLogTotals:
 
 
 def work_log_totals_from_app_data(
-    response: Mapping[str, Any],
+    response: object,
 ) -> DreameLawnMowerWorkLogTotals:
     """Decode a successful MIHIS response into typed lifetime totals."""
+    if not isinstance(response, Mapping):
+        raise DreameLawnMowerConnectionError("MIHIS returned an invalid response.")
     if response.get("r") != 0:
         raise DreameLawnMowerConnectionError("MIHIS returned an unsuccessful result.")
     data = response.get("d")

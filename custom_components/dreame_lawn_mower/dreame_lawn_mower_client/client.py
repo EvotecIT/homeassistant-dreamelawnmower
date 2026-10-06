@@ -1401,11 +1401,12 @@ class DreameLawnMowerClient(
         map_indices: Sequence[int] | None = None,
     ) -> dict[str, Any]:
         """Return read-only mower preference settings from app actions."""
-        return await asyncio.to_thread(
-            self._sync_get_mowing_preferences,
-            include_raw,
-            map_indices,
-        )
+        from .client_app_reads import async_run_app_read
+        from .mowing_preferences_read_plan import read_mowing_preferences
+
+        return await async_run_app_read(self, read_mowing_preferences(
+            include_raw, map_indices, deadline=time.monotonic() + 20.0,
+        ))
 
     async def async_plan_app_mowing_preference_update(
         self,
@@ -1450,7 +1451,13 @@ class DreameLawnMowerClient(
 
     async def async_get_work_log_totals(self) -> DreameLawnMowerWorkLogTotals:
         """Return mower-owned lifetime area, time, and session totals."""
-        return await asyncio.to_thread(self._sync_get_work_log_totals)
+        from .client_app_reads import async_read_app_action
+        from .work_log import WORK_LOG_TOTALS_REQUEST, work_log_totals_from_app_data
+
+        response = await async_read_app_action(
+            self, WORK_LOG_TOTALS_REQUEST, deadline=time.monotonic() + 20.0,
+        )
+        return work_log_totals_from_app_data(response)
 
     async def async_get_maintenance_status(
         self,

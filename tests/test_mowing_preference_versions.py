@@ -33,8 +33,13 @@ class _PreferenceCloud:
         self.preference = [version, 0, 0, 1, 45, 2, 90, 1, 0, 1, 1, 2, 1, 15, 20, 7, 1]
         self.writes: list[dict[str, object]] = []
 
-    def call_app_action(self, payload, *, siid=2, aiid=50):
+    def call_app_action(
+        self, payload, *, siid=2, aiid=50, retry_count=None, timeout=None,
+    ):
         assert (siid, aiid) == (2, 50)
+        if payload["m"] == "g":
+            assert retry_count == 2
+            assert timeout == 20
         if payload["m"] == "s":
             if payload["t"] == "PREP":
                 self.mode = payload["d"]["value"]
