@@ -756,6 +756,16 @@ class DreameLawnMowerClient(
             return False
         return await self._async_call_start_mowing_with_session_identity()
 
+    async def _async_call_start_mowing_with_session_identity(
+        self, *, require_new_session: bool = False,
+    ) -> bool | None:
+        """Start through the shared device policy and retain session identity."""
+        from .client_start_control import async_start_with_session_identity
+
+        return await async_start_with_session_identity(
+            self, require_new_session=require_new_session,
+        )
+
     async def async_pause(self) -> None:
         """Pause mowing."""
         from .client_device_actions import async_run_device_plan

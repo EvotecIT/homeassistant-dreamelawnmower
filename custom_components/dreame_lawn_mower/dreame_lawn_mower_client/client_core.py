@@ -36,7 +36,6 @@ from .client_shared_helpers import (
 from .cloud_session import DreameCloudSession
 from .device_types import DreameMowerTaskStatus
 from .exceptions import (
-    DeviceCommandRejectedException,
     DeviceException,
     DreameLawnMowerCommandRejectedError,
     DreameLawnMowerConnectionError,
@@ -148,109 +147,6 @@ def _device_start_session_identity(device: Any) -> bool | None:
 
 
 class _DreameLawnMowerClientCoreMixin:
-    async def _async_call_device_method(
-        self,
-        method_name: str,
-        *,
-        reconcile_ambiguous: bool = True,
-        method_kwargs: Mapping[str, Any] | None = None,
-    ) -> Any:
-        device = await asyncio.to_thread(self._ensure_device)
-        method = getattr(device, method_name)
-        try:
-            return await asyncio.to_thread(method, **(method_kwargs or {}))
-        except DeviceCommandRejectedException as err:
-            raise DreameLawnMowerCommandRejectedError(str(err)) from err
-        except DeviceException as err:
-            connection_error = DreameLawnMowerConnectionError(str(err))
-            if not reconcile_ambiguous:
-                raise connection_error from err
-            confirmation = {
-                "start_mowing": (
-                    "start mowing",
-                    lambda snapshot: bool(
-                        snapshot.started
-                        or snapshot.mowing
-                        or snapshot.mowing_session_active is True
-                    ),
-                ),
-                "pause": (
-                    "pause mowing",
-                    lambda snapshot: bool(
-                        snapshot.paused or snapshot.task_status == "paused"
-                    ),
-                ),
-                "dock": (
-                    "return to dock",
-                    lambda snapshot: bool(
-                        snapshot.returning
-                        or snapshot.docked
-                        or snapshot.state
-                        in {"returning", "charging", "charging_completed"}
-                    ),
-                ),
-                "stop": (
-                    "stop mowing",
-                    lambda snapshot: bool(
-                        snapshot.mowing_session_active is False
-                        or (
-                            not snapshot.started
-                            and not snapshot.mowing
-                            and not snapshot.paused
-                        )
-                    ),
-                ),
-            }.get(method_name)
-            if confirmation is None:
-                raise connection_error from err
-            label, predicate = confirmation
-            return await self._async_reconcile_ambiguous_mutation(
-                label,
-                connection_error,
-                predicate,
-            )
-
-
-    async def _async_call_start_mowing_with_session_identity(
-        self,
-        *,
-        require_new_session: bool = False,
-    ) -> bool | None:
-        """Invoke the fallback start and capture its cached-state decision."""
-        device = await asyncio.to_thread(self._ensure_device)
-        new_session: bool | None = None
-
-        def call_start_mowing() -> Any:
-            nonlocal new_session
-
-            state_lock = getattr(device, "_state_lock", None)
-            state_context = state_lock if state_lock is not None else nullcontext()
-            with state_context:
-                # Keep the identity decision and the device's own branch under
-                # the same lock used by MQTT state mutations.
-                new_session = _device_start_session_identity(device)
-                if require_new_session and new_session is not True:
-                    raise DreameLawnMowerCommandRejectedError(
-                        "Scheduled mowing cannot resume or replace an existing task."
-                    )
-                return device.start_mowing()
-
-        try:
-            await asyncio.to_thread(call_start_mowing)
-        except DeviceCommandRejectedException as err:
-            raise DreameLawnMowerCommandRejectedError(str(err)) from err
-        except DeviceException as err:
-            await self._async_reconcile_ambiguous_mutation(
-                "start mowing",
-                DreameLawnMowerConnectionError(str(err)),
-                lambda snapshot: bool(
-                    snapshot.started
-                    or snapshot.mowing
-                    or snapshot.mowing_session_active is True
-                ),
-            )
-        return new_session
-
     async def _async_reconcile_ambiguous_mutation(
         self,
         label: str,

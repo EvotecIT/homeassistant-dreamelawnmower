@@ -634,15 +634,25 @@ class _DreameMowerDeviceCommandMixin:
 
     def start_mowing(self) -> dict[str, Any] | None:
         """Start or resume the cleaning task."""
+        from .device_action_plan import run_device_plan
+
+        return run_device_plan(self, self._start_mowing_plan())
+
+    def _start_mowing_plan(
+        self,
+    ) -> Generator[ActionDelay | ActionRequest, Any, dict[str, Any] | None]:
+        """Select the start/resume branch before yielding its transport effects."""
+        from .device_action_plan import device_action_plan
+
         if self.status.fast_mapping_paused:
-            return self.start_custom(DreameMowerStatus.FAST_MAPPING.value)
+            return (yield from self._start_custom_plan(DreameMowerStatus.FAST_MAPPING.value))
 
         if self.status.returning_paused:
-            return self.return_to_base()
+            return (yield from self._dock_plan())
 
         if self.capability.cruising:
             if self.status.cruising_paused:
-                return self.start_custom(self.status.status.value)
+                return (yield from self._start_custom_plan(self.status.status.value))
         elif not self.status.paused:
             self._restore_go_to_zone()
 
@@ -667,47 +677,27 @@ class _DreameMowerDeviceCommandMixin:
                 self._map_manager.editor.clear_path()
             self._map_manager.editor.refresh_map()
 
-        return self.call_action(DreameMowerAction.START_MOWING)
+        response: dict[str, Any] | None = yield from device_action_plan(
+            self, DreameMowerAction.START_MOWING,
+        )
+        return response
 
     def start(self) -> dict[str, Any] | None:
         """Start or resume the cleaning task."""
-        if self.status.fast_mapping_paused:
-            return self.start_custom(DreameMowerStatus.FAST_MAPPING.value)
-
-        if self.status.returning_paused:
-            return self.return_to_base()
-
-        if self.capability.cruising:
-            if self.status.cruising_paused:
-                return self.start_custom(self.status.status.value)
-        elif not self.status.paused:
-            self._restore_go_to_zone()
-
-
-        self.schedule_update(10, True)
-
-        if not self.status.started:
-            self._update_status(DreameMowerTaskStatus.AUTO_CLEANING, DreameMowerStatus.CLEANING)
-        elif (
-            self.status.paused
-            and not self.status.cleaning_paused
-            and not self.status.cruising
-            and not self.status.scheduled_clean
-        ):
-            self._update_property(DreameMowerProperty.STATUS, DreameMowerStatus.CLEANING.value)
-            if self.status.task_status is not DreameMowerTaskStatus.COMPLETED:
-                new_state = DreameMowerState.MOWING
-                self._update_property(DreameMowerProperty.STATE, new_state.value)
-
-        if self._map_manager:
-            if not self.status.started:
-                self._map_manager.editor.clear_path()
-            self._map_manager.editor.refresh_map()
-
-        return self.call_action(DreameMowerAction.START_MOWING)
+        return self.start_mowing()
 
     def start_custom(self, status, parameters: dict[str, Any] = None) -> dict[str, Any] | None:
         """Start custom cleaning task."""
+        from .device_action_plan import run_device_plan
+
+        return run_device_plan(self, self._start_custom_plan(status, parameters))
+
+    def _start_custom_plan(
+        self, status: int, parameters: Any = None,
+    ) -> Generator[ActionDelay | ActionRequest, Any, dict[str, Any] | None]:
+        """Share custom-task payload and availability across transports."""
+        from .device_action_plan import device_action_plan
+
         if not self.capability.cruising and status != DreameMowerStatus.ZONE_CLEANING.value:
             self._restore_go_to_zone()
 
@@ -729,7 +719,10 @@ class _DreameMowerDeviceCommandMixin:
                 }
             )
 
-        return self.call_action(DreameMowerAction.START_CUSTOM, payload)
+        response: dict[str, Any] | None = yield from device_action_plan(
+            self, DreameMowerAction.START_CUSTOM, payload,
+        )
+        return response
 
     def stop(
         self,
