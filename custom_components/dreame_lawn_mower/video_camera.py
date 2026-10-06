@@ -115,66 +115,55 @@ class DreameLawnMowerVideoCamera(
     # in downloaded diagnostics but must never be persisted by the recorder.
     _unrecorded_attributes = frozenset({MATCH_ALL})
 
-    # Preserve the historical method surface while focused mixins own the
-    # implementations. Reading from ``__dict__`` retains property and
-    # staticmethod descriptors as well as normal methods.
-    _handle_coordinator_update = DreameLawnMowerVideoStateMixin.__dict__[
-        "_handle_coordinator_update"
-    ]
-    _async_cleanup_for_state_gate = DreameLawnMowerVideoStateMixin.__dict__[
-        "_async_cleanup_for_state_gate"
-    ]
+    # Preserve direct reflection while retaining concrete method signatures.
+    # Properties use their raw descriptors so class access cannot evaluate them.
+    _handle_coordinator_update = (
+        DreameLawnMowerVideoStateMixin._handle_coordinator_update
+    )
+    _async_cleanup_for_state_gate = (
+        DreameLawnMowerVideoStateMixin._async_cleanup_for_state_gate
+    )
     available = DreameLawnMowerVideoStateMixin.__dict__["available"]
     device_info = DreameLawnMowerVideoStateMixin.__dict__["device_info"]
     extra_state_attributes = DreameLawnMowerVideoStateMixin.__dict__[
         "extra_state_attributes"
     ]
-    video_runtime_diagnostics = DreameLawnMowerVideoStateMixin.__dict__[
-        "video_runtime_diagnostics"
-    ]
-    _async_start_stream = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_start_stream"
-    ]
-    _async_refresh_video_start_state = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_refresh_video_start_state"
-    ]
-    _video_start_is_blocked = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_video_start_is_blocked"
-    ]
-    _async_try_lan_stream = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_try_lan_stream"
-    ]
-    _async_try_cached_xp2p_stream = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_try_cached_xp2p_stream"
-    ]
-    _async_get_runtime_inputs = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_get_runtime_inputs"
-    ]
-    _async_cache_healthy_provisioning = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_cache_healthy_provisioning"
-    ]
-    _async_start_lan_runtime_session = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_start_lan_runtime_session"
-    ]
-    _adopt_stream_session = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_adopt_stream_session"
-    ]
-    _async_adopt_stream_session = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_adopt_stream_session"
-    ]
-    _async_cleanup_rejected_session = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_cleanup_rejected_session"
-    ]
-    _with_lan_failure = DreameLawnMowerVideoStartupMixin.__dict__["_with_lan_failure"]
-    _async_start_runtime_session = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_start_runtime_session"
-    ]
-    _schedule_late_start_cleanup = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_schedule_late_start_cleanup"
-    ]
-    _async_cleanup_late_start = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_cleanup_late_start"
-    ]
+    video_runtime_diagnostics = DreameLawnMowerVideoStateMixin.video_runtime_diagnostics
+    _async_start_stream = DreameLawnMowerVideoStartupMixin._async_start_stream
+    _async_refresh_video_start_state = (
+        DreameLawnMowerVideoStartupMixin._async_refresh_video_start_state
+    )
+    _video_start_is_blocked = DreameLawnMowerVideoStartupMixin._video_start_is_blocked
+    _async_try_lan_stream = DreameLawnMowerVideoStartupMixin._async_try_lan_stream
+    _async_try_cached_xp2p_stream = (
+        DreameLawnMowerVideoStartupMixin._async_try_cached_xp2p_stream
+    )
+    _async_get_runtime_inputs = (
+        DreameLawnMowerVideoStartupMixin._async_get_runtime_inputs
+    )
+    _async_cache_healthy_provisioning = (
+        DreameLawnMowerVideoStartupMixin._async_cache_healthy_provisioning
+    )
+    _async_start_lan_runtime_session = (
+        DreameLawnMowerVideoStartupMixin._async_start_lan_runtime_session
+    )
+    _adopt_stream_session = DreameLawnMowerVideoStartupMixin._adopt_stream_session
+    _async_adopt_stream_session = (
+        DreameLawnMowerVideoStartupMixin._async_adopt_stream_session
+    )
+    _async_cleanup_rejected_session = (
+        DreameLawnMowerVideoStartupMixin._async_cleanup_rejected_session
+    )
+    _with_lan_failure = DreameLawnMowerVideoStartupMixin._with_lan_failure
+    _async_start_runtime_session = (
+        DreameLawnMowerVideoStartupMixin._async_start_runtime_session
+    )
+    _schedule_late_start_cleanup = (
+        DreameLawnMowerVideoStartupMixin._schedule_late_start_cleanup
+    )
+    _async_cleanup_late_start = (
+        DreameLawnMowerVideoStartupMixin._async_cleanup_late_start
+    )
 
     def __init__(
         self,
