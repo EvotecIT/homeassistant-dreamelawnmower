@@ -5,6 +5,7 @@ from __future__ import annotations
 from io import BytesIO
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
@@ -17,6 +18,8 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_types impo
     MapData,
     MapImageDimensions,
     MapPixelType,
+    Path,
+    PathType,
     Point,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_visuals import (
@@ -76,3 +79,38 @@ def test_legacy_map_png_keeps_map_metadata_on_styled_image() -> None:
         assert image.width > 1
         assert image.height > 1
         assert MAP_DATA_JSON_CLASS in image.text
+
+
+@pytest.mark.parametrize("scale", [1, 2])
+def test_legacy_mowing_trail_draws_segments_without_bridging(scale: int) -> None:
+    renderer = legacy_map_visuals._legacy_renderer(
+        style=map_render_style("dark"), label_scale=1.0
+    )
+    trail = [
+        Path(10, 80, PathType.SWEEP),
+        Path(40, 80, PathType.LINE),
+        Path(40, 60, PathType.LINE),
+        Path(60, 20, PathType.SWEEP),
+        Path(90, 20, PathType.LINE),
+    ]
+    layer = renderer.render_path(
+        trail, (40, 200, 80, 255), (100 * scale, 100 * scale), None,
+        MapImageDimensions(0, 0, 100, 100, 1), 3, scale,
+    )
+
+    assert layer.getpixel((25 * scale, 19 * scale)) == (40, 200, 80, 255)
+    assert layer.getpixel((40 * scale, 30 * scale)) == (40, 200, 80, 255)
+    assert layer.getpixel((75 * scale, 79 * scale)) == (40, 200, 80, 255)
+    assert layer.getpixel((50 * scale, 59 * scale))[3] == 0
+
+
+def test_legacy_mowing_trail_with_no_line_is_transparent() -> None:
+    renderer = legacy_map_visuals._legacy_renderer(
+        style=map_render_style("dark"), label_scale=1.0
+    )
+    for trail in ([], [Path(10, 80, PathType.SWEEP)]):
+        layer = renderer.render_path(
+            trail, (40, 200, 80, 255), (100, 100), None,
+            MapImageDimensions(0, 0, 100, 100, 1), 3, 1,
+        )
+        assert layer.getbbox() is None

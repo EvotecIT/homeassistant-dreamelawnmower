@@ -82,7 +82,7 @@ not establish installed, cloud, native-runtime, or physical-device behavior.
 | --- | --- | --- |
 | async-dependency | Gap | The cloud protocol owns synchronous requests, queues, locks, and threads. Modernize the owning client with real async cancellation and resource ownership; executor wrapping alone does not qualify. |
 | inject-websession | Gap | Cloud HTTP uses its own synchronous session. Design injected async session ownership in the reusable client, including standalone callers. |
-| strict-typing | Gap | After platform and map-model annotation fixes, mypy 2.4.0 reports 2,447 errors in 88 of 245 production modules. Fix the full integration and bundled client before enabling a passing strict CI gate. |
+| strict-typing | Gap | After platform and map-model annotation fixes, mypy 2.4.0 reports 2,446 errors in 88 of 245 production modules. Fix the full integration and bundled client before enabling a passing strict CI gate. |
 
 ## Qualification baseline
 
@@ -98,7 +98,7 @@ imports. Map renderer models describe RGBA tuples and optional resources;
 geometry and map-state annotations match the values produced by the decoder.
 Map values follow Python's equality protocol for unrelated objects, and obstacle
 object names use their vendor ID when available. Regression tests cover both
-contracts. Strict typing remains incomplete at 2,447 errors in 88 modules;
+contracts. Strict typing remains incomplete at 2,446 errors in 88 modules;
 `map_renderer_types.py` passes strict checking on its own. Renderer payload
 annotations match the nested crop data, hidden-segment list, and per-segment
 material/status dictionaries; 32 focused map tests pass after these declaration
@@ -166,12 +166,19 @@ Both map decoder entry points validate the binary header and declared image area
 Incomplete images, negative dimensions, and absent binary data return unavailable
 results; complete images remain valid without optional JSON metadata.
 
-The full standalone suite passes 2,634 tests with one skipped, including incomplete-image rejection and complete-image compatibility cases. Three robot-position boundary cases fail before the bounds correction and pass afterward; normal pixel lookup remains covered. Timestamp regressions use compressed payloads through the real decoder. An
+The full standalone suite passes 2,637 tests with one skipped, including incomplete-image rejection and complete-image compatibility cases. Three robot-position boundary cases fail before the bounds correction and pass afterward; normal pixel lookup remains covered. Timestamp regressions use compressed payloads through the real decoder. An
 independent review identified the affected refresh consumer; its correction
 passed targeted confirmation. Component/translation tests pass on HA 2025.1
 (73 passed, one version-specific skip) and HA 2026.9.4 (74 passed) at the ordering
 candidate, before the narrow refresh-loop correction. No physical-device or
 frontend-rendering claim follows from these local tests.
+
+The legacy mowing-trail renderer uses the shared map drawing module. It draws
+continuous recorded segments without connecting separate starting points. Two
+scale regressions fail on the former empty layer and pass with the correction;
+empty and single-point trails remain transparent. Local layer and composed
+light/dark PNGs were inspected, and an independent read-only review accepted this
+renderer change. This is synthetic image evidence, not installed HA UI proof.
 
 ## Release qualification
 

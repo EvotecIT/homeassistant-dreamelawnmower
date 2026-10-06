@@ -5,8 +5,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import replace
 from math import hypot
+from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw
+
+from .device_types import PathType
+
+if TYPE_CHECKING:
+    from .map_types import MapImageDimensions, Path
 
 from .map_visuals import MapRenderStyle, line_width, map_render_style
 
@@ -125,3 +131,35 @@ def draw_navigation_path(
             offset += step
         distance += length
     image.alpha_composite(layer)
+
+
+def render_legacy_mowing_path(
+    path: Sequence[Path],
+    color: tuple[int, int, int, int],
+    layer_size: tuple[int, int],
+    dimensions: MapImageDimensions,
+    width: float,
+    scale: float,
+) -> Image.Image:
+    """Draw recorded trail segments without joining distinct starting points."""
+    image = Image.new("RGBA", layer_size, (0, 0, 0, 0))
+    segments: list[list[tuple[float, float]]] = []
+    current: list[tuple[float, float]] = []
+    for point in path:
+        if point.path_type != PathType.LINE:
+            if len(current) > 1:
+                segments.append(current)
+            current = []
+        projected = point.to_img(dimensions)
+        current.append((projected.x * scale, projected.y * scale))
+    if len(current) > 1:
+        segments.append(current)
+
+    draw = ImageDraw.Draw(image)
+    stroke = max(1, round(width * scale))
+    radius = (stroke - 1) / 2
+    for segment in segments:
+        draw.line(segment, fill=color, width=stroke, joint="curve")
+        for x, y in (segment[0], segment[-1]):
+            draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=color)
+    return image

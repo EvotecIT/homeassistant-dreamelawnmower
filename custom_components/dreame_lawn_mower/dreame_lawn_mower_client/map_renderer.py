@@ -1,7 +1,7 @@
 """Legacy PIL map rendering and resource composition."""
 
 from __future__ import annotations
-from .map_drawing import render_legacy_navigation_paths
+from .map_drawing import render_legacy_mowing_path, render_legacy_navigation_paths
 import io
 import math
 import time
@@ -2467,56 +2467,9 @@ class DreameMowerMapRenderer:
         return new_layer
 
     def render_path(self, path, color, layer_size, mask, dimensions, width, scale):
-        new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
-        draw = ImageDraw.Draw(new_layer, "RGBA")
-        sweep = []
-        mop = []
-        sweep_path = []
-        path_type = ""
-
-        for point in path:
-            p = point.to_img(dimensions)
-            if point.path_type == PathType.LINE:
-                l = [p.x * scale, p.y * scale]
-            else:
-                if sweep_path:
-                    sweep.append(sweep_path)
-
-                path_type = point.path_type
-                sweep_path = []
-
-        if sweep_path:
-            sweep.append(sweep_path)
-
-        for path in sweep:
-            size = width * scale
-            draw.line(
-                path,
-                width=int(round(size)),
-                fill=color,
-                joint="curve",
-            )
-            size = int(math.floor(size / 2))
-            draw.ellipse(
-                [
-                    path[-2] - size,
-                    path[-1] - size,
-                    path[-2] + size,
-                    path[-1] + size,
-                ],
-                fill=color,
-            )
-            draw.ellipse(
-                [
-                    path[0] - size,
-                    path[1] - size,
-                    path[0] + size,
-                    path[1] + size,
-                ],
-                fill=color,
-            )
-
-        return new_layer
+        return render_legacy_mowing_path(
+            path, color, layer_size, dimensions, width, scale
+        )
 
     def render_charger(
         self,
