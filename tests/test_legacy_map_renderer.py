@@ -78,6 +78,19 @@ def test_obstacle_background_tracks_marker_size_and_rotation(
     assert actual.tobytes() == expected.tobytes()
 
 
+@pytest.mark.parametrize("point_type", [0, 1])
+def test_cruise_background_tracks_marker_size_and_rotation(point_type: int) -> None:
+    point = Coordinate(2500, 2500, False, point_type)
+    dimensions = MapImageDimensions(0, 0, 100, 100, 50)
+    renderer = DreameMowerMapRenderer()
+    renderer.render_cruise_point(1, point, (100, 100), dimensions, 10, 0, 1)
+    actual = renderer.render_cruise_point(1, point, (100, 100), dimensions, 20, 90, 1)
+    expected = DreameMowerMapRenderer().render_cruise_point(
+        1, point, (100, 100), dimensions, 20, 90, 1,
+    )
+    assert actual.tobytes() == expected.tobytes()
+
+
 @pytest.mark.parametrize("icon_set", [0, 1, 2, 3])
 def test_charger_without_heading_keeps_reported_location(
     icon_set: int, caplog: pytest.LogCaptureFixture,

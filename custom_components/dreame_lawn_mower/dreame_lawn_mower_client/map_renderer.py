@@ -3382,28 +3382,35 @@ class DreameMowerMapRenderer:
 
         return None
 
-    def render_cruise_point(self, index, cruise_point, layer_size, dimensions, size, rotation, scale):
+    def render_cruise_point(
+        self,
+        index: int,
+        cruise_point: Coordinate,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        size: float,
+        rotation: int | None,
+        scale: int,
+    ) -> Image.Image:
+        rotation = rotation or 0
         new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(new_layer, "RGBA")
-        if cruise_point.type == 1 and self._cruise_path_point_background is None:
-            self._cruise_path_point_background = Image.open(
-                BytesIO(base64.b64decode(MAP_ICON_CRUISE_POINT_BG_DREAME))
-            ).convert("RGBA")
+        if cruise_point.type == 1:
+            if self._cruise_path_point_background is None:
+                self._cruise_path_point_background = Image.open(
+                    BytesIO(base64.b64decode(MAP_ICON_CRUISE_POINT_BG_DREAME))
+                ).convert("RGBA")
+            background_image = self._cruise_path_point_background.copy()
             s = int(size * scale * 3)
-            self._cruise_path_point_background.thumbnail((s, s), Image.Resampling.LANCZOS)
-            self._cruise_path_point_background = self._cruise_path_point_background.rotate(-rotation, expand=1)
-
-        if cruise_point.type != 1 and self._cruise_point_background is None:
-            self._cruise_point_background = Image.open(
-                BytesIO(base64.b64decode(MAP_ICON_CRUISE_POINT_DREAME))
-            ).convert("RGBA")
+        else:
+            if self._cruise_point_background is None:
+                self._cruise_point_background = Image.open(
+                    BytesIO(base64.b64decode(MAP_ICON_CRUISE_POINT_DREAME))
+                ).convert("RGBA")
+            background_image = self._cruise_point_background.copy()
             s = int(round(size * scale * 2))
-            self._cruise_point_background.thumbnail((s, s), Image.Resampling.LANCZOS)
-            self._cruise_point_background = self._cruise_point_background.rotate(-rotation, expand=1)
-
-        background_image = (
-            self._cruise_point_background if cruise_point.type != 1 else self._cruise_path_point_background
-        )
+        background_image.thumbnail((s, s), Image.Resampling.LANCZOS)
+        background_image = background_image.rotate(-rotation, expand=1)
         bg_size = int(min(background_image.size[1], background_image.size[0]) / scale / 4)
         offset = int(-bg_size * 1.25)
 
