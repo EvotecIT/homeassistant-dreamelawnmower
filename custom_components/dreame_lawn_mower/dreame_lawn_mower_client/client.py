@@ -1525,17 +1525,17 @@ class DreameLawnMowerClient(
 
     async def async_set_voice_language(self, voice_language: int) -> dict[str, Any]:
         """Set the mower voice language by app language-pack index."""
-        return await asyncio.to_thread(
-            self._sync_set_voice_language,
-            int(voice_language),
-        )
+        from .client_voice_writes import async_write_voice
+        from .voice_write_plan import write_voice_language
+
+        return await async_write_voice(self, write_voice_language(int(voice_language)))
 
     async def async_set_voice_volume(self, volume: int) -> dict[str, Any]:
         """Set the mower voice volume from 0 to 100."""
-        return await asyncio.to_thread(
-            self._sync_set_voice_volume,
-            int(volume),
-        )
+        from .client_voice_writes import async_write_voice
+        from .voice_write_plan import write_voice_volume
+
+        return await async_write_voice(self, write_voice_volume(int(volume)))
 
     async def async_set_voice_prompts(
         self,
@@ -1543,10 +1543,10 @@ class DreameLawnMowerClient(
     ) -> dict[str, Any]:
         """Set the four mower voice prompt toggles."""
         normalized = _normalize_voice_prompt_flags(prompts)
-        return await asyncio.to_thread(
-            self._sync_set_voice_prompts,
-            normalized,
-        )
+        from .client_voice_writes import async_write_voice
+        from .voice_write_plan import write_voice_prompts
+
+        return await async_write_voice(self, write_voice_prompts(normalized))
 
     async def async_get_cloud_device_info(
         self,

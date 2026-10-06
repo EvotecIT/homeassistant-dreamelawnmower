@@ -15,22 +15,15 @@ from .batch_device_data import (
     decode_batch_mowing_preferences,
     decode_batch_ota_info,
 )
-from .client_constants import (
-    VOICE_LANGUAGE_INDEX_TO_CODE,
-    VOICE_LANGUAGE_INDEX_TO_LABEL,
-    VOICE_PROMPT_FIELDS,
-)
 from .client_map_helpers import (
     _normalize_app_map_entries,
 )
 from .client_settings_helpers import (
-    _as_optional_int,
     _batch_ota_keys,
     _batch_settings_keys,
     _debug_ota_model_name,
     _mowing_preference_map_overview,
     _mowing_preference_overview,
-    _normalize_voice_prompt_flags,
 )
 from .client_shared_helpers import (
     _ensure_app_write_succeeded,
@@ -70,6 +63,12 @@ from .mowing_preferences_read_plan import (
 from .payload_utils import (
     _as_optional_text,
     _json_safe,
+)
+from .voice_write_plan import (
+    run_voice_write,
+    write_voice_language,
+    write_voice_prompts,
+    write_voice_volume,
 )
 from .work_log import (
     WORK_LOG_TOTALS_REQUEST,
@@ -700,99 +699,15 @@ class _DreameLawnMowerClientSettingsMixin:
         return run_app_read(read_voice(include_raw), self._sync_call_app_action)
 
     def _sync_set_voice_language(self, voice_language: int) -> dict[str, Any]:
-        """Set the mower voice language and return the confirmed response."""
-        request = {
-            "m": "s",
-            "t": "LANG",
-            "d": {
-                "type": "voice",
-                "value": int(voice_language),
-            },
-        }
-        response = self._sync_call_app_action(request)
-        data = _ensure_app_write_succeeded(
-            response,
-            operation="Voice language write",
+        return run_voice_write(
+            write_voice_language(voice_language), self._sync_call_app_action
         )
-        if not isinstance(data, Mapping):
-            raise DreameLawnMowerConnectionError(
-                f"LANG voice write returned invalid data: {response}"
-            )
-        confirmed_voice_language = _as_optional_int(data.get("voice"))
-        confirmed_text_language = _as_optional_int(data.get("text"))
-        return {
-            "source": "app_action_voice_settings_write",
-            "action": "set_voice_language",
-            "request": _json_safe(request, max_depth=4),
-            "response_data": _json_safe(response, max_depth=4),
-            "text_language_index": confirmed_text_language,
-            "voice_language_index": confirmed_voice_language,
-            "voice_language_name": VOICE_LANGUAGE_INDEX_TO_LABEL.get(
-                confirmed_voice_language
-            ),
-            "voice_language_code": VOICE_LANGUAGE_INDEX_TO_CODE.get(
-                confirmed_voice_language
-            ),
-        }
 
     def _sync_set_voice_volume(self, volume: int) -> dict[str, Any]:
-        """Set the mower voice volume and return the confirmed response."""
-        if volume < 0 or volume > 100:
-            raise ValueError("volume must be between 0 and 100")
-        request = {
-            "m": "s",
-            "t": "VOL",
-            "d": {
-                "value": int(volume),
-            },
-        }
-        response = self._sync_call_app_action(request)
-        data = _ensure_app_write_succeeded(
-            response,
-            operation="Voice volume write",
-        )
-        if not isinstance(data, Mapping):
-            raise DreameLawnMowerConnectionError(
-                f"VOL write returned invalid data: {response}"
-            )
-        return {
-            "source": "app_action_voice_settings_write",
-            "action": "set_voice_volume",
-            "request": _json_safe(request, max_depth=4),
-            "response_data": _json_safe(response, max_depth=4),
-            "volume": _as_optional_int(data.get("value")),
-        }
+        return run_voice_write(write_voice_volume(volume), self._sync_call_app_action)
 
     def _sync_set_voice_prompts(self, prompts: Sequence[int]) -> dict[str, Any]:
-        """Set the mower voice prompt flags and return the confirmed response."""
-        normalized = _normalize_voice_prompt_flags(prompts)
-        request = {
-            "m": "s",
-            "t": "VOICE",
-            "d": {
-                "value": normalized,
-            },
-        }
-        response = self._sync_call_app_action(request)
-        data = _ensure_app_write_succeeded(
-            response,
-            operation="Voice prompt write",
-        )
-        if not isinstance(data, Mapping):
-            raise DreameLawnMowerConnectionError(
-                f"VOICE write returned invalid data: {response}"
-            )
-        confirmed = _normalize_voice_prompt_flags(data.get("value"))
-        result = {
-            "source": "app_action_voice_settings_write",
-            "action": "set_voice_prompts",
-            "request": _json_safe(request, max_depth=4),
-            "response_data": _json_safe(response, max_depth=4),
-            "voice_prompts": confirmed,
-        }
-        for field_name, enabled in zip(VOICE_PROMPT_FIELDS, confirmed, strict=True):
-            result[field_name] = bool(enabled)
-        return result
+        return run_voice_write(write_voice_prompts(prompts), self._sync_call_app_action)
 
 
 
