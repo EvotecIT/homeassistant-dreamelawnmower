@@ -7,8 +7,8 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from homeassistant.components.stream.const import ATTR_STREAMS
-from homeassistant.components.stream.const import DOMAIN as STREAM_DOMAIN
+from homeassistant.components.stream.const import ATTR_STREAMS as ATTR_STREAMS
+from homeassistant.components.stream.const import DOMAIN as _STREAM_DOMAIN
 
 from .const import VIDEO_TRANSPORT_CLOUD, VIDEO_TRANSPORT_LAN
 from .debug import sanitize_diagnostic_text
@@ -18,6 +18,7 @@ from .video_camera_configuration import _VideoCameraConfiguration
 from .video_camera_types import _DreameVideoRuntime, _facade_binding
 
 _LOGGER = logging.getLogger(f"{__package__}.video_camera")
+STREAM_DOMAIN = _STREAM_DOMAIN
 _PENDING_RUNTIME_STOPS: dict[str, set[asyncio.Future[Any]]] = {}
 
 
