@@ -19,6 +19,7 @@ from .dreame_lawn_mower_client.video_runtime import (
 if TYPE_CHECKING:
     import asyncio
 
+    from homeassistant.components.stream import Stream
     from homeassistant.config_entries import ConfigEntry
 
     from .dreame_lawn_mower_client.models import DreameLawnMowerDescriptor
@@ -72,6 +73,7 @@ class _VideoCameraState(CoordinatorEntity[DreameLawnMowerCoordinator], Camera):
     _entry: ConfigEntry
     _descriptor: DreameLawnMowerDescriptor
     _stream_lock: asyncio.Lock
+    _snapshot_owned_stream: Stream | None
     _snapshot_lock: asyncio.Lock
     _snapshot_requests: int
     _snapshot_request: VideoSnapshotRequest

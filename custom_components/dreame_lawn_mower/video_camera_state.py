@@ -26,6 +26,10 @@ from .dreame_lawn_mower_client.video_runtime import (
 )
 from .video_camera_cleanup import _VideoCameraCleanup
 from .video_camera_types import _facade_binding, _FacadeModuleProxy
+from .video_session_lifecycle import (
+    mower_video_mowing_session_is_current,
+    mower_video_session_should_stay_warm,
+)
 
 video_helpers = _FacadeModuleProxy("video_helpers", _video_helpers)
 
@@ -48,6 +52,62 @@ def snapshot_advertises_video(snapshot: Any) -> bool:
 
 class DreameLawnMowerVideoStateMixin(_VideoCameraCleanup):
     """Expose mower video capability, availability, and diagnostics."""
+
+    def _video_session_should_stay_warm(self) -> bool:
+        """Apply the configured retention policy to an active mower session."""
+        self._reset_video_live_view_if_inactive()
+        if not self._video_retention_state_is_fresh():
+            return False
+        # Retention is only for a stream that has already proved it can deliver
+        # decoder-ready media.  Keeping an unverified cold start alive lets a
+        # dashboard's reconnecting consumers pin a zero-frame XP2P attempt
+        # instead of allowing the normal cleanup/retry path to re-arm video.
+        if self._video_first_media_at is None:
+            return False
+        return mower_video_session_should_stay_warm(
+            self.coordinator.data,
+            retention_mode=self._video_retention_mode,
+            live_view_seen=self._video_live_view_seen,
+        )
+
+    def _video_retention_state_is_fresh(self) -> bool:
+        """Return whether zero-viewer retention has authoritative mower state."""
+        last_update_success = bool(
+            getattr(self.coordinator, "last_update_success", False)
+        )
+        connection_degraded = bool(
+            getattr(self.coordinator, "connection_degraded", False)
+        )
+        return last_update_success and not connection_degraded
+
+    def _reset_video_live_view_if_inactive(self) -> None:
+        """Do not carry live-view intent into a later mowing run."""
+        if not self._video_retention_state_is_fresh():
+            if not self._video_has_active_live_viewer():
+                self._video_live_view_seen = False
+            return
+        if not mower_video_mowing_session_is_current(self.coordinator.data):
+            self._video_live_view_seen = False
+
+    def _video_has_active_live_viewer(self) -> bool:
+        """Return whether a deliberate direct or HA live viewer remains."""
+        relay = getattr(self, "_flv_relay", None)
+        if getattr(relay, "direct_subscriber_count", 0) > 0:
+            return True
+        ha_stream = getattr(self, "stream", None)
+        if ha_stream is None or self._snapshot_owned_stream is ha_stream:
+            return False
+        outputs = getattr(ha_stream, "outputs", None)
+        return bool(outputs()) if callable(outputs) else False
+
+    def _mark_video_live_view(self) -> None:
+        """Remember a request already classified as deliberate live viewing."""
+        self._video_live_view_seen = True
+
+    def _video_relay_subscriber_started(self, ha_stream_owned: bool) -> None:
+        """Recognize a direct relay viewer; HA Stream is classified separately."""
+        if not ha_stream_owned:
+            self._mark_video_live_view()
 
     def _resolved_video_capability(self) -> DreameLawnMowerFeatureCapability:
         """Return stable support independently from temporary availability."""
