@@ -1498,20 +1498,22 @@ class DreameMowerMapDecoder:
                         segments[segment_id] = Segment(segment_id, x, y, x, y)
                         continue
 
-                    if x < segments[segment_id].x0:
+                    x0, y0, x1, y1 = segments[segment_id]._bounds()
+                    if x < x0:
                         segments[segment_id].x0 = x
-                    elif x > segments[segment_id].x1:
+                    elif x > x1:
                         segments[segment_id].x1 = x
 
-                    if y < segments[segment_id].y0:
+                    if y < y0:
                         segments[segment_id].y0 = y
-                    elif y > segments[segment_id].y1:
+                    elif y > y1:
                         segments[segment_id].y1 = y
 
         if segments:
             for k, v in segments.items():
-                x = int(math.ceil((v.x1 - v.x0) / 2 + v.x0))
-                y = int(math.ceil((v.y1 - v.y0) / 2 + v.y0))
+                x0, y0, x1, y1 = v._bounds()
+                x = int(math.ceil((x1 - x0) / 2 + x0))
+                y = int(math.ceil((y1 - y0) / 2 + y0))
 
                 if map_data.saved_map:
                     if vslam_map:
@@ -1542,20 +1544,20 @@ class DreameMowerMapDecoder:
                                 y = center_y
 
                 segments[k].x0 = int(
-                    dimensions.left + (v.x0 * dimensions.grid_size)
+                    dimensions.left + (x0 * dimensions.grid_size)
                 )
                 segments[k].y0 = int(
                     dimensions.top
-                    + (v.y0 * dimensions.grid_size)
+                    + (y0 * dimensions.grid_size)
                     - dimensions.grid_size
                 )
                 segments[k].x1 = int(
                     dimensions.left
-                    + (v.x1 * dimensions.grid_size)
+                    + (x1 * dimensions.grid_size)
                     + dimensions.grid_size
                 )
                 segments[k].y1 = int(
-                    dimensions.top + (v.y1 * dimensions.grid_size)
+                    dimensions.top + (y1 * dimensions.grid_size)
                 )
                 segments[k].x = int(
                     dimensions.left + (x * dimensions.grid_size)

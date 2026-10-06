@@ -311,7 +311,7 @@ class MapRendererData:
     wifi_map: bool | None = False
     history_map: bool | None = False
     recovery_map: bool | None = False
-    segments: list[list[float | str | list[float] | None]] | None = None
+    segments: list[list[float | str | list[float | None] | None]] | None = None
     active_segments: list[int] | None = field(default_factory=lambda: [])
     active_areas: list[list[float]] = field(default_factory=lambda: [])
     active_points: list[list[float]] = field(default_factory=lambda: [])

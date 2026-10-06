@@ -369,8 +369,9 @@ class DreameMowerMapRenderer:
             max_y = 0
             for segment in segments.values():
                 p = segment.to_coord(dimensions, False)
-                x_coords = [int(p.x0), int(p.x1)]
-                y_coords = [int(p.y0), int(p.y1)]
+                x0, y0, x1, y1 = p._bounds()
+                x_coords = [int(x0), int(x1)]
+                y_coords = [int(y0), int(y1)]
                 min_x = min(min(x_coords), min_x)
                 max_x = max(max(x_coords), max_x)
                 min_y = min(min(y_coords), min_y)
@@ -404,8 +405,9 @@ class DreameMowerMapRenderer:
         if segments:
             for segment in segments.values():
                 p = segment.to_coord(dimensions, False)
-                x_coords = sorted([int(p.x0), int(p.x1)])
-                y_coords = sorted([int(p.y0), int(p.y1)])
+                x0, y0, x1, y1 = p._bounds()
+                x_coords = sorted([int(x0), int(x1)])
+                y_coords = sorted([int(y0), int(y1)])
                 min_x = min(x_coords[0], min_x)
                 max_x = max(x_coords[1], max_x)
                 min_y = min(y_coords[0], min_y)
