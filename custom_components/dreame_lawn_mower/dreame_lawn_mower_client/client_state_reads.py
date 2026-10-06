@@ -17,6 +17,25 @@ if TYPE_CHECKING:
     from .device import DreameMowerDevice
 
 
+def read_locked_device_state[T](
+    device: DreameMowerDevice,
+    read_state: Callable[[DreameMowerDevice], T],
+    require_active: Callable[[], None],
+) -> T:
+    """Acquire state with bounded waits and recheck lifetime around callbacks."""
+    while True:
+        require_active()
+        if device._state_lock.acquire(timeout=0.05):
+            break
+    try:
+        require_active()
+        result = read_state(device)
+        require_active()
+        return result
+    finally:
+        device._state_lock.release()
+
+
 async def async_read_device_state[T](
     client: DreameLawnMowerClient,
     read_state: Callable[[DreameMowerDevice], T],
@@ -42,17 +61,7 @@ async def async_read_device_state[T](
                 raise DreameLawnMowerConnectionError("Device state read timed out")
 
         def build() -> T:
-            while True:
-                active()
-                if device._state_lock.acquire(timeout=0.05):
-                    break
-            try:
-                active()
-                result = read_state(device)
-                active()
-                return result
-            finally:
-                device._state_lock.release()
+            return read_locked_device_state(device, read_state, active)
 
         return await _run_state_worker(build, cancelled)
 

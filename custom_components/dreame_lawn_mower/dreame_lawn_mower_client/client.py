@@ -661,7 +661,18 @@ class DreameLawnMowerClient(
             token=getattr(device, "token", None) or self._descriptor.token,
             raw=self._descriptor.raw,
         )
-        snapshot = self._snapshot_from_device(device)
+        from .client_state_reads import async_read_device_state
+
+        def snapshot_current(current: Any) -> DreameLawnMowerSnapshot:
+            if current is not device:
+                raise DreameLawnMowerConnectionError(
+                    "Device changed during snapshot refresh"
+                )
+            return self._snapshot_from_device(current)
+
+        snapshot = await async_read_device_state(
+            self, snapshot_current, refresh=False,
+        )
         try:
             status_blob = await self.async_get_status_blob()
         except DreameLawnMowerConnectionError:

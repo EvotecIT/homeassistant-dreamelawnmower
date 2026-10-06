@@ -541,6 +541,8 @@ def test_refresh_keeps_new_untimestamped_active_observation() -> None:
     client = object.__new__(DreameLawnMowerClient)
     client._closing = False
     client._async_cloud_read = lambda read: read(None)
+    client._device = device
+    client._ensure_device = lambda **kwargs: device
     client._descriptor = raw_snapshot.descriptor
     client._latest_snapshot = None
     client._async_update_device = AsyncMock(return_value=device)

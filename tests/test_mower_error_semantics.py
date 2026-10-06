@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from threading import RLock
 from types import SimpleNamespace
 
 import pytest
@@ -528,6 +529,11 @@ def test_client_carries_fault_state_into_recovery_reconciliation() -> None:
     fault = _snapshot(0, "drop")
     device = _ErrorDevice(0, "drop", state="MOWING")
     client = object.__new__(DreameLawnMowerClient)
+    device._state_lock = RLock()
+    client._closing = False
+    client._device = device
+    client._ensure_device = lambda **kwargs: device
+    client._async_cloud_read = lambda read: read(None)
     client._descriptor = descriptor
     client._latest_snapshot = fault
     async def update_device():

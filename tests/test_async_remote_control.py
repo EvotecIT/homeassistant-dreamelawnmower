@@ -190,8 +190,11 @@ def test_remote_preparation_preserves_state_then_rpc_lock_order(monkeypatch, sto
             thread.start()
             try:
                 assert await asyncio.to_thread(state_held.wait, 2)
-                await asyncio.wait_for(client.async_remote_control_move_step(
-                    velocity=0 if stopping else 200), 3)
+                operation = asyncio.create_task(client.async_remote_control_move_step(
+                    velocity=0 if stopping else 200))
+                await asyncio.sleep(0.05)
+                support_entered.set()
+                await asyncio.wait_for(operation, 3)
                 assert acquired == [True]
             finally:
                 support_entered.set()
@@ -236,5 +239,53 @@ def test_remote_cancel_drains_preparation_without_dispatch(monkeypatch, stop):
             finally:
                 release.set()
                 await asyncio.gather(operation, return_exceptions=True)
+                await client.async_close()
+    asyncio.run(scenario())
+
+@pytest.mark.parametrize("kind", ["remote", "refresh"])
+@pytest.mark.parametrize("stop", ["cancel", "close"])
+def test_state_lock_wait_is_cancellable_before_holder_releases(monkeypatch, kind, stop):
+    import threading
+    from unittest.mock import Mock
+
+    async def scenario():
+        async with ClientSession() as session:
+            client = client_for(session)
+            state = configure(client)
+            held, release = threading.Event(), threading.Event()
+            state_lock = client._device._state_lock
+
+            def hold_state():
+                with state_lock:
+                    held.set()
+                    release.wait(3)
+
+            thread = threading.Thread(target=hold_state)
+            thread.start()
+            snapshot = Mock()
+            client._snapshot_from_device = snapshot
+            operation = None
+            try:
+                assert await asyncio.to_thread(held.wait, 1)
+                operation = asyncio.create_task(
+                    client.async_remote_control_stop() if kind == "remote"
+                    else client.async_refresh())
+                await asyncio.sleep(0.05)
+                assert not operation.done()
+                if stop == "close":
+                    await asyncio.wait_for(client.async_close(), 0.5)
+                else:
+                    operation.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(operation, 0.5)
+                assert not release.is_set()
+                assert state._remote_control is False
+                snapshot.assert_not_called()
+                assert not client._cloud_read_tasks
+            finally:
+                release.set()
+                await asyncio.to_thread(thread.join, 3)
+                if operation:
+                    await asyncio.gather(operation, return_exceptions=True)
                 await client.async_close()
     asyncio.run(scenario())

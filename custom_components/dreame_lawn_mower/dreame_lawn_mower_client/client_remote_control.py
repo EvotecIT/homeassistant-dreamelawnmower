@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from .client_refresh import _run_state_worker
 from .client_rpc import async_device_rpc
+from .client_state_reads import read_locked_device_state
 from .exceptions import (
     DeviceException,
     DreameLawnMowerConnectionError,
@@ -39,19 +40,19 @@ async def async_remote_control_step(
             nonlocal prepared, prepared_device
             cancelled = Event()
 
-            def prepare() -> tuple[int, int, str]:
-                def require_current() -> None:
-                    if (cancelled.is_set() or client._closing
-                            or client._device is not device
-                            or time.monotonic() >= deadline):
-                        raise DreameLawnMowerConnectionError(
-                            "Remote-control preparation expired or was cancelled"
-                        )
-                    if refreshed_device is not None and device is not refreshed_device:
-                        raise DreameLawnMowerConnectionError(
-                            "Device changed after remote-control safety refresh"
-                        )
+            def require_current() -> None:
+                if (cancelled.is_set() or client._closing
+                        or client._device is not device
+                        or time.monotonic() >= deadline):
+                    raise DreameLawnMowerConnectionError(
+                        "Remote-control preparation expired or was cancelled"
+                    )
+                if refreshed_device is not None and device is not refreshed_device:
+                    raise DreameLawnMowerConnectionError(
+                        "Device changed after remote-control safety refresh"
+                    )
 
+            def prepare(device: Any) -> tuple[int, int, str]:
                 require_current()
                 support = client._remote_control_support_from_device(device)
                 require_current()
@@ -67,7 +68,10 @@ async def async_remote_control_step(
                 return siid, piid, payload
 
             try:
-                prepared = await _run_state_worker(prepare, cancelled)
+                prepared = await _run_state_worker(
+                    lambda: read_locked_device_state(device, prepare, require_current),
+                    cancelled,
+                )
                 prepared_device = device
             finally:
                 cancelled.set()
