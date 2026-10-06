@@ -661,6 +661,8 @@ class DreameCloudSession:
         # credentials while preserving the shared vendor wire representation.
         auth = BasicAuth.decode(request_headers.pop("Authorization"))
         remaining = self._remaining(deadline)
+        if self._session.closed:
+            raise DreameLawnMowerConnectionError("Cloud session is closed")
         if on_dispatch is not None:
             on_dispatch()
         async with self._session.request(
