@@ -9,7 +9,11 @@ from .device_types import (
     DreameMowerAIProperty,
     DreameMowerAutoSwitchProperty,
     DreameMowerProperty,
+    DreameMowerState,
+    DreameMowerStateOld,
+    DreameMowerStatus,
     DreameMowerStrAIProperty,
+    DreameMowerTaskStatus,
 )
 
 if TYPE_CHECKING:
@@ -28,7 +32,8 @@ if TYPE_CHECKING:
 class _DreameMowerDeviceContext:
     """Describe members initialized by DreameMowerDevice for all its mixins.
 
-    This base owns cached property readers and shared declarations. Device
+    This base owns cached property access, listener notification and shared
+    declarations. Device
     construction and property/action mapping values remain in the assembled
     device; no defaults are supplied here.
     """
@@ -103,3 +108,46 @@ class _DreameMowerDeviceContext:
             if prop is not None and prop.name in self.ai_data:
                 return bool(self.ai_data[prop.name])
         return None
+
+    def _update_status(
+        self, task_status: DreameMowerTaskStatus, status: DreameMowerStatus
+    ) -> None:
+        """Update cached status for rendering before sending the device action."""
+        if task_status is not DreameMowerTaskStatus.COMPLETED:
+            new_state = DreameMowerState.MOWING
+            self._update_property(DreameMowerProperty.STATE, new_state.value)
+
+        self._update_property(DreameMowerProperty.STATUS, status.value)
+        self._update_property(DreameMowerProperty.TASK_STATUS, task_status.value)
+
+
+    def _update_property(self, prop: DreameMowerProperty, value: Any) -> Any:
+        """Update device property on memory and notify listeners."""
+        if prop in self.property_mapping:
+            if (
+                not self.capability.new_state
+                and prop == DreameMowerProperty.STATE
+                and int(value) > 18
+                and value in DreameMowerState._value2member_map_
+            ):
+                state_name = DreameMowerState(value).name
+                if state_name in DreameMowerStateOld.__members__:
+                    old_state = DreameMowerStateOld[state_name]
+                    value = int(old_state)
+            current_value = self.get_property(prop)
+            if current_value != value:
+                did = prop.value
+                self.data[did] = value
+                if did in self._property_update_callback:
+                    for callback in self._property_update_callback[did]:
+                        callback(current_value)
+
+                self._property_changed()
+                return current_value if current_value is not None else value
+        return None
+
+
+    def _property_changed(self) -> None:
+        """Call external listener when a property changed"""
+        if self._update_callback:
+            self._update_callback()

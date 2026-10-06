@@ -566,39 +566,7 @@ class _DreameMowerDeviceStateMixin(_DreameMowerDeviceContext):
                 return self._handle_properties(results)
         return self._handle_properties(results)
 
-    def _update_status(self, task_status: DreameMowerTaskStatus, status: DreameMowerStatus) -> None:
-        """Update status properties on memory for map renderer to update the image before action is sent to the device."""
-        if task_status is not DreameMowerTaskStatus.COMPLETED:
-            new_state = DreameMowerState.MOWING
-            self._update_property(DreameMowerProperty.STATE, new_state.value)
 
-        self._update_property(DreameMowerProperty.STATUS, status.value)
-        self._update_property(DreameMowerProperty.TASK_STATUS, task_status.value)
-
-    def _update_property(self, prop: DreameMowerProperty, value: Any) -> Any:
-        """Update device property on memory and notify listeners."""
-        if prop in self.property_mapping:
-            if (
-                not self.capability.new_state
-                and prop == DreameMowerProperty.STATE
-                and int(value) > 18
-                and value in DreameMowerState._value2member_map_
-            ):
-                state_name = DreameMowerState(value).name
-                if state_name in DreameMowerStateOld.__members__:
-                    old_state = DreameMowerStateOld[state_name]
-                    value = int(old_state)
-            current_value = self.get_property(prop)
-            if current_value != value:
-                did = prop.value
-                self.data[did] = value
-                if did in self._property_update_callback:
-                    for callback in self._property_update_callback[did]:
-                        callback(current_value)
-
-                self._property_changed()
-                return current_value if current_value is not None else value
-        return None
 
     def _map_property_changed(self, previous_property: Any = None) -> None:
         """Update last update time of the map when a property associated with rendering map changed."""
@@ -1130,10 +1098,6 @@ class _DreameMowerDeviceStateMixin(_DreameMowerDeviceContext):
         if self._map_manager and previous_battery_level is not None and self.status.battery_level == 100:
             self._map_manager.editor.refresh_map()
 
-    def _property_changed(self) -> None:
-        """Call external listener when a property changed"""
-        if self._update_callback:
-            self._update_callback()
 
     def _map_changed(self) -> None:
         """Call external listener when a map changed"""
