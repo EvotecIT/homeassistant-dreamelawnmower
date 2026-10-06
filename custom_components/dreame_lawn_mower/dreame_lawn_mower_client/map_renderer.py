@@ -207,27 +207,27 @@ _LOGGER = logging.getLogger(__name__)
 class DreameMowerMapRenderer:
     def __init__(
         self,
-        color_scheme: str = None,
-        icon_set: str = None,
-        map_objects: list[str] = None,
+        color_scheme: str | None = None,
+        icon_set: str | None = None,
+        map_objects: list[str] | None = None,
         robot_type: int = 0,
         low_resolution: bool = False,
         square: bool = False,
         cache: bool = True,
     ) -> None:
-        self.color_scheme: MapRendererColorScheme = MAP_COLOR_SCHEME_LIST.get(color_scheme, MapRendererColorScheme())
-        self.icon_set: int = MAP_ICON_SET_LIST.get(icon_set, 0)
+        self.color_scheme: MapRendererColorScheme = MAP_COLOR_SCHEME_LIST.get(color_scheme or "", MapRendererColorScheme())
+        self.icon_set: int = MAP_ICON_SET_LIST.get(icon_set or "", 0)
         self.config: MapRendererConfig = MapRendererConfig()
         if map_objects is not None:
             for attr in self.config.__dict__.keys():
                 if attr not in map_objects:
                     setattr(self.config, attr, False)
 
-        self._map_data: MapData = None
+        self._map_data: MapData | None = None
         self.render_complete: bool = True
         self._layers: dict[MapRendererLayer, Any] = {}
-        self._robot_status: int = None
-        self._station_status: int = None
+        self._robot_status: int | None = None
+        self._station_status: int | None = None
         self._robot_type: int = robot_type
         self._low_resolution: bool = low_resolution
         self._low_memory: bool = low_resolution
@@ -524,7 +524,7 @@ class DreameMowerMapRenderer:
     def get_data_string(
         self,
         map_data: MapData,
-        resources: MapRendererResources = None,
+        resources: MapRendererResources | None = None,
         robot_status: int = 0,
         station_status: int = 0,
     ) -> str:
