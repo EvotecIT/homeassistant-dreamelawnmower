@@ -221,6 +221,7 @@ from .vector_map import vector_map_to_details as vector_map_to_details
 from .vector_map import vector_map_to_summary as vector_map_to_summary
 
 if _typing.TYPE_CHECKING:
+    from .device import DreameMowerDevice
     from .map_visuals import MapRenderStyle
     from .work_log import DreameLawnMowerWorkLogTotals
 
@@ -547,7 +548,7 @@ class DreameLawnMowerClient(
         self._country = country
         self._account_type = account_type
         self._descriptor = descriptor
-        self._device: Any | None = None
+        self._device: DreameMowerDevice | None = None
         self._device_ownership_lock = _threading.Lock()
         self._schedule_operation_lock = _threading.RLock()
         self._schedule_protocols: dict[int, str] = {}
@@ -586,7 +587,7 @@ class DreameLawnMowerClient(
         return self._descriptor
 
     @property
-    def device(self) -> Any | None:
+    def device(self) -> DreameMowerDevice | None:
         """Return the currently connected upstream device instance."""
         return self._device
 

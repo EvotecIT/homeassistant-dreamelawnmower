@@ -10,11 +10,12 @@ from copy import deepcopy
 from typing import Any
 
 from .client_shared_helpers import _ensure_app_write_succeeded
+from .client_transport import _DreameLawnMowerClientTransport
 from .exceptions import DreameLawnMowerConnectionError, mark_write_attempted
 from .schedule import build_schedule_upload_requests, decode_schedule_payload_text
 
 
-class _DreameLawnMowerScheduleEditsMixin:
+class _DreameLawnMowerScheduleEditsMixin(_DreameLawnMowerClientTransport):
     """Own read/modify/write start edits without reconstructing native frames."""
 
     async def async_set_app_schedule_task_start_time(

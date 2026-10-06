@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .client_shared_helpers import _ensure_app_write_succeeded
+from .client_transport import _DreameLawnMowerClientTransport
 from .exceptions import DreameLawnMowerConnectionError, mark_write_attempted
 from .payload_utils import _json_safe
 from .schedule_tables import (
@@ -17,7 +18,7 @@ from .schedule_tables import (
 )
 
 
-class _DreameLawnMowerScheduleTablesMixin:
+class _DreameLawnMowerScheduleTablesMixin(_DreameLawnMowerClientTransport):
     """Adapt table records to the same model used by document schedules."""
 
     def _sync_read_schedule_tables(

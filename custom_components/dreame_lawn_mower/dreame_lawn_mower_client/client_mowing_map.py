@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Mapping
 from typing import Any
 
+from .client_transport import _DreameLawnMowerClientTransport
 from .map_visuals import MapRenderStyle
 from .mowing_map import MowingMapScene, build_mowing_map_scene, mowing_map_overlay
 from .position_tracking import snapshot_is_docked
@@ -38,7 +39,7 @@ def bounded_mowing_map_batch(batch: Mapping[str, Any] | None) -> dict[str, Any]:
     return geometry
 
 
-class _DreameLawnMowerClientMowingMapMixin:
+class _DreameLawnMowerClientMowingMapMixin(_DreameLawnMowerClientTransport):
     """Reuse the client transport and session owner; keep HTTP out of the core."""
 
     async def async_get_mowing_map_scene(

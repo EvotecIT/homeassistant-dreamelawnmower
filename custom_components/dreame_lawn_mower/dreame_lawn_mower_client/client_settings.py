@@ -40,6 +40,7 @@ from .client_shared_helpers import (
     _ensure_app_write_succeeded,
     _positive_int,
 )
+from .client_transport import _DreameLawnMowerClientTransport
 from .debug_ota_catalog import (
     build_debug_ota_catalog_url,
     normalize_debug_ota_catalog_payload,
@@ -85,7 +86,7 @@ from .work_log import (
 _MOWING_PREFERENCE_READBACK_DELAYS_SECONDS = (0.0, 1.0, 2.0)
 
 
-class _DreameLawnMowerClientSettingsMixin:
+class _DreameLawnMowerClientSettingsMixin(_DreameLawnMowerClientTransport):
     def _sync_get_work_log_totals(self) -> DreameLawnMowerWorkLogTotals:
         """Fetch mower-owned lifetime totals through the MIHIS app action."""
         response = self._sync_call_app_action(

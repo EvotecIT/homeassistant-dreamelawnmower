@@ -166,7 +166,7 @@ class DreameMowerDevice(
     def __init__(
         self,
         name: str,
-        host: str,
+        host: str | None,
         token: str,
         mac: str | None = None,
         username: str | None = None,

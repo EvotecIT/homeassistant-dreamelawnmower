@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from .client_transport import _DreameLawnMowerClientTransport
 from .models import DreameLawnMowerStatusBlob
 from .position_tracking import MowerPositionTracker
 
 
-class _DreameLawnMowerClientTrackingMixin:
+class _DreameLawnMowerClientTrackingMixin(_DreameLawnMowerClientTransport):
     """Own live evidence retirement for both streamed and rendered maps."""
 
     _position_tracker: MowerPositionTracker

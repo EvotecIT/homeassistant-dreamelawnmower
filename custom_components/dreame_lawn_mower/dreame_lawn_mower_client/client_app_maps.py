@@ -15,11 +15,12 @@ from .client_map_helpers import (
     _validate_app_map_chunk_size,
 )
 from .client_shared_helpers import _app_action_data
+from .client_transport import _DreameLawnMowerClientTransport
 from .exceptions import DreameLawnMowerConnectionError
 from .payload_utils import _json_safe
 
 
-class _DreameLawnMowerClientAppMapsMixin:
+class _DreameLawnMowerClientAppMapsMixin(_DreameLawnMowerClientTransport):
     def _sync_get_app_maps(
         self,
         chunk_size: int = 400,

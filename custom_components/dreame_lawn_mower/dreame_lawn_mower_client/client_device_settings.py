@@ -8,6 +8,7 @@ from typing import Any
 
 from .client_settings_helpers import _weather_protection_active_summary
 from .client_shared_helpers import _app_action_data, _ensure_app_write_succeeded
+from .client_transport import _DreameLawnMowerClientTransport
 from .device_settings import (
     build_anti_theft_settings_request,
     build_charging_period_request,
@@ -23,7 +24,7 @@ from .exceptions import (
 from .payload_utils import _json_safe
 
 
-class _DreameLawnMowerClientDeviceSettingsMixin:
+class _DreameLawnMowerClientDeviceSettingsMixin(_DreameLawnMowerClientTransport):
     def _sync_get_device_settings(
         self,
         include_raw: bool = False,

@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from .camera_probe import CAMERA_PROBE_PROPERTY_KEYS, build_camera_probe_payload
+from .client_transport import _DreameLawnMowerClientTransport
 from .exceptions import (
     DeviceException,
     DreameLawnMowerConnectionError,
@@ -267,7 +268,7 @@ def _cloud_user_feature_summary(value: Any) -> Mapping[str, Any]:
     return {"type": type(value).__name__, "value": safe}
 
 
-class _DreameLawnMowerCameraMixin:
+class _DreameLawnMowerCameraMixin(_DreameLawnMowerClientTransport):
     """Camera/video domain for :class:`DreameLawnMowerClient`.
 
     The host client supplies device lifecycle, cloud protocol, app action, and
