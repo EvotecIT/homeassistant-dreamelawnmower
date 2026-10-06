@@ -74,18 +74,24 @@ async def async_read_debug_catalog(
 
 async def async_read_key_definition(
     client: DreameLawnMowerClient, *, language: str | None,
+    device_info: Mapping[str, Any] | None = None,
+    device_list_page: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Resolve the advertised definition and preserve its partial-result shape."""
     async def read(cloud: DreameCloudSession) -> dict[str, Any]:
-        info = await client.async_get_cloud_device_info(language=language)
+        info = device_info or await client.async_get_cloud_device_info(
+            language=language,
+        )
         key_define = _key_define_from_mapping(info or {})
         source = "device_info"
         if not key_define.get("url"):
             try:
-                page = await client.async_get_cloud_device_list_page(
-                    current=1, size=20, language=language, master=None,
-                    shared_status=None,
-                )
+                page = device_list_page
+                if page is None:
+                    page = await client.async_get_cloud_device_list_page(
+                        current=1, size=20, language=language, master=None,
+                        shared_status=None,
+                    )
             except DreameLawnMowerConnectionError:
                 page = None
             fallback = _key_define_from_device_list_page(client._descriptor.did, page)

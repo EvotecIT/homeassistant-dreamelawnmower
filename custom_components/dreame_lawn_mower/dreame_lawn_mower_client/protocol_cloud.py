@@ -25,6 +25,7 @@ from .exceptions import (
 )
 from .cloud_auth import CloudAuthentication, parse_cloud_authentication
 from .cloud_files import interim_file_params, interim_file_result
+from .cloud_history import history_params, history_result
 from .cloud_wire import (
     APP_PLUGIN_PATH, DEVICE_INFO_PATH, DEVICE_LIST_PATH, DEVICE_METADATA_PATHS,
     cloud_batch_data_params, cloud_device_info_data,
@@ -1174,29 +1175,13 @@ class DreameMowerDreameHomeCloudProtocol:
         return self.get_device_data(key, "event", limit, time_start, time_end)
 
     def get_device_data(self, key, type, limit=1, time_start=0, time_end=9999999999):
-        data_keys = key.split(".")
-        params = {
-            "uid": str(self._uid),
-            "did": str(self._did),
-            "from": time_start if time_start else 1687019188,
-            "limit": limit,
-            "siid": data_keys[0],
-            self._strings[21]: self._country,
-            self._strings[42]: 3,
-        }
-        param_name = "piid"
-        if type == "event":
-            param_name = "eiid"
-        elif type == "action":
-            param_name = "aiid"
-
-        params[param_name] = data_keys[1]
+        params = history_params(
+            self._strings, self._uid, self._did, self._country,
+            key, type, limit, time_start,
+        )
         api_response = self._api_call(
             f"{self._strings[23]}/{self._strings[25]}/{self._strings[43]}", params)
-        if api_response is None or "data" not in api_response or self._strings[33] not in api_response["data"]:
-            return None
-
-        return api_response["data"][self._strings[33]]
+        return history_result(api_response, self._strings)
 
     def get_batch_device_datas(
         self,

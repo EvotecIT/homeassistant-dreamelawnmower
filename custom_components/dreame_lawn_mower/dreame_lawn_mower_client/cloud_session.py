@@ -7,7 +7,7 @@ import json
 import math
 import re
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Literal
 from urllib.parse import urlencode
 
@@ -15,6 +15,7 @@ from aiohttp import BasicAuth, ClientError, ClientSession, ClientTimeout
 
 from .cloud_auth import CloudAuthentication, parse_cloud_authentication
 from .cloud_files import interim_file_params, interim_file_result
+from .cloud_history import history_params, history_result
 from .cloud_wire import (
     APP_PLUGIN_PATH,
     DEVICE_INFO_PATH,
@@ -83,6 +84,22 @@ class DreameCloudSession:
     @property
     def _base_url(self) -> str:
         return f"https://{self._country}{self._strings[0]}:{self._strings[1]}"
+
+    async def async_get_property_history(
+        self, did: str, key: str, *, limit: int = 3, time_start: int = 0,
+        deadline: float | None = None,
+    ) -> Any:
+        """Read history with account fields built after login or token renewal."""
+        path = "/".join(self._strings[i] for i in (23, 25, 43))
+        response = await self._async_read_response(
+            f"/{path}",
+            lambda: json.dumps(history_params(
+                self._strings, self._user_id, did, self._country,
+                key, "prop", limit, time_start,
+            ), separators=(",", ":")),
+            timeout=20, deadline=deadline,
+        )
+        return history_result(response, self._strings)
 
     async def async_get_interim_file_url(
         self, did: str, model: str | None, object_name: str, *,
@@ -384,7 +401,7 @@ class DreameCloudSession:
         return payload.get("data")
 
     async def _async_read_response(
-        self, path: str, data: str | None, *,
+        self, path: str, data: str | None | Callable[[], str], *,
         timeout: float, deadline: float | None,
         http_method: Literal["GET", "POST"] = "POST",
     ) -> dict[str, Any]:
@@ -407,7 +424,7 @@ class DreameCloudSession:
                         status, payload = await self._request_read(
                             f"{self._base_url}{path}",
                             headers,
-                            data,
+                            data() if callable(data) else data,
                             end,
                             http_method=http_method,
                         )

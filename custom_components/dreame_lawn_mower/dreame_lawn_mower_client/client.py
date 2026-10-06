@@ -2008,11 +2008,10 @@ class DreameLawnMowerClient(
         language: str = "en",
     ) -> dict[str, Any]:
         """Probe known read-only map sources and return a JSON-safe payload."""
-        return await asyncio.to_thread(
-            self._sync_probe_map_sources,
-            timeout,
-            interval,
-            language,
+        from .client_map_probe_reads import async_probe_maps
+
+        return await async_probe_maps(
+            self, timeout=timeout, interval=interval, language=language,
         )
 
     async def async_close(self) -> None:
