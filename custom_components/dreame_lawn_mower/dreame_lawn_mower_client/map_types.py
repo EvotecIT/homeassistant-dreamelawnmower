@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any
@@ -822,14 +822,18 @@ class MapImageDimensions:
 
 
 class CleaningHistory:
-    def __init__(self, history_data, property_mapping) -> None:
+    def __init__(
+        self,
+        history_data: Sequence[Mapping[str, Any]],
+        property_mapping: Mapping[DreameMowerProperty, Mapping[str, int]],
+    ) -> None:
         self.date: datetime | None = None
         self.status: DreameMowerStatus | None = None
         self.cleaning_time: int = 0
         self.cleaned_area: int = 0
         self.file_name: str | None = None
-        self.key = None
-        self.object_name = None
+        self.key: str | None = None
+        self.object_name: str | None = None
         self.completed: bool | None = None
         self.map_index: int | None = None
         self.map_name: str | None = None
@@ -862,10 +866,11 @@ class CleaningHistory:
             elif pid == PIID(DreameMowerProperty.CLEANING_START_TIME, property_mapping):
                 self.date = datetime.fromtimestamp(value)
             elif pid == PIID(DreameMowerProperty.CLEAN_LOG_FILE_NAME, property_mapping):
-                self.file_name = value
-                if len(self.file_name) > 1:
-                    if "," in self.file_name:
-                        values = self.file_name.split(",")
+                file_name: str = value
+                self.file_name = file_name
+                if len(file_name) > 1:
+                    if "," in file_name:
+                        values = file_name.split(",")
                         self.object_name = values[0]
                         self.key = values[1]
                     else:

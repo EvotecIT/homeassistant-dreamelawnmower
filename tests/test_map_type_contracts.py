@@ -7,6 +7,7 @@ import pytest
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import map_decoder
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_types import (
     Area,
+    CleaningHistory,
     Coordinate,
     Furniture,
     FurnitureType,
@@ -152,3 +153,17 @@ def test_point_validation_respects_grid_bounds_and_blocked_pixels():
     assert data.check_point(30, 10) is False
     assert data.check_point(-1, 0, absolute=True) is False
     assert data.check_point(1, 1, absolute=True) is True
+
+
+@pytest.mark.parametrize("value_key", ["value", "val"])
+@pytest.mark.parametrize("filename", ["map-object", "map-object,decryption-key"])
+def test_cleaning_history_preserves_map_file_identity(value_key, filename):
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        device_types,
+    )
+
+    mapping = {device_types.DreameMowerProperty.CLEAN_LOG_FILE_NAME: {"piid": 7}}
+    history = CleaningHistory([{"piid": 7, value_key: filename}], mapping)
+    assert history.file_name == filename
+    assert history.object_name == "map-object"
+    assert history.key == ("decryption-key" if "," in filename else None)
