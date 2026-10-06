@@ -12,11 +12,12 @@ from .map_probe import build_cloud_property_summary
 
 if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
+    from .client_maps import _DreameLawnMowerClientMapsMixin
     from .cloud_session import DreameCloudSession
 
 
 def cloud_property_scan_result(
-    client: DreameLawnMowerClient,
+    client: _DreameLawnMowerClientMapsMixin,
     requested_key_count: int,
     all_entries: list[dict[str, Any]],
     *,
