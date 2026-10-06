@@ -530,12 +530,16 @@ class DreameMowerMapRenderer:
             return (int(outRGB[0]), int(outRGB[1]), int(outRGB[2]), int(outA * 255))
         return source
 
-    def _combine_layers(self, cached_layers, layer_size, parent, sub):
-        cached_layers[parent] = Image.new("RGBA", layer_size, (255, 255, 255, 0))
-        if sub in cached_layers:
-            for k, v in sorted(cached_layers[sub].items()):
-                if v is not None:
-                    cached_layers[parent] = Image.alpha_composite(cached_layers[parent], v)
+    @staticmethod
+    def _combine_layers(
+        layer_size: tuple[int, int], layers: Mapping[int, Image.Image | None] | None
+    ) -> Image.Image:
+        image = Image.new("RGBA", layer_size, (255, 255, 255, 0))
+        if layers is not None:
+            for _, layer in sorted(layers.items()):
+                if layer is not None:
+                    image = Image.alpha_composite(image, layer)
+        return image
 
     def get_data_string(
         self,
@@ -1989,7 +1993,9 @@ class DreameMowerMapRenderer:
 
                 if changed:
                     changes.append(layer)
-                    self._combine_layers(cached_layers, layer_size, layer, MapRendererLayer.FURNITURE)
+                    cached_layers[layer] = self._combine_layers(
+                        layer_size, cached_layers.get(MapRendererLayer.FURNITURE)
+                    )
         elif self._cache and cached_layers.get(layer):
             changes.append(layer)
             del cached_layers[layer]
@@ -2054,7 +2060,9 @@ class DreameMowerMapRenderer:
 
                 if changed:
                     changes.append(layer)
-                    self._combine_layers(cached_layers, layer_size, layer, MapRendererLayer.SEGMENT)
+                    cached_layers[layer] = self._combine_layers(
+                        layer_size, cached_layers.get(MapRendererLayer.SEGMENT)
+                    )
         elif self._cache and cached_layers.get(layer):
             changes.append(layer)
             del cached_layers[layer]
@@ -2368,7 +2376,9 @@ class DreameMowerMapRenderer:
 
                 if changed:
                     changes.append(layer)
-                    self._combine_layers(cached_layers, layer_size, layer, MapRendererLayer.OBSTACLE)
+                    cached_layers[layer] = self._combine_layers(
+                        layer_size, cached_layers.get(MapRendererLayer.OBSTACLE)
+                    )
         elif self._cache and cached_layers.get(layer):
             changes.append(layer)
             del cached_layers[layer]
@@ -2413,7 +2423,9 @@ class DreameMowerMapRenderer:
 
                 if changed:
                     changes.append(layer)
-                    self._combine_layers(cached_layers, layer_size, layer, MapRendererLayer.CRUISE_POINT)
+                    cached_layers[layer] = self._combine_layers(
+                        layer_size, cached_layers.get(MapRendererLayer.CRUISE_POINT)
+                    )
         elif self._cache and cached_layers.get(layer):
             changes.append(layer)
             del cached_layers[layer]

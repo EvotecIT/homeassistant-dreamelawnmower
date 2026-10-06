@@ -25,6 +25,17 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
 )
 
 
+def test_layer_composition_uses_key_order_and_preserves_source_images() -> None:
+    red = Image.new("RGBA", (2, 2), (255, 0, 0, 128))
+    blue = Image.new("RGBA", (2, 2), (0, 0, 255, 128))
+    combined = DreameMowerMapRenderer._combine_layers(
+        (2, 2), {2: blue, 1: red, 3: None},
+    )
+    assert combined.getpixel((0, 0)) == (85, 0, 170, 192)
+    assert red.getpixel((0, 0)) == (255, 0, 0, 128)
+    assert blue.getpixel((0, 0)) == (0, 0, 255, 128)
+
+
 @pytest.mark.parametrize("point_kind", ["active", "predefined"])
 def test_map_json_exports_fractional_point_coordinates(point_kind: str) -> None:
     data = MapData()
