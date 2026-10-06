@@ -1092,7 +1092,8 @@ class DreameMowerMapRenderer:
                     )
 
                     if self._map_data and (
-                        self._map_data.dimensions.bounds != map_data.dimensions.bounds
+                        self._map_data.dimensions is None
+                        or self._map_data.dimensions.bounds != map_data.dimensions.bounds
                         or self._map_data.saved_map_id != map_data.saved_map_id
                     ):
                         self._map_data = None
@@ -1125,7 +1126,10 @@ class DreameMowerMapRenderer:
                     scale,
                 )
 
-                if self._cache and self._map_data and self._map_data.dimensions.padding != map_data.dimensions.padding:
+                if self._cache and self._map_data and (
+                    self._map_data.dimensions is None
+                    or self._map_data.dimensions.padding != map_data.dimensions.padding
+                ):
                     self._map_data = None
             else:
                 map_data.dimensions.padding = self._map_data.dimensions.padding
@@ -1143,7 +1147,10 @@ class DreameMowerMapRenderer:
             if self._cache and not self._has_mask and cached_layers.get(MapRendererLayer.PATH_MASK):
                 del cached_layers[MapRendererLayer.PATH_MASK]
 
-            if self._cache and self._map_data and self._map_data.dimensions.scale != scale:
+            if self._cache and self._map_data and (
+                self._map_data.dimensions is None
+                or self._map_data.dimensions.scale != scale
+            ):
                 self._map_data = None
 
             if not self._cache or (self._map_data is None or self._map_data.rotation != map_data.rotation):
@@ -1173,6 +1180,7 @@ class DreameMowerMapRenderer:
                 not self._cache
                 or self._map_data is None
                 or not cached_layers.get(MapRendererLayer.IMAGE)
+                or self._map_data.dimensions is None
                 or self._map_data.active_segments != map_data.active_segments
                 or self._map_data.active_areas != map_data.active_areas
                 or self._map_data.segments != map_data.segments
@@ -1358,7 +1366,10 @@ class DreameMowerMapRenderer:
                         (map_data.dimensions.height - (max_y + 1)) * scale,
                     ]
 
-                if self._map_data and self._map_data.dimensions.crop != map_data.dimensions.crop:
+                if self._map_data and (
+                    self._map_data.dimensions is None
+                    or self._map_data.dimensions.crop != map_data.dimensions.crop
+                ):
                     self._map_data = None
 
                 image = Image.fromarray(pixels)
