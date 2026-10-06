@@ -196,13 +196,15 @@ class DreameMowerMapDataJsonRenderer:
                             map_data.robot_position.x, map_data.robot_position.y
                         )
                     ),
-                    MAP_DATA_JSON_PARAMETER_META_DATA: {
-                        MAP_PARAMETER_ANGLE: (
-                            DreameMowerMapDataJsonRenderer._convert_angle(
+                    MAP_DATA_JSON_PARAMETER_META_DATA: (
+                        {
+                            MAP_PARAMETER_ANGLE: self._convert_angle(
                                 map_data.robot_position.a
                             )
-                        )
-                    },
+                        }
+                        if map_data.robot_position.a is not None
+                        else {}
+                    ),
                 }
             map_data_json[MAP_DATA_JSON_PARAMETER_ENTITIES].append(
                 self._positions[MapRendererLayer.ROBOT]
@@ -223,13 +225,15 @@ class DreameMowerMapDataJsonRenderer:
                             map_data.charger_position.x, map_data.charger_position.y
                         )
                     ),
-                    MAP_DATA_JSON_PARAMETER_META_DATA: {
-                        MAP_PARAMETER_ANGLE: (
-                            DreameMowerMapDataJsonRenderer._convert_angle(
+                    MAP_DATA_JSON_PARAMETER_META_DATA: (
+                        {
+                            MAP_PARAMETER_ANGLE: self._convert_angle(
                                 map_data.charger_position.a
                             )
-                        )
-                    },
+                        }
+                        if map_data.charger_position.a is not None
+                        else {}
+                    ),
                 }
             map_data_json[MAP_DATA_JSON_PARAMETER_ENTITIES].append(
                 self._positions[MapRendererLayer.CHARGER]

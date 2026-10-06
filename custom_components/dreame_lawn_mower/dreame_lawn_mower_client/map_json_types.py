@@ -4,7 +4,7 @@ from typing import NotRequired, TypedDict
 
 
 class JsonMapEntityMetadata(TypedDict):
-    angle: float
+    angle: NotRequired[float]
 
 
 class JsonMapEntity(TypedDict):

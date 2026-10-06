@@ -558,3 +558,47 @@ def test_json_path_cache_matches_fresh_frame(change: str) -> None:
     actual = renderer.render_map(updated)
     expected = map_json_renderer.DreameMowerMapDataJsonRenderer().render_map(updated)
     assert actual == expected
+
+
+@pytest.mark.parametrize("position_field", ["robot_position", "charger_position"])
+def test_json_position_without_heading_preserves_coordinates(
+    position_field: str,
+) -> None:
+    data = MapData()
+    data.empty_map = False
+    data.map_id = data.frame_id = 1
+    data.rotation = 0
+    data.dimensions = MapImageDimensions(0, 0, 2, 2, 50)
+    data.pixel_type = np.full((2, 2), 255, dtype=np.uint8)
+    data.data = bytes([255] * 4)
+    position = Point(12.5, -3.25)
+    setattr(data, position_field, position)
+    renderer = map_json_renderer.DreameMowerMapDataJsonRenderer()
+    with Image.open(BytesIO(renderer.render_map(data))) as image:
+        output = json.loads(image.text[map_json_renderer.MAP_DATA_JSON_CLASS])
+    entity = output["entities"][0]
+    assert entity["points"] == [3278, 3278]
+    assert entity["metaData"] == {}
+    assert position.a is None
+
+
+
+def test_json_compressed_pixels_preserve_every_source_cell() -> None:
+    data = MapData()
+    data.empty_map = False
+    data.map_id = data.frame_id = 1
+    data.rotation = 0
+    data.dimensions = MapImageDimensions(0, 0, 2, 3, 50)
+    data.pixel_type = np.full((3, 2), 255, dtype=np.uint8)
+    data.data = bytes([255] * 6)
+    renderer = map_json_renderer.DreameMowerMapDataJsonRenderer()
+    with Image.open(BytesIO(renderer.render_map(data))) as image:
+        output = json.loads(image.text[map_json_renderer.MAP_DATA_JSON_CLASS])
+    pixels = output["layers"][0]["compressedPixels"]
+    actual = {
+        (x + offset, y)
+        for x, y, count in zip(pixels[::3], pixels[1::3], pixels[2::3], strict=True)
+        for offset in range(count)
+    }
+    expected = {(x, y) for x in (655, 656, 657) for y in (654, 655)}
+    assert actual == expected
