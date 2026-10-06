@@ -8,11 +8,9 @@ from typing import Any
 
 from .client_shared_helpers import _ensure_app_write_succeeded
 from .exceptions import DreameLawnMowerConnectionError, mark_write_attempted
-from .payload_utils import _json_safe
+from .schedule_read_plan import read_tables
+from .schedule_read_transport import run_schedule_read
 from .schedule_tables import (
-    combine_schedule_table_weeks,
-    decode_schedule_table_task,
-    decode_schedule_tables,
     schedule_table_ids,
 )
 
@@ -28,57 +26,15 @@ class _DreameLawnMowerScheduleTablesMixin:
         include_raw: bool = False,
         include_tasks: bool = True,
     ) -> dict[str, Any]:
-        response = self._sync_call_app_action(
-            {"m": "g", "t": "SCHDI", "d": list(schedule_table_ids(map_index))},
-            retry_count=0,
-            timeout=5.0,
-            deadline=deadline,
+        return run_schedule_read(
+            read_tables(
+                map_index=map_index,
+                deadline=deadline,
+                include_raw=include_raw,
+                include_tasks=include_tasks,
+            ),
+            self._sync_call_app_action,
         )
-        plans = decode_schedule_tables(_table_data(response), map_index=map_index)
-        errors: list[dict[str, Any]] = []
-        for plan in plans:
-            task_weeks = []
-            if include_tasks:
-                for task_id in plan["task_references"]:
-                    try:
-                        task_response = self._sync_call_app_action(
-                            {"m": "g", "t": "SCHDC", "d": [plan["table_id"], task_id]},
-                            retry_count=0,
-                            timeout=5.0,
-                            deadline=deadline,
-                        )
-                        task_weeks.append(
-                            decode_schedule_table_task(
-                                _table_data(task_response),
-                                task_id=task_id,
-                            )
-                        )
-                    except Exception as err:  # noqa: BLE001 - retain observed flags
-                        plan["tasks_complete"] = False
-                        errors.append(
-                            {
-                                "plan_id": plan["plan_id"],
-                                "task_id": task_id,
-                                "error": str(err),
-                            }
-                        )
-                plan["weeks"] = combine_schedule_table_weeks(task_weeks)
-            else:
-                plan["tasks_complete"] = not plan["task_references"]
-        result = {
-            "idx": map_index,
-            "label": f"map_{map_index}",
-            "protocol": "tables",
-            "available": bool(plans),
-            "plans": plans,
-            "plan_count": len(plans),
-            "enabled_plan_count": sum(plan["enabled"] for plan in plans),
-            "read_status": "partial" if errors else "complete",
-            "task_errors": errors,
-        }
-        if include_raw:
-            result["raw_info"] = _json_safe(response, max_depth=6)
-        return result
 
     def _sync_set_schedule_table_enabled(
         self,
@@ -159,16 +115,3 @@ class _DreameLawnMowerScheduleTablesMixin:
         except Exception as err:
             mark_write_attempted(err, fields=["schedule"])
             raise
-
-
-def _table_data(response: Any) -> Any:
-    """Require an explicit success code; a failure value is not an empty list."""
-    if (
-        not isinstance(response, Mapping)
-        or response.get("r") != 0
-        or isinstance(response.get("r"), bool)
-    ):
-        raise DreameLawnMowerConnectionError(
-            "Schedule table read was not acknowledged."
-        )
-    return response.get("d")

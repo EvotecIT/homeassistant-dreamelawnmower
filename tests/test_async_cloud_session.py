@@ -2113,3 +2113,164 @@ def test_firmware_support_drains_started_workers(monkeypatch, stop, stage):
                 await client.async_close()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("account_type", ["dreame", "mova"])
+@pytest.mark.parametrize("protocol", ["document2", "document3", "tables", "partial"])
+def test_native_schedule_read_preserves_protocol_results(
+    monkeypatch, account_type, protocol,
+):
+    strings = cloud_strings(account_type)
+    text = json.dumps({"v": 42, "d": [[0, 1, ""]]})
+    seen = []
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        body = await request.json()
+        action = body["data"]["params"]["in"][0]
+        seen.append(action)
+        assert action["m"] == "g"
+        command = action["t"]
+        response = {"r": -1}
+        if command == "MAPL":
+            response = {"r": 0, "d": [[0, 1, 1, 1, 0]]}
+        elif command == "SCHDT":
+            response = {"r": 0, "d": []}
+        elif command == "SCHDI" and protocol in {"tables", "partial"}:
+            response = {"r": 0, "d": [
+                [0, 1, 0, "Morning", [[10, 2]]], [1, 0, 0, "Evening", []],
+            ]}
+        elif command == "SCHDC" and protocol == "tables":
+            response = {"r": 0, "d": [10, 1, 0, 480, [1], []]}
+        elif command == "SCHDIV" + protocol.removeprefix("document"):
+            response = {"r": 0, "d": {"i": action["d"]["i"], "v": 42, "l": len(text)}}
+        elif command.startswith("SCHDDV"):
+            offset = action["d"]["s"]
+            chunk = text[offset:offset + action["d"]["l"]]
+            response = {"r": 0, "d": {
+                "d": chunk, "l": len(chunk), "s": offset, "v": 42,
+            }}
+        return web.json_response({"code": 0, "data": {"result": {"out": [response]}}})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **{**OPTIONS, "account_type": account_type}, session=session,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type=account_type, country="eu",
+                ),
+            )
+            client._ensure_device()._protocol.cloud._host = "hub.example.invalid"
+            try:
+                result = await client.async_get_app_schedules(
+                    map_indices=(
+                        None if protocol == "document2" and account_type == "dreame"
+                        else [0]
+                    ),
+                    include_raw=True, chunk_size=10,
+                )
+                schedule = result["schedules"][-1]
+                if protocol == "document2" and account_type == "dreame":
+                    assert [item["idx"] for item in result["schedules"]] == [-1, 0]
+                    assert seen[1]["t"] == "MAPL"
+                assert result["available"] is True
+                assert result["errors"] == []
+                assert seen[0]["t"] == "SCHDT"
+                if protocol.startswith("document"):
+                    assert schedule["protocol"] == "document"
+                    assert schedule["document_version"] == int(protocol[-1])
+                    assert schedule["raw_text"] == text
+                    assert schedule["downloaded_size"] == len(text)
+                    assert schedule["chunk_count"] > 1
+                    assert schedule["plan_count"] == 1
+                else:
+                    assert schedule["protocol"] == "tables"
+                    assert schedule["plan_count"] == 2
+                    assert schedule["plans"][0]["enabled"] is True
+                    assert schedule["plans"][0]["tasks_complete"] is (
+                        protocol == "tables"
+                    )
+                assert schedule["read_status"] == (
+                    "partial" if protocol == "partial" else "complete"
+                )
+                assert not client._cloud_read_tasks
+                assert not client._schedule_async_gate.locked()
+            finally:
+                await client.async_close()
+            assert not session.closed
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("stop", ["cancel", "close"])
+def test_native_schedule_serializes_threads_and_tasks(monkeypatch, stop):
+    strings = cloud_strings("dreame")
+
+    async def scenario():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        calls = []
+
+        async def handler(request):
+            if request.path == strings[17]:
+                return web.json_response(login_response(strings))
+            calls.append(await request.json())
+            entered.set()
+            await release.wait()
+            return web.json_response({"code": 0, "data": {"result": {"out": [
+                {"r": 0, "d": {"l": 0, "v": 65535}},
+            ]}}})
+
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **OPTIONS, session=session,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type="dreame", country="eu",
+                ),
+            )
+            client._ensure_device()._protocol.cloud._host = "hub.example.invalid"
+
+            def legacy_operation_can_enter():
+                acquired = client._schedule_operation_lock.acquire(blocking=False)
+                if acquired:
+                    client._schedule_operation_lock.release()
+                return acquired
+
+            first = asyncio.create_task(client.async_get_app_schedules(
+                map_indices=[0], include_current_task=False,
+            ))
+            second = None
+            try:
+                await asyncio.wait_for(entered.wait(), 2)
+                assert not await asyncio.to_thread(legacy_operation_can_enter)
+                second = asyncio.create_task(client.async_get_app_schedules(
+                    map_indices=[0], include_current_task=False,
+                ))
+                await asyncio.sleep(0.02)
+                assert len(calls) == 1
+                assert not second.done()
+                if stop == "close":
+                    await asyncio.wait_for(client.async_close(), 2)
+                else:
+                    first.cancel()
+                    second.cancel()
+                for task in (first, second):
+                    with pytest.raises(asyncio.CancelledError):
+                        await asyncio.wait_for(task, 2)
+                assert await asyncio.to_thread(legacy_operation_can_enter)
+                assert not client._schedule_async_gate.locked()
+                assert not client._cloud_read_tasks
+                assert not session.closed
+            finally:
+                release.set()
+                first.cancel()
+                if second is not None:
+                    second.cancel()
+                    await asyncio.gather(second, return_exceptions=True)
+                await asyncio.gather(first, return_exceptions=True)
+                await client.async_close()
+
+    asyncio.run(scenario())

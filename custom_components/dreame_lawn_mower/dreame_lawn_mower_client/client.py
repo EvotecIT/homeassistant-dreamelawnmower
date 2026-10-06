@@ -559,6 +559,8 @@ class DreameLawnMowerClient(
         self._device_ownership_lock = _threading.Lock()
         self._refresh_lock = asyncio.Lock()
         self._schedule_operation_lock = _threading.RLock()
+        self._schedule_async_gate = asyncio.Lock()
+        self._app_schedule_retry_offset = 0
         self._schedule_protocols: dict[int, str] = {}
         self._schedule_document_versions: dict[int, int] = {}
         self._schedule_document_retry_versions: dict[int, int] = {}
@@ -1345,12 +1347,11 @@ class DreameLawnMowerClient(
         include_current_task: bool = True,
     ) -> dict[str, Any]:
         """Return read-only mower schedules from the app action protocol."""
-        return await asyncio.to_thread(
-            self._sync_get_app_schedules,
-            include_raw,
-            map_indices,
-            chunk_size,
-            include_current_task,
+        from .client_schedule_async import async_read_schedules
+
+        return await async_read_schedules(
+            self, include_raw=include_raw, map_indices=map_indices,
+            chunk_size=chunk_size, include_current_task=include_current_task,
         )
 
     async def async_set_app_schedule_plan_enabled(

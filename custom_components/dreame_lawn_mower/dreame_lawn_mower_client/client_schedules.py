@@ -13,13 +13,11 @@ from .client_schedule_edits import _DreameLawnMowerScheduleEditsMixin
 from .client_schedule_tables import _DreameLawnMowerScheduleTablesMixin
 from .client_settings_helpers import (
     _batch_schedule_keys,
-    _dedupe_ints,
     _schedule_entry_overview,
     _schedule_plan_overview,
     _schedule_upload_overview,
 )
 from .client_shared_helpers import (
-    _app_action_data,
     _ensure_app_write_succeeded,
     _positive_int,
 )
@@ -35,10 +33,17 @@ from .schedule import (
     build_schedule_upload_requests,
     decode_schedule_payload_text,
     encode_schedule_payload_text,
-    schedule_task_summary,
     schedule_write_block_reason,
 )
-from .schedule_document import ScheduleDocumentReader
+from .schedule_read_plan import (
+    read_document_generation,
+    read_document_slot,
+    read_document_text,
+    read_map_indices,
+    read_schedules,
+    read_slot,
+)
+from .schedule_read_transport import run_schedule_read
 
 SCHEDULE_CURRENT_TASK_TIMEOUT_SECONDS = 5.0
 SCHEDULE_READ_DEADLINE_SECONDS = 10.0
@@ -105,132 +110,12 @@ class _DreameLawnMowerClientSchedulesMixin(
         chunk_size: int = SCHEDULE_CHUNK_SIZE,
         include_current_task: bool = True,
     ) -> dict[str, Any]:
-        """Fetch and decode mower schedules through read-only app actions."""
-        if chunk_size <= 0:
-            raise ValueError("chunk_size must be greater than zero.")
-
-        result: dict[str, Any] = {
-            "source": "app_action_schedule",
-            "available": False,
-            "current_task": None,
-            "schedules": [],
-            "errors": [],
-        }
-
-        if include_current_task:
-            try:
-                current_task_deadline = (
-                    time.monotonic() + SCHEDULE_CURRENT_TASK_TIMEOUT_SECONDS
-                )
-                task_result = self._sync_call_app_action(
-                    {"m": "g", "t": "SCHDT", "d": {"t": 0}},
-                    retry_count=0,
-                    timeout=SCHEDULE_CURRENT_TASK_TIMEOUT_SECONDS,
-                    deadline=current_task_deadline,
-                )
-                result["raw_current_task"] = _json_safe(task_result, max_depth=4)
-                task_data = _app_action_data(task_result)
-                result["current_task"] = schedule_task_summary(task_data)
-            except Exception as err:  # noqa: BLE001 - optional diagnostic
-                result["errors"].append({"stage": "current_task", "error": str(err)})
-
-        schedule_started_at = time.monotonic()
-        schedule_deadline = schedule_started_at + SCHEDULE_READ_DEADLINE_SECONDS
-        map_discovery_deadline = schedule_deadline
-        if map_indices is None:
-            # Treat MAPL as another fair-budget participant so a nonresponsive
-            # discovery probe cannot consume the schedule slots' whole window.
-            map_discovery_deadline = min(
-                schedule_deadline,
-                schedule_started_at + SCHEDULE_READ_DEADLINE_SECONDS / 4,
-            )
-        schedule_indices = self._app_schedule_map_indices(
-            map_indices,
-            deadline=map_discovery_deadline,
+        return run_schedule_read(
+            read_schedules(
+                self, include_raw, map_indices, chunk_size, include_current_task
+            ),
+            self._sync_call_app_action,
         )
-        first_pass_deadline = schedule_deadline
-        if len(schedule_indices) > 1:
-            now = time.monotonic()
-            remaining = max(0.0, schedule_deadline - now)
-            # Reserve enough of the shared window for one slower slot to make
-            # meaningful progress after every slot receives a fair first pass.
-            recovery_reserve = min(
-                SCHEDULE_READ_TIMEOUT_SECONDS,
-                remaining / 2,
-            )
-            first_pass_deadline = schedule_deadline - recovery_reserve
-        failed_schedule_positions: list[int] = []
-        for position, map_index in enumerate(schedule_indices):
-            now = time.monotonic()
-            remaining = max(0.0, first_pass_deadline - now)
-            remaining_slots = len(schedule_indices) - position
-            slot_deadline = min(
-                first_pass_deadline,
-                now + remaining / remaining_slots,
-            )
-            schedule_result, error = self._sync_get_app_schedule_slot(
-                map_index=map_index,
-                chunk_size=chunk_size,
-                include_raw=include_raw,
-                deadline=slot_deadline,
-            )
-            if error is not None:
-                failed_schedule_positions.append(position)
-                result["errors"].append(
-                    {"idx": map_index, "stage": "schedule", "error": str(error)}
-                )
-            elif schedule_result.get("plans"):
-                result["available"] = True
-            result["schedules"].append(schedule_result)
-
-        # A fair first pass prevents one slow slot from starving the rest. If
-        # later slots return quickly, spend the unused shared budget on one
-        # recovery pass so a valid early slot is not permanently limited to
-        # only its initial fraction of the operation deadline.
-        retry_offset = getattr(self, "_app_schedule_retry_offset", 0)
-        if failed_schedule_positions:
-            retry_offset %= len(failed_schedule_positions)
-            failed_schedule_positions = [
-                *failed_schedule_positions[retry_offset:],
-                *failed_schedule_positions[:retry_offset],
-            ]
-            self._app_schedule_retry_offset = (retry_offset + 1) % len(
-                failed_schedule_positions
-            )
-        for position in failed_schedule_positions:
-            now = time.monotonic()
-            if now >= schedule_deadline:
-                break
-            map_index = schedule_indices[position]
-            retry_deadline = min(
-                schedule_deadline,
-                now + SCHEDULE_READ_TIMEOUT_SECONDS,
-            )
-            schedule_result, error = self._sync_get_app_schedule_slot(
-                map_index=map_index,
-                chunk_size=chunk_size,
-                include_raw=include_raw,
-                deadline=retry_deadline,
-                reserve_alternate=False,
-            )
-            result["schedules"][position] = schedule_result
-            prior_error = next(
-                (
-                    item
-                    for item in result["errors"]
-                    if item.get("idx") == map_index and item.get("stage") == "schedule"
-                ),
-                None,
-            )
-            if error is None:
-                if prior_error is not None:
-                    result["errors"].remove(prior_error)
-                if schedule_result.get("plans"):
-                    result["available"] = True
-            elif prior_error is not None:
-                prior_error["error"] = str(error)
-
-        return result
 
     def _sync_get_app_schedule_slot(
         self,
@@ -241,62 +126,17 @@ class _DreameLawnMowerClientSchedulesMixin(
         deadline: float,
         reserve_alternate: bool = True,
     ) -> tuple[dict[str, Any], Exception | None]:
-        """Select a protocol from validated replies, using brand only for order."""
-        preferred = self._schedule_protocols.get(map_index)
-        if preferred is None:
-            preferred = "tables" if self._account_type == "mova" else "document"
-        protocols = [preferred]
-        if map_index >= 0:
-            protocols.append("document" if preferred == "tables" else "tables")
-        else:
-            protocols = ["document"]
-        errors: list[str] = []
-        for position, protocol in enumerate(protocols):
-            probe_deadline = deadline
-            if (
-                map_index >= 0
-                and position == 0
-                and map_index not in self._schedule_protocols
-                and reserve_alternate
-            ):
-                now = time.monotonic()
-                probe_deadline = now + max(0.0, deadline - now) / 2
-            if protocol == "tables":
-                try:
-                    result = self._sync_read_schedule_tables(
-                        map_index=map_index,
-                        deadline=probe_deadline,
-                        include_raw=include_raw,
-                    )
-                    self._schedule_protocols[map_index] = protocol
-                    return result, None
-                except Exception as err:  # noqa: BLE001 - optional protocol probe
-                    errors.append(f"{protocol}: {err}")
-            else:
-                result, error = self._sync_get_document_schedule_slot(
-                    map_index=map_index,
-                    chunk_size=chunk_size,
-                    include_raw=include_raw,
-                    deadline=deadline,
-                    metadata_deadline=probe_deadline,
-                    reserve_generation=reserve_alternate,
-                )
-                if error is None:
-                    result["protocol"] = protocol
-                    result["read_status"] = "complete"
-                    self._schedule_protocols[map_index] = protocol
-                    return result, None
-                errors.append(f"{protocol}: {error}")
-            if time.monotonic() >= deadline:
-                break
-        error = DreameLawnMowerConnectionError("; ".join(errors))
-        return {
-            "idx": map_index,
-            "label": "default" if map_index == -1 else f"map_{map_index}",
-            "available": False,
-            "read_status": "unknown",
-            "error": str(error),
-        }, error
+        return run_schedule_read(
+            read_slot(
+                self,
+                map_index=map_index,
+                chunk_size=chunk_size,
+                include_raw=include_raw,
+                deadline=deadline,
+                reserve_alternate=reserve_alternate,
+            ),
+            self._sync_call_app_action,
+        )
 
     def _sync_get_document_schedule_slot(
         self,
@@ -308,51 +148,18 @@ class _DreameLawnMowerClientSchedulesMixin(
         metadata_deadline: float | None = None,
         reserve_generation: bool = True,
     ) -> tuple[dict[str, Any], Exception | None]:
-        """Negotiate document generations without consuming the next slot's budget."""
-        preferred = self._schedule_document_versions.get(map_index, 2)
-        if not reserve_generation:
-            # Give slow metadata a full recovery window, rotating that window
-            # across generations after failure instead of repeatedly letting
-            # an unsupported generation consume it. A remembered generation
-            # already failed the first pass, so try its alternate first.
-            recovery_generation = preferred
-            if map_index in self._schedule_document_versions:
-                recovery_generation = 3 if preferred == 2 else 2
-            preferred = self._schedule_document_retry_versions.get(
-                map_index, recovery_generation
-            )
-        generations = [preferred, 3 if preferred == 2 else 2]
-        metadata_end = metadata_deadline if metadata_deadline is not None else deadline
-        errors: list[str] = []
-        for position, generation in enumerate(generations):
-            now = time.monotonic()
-            if now >= metadata_end:
-                break
-            probe_end = metadata_end
-            if reserve_generation and map_index not in self._schedule_document_versions:
-                probe_end = now + (metadata_end - now) / (len(generations) - position)
-            result, error = self._sync_get_document_schedule_generation(
+        return run_schedule_read(
+            read_document_slot(
+                self,
                 map_index=map_index,
                 chunk_size=chunk_size,
                 include_raw=include_raw,
                 deadline=deadline,
-                metadata_deadline=probe_end,
-                generation=generation,
-            )
-            if error is None:
-                self._schedule_document_versions[map_index] = generation
-                self._schedule_document_retry_versions.pop(map_index, None)
-                result["document_version"] = generation
-                return result, None
-            errors.append(f"V{generation}: {error}")
-        if not reserve_generation:
-            self._schedule_document_retry_versions[map_index] = (
-                3 if preferred == 2 else 2
-            )
-        error = DreameLawnMowerConnectionError(
-            "; ".join(errors) or "Schedule read timed out."
+                metadata_deadline=metadata_deadline,
+                reserve_generation=reserve_generation,
+            ),
+            self._sync_call_app_action,
         )
-        return {"idx": map_index, "available": False, "error": str(error)}, error
 
     def _sync_get_document_schedule_generation(
         self,
@@ -364,71 +171,18 @@ class _DreameLawnMowerClientSchedulesMixin(
         metadata_deadline: float,
         generation: int,
     ) -> tuple[dict[str, Any], Exception | None]:
-        """Read metadata and chunks from one internally consistent generation."""
-        schedule_result: dict[str, Any] = {
-            "idx": map_index,
-            "label": "default" if map_index == -1 else f"map_{map_index}",
-            "available": False,
-        }
-        try:
-            info_result = self._sync_call_app_action(
-                {"m": "g", "t": f"SCHDIV{generation}", "d": {"i": map_index}},
-                retry_count=0,
-                timeout=SCHEDULE_READ_TIMEOUT_SECONDS,
-                deadline=metadata_deadline,
-            )
-            schedule_result["raw_info"] = _json_safe(info_result, max_depth=4)
-            info = _app_action_data(info_result)
-            if not isinstance(info, Mapping) or "l" not in info or "v" not in info:
-                raise DreameLawnMowerConnectionError(
-                    f"SCHDIV{generation} returned invalid schedule metadata."
-                )
-            size = _positive_int(info.get("l"))
-            version = _positive_int(info.get("v"))
-            if (
-                size is None
-                or version is None
-                or version > EMPTY_SCHEDULE_VERSION
-                or isinstance(info.get("l"), bool)
-                or isinstance(info.get("v"), bool)
-                or ("i" in info and info["i"] != map_index)
-            ):
-                raise DreameLawnMowerConnectionError(
-                    f"SCHDIV{generation} returned invalid schedule identity, "
-                    "size, or version."
-                )
-            schedule_result["size"] = size
-            schedule_result["version"] = version
-            if not size or version is None or version == EMPTY_SCHEDULE_VERSION:
-                schedule_result["plans"] = []
-                return schedule_result, None
-
-            payload_text, chunk_count, offset = self._sync_get_app_schedule_text(
-                size=size,
-                version=version,
+        return run_schedule_read(
+            read_document_generation(
+                self,
+                map_index=map_index,
                 chunk_size=chunk_size,
+                include_raw=include_raw,
                 deadline=deadline,
-                document_version=generation,
-            )
-            plans = decode_schedule_payload_text(payload_text)
-            schedule_result.update(
-                {
-                    "available": bool(plans),
-                    "chunk_count": chunk_count,
-                    "downloaded_size": offset,
-                    "plan_count": len(plans),
-                    "enabled_plan_count": sum(
-                        1 for plan in plans if plan.get("enabled")
-                    ),
-                    "plans": plans,
-                }
-            )
-            if include_raw:
-                schedule_result["raw_text"] = payload_text
-        except Exception as err:  # noqa: BLE001 - caller keeps probing other maps
-            schedule_result["error"] = str(err)
-            return schedule_result, err
-        return schedule_result, None
+                metadata_deadline=metadata_deadline,
+                generation=generation,
+            ),
+            self._sync_call_app_action,
+        )
 
     @_serialized_schedule_operation
     def _sync_set_app_schedule_plan_enabled(
@@ -682,24 +436,22 @@ class _DreameLawnMowerClientSchedulesMixin(
         deadline: float | None = None,
         document_version: int = 2,
     ) -> tuple[str, int, int]:
-        reader = ScheduleDocumentReader(
-            size=size, version=version, chunk_size=chunk_size,
-            document_version=document_version,
+        return run_schedule_read(
+            read_document_text(
+                self,
+                size=size,
+                version=version,
+                chunk_size=chunk_size,
+                deadline=deadline,
+                document_version=document_version,
+            ),
+            self._sync_call_app_action,
         )
-        while not reader.complete:
-            response = self._sync_call_app_action(
-                reader.request(), retry_count=0,
-                timeout=SCHEDULE_READ_TIMEOUT_SECONDS, deadline=deadline,
-            )
-            reader.append_response(response)
-        return reader.result()
 
     def _app_schedule_map_indices(
-        self,
-        map_indices: Sequence[int] | None,
-        *,
-        deadline: float | None = None,
+        self, map_indices: Sequence[int] | None, *, deadline: float | None = None
     ) -> list[int]:
-        if map_indices is not None:
-            return _dedupe_ints(map_indices)
-        return _dedupe_ints([-1, *self._app_map_indices(None, deadline=deadline)])
+        return run_schedule_read(
+            read_map_indices(self, map_indices, deadline=deadline),
+            self._sync_call_app_action,
+        )
