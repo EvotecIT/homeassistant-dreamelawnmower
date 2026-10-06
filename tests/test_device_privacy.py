@@ -119,7 +119,10 @@ def test_ai_property_updates_preserve_explicit_cloud_refusal(privacy_device, wir
         device_privacy.AI_POLICY_PROPERTY: json.dumps({"privacyAuthed": False}),
     })
     with pytest.raises(InvalidActionException, match="accept privacy policy"):
-        mower.set_ai_detection(int(DreameMowerAIProperty.AI_OBSTACLE_DETECTION))
+        mower.set_ai_detection(int(
+            DreameMowerAIProperty.AI_OBSTACLE_DETECTION
+            | DreameMowerAIProperty.AI_OBSTACLE_IMAGE_UPLOAD
+        ))
     mower._protocol.cloud.get_batch_device_datas.assert_called_once_with(
         [device_privacy.AI_POLICY_PROPERTY],
     )
@@ -173,3 +176,24 @@ def test_legacy_startup_updates_the_same_privacy_status(monkeypatch, accepted):
     mower._protocol.cloud.get_batch_device_datas.assert_called_once_with(
         [device_privacy.AI_POLICY_PROPERTY],
     )
+
+
+@pytest.mark.parametrize("prop,remaining", [
+    (DreameMowerAIProperty.AI_OBSTACLE_DETECTION,
+     DreameMowerAIProperty.AI_OBSTACLE_IMAGE_UPLOAD),
+    (DreameMowerAIProperty.AI_OBSTACLE_IMAGE_UPLOAD,
+     DreameMowerAIProperty.AI_OBSTACLE_DETECTION),
+])
+def test_disabling_one_bit_preserves_other_setting_without_consent(
+    privacy_device, prop, remaining,
+):
+    mower = privacy_device
+    mower.data[DreameMowerProperty.AI_DETECTION.value] = int(prop | remaining)
+    mower._protocol.cloud.get_batch_device_datas = Mock(
+        side_effect=AssertionError("Disabling must not request consent"),
+    )
+    assert mower.set_ai_property(prop, False) == [{"code": 0}]
+    assert mower.ai_data[prop.name] is False
+    assert mower.ai_data[remaining.name] is True
+    assert mower._protocol.set_property.call_args.args[2] == int(remaining)
+    mower._protocol.cloud.get_batch_device_datas.assert_not_called()

@@ -1364,10 +1364,15 @@ class _DreameMowerDeviceCommandMixin:
         """Send ai detection parameters to the device."""
         if self.capability.ai_detection:
             if isinstance(settings, int):
-                requires_acceptance = bool(settings & (
+                enabled = settings & (
                     DreameMowerAIProperty.AI_OBSTACLE_DETECTION
                     | DreameMowerAIProperty.AI_OBSTACLE_IMAGE_UPLOAD
-                ))
+                )
+                # Use the reported mask; ai_data may already contain an optimistic edit.
+                current = self.get_property(DreameMowerProperty.AI_DETECTION)
+                if isinstance(current, int):
+                    enabled &= ~current
+                requires_acceptance = bool(enabled)
             else:
                 requires_acceptance = bool(
                     settings.get(DreameMowerStrAIProperty.AI_OBSTACLE_DETECTION.value)
