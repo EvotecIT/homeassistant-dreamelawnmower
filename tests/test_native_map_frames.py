@@ -403,3 +403,23 @@ def test_missing_frame_rechecks_new_gap_after_inflight_rpc(monkeypatch):
                 await client.async_close()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "properties, expected",
+    [
+        ([{"piid": 3, "value": "object,key"}], ("object,key", None, None)),
+        ([{"piid": 1, "value": "inline"}], (None, "inline", None)),
+        (
+            [{"piid": 3, "value": "object"}, {"piid": 1, "value": "inline"},
+             {"piid": 5, "value": "12000"}],
+            ("object", "inline", 12000),
+        ),
+        ([{"piid": 1}, {"piid": 3, "value": ""}], (None, None, None)),
+        ([{"piid": 5, "value": 0}], (None, None, 0)),
+    ],
+)
+def test_next_frame_metadata_preserves_inline_file_and_timestamp(properties, expected):
+    assert map_manager.DreameMapMowerMapManager._read_p_map_response(
+        {"code": 0, "out": properties}
+    ) == expected

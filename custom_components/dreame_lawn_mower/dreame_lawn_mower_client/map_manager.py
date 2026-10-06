@@ -430,26 +430,7 @@ class DreameMapMowerMapManager:
             # This is an in-flight guard, not a permanent record of failed work.
             self._request_queue.pop(key, None)
         if self._map_action_succeeded(result):
-            object_name = None
-            raw_map_data = None
-            timestamp = None
-
-            for prop in result[MAP_PARAMETER_OUT]:
-                value = prop.get(MAP_PARAMETER_VALUE)
-                if value is None:
-                    _LOGGER.debug(
-                        "P-map response property has no value field: %s",
-                        prop,
-                    )
-                    continue
-                if value != "":
-                    piid = prop["piid"]
-                    if piid == PIID(DreameMowerProperty.OBJECT_NAME):
-                        object_name = value
-                    elif piid == PIID(DreameMowerProperty.MAP_DATA):
-                        raw_map_data = value
-                    elif piid == PIID(DreameMowerProperty.ROBOT_TIME):
-                        timestamp = int(value)
+            object_name, raw_map_data, timestamp = self._read_p_map_response(result)
 
             if object_name:
                 self._add_map_data_file(object_name, timestamp)
@@ -462,6 +443,34 @@ class DreameMapMowerMapManager:
                 return False
             return True
         return False
+
+    @staticmethod
+    def _read_p_map_response(
+        result: dict[str, Any],
+    ) -> tuple[str | None, str | None, int | None]:
+        """Read next-frame metadata without downloading or applying map data."""
+        object_name = None
+        raw_map_data = None
+        timestamp = None
+
+        for prop in result[MAP_PARAMETER_OUT]:
+            value = prop.get(MAP_PARAMETER_VALUE)
+            if value is None:
+                _LOGGER.debug(
+                    "P-map response property has no value field: %s",
+                    prop,
+                )
+                continue
+            if value != "":
+                piid = prop["piid"]
+                if piid == PIID(DreameMowerProperty.OBJECT_NAME):
+                    object_name = value
+                elif piid == PIID(DreameMowerProperty.MAP_DATA):
+                    raw_map_data = value
+                elif piid == PIID(DreameMowerProperty.ROBOT_TIME):
+                    timestamp = int(value)
+
+        return object_name, raw_map_data, timestamp
 
     def _request_t_map(self) -> None:
         result = self._request_map({MAP_REQUEST_PARAMETER_FRAME_TYPE: "T"})
