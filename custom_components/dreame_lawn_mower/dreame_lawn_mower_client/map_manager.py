@@ -28,7 +28,7 @@ from PIL import (
     PngImagePlugin,
     ImageFilter,
 )
-from typing import Any, Mapping, Callable
+from typing import Any, Mapping, Callable, TypeGuard
 from time import sleep
 from io import BytesIO
 from typing import Optional, Tuple
@@ -280,7 +280,7 @@ class DreameMapMowerMapManager:
         self._add_cloud_map_data(partial_map_data, object_name, object_name_timestamp)
         return len(map_data_result) or object_name is not None
 
-    def _request_map(self, parameters: dict[str, Any] = None) -> dict[str, Any] | None:
+    def _request_map(self, parameters: dict[str, Any] | None = None) -> dict[str, Any] | None:
         payload = map_frame_parameters(parameters)
 
         try:
@@ -291,7 +291,7 @@ class DreameMapMowerMapManager:
             _LOGGER.warning("DreameMapMowerMapManager._request_map failed: %s", type(ex).__name__)
         return None
 
-    def _map_action_succeeded(self, result: Any) -> bool:
+    def _map_action_succeeded(self, result: Any) -> TypeGuard[Mapping[str, Any]]:
         """Return whether an app action response contains a successful map payload."""
         if not isinstance(result, Mapping):
             if result is not None:
@@ -299,7 +299,7 @@ class DreameMapMowerMapManager:
             return False
         return result.get(MAP_PARAMETER_CODE) == 0
 
-    def _read_i_map_response(self, result: Mapping, start_time: int | None) -> tuple[str | None, str | None]:
+    def _read_i_map_response(self, result: Mapping[str, Any], start_time: int | None) -> tuple[str | None, str | None]:
         """Read frame metadata without downloading or applying map contents."""
         out = result[MAP_PARAMETER_OUT]
         _LOGGER.debug("Response from device %s", out)
@@ -343,7 +343,7 @@ class DreameMapMowerMapManager:
 
         return object_name, raw_map_data
 
-    def _request_i_map(self, start_time: int = None) -> bool:
+    def _request_i_map(self, start_time: int | None = None) -> bool | None:
         if not self._request_i_map_available and not self._protocol.dreame_cloud:
             return self.request_new_map()
 
@@ -371,7 +371,7 @@ class DreameMapMowerMapManager:
         self._request_map_from_cloud()
         return False
 
-    def _request_missing_p_map(self) -> bool:
+    def _request_missing_p_map(self) -> bool | None:
         if self._native_missing_frame_request is not None:
             self._native_missing_frame_request()
             return None
@@ -382,11 +382,12 @@ class DreameMapMowerMapManager:
 
     def _prepare_missing_p_map(self) -> dict[str, Any] | None:
         """Apply existing queue and retry policy without network I/O."""
-        if self._map_data is None:
-            return
+        if (self._map_data is None or self._current_map_id is None
+                or self._current_frame_id is None):
+            return None
 
         if self._partial_map_queue_size() == 0:
-            return
+            return None
 
         frame_id = self._current_frame_id + 1
         map_id = self._current_map_id
@@ -397,7 +398,7 @@ class DreameMapMowerMapManager:
             and self._last_p_request_frame_id == frame_id
             and (time.time() - self._last_p_request_time) < 3
         ):
-            return
+            return None
 
         self._last_p_request_map_id = map_id
         self._last_p_request_frame_id = frame_id
@@ -410,7 +411,7 @@ class DreameMapMowerMapManager:
             MAP_REQUEST_PARAMETER_FRAME_TYPE: MapFrameType.P.name,
         }
 
-    def _request_next_p_map(self, map_id: int, frame_id: int) -> bool:
+    def _request_next_p_map(self, map_id: int, frame_id: int) -> bool | None:
         key = f"{map_id}:{frame_id}"
         if key in self._request_queue and self._request_queue[key]:
             return
@@ -446,7 +447,7 @@ class DreameMapMowerMapManager:
 
     @staticmethod
     def _read_p_map_response(
-        result: dict[str, Any],
+        result: Mapping[str, Any],
     ) -> tuple[str | None, str | None, int | None]:
         """Read next-frame metadata without downloading or applying map data."""
         object_name = None
@@ -486,7 +487,7 @@ class DreameMapMowerMapManager:
             _LOGGER.warning("Send _request_w_map failed: %s", type(ex).__name__)
         return None
 
-    def _request_current_map(self, map_request_time: int = None) -> bool:
+    def _request_current_map(self, map_request_time: int | None = None) -> bool | None:
         if self._request_i_map_available or self._protocol.dreame_cloud:
             return self._request_i_map(map_request_time)
 
@@ -515,12 +516,15 @@ class DreameMapMowerMapManager:
         finally:
             self.schedule_update(max(self._update_interval - (time.time() - start), 1))
 
-    def _queue_partial_map(self, map_data) -> None:
-        if map_data.map_id != self._latest_map_id:
+    def _queue_partial_map(self, map_data: MapDataPartial) -> None:
+        if (map_data.map_id is None or map_data.frame_id is None
+                or map_data.map_id != self._latest_map_id):
             return
         next_frame_id = 0
 
-        if self._current_map_id is not None and self._current_map_id == self._latest_map_id:
+        if (self._current_map_id is not None
+                and self._current_map_id == self._latest_map_id
+                and self._current_frame_id is not None):
             next_frame_id = self._current_frame_id + 1
 
         if map_data.map_id not in self._map_data_queue:
@@ -546,18 +550,18 @@ class DreameMapMowerMapManager:
         if self._latest_map_id not in self._map_data_queue or not self._map_data_queue[self._latest_map_id]:
             return
 
-        map_data_queue = copy.deepcopy(self._map_data_queue[self._latest_map_id])
-        for k, v in map_data_queue.items():
+        queued_frames = copy.deepcopy(self._map_data_queue[self._latest_map_id])
+        for k, v in queued_frames.items():
             if k <= frame_id:
                 del self._map_data_queue[self._latest_map_id][k]
 
-    def _unqueue_next_partial_map(self) -> MapData | None:
+    def _unqueue_next_partial_map(self) -> MapDataPartial | None:
         if (
             self._latest_map_id is None
             or self._current_frame_id is None
             or self._current_map_id != self._latest_map_id
         ):
-            return
+            return None
 
         frame_id = self._current_frame_id + 1
         if (
@@ -565,7 +569,7 @@ class DreameMapMowerMapManager:
             or not self._map_data_queue[self._latest_map_id]
             or frame_id not in self._map_data_queue[self._latest_map_id]
         ):
-            return
+            return None
 
         map_data = self._map_data_queue[self._latest_map_id][frame_id]
 
@@ -573,7 +577,9 @@ class DreameMapMowerMapManager:
             del self._map_data_queue[self._latest_map_id][frame_id]
             return map_data
 
-    def _unqueue_partial_map(self, map_id: int, frame_id: int) -> MapData | None:
+        return None
+
+    def _unqueue_partial_map(self, map_id: int, frame_id: int) -> MapDataPartial | None:
         if (
             map_id in self._map_data_queue
             and self._map_data_queue[map_id]
@@ -582,9 +588,10 @@ class DreameMapMowerMapManager:
             map_data = self._map_data_queue[map_id][frame_id]
             del self._map_data_queue[map_id][frame_id]
             return map_data
+        return None
 
     def _partial_map_queue_size(self) -> int:
-        if self._latest_map_timestamp_ms is None:
+        if self._latest_map_timestamp_ms is None or self._latest_map_id is None:
             return 0
 
         if self._latest_map_id not in self._map_data_queue or not self._map_data_queue[self._latest_map_id]:
@@ -1386,7 +1393,7 @@ class DreameMapMowerMapManager:
             self.schedule_update(2)
         self._device_docked = device_docked
 
-    def request_new_map(self) -> None:
+    def request_new_map(self) -> bool | None:
         if (
             self._new_map_request_time
             and time.time() - self._new_map_request_time < 10
@@ -1395,7 +1402,7 @@ class DreameMapMowerMapManager:
             if time.time() - self._new_map_request_time > 3:
                 self._new_map_request_time = time.time()
                 self._request_map_from_cloud()
-            return
+            return None
 
         self._new_map_request_time = time.time()
         if self._map_data is None:
@@ -1404,6 +1411,7 @@ class DreameMapMowerMapManager:
             result = self._request_map()
             if self._map_action_succeeded(result) and not self._protocol.dreame_cloud:
                 self._request_map_from_cloud()
+        return None
 
     def request_next_map(self) -> None:
         self._map_request_count = 0
