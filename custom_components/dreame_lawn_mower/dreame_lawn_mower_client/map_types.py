@@ -1089,7 +1089,7 @@ class MapData:
         self.has_cleaned_area: bool | None = None  #
         self.has_dirty_area: bool | None = None  #
         self.history_map: bool | None = None  #
-        self.furniture_version: bool | None = None  #
+        self.furniture_version: int | None = None
         # Generated from recovery map list
         self.recovery_map_list: list[RecoveryMapInfo] | None = None
         # Data json: pointinfo.tpoint

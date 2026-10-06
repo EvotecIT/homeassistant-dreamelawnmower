@@ -17,6 +17,8 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map import (
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
     Coordinate,
+    Furniture,
+    FurnitureType,
     MapData,
     MapImageDimensions,
     MapPixelType,
@@ -88,6 +90,22 @@ def test_cruise_background_tracks_marker_size_and_rotation(point_type: int) -> N
     expected = DreameMowerMapRenderer().render_cruise_point(
         1, point, (100, 100), dimensions, 20, 90, 1,
     )
+    assert actual.tobytes() == expected.tobytes()
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_furniture_background_tracks_marker_size_and_rotation(version: int) -> None:
+    furniture = Furniture(2500, 2500, 0, 0, 0, 0, FurnitureType.COFFEE_TABLE, 0)
+    dimensions = MapImageDimensions(0, 0, 100, 100, 50)
+    renderer = DreameMowerMapRenderer()
+    renderer.render_furniture(furniture, version, (100, 100), dimensions, 10, 0, 1)
+    actual = renderer.render_furniture(
+        furniture, version, (100, 100), dimensions, 20, 90, 1,
+    )
+    expected = DreameMowerMapRenderer().render_furniture(
+        furniture, version, (100, 100), dimensions, 20, 90, 1,
+    )
+    assert actual is not None and expected is not None
     assert actual.tobytes() == expected.tobytes()
 
 

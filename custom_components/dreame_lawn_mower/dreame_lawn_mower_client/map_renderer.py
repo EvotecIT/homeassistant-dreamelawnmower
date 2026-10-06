@@ -3491,7 +3491,17 @@ class DreameMowerMapRenderer:
 
         return new_layer
 
-    def render_furniture(self, furniture, furniture_version, layer_size, dimensions, size, rotation, scale):
+    def render_furniture(
+        self,
+        furniture: Furniture,
+        furniture_version: int | None,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        size: float,
+        rotation: int | None,
+        scale: int,
+    ) -> Image.Image | None:
+        rotation = rotation or 0
         draw_image = furniture.width and furniture.height
         furniture_type = (
             FurnitureType.COFFEE_TABLE.value
@@ -3548,9 +3558,10 @@ class DreameMowerMapRenderer:
                     self._furniture_background = Image.open(
                         BytesIO(base64.b64decode(MAP_ICON_OBSTACLE_BG_DREAME))
                     ).convert("RGBA")
-                    s = int(size * scale * 2)
-                    self._furniture_background.thumbnail((s, s), Image.Resampling.LANCZOS)
-                    self._furniture_background = self._furniture_background.rotate(-rotation, expand=1)
+                background_image = self._furniture_background.copy()
+                s = int(size * scale * 2)
+                background_image.thumbnail((s, s), Image.Resampling.LANCZOS)
+                background_image = background_image.rotate(-rotation, expand=1)
 
                 offset = int(-(size * 0.2) * scale)
 
@@ -3558,7 +3569,7 @@ class DreameMowerMapRenderer:
                 x = p.x
                 y = p.y
                 pos_offset = (
-                    (self._furniture_background.size[1] * (1.15 if rotation == 90 or rotation == 270 else 0.9))
+                    (background_image.size[1] * (1.15 if rotation == 90 or rotation == 270 else 0.9))
                     / scale
                     / 2
                 )
@@ -3581,10 +3592,10 @@ class DreameMowerMapRenderer:
                     y = y - pos_offset
 
                 new_layer.paste(
-                    self._furniture_background,
+                    background_image,
                     (
-                        int(round(x * scale - (self._furniture_background.size[0] / 2) + x_offset)),
-                        int(round(y * scale - (self._furniture_background.size[1] / 2) + y_offset)),
+                        int(round(x * scale - (background_image.size[0] / 2) + x_offset)),
+                        int(round(y * scale - (background_image.size[1] / 2) + y_offset)),
                     ),
                 )
 
@@ -3600,6 +3611,8 @@ class DreameMowerMapRenderer:
                 )
 
             return new_layer
+
+        return None
 
     def render_router(
         self,
