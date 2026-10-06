@@ -31,6 +31,7 @@ from dreame_lawn_mower_client.models import (
     DreameLawnMowerDescriptor,
     DreameLawnMowerMapSummary,
     DreameLawnMowerMapView,
+    DreameLawnMowerStatusBlob,
 )
 
 
@@ -980,9 +981,9 @@ def test_cached_packet_cannot_move_between_verified_maps():
 
 def test_fetching_runtime_status_does_not_publish_unverified_overlay_input():
     client = _client()
-    verified = SimpleNamespace(hex="verified")
+    verified = DreameLawnMowerStatusBlob(supported=True, hex="verified")
     client.update_runtime_live_tracking(verified, active=True, map_index=0)
-    unverified = SimpleNamespace(hex="unverified")
+    unverified = DreameLawnMowerStatusBlob(supported=True, hex="unverified")
     client._sync_get_decoded_status_blob = lambda *args, **kwargs: unverified
     assert client._sync_get_runtime_status_blob() is unverified
     assert client._latest_runtime_status_blob is verified

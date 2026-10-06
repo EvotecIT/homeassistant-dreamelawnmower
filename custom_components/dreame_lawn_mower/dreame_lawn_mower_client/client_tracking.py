@@ -5,10 +5,20 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from .models import DreameLawnMowerStatusBlob
+from .position_tracking import MowerPositionTracker
 
 
 class _DreameLawnMowerClientTrackingMixin:
     """Own live evidence retirement for both streamed and rendered maps."""
+
+    _position_tracker: MowerPositionTracker
+    _latest_runtime_status_blob: DreameLawnMowerStatusBlob | None
+    _runtime_map_identity_expires_at: datetime | None
+    _runtime_live_track_segments: tuple[tuple[tuple[int, int], ...], ...]
+    _runtime_live_map_index: int | None
+    _runtime_live_task_id: int | None
+    _runtime_session_active: bool | None
+    _last_runtime_track_blob_hex: str | None
 
     @property
     def runtime_map_identity_expires_at(self) -> datetime | None:
@@ -100,7 +110,7 @@ class _DreameLawnMowerClientTrackingMixin:
         if blob_hex and blob_hex == self._last_runtime_track_blob_hex:
             return
 
-        segments = getattr(status_blob, "candidate_runtime_track_segments", ()) or ()
+        segments = status_blob.candidate_runtime_track_segments or ()
         if not segments:
             if blob_hex:
                 self._last_runtime_track_blob_hex = blob_hex
@@ -108,7 +118,7 @@ class _DreameLawnMowerClientTrackingMixin:
 
         self._runtime_live_track_segments = (
             *self._runtime_live_track_segments,
-            *tuple(tuple(tuple(point) for point in segment) for segment in segments),
+            *tuple(tuple(segment) for segment in segments),
         )
         if len(self._runtime_live_track_segments) > 64:
             self._runtime_live_track_segments = self._runtime_live_track_segments[-64:]
