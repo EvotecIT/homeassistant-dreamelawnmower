@@ -773,7 +773,7 @@ class _DreameMowerDeviceCommandMixin:
         # status first makes ``ACTION_AVAILABILITY`` see an idle mower and
         # reject the STOP action locally, so the command never reaches the
         # device.
-        response = yield from device_action_plan(
+        response: dict[str, Any] | None = yield from device_action_plan(
             self, DreameMowerAction.STOP,
             enforce_availability=not authoritative_task_active,
         )
