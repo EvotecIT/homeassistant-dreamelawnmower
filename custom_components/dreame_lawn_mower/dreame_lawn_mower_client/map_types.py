@@ -912,10 +912,11 @@ class CleaningHistory:
 
 
 class RecoveryMapInfo:
-    def __init__(self, map_id, map_info) -> None:
-        self.date = map_info.get("time")
-        self.raw_map: str = map_info.get("thb")
-        self.object_name: str = map_info.get("objname")
+    def __init__(self, map_id: int, map_info: Mapping[str, Any]) -> None:
+        timestamp = map_info.get("time")
+        self.date = datetime.fromtimestamp(timestamp) if timestamp is not None else None
+        self.raw_map: str | None = map_info.get("thb")
+        self.object_name: str | None = map_info.get("objname")
         self.map_data: MapData | None = None
         self.map_id: int = map_id
 
@@ -926,14 +927,11 @@ class RecoveryMapInfo:
             else RecoveryMapType.UNKNOWN
         )
 
-        if self.date:
-            self.date = datetime.fromtimestamp(self.date)
-
-    def as_dict(self):
+    def as_dict(self) -> dict[str, str | None]:
         return {
             "date": time.strftime(
                 "%Y-%m-%d %H:%M", time.localtime(self.date.timestamp())
-            ),
+            ) if self.date is not None else None,
             "map_type": self.map_type.name.replace("_", " ").title(),
             "object_name": self.object_name,
         }

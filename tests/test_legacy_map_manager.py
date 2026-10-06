@@ -30,6 +30,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_types impo
     MapData,
     MapDataPartial,
     MapFrameType,
+    RecoveryMapInfo,
 )
 
 
@@ -244,3 +245,30 @@ def test_timestamp_free_map_refreshes_while_running(
 
     request_map.assert_called_once_with()
     assert manager._available is True
+@pytest.mark.parametrize("timestamp", [None, 0, 1700000000])
+def test_recovery_map_preserves_optional_date(timestamp, monkeypatch):
+    info = {"thb": "encoded-map", "objname": "recovery-object"}
+    if timestamp is not None:
+        info["time"] = timestamp
+    recovery = RecoveryMapInfo(1, info)
+    attributes = recovery.as_dict()
+    assert attributes["object_name"] == "recovery-object"
+    assert (attributes["date"] is None) == (timestamp is None)
+    if timestamp is not None:
+        assert recovery.date.timestamp() == timestamp
+
+    manager = DreameMapMowerMapManager(_DummyProtocol())
+    manager._map_list = [1]
+    saved = MapData()
+    saved.recovery_map_list = [recovery]
+    manager._saved_map_data = {1: saved}
+    decoded = MapData()
+    decode = Mock(return_value=decoded)
+    monkeypatch.setattr(
+        map_manager_module.DreameMowerMapDecoder, "decode_saved_map", decode
+    )
+    assert manager.get_recovery_map(1, 1) is decoded
+    assert decoded.last_updated == timestamp
+    assert decoded.recovery_map is True
+    assert manager.get_recovery_map(1, 1) is decoded
+    decode.assert_called_once()

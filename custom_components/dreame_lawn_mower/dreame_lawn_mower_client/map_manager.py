@@ -1191,7 +1191,10 @@ class DreameMapMowerMapManager:
                         self._saved_map_data[map_id].rotation,
                         self._aes_iv,
                     )
-                    recovery_map_list[index].map_data.last_updated = recovery_map_list[index].date.timestamp()
+                    recovery_date = recovery_map_list[index].date
+                    recovery_map_list[index].map_data.last_updated = (
+                        recovery_date.timestamp() if recovery_date is not None else None
+                    )
                     recovery_map_list[index].map_data.recovery_map_type = recovery_map_list[index].map_type
                     recovery_map_list[index].map_data.recovery_map = True
                 return recovery_map_list[index].map_data
