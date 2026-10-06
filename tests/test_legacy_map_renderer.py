@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from io import BytesIO
 from types import SimpleNamespace
@@ -25,6 +26,33 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
     RecoveryMapType,
     Segment,
 )
+
+
+@pytest.mark.parametrize("charger", [None, Point(50, 50)])
+def test_docked_marker_preserves_reported_position_without_charger_heading(
+    charger: Point | None, caplog: pytest.LogCaptureFixture,
+) -> None:
+    data = MapData()
+    data.map_id = data.frame_id = 1
+    data.empty_map = False
+    data.rotation = 0
+    data.robot_position = Point(100, 100, 45)
+    data.charger_position = charger
+    data.docked = True
+    data.dimensions = MapImageDimensions(0, 0, 8, 8, 50)
+    data.pixel_type = np.full((8, 8), MapPixelType.FLOOR.value)
+    data.data = bytes([MapPixelType.FLOOR.value] * 64)
+    data.segments = {}
+    reported = copy.deepcopy(data)
+    reported.docked = False
+    expected = DreameMowerMapRenderer(
+        cache=False, map_objects=["robot"],
+    ).render_map(reported)
+    renderer = DreameMowerMapRenderer(cache=False, map_objects=["robot"])
+    actual = renderer.render_map(data)
+    assert actual != renderer.default_map_image
+    assert actual == expected
+    assert "Map render Failed" not in caplog.text
 
 
 @pytest.mark.parametrize(

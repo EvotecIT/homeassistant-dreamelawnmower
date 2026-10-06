@@ -2270,7 +2270,11 @@ class DreameMowerMapRenderer:
             ):
                 robot_position = map_data.robot_position
 
-                if map_data.docked:
+                if (
+                    map_data.docked
+                    and map_data.charger_position is not None
+                    and map_data.charger_position.a is not None
+                ):
                     # Calculate charger angle
                     charger_angle = map_data.charger_position.a
                     if self._robot_type != RobotType.VSLAM:
