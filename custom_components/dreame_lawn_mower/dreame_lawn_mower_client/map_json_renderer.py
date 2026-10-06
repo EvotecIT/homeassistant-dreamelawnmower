@@ -74,21 +74,21 @@ class DreameMowerMapDataJsonRenderer:
     MAX = round((HALF_INT16 + HALF_INT16_UPPER_HALF) / 10)
 
     def __init__(self) -> None:
-        self._map_data: MapData = None
-        self._map_data_json: dict[str, Any] = None
+        self._map_data: MapData | None = None
+        self._map_data_json: dict[str, Any] | None = None
         self._left: int = 0
         self._top: int = 0
         self._grid_size: int = 0
         self.render_complete: bool = True
         self._layers: dict[MapRendererLayer, dict[str, Any]] = {}
 
-        self._default_map_data: str = base64.b64decode(DEFAULT_MAP_DATA)
+        self._default_map_data: bytes = base64.b64decode(DEFAULT_MAP_DATA)
         self._default_map_image = Image.open(
             BytesIO(base64.b64decode(DEFAULT_MAP_DATA_IMAGE))
         ).convert("RGBA")
 
     @staticmethod
-    def _coordinate_tuple_sort(a: list[int], b: list[int]) -> bool:
+    def _coordinate_tuple_sort(a: list[float], b: list[float]) -> int:
         xA = a[0]
         yA = a[1]
         xB = b[0]
@@ -101,7 +101,7 @@ class DreameMowerMapDataJsonRenderer:
         return 0
 
     @staticmethod
-    def _convert_coordinates(x: int, y: int) -> int:
+    def _convert_coordinates(x: float, y: float) -> list[int]:
         return [
             round((x + DreameMowerMapDataJsonRenderer.HALF_INT16) / 10),
             DreameMowerMapDataJsonRenderer.MAX
@@ -109,11 +109,11 @@ class DreameMowerMapDataJsonRenderer:
         ]
 
     @staticmethod
-    def _convert_angle(angle: int) -> int:
+    def _convert_angle(angle: float) -> float:
         return (((180 - angle) if (angle < 180) else (360 - angle + 180)) + 270) % 360
 
     @staticmethod
-    def _to_buffer(image, extra_data: str) -> bytes:
+    def _to_buffer(image: Image.Image, extra_data: str | bytes) -> bytes:
         buffer = io.BytesIO()
         info = PngImagePlugin.PngInfo()
         info.add_text(MAP_DATA_JSON_CLASS, extra_data, zip=True)
@@ -121,9 +121,15 @@ class DreameMowerMapDataJsonRenderer:
         return buffer.getvalue()
 
     def render_map(
-        self, map_data: MapData, robot_status: int = 0, station_status: int = 0
+        self, map_data: MapData | None, robot_status: int = 0, station_status: int = 0
     ) -> bytes:
-        if map_data is None or map_data.empty_map:
+        if (
+            map_data is None
+            or map_data.empty_map
+            or map_data.dimensions is None
+            or map_data.pixel_type is None
+        ):
+            self.render_complete = True
             return self.default_map_image
 
         if (

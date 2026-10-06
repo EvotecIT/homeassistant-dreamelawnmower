@@ -7,11 +7,13 @@ import hashlib
 import json
 import logging
 import zlib
+from io import BytesIO
 
 import numpy as np
 import pytest
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from PIL import Image
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     device as device_module,
@@ -497,3 +499,33 @@ def test_cleaning_metadata_validates_wire_records(
     else:
         assert segment.cleaning_times == 2
         assert segment.order == 4
+
+
+@pytest.mark.parametrize("has_dimensions", [False, True])
+def test_json_renderer_incomplete_frame_returns_default_png(
+    has_dimensions: bool,
+) -> None:
+    renderer = map_json_renderer.DreameMowerMapDataJsonRenderer()
+    data = MapData()
+    data.empty_map = False
+    if has_dimensions:
+        data.dimensions = MapImageDimensions(0, 0, 2, 2, 50)
+    assert renderer.render_map(data) == renderer.default_map_image
+    assert renderer.render_complete is True
+
+
+def test_json_renderer_preserves_fractional_position_conversion() -> None:
+    data = MapData()
+    data.empty_map = False
+    data.map_id = data.frame_id = 1
+    data.rotation = 0
+    data.dimensions = MapImageDimensions(0, 0, 2, 2, 50)
+    data.pixel_type = np.full((2, 2), 255, dtype=np.uint8)
+    data.data = bytes([255] * 4)
+    data.robot_position = Point(12.5, -3.25, 45.5)
+    renderer = map_json_renderer.DreameMowerMapDataJsonRenderer()
+    with Image.open(BytesIO(renderer.render_map(data))) as image:
+        output = json.loads(image.text[map_json_renderer.MAP_DATA_JSON_CLASS])
+    robot = output["entities"][0]
+    assert robot["points"] == [3278, 3278]
+    assert robot["metaData"]["angle"] == 44.5
