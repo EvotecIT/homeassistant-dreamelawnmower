@@ -234,7 +234,7 @@ class _DreameMowerDeviceMapMixin(_DreameMowerDeviceContext):
                     render_map_data.active_cruise_points = None
 
                 if self.capability.camera_streaming and render_map_data.predefined_points is None:
-                    render_map_data.predefined_points = []
+                    render_map_data.predefined_points = {}
             else:
                 if not self.capability.camera_streaming:
                     if render_map_data.active_areas and len(render_map_data.active_areas) == 1:

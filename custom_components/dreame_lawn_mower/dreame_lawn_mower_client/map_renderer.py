@@ -558,7 +558,7 @@ class DreameMowerMapRenderer:
             )
         now = time.time()
 
-        pixels = {}
+        pixels: dict[int, list[int]] = {}
         min_x = map_data.dimensions.width - 1
         min_y = map_data.dimensions.height - 1
         max_x = 0
@@ -757,7 +757,7 @@ class DreameMowerMapRenderer:
                 if map_data.active_areas
                 else []
             ),
-            active_points=[[point.x0, point.y0] for point in map_data.active_points] if map_data.active_points else [],
+            active_points=[[point.x, point.y] for point in map_data.active_points] if map_data.active_points else [],
             active_cruise_points=(
                 [[point.x, point.y, point.type, point.completed] for point in map_data.active_cruise_points.values()]
                 if map_data.active_cruise_points
@@ -811,7 +811,7 @@ class DreameMowerMapRenderer:
                 else []
             ),
             predefined_points=(
-                [[point.x0, point.y0] for point in map_data.predefined_points]
+                [[point.x, point.y] for point in map_data.predefined_points.values()]
                 if map_data.predefined_points is not None
                 else None
             ),

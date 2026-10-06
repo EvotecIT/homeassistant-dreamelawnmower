@@ -286,32 +286,32 @@ class MapRendererResources:
 @dataclass
 class MapRendererData:
     data: dict[int, list[int]]
-    size: list[int | list[int] | None] | None = None
-    frame_id: int = 0
-    saved_map: bool = False
-    wifi_map: bool = False
-    history_map: bool = False
-    recovery_map: bool = False
+    size: list[float | list[int] | None] | None = None
+    frame_id: int | None = 0
+    saved_map: bool | None = False
+    wifi_map: bool | None = False
+    history_map: bool | None = False
+    recovery_map: bool | None = False
     segments: dict[int, list[int | str]] | None = None
-    active_segments: list[int] = field(default_factory=lambda: [])
-    active_areas: list[list[int]] = field(default_factory=lambda: [])
-    active_points: list[list[int]] = field(default_factory=lambda: [])
-    active_cruise_points: list[list[int]] = field(default_factory=lambda: [])
+    active_segments: list[int] | None = field(default_factory=lambda: [])
+    active_areas: list[list[float]] = field(default_factory=lambda: [])
+    active_points: list[list[float]] = field(default_factory=lambda: [])
+    active_cruise_points: list[list[float]] = field(default_factory=lambda: [])
     task_cruise_points: bool = False
-    predefined_points: list[list[int]] | None = None
+    predefined_points: list[list[float]] | None = None
     no_mop: list[list[int]] = field(default_factory=lambda: [])
-    no_go: list[list[int]] = field(default_factory=lambda: [])
-    virtual_walls: list[list[int]] = field(default_factory=lambda: [])
-    pathways: list[list[int]] | None = None
+    no_go: list[list[float]] = field(default_factory=lambda: [])
+    virtual_walls: list[list[float]] = field(default_factory=lambda: [])
+    pathways: list[list[float]] | None = None
     obstacles: list[list[int | float]] = field(default_factory=lambda: [])
     furnitures: list[list[int | float]] | None = None
     path: list[list[int]] = field(default_factory=lambda: [])
     floor_material: dict[int, int] | None = None
     hidden_segments: list[int] | None = None
     neglected_segments: dict[int, int] | None = None
-    robot_position: list[int] | None = None
-    charger_position: list[int] | None = None
-    router_position: list[int] | None = None
+    robot_position: list[float | None] | None = None
+    charger_position: list[float | None] | None = None
+    router_position: list[float] | None = None
     ai_outborders_user: list[list[int]] | None = None
     ai_outborders: list[list[int]] | None = None
     ai_outborders_new: list[list[int]] | None = None
@@ -332,8 +332,8 @@ class MapRendererData:
     completed: bool | None = None
     remaining_battery: int | None = None
     cleanset: bool = False
-    docked: bool = True
-    work_status: int = 0
+    docked: bool | None = True
+    work_status: int | None = 0
     resources: MapRendererResources | None = None
     version: int = 1
 

@@ -4,21 +4,60 @@ from __future__ import annotations
 
 import json
 from io import BytesIO
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from PIL import Image
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import device_map
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map import (
     DreameMowerMapRenderer,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
+    Coordinate,
     MapData,
     MapImageDimensions,
     MapPixelType,
     MapRendererResources,
+    Point,
     Segment,
 )
+
+
+@pytest.mark.parametrize("point_kind", ["active", "predefined"])
+def test_map_json_exports_fractional_point_coordinates(point_kind: str) -> None:
+    data = MapData()
+    data.dimensions = MapImageDimensions(0, 0, 2, 2, 50)
+    data.pixel_type = np.full((2, 2), MapPixelType.FLOOR.value)
+    if point_kind == "active":
+        data.active_points = [Point(12.5, -3.25)]
+        field = "active_points"
+    else:
+        data.predefined_points = {7: Coordinate(12.5, -3.25, False, 0)}
+        field = "predefined_points"
+    output = json.loads(DreameMowerMapRenderer().get_data_string(data))
+    assert output[field] == [[12.5, -3.25]]
+
+
+def test_camera_map_without_predefined_points_exports_empty_array() -> None:
+    data = MapData()
+    data.saved_map = True
+    data.dimensions = MapImageDimensions(0, 0, 2, 2, 50)
+    data.pixel_type = np.full((2, 2), MapPixelType.FLOOR.value)
+    state = SimpleNamespace(
+        capability=SimpleNamespace(
+            lidar_navigation=True, map_object_offset=False, camera_streaming=True,
+        ),
+        status=SimpleNamespace(
+            started=False, segment_cleaning=False, cruising=False,
+            customized_cleaning=False, docked=False,
+        ),
+    )
+    prepared = device_map._DreameMowerDeviceMapMixin.get_map_for_render(state, data)
+    output = json.loads(DreameMowerMapRenderer().get_data_string(prepared))
+    assert output["predefined_points"] == []
+    assert data.predefined_points is None
 
 
 @pytest.mark.parametrize("has_dimensions", [False, True])
