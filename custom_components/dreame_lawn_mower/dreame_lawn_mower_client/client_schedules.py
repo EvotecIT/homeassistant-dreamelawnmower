@@ -38,6 +38,7 @@ from .schedule import (
     schedule_task_summary,
     schedule_write_block_reason,
 )
+from .schedule_document import ScheduleDocumentReader
 
 SCHEDULE_CURRENT_TASK_TIMEOUT_SECONDS = 5.0
 SCHEDULE_READ_DEADLINE_SECONDS = 10.0
@@ -681,59 +682,17 @@ class _DreameLawnMowerClientSchedulesMixin(
         deadline: float | None = None,
         document_version: int = 2,
     ) -> tuple[str, int, int]:
-        chunks = bytearray()
-        offset = 0
-        chunk_count = 0
-        while offset < size:
-            request_size = min(chunk_size, size - offset)
-            chunk_result = self._sync_call_app_action(
-                {
-                    "m": "g",
-                    "t": f"SCHDDV{document_version}",
-                    "d": {"s": offset, "l": request_size, "v": version},
-                },
-                retry_count=0,
-                timeout=SCHEDULE_READ_TIMEOUT_SECONDS,
-                deadline=deadline,
+        reader = ScheduleDocumentReader(
+            size=size, version=version, chunk_size=chunk_size,
+            document_version=document_version,
+        )
+        while not reader.complete:
+            response = self._sync_call_app_action(
+                reader.request(), retry_count=0,
+                timeout=SCHEDULE_READ_TIMEOUT_SECONDS, deadline=deadline,
             )
-            data = _app_action_data(chunk_result)
-            if not isinstance(data, Mapping) or "d" not in data:
-                raise DreameLawnMowerConnectionError(
-                    f"SCHDDV{document_version} returned invalid chunk "
-                    f"at offset {offset}."
-                )
-            text = str(data.get("d") or "")
-            encoded = text.encode("utf-8")
-            returned_size = _positive_int(data.get("l"))
-            if any(
-                key in data
-                and (
-                    isinstance(data[key], bool) or _positive_int(data[key]) != expected
-                )
-                for key, expected in (("s", offset), ("v", version))
-            ):
-                raise DreameLawnMowerConnectionError(
-                    f"SCHDDV{document_version} returned a mismatched chunk identity."
-                )
-            if "l" in data and (
-                isinstance(data["l"], bool) or returned_size != len(encoded)
-            ):
-                raise DreameLawnMowerConnectionError(
-                    f"SCHDDV{document_version} returned an invalid chunk size."
-                )
-            if not encoded:
-                raise DreameLawnMowerConnectionError(
-                    f"SCHDDV{document_version} returned empty data at offset {offset}."
-                )
-            if len(chunks) + len(encoded) > size:
-                raise DreameLawnMowerConnectionError(
-                    f"SCHDDV{document_version} returned too much data "
-                    f"at offset {offset}."
-                )
-            chunks.extend(encoded)
-            offset += returned_size if returned_size else len(encoded)
-            chunk_count += 1
-        return chunks.decode("utf-8"), chunk_count, offset
+            reader.append_response(response)
+        return reader.result()
 
     def _app_schedule_map_indices(
         self,
