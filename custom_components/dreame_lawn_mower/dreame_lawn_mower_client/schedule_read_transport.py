@@ -19,6 +19,7 @@ class ScheduleReadDispatch(Protocol):
     def __call__(
         self,
         action: Mapping[str, Any],
+        /,
         *,
         retry_count: int,
         timeout: float,
