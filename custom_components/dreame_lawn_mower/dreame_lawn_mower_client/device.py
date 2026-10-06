@@ -685,6 +685,10 @@ class DreameMowerDevice(
             self._update_running = False
             raise DeviceUpdateFailedException(ex) from None
 
+        self._finish_update()
+
+    def _finish_update(self) -> None:
+        """Reconcile expired optimistic changes and update map polling state."""
         if self._dirty_data:
             for k, v in copy.deepcopy(self._dirty_data).items():
                 if time.time() - v.update_time >= self._restore_timeout:

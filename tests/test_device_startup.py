@@ -14,6 +14,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device import 
     DreameMowerDevice,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device_types import (
+    DirtyData,
     DreameMowerProperty,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
@@ -189,3 +190,42 @@ def test_poll_selection_preserves_settings_and_idle_map_cadence(monkeypatch, run
     assert DreameMowerProperty.DND not in second
     assert DreameMowerProperty.MAP_LIST not in second
     assert mower._last_settings_request == 100.0
+
+
+def test_poll_completion_preserves_new_device_values(monkeypatch):
+    """Unconfirmed writes expire, but newer device values and pending writes survive."""
+    monkeypatch.setattr(device_module.time, "time", lambda: 100.0)
+    observed = []
+    map_manager = Mock()
+    mower = SimpleNamespace(
+        _dirty_data={
+            1: DirtyData(value=20, previous_value=10, update_time=80.0),
+            2: DirtyData(value=30, previous_value=15, update_time=80.0),
+            3: DirtyData(value=40, previous_value=25, update_time=99.0),
+        },
+        data={1: 20, 2: 35, 3: 40},
+        _restore_timeout=10,
+        _property_name=str,
+        _property_update_callback={1: [observed.append]},
+        _property_changed=Mock(),
+        schedule_update=Mock(),
+        _dirty_auto_switch_data={},
+        _dirty_ai_data={},
+        _consumable_change=True,
+        _map_manager=map_manager,
+        _map_update_interval=10,
+        status=SimpleNamespace(running=False, docked=True, started=False),
+        _update_running=True,
+    )
+
+    DreameMowerDevice._finish_update(mower)
+
+    assert mower.data == {1: 10, 2: 35, 3: 40}
+    assert set(mower._dirty_data) == {3}
+    assert observed == [10]
+    mower._property_changed.assert_called_once_with()
+    mower.schedule_update.assert_called_once_with(1, True)
+    assert mower._consumable_change is False
+    assert mower._update_running is False
+    map_manager.set_update_interval.assert_called_once_with(10)
+    map_manager.set_device_running.assert_called_once_with(False, True)
