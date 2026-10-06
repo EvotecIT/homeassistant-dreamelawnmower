@@ -767,7 +767,7 @@ class Coordinate(Point):
 
 class MapImageDimensions:
     def __init__(
-        self, top: int, left: int, height: int, width: int, grid_size: int
+        self, top: float, left: float, height: int, width: int, grid_size: int
     ) -> None:
         self.top = top
         self.left = left

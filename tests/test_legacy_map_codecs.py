@@ -339,3 +339,34 @@ def test_legacy_trajectory_operators_preserve_path_and_later_metadata(
         (10, 20, operator), (15, 17, "L"), (40, 50, "S"), (42, 54, "L"),
     ]
     assert decoded.hidden_segments == [3]
+
+
+@pytest.mark.parametrize("origin", [[120, -60], [120.5, -60.25]])
+def test_map_metadata_preserves_numeric_coordinates(origin: list[float]) -> None:
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[4] = 73
+    metadata = {"origin": origin, "whmp": origin}
+    payload = base64.b64encode(
+        zlib.compress(bytes(header) + json.dumps(metadata).encode())
+    ).decode()
+    decoded, _ = map_decoder.DreameMowerMapDecoder.decode_map(payload, False)
+    assert decoded is not None and decoded.dimensions is not None
+    assert (decoded.dimensions.left, decoded.dimensions.top) == tuple(origin)
+    assert decoded.router_position == Point(*origin)
+
+
+@pytest.mark.parametrize("value", ["12", 12, [1], ["1", 2], [float("nan"), 2]])
+def test_invalid_coordinate_metadata_retains_binary_geometry(value: object) -> None:
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[4] = 73
+    header[23:25] = (10).to_bytes(2, "little", signed=True)
+    header[25:27] = (-20).to_bytes(2, "little", signed=True)
+    metadata = {"origin": value, "whmp": value, "cs": 42}
+    payload = base64.b64encode(
+        zlib.compress(bytes(header) + json.dumps(metadata).encode())
+    ).decode()
+    decoded, _ = map_decoder.DreameMowerMapDecoder.decode_map(payload, False)
+    assert decoded is not None and decoded.dimensions is not None
+    assert (decoded.dimensions.left, decoded.dimensions.top) == (10, -20)
+    assert decoded.cleaned_area == 42
+    assert decoded.router_position is None

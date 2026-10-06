@@ -52,6 +52,20 @@ class DreameMowerMapDecoder:
     HEADER_SIZE = 27
 
     @staticmethod
+    def _metadata_coordinates(value: object) -> tuple[float, float] | None:
+        """Read an optional finite coordinate pair without coercing wire values."""
+        if not isinstance(value, list) or len(value) < 2:
+            return None
+        x, y = value[:2]
+        if not isinstance(x, int | float) or not isinstance(y, int | float):
+            return None
+        if isinstance(x, float) and not math.isfinite(x):
+            return None
+        if isinstance(y, float) and not math.isfinite(y):
+            return None
+        return x, y
+
+    @staticmethod
     def _metadata_int(value: object) -> int:
         """Convert JSON numeric metadata without changing legacy int semantics."""
         if not isinstance(value, str | int | float):
@@ -340,8 +354,8 @@ class DreameMowerMapDecoder:
         grid_size = DreameMowerMapDecoder._read_int_16_le(raw, 17)
         width = DreameMowerMapDecoder._read_int_16_le(raw, 19)
         height = DreameMowerMapDecoder._read_int_16_le(raw, 21)
-        left = DreameMowerMapDecoder._read_int_16_le(raw, 23)
-        top = DreameMowerMapDecoder._read_int_16_le(raw, 25)
+        left: float = DreameMowerMapDecoder._read_int_16_le(raw, 23)
+        top: float = DreameMowerMapDecoder._read_int_16_le(raw, 25)
 
         data_json = partial_map.data_json
         if data_json is None:
@@ -350,13 +364,11 @@ class DreameMowerMapDecoder:
         _LOGGER.debug("Map Data Json: %s", data_json)
 
         try:
-            if (
-                "origin" in data_json
-                and data_json["origin"]
-                and len(data_json["origin"]) > 1
-            ):
-                left = data_json["origin"][0]
-                top = data_json["origin"][1]
+            origin = DreameMowerMapDecoder._metadata_coordinates(
+                data_json.get("origin")
+            )
+            if origin is not None:
+                left, top = origin
 
             map_data.dimensions = MapImageDimensions(
                 top, left, height, width, grid_size
@@ -689,13 +701,11 @@ class DreameMowerMapDecoder:
 
             restored_map = map_data.restored_map
 
-            if "whmp" in data_json:
-                router_position = data_json["whmp"]
-                if router_position and len(router_position) > 1:
-                    map_data.router_position = Point(
-                        router_position[0],
-                        router_position[1],
-                    )
+            router_position = DreameMowerMapDecoder._metadata_coordinates(
+                data_json.get("whmp")
+            )
+            if router_position is not None:
+                map_data.router_position = Point(*router_position)
 
             wifi_map = data_json.get("whm")
             if map_data.saved_map and wifi_map and len(wifi_map) > 1:

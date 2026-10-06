@@ -82,7 +82,9 @@ def test_legacy_map_png_keeps_map_metadata_on_styled_image() -> None:
 
 
 @pytest.mark.parametrize("scale", [1, 2])
-@pytest.mark.parametrize("start_type", [kind for kind in PathType if kind != PathType.LINE])
+@pytest.mark.parametrize(
+    "start_type", [kind for kind in PathType if kind != PathType.LINE]
+)
 def test_legacy_mowing_trail_draws_segments_without_bridging(
     scale: int, start_type: PathType,
 ) -> None:
