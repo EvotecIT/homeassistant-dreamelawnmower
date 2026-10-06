@@ -1760,10 +1760,9 @@ class DreameLawnMowerClient(
         include_urls: bool = False,
     ) -> dict[str, Any]:
         """Fetch read-only 3D map object metadata from the app command path."""
-        return await asyncio.to_thread(
-            self._sync_get_app_map_objects,
-            include_urls,
-        )
+        from .client_map_object_reads import async_read_map_objects
+
+        return await async_read_map_objects(self, include_urls=include_urls)
 
     async def async_download_app_map_point_cloud(
         self,

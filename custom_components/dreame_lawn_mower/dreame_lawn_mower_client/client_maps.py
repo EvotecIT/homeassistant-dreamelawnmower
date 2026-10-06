@@ -49,7 +49,6 @@ from .client_map_helpers import (
 from .client_mowing_map import _DreameLawnMowerClientMowingMapMixin
 from .client_position import apply_position_metadata, vector_map_position
 from .client_shared_helpers import (
-    _app_action_data,
     _property_entry_received_at,
 )
 from .exceptions import (
@@ -60,6 +59,12 @@ from .exceptions import (
 )
 from .exceptions import (
     DreameLawnMowerError as DreameLawnMowerError,
+)
+from .map_objects import (
+    map_object_description,
+    map_object_names,
+    map_objects_result,
+    normalized_object_names,
 )
 from .map_probe import (
     MAP_HISTORY_PROPERTY_KEYS,
@@ -610,17 +615,8 @@ class _DreameLawnMowerClientMapsMixin(
             {"m": "g", "t": "OBJ", "d": {"type": "3dmap"}},
             redact_response=True,
         )
-        data = _app_action_data(object_result)
-        names = data.get("name") if isinstance(data, Mapping) else None
-        if not isinstance(names, Sequence) or isinstance(
-            names,
-            str | bytes | bytearray,
-        ):
-            names = []
-        normalized_names = tuple(
-            raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else None
-            for raw_name in names
-        )
+        names = map_object_names(object_result)
+        normalized_names = normalized_object_names(names)
         with self._app_map_object_cache_lock:
             if (
                 inventory_identity is not None
@@ -633,15 +629,8 @@ class _DreameLawnMowerClientMapsMixin(
         cloud = self._sync_get_cloud_protocol() if include_urls else None
         for raw_name in names:
             name = str(raw_name)
-            item: dict[str, Any] = {
-                "extension": _app_object_extension(name),
-                "url_present": False,
-                "name_shape": value_shape(raw_name),
-                "name_present": isinstance(raw_name, str) and bool(raw_name.strip()),
-                "url_checked": False,
-            }
+            item = map_object_description(raw_name, include_urls=include_urls)
             if include_urls:
-                item["name"] = name
                 try:
                     item["url_checked"] = (
                         cloud is not None and hasattr(cloud, "get_interim_file_url")
@@ -657,16 +646,7 @@ class _DreameLawnMowerClientMapsMixin(
                     item["error"] = str(err)
             objects.append(item)
 
-        result = {
-            "source": "app_action_obj_3dmap",
-            "object_count": len(objects),
-            "named_object_count": sum(item["name_present"] for item in objects),
-            "objects": objects,
-            "urls_included": bool(include_urls),
-        }
-        if include_urls:
-            result["raw"] = _json_safe(object_result, max_depth=4)
-        return result
+        return map_objects_result(object_result, objects, include_urls=include_urls)
 
     def _sync_download_app_map_point_cloud(
         self,

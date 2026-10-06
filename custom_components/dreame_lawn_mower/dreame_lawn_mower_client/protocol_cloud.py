@@ -24,6 +24,7 @@ from .exceptions import (
     DeviceException, DreameLawnMowerCloudAPIError, DreameLawnMowerConnectionError,
 )
 from .cloud_auth import CloudAuthentication, parse_cloud_authentication
+from .cloud_files import interim_file_params, interim_file_result
 from .cloud_wire import (
     APP_PLUGIN_PATH, DEVICE_INFO_PATH, DEVICE_LIST_PATH, DEVICE_METADATA_PATHS,
     cloud_batch_data_params, cloud_device_info_data,
@@ -34,7 +35,6 @@ from .deadline import DeadlineExceededError, run_with_deadline
 from .mqtt_tls import create_cloud_mqtt_ssl_context
 
 _LOGGER = logging.getLogger(__name__)
-_INTERIM_FILE_NOT_AVAILABLE_CODE = 10007
 _TX_VIDEO_API_PATH = "/dreame-third-video/tx/"
 _REDACTED_TX_VIDEO_PAYLOAD = "<redacted TX video payload>"
 _INTERIM_FILE_API_PATH = "/dreame-user-iot/iotfile/getDownloadUrl"
@@ -1137,45 +1137,14 @@ class DreameMowerDreameHomeCloudProtocol:
     ) -> str:
         api_response = self._api_call(
             f"{self._strings[23]}/{self._strings[39]}/{self._strings[55]}",
-            {
-                "did": str(self._did),
-                self._strings[35]: self._model,
-                self._strings[40]: object_name,
-                self._strings[21]: self._country,
-            },
+            interim_file_params(
+                self._strings, self._did, self._model, self._country, object_name,
+            ),
             retry_count=retry_count,
             timeout=timeout,
             deadline=deadline,
         )
-        if require_response:
-            if not isinstance(api_response, Mapping):
-                raise DeviceException(
-                    "The interim-file signer did not return a response."
-                )
-            response_code = api_response.get("code")
-            if (
-                isinstance(response_code, int)
-                and not isinstance(response_code, bool)
-                and response_code == _INTERIM_FILE_NOT_AVAILABLE_CODE
-            ):
-                return None
-            if not isinstance(response_code, int) or isinstance(
-                response_code,
-                bool,
-            ):
-                raise DeviceException(
-                    "The interim-file signer response had an invalid code."
-                )
-            if response_code != 0:
-                raise DreameLawnMowerCloudAPIError(response_code)
-            if "data" not in api_response:
-                raise DeviceException(
-                    "The interim-file signer response did not contain data."
-                )
-        if api_response is None or "data" not in api_response:
-            return None
-
-        return api_response["data"]
+        return interim_file_result(api_response, require_response=require_response)
 
     def get_properties(
         self,

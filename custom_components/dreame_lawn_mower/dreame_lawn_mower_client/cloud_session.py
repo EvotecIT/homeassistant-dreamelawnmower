@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 from aiohttp import BasicAuth, ClientError, ClientSession, ClientTimeout
 
 from .cloud_auth import CloudAuthentication, parse_cloud_authentication
+from .cloud_files import interim_file_params, interim_file_result
 from .cloud_wire import (
     APP_PLUGIN_PATH,
     DEVICE_INFO_PATH,
@@ -82,6 +83,19 @@ class DreameCloudSession:
     @property
     def _base_url(self) -> str:
         return f"https://{self._country}{self._strings[0]}:{self._strings[1]}"
+
+    async def async_get_interim_file_url(
+        self, did: str, model: str | None, object_name: str, *,
+        deadline: float, require_response: bool = False,
+    ) -> Any:
+        """Sign a stored object through native read-only cloud HTTP."""
+        path = "/".join(self._strings[index] for index in (23, 39, 55))
+        response = await self._async_read_response(
+            f"/{path}", json.dumps(interim_file_params(
+                self._strings, did, model, self._country, object_name,
+            ), separators=(",", ":")), timeout=20, deadline=deadline,
+        )
+        return interim_file_result(response, require_response=require_response)
 
     async def async_get_public_file(
         self, url: str, *, deadline: float, attempts: int = 1, timeout: float = 20,
