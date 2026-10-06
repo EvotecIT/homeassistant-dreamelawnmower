@@ -206,12 +206,20 @@ has the old name. Vector metadata supplies the fallback when native names are
 unavailable. Clearing a native name restores the stable `Zone #<id>` label.
 Name refreshes retain the existing zone IDs and map scope.
 
-Zone, spot, and edge actions require both a mower acknowledgement and an
-authoritative task-type readback before Home Assistant reports success. If the
-mower acknowledges a zone request but starts whole-map mowing, the action fails
-instead of silently reporting the wrong job as successful. Explicit targeted
-services also update the local `Mowing Action` selection after confirmation.
+Zone, spot, and edge actions check the mower acknowledgement and fresh task
+state. When native task metadata is available, the mode and zone or spot IDs
+must match the request. A reported whole-map task cannot confirm a zone request.
+
+Some firmware reports a new mowing session before publishing its native task
+metadata. If the request was acknowledged, the mower was inactive beforehand,
+and fresh heartbeat reads confirm that mowing started, the action succeeds
+without waiting for the delayed metadata. The integration logs a warning that
+the exact targets remain unverified. A lost acknowledgement or failed readback
+cannot use this fallback, and any observed mode or target mismatch blocks it.
+Explicit targeted services also update the local `Mowing Action` selection
+after the start is accepted.
 Unknown current-map IDs, map-scope mismatches, device rejection responses, and
-unconfirmed task types are surfaced as failed actions. A repeated targeted call
-is rejected before dispatch when the mower is already running the same task type
-and the integration cannot prove that a different target was requested.
+missing start evidence are surfaced as failed actions. A repeated targeted call
+is rejected before dispatch while an active task's mode is unknown, or when the
+mower is running the same task type and the integration cannot prove that a
+different target was requested.
