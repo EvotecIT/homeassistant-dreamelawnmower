@@ -478,50 +478,57 @@ class DreameMowerDreameHomeCloudProtocol:
             return self._connect_unlocked(message_callback, connected_callback)
 
     def _connect_unlocked(self, message_callback=None, connected_callback=None):
+        if self._disconnect_is_pending() or not self._logged_in:
+            return None
+        info = self.get_device_info()
+        return self._connect_device_info_unlocked(
+            info, message_callback, connected_callback,
+        )
+
+    def _connect_device_info_unlocked(
+        self, info, message_callback=None, connected_callback=None,
+    ):
+        """Start MQTT from fetched device information while holding the owner lock."""
+        if self._disconnect_is_pending() or not self._logged_in or not info:
+            return None
+        if message_callback:
+            self._message_callback = message_callback
+            self._connected_callback = connected_callback
+            if self._client is None:
+                _LOGGER.debug("Connecting to the device client")
+                try:
+                    host = self._host.split(":")
+                    # HA 2025.1 supplies Paho 1.6; Paho 2 adds an
+                    # explicit callback version with the same handlers.
+                    client_options = {
+                        "client_id": f"{self._strings[53]}{self._uid}{self._strings[54]}{DreameMowerDreameHomeCloudProtocol.get_random_agent_id()}{self._strings[54]}{host[0]}",
+                        "clean_session": True,
+                        "userdata": self,
+                    }
+                    if hasattr(mqtt_client, "CallbackAPIVersion"):
+                        client_options["callback_api_version"] = mqtt_client.CallbackAPIVersion.VERSION1
+                    self._client = mqtt_client.Client(**client_options)
+                    self._client.on_connect = DreameMowerDreameHomeCloudProtocol._on_client_connect
+                    self._client.on_disconnect = DreameMowerDreameHomeCloudProtocol._on_client_disconnect
+                    self._client.on_message = DreameMowerDreameHomeCloudProtocol._on_client_message
+                    self._client.reconnect_delay_set(1, 15)
+                    self._client.tls_set_context(
+                        create_cloud_mqtt_ssl_context()
+                    )
+                    self._client.tls_insecure_set(False)
+                    self._set_client_key()
+                    self._client.connect(host[0], int(host[1]), 50)
+                    self._client.loop_start()
+                except Exception as e:
+                    _LOGGER.error("Connect failed (%s)", type(e).__name__)
+                    pass
+            elif not self._client_connected:
+                _LOGGER.error("Not connected to the device client")
+                self._set_client_key()
         if self._disconnect_is_pending():
             return None
-        if self._logged_in:
-            info = self.get_device_info()
-            if info:
-                if message_callback:
-                    self._message_callback = message_callback
-                    self._connected_callback = connected_callback
-                    if self._client is None:
-                        _LOGGER.debug("Connecting to the device client")
-                        try:
-                            host = self._host.split(":")
-                            # HA 2025.1 supplies Paho 1.6; Paho 2 adds an
-                            # explicit callback version with the same handlers.
-                            client_options = {
-                                "client_id": f"{self._strings[53]}{self._uid}{self._strings[54]}{DreameMowerDreameHomeCloudProtocol.get_random_agent_id()}{self._strings[54]}{host[0]}",
-                                "clean_session": True,
-                                "userdata": self,
-                            }
-                            if hasattr(mqtt_client, "CallbackAPIVersion"):
-                                client_options["callback_api_version"] = mqtt_client.CallbackAPIVersion.VERSION1
-                            self._client = mqtt_client.Client(**client_options)
-                            self._client.on_connect = DreameMowerDreameHomeCloudProtocol._on_client_connect
-                            self._client.on_disconnect = DreameMowerDreameHomeCloudProtocol._on_client_disconnect
-                            self._client.on_message = DreameMowerDreameHomeCloudProtocol._on_client_message
-                            self._client.reconnect_delay_set(1, 15)
-                            self._client.tls_set_context(
-                                create_cloud_mqtt_ssl_context()
-                            )
-                            self._client.tls_insecure_set(False)
-                            self._set_client_key()
-                            self._client.connect(host[0], int(host[1]), 50)
-                            self._client.loop_start()
-                        except Exception as e:
-                            _LOGGER.error("Connect failed. error: %s", e)
-                            pass
-                    elif not self._client_connected:
-                        _LOGGER.error("Not connected to the device client")
-                        self._set_client_key()
-                if self._disconnect_is_pending():
-                    return None
-                self._connected = True
-                return info
-        return None
+        self._connected = True
+        return info
 
     def login(
         self,
