@@ -227,6 +227,7 @@ from .vector_map import vector_map_to_details as vector_map_to_details
 from .vector_map import vector_map_to_summary as vector_map_to_summary
 
 if _typing.TYPE_CHECKING:
+    from .client_update_scheduler import NativeDeviceUpdates as _NativeDeviceUpdates
     from .map_visuals import MapRenderStyle
     from .models import DreameLawnMowerCameraFeatureSupport as _CameraFeatureSupport
     from .models import DreameLawnMowerCameraStreamRuntimeInputs as _CameraRuntimeInputs
@@ -559,6 +560,7 @@ class DreameLawnMowerClient(
         self._owns_http_session = session is None
         self._async_cloud: _DreameCloudSession | None = None
         self._cloud_read_tasks: set[asyncio.Task[Any]] = set()
+        self._native_updates: _NativeDeviceUpdates | None = None
         self._device: Any | None = None
         self._device_ownership_lock = _threading.Lock()
         self._refresh_lock = asyncio.Lock()
@@ -2226,6 +2228,10 @@ class DreameLawnMowerClient(
         """Own one native read from session creation through cancellation cleanup."""
         if self._closing:
             raise DreameLawnMowerConnectionError("Client is closing")
+        if self._native_updates is None:
+            from .client_update_scheduler import NativeDeviceUpdates
+
+            self._native_updates = NativeDeviceUpdates(self)
         if self._async_cloud is None:
             if self._http_session is None:
                 self._http_session = _ClientSession(trust_env=True)
@@ -2271,6 +2277,8 @@ class DreameLawnMowerClient(
         """Disconnect long-lived device resources."""
         with self._device_ownership_lock:
             self._closing = True
+        if self._native_updates is not None:
+            self._native_updates.close()
         # Stop native reads before releasing an owned pool. A borrowed HA pool
         # remains usable by other integrations after this client has closed.
         reads = tuple(self._cloud_read_tasks)

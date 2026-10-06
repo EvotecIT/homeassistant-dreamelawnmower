@@ -1156,12 +1156,24 @@ class _DreameMowerDeviceStateMixin:
     def _update_task(self, force_request_properties=False) -> None:
         """Timer task for updating properties periodically"""
         self._update_timer = None
+        if self._native_update_scheduler is not None:
+            self._native_update_scheduler(self, 0, force_request_properties)
+            return
         try:
             self.update(force_request_properties)
+        except Exception as error:
+            self._complete_scheduled_update(error)
+        else:
+            self._complete_scheduled_update(None)
+
+    def _complete_scheduled_update(self, error: Exception | None) -> None:
+        """Apply the same availability and rescheduling policy for both transports."""
+        if error is None:
             if self._ready:
                 self.available = True
             self._update_fail_count = 0
-        except Exception as ex:
+        else:
+            ex = error
             self._update_fail_count = self._update_fail_count + 1
             if self.available:
                 self._last_update_failed = time.time()

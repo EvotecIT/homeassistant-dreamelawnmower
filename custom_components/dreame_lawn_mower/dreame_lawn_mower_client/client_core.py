@@ -1065,6 +1065,10 @@ class _DreameLawnMowerClientCoreMixin:
                     "The mower client is shutting down."
                 )
             if self._device is not None:
+                if self._native_updates is not None:
+                    self._device._native_update_scheduler = (
+                        self._native_updates.schedule
+                    )
                 return self._device
 
             from .device import DreameMowerDevice
@@ -1081,6 +1085,8 @@ class _DreameLawnMowerClientCoreMixin:
                 self._account_type,
                 self._descriptor.did,
             )
+            if self._native_updates is not None:
+                self._device._native_update_scheduler = self._native_updates.schedule
             if self._update_callback is not None:
                 self._device.listen(self._update_callback)
             return self._device

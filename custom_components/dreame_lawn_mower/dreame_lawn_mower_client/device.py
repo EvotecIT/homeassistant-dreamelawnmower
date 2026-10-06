@@ -11,6 +11,7 @@ from datetime import datetime
 from random import randrange
 from threading import RLock, Timer
 from typing import Any, Optional
+from collections.abc import Callable
 
 from .app_protocol import mower_realtime_property_name
 from .device_privacy import AI_POLICY_PROPERTY, decode_ai_policy_acceptance
@@ -212,6 +213,7 @@ class DreameMowerDevice(
         # External update callbacks for specific device property
         self._property_update_callback = {}
         self._update_timer: Timer = None  # Update schedule timer
+        self._native_update_scheduler: Callable[[Any, float, bool], None] | None = None
         # Used for requesting consumable properties after reset action otherwise they will only requested when cleaning completed
         self._consumable_change: bool = False
         self._remote_control: bool = False
@@ -514,6 +516,10 @@ class DreameMowerDevice(
             self._update_timer.cancel()
             del self._update_timer
             self._update_timer = None
+
+        if self._native_update_scheduler is not None:
+            self._native_update_scheduler(self, wait, force_request_properties)
+            return
 
         if wait >= 0:
             self._update_timer = Timer(
