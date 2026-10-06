@@ -1297,3 +1297,173 @@ def test_refresh_keeps_state_callback_owned_through_shutdown(monkeypatch, stop):
                 await client.async_close()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "failure", [None, "missing", "duplicate", "rejected", "offline"],
+)
+def test_authoritative_native_read_rejects_incomplete_evidence(monkeypatch, failure):
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        device as device_module,
+    )
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        device_property_read,
+    )
+
+    strings = cloud_strings("dreame")
+    required = device_property_read.TASK_DECISION_PROPERTIES
+    requests = []
+    monkeypatch.setattr(
+        device_module.DreameMowerDevice,
+        "cloud_connected", property(lambda _: True),
+    )
+    monkeypatch.setattr(
+        device_module.DreameMowerDevice,
+        "device_connected", property(lambda _: True),
+    )
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        requests.append(await request.json())
+        rows = [{"did": str(prop.value), "code": 0, "value": 0}
+                for prop in required]
+        if failure == "missing":
+            rows.pop()
+        elif failure == "duplicate":
+            rows.append(dict(rows[-1]))
+        elif failure == "rejected":
+            rows[-1]["code"] = -1
+        return web.json_response({
+            "code": 80001 if failure == "offline" else 0,
+            "data": {"result": rows},
+        })
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **OPTIONS,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type="dreame", country="eu",
+                ), session=session,
+            )
+            device = client._ensure_device()
+            device._ready = True
+            device.data = {prop.value: 0 for prop in required}
+            device._last_settings_request = 10**20
+            previous = {"legacy_task_status": 6, "received_at": 0}
+            device._fresh_task_state = dict(previous)
+            client._snapshot_from_device = (
+                lambda mower, **kwargs: dict(mower._fresh_task_state)
+            )
+            try:
+                if failure:
+                    with pytest.raises(DreameLawnMowerConnectionError):
+                        await client.async_refresh_authoritative_snapshot()
+                    assert device._fresh_task_state == previous
+                else:
+                    evidence = await client.async_refresh_authoritative_snapshot()
+                    assert evidence["legacy_task_status"] == 0
+                    assert evidence["received_at"] > 0
+                assert len(requests) == 1
+                requested = requests[0]["data"]["params"]
+                assert {str(prop.value) for prop in required} <= {
+                    row["did"] for row in requested
+                }
+                assert {"did": "100001", "siid": 1, "piid": 1} in requested
+            finally:
+                await client.async_close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("blocked", ["gate", "busy", "expired"])
+def test_authoritative_read_fails_closed_before_network_when_blocked(blocked):
+    async def scenario():
+        async with ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **OPTIONS,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type="dreame", country="eu",
+                ), session=session,
+            )
+            if blocked == "gate":
+                await client._refresh_lock.acquire()
+            elif blocked == "busy":
+                client._ensure_device()._update_running = True
+            deadline = asyncio.get_running_loop().time() + (
+                -1 if blocked == "expired" else 0.05
+            )
+            try:
+                with pytest.raises(DreameLawnMowerConnectionError):
+                    await asyncio.wait_for(
+                        client.async_refresh_authoritative_snapshot(deadline=deadline),
+                        1,
+                    )
+                if blocked != "busy":
+                    assert client._device is None
+                assert not client._cloud_read_tasks
+            finally:
+                if blocked == "gate":
+                    client._refresh_lock.release()
+                await client.async_close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("stop", ["cancel", "close"])
+def test_authoritative_snapshot_worker_remains_owned_until_finished(stop):
+    from threading import Event
+    from unittest.mock import AsyncMock
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        started = asyncio.Event()
+        release = Event()
+        async with ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **OPTIONS,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type="dreame", country="eu",
+                ), session=session,
+            )
+            device = client._ensure_device()
+            client._async_update_device = AsyncMock(return_value=device)
+
+            def snapshot(_device, **_kwargs):
+                loop.call_soon_threadsafe(started.set)
+                assert release.wait(3)
+                return object()
+
+            client._snapshot_from_device = snapshot
+            refresh = asyncio.create_task(client.async_refresh_authoritative_snapshot())
+            close = None
+            try:
+                await asyncio.wait_for(started.wait(), 1)
+                if stop == "close":
+                    close = asyncio.create_task(client.async_close())
+                else:
+                    refresh.cancel()
+                await asyncio.sleep(0.02)
+                assert not refresh.done()
+                assert client._cloud_read_tasks
+                if close is not None:
+                    assert not close.done()
+                release.set()
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(refresh, 1)
+                if close is not None:
+                    await asyncio.wait_for(close, 1)
+                assert not client._cloud_read_tasks
+                assert not session.closed
+            finally:
+                release.set()
+                await asyncio.gather(refresh, return_exceptions=True)
+                if close is not None:
+                    await asyncio.gather(close, return_exceptions=True)
+                await client.async_close()
+
+    asyncio.run(scenario())

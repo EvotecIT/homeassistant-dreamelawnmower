@@ -292,30 +292,60 @@ class _DreameLawnMowerClientCoreMixin:
         deadline: float | None = None,
     ) -> DreameLawnMowerSnapshot:
         """Force properties and apply heartbeat reconciliation before decisions."""
-        if deadline is None:
-            device = await asyncio.to_thread(self._sync_update_device, True)
-        else:
-            device = await asyncio.to_thread(
-                self._sync_update_device,
-                True,
-                deadline=deadline,
-            )
-        return await asyncio.to_thread(
-            self._snapshot_from_device,
-            device,
-            fresh_task_state=True,
-        )
+        from .client_refresh import _run_state_worker
+
+        cancelled = Event()
+
+        async def read(_cloud: DreameCloudSession) -> DreameLawnMowerSnapshot:
+            try:
+                device = await self._async_update_device(
+                    force_request_properties=True, deadline=deadline,
+                )
+
+                def build_snapshot() -> DreameLawnMowerSnapshot:
+                    if cancelled.is_set() or self._closing:
+                        raise DreameLawnMowerConnectionError("Client is closing")
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise DreameLawnMowerConnectionError(
+                            "Authoritative snapshot timed out"
+                        )
+                    return self._snapshot_from_device(device, fresh_task_state=True)
+
+                async with asyncio.timeout(
+                    None if deadline is None else max(0, deadline - time.monotonic())
+                ):
+                    snapshot = await _run_state_worker(build_snapshot, cancelled)
+                if self._closing:
+                    raise DreameLawnMowerConnectionError("Client is closing")
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise DreameLawnMowerConnectionError(
+                        "Authoritative snapshot timed out"
+                    )
+                return snapshot
+            except TimeoutError as err:
+                raise DreameLawnMowerConnectionError(
+                    "Authoritative snapshot timed out"
+                ) from err
+            finally:
+                cancelled.set()
+
+        return await self._async_cloud_read(read)
 
     async def _async_cached_authoritative_snapshot(self) -> DreameLawnMowerSnapshot:
         """Apply heartbeat reconciliation to the current in-memory device state."""
         device = await asyncio.to_thread(self._ensure_device)
         return await asyncio.to_thread(self._snapshot_from_device, device)
 
-    async def _async_update_device(self) -> DreameMowerDevice:
+    async def _async_update_device(
+        self, *, force_request_properties: bool = False,
+        deadline: float | None = None,
+    ) -> DreameMowerDevice:
         """Use native polling while retaining owned synchronous startup."""
         from .client_refresh import async_update_device
 
-        return await async_update_device(self)
+        return await async_update_device(
+            self, force_request_properties=force_request_properties, deadline=deadline,
+        )
 
     def _sync_update_device(
         self,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -1137,33 +1138,40 @@ def test_explicit_zone_rejection_is_not_reconciled_after_preflight() -> None:
 
 def test_authoritative_confirmation_forces_device_property_request() -> None:
     client = object.__new__(DreameLawnMowerClient)
+    client._closing = False
+    client._async_cloud_read = lambda read: read(None)
     device = SimpleNamespace(update=Mock())
     snapshot = SimpleNamespace(state="paused")
-    client._ensure_device = Mock(return_value=device)
+    client._async_update_device = AsyncMock(return_value=device)
     client._snapshot_from_device = Mock(return_value=snapshot)
 
     result = asyncio.run(client._async_refresh_authoritative_snapshot())
 
     assert result is snapshot
-    device.update.assert_called_once_with(force_request_properties=True)
+    client._async_update_device.assert_awaited_once_with(
+        force_request_properties=True, deadline=None,
+    )
     client._snapshot_from_device.assert_called_once_with(device, fresh_task_state=True)
 
 
 def test_authoritative_confirmation_forwards_shared_deadline() -> None:
     client = object.__new__(DreameLawnMowerClient)
+    client._closing = False
+    client._async_cloud_read = lambda read: read(None)
     device = SimpleNamespace(update=Mock())
     snapshot = SimpleNamespace(state="paused")
-    client._ensure_device = Mock(return_value=device)
+    client._async_update_device = AsyncMock(return_value=device)
     client._snapshot_from_device = Mock(return_value=snapshot)
 
+    deadline = time.monotonic() + 30
     result = asyncio.run(
-        client._async_refresh_authoritative_snapshot(deadline=123.0)
+        client._async_refresh_authoritative_snapshot(deadline=deadline)
     )
 
     assert result is snapshot
-    device.update.assert_called_once_with(
+    client._async_update_device.assert_awaited_once_with(
         force_request_properties=True,
-        deadline=123.0,
+        deadline=deadline,
     )
     client._snapshot_from_device.assert_called_once_with(device, fresh_task_state=True)
 

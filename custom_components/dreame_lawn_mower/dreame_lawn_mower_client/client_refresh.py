@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from collections.abc import Callable
 from threading import Event
@@ -46,28 +47,47 @@ async def _run_state_worker[T](operation: Callable[[], T], cancelled: Event) -> 
     return worker.result()
 
 
-async def async_update_device(client: DreameLawnMowerClient) -> DreameMowerDevice:
+async def async_update_device(
+    client: DreameLawnMowerClient, *, force_request_properties: bool = False,
+    deadline: float | None = None,
+) -> DreameMowerDevice:
     """Poll native RPC once connected, retaining synchronous startup ownership."""
     cancelled = Event()
+    supplied_deadline = deadline
+    if deadline is not None and not math.isfinite(deadline):
+        raise ValueError("Device refresh deadline must be finite")
+    if force_request_properties and deadline is None:
+        deadline = time.monotonic() + 20
 
     def ensure_active() -> None:
         if cancelled.is_set() or client._closing:
             raise DreameLawnMowerConnectionError("Device refresh was cancelled")
+        if deadline is not None and time.monotonic() >= deadline:
+            raise DreameLawnMowerConnectionError("Device refresh timed out")
 
     def prepare() -> tuple[DreameMowerDevice, list[DreameMowerProperty] | None]:
         ensure_active()
-        device = client._ensure_device(cancelled=cancelled)
+        device = client._ensure_device(deadline=deadline, cancelled=cancelled)
         if device._update_running:
+            if force_request_properties:
+                raise DeviceUpdateFailedException(
+                    "Fresh mower task state is unavailable "
+                    "while another update is running."
+                )
             return device, None
         # Startup still owns MQTT initialization, initial capabilities and maps.
         # Keep that existing path tracked until its remaining HTTP is migrated.
-        if not device.cloud_connected or not device._ready:
+        if supplied_deadline is None and (
+            not device.cloud_connected or not device._ready
+        ):
             ensure_active()
             client._sync_update_device()
-            return device, None
+            if not force_request_properties:
+                return device, None
         ensure_active()
         properties = device._select_update_properties()
-        if not device._protocol.dreame_cloud or not device.device_connected:
+        if (force_request_properties or not device._protocol.dreame_cloud
+                or not device.device_connected):
             return device, properties
         if device.status.map_backup_status:
             return device, [DreameMowerProperty.MAP_BACKUP_STATUS]
@@ -82,27 +102,30 @@ async def async_update_device(client: DreameLawnMowerClient) -> DreameMowerDevic
                 ensure_active()
                 if properties is None:
                     return device
-                deadline = time.monotonic() + 20
+                rpc_deadline = (
+                    deadline if deadline is not None else time.monotonic() + 20
+                )
                 protocol = device._protocol.cloud
                 results: object = None
                 if properties:
                     requests = build_device_property_request(
                         properties, device.property_mapping, device.data,
-                        ready=device._ready, require_fresh_state=False,
+                        ready=device._ready,
+                        require_fresh_state=force_request_properties,
                     )
                     if requests:
                         async with protocol.async_rpc_operation(
-                            deadline=deadline,
+                            deadline=rpc_deadline,
                         ) as request_id:
                             results = await cloud.async_read_device_properties(
                                 client._descriptor.did, protocol._host,
-                                request_id, requests, deadline=deadline,
+                                request_id, requests, deadline=rpc_deadline,
                             )
 
                 def apply() -> None:
                     # Acquire on this worker: callbacks can re-enter legacy RPC.
                     lock = protocol._operation_lock()
-                    remaining = deadline - time.monotonic()
+                    remaining = rpc_deadline - time.monotonic()
                     if remaining <= 0 or not lock.acquire(timeout=remaining):
                         raise DreameLawnMowerConnectionError(
                             "Device refresh timed out waiting to apply state"
@@ -116,7 +139,8 @@ async def async_update_device(client: DreameLawnMowerClient) -> DreameMowerDevic
                         if properties:
                             try:
                                 apply_device_property_response(
-                                    device, results, require_fresh_state=False,
+                                    device, results,
+                                    require_fresh_state=force_request_properties,
                                 )
                             except Exception as err:
                                 # Match device.update's request/application
@@ -134,4 +158,13 @@ async def async_update_device(client: DreameLawnMowerClient) -> DreameMowerDevic
             finally:
                 cancelled.set()
 
-    return await client._async_cloud_read(refresh)
+    async def bounded_refresh(cloud: DreameCloudSession) -> DreameMowerDevice:
+        try:
+            async with asyncio.timeout(
+                None if deadline is None else max(0, deadline - time.monotonic())
+            ):
+                return await refresh(cloud)
+        except TimeoutError as err:
+            raise DreameLawnMowerConnectionError("Device refresh timed out") from err
+
+    return await client._async_cloud_read(bounded_refresh)
