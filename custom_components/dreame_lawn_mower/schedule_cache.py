@@ -620,7 +620,7 @@ def merge_batch_schedule_payload(
         batch_schedule["label"] = "active_schedule"
         batch_schedule["writable"] = False
 
-    replacement_schedule = batch_schedule
+    replacement_schedule: Mapping[str, object] = batch_schedule
     if (
         matching_schedule is not None
         and matching_schedule.get("idx") in preserved_indices
@@ -660,9 +660,9 @@ def merge_batch_schedule_payload(
         for schedule in normalized["schedules"]
     )
     normalized["active_schedule_version"] = batch_version
-    active_index = batch_schedule.get("idx")
-    if isinstance(active_index, int) and not isinstance(active_index, bool):
-        normalized["active_schedule_index"] = active_index
+    batch_active_index = batch_schedule.get("idx")
+    if isinstance(batch_active_index, int) and not isinstance(batch_active_index, bool):
+        normalized["active_schedule_index"] = batch_active_index
     else:
         # Keep an explicit unknown-slot selection so calendar consumers can
         # filter to the authoritative idx=None fallback instead of treating a
