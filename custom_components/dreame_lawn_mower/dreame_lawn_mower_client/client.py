@@ -743,7 +743,9 @@ class DreameLawnMowerClient(
 
     async def async_get_schedule_start_evidence(self) -> dict[str, Any]:
         """Read native plans against a fresh authoritative map inventory."""
-        return await asyncio.to_thread(self._sync_get_schedule_start_evidence)
+        from .client_schedule_async import async_read_start_evidence
+
+        return await async_read_start_evidence(self)
 
     async def async_cancel_current_task(self) -> bool:
         """End the current task and require authoritative inactive readback.

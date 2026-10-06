@@ -46,6 +46,37 @@ class ScheduleReadState(Protocol):
     _app_schedule_retry_offset: int
 
 
+def read_start_evidence(
+    self: ScheduleReadState,
+) -> Generator[ScheduleReadRequest, Any, dict[str, Any]]:
+    """Read start evidence only from a validated fresh map inventory."""
+    response = yield ScheduleReadRequest(
+        {"m": "g", "t": "MAPL"},
+        retry_count=0,
+        timeout=5.0,
+    )
+    entries = _normalize_app_map_entries(response)
+    if response.get("r") != 0 or not _app_map_entries_are_valid(response, entries):
+        raise DreameLawnMowerConnectionError(
+            "Native schedule map inventory is unknown."
+        )
+    created = [entry for entry in entries if entry["created"]]
+    indices = [entry["idx"] for entry in created]
+    payload = yield from read_schedules(
+        self,
+        map_indices=[-1, *indices],
+        include_current_task=False,
+    )
+    return {
+        "map_indices": indices,
+        "map_inventory_valid": True,
+        "current_map_index": next(
+            (entry["idx"] for entry in created if entry["current"]), None
+        ),
+        "schedules": payload["schedules"],
+    }
+
+
 def read_schedules(
     self: ScheduleReadState,
     include_raw: bool = False,

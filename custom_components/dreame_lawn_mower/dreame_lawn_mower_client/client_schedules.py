@@ -8,7 +8,6 @@ from functools import wraps
 from typing import Any
 
 from .batch_device_data import decode_batch_schedule_payload
-from .client_map_helpers import _app_map_entries_are_valid, _normalize_app_map_entries
 from .client_schedule_edits import _DreameLawnMowerScheduleEditsMixin
 from .client_schedule_tables import _DreameLawnMowerScheduleTablesMixin
 from .client_settings_helpers import (
@@ -42,6 +41,7 @@ from .schedule_read_plan import (
     read_map_indices,
     read_schedules,
     read_slot,
+    read_start_evidence,
 )
 from .schedule_read_transport import run_schedule_read
 
@@ -77,30 +77,9 @@ class _DreameLawnMowerClientSchedulesMixin(
     @_serialized_schedule_operation
     def _sync_get_schedule_start_evidence(self) -> dict[str, Any]:
         """Never replace failed map discovery with likely-slot guesses for a start."""
-        response = self._sync_call_app_action(
-            {"m": "g", "t": "MAPL"},
-            retry_count=0,
-            timeout=5.0,
+        return run_schedule_read(
+            read_start_evidence(self), self._sync_call_app_action,
         )
-        entries = _normalize_app_map_entries(response)
-        if response.get("r") != 0 or not _app_map_entries_are_valid(response, entries):
-            raise DreameLawnMowerConnectionError(
-                "Native schedule map inventory is unknown."
-            )
-        created = [entry for entry in entries if entry["created"]]
-        indices = [entry["idx"] for entry in created]
-        payload = self._sync_get_app_schedules(
-            map_indices=[-1, *indices],
-            include_current_task=False,
-        )
-        return {
-            "map_indices": indices,
-            "map_inventory_valid": True,
-            "current_map_index": next(
-                (entry["idx"] for entry in created if entry["current"]), None
-            ),
-            "schedules": payload["schedules"],
-        }
 
     @_serialized_schedule_operation
     def _sync_get_app_schedules(

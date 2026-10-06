@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
 from typing import TYPE_CHECKING, Any
 
 from .client_app_reads import async_read_app_action
 from .exceptions import DreameLawnMowerConnectionError
-from .schedule_read_plan import read_schedules
-from .schedule_read_transport import capture_schedule_result
+from .schedule_read_plan import read_schedules, read_start_evidence
+from .schedule_read_transport import ScheduleReadRequest, capture_schedule_result
 
 if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
@@ -29,6 +29,26 @@ async def async_read_schedules(
     if chunk_size <= 0:
         raise ValueError("chunk_size must be greater than zero.")
 
+    return await _run_serialized_plan(client, read_schedules(
+        client,
+        include_raw=include_raw,
+        map_indices=map_indices,
+        chunk_size=chunk_size,
+        include_current_task=include_current_task,
+    ))
+
+
+async def async_read_start_evidence(
+    client: DreameLawnMowerClient,
+) -> dict[str, Any]:
+    """Keep authoritative inventory and schedule reads in one transaction."""
+    return await _run_serialized_plan(client, read_start_evidence(client))
+
+
+async def _run_serialized_plan(
+    client: DreameLawnMowerClient,
+    plan: Generator[ScheduleReadRequest, Any, dict[str, Any]],
+) -> dict[str, Any]:
     async def read(_cloud: DreameCloudSession) -> dict[str, Any]:
         gate = client._schedule_async_gate
         lock = client._schedule_operation_lock
@@ -48,13 +68,6 @@ async def async_read_schedules(
                 raise DreameLawnMowerConnectionError(
                     "Schedule read timed out waiting for another operation."
                 ) from error
-            plan = read_schedules(
-                client,
-                include_raw=include_raw,
-                map_indices=map_indices,
-                chunk_size=chunk_size,
-                include_current_task=include_current_task,
-            )
             result: list[dict[str, Any]] = []
             plan_with_result = capture_schedule_result(plan, result)
             try:

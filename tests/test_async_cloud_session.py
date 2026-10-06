@@ -2205,7 +2205,10 @@ def test_native_schedule_read_preserves_protocol_results(
 
 
 @pytest.mark.parametrize("stop", ["cancel", "close"])
-def test_native_schedule_serializes_threads_and_tasks(monkeypatch, stop):
+@pytest.mark.parametrize("start_evidence", [False, "inventory", "schedule"])
+def test_native_schedule_serializes_threads_and_tasks(
+    monkeypatch, stop, start_evidence,
+):
     strings = cloud_strings("dreame")
 
     async def scenario():
@@ -2216,7 +2219,13 @@ def test_native_schedule_serializes_threads_and_tasks(monkeypatch, stop):
         async def handler(request):
             if request.path == strings[17]:
                 return web.json_response(login_response(strings))
-            calls.append(await request.json())
+            body = await request.json()
+            calls.append(body)
+            action = body["data"]["params"]["in"][0]
+            if start_evidence == "schedule" and action["t"] == "MAPL":
+                return web.json_response({"code": 0, "data": {"result": {"out": [
+                    {"r": 0, "d": [[0, 1, 1, 1, 0]]},
+                ]}}})
             entered.set()
             await release.wait()
             return web.json_response({"code": 0, "data": {"result": {"out": [
@@ -2239,9 +2248,12 @@ def test_native_schedule_serializes_threads_and_tasks(monkeypatch, stop):
                     client._schedule_operation_lock.release()
                 return acquired
 
-            first = asyncio.create_task(client.async_get_app_schedules(
-                map_indices=[0], include_current_task=False,
-            ))
+            first = asyncio.create_task(
+                client.async_get_schedule_start_evidence() if start_evidence
+                else client.async_get_app_schedules(
+                    map_indices=[0], include_current_task=False,
+                )
+            )
             second = None
             try:
                 await asyncio.wait_for(entered.wait(), 2)
@@ -2250,7 +2262,7 @@ def test_native_schedule_serializes_threads_and_tasks(monkeypatch, stop):
                     map_indices=[0], include_current_task=False,
                 ))
                 await asyncio.sleep(0.02)
-                assert len(calls) == 1
+                assert len(calls) == (2 if start_evidence == "schedule" else 1)
                 assert not second.done()
                 if stop == "close":
                     await asyncio.wait_for(client.async_close(), 2)
@@ -2272,5 +2284,69 @@ def test_native_schedule_serializes_threads_and_tasks(monkeypatch, stop):
                     await asyncio.gather(second, return_exceptions=True)
                 await asyncio.gather(first, return_exceptions=True)
                 await client.async_close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("inventory", [
+    {"r": 0, "d": [[0, 1, 1, 1, 0], [1, 0, 0, 0, 0]]},
+    {"r": 0, "d": []},
+    {"r": -1, "d": [[0, 1, 1, 1, 0]]},
+    {"r": 0, "d": "unknown"},
+])
+def test_native_schedule_start_requires_authoritative_inventory(monkeypatch, inventory):
+    strings = cloud_strings("dreame")
+    seen = []
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        body = await request.json()
+        action = body["data"]["params"]["in"][0]
+        seen.append(action)
+        assert action["m"] == "g"
+        response = inventory if action["t"] == "MAPL" else {
+            "r": 0, "d": {"i": action["d"]["i"], "l": 0, "v": 65535},
+        }
+        return web.json_response({"code": 0, "data": {"result": {"out": [response]}}})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **OPTIONS, session=session,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type="dreame", country="eu",
+                ),
+            )
+            client._ensure_device()._protocol.cloud._host = "hub.example.invalid"
+            try:
+                if inventory["r"] != 0 or inventory["d"] == "unknown":
+                    with pytest.raises(
+                        DreameLawnMowerConnectionError,
+                        match="inventory is unknown|App action failed",
+                    ):
+                        await client.async_get_schedule_start_evidence()
+                    assert len(seen) == 1
+                else:
+                    result = await client.async_get_schedule_start_evidence()
+                    indices = [0] if inventory["d"] else []
+                    assert result["map_inventory_valid"] is True
+                    assert result["map_indices"] == indices
+                    assert result["current_map_index"] == (0 if indices else None)
+                    assert [item["idx"] for item in result["schedules"]] == [
+                        -1, *indices,
+                    ]
+                    assert all(
+                        item["read_status"] == "complete"
+                        for item in result["schedules"]
+                    )
+                    assert seen[0]["t"] == "MAPL"
+                    assert all(action["t"] != "SCHDT" for action in seen)
+                assert not client._schedule_async_gate.locked()
+                assert not client._cloud_read_tasks
+            finally:
+                await client.async_close()
+            assert not session.closed
 
     asyncio.run(scenario())
