@@ -1363,25 +1363,25 @@ class _DreameMowerDeviceCommandMixin:
     def set_ai_detection(self, settings: dict[str, bool] | int) -> dict[str, Any] | None:
         """Send ai detection parameters to the device."""
         if self.capability.ai_detection:
-            if (self.status.ai_obstacle_detection or self.status.ai_obstacle_image_upload) and (
-                self._protocol.cloud and not self.status.ai_policy_accepted
-            ):
-                response = self._protocol.cloud.get_batch_device_datas(
-                    [AI_POLICY_PROPERTY]
+            if isinstance(settings, int):
+                requires_acceptance = bool(settings & (
+                    DreameMowerAIProperty.AI_OBSTACLE_DETECTION
+                    | DreameMowerAIProperty.AI_OBSTACLE_IMAGE_UPLOAD
+                ))
+            else:
+                requires_acceptance = bool(
+                    settings.get(DreameMowerStrAIProperty.AI_OBSTACLE_DETECTION.value)
+                    or settings.get(DreameMowerStrAIProperty.AI_OBSTACLE_IMAGE_UPLOAD.value)
                 )
-                accepted = decode_ai_policy_acceptance(response)
-                if accepted is not None:
-                    self.status.ai_policy_accepted = accepted
-
+            if requires_acceptance and not self.status.ai_policy_accepted:
+                if self._protocol.cloud:
+                    response = self._protocol.cloud.get_batch_device_datas(
+                        [AI_POLICY_PROPERTY]
+                    )
+                    accepted = decode_ai_policy_acceptance(response)
+                    if accepted is not None:
+                        self.status.ai_policy_accepted = accepted
                 if not self.status.ai_policy_accepted:
-                    if self.status.ai_obstacle_detection:
-                        self.status.ai_obstacle_detection = False
-
-                    if self.status.ai_obstacle_image_upload:
-                        self.status.ai_obstacle_image_upload = False
-
-                    self._property_changed()
-
                     raise InvalidActionException(
                         "You need to accept privacy policy from the App before enabling AI obstacle detection feature"
                     )
@@ -1425,11 +1425,12 @@ class _DreameMowerDeviceCommandMixin:
                         del self._dirty_ai_data[prop.name]
                     self.ai_data[prop.name] = current_value
                     self._property_changed()
-            except:
+            except Exception:
                 if prop.name in self._dirty_ai_data:
                     del self._dirty_ai_data[prop.name]
                 self.ai_data[prop.name] = current_value
                 self._property_changed()
+                raise
             return result
 
     def set_auto_switch_settings(self, settings) -> dict[str, Any] | None:
