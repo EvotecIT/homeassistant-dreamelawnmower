@@ -173,6 +173,7 @@ class DreameMowerDreameHomeCloudProtocol:
         self._thread = None
         self._id = random.randint(1, 100)
         self._reconnect_timer = None
+        self._native_authentication_request: Callable[[], None] | None = None
         self._host = None
         self._model = None
         self._ti: str | None = None
@@ -423,7 +424,10 @@ class DreameMowerDreameHomeCloudProtocol:
             return
         if rc != 0 and not self._set_client_key():
             if rc == 5 and self._key_expire:
-                self.login()
+                if self._native_authentication_request is not None:
+                    self._native_authentication_request()
+                else:
+                    self.login()
             if self._client_connected:
                 if not self._client_connecting:
                     self._client_connecting = True
@@ -491,6 +495,7 @@ class DreameMowerDreameHomeCloudProtocol:
 
     def _connect_device_info_unlocked(
         self, info, message_callback=None, connected_callback=None,
+        *, nonblocking: bool = False,
     ):
         """Start MQTT from fetched device information while holding the owner lock."""
         if self._disconnect_is_pending() or not self._logged_in or not info:
@@ -521,7 +526,10 @@ class DreameMowerDreameHomeCloudProtocol:
                     )
                     self._client.tls_insecure_set(False)
                     self._set_client_key()
-                    self._client.connect(host[0], int(host[1]), 50)
+                    if nonblocking:
+                        self._client.connect_async(host[0], int(host[1]), 50)
+                    else:
+                        self._client.connect(host[0], int(host[1]), 50)
                     self._client.loop_start()
                 except Exception as e:
                     _LOGGER.error("Connect failed (%s)", type(e).__name__)

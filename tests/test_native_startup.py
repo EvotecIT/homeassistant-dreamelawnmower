@@ -132,7 +132,10 @@ def test_startup_uses_native_metadata_and_initial_properties(
                     for row in rpc[0]["data"]["params"]
                 )
                 mqtt.username_pw_set.assert_called_once_with("account", "access-secret")
-                mqtt.connect.assert_called_once_with("mqtt.example.invalid", 8883, 50)
+                mqtt.connect_async.assert_called_once_with(
+                    "mqtt.example.invalid", 8883, 50,
+                )
+                mqtt.connect.assert_not_called()
                 owner.login.assert_not_called()
                 owner.get_device_info.assert_not_called()
                 owner.get_batch_device_datas.assert_not_called()

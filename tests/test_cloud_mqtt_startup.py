@@ -35,13 +35,18 @@ def test_mqtt_setup_reuses_fetched_information(monkeypatch, account_type, preloa
         cloud._handle_device_info(info)
         if preloaded:
             with cloud._operation_lock():
-                result = cloud._connect_device_info_unlocked(info, callback, connected)
+                result = cloud._connect_device_info_unlocked(
+                    info, callback, connected, nonblocking=True,
+                )
                 assert result is info
         else:
             cloud.get_device_info = Mock(return_value=info)
             assert cloud.connect(callback, connected) is info
         mqtt.username_pw_set.assert_called_once_with("account-owner", "access-secret")
-        mqtt.connect.assert_called_once_with("mqtt.example.invalid", 8883, 50)
+        connect = mqtt.connect_async if preloaded else mqtt.connect
+        unused_connect = mqtt.connect if preloaded else mqtt.connect_async
+        connect.assert_called_once_with("mqtt.example.invalid", 8883, 50)
+        unused_connect.assert_not_called()
         mqtt.loop_start.assert_called_once_with()
         mqtt.tls_insecure_set.assert_called_once_with(False)
         assert cloud._message_callback is callback
@@ -54,7 +59,7 @@ def test_mqtt_setup_reuses_fetched_information(monkeypatch, account_type, preloa
         with cloud._operation_lock():
             result = cloud._connect_device_info_unlocked(info, callback, connected)
             assert result is None
-        assert mqtt.connect.call_count == 1
+        assert connect.call_count == 1
     finally:
         cloud.disconnect()
 

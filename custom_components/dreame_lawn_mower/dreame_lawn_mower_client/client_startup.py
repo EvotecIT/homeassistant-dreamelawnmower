@@ -25,7 +25,14 @@ async def async_start_device(
     cloud: DreameCloudSession, *, deadline: float, cancelled: Event,
 ) -> None:
     """Reuse native login and metadata before starting the existing MQTT owner."""
+    from .client_mqtt_auth import NativeMqttAuthentication
     from .client_refresh import _run_state_worker
+
+    mqtt_protocol = device._protocol.cloud
+    if mqtt_protocol._native_authentication_request is None:
+        mqtt_protocol._native_authentication_request = NativeMqttAuthentication(
+            client, device, mqtt_protocol,
+        ).request
 
     def ensure_active() -> None:
         if cancelled.is_set() or client._closing or client._device is not device:
@@ -59,6 +66,7 @@ async def async_start_device(
                     protocol._apply_authentication(authentication)
                     connected_info = protocol._connect_device_info_unlocked(
                         info, device._message_callback, device._connected_callback,
+                        nonblocking=True,
                     )
                     if connected_info is None:
                         raise DreameLawnMowerConnectionError(
