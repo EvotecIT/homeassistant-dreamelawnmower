@@ -230,8 +230,13 @@ class Obstacle(Point):
 
         self.segment: str | None = None
 
-    def set_segment(self, map_data):
-        if map_data and map_data.segments and map_data.pixel_type is not None:
+    def set_segment(self, map_data: MapData | None) -> None:
+        if (
+            map_data is not None
+            and map_data.segments
+            and map_data.pixel_type is not None
+            and map_data.dimensions is not None
+        ):
             x = int((self.x - map_data.dimensions.left) / map_data.dimensions.grid_size)
             y = int((self.y - map_data.dimensions.top) / map_data.dimensions.grid_size)
             if (

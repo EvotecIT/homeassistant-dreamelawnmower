@@ -182,3 +182,21 @@ def test_segment_requires_complete_bounds_for_geometry(missing):
     setattr(segment, missing, {"x0": 10, "y0": 20, "x1": 30, "y1": 40}[missing])
     assert segment.check_point(20, 30, 1) is True
     assert segment.to_img(dimensions).to_coord(dimensions) == segment
+
+
+@pytest.mark.parametrize("pixel", [0, 1])
+def test_obstacle_assignment_uses_map_pixels_or_segment_bounds(pixel):
+    import numpy as np
+
+    data = MapData()
+    data.dimensions = MapImageDimensions(0, 0, 10, 10, 10)
+    data.pixel_type = np.full((10, 10), pixel, dtype=np.uint8)
+    data.segments = {1: Segment(1, x0=0, y0=0, x1=100, y1=100, name="Zone 1")}
+    obstacle = Obstacle(50, 50, 0, 99)
+    obstacle.set_segment(data)
+    assert obstacle.segment == "Zone 1"
+    data.dimensions = None
+    obstacle.set_segment(data)
+    assert obstacle.segment == "Zone 1"
+    obstacle.set_segment(None)
+    assert obstacle.segment == "Zone 1"
