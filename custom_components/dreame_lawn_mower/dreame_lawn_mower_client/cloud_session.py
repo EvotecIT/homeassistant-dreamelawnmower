@@ -185,12 +185,21 @@ class DreameCloudSession:
             return None
         strings = self._strings
         path = "/".join(strings[index] for index in (23, 25, 30))
-        otc = await self._async_read(
-            f"/{path}", cloud_device_info_data(did, None),
-            timeout=20, deadline=deadline,
-        )
-        if not otc:
+        try:
+            response = await self._async_read_response(
+                f"/{path}", cloud_device_info_data(did, None),
+                timeout=20, deadline=deadline,
+            )
+        except DreameLawnMowerConnectionError:
+            # Firmware enrichment is optional; required identity and initial
+            # properties still determine whether startup can succeed. Never
+            # turn an expired shared deadline into a successful fallback.
+            if time.monotonic() >= deadline:
+                raise
             return info
+        if response.get("code") != 0 or response.get("data") is None:
+            return info
+        otc = response["data"]
         if not isinstance(otc, dict):
             raise DreameLawnMowerConnectionError("Cloud firmware info is invalid")
         if strings[31] in otc:

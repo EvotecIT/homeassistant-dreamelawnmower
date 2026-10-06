@@ -1,6 +1,7 @@
 """Native startup contract through the real client and local HTTP transport."""
 
 import asyncio
+import time
 from unittest.mock import Mock
 
 import pytest
@@ -25,11 +26,18 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions imp
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
     DreameLawnMowerDescriptor,
 )
-from tests.test_async_cloud_session import OPTIONS, login_response, server
+from tests.test_async_cloud_session import (
+    OPTIONS,
+    DreameCloudSession,
+    login_response,
+    server,
+)
 
 
 @pytest.mark.parametrize("account_type", ["dreame", "mova"])
-@pytest.mark.parametrize("fallback", [False, True])
+@pytest.mark.parametrize(
+    "fallback", [False, True, "empty", "vendor_error", "http_error"],
+)
 def test_startup_uses_native_metadata_and_initial_properties(
     monkeypatch, account_type, fallback,
 ):
@@ -55,9 +63,15 @@ def test_startup_uses_native_metadata_and_initial_properties(
         if request.path == DEVICE_INFO_PATH:
             data = info
         elif request.path == "/" + "/".join(strings[i] for i in (23, 25, 30)):
-            data = {"other": True} if fallback else {
+            if fallback == "vendor_error":
+                return web.json_response({"code": 10001, "data": None})
+            if fallback == "http_error":
+                return web.json_response({"error": "unavailable"}, status=503)
+            data = ({"other": True} if fallback else {
                 strings[31]: {strings[32]: firmware},
-            }
+            })
+            if fallback == "empty":
+                data = {}
         elif request.path == "/" + "/".join(strings[i] for i in (23, 24, 27, 28)):
             data = {strings[34]: {strings[36]: [
                 {"did": "other"}, {**firmware, **info},
@@ -91,7 +105,9 @@ def test_startup_uses_native_metadata_and_initial_properties(
                 assert await client._async_update_device() is device
                 assert device._ready and device.available
                 assert device.info.model == info["model"]
-                assert device.info.firmware_version == "4.3.6_1200"
+                assert device.info.firmware_version == (
+                    None if fallback in {"vendor_error", "http_error"} else "4.3.6_1200"
+                )
                 assert device.data[battery.value] == 55
                 assert owner._uuid == "account"
                 assert owner._uid == "device-owner"
@@ -178,5 +194,48 @@ def test_failed_initial_properties_cannot_publish_ready_device(monkeypatch, outc
                 release.set()
                 await asyncio.gather(refresh, return_exceptions=True)
                 await client.async_close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("stop", ["timeout", "cancel"])
+def test_optional_firmware_failure_does_not_swallow_deadline_or_cancel(
+    monkeypatch, stop,
+):
+    strings = cloud_strings("dreame")
+
+    async def scenario():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def handler(request):
+            if request.path == strings[17]:
+                return web.json_response(login_response(strings))
+            if request.path == DEVICE_INFO_PATH:
+                return web.json_response({"code": 0, "data": {"did": "42"}})
+            entered.set()
+            await release.wait()
+            return web.json_response({"code": 10001})
+
+        async with server(monkeypatch, handler), ClientSession() as session:
+            cloud = DreameCloudSession(session, **OPTIONS)
+            read = asyncio.create_task(cloud.async_get_connection_info(
+                "42", deadline=time.monotonic() + (0.2 if stop == "timeout" else 5),
+            ))
+            try:
+                await asyncio.wait_for(entered.wait(), 1)
+                if stop == "cancel":
+                    read.cancel()
+                expected = (
+                    asyncio.CancelledError if stop == "cancel"
+                    else DreameLawnMowerConnectionError
+                )
+                with pytest.raises(expected):
+                    await asyncio.wait_for(read, 1)
+                assert not cloud._lock.locked()
+                assert not session.closed
+            finally:
+                release.set()
+                await asyncio.gather(read, return_exceptions=True)
 
     asyncio.run(scenario())
