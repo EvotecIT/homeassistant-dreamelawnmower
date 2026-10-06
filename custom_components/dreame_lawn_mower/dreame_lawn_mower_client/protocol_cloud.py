@@ -22,7 +22,7 @@ from .exceptions import DeviceException, DreameLawnMowerCloudAPIError
 from .cloud_wire import (
     DEVICE_INFO_PATH, DEVICE_LIST_PATH, cloud_device_info_data,
     cloud_device_list_data, cloud_headers, cloud_login_data,
-    cloud_properties_params, cloud_strings,
+    cloud_properties_params, cloud_rpc_params, cloud_rpc_path, cloud_strings,
 )
 from .deadline import DeadlineExceededError, run_with_deadline
 from .mqtt_tls import create_cloud_mqtt_ssl_context
@@ -905,10 +905,6 @@ class DreameMowerDreameHomeCloudProtocol:
         parameters,
         retry_count: int = 2,
     ):
-        host = ""
-        if self._host and len(self._host):
-            host = f"-{self._host.split('.')[0]}"
-
         self._id = self._id + 1
         self._api_call_async(
             lambda api_response: callback(
@@ -916,17 +912,8 @@ class DreameMowerDreameHomeCloudProtocol:
                 if api_response is None or "data" not in api_response or "result" not in api_response["data"]
                 else api_response["data"]["result"]
             ),
-            f"{self._strings[37]}{host}/{self._strings[27]}/{self._strings[38]}",
-            {
-                "did": str(self._did),
-                "id": self._id,
-                "data": {
-                    "did": str(self._did),
-                    "id": self._id,
-                    "method": method,
-                    "params": parameters,
-                },
-            },
+            cloud_rpc_path(self._strings, self._host),
+            cloud_rpc_params(self._did, self._id, method, parameters),
             retry_count,
         )
 
@@ -968,22 +955,9 @@ class DreameMowerDreameHomeCloudProtocol:
         on_dispatch: Callable[[], None] | None = None,
         raise_on_api_error: bool = False,
     ) -> Any:
-        host = ""
-        if self._host and len(self._host):
-            host = f"-{self._host.split('.')[0]}"
-
         api_response = self._api_call(
-            f"{self._strings[37]}{host}/{self._strings[27]}/{self._strings[38]}",
-            {
-                "did": str(self._did),
-                "id": self._id,
-                "data": {
-                    "did": str(self._did),
-                    "id": self._id,
-                    "method": method,
-                    "params": parameters,
-                },
-            },
+            cloud_rpc_path(self._strings, self._host),
+            cloud_rpc_params(self._did, self._id, method, parameters),
             retry_count,
             timeout,
             deadline=deadline,

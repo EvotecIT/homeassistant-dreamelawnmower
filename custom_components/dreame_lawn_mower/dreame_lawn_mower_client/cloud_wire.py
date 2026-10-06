@@ -15,6 +15,25 @@ DEVICE_INFO_PATH = "/dreame-user-iot/iotuserbind/device/info"
 DEVICE_LIST_PATH = "/dreame-user-iot/iotuserbind/device/listV2"
 
 
+def cloud_rpc_path(strings: Sequence[str], host: str | None) -> str:
+    """Route a device RPC through its vendor-assigned host prefix."""
+    suffix = f"-{host.split('.')[0]}" if host else ""
+    return f"{strings[37]}{suffix}/{strings[27]}/{strings[38]}"
+
+
+def cloud_rpc_params(
+    did: str | None, request_id: int, method: str, parameters: object,
+) -> dict[str, object]:
+    """Preserve matching outer and inner identities in the device RPC envelope."""
+    return {
+        "did": str(did), "id": request_id,
+        "data": {
+            "did": str(did), "id": request_id,
+            "method": method, "params": parameters,
+        },
+    }
+
+
 def cloud_properties_params(did: str | None, keys: str) -> dict[str, str]:
     """Share device identity and normalized keys between both transports."""
     return {"did": str(did), "keys": keys}

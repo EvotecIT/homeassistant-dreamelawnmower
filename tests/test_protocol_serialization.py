@@ -17,6 +17,48 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
 )
 
 
+@pytest.mark.parametrize("host,path", [
+    (None, "rpc/iot/command"), ("hub.example.invalid", "rpc-hub/iot/command"),
+])
+@pytest.mark.parametrize("callback_mode", [False, True])
+def test_rpc_envelope_preserves_routing_and_request_identity(host, path, callback_mode):
+    cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
+    cloud._host = host
+    cloud._did = "42"
+    cloud._id = 10
+    cloud._strings = [""] * 53
+    cloud._strings[37] = "rpc"
+    cloud._strings[27] = "iot"
+    cloud._strings[38] = "command"
+    parameters = [{"did": "1", "siid": 2, "piid": 1}]
+    result = [{"did": "1", "code": 0, "value": 3}]
+    response = {"code": 0, "data": {"result": result}}
+    cloud._api_call = Mock(return_value=response)
+    cloud._api_call_async = Mock()
+    callback = Mock()
+    if callback_mode:
+        cloud.send_async(callback, "get_properties", parameters, retry_count=1)
+        args = cloud._api_call_async.call_args.args
+        args[0](response)
+        callback.assert_called_once_with(result)
+        route, payload, retries = args[1:]
+        expected_id = 11
+    else:
+        assert cloud.send("get_properties", parameters, retry_count=1) == result
+        route, payload, retries = cloud._api_call.call_args.args[:3]
+        expected_id = 10
+    assert route == path
+    assert retries == 1
+    assert payload == {
+        "did": "42", "id": expected_id,
+        "data": {
+            "did": "42", "id": expected_id,
+            "method": "get_properties", "params": parameters,
+        },
+    }
+    assert cloud._id == 11
+
+
 def test_cloud_request_lock_serializes_app_and_device_operations() -> None:
     """Different cloud entry points must not race one session or request id."""
     cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
