@@ -151,26 +151,16 @@ from .map_decoder import DreameMowerMapDecoder
 _LOGGER = logging.getLogger(__name__)
 
 class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
-    def _set_go_to_zone(self, x, y, size):
-        current_cleaning_mode = int(self.status.cleaning_mode.value)
-
-        new_cleaning_mode = None
-
-        cleaning_mode = DreameMowerCleaningMode.MOWING.value
-
-        if current_cleaning_mode != cleaning_mode:
-            new_cleaning_mode = cleaning_mode
-            current_cleaning_mode = DreameMowerCleaningMode.MOWING.value
-
+    def _set_go_to_zone(self, x: int, y: int, size: int) -> None:
         self.status.go_to_zone = GoToZoneSettings(
             x=x,
             y=y,
             stop=True,
-            cleaning_mode=current_cleaning_mode,
+            cleaning_mode=DreameMowerCleaningMode.MOWING.value,
             size=size,
         )
 
-    def _restore_go_to_zone(self, stop=False):
+    def _restore_go_to_zone(self, stop: bool = False) -> None:
         if self.status.go_to_zone is not None:
             if self.status.go_to_zone:
                 stop = stop and self.status.go_to_zone.stop
@@ -186,7 +176,8 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
 
                 try:
                     self._cleaning_history_update = time.time()
-                    if cleaning_mode is not None and self.status.cleaning_mode.value != cleaning_mode:
+                    current_mode = self.status.cleaning_mode
+                    if cleaning_mode is not None and current_mode is not None and current_mode.value != cleaning_mode:
                         self._update_cleaning_mode(cleaning_mode)
 
                     if stop and self.status.started:
@@ -593,6 +584,12 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
             )
         self.schedule_update(2, True)
         return response
+
+    def _update_cleaning_mode(self, cleaning_mode: int) -> bool:
+        """Write a supported mower mode through the normal property lifecycle."""
+        if cleaning_mode != DreameMowerCleaningMode.MOWING.value:
+            raise InvalidValueException("Unsupported mower cleaning mode")
+        return self.set_property(DreameMowerProperty.CLEANING_MODE, cleaning_mode)
 
     def set_cleaning_mode(self, cleaning_mode: int) -> bool:
         """Set cleaning mode."""
