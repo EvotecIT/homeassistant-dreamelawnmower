@@ -18,6 +18,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions imp
 from .test_app_schedules import _FakeAppScheduleCloud, decode_schedule_payload_text
 from .test_async_app_commands import client_for
 from .test_async_cloud_session import (
+    DreameLawnMowerClient,
     DreameLawnMowerConnectionError,
     cloud_strings,
     login_response,
@@ -49,7 +50,7 @@ def test_native_schedule_write(monkeypatch, account_type, kind, mode):
             task_resumable=False,
         )
 
-    monkeypatch.setattr(client_schedule_writes, "async_update_device", refresh)
+    monkeypatch.setattr(DreameLawnMowerClient, "_async_update_device", refresh)
 
     async def handler(request):
         if request.path == strings[17]:
@@ -232,7 +233,7 @@ def test_schedule_write_holds_transaction_and_cancels_without_later_legs(
             task_resumable=False,
         )
 
-    monkeypatch.setattr(client_schedule_writes, "async_update_device", refresh)
+    monkeypatch.setattr(DreameLawnMowerClient, "_async_update_device", refresh)
 
     async def scenario():
         entered = asyncio.Event()
@@ -297,6 +298,63 @@ def test_schedule_write_holds_transaction_and_cancels_without_later_legs(
                     reader.cancel()
                     await asyncio.gather(reader, return_exceptions=True)
                 await asyncio.gather(operation, return_exceptions=True)
+                await client.async_close()
+
+    asyncio.run(scenario())
+
+
+def test_queued_schedule_snapshot_obeys_transaction_deadline(monkeypatch):
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        schedule_write_plan,
+    )
+
+    monkeypatch.setattr(
+        client_schedule_writes,
+        "time",
+        SimpleNamespace(monotonic=lambda: time.monotonic() - 119.9),
+    )
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
+        release = Event()
+        occupied = None
+        async with ClientSession() as session:
+            client = client_for(session)
+
+            async def refresh(*args, **kwargs):
+                nonlocal occupied
+                occupied = loop.run_in_executor(None, release.wait)
+                return SimpleNamespace()
+
+            monkeypatch.setattr(client, "_async_update_device", refresh)
+            client._snapshot_from_device = lambda *args, **kwargs: pytest.fail(
+                "Expired queued snapshot ran"
+            )
+
+            def plan():
+                yield schedule_write_plan.RequireWriteAllowed()
+                yield schedule_write_plan.ScheduleCommand(
+                    {"m": "s", "t": "SCHDS", "d": [0, 1]}
+                )
+                pytest.fail("Timed-out preparation reached a write")
+
+            try:
+                with pytest.raises(DreameLawnMowerConnectionError, match="timed out"):
+                    await asyncio.wait_for(
+                        client_schedule_writes.async_run_schedule_write(client, plan()),
+                        0.5,
+                    )
+                assert not client._schedule_async_gate.locked()
+                assert not client._cloud_read_tasks
+            finally:
+                release.set()
+                if occupied is not None:
+                    await occupied
                 await client.async_close()
 
     asyncio.run(scenario())
