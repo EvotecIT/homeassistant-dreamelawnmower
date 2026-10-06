@@ -61,7 +61,10 @@ def test_bluetooth_cache_precedes_native_cloud(
 
 
 @pytest.mark.parametrize("close_client", [False, True])
-def test_started_state_reader_is_drained_before_cancel_or_close(close_client):
+@pytest.mark.parametrize("public_cached", [False, True])
+def test_started_state_reader_is_drained_before_cancel_or_close(
+    close_client, public_cached,
+):
     started = Event()
     release = Event()
     finished = Event()
@@ -76,8 +79,10 @@ def test_started_state_reader_is_drained_before_cancel_or_close(close_client):
         async with ClientSession() as session:
             client = make_client(session)
             device = client._device
+            client._snapshot_from_device = read
             task = asyncio.create_task(
-                async_read_device_state(client, read, refresh=False),
+                client.async_get_cached_snapshot() if public_cached
+                else async_read_device_state(client, read, refresh=False),
             )
             close_task = None
             try:

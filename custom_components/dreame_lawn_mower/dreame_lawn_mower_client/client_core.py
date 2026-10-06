@@ -146,11 +146,6 @@ def _device_start_session_identity(device: Any) -> bool | None:
 
 
 class _DreameLawnMowerClientCoreMixin:
-    async def async_get_cached_snapshot(self) -> DreameLawnMowerSnapshot:
-        """Return a snapshot from the latest in-memory device state."""
-        device = await asyncio.to_thread(self._ensure_device)
-        return await asyncio.to_thread(self._snapshot_from_device, device)
-
     async def _async_call_device_method(
         self,
         method_name: str,
@@ -739,19 +734,9 @@ class _DreameLawnMowerClientCoreMixin:
                     )
         return None
 
-    def _sync_capture_operation_snapshot(
-        self,
-        label: str | None,
-        include_status_blob: bool,
-        include_cloud_status_blob: bool,
-        include_remote_control: bool,
-        include_map_view: bool,
-        include_firmware: bool,
-        map_timeout: float,
-        map_interval: float,
-        language: str | None,
+    def _operation_snapshot_from_device(
+        self, device: Any, label: str | None,
     ) -> dict[str, Any]:
-        device = self._sync_update_device()
         snapshot = self._snapshot_from_device(device)
         errors: list[dict[str, str]] = []
         payload: dict[str, Any] = {
@@ -767,6 +752,24 @@ class _DreameLawnMowerClientCoreMixin:
             ),
             "errors": errors,
         }
+
+        return payload
+
+    def _sync_capture_operation_snapshot(
+        self,
+        label: str | None,
+        include_status_blob: bool,
+        include_cloud_status_blob: bool,
+        include_remote_control: bool,
+        include_map_view: bool,
+        include_firmware: bool,
+        map_timeout: float,
+        map_interval: float,
+        language: str | None,
+    ) -> dict[str, Any]:
+        device = self._sync_update_device()
+        payload = self._operation_snapshot_from_device(device, label)
+        errors = payload["errors"]
 
         if include_status_blob:
             try:

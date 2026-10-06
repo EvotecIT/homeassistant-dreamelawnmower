@@ -1268,6 +1268,14 @@ class DreameLawnMowerClient(
             refresh=refresh, include_cloud=include_cloud,
         )
 
+    async def async_get_cached_snapshot(self) -> DreameLawnMowerSnapshot:
+        """Return an owned snapshot from the latest in-memory device state."""
+        from .client_state_reads import async_read_device_state
+
+        return await async_read_device_state(
+            self, self._snapshot_from_device, refresh=False,
+        )
+
     async def async_capture_operation_snapshot(
         self,
         *,
@@ -1288,17 +1296,14 @@ class DreameLawnMowerClient(
         diagnostics, and firmware/update evidence. It never starts mowing,
         remote control, camera streaming, or docking.
         """
-        return await asyncio.to_thread(
-            self._sync_capture_operation_snapshot,
-            label,
-            include_status_blob,
-            include_cloud_status_blob,
-            include_remote_control,
-            include_map_view,
-            include_firmware,
-            map_timeout,
-            map_interval,
-            language,
+        from .client_operation_reads import async_capture_operation_snapshot
+
+        return await async_capture_operation_snapshot(
+            self, label=label, include_status_blob=include_status_blob,
+            include_cloud_status_blob=include_cloud_status_blob,
+            include_remote_control=include_remote_control,
+            include_map_view=include_map_view, include_firmware=include_firmware,
+            map_timeout=map_timeout, map_interval=map_interval, language=language,
         )
 
     async def async_refresh_map_summary(

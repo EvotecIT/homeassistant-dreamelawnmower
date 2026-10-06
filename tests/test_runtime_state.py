@@ -323,7 +323,8 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
     client._async_cloud_read = lambda read: read(None)
     client._descriptor = raw_snapshot.descriptor
     client._latest_snapshot = None
-    client._ensure_device = lambda: device
+    client._device = device
+    client._ensure_device = lambda **kwargs: device
     client._async_update_device = AsyncMock(return_value=device)
     device._fresh_task_state = {"legacy_task_status": 6, "received_at": 101.0}
     client._sync_switch_current_map = Mock(
