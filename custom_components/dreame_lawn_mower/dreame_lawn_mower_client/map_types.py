@@ -396,7 +396,7 @@ class Segment(Zone):
         self.floor_material: int | None = None
         self.floor_material_direction: int | None = None
         self.floor_material_rotated_direction: int | None = None
-        self.visibility = None
+        self.visibility: bool | None = None
         self.cleanset_type = CleansetType.NONE
         self.set_name()
 

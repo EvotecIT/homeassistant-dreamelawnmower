@@ -602,3 +602,21 @@ def test_json_compressed_pixels_preserve_every_source_cell() -> None:
     }
     expected = {(x, y) for x in (655, 656, 657) for y in (654, 655)}
     assert actual == expected
+
+
+@pytest.mark.parametrize("segment_info", [[], "invalid", {"1": []}, {"1": "invalid"},
+                                          {"1": {"type": 0}}])
+def test_segment_metadata_shape_does_not_drop_later_map_fields(segment_info):
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[4] = 73
+    for offset, value in [(17, 50), (19, 1), (21, 1)]:
+        header[offset:offset + 2] = value.to_bytes(2, "little", signed=True)
+    metadata = {"seg_inf": segment_info, "whmp": [120, -60]}
+    payload = base64.b64encode(zlib.compress(
+        bytes(header) + bytes([1]) + json.dumps(metadata).encode()
+    )).decode()
+    decoded, _ = map_decoder.DreameMowerMapDecoder.decode_map(payload, False)
+    assert decoded is not None
+    assert decoded.segments is not None and 1 in decoded.segments
+    assert decoded.router_position == Point(120, -60)
+    assert decoded.segments[1].name == "Zone 1"

@@ -692,11 +692,11 @@ class DreameMowerMapDecoder:
                         segments = DreameMowerMapDecoder.get_segments(
                             map_data, vslam_map
                         )
-                        if segments and "seg_inf" in data_json:
-                            seg_inf = data_json["seg_inf"]
+                        seg_inf = data_json.get("seg_inf")
+                        if segments and isinstance(seg_inf, dict):
                             for k, _value in segments.items():
-                                if seg_inf.get(str(k)):
-                                    segment_info = seg_inf[str(k)]
+                                segment_info = seg_inf.get(str(k))
+                                if isinstance(segment_info, dict) and segment_info:
                                     if segment_info.get("nei_id") is not None:
                                         segments[k].neighbors = segment_info["nei_id"]
                                     if segment_info.get("type") is not None:
