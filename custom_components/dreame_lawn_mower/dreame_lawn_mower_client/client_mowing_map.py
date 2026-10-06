@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .client_transport import _DreameLawnMowerClientTransport
+from .client_tracking import _DreameLawnMowerClientTrackingMixin
 from .map_visuals import MapRenderStyle
 from .mowing_map import MowingMapScene, build_mowing_map_scene, mowing_map_overlay
 from .position_tracking import snapshot_is_docked
 from .vector_map import parse_batch_vector_map
+
+if TYPE_CHECKING:
+    from .models import DreameLawnMowerSnapshot
+
 
 MAX_SCENE_INPUT_UNITS = 4 * 1024 * 1024
 MAX_SCENE_CHUNKS = 1024
@@ -39,8 +43,10 @@ def bounded_mowing_map_batch(batch: Mapping[str, Any] | None) -> dict[str, Any]:
     return geometry
 
 
-class _DreameLawnMowerClientMowingMapMixin(_DreameLawnMowerClientTransport):
-    """Reuse the client transport and session owner; keep HTTP out of the core."""
+class _DreameLawnMowerClientMowingMapMixin(_DreameLawnMowerClientTrackingMixin):
+    """Reuse transport and live tracking owners for cached map overlays."""
+
+    _latest_snapshot: DreameLawnMowerSnapshot | None
 
     async def async_get_mowing_map_scene(
         self, *, map_index: int, style: MapRenderStyle, label_scale: float = 1.0
