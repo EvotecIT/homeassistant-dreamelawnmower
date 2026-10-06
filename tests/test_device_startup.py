@@ -13,6 +13,9 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device import (
     DreameMowerDevice,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device_types import (
+    DreameMowerProperty,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
     DeviceUpdateFailedException,
 )
@@ -86,6 +89,10 @@ def test_bounded_update_skips_reconnection_and_attempts_http_readback() -> None:
         _request_properties=Mock(side_effect=readback_error),
     )
 
+    mower._select_update_properties = lambda: (
+        DreameMowerDevice._select_update_properties(mower)
+    )
+
     with pytest.raises(
         DeviceUpdateFailedException,
         match="stop after bounded readback dispatch",
@@ -149,3 +156,36 @@ def test_disconnect_quiesces_map_before_protocol_teardown() -> None:
 
     assert mower.disconnected is True
     assert order == ["device", "map", "protocol", "property"]
+
+
+@pytest.mark.parametrize("running", [False, True])
+def test_poll_selection_preserves_settings_and_idle_map_cadence(monkeypatch, running):
+    """Frequent state polls must not repeatedly request settings or idle map lists."""
+    now = 100.0
+    monkeypatch.setattr(device_module.time, "time", lambda: now)
+    mower = SimpleNamespace(
+        capability=SimpleNamespace(backup_map=False, dnd_task=False),
+        status=SimpleNamespace(active=running, running=running),
+        _consumable_change=False,
+        _last_settings_request=90.0,
+        _last_map_list_request=39.0,
+        _map_manager=object(),
+        _read_write_properties=[DreameMowerProperty.VOLUME],
+    )
+
+    first = DreameMowerDevice._select_update_properties(mower)
+    assert DreameMowerProperty.STATE in first
+    assert DreameMowerProperty.VOLUME in first
+    assert DreameMowerProperty.DND in first
+    assert (DreameMowerProperty.CLEANING_TIME in first) is running
+    assert (DreameMowerProperty.MAP_LIST in first) is (not running)
+    assert mower._last_settings_request == 100.0
+    assert mower._last_map_list_request == (39.0 if running else 100.0)
+
+    now = 105.0
+    second = DreameMowerDevice._select_update_properties(mower)
+    assert DreameMowerProperty.STATE in second
+    assert DreameMowerProperty.VOLUME not in second
+    assert DreameMowerProperty.DND not in second
+    assert DreameMowerProperty.MAP_LIST not in second
+    assert mower._last_settings_request == 100.0

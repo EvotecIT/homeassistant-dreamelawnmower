@@ -297,6 +297,10 @@ def test_failed_property_read_cannot_reuse_cached_idle_for_schedule_write(
     device._request_properties = lambda *args, **kwargs: (
         DreameMowerDevice._request_properties(device, *args, **kwargs)
     )
+    device._select_update_properties = lambda: (
+        DreameMowerDevice._select_update_properties(device)
+    )
+
     device.update = lambda **kwargs: DreameMowerDevice.update(device, **kwargs)
     client._ensure_device = lambda: device
     client._sync_update_device = lambda **kwargs: (

@@ -546,28 +546,8 @@ class DreameMowerDevice(
 
 
 
-    def update(
-        self,
-        force_request_properties=False,
-        *,
-        deadline: float | None = None,
-    ) -> None:
-        """Get properties from the device."""
-        _LOGGER.debug("Device update: %s", self._update_interval)
-
-        if self._update_running:
-            if force_request_properties:
-                raise DeviceUpdateFailedException(
-                    "Fresh mower task state is unavailable while another update is running."
-                )
-            return
-
-        require_fresh_state = bool(force_request_properties)
-
-        if not self.cloud_connected and deadline is None:
-            self.connect_cloud()
-            self.connect_device()
-
+    def _select_update_properties(self) -> list[DreameMowerProperty]:
+        """Select state and scheduled settings reads for one polling cycle."""
         # Read-only properties
         properties = [
             DreameMowerProperty.STATE,
@@ -649,6 +629,32 @@ class DreameMowerDevice(
         if self._map_manager and not self.status.running and now - self._last_map_list_request > 60:
             properties.extend([DreameMowerProperty.MAP_LIST, DreameMowerProperty.RECOVERY_MAP_LIST])
             self._last_map_list_request = time.time()
+
+        return properties
+
+    def update(
+        self,
+        force_request_properties=False,
+        *,
+        deadline: float | None = None,
+    ) -> None:
+        """Get properties from the device."""
+        _LOGGER.debug("Device update: %s", self._update_interval)
+
+        if self._update_running:
+            if force_request_properties:
+                raise DeviceUpdateFailedException(
+                    "Fresh mower task state is unavailable while another update is running."
+                )
+            return
+
+        require_fresh_state = bool(force_request_properties)
+
+        if not self.cloud_connected and deadline is None:
+            self.connect_cloud()
+            self.connect_device()
+
+        properties = self._select_update_properties()
 
         try:
             if self._protocol.dreame_cloud and (not self.device_connected or not self.cloud_connected):
