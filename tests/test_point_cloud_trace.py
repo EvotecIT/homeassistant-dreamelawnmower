@@ -12,7 +12,7 @@ import pytest
 
 from dreame_lawn_mower_client import DreameLawnMowerPointCloudError, parse_pcd_metadata
 from dreame_lawn_mower_client._loader import load_internal_module
-from tests.test_point_cloud import _binary_pcd, _client
+from tests.test_point_cloud import _binary_pcd, _client, cpu_plan_driver  # noqa: F401
 
 trace_module = load_internal_module("point_cloud_trace")
 diagnostics = load_internal_module("point_cloud_diagnostics")
@@ -60,6 +60,7 @@ def test_first_failure_survives_when_middle_of_timeline_is_dropped():
     )
 
 
+@pytest.mark.usefixtures("cpu_plan_driver")
 def test_outer_timeout_keeps_thread_evidence_and_immutable_snapshot(monkeypatch):
     client = _client()
     release = threading.Event()
@@ -106,6 +107,7 @@ def test_outer_timeout_keeps_thread_evidence_and_immutable_snapshot(monkeypatch)
     asyncio.run(run())
 
 
+@pytest.mark.usefixtures("cpu_plan_driver")
 def test_concurrent_request_traces_are_isolated():
     clients = [_client(), _client()]
     barrier = threading.Barrier(2)
@@ -137,6 +139,7 @@ def test_concurrent_request_traces_are_isolated():
 
 
 @pytest.mark.parametrize("timeout_type", [TimeoutError, client_module._RequestsTimeout])
+@pytest.mark.usefixtures("cpu_plan_driver")
 def test_completed_worker_timeout_is_not_an_outer_deadline(timeout_type):
     client = _client()
 
@@ -152,6 +155,7 @@ def test_completed_worker_timeout_is_not_an_outer_deadline(timeout_type):
 
 
 @pytest.mark.parametrize("blocked", [True, False])
+@pytest.mark.usefixtures("cpu_plan_driver")
 def test_stored_http_failure_is_published_before_next_phase(monkeypatch, blocked):
     client = _client()
     client._sync_update_app_map_inventory_identity(
@@ -215,6 +219,7 @@ def test_stored_http_failure_is_published_before_next_phase(monkeypatch, blocked
     asyncio.run(run())
 
 
+@pytest.mark.usefixtures("cpu_plan_driver")
 def test_unexpected_transport_failure_keeps_last_stage_without_private_text():
     client = _client()
 
@@ -283,7 +288,8 @@ def test_trace_boundary_does_not_recurse_into_nested_timeline():
     assert safe["timeline"][0]["observation"] == {"member_shapes": {}}
 
 
-def test_real_client_trace_reaches_http_and_saved_event(monkeypatch):
+@pytest.mark.usefixtures("cpu_plan_driver")
+def test_real_client_trace_reaches_http_and_saved_event(monkeypatch, request):
     from custom_components.dreame_lawn_mower.const import DOMAIN
     from custom_components.dreame_lawn_mower.diagnostic_events import (
         DreameLawnMowerDiagnosticEventStore,
@@ -340,6 +346,13 @@ def test_real_client_trace_reaches_http_and_saved_event(monkeypatch):
     )
     api = DreameLawnMowerPointCloudAPI(
         SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    )
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        client_point_cloud_async,
+    )
+    monkeypatch.setattr(
+        client_point_cloud_async, "async_generate_point_cloud",
+        request.getfixturevalue("cpu_plan_driver"),
     )
     # Use the real client's public timing option to keep the failure test short.
     download = client.async_download_app_map_point_cloud

@@ -6,20 +6,24 @@ import time
 from collections.abc import Generator
 from typing import TYPE_CHECKING, Any, Protocol, assert_never
 
+from .client_map_helpers import _download_point_cloud_content_with_identity
 from .point_cloud import (
-    DreameLawnMowerPointCloudDownload,
     DreameLawnMowerPointCloudError,
     parse_pcd_metadata,
 )
 from .point_cloud_transport import (
     CachedObjectNames,
     CloudSetup,
+    DownloadFile,
     DownloadObject,
     MowerAction,
     ObjectIdentity,
     ParseMetadata,
     PointCloudRequest,
+    RawAppAction,
     ReadAnnouncement,
+    ResolveObjectURL,
+    SignObject,
     StoredObject,
     WaitForObject,
 )
@@ -32,15 +36,14 @@ class CloudSetupDispatch(Protocol):
     def __call__(self, *, deadline: float) -> Any: ...
 
 
-def run_sync_point_cloud(
+def run_sync_point_cloud[T](
     client: _DreameLawnMowerClientMapsMixin,
-    plan: Generator[PointCloudRequest, Any, DreameLawnMowerPointCloudDownload],
+    plan: Generator[PointCloudRequest, Any, T],
     *,
     setup: CloudSetupDispatch,
-) -> DreameLawnMowerPointCloudDownload:
+    cloud: Any = None,
+) -> T:
     """Retain existing synchronous hooks while executing transport-free policy."""
-
-    cloud: Any = None
 
     def dispatch(request: PointCloudRequest) -> Any:
         nonlocal cloud
@@ -126,10 +129,50 @@ def run_sync_point_cloud(
             case WaitForObject():
                 time.sleep(request.seconds)
                 return None
+            case DownloadFile():
+                return _download_point_cloud_content_with_identity(
+                    request.url,
+                    timeout=request.timeout,
+                    max_bytes=request.max_bytes,
+                )
+            case ResolveObjectURL():
+                options: dict[str, Any] = {}
+                if request.require_response:
+                    options["require_response"] = True
+                return client._sync_get_point_cloud_download_url(
+                    cloud,
+                    request.object_name,
+                    deadline=request.deadline,
+                    **options,
+                )
+            case SignObject():
+                options = {}
+                if request.require_response:
+                    options["require_response"] = True
+                return cloud.get_interim_file_url(
+                    request.object_name,
+                    retry_count=request.retry_count,
+                    timeout=request.timeout,
+                    deadline=request.deadline,
+                    **options,
+                )
+            case RawAppAction():
+                options = {}
+                if request.on_dispatch is not None:
+                    options["on_dispatch"] = request.on_dispatch
+                return client._sync_call_app_action(
+                    request.payload,
+                    retry_count=request.retry_count,
+                    timeout=request.timeout,
+                    deadline=request.deadline,
+                    redact_response=request.redact_response,
+                    raise_on_api_error=request.raise_on_api_error,
+                    **options,
+                )
             case _:
                 assert_never(request)
 
-    result: list[DreameLawnMowerPointCloudDownload] = []
+    result: list[T] = []
 
     def capture() -> Generator[PointCloudRequest, Any]:
         result.append((yield from plan))

@@ -28,14 +28,10 @@ from .app_protocol import (
 from .client_app_map_view import app_map_view, preferred_map_view
 from .client_app_maps import _DreameLawnMowerClientAppMapsMixin
 from .client_map_helpers import (
-    _app_object_extension,
     _current_app_map_index,
-    _download_point_cloud_content_with_identity,
     _key_define_from_device_list_page,
     _key_define_from_mapping,
     _map_view_current_app_map_index,
-    _point_cloud_action_data,
-    _point_cloud_download_url,
     _PointCloudObjectIdentity,
 )
 from .client_mowing_map import _DreameLawnMowerClientMowingMapMixin
@@ -80,12 +76,8 @@ from .payload_utils import (
 )
 from .point_cloud import (
     DreameLawnMowerPointCloudDownload,
-    DreameLawnMowerPointCloudError,
-    parse_pcd_metadata,
 )
 from .point_cloud_diagnostics import (
-    action_reply_observation,
-    property_value_observation,
     value_shape,
 )
 from .point_cloud_trace import record_point_cloud_stage
@@ -94,11 +86,8 @@ if TYPE_CHECKING:
     from .map_visuals import MapRenderStyle
 
 from .point_cloud_policy import (
-    _POINT_CLOUD_ANNOUNCEMENT_CLOCK_SKEW_MS,
     _POINT_CLOUD_ANNOUNCEMENT_PROBE_TIMEOUT_SECONDS,
     _POINT_CLOUD_ANNOUNCEMENT_PROPERTY_KEY,
-    _POINT_CLOUD_OBJECT_EXTENSIONS,
-    _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
 )
 
 
@@ -382,7 +371,6 @@ class _DreameLawnMowerClientMapsMixin(
         # fixed key range silently truncates long mowing paths.
         return self._sync_get_batch_device_data()
 
-
     def _sync_update_app_map_inventory_identity(
         self,
         maps: Sequence[Mapping[str, Any]],
@@ -473,53 +461,21 @@ class _DreameLawnMowerClientMapsMixin(
         max_bytes: int,
         observation: dict[str, Any] | None = None,
     ) -> DreameLawnMowerPointCloudDownload | None:
-        """Return one valid stored PCD from either object-discovery route."""
-        observation = {} if observation is None else observation
-        extension = _app_object_extension(object_name)
-        if (
-            extension is None
-            or extension.casefold() not in _POINT_CLOUD_OBJECT_EXTENSIONS
-        ):
-            return None
-        stored_deadline = min(
-            deadline,
-            time.monotonic() + _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
-        )
-        observation["download_attempts"] = observation.get("download_attempts", 0) + 1
-        record_point_cloud_stage("stored_download", observation)
-        try:
-            content, content_type, _ = self._sync_download_point_cloud_object(
-                cloud,
-                object_name,
-                deadline=stored_deadline,
-                download_timeout=min(
-                    download_timeout,
-                    _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
-                ),
+        from .client_point_cloud_transport import run_sync_point_cloud
+        from .point_cloud_object_plan import stored_object
+
+        return run_sync_point_cloud(
+            self,
+            stored_object(
+                object_name=object_name,
+                map_index=map_index,
+                deadline=deadline,
+                download_timeout=download_timeout,
                 max_bytes=max_bytes,
                 observation=observation,
-            )
-            observation["last_download_step"] = "validation"
-            metadata = parse_pcd_metadata(
-                content,
-                max_bytes=max_bytes,
-                deadline=stored_deadline,
-            )
-        except (DeviceException, DreameLawnMowerPointCloudError) as err:
-            if isinstance(err, DreameLawnMowerPointCloudError):
-                observation.update(err.safe_diagnostics()["attempt"])
-            observation["last_download_result"] = (
-                f"error:{err.code}" if isinstance(err, DreameLawnMowerPointCloudError)
-                else "error:device"
-            )
-            return None
-        observation["last_download_result"] = "validated"
-        return DreameLawnMowerPointCloudDownload(
-            map_index=map_index,
-            content=content,
-            metadata=metadata,
-            content_type=content_type,
-            source="stored",
+            ),
+            setup=self._sync_get_cloud_protocol,
+            cloud=cloud,
         )
 
     def _sync_get_announced_point_cloud_object(
@@ -572,78 +528,16 @@ class _DreameLawnMowerClientMapsMixin(
             return None, None, None
 
         entries = self._normalize_cloud_property_entries(payload)
-        record_point_cloud_stage("announcement_result", {
-            "value_shape": value_shape(payload), "property_entry_count": len(entries),
-        })
-        observation["property_entry_count"] = min(len(entries), 1_000_000)
-        observation["status"] = "property_missing"
-        for entry in entries:
-            if entry.get("key") != _POINT_CLOUD_ANNOUNCEMENT_PROPERTY_KEY:
-                continue
-            object_name = entry.get("value")
-            updated_at = entry.get("updateDate")
-            observation["value_shape"] = value_shape(object_name)
-            observation.update(property_value_observation(object_name))
-            observation["timestamp_shape"] = value_shape(updated_at)
-            observation["status"] = "invalid_value"
-            if (
-                not isinstance(object_name, str)
-                or not object_name.strip()
-            ):
-                return True, None, None
-            observation["status"] = "invalid_timestamp"
-            if isinstance(updated_at, bool) or not isinstance(
-                updated_at, int | float | str,
-            ):
-                return True, None, None
-            try:
-                updated_at_ms = int(updated_at)
-            except (TypeError, ValueError, OverflowError):
-                return True, None, None
-            observation["timestamp_unit"] = (
-                "milliseconds"
-                if 1_000_000_000_000 <= updated_at_ms < 10_000_000_000_000
-                else "seconds" if 1_000_000_000 <= updated_at_ms < 10_000_000_000
-                else "unknown"
-            )
-            extension = _app_object_extension(object_name)
-            observation["object_extension"] = (
-                "missing" if extension is None else extension.casefold()
-                if extension.casefold() in _POINT_CLOUD_OBJECT_EXTENSIONS
-                else "unsupported"
-            )
-            if (
-                extension is None
-                or extension.casefold() not in _POINT_CLOUD_OBJECT_EXTENSIONS
-            ):
-                observation["status"] = "unsupported_extension"
-                return True, None, None
-            normalized_name = object_name.strip()
-            observed = (normalized_name, updated_at_ms)
-            observation["after_request"] = updated_at_ms > requested_after_ms
-            if baseline is not None:
-                observation["name_changed"] = normalized_name != baseline[0]
-                observation["timestamp_changed"] = updated_at_ms != baseline[1]
-            fresh = (
-                (
-                    (normalized_name != baseline[0] or updated_at_ms > baseline[1])
-                    and updated_at_ms > requested_after_ms
-                )
-                if baseline is not None
-                else (
-                    updated_at_ms > requested_after_ms
-                    if require_post_request
-                    else (
-                        updated_at_ms
-                        >= (
-                            requested_after_ms - _POINT_CLOUD_ANNOUNCEMENT_CLOCK_SKEW_MS
-                        )
-                    )
-                )
-            )
-            observation["status"] = "fresh" if fresh else "stale"
-            return True, normalized_name if fresh else None, observed
-        return False, None, None
+        from .point_cloud_announcement import announcement_result
+
+        return announcement_result(
+            entries,
+            payload_shape=value_shape(payload),
+            requested_after_ms=requested_after_ms,
+            baseline=baseline,
+            require_post_request=require_post_request,
+            observation=observation,
+        )
 
     def _sync_probe_point_cloud_object_identity(
         self,
@@ -654,72 +548,20 @@ class _DreameLawnMowerClientMapsMixin(
         download_timeout: float,
         max_bytes: int,
     ) -> tuple[bool, _PointCloudObjectIdentity | None]:
-        """Return whether a pre-generation object baseline is conclusive."""
-        baseline_deadline = min(
-            deadline,
-            time.monotonic() + _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
-        )
-        record_point_cloud_stage("baseline_signer")
-        try:
-            raw_url = self._sync_get_point_cloud_download_url(
-                cloud,
-                object_name,
-                deadline=baseline_deadline,
-                require_response=True,
-            )
-            record_point_cloud_stage(
-                "signer_reply", {"signer_shape": value_shape(raw_url)},
-            )
-        except (
-            DeviceException,
-            DreameLawnMowerPointCloudError,
-            json.JSONDecodeError,
-        ) as err:
-            record_point_cloud_stage("signer_reply", {
-                "last_download_step": "signer",
-                "download_reason": (
-                    "signer_invalid_response" if isinstance(err, json.JSONDecodeError)
-                    else "transport_error"
-                ),
-                **(
-                    err.safe_diagnostics()["attempt"]
-                    if isinstance(err, DreameLawnMowerPointCloudError) else {}
-                ),
-            })
-            return False, None
+        from .client_point_cloud_transport import run_sync_point_cloud
+        from .point_cloud_object_plan import object_identity
 
-        try:
-            url = _point_cloud_download_url(raw_url)
-        except DreameLawnMowerPointCloudError as err:
-            # Only the signer's explicit empty result proves the object was
-            # unavailable before o:10. Malformed responses are inconclusive.
-            record_point_cloud_stage("signer_reply", {
-                "last_download_step": "signer", **err.safe_diagnostics()["attempt"],
-            })
-            return raw_url is None, None
-
-        remaining = baseline_deadline - time.monotonic()
-        if remaining <= 0:
-            return False, None
-        try:
-            record_point_cloud_stage("baseline_download")
-            _, _, identity = _download_point_cloud_content_with_identity(
-                url,
-                timeout=min(
-                    download_timeout,
-                    _POINT_CLOUD_STORED_DOWNLOAD_TIMEOUT_SECONDS,
-                    remaining,
-                ),
+        return run_sync_point_cloud(
+            self,
+            object_identity(
+                object_name=object_name,
+                deadline=deadline,
+                download_timeout=download_timeout,
                 max_bytes=max_bytes,
-            )
-        except DreameLawnMowerPointCloudError as err:
-            # Transport, size, and content failures do not prove that a
-            # signable baseline object was absent.
-            record_point_cloud_stage("download_result", {
-                "last_download_step": "download", **err.safe_diagnostics()["attempt"],
-            })
-            return False, None
-        return True, identity
+            ),
+            setup=self._sync_get_cloud_protocol,
+            cloud=cloud,
+        )
 
     def _sync_download_point_cloud_object(
         self,
@@ -731,66 +573,21 @@ class _DreameLawnMowerClientMapsMixin(
         max_bytes: int,
         observation: dict[str, Any] | None = None,
     ) -> tuple[bytes, str, _PointCloudObjectIdentity]:
-        observation = {} if observation is None else observation
-        observation["last_download_step"] = "signer"
-        observation.pop("download_http_status", None)
-        observation.pop("download_bytes", None)
-        observation.pop("signer_shape", None)
-        observation.pop("validation_reason", None)
-        observation.pop("download_reason", None)
-        record_point_cloud_stage("signer", observation)
-        try:
-            try:
-                raw_url = self._sync_get_point_cloud_download_url(
-                    cloud,
-                    object_name,
-                    deadline=deadline,
-                )
-            except json.JSONDecodeError as err:
-                raise DreameLawnMowerPointCloudError(
-                    "Point-cloud signer returned an invalid response.",
-                    code="point_cloud_download_invalid",
-                    stage="download",
-                    public_message=(
-                        "The mower's generated 3D map is not ready to download."
-                    ),
-                    retry_after_seconds=2,
-                    diagnostic_context={"download_reason": "signer_invalid_response"},
-                ) from err
-            observation["signer_shape"] = value_shape(raw_url)
-            record_point_cloud_stage("signer_reply", observation)
-            url = _point_cloud_download_url(raw_url)
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise DreameLawnMowerPointCloudError(
-                    "Point-cloud generation timed out.",
-                    code="point_cloud_timeout",
-                    stage="download",
-                    public_message=(
-                        "The mower did not finish the 3D map request in time."
-                    ),
-                    timeout_seconds=download_timeout,
-                    retry_after_seconds=10,
-                )
-            observation["last_download_step"] = "download"
-            record_point_cloud_stage("download", observation)
-            result = _download_point_cloud_content_with_identity(
-                url,
-                timeout=min(download_timeout, remaining),
+        from .client_point_cloud_transport import run_sync_point_cloud
+        from .point_cloud_object_plan import download_object
+
+        return run_sync_point_cloud(
+            self,
+            download_object(
+                object_name=object_name,
+                deadline=deadline,
+                download_timeout=download_timeout,
                 max_bytes=max_bytes,
-            )
-            observation["download_bytes"] = len(result[0])
-            record_point_cloud_stage("download_result", observation)
-            return result
-        except (DeviceException, DreameLawnMowerPointCloudError) as err:
-            if isinstance(err, DreameLawnMowerPointCloudError):
-                observation.update(err.safe_diagnostics()["attempt"])
-            observation["last_download_result"] = (
-                f"error:{err.code}" if isinstance(err, DreameLawnMowerPointCloudError)
-                else "error:device"
-            )
-            record_point_cloud_stage("download_result", observation)
-            raise
+                observation=observation,
+            ),
+            setup=self._sync_get_cloud_protocol,
+            cloud=cloud,
+        )
 
     def _sync_call_point_cloud_action(
         self,
@@ -801,96 +598,20 @@ class _DreameLawnMowerClientMapsMixin(
         require_data: bool,
         on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
-        """Call one point-cloud action within the shared generation deadline."""
-        record_point_cloud_stage(
-            "indexed_read" if require_data else "generation_request",
-        )
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise DreameLawnMowerPointCloudError(
-                "Point-cloud generation timed out.",
-                code="point_cloud_timeout",
-                stage="mower_request",
-                public_message="The mower did not finish the 3D map request in time.",
-                retry_after_seconds=10,
-            )
-        try:
-            action_options: dict[str, Any] = {
-                "retry_count": 0,
-                "timeout": remaining,
-                "deadline": deadline,
-                "redact_response": True,
-                "raise_on_api_error": True,
-            }
-            if on_dispatch is not None:
-                action_options["on_dispatch"] = on_dispatch
-            response = self._sync_call_app_action(payload, **action_options)
-            record_point_cloud_stage(
-                "indexed_reply" if require_data else "generation_reply",
-                {"action_reply": action_reply_observation(response)},
-            )
-        except DreameLawnMowerCloudAPIError as err:
-            raise DreameLawnMowerPointCloudError(
-                f"The Dreame cloud rejected the {operation} request.",
-                code="point_cloud_mower_request_rejected",
-                stage="mower_request",
-                public_message="The Dreame cloud rejected the mower 3D map request.",
-                retry_after_seconds=10,
-                vendor_error_code=err.code,
-            ) from err
-        except RequestsTimeout as err:
-            raise DreameLawnMowerPointCloudError(
-                f"The mower timed out while trying to {operation}.",
-                code="point_cloud_timeout",
-                stage="mower_request",
-                public_message="The mower did not finish the 3D map request in time.",
-                retry_after_seconds=10,
-            ) from err
-        except DreameLawnMowerConnectionError as err:
-            if time.monotonic() >= deadline:
-                raise DreameLawnMowerPointCloudError(
-                    "Point-cloud generation timed out.",
-                    code="point_cloud_timeout",
-                    stage="mower_request",
-                    public_message=(
-                        "The mower did not finish the 3D map request in time."
-                    ),
-                    retry_after_seconds=10,
-                ) from err
-            raise DreameLawnMowerPointCloudError(
-                f"The mower could not {operation}.",
-                code="point_cloud_mower_request_failed",
-                stage="mower_request",
-                public_message=(
-                    "The mower rejected or could not complete the 3D map request."
-                ),
-                retry_after_seconds=10,
-            ) from err
-        if time.monotonic() >= deadline:
-            raise DreameLawnMowerPointCloudError(
-                "Point-cloud generation timed out.",
-                code="point_cloud_timeout",
-                stage="mower_request",
-                public_message="The mower did not finish the 3D map request in time.",
-                retry_after_seconds=10,
-            )
-        try:
-            return _point_cloud_action_data(
-                response,
-                operation,
+        from .client_point_cloud_transport import run_sync_point_cloud
+        from .point_cloud_object_plan import mower_action
+
+        return run_sync_point_cloud(
+            self,
+            mower_action(
+                payload=payload,
+                operation=operation,
+                deadline=deadline,
                 require_data=require_data,
-            )
-        except DreameLawnMowerPointCloudError as err:
-            raise DreameLawnMowerPointCloudError(
-                str(err),
-                code="point_cloud_mower_response_invalid",
-                stage="mower_response",
-                public_message=(
-                    "The mower returned an invalid response for the 3D map request."
-                ),
-                retry_after_seconds=10,
-                diagnostic_context={"action_reply": action_reply_observation(response)},
-            ) from err
+                on_dispatch=on_dispatch,
+            ),
+            setup=self._sync_get_cloud_protocol,
+        )
 
     def _sync_get_point_cloud_download_url(
         self,
@@ -899,35 +620,20 @@ class _DreameLawnMowerClientMapsMixin(
         *,
         deadline: float,
         require_response: bool = False,
-    ) -> str | None:
-        """Resolve a signed point-cloud URL within the generation deadline."""
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise DreameLawnMowerPointCloudError("Point-cloud generation timed out.")
-        try:
-            signer_options: dict[str, Any] = {
-                "retry_count": 0,
-                "timeout": remaining,
-                "deadline": deadline,
-            }
-            if require_response:
-                signer_options["require_response"] = True
-            raw_url = cloud.get_interim_file_url(object_name, **signer_options)
-        except RequestsTimeout as err:
-            raise DreameLawnMowerPointCloudError(
-                "Point-cloud download URL request timed out.",
-                code="point_cloud_timeout",
-                stage="download",
-                public_message=(
-                    "The mower cloud timed out while preparing the generated "
-                    "3D map download."
-                ),
-                retry_after_seconds=10,
-            ) from err
-        if time.monotonic() >= deadline:
-            raise DreameLawnMowerPointCloudError("Point-cloud generation timed out.")
-        return raw_url
+    ) -> Any:
+        from .client_point_cloud_transport import run_sync_point_cloud
+        from .point_cloud_object_plan import resolve_object_url
 
+        return run_sync_point_cloud(
+            self,
+            resolve_object_url(
+                object_name=object_name,
+                deadline=deadline,
+                require_response=require_response,
+            ),
+            setup=self._sync_get_cloud_protocol,
+            cloud=cloud,
+        )
 
     def _sync_call_app_action(
         self,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import math
 import time
-from collections.abc import Generator, Mapping
+from collections.abc import Callable, Generator, Mapping
 from threading import Event
 from typing import TYPE_CHECKING, Any
 
@@ -24,12 +24,51 @@ async def async_read_app_action(
     action: Mapping[str, Any],
     *,
     deadline: float,
+    strict_response: bool = False,
 ) -> Any:
     """Keep setup, routing and RPC within one owned, bounded native read."""
     if action.get("m") != "g":
         raise ValueError("App action read requires m='g'")
     if not math.isfinite(deadline):
         raise ValueError("App read deadline must be finite")
+    return await _async_app_action(
+        client,
+        action,
+        deadline=deadline,
+        strict_response=strict_response,
+    )
+
+
+async def async_command_app_action(
+    client: DreameLawnMowerClient,
+    action: Mapping[str, Any],
+    *,
+    deadline: float,
+    on_dispatch: Callable[[], None] | None = None,
+) -> Any:
+    """Share device routing and RPC ownership without retrying mutations."""
+    if action.get("m") not in {"a", "s"}:
+        raise ValueError("App command requires m='a' or m='s'")
+    if not math.isfinite(deadline):
+        raise ValueError("App command deadline must be finite")
+    return await _async_app_action(
+        client,
+        action,
+        deadline=deadline,
+        command=True,
+        on_dispatch=on_dispatch,
+    )
+
+
+async def _async_app_action(
+    client: DreameLawnMowerClient,
+    action: Mapping[str, Any],
+    *,
+    deadline: float,
+    strict_response: bool = False,
+    command: bool = False,
+    on_dispatch: Callable[[], None] | None = None,
+) -> Any:
     cancelled = Event()
 
     async def read(cloud: DreameCloudSession) -> Any:
@@ -51,7 +90,7 @@ async def async_read_app_action(
                 ) as request_id:
                     if client._closing or client._device is not device:
                         raise DreameLawnMowerConnectionError(
-                            "Device changed during app read"
+                            "Device changed during app operation"
                         )
                     if not protocol._host:
                         info = await cloud.async_get_device_info(
@@ -75,7 +114,17 @@ async def async_read_app_action(
                             ) from err
                     if client._closing or client._device is not device:
                         raise DreameLawnMowerConnectionError(
-                            "Device changed during app read"
+                            "Device changed during app operation"
+                        )
+                    if command:
+                        return await cloud.async_command_app_action(
+                            client._descriptor.did,
+                            protocol._host,
+                            request_id,
+                            action,
+                            deadline=deadline,
+                            on_dispatch=on_dispatch,
+                            timeout=max(0.001, deadline - time.monotonic()),
                         )
                     return await cloud.async_read_app_action(
                         client._descriptor.did,
@@ -83,9 +132,11 @@ async def async_read_app_action(
                         request_id,
                         action,
                         deadline=deadline,
+                        strict_response=strict_response,
+                        timeout=max(0.001, deadline - time.monotonic()),
                     )
         except TimeoutError as err:
-            raise DreameLawnMowerConnectionError("App read timed out") from err
+            raise DreameLawnMowerConnectionError("App operation timed out") from err
         finally:
             cancelled.set()
 

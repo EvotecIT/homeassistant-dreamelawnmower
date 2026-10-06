@@ -66,6 +66,40 @@ class WaitForObject:
     seconds: float
 
 
+@dataclass(frozen=True, kw_only=True)
+class DownloadFile:
+    url: str
+    timeout: float
+    max_bytes: int
+
+
+@dataclass(frozen=True, kw_only=True)
+class ResolveObjectURL:
+    object_name: str
+    deadline: float
+    require_response: bool = False
+
+
+@dataclass(frozen=True, kw_only=True)
+class SignObject:
+    object_name: str
+    retry_count: int
+    timeout: float
+    deadline: float
+    require_response: bool = False
+
+
+@dataclass(frozen=True, kw_only=True)
+class RawAppAction:
+    payload: Mapping[str, Any]
+    retry_count: int
+    timeout: float
+    deadline: float
+    redact_response: bool
+    raise_on_api_error: bool
+    on_dispatch: Callable[[], None] | None = None
+
+
 type PointCloudRequest = (
     CloudSetup
     | CachedObjectNames
@@ -76,4 +110,8 @@ type PointCloudRequest = (
     | DownloadObject
     | ParseMetadata
     | WaitForObject
+    | DownloadFile
+    | SignObject
+    | RawAppAction
+    | ResolveObjectURL
 )

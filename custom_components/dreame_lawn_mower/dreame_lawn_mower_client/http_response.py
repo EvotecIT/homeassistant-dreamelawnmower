@@ -9,6 +9,12 @@ from aiohttp import ClientResponse
 from .exceptions import DreameLawnMowerConnectionError
 
 
+class HttpResponseError(DreameLawnMowerConnectionError):
+    def __init__(self, message: str, *, reason: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
 async def async_read_bounded_response(
     response: ClientResponse,
     *,
@@ -22,7 +28,9 @@ async def async_read_bounded_response(
     """
     encoding = response.headers.get("Content-Encoding", "identity").strip().lower()
     if encoding not in ("identity", "gzip", "deflate"):
-        raise DreameLawnMowerConnectionError("Unsupported HTTP content encoding")
+        raise HttpResponseError(
+            "Unsupported HTTP content encoding", reason="transport_error"
+        )
     body = bytearray()
     wire_bytes = 0
     decoder = None
@@ -30,8 +38,8 @@ async def async_read_bounded_response(
         async for chunk in response.content.iter_chunked(8192):
             wire_bytes += len(chunk)
             if wire_bytes > max_bytes * 2:
-                raise DreameLawnMowerConnectionError(
-                    "HTTP response exceeds the size limit"
+                raise HttpResponseError(
+                    "HTTP response exceeds the size limit", reason="byte_limit"
                 )
             if encoding != "identity":
                 if decoder is None:
@@ -46,18 +54,18 @@ async def async_read_bounded_response(
                     decoder = zlib.decompressobj(window)
                 chunk = decoder.decompress(chunk, max_bytes - len(body) + 1)
             if len(body) + len(chunk) > max_bytes:
-                raise DreameLawnMowerConnectionError(
-                    "HTTP response exceeds the size limit"
+                raise HttpResponseError(
+                    "HTTP response exceeds the size limit", reason="byte_limit"
                 )
             body.extend(chunk)
         if encoding != "identity" and (
             decoder is None or not decoder.eof or decoder.unused_data
         ):
-            raise DreameLawnMowerConnectionError(
-                "Incomplete or trailing compressed data"
+            raise HttpResponseError(
+                "Incomplete or trailing compressed data", reason="truncated_content"
             )
     except zlib.error:
-        raise DreameLawnMowerConnectionError(
-            "Invalid compressed HTTP response"
+        raise HttpResponseError(
+            "Invalid compressed HTTP response", reason="transport_error"
         ) from None
     return bytes(body)

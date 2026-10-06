@@ -33,7 +33,11 @@ from .cloud_wire import (
     cloud_rpc_path,
     cloud_strings,
 )
-from .exceptions import DreameLawnMowerAuthError, DreameLawnMowerConnectionError
+from .exceptions import (
+    DreameLawnMowerAuthError,
+    DreameLawnMowerCloudAPIError,
+    DreameLawnMowerConnectionError,
+)
 from .http_response import async_read_bounded_response
 
 MAX_CLOUD_RESPONSE_BYTES = 1024 * 1024
@@ -103,14 +107,14 @@ class DreameCloudSession:
 
     async def async_get_interim_file_url(
         self, did: str, model: str | None, object_name: str, *,
-        deadline: float, require_response: bool = False,
+        deadline: float, require_response: bool = False, timeout: float = 20,
     ) -> Any:
         """Sign a stored object through native read-only cloud HTTP."""
         path = "/".join(self._strings[index] for index in (23, 39, 55))
         response = await self._async_read_response(
             f"/{path}", json.dumps(interim_file_params(
                 self._strings, did, model, self._country, object_name,
-            ), separators=(",", ":")), timeout=20, deadline=deadline,
+            ), separators=(",", ":")), timeout=timeout, deadline=deadline,
         )
         return interim_file_result(response, require_response=require_response)
 
@@ -130,12 +134,30 @@ class DreameCloudSession:
         timeout: float = 10,
         deadline: float | None = None,
     ) -> None:
+        await self._async_authenticate(force=True, timeout=timeout, deadline=deadline)
+
+    async def async_ensure_authenticated(
+        self,
+        *,
+        timeout: float = 20,
+        deadline: float | None = None,
+    ) -> None:
+        await self._async_authenticate(force=False, timeout=timeout, deadline=deadline)
+
+    async def _async_authenticate(
+        self,
+        *,
+        force: bool,
+        timeout: float = 10,
+        deadline: float | None = None,
+    ) -> None:
         """Authenticate within a deadline that includes waiting for another call."""
         end = self._deadline(timeout, deadline)
         try:
             async with asyncio.timeout(self._remaining(end)):
                 async with self._lock:
-                    await self._login(end)
+                    if force or self._token is None or time.time() >= self._expires_at:
+                        await self._login(end)
         except TimeoutError as err:
             raise DreameLawnMowerConnectionError("Cloud login timed out") from err
         except ClientError as err:
@@ -328,9 +350,14 @@ class DreameCloudSession:
         deadline: float | None = None,
     ) -> Any:
         """Send only a property-read RPC; the device owner supplies its request ID."""
-        return await self._async_read_rpc(
-            did, host, request_id, "get_properties",
-            [dict(row) for row in properties], timeout=timeout, deadline=deadline,
+        return await self._async_rpc(
+            did,
+            host,
+            request_id,
+            "get_properties",
+            [dict(row) for row in properties],
+            timeout=timeout,
+            deadline=deadline,
         )
 
     async def async_read_app_action(
@@ -342,21 +369,57 @@ class DreameCloudSession:
         *,
         timeout: float = 20,
         deadline: float | None = None,
+        strict_response: bool = False,
     ) -> Any:
         """Read the mower app bridge without permitting retryable mutations."""
         if action.get("m") != "g":
             raise ValueError("App action read requires m='g'")
-        result = await self._async_read_rpc(
-            did, host, request_id, "action",
+        result = await self._async_rpc(
+            did,
+            host,
+            request_id,
+            "action",
             {"did": str(did), "siid": 2, "aiid": 50, "in": [dict(action)]},
-            timeout=timeout, deadline=deadline,
+            timeout=timeout,
+            deadline=deadline,
+            strict_response=strict_response,
         )
         out = result.get("out") if isinstance(result, Mapping) else None
         if isinstance(out, Sequence) and not isinstance(out, str | bytes | bytearray):
             return out[0] if out else None
         return result
 
-    async def _async_read_rpc(
+    async def async_command_app_action(
+        self,
+        did: str,
+        host: str | None,
+        request_id: int,
+        action: Mapping[str, Any],
+        *,
+        timeout: float = 20,
+        deadline: float | None = None,
+        on_dispatch: Callable[[], None] | None = None,
+    ) -> Any:
+        """Dispatch a mutation once; an uncertain reply must never replay it."""
+        if action.get("m") not in {"a", "s"}:
+            raise ValueError("App command requires m='a' or m='s'")
+        result = await self._async_rpc(
+            did,
+            host,
+            request_id,
+            "action",
+            {"did": str(did), "siid": 2, "aiid": 50, "in": [dict(action)]},
+            timeout=timeout,
+            deadline=deadline,
+            command=True,
+            on_dispatch=on_dispatch,
+        )
+        out = result.get("out") if isinstance(result, Mapping) else None
+        if isinstance(out, Sequence) and not isinstance(out, str | bytes | bytearray):
+            return out[0] if out else None
+        return result
+
+    async def _async_rpc(
         self,
         did: str,
         host: str | None,
@@ -366,18 +429,39 @@ class DreameCloudSession:
         *,
         timeout: float,
         deadline: float | None,
+        command: bool = False,
+        strict_response: bool = False,
+        on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
         """Apply the common cloud RPC envelope and absent-result semantics."""
-        payload = await self._async_read_response(
-            f"/{cloud_rpc_path(self._strings, host)}",
-            json.dumps(
-                cloud_rpc_params(
-                    did, request_id, method, parameters,
-                ),
-                separators=(",", ":"),
-            ),
-            timeout=timeout, deadline=deadline,
+        path = f"/{cloud_rpc_path(self._strings, host)}"
+        request_data = json.dumps(
+            cloud_rpc_params(did, request_id, method, parameters),
+            separators=(",", ":"),
         )
+        if command:
+            payload = await self._async_command_response(
+                path,
+                request_data,
+                timeout=timeout,
+                deadline=deadline,
+                on_dispatch=on_dispatch,
+            )
+        else:
+            payload = await self._async_read_response(
+                path,
+                request_data,
+                timeout=timeout,
+                deadline=deadline,
+            )
+        if command or strict_response:
+            code = payload.get("code")
+            if isinstance(code, bool) or not isinstance(code, int):
+                raise DreameLawnMowerConnectionError(
+                    "Cloud command response code is invalid"
+                )
+            if code != 0:
+                raise DreameLawnMowerCloudAPIError(code)
         if payload.get("code") == 80001:
             return None
         if payload.get("code") != 0:
@@ -401,8 +485,12 @@ class DreameCloudSession:
         return payload.get("data")
 
     async def _async_read_response(
-        self, path: str, data: str | None | Callable[[], str], *,
-        timeout: float, deadline: float | None,
+        self,
+        path: str,
+        data: str | None | Callable[[], str],
+        *,
+        timeout: float,
+        deadline: float | None,
         http_method: Literal["GET", "POST"] = "POST",
     ) -> dict[str, Any]:
         """Serialize a read-only request, authentication, and bounded retries."""
@@ -413,14 +501,7 @@ class DreameCloudSession:
                     if self._token is None or time.time() >= self._expires_at:
                         await self._login(end)
                     for attempt in range(2):
-                        headers = cloud_headers(
-                            self._strings,
-                            self._country,
-                            self._tenant,
-                        )
-                        headers[self._strings[51]] = self._strings[52]
-                        assert self._token is not None
-                        headers[self._strings[46]] = self._token
+                        headers = self._authenticated_headers()
                         status, payload = await self._request_read(
                             f"{self._base_url}{path}",
                             headers,
@@ -443,6 +524,53 @@ class DreameCloudSession:
                 "Cloud inventory connection failed"
             ) from err
         raise DreameLawnMowerConnectionError("Cloud inventory request failed")
+
+    async def _async_command_response(
+        self,
+        path: str,
+        data: str | None,
+        *,
+        timeout: float,
+        deadline: float | None,
+        on_dispatch: Callable[[], None] | None = None,
+    ) -> dict[str, Any]:
+        """Authenticate first; never retry or reauthenticate a dispatched command."""
+        end = self._deadline(timeout, deadline)
+        try:
+            async with asyncio.timeout(self._remaining(end)):
+                async with self._lock:
+                    if self._token is None or time.time() >= self._expires_at:
+                        await self._login(end)
+                    headers = self._authenticated_headers()
+                    status, payload = await self._request_json(
+                        f"{self._base_url}{path}",
+                        headers,
+                        data,
+                        end,
+                        on_dispatch=on_dispatch,
+                    )
+                    if status == 401:
+                        # A later operation can log in again, but this command
+                        # may already have reached the vendor. Do not replay it.
+                        self._token = None
+                    if status != 200:
+                        raise DreameLawnMowerConnectionError(
+                            f"Cloud command failed: HTTP {status}"
+                        )
+                    return payload
+        except TimeoutError as err:
+            raise DreameLawnMowerConnectionError("Cloud command timed out") from err
+        except ClientError as err:
+            raise DreameLawnMowerConnectionError(
+                "Cloud command connection failed"
+            ) from err
+
+    def _authenticated_headers(self) -> dict[str, str]:
+        headers = cloud_headers(self._strings, self._country, self._tenant)
+        headers[self._strings[51]] = self._strings[52]
+        assert self._token is not None
+        headers[self._strings[46]] = self._token
+        return headers
 
     async def _login(self, deadline: float) -> None:
         for attempt in range(2):
@@ -514,24 +642,30 @@ class DreameCloudSession:
         deadline: float,
         *,
         http_method: Literal["GET", "POST"] = "POST",
+        on_dispatch: Callable[[], None] | None = None,
     ) -> tuple[int, dict[str, Any]]:
         request_headers = dict(headers)
         request_headers["Accept-Encoding"] = "gzip, deflate"
         # Explicit auth overrides both borrowed defaults and environment netrc
         # credentials while preserving the shared vendor wire representation.
         auth = BasicAuth.decode(request_headers.pop("Authorization"))
+        remaining = self._remaining(deadline)
+        if on_dispatch is not None:
+            on_dispatch()
         async with self._session.request(
-            http_method, url,
+            http_method,
+            url,
             headers=request_headers,
             auth=auth,
             data=data,
-            timeout=ClientTimeout(total=self._remaining(deadline)),
+            timeout=ClientTimeout(total=remaining),
             allow_redirects=False,
             raise_for_status=False,
             auto_decompress=False,
         ) as response:
             body = await async_read_bounded_response(
-                response, max_bytes=MAX_CLOUD_RESPONSE_BYTES,
+                response,
+                max_bytes=MAX_CLOUD_RESPONSE_BYTES,
             )
             try:
                 payload = json.loads(body)

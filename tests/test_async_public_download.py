@@ -268,3 +268,45 @@ def test_download_honors_environment_proxy_without_origin_credentials(monkeypatc
 
     asyncio.run(scenario())
     assert seen == ["http://download.example.invalid/file"]
+
+
+
+def test_public_download_response_preserves_file_identity(monkeypatch):
+    async def handler(request):
+        return web.Response(
+            body=b"file bytes", content_type="application/pcd", headers={
+            "ETag": "version-2", "Last-Modified": "Tue, 06 Oct 2026 12:00:00 GMT",
+        })
+
+    async def scenario():
+        async with server(monkeypatch, handler) as url, ClientSession() as session:
+            response = await public_download.async_download_public_response(
+                session, url, deadline=time.monotonic() + 2,
+            )
+            assert response.content == b"file bytes"
+            assert response.content_type == "application/pcd"
+            assert response.etag == "version-2"
+            assert response.last_modified == "Tue, 06 Oct 2026 12:00:00 GMT"
+            assert not session.closed
+
+    asyncio.run(scenario())
+
+
+def test_https_only_download_rejects_cleartext_before_dispatch(monkeypatch):
+    seen = []
+
+    async def handler(request):
+        seen.append(request.path)
+        return web.Response(body=b"unexpected")
+
+    async def scenario():
+        async with server(monkeypatch, handler) as url, ClientSession() as session:
+            with pytest.raises(public_download.PublicDownloadError) as failure:
+                await public_download.async_download_public_response(
+                    session, url, deadline=time.monotonic() + 2, https_only=True,
+                )
+            assert failure.value.reason == "https_redirect"
+            assert not seen
+            assert not session.closed
+
+    asyncio.run(scenario())

@@ -326,9 +326,7 @@ camera_metadata_advertises_video = _client_camera.camera_metadata_advertises_vid
 camera_stream_block_reason = _client_camera.camera_stream_block_reason
 derive_tx_video_app_credentials = _client_camera.derive_tx_video_app_credentials
 
-_GENERIC_ACTIVE_TASK_CONFIRMATION_STATUSES = frozenset(
-    {"starting", "mowing", "paused"}
-)
+_GENERIC_ACTIVE_TASK_CONFIRMATION_STATUSES = frozenset({"starting", "mowing", "paused"})
 _ZONE_TASK_CONFIRMATION_STATUSES = _GENERIC_ACTIVE_TASK_CONFIRMATION_STATUSES | {
     "zone_cleaning",
     "segment_cleaning",
@@ -1788,25 +1786,29 @@ class DreameLawnMowerClient(
             else _POINT_CLOUD_GENERATION_PREFLIGHT_BUDGET_SECONDS
         )
         operation_timeout = (
-            timeout
-            + _POINT_CLOUD_CLOUD_SETUP_TIMEOUT_SECONDS
-            + preflight_timeout
+            timeout + _POINT_CLOUD_CLOUD_SETUP_TIMEOUT_SECONDS + preflight_timeout
         )
         deadline = time.monotonic() + operation_timeout
-        abandoned = _threading.Event()
+        worker: asyncio.Task[DreameLawnMowerPointCloudDownload] | None = None
         trace = _PointCloudTrace()
         trace.record("queue")
         trace_token = _active_point_cloud_trace.set(trace)
         timeout_scope = asyncio.timeout(operation_timeout)
         try:
             async with timeout_scope:
-                from .client_refresh import _run_state_worker
+                from .client_point_cloud_async import async_generate_point_cloud
 
-                def download() -> DreameLawnMowerPointCloudDownload:
-                    return self._sync_download_app_map_point_cloud_singleflight(
-                        map_index, timeout, poll_interval, download_timeout,
-                        max_bytes, deadline, allow_stored,
-                        allow_unscoped_stored, abandoned,
+                async def download() -> DreameLawnMowerPointCloudDownload:
+                    return await async_generate_point_cloud(
+                        self,
+                        map_index=map_index,
+                        timeout=timeout,
+                        poll_interval=poll_interval,
+                        download_timeout=download_timeout,
+                        max_bytes=max_bytes,
+                        deadline=deadline,
+                        allow_stored=allow_stored,
+                        allow_unscoped_stored=allow_unscoped_stored,
                     )
 
                 def completed(task: asyncio.Task[Any]) -> None:
@@ -1817,14 +1819,15 @@ class DreameLawnMowerClient(
                 with self._device_ownership_lock:
                     if self._closing:
                         raise DreameLawnMowerConnectionError("Client is closing")
-                    worker = asyncio.create_task(_run_state_worker(download, abandoned))
-                    # Caller cancellation is prompt, but shutdown owns this task
-                    # until its already-started thread has actually finished.
+                    worker = asyncio.create_task(download())
+                    # Caller cancellation is prompt; shutdown still owns any
+                    # CPU worker until cancellation cleanup has drained it.
                     self._cloud_read_tasks.add(worker)
                     worker.add_done_callback(completed)
                 return await asyncio.shield(worker)
         except (TimeoutError, _RequestsTimeout) as err:
-            abandoned.set()
+            if worker is not None:
+                worker.cancel()
             outer_expired = timeout_scope.expired()
             trace.record("outer_timeout" if outer_expired else "worker_timeout")
             raise DreameLawnMowerPointCloudError(
@@ -1847,75 +1850,36 @@ class DreameLawnMowerClient(
             # Unknown transport/parser failures still need the observations
             # preceding them, without publishing a raw exception message.
             kind = type(err).__name__
-            trace.record("failed", {"exception_kind": kind if kind in {
-                "KeyError", "TypeError", "ValueError", "AttributeError",
-                "RuntimeError", "OSError", "ConnectionError",
-            } else "other"})
+            trace.record(
+                "failed",
+                {
+                    "exception_kind": kind
+                    if kind
+                    in {
+                        "KeyError",
+                        "TypeError",
+                        "ValueError",
+                        "AttributeError",
+                        "RuntimeError",
+                        "OSError",
+                        "ConnectionError",
+                    }
+                    else "other"
+                },
+            )
             raise DreameLawnMowerPointCloudError(
                 "The point-cloud operation failed unexpectedly.",
-                code="point_cloud_failed", stage="generation",
+                code="point_cloud_failed",
+                stage="generation",
                 diagnostic_context=trace.snapshot(complete=True),
             ) from err
         except asyncio.CancelledError:
-            abandoned.set()
+            if worker is not None:
+                worker.cancel()
             raise
         finally:
             _active_point_cloud_trace.reset(trace_token)
 
-    def _sync_download_app_map_point_cloud_singleflight(
-        self,
-        map_index: int,
-        timeout: float,
-        poll_interval: float,
-        download_timeout: float,
-        max_bytes: int,
-        deadline: float,
-        allow_stored: bool,
-        allow_unscoped_stored: bool,
-        abandoned: _threading.Event,
-    ) -> DreameLawnMowerPointCloudDownload:
-        """Run one mower-wide generation while retaining ownership after cancel."""
-        if abandoned.is_set() or time.monotonic() >= deadline:
-            raise DreameLawnMowerPointCloudError(
-                "Point-cloud request ended before generation started.",
-                code="point_cloud_timeout",
-                stage="queue",
-                public_message="The mower point-cloud request timed out in the queue.",
-                timeout_seconds=timeout,
-                retry_after_seconds=2,
-            )
-        if not self._point_cloud_generation_lock.acquire(blocking=False):
-            raise DreameLawnMowerPointCloudError(
-                "Another point-cloud generation is already in progress.",
-                code="point_cloud_generation_in_progress",
-                stage="queue",
-                public_message="A 3D map is already being generated for this mower.",
-                retry_after_seconds=5,
-            )
-        try:
-            if abandoned.is_set():
-                raise DreameLawnMowerPointCloudError(
-                    "Point-cloud request ended before generation started.",
-                    code="point_cloud_timeout",
-                    stage="queue",
-                    public_message=(
-                        "The mower point-cloud request timed out in the queue."
-                    ),
-                    timeout_seconds=timeout,
-                    retry_after_seconds=2,
-                )
-            return self._sync_download_app_map_point_cloud(
-                map_index,
-                timeout,
-                poll_interval,
-                download_timeout,
-                max_bytes,
-                deadline,
-                allow_stored,
-                allow_unscoped_stored,
-            )
-        finally:
-            self._point_cloud_generation_lock.release()
 
     async def async_get_cloud_properties(
         self,
