@@ -85,3 +85,28 @@ def test_optimizer_accepts_calls_from_different_workers():
     assert results == [
         "96d32b818551678f74e95179e7a21d5099cc63d090ca97d35b7fa2adc6e64b01"
     ] * 12
+
+
+@pytest.mark.parametrize("vertical", [False, True])
+def test_python_optimizer_connects_adjacent_areas(vertical):
+    """The Python path retains the outline and joins a supported narrow gap."""
+    width = height = 40
+
+    def paint(data, left, top, right, bottom):
+        for y in range(top, bottom + 1):
+            for x in range(left, right + 1):
+                data[y * width + x] = (
+                    5 if x in (left, right) or y in (top, bottom) else 1
+                )
+
+    data = [0] * (width * height)
+    paint(data, 5, 5, 14, 14)
+    paint(data, *((5, 17, 14, 26) if vertical else (17, 5, 26, 14)))
+    expected = [0] * len(data)
+    paint(expected, *((5, 5, 14, 26) if vertical else (5, 5, 26, 14)))
+
+    _optimizer.DreameMowerMapOptimizer()._link_adjacent_areas(
+        [1] * len(data), data, width, height, 5
+    )
+
+    assert data == expected

@@ -783,6 +783,9 @@ class DreameMowerMapOptimizer:
                     for j in range(len(nLines)):
                         nLine = nLines[j]
                         if not line.ishorizontal and not nLine.ishorizontal:
+                            assert isinstance(line.x, int) and isinstance(nLine.x, int)
+                            assert isinstance(line.y, list)
+                            assert isinstance(nLine.y, list)
                             if line.direction != nLine.direction:
                                 if (
                                     line.x > nLine.x and line.direction == DIR_LEFT
@@ -797,6 +800,9 @@ class DreameMowerMapOptimizer:
                                                 original_data, data, width, xs, _ys
                                             )
                         elif line.ishorizontal and nLine.ishorizontal:
+                            assert isinstance(line.y, int) and isinstance(nLine.y, int)
+                            assert isinstance(line.x, list)
+                            assert isinstance(nLine.x, list)
                             if line.direction != nLine.direction:
                                 if (
                                     line.y > nLine.y and line.direction == DIR_BOTTOM
@@ -1043,8 +1049,8 @@ class DreameMowerMapOptimizer:
 
         paths = self._find_bounds(data, width, horizontalLines, verticalLines)
 
-        covertlines = None
-        allLines = None
+        covertlines: list[ALine] = []
+        allLines: list[CLine] = []
         totalLen = 0
         tmp = []
         for i in range(len(paths)):

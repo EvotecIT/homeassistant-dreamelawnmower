@@ -236,14 +236,15 @@ class ALine:
 
 @dataclass
 class Paths:
-    clines: list[CLine] = field(default_factory=lambda: [])
-    alines: list[ALine] = field(default_factory=lambda: [])
+    # Converted endpoint lines and their original directional contour lines.
+    clines: list[ALine] = field(default_factory=lambda: [])
+    alines: list[CLine] = field(default_factory=lambda: [])
     length: int = 0
 
 
 @dataclass
 class Angle:
-    lines: list[ALine] = field(default_factory=lambda: [])
+    lines: list[CLine] = field(default_factory=lambda: [])
     horizontalDir: int = 0
     verticalDir: int = 0
 
