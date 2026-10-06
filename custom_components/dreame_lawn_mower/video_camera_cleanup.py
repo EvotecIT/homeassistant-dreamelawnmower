@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from datetime import UTC, datetime
 from typing import Any
 
@@ -14,15 +13,14 @@ from .const import VIDEO_TRANSPORT_CLOUD, VIDEO_TRANSPORT_LAN
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
 from .dreame_lawn_mower_client.video_runtime import DreameLawnMowerXp2pLiveStreamSession
-from .video_camera_configuration import _VideoCameraConfiguration
+from .video_camera_diagnostics import _VideoCameraDiagnostics
 from .video_camera_types import _DreameVideoRuntime, _facade_binding
 
-_LOGGER = logging.getLogger(f"{__package__}.video_camera")
 STREAM_DOMAIN = _STREAM_DOMAIN
 _PENDING_RUNTIME_STOPS: dict[str, set[asyncio.Future[Any]]] = {}
 
 
-class _VideoCameraCleanup(_VideoCameraConfiguration):
+class _VideoCameraCleanup(_VideoCameraDiagnostics):
     """Own bounded session cleanup and replacement-session fencing."""
 
     async def _async_stop_active_session(
@@ -246,24 +244,3 @@ class _VideoCameraCleanup(_VideoCameraConfiguration):
                 "camera_stream_disable",
                 self._last_stream_disable_error,
             )
-
-    def _record_stream_cleanup_error(self, stage: str, error: object) -> None:
-        """Retain one safe cleanup failure and add it to shared diagnostics."""
-        safe_error = sanitize_diagnostic_text(error)
-        self._last_stream_cleanup_error = safe_error
-        self._last_stream_cleanup_error_stage = stage
-        record_diagnostic_event(
-            self.coordinator,
-            code=f"video_{stage}_failed",
-            source="video_camera",
-            message=safe_error,
-            context={
-                "cleanup_reason": self._last_stream_cleanup_reason,
-                "transport": self._video_transport,
-            },
-        )
-        _LOGGER.warning(
-            "Dreame mower live-video cleanup failed [%s]: %s",
-            stage,
-            safe_error,
-        )
