@@ -859,7 +859,7 @@ class _DreameLawnMowerClientCoreMixin:
         """Apply native HTTP state under the legacy device's ownership locks."""
         if cancelled.is_set():
             return
-        device = self._ensure_device()
+        device = self._ensure_device(deadline=deadline, cancelled=cancelled)
         cloud = device._protocol.cloud
         lock = cloud._operation_lock()
         remaining = deadline - time.monotonic()
@@ -868,7 +868,14 @@ class _DreameLawnMowerClientCoreMixin:
                 "Cloud device info timed out waiting for device state."
             )
         try:
-            with self._device_ownership_lock:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not self._device_ownership_lock.acquire(
+                timeout=remaining,
+            ):
+                raise DreameLawnMowerConnectionError(
+                    "Cloud device info timed out waiting for device state."
+                )
+            try:
                 if cancelled.is_set() or self._closing or self._device is not device:
                     return
                 if time.monotonic() >= deadline:
@@ -876,6 +883,8 @@ class _DreameLawnMowerClientCoreMixin:
                         "Cloud device info timed out waiting for device state."
                     )
                 cloud._handle_device_info(info)
+            finally:
+                self._device_ownership_lock.release()
         finally:
             lock.release()
 
@@ -1098,8 +1107,26 @@ class _DreameLawnMowerClientCoreMixin:
                 )
         return cloud
 
-    def _ensure_device(self):
-        with self._device_ownership_lock:
+    def _ensure_device(
+        self, *, deadline: float | None = None, cancelled: Event | None = None,
+    ):
+        if deadline is None:
+            self._device_ownership_lock.acquire()
+        else:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not self._device_ownership_lock.acquire(
+                timeout=remaining,
+            ):
+                raise DreameLawnMowerConnectionError(
+                    "Cloud device info timed out waiting for device ownership."
+                )
+        try:
+            if (cancelled is not None and cancelled.is_set()) or (
+                deadline is not None and time.monotonic() >= deadline
+            ):
+                raise DreameLawnMowerConnectionError(
+                    "Cloud device info ended before device initialization."
+                )
             if self._closing:
                 raise DreameLawnMowerConnectionError(
                     "The mower client is shutting down."
@@ -1124,3 +1151,5 @@ class _DreameLawnMowerClientCoreMixin:
             if self._update_callback is not None:
                 self._device.listen(self._update_callback)
             return self._device
+        finally:
+            self._device_ownership_lock.release()

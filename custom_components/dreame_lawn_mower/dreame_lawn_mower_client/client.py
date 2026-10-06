@@ -1523,9 +1523,16 @@ class DreameLawnMowerClient(
                     self._descriptor.did, language=language, deadline=deadline,
                 )
                 if info:
-                    await asyncio.to_thread(
-                        self._sync_apply_cloud_device_info, info, cancelled, deadline,
-                    )
+                    try:
+                        async with asyncio.timeout(max(0, deadline - time.monotonic())):
+                            await asyncio.to_thread(
+                                self._sync_apply_cloud_device_info,
+                                info, cancelled, deadline,
+                            )
+                    except TimeoutError as err:
+                        raise DreameLawnMowerConnectionError(
+                            "Cloud device info timed out waiting for device state."
+                        ) from err
                 return info
             finally:
                 # Cancelling an executor await cannot stop its worker. Prevent

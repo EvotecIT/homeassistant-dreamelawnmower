@@ -972,3 +972,45 @@ def test_cancelled_device_info_cannot_apply_after_device_lock_releases(monkeypat
             assert not session.closed
 
     asyncio.run(scenario())
+
+
+def test_device_info_deadline_includes_executor_queue(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    strings = cloud_strings("dreame")
+    release_worker = Event()
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        return web.json_response({"code": 0, "data": {"did": "42"}})
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
+        occupied = loop.run_in_executor(None, release_worker.wait)
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **OPTIONS,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type="dreame", country="eu",
+                ),
+                session=session,
+            )
+            try:
+                with pytest.raises(
+                    DreameLawnMowerConnectionError, match="timed out",
+                ):
+                    await asyncio.wait_for(client.async_get_cloud_device_info(), 22)
+                assert not occupied.done()
+                assert client._device is None
+            finally:
+                release_worker.set()
+                await occupied
+                await client.async_close()
+            assert client._device is None
+            assert not session.closed
+
+    asyncio.run(scenario())
