@@ -110,3 +110,26 @@ def test_python_optimizer_connects_adjacent_areas(vertical):
     )
 
     assert data == expected
+
+
+@pytest.mark.parametrize(
+    ("heading", "expected"),
+    [(180, (14.5, 9, 180)), (0, (5.5, 9, 360)),
+     (270, (9, 14.5, 270)), (90, (9, 5.5, 90))],
+)
+def test_python_optimizer_snaps_charger_to_wall_in_heading_direction(
+    heading, expected,
+):
+    width = height = 20
+    data = [0] * (width * height)
+    for y in range(5, 15):
+        for x in range(5, 15):
+            data[y * width + x] = 6 if x in (5, 14) or y in (5, 14) else 1
+    charger = _types.Point(9, 9, heading)
+
+    result = _optimizer.DreameMowerMapOptimizer()._calculate_charger_position(
+        data, width, height, 6, charger
+    )
+
+    assert result is charger
+    assert (result.x, result.y, result.a) == expected

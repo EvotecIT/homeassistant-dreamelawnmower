@@ -12,7 +12,7 @@ import numpy as np
 
 from .map_javascript import optimize_map
 from .map_renderer_types import ALine, Angle, CLine, Paths
-from .map_types import MapImageDimensions, MapPixelType, Point
+from .map_types import MapData, MapImageDimensions, MapPixelType, Point
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1214,8 +1214,11 @@ class DreameMowerMapOptimizer:
                 startX = -1
 
     def _calculate_charger_position(
-        self, data, width, height, stroke, charger_position
-    ):
+        self, data: list[int], width: int, height: int, stroke: int,
+        charger_position: Point,
+    ) -> Point:
+        """Snap a decoded charger with a known heading to a nearby wall."""
+        assert charger_position.a is not None
         vLines = []
         hLines = []
         for i in range(width):
@@ -1289,71 +1292,80 @@ class DreameMowerMapOptimizer:
                         continue
                 startX = -1
 
+        nearest_x: int | None = None
+        nearest_y: int | None = None
         cX = math.floor(charger_position.x)
         cY = math.floor(charger_position.y)
         if abs(charger_position.a - 180) <= 30:
             charger_position.a = 180
-            lastX = None
+            nearest_x = None
             for i in range(len(vLines)):
                 line = vLines[i]
                 lx = line[0][0]
                 minY = line[0][1] if line[0][1] < line[1][1] else line[1][1]
                 maxY = line[0][1] if line[0][1] > line[1][1] else line[1][1]
                 if lx >= cX and cY >= minY and cY <= maxY:
-                    if lastX is None or lx < lastX:
-                        lastX = lx
-            if lastX is not None:
-                if lastX - cX <= 11:
+                    if nearest_x is None or lx < nearest_x:
+                        nearest_x = lx
+            if nearest_x is not None:
+                if nearest_x - cX <= 11:
                     charger_position.a = 180
-                    charger_position.x = lastX + 0.5
+                    charger_position.x = nearest_x + 0.5
         elif abs(charger_position.a - 360) <= 30 or abs(charger_position.a) <= 3:
             charger_position.a = 360
-            lastX = None
+            nearest_x = None
             for i in range(len(vLines)):
                 line = vLines[i]
                 lx = line[0][0]
                 minY = line[0][1] if line[0][1] < line[1][1] else line[1][1]
                 maxY = line[0][1] if line[0][1] > line[1][1] else line[1][1]
                 if lx <= cX and cY >= minY and cY <= maxY:
-                    if lastX is None or lx > lastX:
-                        lastX = lx
-            if lastX is not None:
-                if cX - lastX <= 11:
+                    if nearest_x is None or lx > nearest_x:
+                        nearest_x = lx
+            if nearest_x is not None:
+                if cX - nearest_x <= 11:
                     charger_position.a = 360
-                    charger_position.x = lastX + 0.5
+                    charger_position.x = nearest_x + 0.5
         elif abs(abs(charger_position.a - 270) <= 30):
-            lastY = None
+            nearest_y = None
             for i in range(len(hLines)):
                 line = hLines[i]
                 ly = line[0][1]
                 minX = line[0][0] if line[0][0] < line[1][0] else line[1][0]
                 maxX = line[0][0] if line[0][0] > line[1][0] else line[1][0]
                 if ly >= cY and cX >= minX and cX <= maxX:
-                    if lastY is None or ly < lastY:
-                        lastY = ly
-            if lastY is not None:
-                if lastY - cY <= 11:
+                    if nearest_y is None or ly < nearest_y:
+                        nearest_y = ly
+            if nearest_y is not None:
+                if nearest_y - cY <= 11:
                     charger_position.a = 270
-                    charger_position.y = lastY + 0.5
+                    charger_position.y = nearest_y + 0.5
         elif abs(abs(charger_position.a - 90) <= 30):
-            lastY = None
+            nearest_y = None
             for i in range(len(hLines)):
                 line = hLines[i]
                 ly = line[0][1]
                 minX = line[0][0] if line[0][0] < line[1][0] else line[1][0]
                 maxX = line[0][0] if line[0][0] > line[1][0] else line[1][0]
                 if ly <= cY and cX >= minX and cX <= maxX:
-                    if lastY is None or ly > lastY:
-                        lastY = ly
-            if lastY is not None:
-                if cY - lastY <= 11:
+                    if nearest_y is None or ly > nearest_y:
+                        nearest_y = ly
+            if nearest_y is not None:
+                if cY - nearest_y <= 11:
                     charger_position.a = 90
-                    charger_position.y = lastY + 0.5
+                    charger_position.y = nearest_y + 0.5
 
         return charger_position
 
-    def _merge_saved_map_data(self, map_data, saved_map_data, original_data=None):
+    def _merge_saved_map_data(
+        self, map_data: MapData, saved_map_data: MapData | None,
+        original_data: list[int] | None = None,
+    ) -> None:
         if saved_map_data:
+            assert map_data.dimensions is not None
+            assert map_data.pixel_type is not None
+            assert saved_map_data.dimensions is not None
+            assert saved_map_data.pixel_type is not None
             maxX = map_data.dimensions.left + (
                 map_data.dimensions.width * map_data.dimensions.grid_size
             )
@@ -1476,9 +1488,18 @@ class DreameMowerMapOptimizer:
                 top, left, height, width, map_data.dimensions.grid_size
             )
 
-    def optimize(self, map_data, saved_map_data=None, js_optimizer=True):
+    def optimize(
+        self, map_data: MapData, saved_map_data: MapData | None = None,
+        js_optimizer: bool = True,
+    ) -> MapData:
         if map_data.saved_map:
             return map_data
+
+        assert map_data.dimensions is not None
+        assert map_data.pixel_type is not None
+        if saved_map_data is not None:
+            assert saved_map_data.dimensions is not None
+            assert saved_map_data.pixel_type is not None
 
         if map_data.wifi_map:
             map_data.optimized_pixel_type = np.copy(map_data.pixel_type)
@@ -1527,26 +1548,26 @@ class DreameMowerMapOptimizer:
                     map_data.dimensions.height,
                     map_data.dimensions.grid_size,
                 ]
-                saved_data = (
-                    saved_map_data.pixel_type.tolist() if saved_map_data else None
-                )
-                saved_data_size = (
-                    [
+                saved_data = None
+                saved_data_size = None
+                if saved_map_data is not None:
+                    assert saved_map_data.pixel_type is not None
+                    assert saved_map_data.dimensions is not None
+                    saved_data = saved_map_data.pixel_type.tolist()
+                    saved_data_size = [
                         saved_map_data.dimensions.left,
                         saved_map_data.dimensions.top,
                         saved_map_data.dimensions.width,
                         saved_map_data.dimensions.height,
                         saved_map_data.dimensions.grid_size,
                     ]
-                    if saved_map_data
-                    else None
-                )
                 charger_position = None
                 if map_data.charger_position:
                     left = map_data.dimensions.left
                     top = map_data.dimensions.top
 
-                    if saved_map_data:
+                    if saved_map_data is not None:
+                        assert saved_map_data.dimensions is not None
                         if saved_map_data.dimensions.left < left:
                             left = saved_map_data.dimensions.left
 
@@ -1615,7 +1636,8 @@ class DreameMowerMapOptimizer:
                         left = map_data.dimensions.left
                         top = map_data.dimensions.top
 
-                        if saved_map_data:
+                        if saved_map_data is not None:
+                            assert saved_map_data.dimensions is not None
                             if saved_map_data.dimensions.left < left:
                                 left = saved_map_data.dimensions.left
 
@@ -1662,14 +1684,17 @@ class DreameMowerMapOptimizer:
                     self._fill_map_data_2(clean_data, width, height)
                     self._update_border_value(clean_data, width, height, 7)
 
-                    if saved_map_data:
+                    if saved_map_data is not None:
                         self._find_obstacle_border(clean_data, width, height, 3)
                         self._obstacle_data(original_data, width, height)
                     else:
                         self._clean_small_obstacle(clean_data, width, height, 3)
 
                     currentPointNum = 0
-                    data_map = {7: 255, 2: 255, 3: (0 if saved_map_data else 250)}
+                    data_map = {
+                        7: 255, 2: 255,
+                        3: (0 if saved_map_data is not None else 250),
+                    }
                     for j in range(height):
                         for i in range(width):
                             clean_value = clean_data[j * width + i]
