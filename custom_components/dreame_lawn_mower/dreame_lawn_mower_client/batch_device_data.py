@@ -297,6 +297,8 @@ def decode_batch_ota_info(
 
 def _ota_state_name(value: int | None) -> str | None:
     """Return the app OTA state label used by the mower plugin."""
+    if value is None:
+        return None
     return {
         0: "undefined",
         1: "idle",
@@ -450,7 +452,7 @@ def _decode_batch_preference_map_entry(
                 settings_inventory_valid = False
                 continue
             area_ids.add(area_id)
-            preference = {
+            preference: dict[str, object] = {
                 "version": _to_int(raw_preference.get("version")),
                 "reported_version": _to_int(raw_preference.get("version")),
                 "map_index": map_index,

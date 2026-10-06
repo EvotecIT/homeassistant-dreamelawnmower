@@ -24,10 +24,9 @@ from .payload_utils import (
 def _dedupe_ints(values: Sequence[int]) -> list[int]:
     result: list[int] = []
     for value in values:
-        parsed = _positive_int(value)
-        if parsed is None and value != -1:
+        parsed = -1 if value == -1 else _positive_int(value)
+        if parsed is None:
             continue
-        parsed = -1 if value == -1 else parsed
         if parsed not in result:
             result.append(parsed)
     return result
@@ -284,11 +283,13 @@ def _voice_settings_summary(config: Mapping[str, Any]) -> dict[str, Any]:
         voice_language_index = _as_optional_int(values[1]) if len(values) > 1 else None
         summary["text_language_index"] = text_language_index
         summary["voice_language_index"] = voice_language_index
-        summary["voice_language_name"] = VOICE_LANGUAGE_INDEX_TO_LABEL.get(
-            voice_language_index
+        summary["voice_language_name"] = (
+            VOICE_LANGUAGE_INDEX_TO_LABEL.get(voice_language_index)
+            if voice_language_index is not None else None
         )
-        summary["voice_language_code"] = VOICE_LANGUAGE_INDEX_TO_CODE.get(
-            voice_language_index
+        summary["voice_language_code"] = (
+            VOICE_LANGUAGE_INDEX_TO_CODE.get(voice_language_index)
+            if voice_language_index is not None else None
         )
 
     volume = _as_optional_int(config.get("VOL"))
