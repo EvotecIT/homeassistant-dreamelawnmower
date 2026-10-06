@@ -1463,13 +1463,10 @@ class DreameLawnMowerClient(
         confirm_write: bool = False,
     ) -> dict[str, Any]:
         """Build or execute a mower preference update from the current app state."""
-        return await asyncio.to_thread(
-            self._sync_plan_app_mowing_preference_update,
-            map_index,
-            area_id,
-            changes,
-            execute,
-            confirm_write,
+        from .client_preference_writes import async_update_preferences
+
+        return await async_update_preferences(
+            self, map_index, area_id, changes, execute, confirm_write,
         )
 
     async def async_get_device_settings(
