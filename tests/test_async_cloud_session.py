@@ -1964,3 +1964,132 @@ def test_public_batch_metadata_reads_use_native_http(
             assert not session.closed
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("account_type", ["dreame", "mova"])
+@pytest.mark.parametrize("mode", ["normal", "partial", "batch_only"])
+def test_firmware_support_uses_native_metadata(monkeypatch, account_type, mode):
+    strings = cloud_strings(account_type)
+    seen = []
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        seen.append(request.path)
+        if request.path.endswith("device/info"):
+            if mode == "partial":
+                return web.Response(status=403)
+            return web.json_response({"code": 0, "data": None})
+        if request.path.endswith("device/listV2"):
+            return web.json_response({"code": 0, "data": None})
+        if request.path.endswith("checkDeviceVersion"):
+            return web.json_response({"code": 0, "data": {
+                "curVersion": "1.0", "newVersion": "1.1", "hasNewFirmware": True,
+            }})
+        assert request.path == "/" + "/".join(strings[i] for i in (23, 26, 44))
+        return web.json_response({"code": 0, "data": {
+            "OTA_INFO.0": "[2,35]", "prop.s_auto_upgrade": "1",
+        }})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **{**OPTIONS, "account_type": account_type}, session=session,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type=account_type, country="eu",
+                ),
+            )
+            try:
+                result = await client.async_get_firmware_update_support(
+                    include_cloud=mode != "batch_only",
+                )
+                assert result.ota_state == 2
+                assert result.ota_progress == 35
+                assert result.auto_upgrade_enabled is True
+                assert result.debug_catalog_available is None
+                assert len(seen) == (1 if mode == "batch_only" else 4)
+                if mode != "batch_only":
+                    assert result.latest_version == "1.1"
+                    assert result.cloud_check_update_available is True
+                if mode == "partial":
+                    assert "cloud_device_info:" in result.cloud_error
+                else:
+                    assert result.cloud_error is None
+                assert not client._cloud_read_tasks
+            finally:
+                await client.async_close()
+            assert not session.closed
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("stop", ["cancel", "close"])
+@pytest.mark.parametrize("stage", ["snapshot", "debug_catalog"])
+def test_firmware_support_drains_started_workers(monkeypatch, stop, stage):
+    from threading import Event
+    from unittest.mock import AsyncMock
+
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        client_firmware_reads,
+    )
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        started = asyncio.Event()
+        release = Event()
+        finished = Event()
+        async with ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **OPTIONS, session=session,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type="dreame", country="eu",
+                ),
+            )
+            client.async_get_batch_ota_info = AsyncMock(return_value={})
+
+            def blocked(*args, **kwargs):
+                loop.call_soon_threadsafe(started.set)
+                assert release.wait(3)
+                finished.set()
+                return {}
+
+            if stage == "snapshot":
+                monkeypatch.setattr(
+                    client_firmware_reads,
+                    "firmware_update_support_from_device", blocked,
+                )
+            else:
+                client._sync_get_debug_ota_catalog = blocked
+            task = asyncio.create_task(client.async_get_firmware_update_support(
+                include_cloud=False, include_debug_ota_catalog=stage == "debug_catalog",
+            ))
+            close = None
+            try:
+                await asyncio.wait_for(started.wait(), 2)
+                if stop == "close":
+                    close = asyncio.create_task(client.async_close())
+                else:
+                    task.cancel()
+                await asyncio.sleep(0.02)
+                assert not task.done()
+                assert client._cloud_read_tasks
+                if close is not None:
+                    assert not close.done()
+                release.set()
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, 2)
+                if close is not None:
+                    await asyncio.wait_for(close, 2)
+                assert finished.is_set()
+                assert not client._cloud_read_tasks
+                assert not session.closed
+            finally:
+                release.set()
+                await asyncio.gather(task, return_exceptions=True)
+                if close is not None:
+                    await asyncio.gather(close, return_exceptions=True)
+                await client.async_close()
+
+    asyncio.run(scenario())

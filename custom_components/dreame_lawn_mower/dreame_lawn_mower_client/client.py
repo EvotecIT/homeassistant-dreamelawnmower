@@ -1200,12 +1200,11 @@ class DreameLawnMowerClient(
         language: str | None = "en",
     ) -> DreameLawnMowerFirmwareUpdateSupport:
         """Return firmware/update evidence without guessing availability."""
-        return await asyncio.to_thread(
-            self._sync_get_firmware_update_support,
-            refresh,
-            include_cloud,
-            include_debug_ota_catalog,
-            language,
+        from .client_firmware_reads import async_read_firmware_support
+
+        return await async_read_firmware_support(
+            self, refresh=refresh, include_cloud=include_cloud,
+            include_debug_ota_catalog=include_debug_ota_catalog, language=language,
         )
 
     async def async_get_status_blob(
