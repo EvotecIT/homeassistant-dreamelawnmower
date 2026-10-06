@@ -562,7 +562,14 @@ def test_batch_schedule_recovery_can_skip_map_discovery() -> None:
 def test_async_batch_schedule_recovery_has_an_overall_deadline() -> None:
     client = _client()
     cloud = _FakeBatchCloud()
-    client._sync_get_cloud_protocol = lambda **_kwargs: cloud
+    request_options = {}
+
+    async def read_batch(did, keys, **kwargs):
+        request_options.update(kwargs)
+        return cloud.payload
+
+    cloud.async_get_batch_device_datas = read_batch
+    client._async_cloud = cloud
     started = time.monotonic()
 
     result = asyncio.run(
@@ -570,9 +577,6 @@ def test_async_batch_schedule_recovery_has_an_overall_deadline() -> None:
     )
 
     assert result["schedules"][0]["version"] == 19383
-    request_options = cloud.request_options[0]
-    assert request_options["timeout"] is not None
-    assert 0 < request_options["timeout"] <= 5.0
     assert request_options["deadline"] is not None
     assert started < request_options["deadline"] <= started + 5.1
 

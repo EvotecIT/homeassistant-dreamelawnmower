@@ -666,19 +666,6 @@ class _DreameLawnMowerClientSchedulesMixin(
             _batch_schedule_keys(),
             deadline=deadline,
         )
-        if batch_data is None:
-            return {
-                "source": "batch_device_data_schedule",
-                "available": False,
-                "current_task": None,
-                "schedules": [],
-                "errors": [
-                    {
-                        "stage": "schedule",
-                        "error": "Batch device data returned no schedule payload.",
-                    }
-                ],
-            }
         return decode_batch_schedule_payload(
             batch_data,
             include_raw=include_raw,

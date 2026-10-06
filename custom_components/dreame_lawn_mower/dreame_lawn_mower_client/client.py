@@ -1620,13 +1620,15 @@ class DreameLawnMowerClient(
         timeout: float = _SCHEDULE_READ_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
         """Fetch and decode schedule data from batch device data."""
+        from .client_batch_reads import async_read_batch_schedules
+
         timeout = _validate_positive_number(timeout, "batch schedule timeout")
-        return await asyncio.to_thread(
-            self._sync_get_batch_schedules,
-            include_raw,
-            map_index_hint,
-            discover_map_index,
-            timeout,
+        return await async_read_batch_schedules(
+            self,
+            include_raw=include_raw,
+            map_index_hint=map_index_hint,
+            discover_map_index=discover_map_index,
+            timeout=timeout,
         )
 
     async def async_get_batch_mowing_preferences(

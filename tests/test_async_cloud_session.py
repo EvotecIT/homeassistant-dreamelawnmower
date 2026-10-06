@@ -98,7 +98,8 @@ def test_public_current_map_read_uses_native_http(
 
 
 @pytest.mark.parametrize("stop", ["cancel", "close", "deadline"])
-def test_native_map_read_releases_ownership_when_interrupted(monkeypatch, stop):
+@pytest.mark.parametrize("read_kind", ["map", "batch", "batch_hint"])
+def test_native_read_releases_ownership_when_interrupted(monkeypatch, stop, read_kind):
     import time
 
     from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
@@ -127,10 +128,17 @@ def test_native_map_read_releases_ownership_when_interrupted(monkeypatch, stop):
             )
             protocol = client._ensure_device()._protocol.cloud
             protocol._host = "hub.example.invalid"
-            task = asyncio.create_task(client_app_reads.async_read_app_action(
-                client, {"m": "g", "t": "MAPL"},
-                deadline=time.monotonic() + (0.5 if stop == "deadline" else 5),
-            ))
+            timeout = 0.5 if stop == "deadline" else 5
+            if read_kind == "map":
+                operation = client_app_reads.async_read_app_action(
+                    client, {"m": "g", "t": "MAPL"},
+                    deadline=time.monotonic() + timeout,
+                )
+            else:
+                operation = client.async_get_batch_schedules(
+                    discover_map_index=read_kind == "batch_hint", timeout=timeout,
+                )
+            task = asyncio.create_task(operation)
             try:
                 await asyncio.wait_for(entered.wait(), 3)
                 if stop == "close":
@@ -144,7 +152,8 @@ def test_native_map_read_releases_ownership_when_interrupted(monkeypatch, stop):
                 with pytest.raises(expected):
                     await task
                 assert not client._cloud_read_tasks
-                assert not protocol._async_rpc_gate.locked()
+                if read_kind != "batch":
+                    assert not protocol._async_rpc_gate.locked()
 
                 def can_acquire():
                     acquired = protocol._operation_lock().acquire(blocking=False)
@@ -179,6 +188,78 @@ async def server(monkeypatch, handler):
         yield f"http://127.0.0.1:{port}"
     finally:
         await runner.cleanup()
+
+
+@pytest.mark.parametrize("account_type", ["dreame", "mova"])
+@pytest.mark.parametrize(
+    "hint_mode", ["explicit", "skip", "discover", "failed", "missing"],
+)
+def test_public_batch_schedule_read_uses_native_http(
+    monkeypatch, account_type, hint_mode,
+):
+    strings = cloud_strings(account_type)
+    seen = []
+    schedule = json.dumps({"d": [], "v": 19383})
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        seen.append(request.path)
+        body = await request.json()
+        if "data" in body:
+            assert body["data"]["params"]["in"] == [{"m": "g", "t": "MAPL"}]
+            if hint_mode == "failed":
+                return web.json_response({"code": 500})
+            return web.json_response({"code": 0, "data": {"result": {"out": [
+                {"r": 0, "d": [[2, 1, 1, 1, 0]]},
+            ]}}})
+        assert request.path == "/" + "/".join(strings[i] for i in (23, 26, 44))
+        assert body == {
+            "did": "42",
+            strings[35]: [*(f"SCHEDULE.{i}" for i in range(10)), "SCHEDULE.info"],
+        }
+        return web.json_response({
+            "code": 0,
+            "data": None if hint_mode == "missing" else {"SCHEDULE.0": schedule},
+        })
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **{**OPTIONS, "account_type": account_type}, session=session,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type=account_type, country="eu",
+                ),
+            )
+            if hint_mode in {"discover", "failed"}:
+                client._ensure_device()._protocol.cloud._host = "hub.example.invalid"
+            try:
+                result = await client.async_get_batch_schedules(
+                    include_raw=True,
+                    map_index_hint=0 if hint_mode == "explicit" else None,
+                    discover_map_index=hint_mode not in {"skip", "missing"},
+                )
+                expected_hint = {"explicit": 0, "discover": 2}.get(hint_mode)
+                if hint_mode == "missing":
+                    assert result["schedules"] == []
+                    assert result["available"] is False
+                    assert result["errors"] == [{
+                        "stage": "schedule",
+                        "error": "Batch device data returned no schedule payload.",
+                    }]
+                else:
+                    assert result["schedules"][0]["idx"] == expected_hint
+                    assert result["active_schedule_version"] == 19383
+                assert len(seen) == (2 if hint_mode in {"discover", "failed"} else 1)
+                assert not client._cloud_read_tasks
+                if hint_mode in {"explicit", "skip", "missing"}:
+                    assert client._device is None
+            finally:
+                await client.async_close()
+            assert not session.closed
+
+    asyncio.run(scenario())
 
 
 def login_response(strings, token="access-secret"):

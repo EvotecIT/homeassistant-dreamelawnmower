@@ -23,7 +23,7 @@ _DEFAULT_BATCH_CHUNK_COUNT = 10
 
 
 def decode_batch_schedule_payload(
-    batch_data: Mapping[str, Any],
+    batch_data: Mapping[str, Any] | None,
     *,
     include_raw: bool = False,
     map_index_hint: int | None = None,
@@ -36,6 +36,13 @@ def decode_batch_schedule_payload(
         "schedules": [],
         "errors": [],
     }
+
+    if batch_data is None:
+        result["errors"].append({
+            "stage": "schedule",
+            "error": "Batch device data returned no schedule payload.",
+        })
+        return result
 
     payload_text = batch_data_text(batch_data, "SCHEDULE")
     schedule: dict[str, Any] = {
