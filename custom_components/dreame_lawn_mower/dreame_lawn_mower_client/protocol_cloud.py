@@ -448,7 +448,7 @@ class DreameMowerDreameHomeCloudProtocol:
         result_str = "".join(random.choice(letters) for i in range(13))
         return result_str
 
-    def _handle_device_info(self, info):
+    def _handle_device_info(self, info: Mapping[str, Any]) -> None:
         # Native HTTP can supply device info before the legacy MQTT login.
         strings = self._strings or cloud_strings(self._account_type)
         uid = info[strings[8]]
