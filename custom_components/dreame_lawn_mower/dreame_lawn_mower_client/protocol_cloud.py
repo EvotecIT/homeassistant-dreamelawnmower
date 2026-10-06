@@ -21,7 +21,8 @@ from miio.miioprotocol import MiIOProtocol
 from .exceptions import DeviceException, DreameLawnMowerCloudAPIError
 from .cloud_wire import (
     DEVICE_INFO_PATH, DEVICE_LIST_PATH, cloud_device_info_data,
-    cloud_device_list_data, cloud_headers, cloud_login_data, cloud_strings,
+    cloud_device_list_data, cloud_headers, cloud_login_data,
+    cloud_properties_params, cloud_strings,
 )
 from .deadline import DeadlineExceededError, run_with_deadline
 from .mqtt_tls import create_cloud_mqtt_ssl_context
@@ -1167,7 +1168,7 @@ class DreameMowerDreameHomeCloudProtocol:
         *,
         deadline: float | None = None,
     ):
-        params = {"did": str(self._did), "keys": keys}
+        params = cloud_properties_params(self._did, keys)
         api_response = self._api_call(
             f"{self._strings[23]}/{self._strings[25]}/{self._strings[41]}",
             params,

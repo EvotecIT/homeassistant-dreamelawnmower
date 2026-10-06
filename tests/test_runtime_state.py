@@ -54,6 +54,32 @@ _A3_STANDBY_FRAME = (
 )
 
 
+@pytest.mark.parametrize("realtime", [True, False])
+@pytest.mark.parametrize("include_cloud", [True, False])
+def test_async_status_blob_preserves_realtime_precedence_and_cloud_timestamp(
+    realtime, include_cloud,
+):
+    key = MOWER_RAW_STATUS_PROPERTY_KEY
+    entry = {"value": list(_A3_STANDBY_FRAME), "last_seen": 123.0}
+    device = SimpleNamespace(realtime_properties={key: entry} if realtime else {})
+    client = object.__new__(DreameLawnMowerClient)
+    client._ensure_device = lambda: device
+    client.async_get_cloud_properties = AsyncMock(return_value=[
+        {"key": "unrelated", "value": []}, {"key": key, **entry},
+    ])
+    result = asyncio.run(client.async_get_status_blob(include_cloud=include_cloud))
+    if realtime or include_cloud:
+        assert result is not None
+        assert result.source == ("realtime" if realtime else "cloud")
+        assert result.received_at == "1970-01-01T00:02:03+00:00"
+    else:
+        assert result is None
+    if not realtime and include_cloud:
+        client.async_get_cloud_properties.assert_awaited_once_with(key)
+    else:
+        client.async_get_cloud_properties.assert_not_awaited()
+
+
 def _snapshot(
     *,
     model: str = "dreame.mower.g2568d",
@@ -500,7 +526,7 @@ def test_refresh_keeps_new_untimestamped_active_observation() -> None:
     client._descriptor = raw_snapshot.descriptor
     client._latest_snapshot = None
     client._sync_update_device = lambda force=False: device  # noqa: ARG005
-    client._sync_get_status_blob = lambda include_cloud, refresh: status_blob  # noqa: ARG005
+    client.async_get_status_blob = AsyncMock(return_value=status_blob)
     async def no_cloud_presence():
         return None
 

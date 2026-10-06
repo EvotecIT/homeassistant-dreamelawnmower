@@ -15,6 +15,11 @@ DEVICE_INFO_PATH = "/dreame-user-iot/iotuserbind/device/info"
 DEVICE_LIST_PATH = "/dreame-user-iot/iotuserbind/device/listV2"
 
 
+def cloud_properties_params(did: str | None, keys: str) -> dict[str, str]:
+    """Share device identity and normalized keys between both transports."""
+    return {"did": str(did), "keys": keys}
+
+
 def cloud_device_info_data(did: str | None, language: str | None) -> str:
     """Encode device identity and optional language for both cloud transports."""
     params = {"did": did}

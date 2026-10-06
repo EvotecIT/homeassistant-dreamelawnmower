@@ -19,6 +19,7 @@ from .cloud_wire import (
     cloud_device_list_data,
     cloud_headers,
     cloud_login_data,
+    cloud_properties_params,
     cloud_strings,
 )
 from .exceptions import DreameLawnMowerAuthError, DreameLawnMowerConnectionError
@@ -127,6 +128,18 @@ class DreameCloudSession:
         if not isinstance(page, dict):
             raise DreameLawnMowerConnectionError("Cloud device page is invalid")
         return page
+
+    async def async_get_properties(
+        self, did: str, keys: str, *, timeout: float = 20,
+        deadline: float | None = None,
+    ) -> Any:
+        """Read raw cloud properties using the legacy vendor payload shape."""
+        path = "/".join(self._strings[index] for index in (23, 25, 41))
+        return await self._async_read(
+            f"/{path}",
+            json.dumps(cloud_properties_params(did, keys), separators=(",", ":")),
+            timeout=timeout, deadline=deadline,
+        )
 
     async def async_get_device_info(
         self,

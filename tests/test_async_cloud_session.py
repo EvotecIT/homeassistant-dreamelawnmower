@@ -672,9 +672,9 @@ def test_client_page_reads_own_only_standalone_session(monkeypatch, borrowed):
 
 @pytest.mark.parametrize("borrowed", [True, False])
 @pytest.mark.parametrize("caller_continues", [True, False])
-@pytest.mark.parametrize("device_info", [True, False])
+@pytest.mark.parametrize("read_kind", ["info", "page", "properties"])
 def test_client_close_cancels_active_native_read(
-    monkeypatch, borrowed, caller_continues, device_info,
+    monkeypatch, borrowed, caller_continues, read_kind,
 ):
     strings = cloud_strings("dreame")
 
@@ -703,8 +703,10 @@ def test_client_close_cancels_active_native_read(
             )
             async def read_then_continue():
                 try:
-                    if device_info:
+                    if read_kind == "info":
                         await client.async_get_cloud_device_info()
+                    elif read_kind == "properties":
+                        await client.async_get_cloud_properties("1.1")
                     else:
                         await client.async_get_cloud_device_list_page()
                 except asyncio.CancelledError:
@@ -1014,3 +1016,47 @@ def test_device_info_deadline_includes_executor_queue(monkeypatch):
             assert not session.closed
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("account_type", ["dreame", "mova"])
+@pytest.mark.parametrize("keys,expected", [
+    ("1.1,2.2", "1.1,2.2"), ([" 1.1 ", "", "2.2"], "1.1,2.2"), ([], ""),
+])
+def test_public_cloud_properties_preserves_wire_and_raw_values(
+    monkeypatch, account_type, keys, expected,
+):
+    strings = cloud_strings(account_type)
+    values = [{"key": "1.1", "value": [1, 2], "time": 42}]
+    calls = []
+
+    async def handler(request):
+        calls.append(request.path)
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        assert request.path == "/dreame-user-iot/iotstatus/props"
+        assert await request.json() == {"did": "42", "keys": expected}
+        return web.json_response({"code": 0, "data": values})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **{**OPTIONS, "account_type": account_type},
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type=account_type, country="eu",
+                ),
+                session=session,
+            )
+            try:
+                for _ in range(2):
+                    assert await client.async_get_cloud_properties(keys) == values
+                assert client._device is None
+            finally:
+                await client.async_close()
+            assert not session.closed
+            with pytest.raises(DreameLawnMowerConnectionError, match="closing"):
+                await client.async_get_cloud_properties(keys)
+
+    asyncio.run(scenario())
+    assert calls.count(strings[17]) == 1
+    assert len(calls) == 3

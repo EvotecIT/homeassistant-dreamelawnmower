@@ -662,11 +662,7 @@ class DreameLawnMowerClient(
         )
         snapshot = self._snapshot_from_device(device)
         try:
-            status_blob = await asyncio.to_thread(
-                self._sync_get_status_blob,
-                False,
-                True,
-            )
+            status_blob = await self.async_get_status_blob()
         except DreameLawnMowerConnectionError:
             status_blob = None
         if status_blob is not None:
@@ -1218,10 +1214,9 @@ class DreameLawnMowerClient(
         include_cloud: bool = True,
     ) -> DreameLawnMowerStatusBlob | None:
         """Return the latest decoded raw realtime status blob, if available."""
-        return await asyncio.to_thread(
-            self._sync_get_status_blob,
-            refresh,
-            include_cloud,
+        return await self._async_get_decoded_status_blob(
+            MOWER_RAW_STATUS_PROPERTY_KEY,
+            refresh=refresh, include_cloud=include_cloud,
         )
 
     async def async_get_runtime_status_blob(
@@ -1231,10 +1226,9 @@ class DreameLawnMowerClient(
         include_cloud: bool = True,
     ) -> DreameLawnMowerStatusBlob | None:
         """Return the latest decoded runtime-status blob, if available."""
-        return await asyncio.to_thread(
-            self._sync_get_runtime_status_blob,
-            refresh,
-            include_cloud,
+        return await self._async_get_decoded_status_blob(
+            MOWER_RUNTIME_STATUS_PROPERTY_KEY,
+            refresh=refresh, include_cloud=include_cloud,
         )
 
     async def async_get_bluetooth_connected(
@@ -1835,7 +1829,12 @@ class DreameLawnMowerClient(
         keys: str | Sequence[str],
     ) -> Any:
         """Fetch raw cloud property values from the `iotstatus/props` endpoint."""
-        return await asyncio.to_thread(self._sync_get_cloud_properties, keys)
+        normalized_keys = self._normalize_cloud_property_keys(keys)
+        return await self._async_cloud_read(
+            lambda cloud: cloud.async_get_properties(
+                self._descriptor.did, normalized_keys,
+            )
+        )
 
     async def async_scan_cloud_properties(
         self,

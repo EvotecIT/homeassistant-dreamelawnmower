@@ -648,6 +648,19 @@ class _DreameLawnMowerClientCoreMixin:
                 return parsed
         return None
 
+    async def _async_get_decoded_status_blob(
+        self, property_key: str, *, refresh: bool, include_cloud: bool,
+    ) -> DreameLawnMowerStatusBlob | None:
+        """Prefer device realtime data, then fetch missing status with native HTTP."""
+        decoded = await asyncio.to_thread(
+            self._sync_get_decoded_status_blob, property_key,
+            refresh=refresh, include_cloud=False,
+        )
+        if decoded is not None or not include_cloud:
+            return decoded
+        response = await self.async_get_cloud_properties(property_key)
+        return self._decode_cloud_status_blob(response, property_key)
+
     def _sync_get_decoded_status_blob(
         self,
         property_key: str,
@@ -668,6 +681,12 @@ class _DreameLawnMowerClientCoreMixin:
             return None
 
         response = self._sync_get_cloud_properties(property_key)
+        return self._decode_cloud_status_blob(response, property_key)
+
+    def _decode_cloud_status_blob(
+        self, response: Any, property_key: str,
+    ) -> DreameLawnMowerStatusBlob | None:
+        """Decode matching cloud values identically for sync and async callers."""
         for entry in self._normalize_cloud_property_entries(response):
             if str(entry.get("key", "")) == property_key:
                 decoded = decode_mower_status_blob(
