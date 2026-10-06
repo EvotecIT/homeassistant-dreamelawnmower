@@ -361,6 +361,18 @@ class DreameCloudSession:
             deadline=deadline,
         )
 
+    async def async_command_device_property(
+        self, did: str, host: str | None, request_id: int,
+        siid: int, piid: int, value: Any, *, deadline: float,
+    ) -> Any:
+        """Write a property once without replaying an uncertain mutation."""
+        return await self._async_rpc(
+            did, host, request_id, "set_properties",
+            [{"did": str(did), "siid": siid, "piid": piid, "value": value}],
+            timeout=max(0.001, deadline - time.monotonic()),
+            deadline=deadline, command=True,
+        )
+
     async def async_read_app_action(
         self,
         did: str,

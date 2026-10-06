@@ -1218,12 +1218,9 @@ class DreameLawnMowerClient(
         added only after the command shape is validated on real hardware.
         """
         _validate_remote_control_step(rotation=rotation, velocity=velocity)
-        return await asyncio.to_thread(
-            self._sync_remote_control_move_step,
-            rotation,
-            velocity,
-            prompt,
-        )
+        from .client_remote_control import async_remote_control_step
+
+        return await async_remote_control_step(self, rotation, velocity, prompt)
 
     async def async_remote_control_stop(self) -> Any:
         """Send a remote-control stop step."""

@@ -1328,6 +1328,15 @@ class _DreameMowerDeviceCommandMixin:
         self, rotation: int = 0, velocity: int = 0, prompt: bool | None = None
     ) -> dict[str, Any] | None:
         """Send remote control command to device."""
+        siid, piid, payload = self._prepare_remote_control_step(
+            rotation, velocity, prompt
+        )
+        return self._protocol.set_property(siid, piid, payload, 1)
+
+    def _prepare_remote_control_step(
+        self, rotation: int, velocity: int, prompt: bool | None,
+    ) -> tuple[int, int, str]:
+        """Prepare the shared remote-control payload and local activity flag."""
         if self.status.fast_mapping:
             raise InvalidActionException("Cannot remote control mower while fast mapping")
 
@@ -1347,7 +1356,7 @@ class _DreameMowerDeviceCommandMixin:
         }
         self._remote_control = True
         mapping = self.property_mapping[DreameMowerProperty.REMOTE_CONTROL]
-        return self._protocol.set_property(mapping["siid"], mapping["piid"], payload, 1)
+        return mapping["siid"], mapping["piid"], payload
 
     def install_voice_pack(self, lang_id: int, url: str, md5: str, size: int) -> dict[str, Any] | None:
         """install a custom language pack"""

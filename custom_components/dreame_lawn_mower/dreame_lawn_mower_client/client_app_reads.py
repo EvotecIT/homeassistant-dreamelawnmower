@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 import math
 import time
 from collections.abc import Callable, Generator, Mapping
-from threading import Event
 from typing import TYPE_CHECKING, Any
 
 from .app_read_transport import AppReadRequest, capture_app_result
-from .client_refresh import _run_state_worker
-from .cloud_wire import cloud_strings
-from .exceptions import DreameLawnMowerConnectionError
+from .client_rpc import async_device_rpc
 
 if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
@@ -69,78 +65,29 @@ async def _async_app_action(
     command: bool = False,
     on_dispatch: Callable[[], None] | None = None,
 ) -> Any:
-    cancelled = Event()
+    async def operation(device: Any, cloud: DreameCloudSession,
+                        protocol: Any, request_id: int) -> Any:
+        if command:
+            return await cloud.async_command_app_action(
+                client._descriptor.did,
+                protocol._host,
+                request_id,
+                action,
+                deadline=deadline,
+                on_dispatch=on_dispatch,
+                timeout=max(0.001, deadline - time.monotonic()),
+            )
+        return await cloud.async_read_app_action(
+            client._descriptor.did,
+            protocol._host,
+            request_id,
+            action,
+            deadline=deadline,
+            strict_response=strict_response,
+            timeout=max(0.001, deadline - time.monotonic()),
+        )
 
-    async def read(cloud: DreameCloudSession) -> Any:
-        try:
-            async with asyncio.timeout(max(0, deadline - time.monotonic())):
-                device = await _run_state_worker(
-                    lambda: client._ensure_device(
-                        deadline=deadline, cancelled=cancelled
-                    ),
-                    cancelled,
-                )
-                protocol = device._protocol.cloud
-                if protocol is None:
-                    raise DreameLawnMowerConnectionError(
-                        "Cloud protocol is unavailable"
-                    )
-                async with protocol.async_rpc_operation(
-                    deadline=deadline
-                ) as request_id:
-                    if client._closing or client._device is not device:
-                        raise DreameLawnMowerConnectionError(
-                            "Device changed during app operation"
-                        )
-                    if not protocol._host:
-                        info = await cloud.async_get_device_info(
-                            client._descriptor.did,
-                            deadline=deadline,
-                        )
-                        if not info or str(info.get("did")) != client._descriptor.did:
-                            raise DreameLawnMowerConnectionError(
-                                "Cloud device identity is invalid"
-                            )
-                        host = info.get(cloud_strings(client._account_type)[9])
-                        if not isinstance(host, str) or not host:
-                            raise DreameLawnMowerConnectionError(
-                                "Cloud device routing is invalid"
-                            )
-                        try:
-                            protocol._handle_device_info(info)
-                        except (KeyError, TypeError, ValueError) as err:
-                            raise DreameLawnMowerConnectionError(
-                                "Cloud device routing is invalid"
-                            ) from err
-                    if client._closing or client._device is not device:
-                        raise DreameLawnMowerConnectionError(
-                            "Device changed during app operation"
-                        )
-                    if command:
-                        return await cloud.async_command_app_action(
-                            client._descriptor.did,
-                            protocol._host,
-                            request_id,
-                            action,
-                            deadline=deadline,
-                            on_dispatch=on_dispatch,
-                            timeout=max(0.001, deadline - time.monotonic()),
-                        )
-                    return await cloud.async_read_app_action(
-                        client._descriptor.did,
-                        protocol._host,
-                        request_id,
-                        action,
-                        deadline=deadline,
-                        strict_response=strict_response,
-                        timeout=max(0.001, deadline - time.monotonic()),
-                    )
-        except TimeoutError as err:
-            raise DreameLawnMowerConnectionError("App operation timed out") from err
-        finally:
-            cancelled.set()
-
-    return await client._async_cloud_read(read)
+    return await async_device_rpc(client, operation, deadline=deadline)
 
 
 async def async_run_app_read(
