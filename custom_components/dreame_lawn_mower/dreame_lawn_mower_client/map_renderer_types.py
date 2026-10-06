@@ -323,7 +323,7 @@ class MapRendererData:
     virtual_walls: list[list[float]] = field(default_factory=lambda: [])
     pathways: list[list[float]] | None = None
     obstacles: list[list[float | str | None]] = field(default_factory=lambda: [])
-    furnitures: list[list[int | float]] | None = None
+    furnitures: list[list[int | float | None]] | None = None
     path: list[list[float | None]] | None = field(default_factory=lambda: [])
     floor_material: dict[int, int] | None = None
     hidden_segments: list[int] | None = None

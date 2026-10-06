@@ -679,12 +679,12 @@ class Furniture(Point):
         self.width = width
         self.height = height
         if x0 and y0 and width and height:
-            self.x1 = x0 + width
-            self.y1 = y0
-            self.x2 = x0 + width
-            self.y2 = y0 + height
-            self.x3 = x0
-            self.y3 = y0 + height
+            self.x1: float | None = x0 + width
+            self.y1: float | None = y0
+            self.x2: float | None = x0 + width
+            self.y2: float | None = y0 + height
+            self.x3: float | None = x0
+            self.y3: float | None = y0 + height
         else:
             self.x1 = None
             self.y1 = None
