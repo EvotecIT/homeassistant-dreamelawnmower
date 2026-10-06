@@ -27,6 +27,7 @@ from .cloud_auth import CloudAuthentication, parse_cloud_authentication
 from .cloud_files import interim_file_params, interim_file_result
 from .cloud_history import history_params, history_result
 from .cloud_wire import (
+    FIRMWARE_APPROVAL_PATH,
     APP_PLUGIN_PATH, DEVICE_INFO_PATH, DEVICE_LIST_PATH, DEVICE_METADATA_PATHS,
     cloud_batch_data_params, cloud_device_info_data,
     cloud_device_list_data, cloud_headers, cloud_login_data, cloud_plugin_params,
@@ -726,13 +727,9 @@ class DreameMowerDreameHomeCloudProtocol:
         return response
 
     def manual_firmware_update(self, lang: str | None = None) -> Any:
-        params = {"did": self._did}
-        if lang:
-            params["lang"] = lang
-
         return self.request(
-            f"{self.get_api_url()}/dreame-user-iot/iotuserbind/manualFirmwareUpdate",
-            json.dumps(params, separators=(",", ":")),
+            f"{self.get_api_url()}{FIRMWARE_APPROVAL_PATH}",
+            cloud_device_info_data(self._did, lang),
             retry_count=0,
         )
 

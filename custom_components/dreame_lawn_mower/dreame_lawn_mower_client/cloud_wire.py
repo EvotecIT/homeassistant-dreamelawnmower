@@ -14,6 +14,7 @@ from .exceptions import DreameLawnMowerAuthError
 
 DEVICE_INFO_PATH = "/dreame-user-iot/iotuserbind/device/info"
 DEVICE_LIST_PATH = "/dreame-user-iot/iotuserbind/device/listV2"
+FIRMWARE_APPROVAL_PATH = "/dreame-user-iot/iotuserbind/manualFirmwareUpdate"
 APP_PLUGIN_PATH = "/dreame-product/upgrades/appplugin"
 type DeviceMetadataKind = Literal["features", "otc", "firmware"]
 DEVICE_METADATA_PATHS: dict[DeviceMetadataKind, str] = {

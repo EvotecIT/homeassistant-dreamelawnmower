@@ -1642,7 +1642,15 @@ class DreameLawnMowerClient(
         language: str | None = None,
     ) -> dict[str, Any]:
         """Trigger the cloud firmware approval step used by the mobile app."""
-        return await asyncio.to_thread(self._sync_approve_firmware_update, language)
+        from .firmware_approval import firmware_approval_result
+
+        async def approve(cloud: _DreameCloudSession) -> dict[str, Any]:
+            raw = await cloud.async_approve_firmware_update(
+                self._descriptor.did, language,
+            )
+            return firmware_approval_result(raw)
+
+        return await self._async_cloud_read(approve)
 
     async def async_get_app_plugin_version(
         self,

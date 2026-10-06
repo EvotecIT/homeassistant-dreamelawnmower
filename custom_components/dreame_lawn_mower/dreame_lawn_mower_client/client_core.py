@@ -45,6 +45,7 @@ from .exceptions import (
 from .exceptions import (
     DreameLawnMowerError as DreameLawnMowerError,
 )
+from .firmware_approval import firmware_approval_result
 from .models import (
     DreameLawnMowerFirmwareUpdateSupport,
     DreameLawnMowerMapView,
@@ -1111,36 +1112,7 @@ class _DreameLawnMowerClientCoreMixin:
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
 
-        result: dict[str, Any] = {
-            "source": "cloud_manual_firmware_update",
-            "available": isinstance(raw, Mapping),
-            "accepted": False,
-            "success": False,
-        }
-        if isinstance(raw, Mapping):
-            code = raw.get("code")
-            success = raw.get("success")
-            data = raw.get("data")
-            inner_code = data.get("code") if isinstance(data, Mapping) else None
-            inner_success = data.get("success") if isinstance(data, Mapping) else None
-            accepted = bool(success) if isinstance(success, bool) else code == 0
-            result.update(
-                {
-                    "code": code,
-                    "accepted": accepted,
-                    "success": accepted,
-                    "msg": _as_optional_text(raw.get("msg")),
-                    "data": _json_safe(data, max_depth=3),
-                    "wrapper_success": success if isinstance(success, bool) else None,
-                    "inner_code": inner_code,
-                    "inner_success": (
-                        inner_success if isinstance(inner_success, bool) else None
-                    ),
-                }
-            )
-        else:
-            result["errors"] = [{"stage": "response", "error": "invalid_response"}]
-        return result
+        return firmware_approval_result(raw)
 
     def _sync_get_app_plugin_version(
         self,

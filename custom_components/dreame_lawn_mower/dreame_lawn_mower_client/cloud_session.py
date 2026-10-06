@@ -21,6 +21,7 @@ from .cloud_wire import (
     DEVICE_INFO_PATH,
     DEVICE_LIST_PATH,
     DEVICE_METADATA_PATHS,
+    FIRMWARE_APPROVAL_PATH,
     DeviceMetadataKind,
     cloud_batch_data_params,
     cloud_device_info_data,
@@ -524,6 +525,16 @@ class DreameCloudSession:
                 "Cloud inventory connection failed"
             ) from err
         raise DreameLawnMowerConnectionError("Cloud inventory request failed")
+
+    async def async_approve_firmware_update(
+        self, did: str, language: str | None = None, *,
+        timeout: float = 20, deadline: float | None = None,
+    ) -> dict[str, Any]:
+        """Submit firmware approval once, retaining the vendor result wrapper."""
+        return await self._async_command_response(
+            FIRMWARE_APPROVAL_PATH, cloud_device_info_data(did, language),
+            timeout=timeout, deadline=deadline,
+        )
 
     async def _async_command_response(
         self,
