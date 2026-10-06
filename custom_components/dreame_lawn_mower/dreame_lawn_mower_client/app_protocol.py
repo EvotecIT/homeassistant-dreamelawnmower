@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from typing import Final
+from typing import Final, TypedDict
 
 from .device_code_semantics import mower_device_code_name
 from .device_types import DreameMowerState
@@ -459,12 +459,39 @@ _HEARTBEAT_TASK_STATUSES = {
 _INACTIVE_HEARTBEAT_TASK_STATUSES = frozenset({"idle", "finished", "failed", "exit"})
 
 
+class _HeartbeatTaskState(TypedDict, total=False):
+    """Validated fields decoded from a supported heartbeat frame."""
+
+    main_state: int
+    sub_state: int
+    task_status: str | None
+    mowing_session_active: bool | None
+    task_resumable: bool | None
+    notes: Sequence[str]
+
+
+class _RuntimeCandidates(TypedDict, total=False):
+    """Optional telemetry decoded from supported runtime frame layouts."""
+
+    pose_x: int
+    pose_y: int
+    heading_deg: float
+    region_id: int
+    task_id: int
+    progress_percent: float | None
+    area_progress_percent: float | None
+    current_area_sqm: float
+    total_area_sqm: float
+    track_segments: tuple[tuple[tuple[int, int], ...], ...]
+    notes: Sequence[str]
+
+
 def _decode_heartbeat_task_state(
     raw: Sequence[int],
     *,
     frame_valid: bool,
     property_key: str | None,
-) -> dict[str, object]:
+) -> _HeartbeatTaskState:
     """Decode the active mowing session state from a supported heartbeat."""
     if not _is_supported_heartbeat_frame(
         raw,
@@ -475,6 +502,7 @@ def _decode_heartbeat_task_state(
 
     main_state = (raw[12] & 0x0F) - 1
     sub_state = raw[13]
+    task_status: str | None
     if main_state != _HEARTBEAT_MOWING_MAIN_STATE:
         task_status = "idle"
     else:
@@ -482,7 +510,7 @@ def _decode_heartbeat_task_state(
             sub_state - _HEARTBEAT_TASK_SUBSTATE_BASE
         )
 
-    result: dict[str, object] = {
+    result: _HeartbeatTaskState = {
         "main_state": main_state,
         "sub_state": sub_state,
         "task_status": task_status,
@@ -502,9 +530,9 @@ def _decode_runtime_blob_candidates(
     raw: Sequence[int],
     *,
     frame_valid: bool,
-) -> dict[str, object]:
+) -> _RuntimeCandidates:
     """Return conservative pose/progress hints from runtime-status payloads."""
-    result: dict[str, object] = {"notes": []}
+    result: _RuntimeCandidates = {"notes": []}
     if not frame_valid:
         return result
 
@@ -523,7 +551,7 @@ def _decode_runtime_blob_candidates(
     return result
 
 
-def _decode_runtime_pose(raw: Sequence[int]) -> dict[str, object] | None:
+def _decode_runtime_pose(raw: Sequence[int]) -> _RuntimeCandidates | None:
     """Decode the 6-byte overlapping 20-bit pose used in app runtime payloads."""
     if len(raw) not in (13, 22, 33, 44) or raw[0] != 0xCE:
         return None
@@ -552,7 +580,7 @@ def _decode_runtime_pose(raw: Sequence[int]) -> dict[str, object] | None:
     }
 
 
-def _decode_runtime_task_block(raw: Sequence[int]) -> dict[str, object] | None:
+def _decode_runtime_task_block(raw: Sequence[int]) -> _RuntimeCandidates | None:
     """Decode the 10-byte mission/progress block from framed runtime payloads."""
     if len(raw) not in (33, 44):
         return None
@@ -596,7 +624,7 @@ def _decode_runtime_task_block(raw: Sequence[int]) -> dict[str, object] | None:
 def _decode_runtime_track_segments(
     raw: Sequence[int],
     pose: Mapping[str, object] | None,
-) -> dict[str, object] | None:
+) -> _RuntimeCandidates | None:
     """Decode runtime trace chunks into map-unit coordinate segments."""
     if not pose:
         return None
