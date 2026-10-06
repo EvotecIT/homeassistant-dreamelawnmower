@@ -145,7 +145,7 @@ class _DreameLawnMowerClientMapsMixin(
     _app_map_object_cache_lock: Lock
     _latest_app_map_inventory_identity: str | None
     _latest_app_map_object_inventory_identity: str | None
-    _latest_app_map_object_names: tuple[str, ...]
+    _latest_app_map_object_names: tuple[str | None, ...]
 
     def _sync_get_current_app_map_index_readback(self) -> int | None:
         """Read only MAPL and return its unambiguous current map index."""
