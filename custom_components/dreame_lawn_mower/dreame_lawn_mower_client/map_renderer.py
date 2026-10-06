@@ -30,7 +30,7 @@ from PIL import (
     PngImagePlugin,
     ImageFilter,
 )
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 from time import sleep
 from io import BytesIO
 from typing import Optional, Tuple
@@ -2533,7 +2533,16 @@ class DreameMowerMapRenderer:
             )
         return new_layer
 
-    def render_path(self, path, color, layer_size, mask, dimensions, width, scale):
+    def render_path(
+        self,
+        path: Sequence[Path],
+        color: _RGBA,
+        layer_size: tuple[int, int],
+        mask: Image.Image | None,
+        dimensions: MapImageDimensions,
+        width: float,
+        scale: float,
+    ) -> Image.Image:
         return render_legacy_mowing_path(
             path, color, layer_size, dimensions, width, scale
         )
