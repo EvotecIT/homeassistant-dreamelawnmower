@@ -38,6 +38,7 @@ class _DreameMowerDeviceContext:
     _protocol: DreameMowerProtocol
     _map_manager: DreameMapMowerMapManager | None
     property_mapping: dict[DreameMowerProperty, dict[str, int]]
+    _read_write_properties: list[DreameMowerProperty]
     action_mapping: dict[DreameMowerAction, dict[str, int]]
 
     info: DreameMowerDeviceInfo | None

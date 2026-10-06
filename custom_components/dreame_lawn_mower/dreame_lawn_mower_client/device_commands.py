@@ -9,7 +9,9 @@ import copy
 import zlib
 import base64
 import traceback
+from collections.abc import Callable, Mapping
 from datetime import datetime
+from enum import Enum
 from random import randrange
 from threading import RLock, Timer
 from typing import Any, Optional
@@ -197,39 +199,44 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
             else:
                 self.status.go_to_zone = None
 
-    def set_property_value(self, prop: str, value: Any):
+    def set_property_value(self, prop: str, value: Any) -> object:
         if prop is not None and value is not None:
-            set_fn = "set_" + prop.lower()
-            if hasattr(self, set_fn):
-                set_fn = getattr(self, set_fn)
-            else:
-                set_fn = None
-
-            prop = prop.upper()
-            if prop in DreameMowerProperty.__members__:
-                prop = DreameMowerProperty(DreameMowerProperty[prop])
-                if prop not in self._read_write_properties:
+            set_fn: Callable[[int], object] | None = getattr(
+                self, "set_" + prop.lower(), None
+            )
+            property_key = prop.upper()
+            resolved: (
+                str | DreameMowerProperty | DreameMowerAutoSwitchProperty
+                | DreameMowerAIProperty | DreameMowerStrAIProperty
+            ) = property_key
+            if property_key in DreameMowerProperty.__members__:
+                resolved = DreameMowerProperty(DreameMowerProperty[property_key])
+                if resolved not in self._read_write_properties:
                     raise InvalidActionException("Invalid property")
-            elif prop in DreameMowerAutoSwitchProperty.__members__:
-                prop = DreameMowerAutoSwitchProperty(DreameMowerAutoSwitchProperty[prop])
-            elif prop in DreameMowerAIProperty.__members__:
-                prop = DreameMowerAIProperty(DreameMowerAIProperty[prop])
-            elif prop in DreameMowerStrAIProperty.__members__:
-                prop = DreameMowerStrAIProperty(DreameMowerStrAIProperty[prop])
+            elif property_key in DreameMowerAutoSwitchProperty.__members__:
+                resolved = DreameMowerAutoSwitchProperty(DreameMowerAutoSwitchProperty[property_key])
+            elif property_key in DreameMowerAIProperty.__members__:
+                resolved = DreameMowerAIProperty(DreameMowerAIProperty[property_key])
+            elif property_key in DreameMowerStrAIProperty.__members__:
+                resolved = DreameMowerStrAIProperty(DreameMowerStrAIProperty[property_key])
             elif set_fn is None:
                 raise InvalidActionException("Invalid property")
 
-            if set_fn is None and self.get_property(prop) is None:
+            if set_fn is None and (
+                not isinstance(resolved, (DreameMowerProperty, DreameMowerAutoSwitchProperty,
+                    DreameMowerAIProperty, DreameMowerStrAIProperty))
+                or self.get_property(resolved) is None
+            ):
                 raise InvalidActionException("Invalid property")
 
-            prop_name = prop.lower() if isinstance(prop, str) else prop.name
+            prop_name = resolved.lower() if isinstance(resolved, str) else resolved.name
 
             if (
                 (
                     self.status.started
                     or not (
-                        prop is DreameMowerProperty.CLEANING_MODE
-                        or prop is DreameMowerAutoSwitchProperty.CLEANING_ROUTE
+                        resolved is DreameMowerProperty.CLEANING_MODE
+                        or resolved is DreameMowerAutoSwitchProperty.CLEANING_ROUTE
                     )
                 )
                 and prop_name in PROPERTY_AVAILABILITY
@@ -237,7 +244,10 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
             ):
                 raise InvalidActionException("Property unavailable")
 
-            def get_int_value(enum, value, enum_list=None):
+            def get_int_value(
+                enum: type[Enum], value: object,
+                enum_list: Mapping[str, object] | None = None,
+            ) -> object:
                 if isinstance(value, str):
                     value = value.upper()
                     if value.isnumeric():
@@ -253,18 +263,19 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
                             return value
                     elif value in enum_list.values():
                         return value
+                return None
 
-            if prop is DreameMowerProperty.CLEANING_MODE:
+            if resolved is DreameMowerProperty.CLEANING_MODE:
                 value = get_int_value(DreameMowerCleaningMode, value)
-            elif prop is DreameMowerProperty.VOICE_ASSISTANT_LANGUAGE:
+            elif resolved is DreameMowerProperty.VOICE_ASSISTANT_LANGUAGE:
                 value = get_int_value(
                     DreameMowerVoiceAssistantLanguage, value, self.status.voice_assistant_language_list
                 )
-            elif prop is DreameMowerAutoSwitchProperty.WIDER_CORNER_COVERAGE:
+            elif resolved is DreameMowerAutoSwitchProperty.WIDER_CORNER_COVERAGE:
                 value = get_int_value(DreameMowerWiderCornerCoverage, value)
-            elif prop is DreameMowerAutoSwitchProperty.CLEANING_ROUTE:
+            elif resolved is DreameMowerAutoSwitchProperty.CLEANING_ROUTE:
                 value = get_int_value(DreameMowerCleaningRoute, value, self.status.cleaning_route_list)
-            elif prop is DreameMowerAutoSwitchProperty.CLEANGENIUS:
+            elif resolved is DreameMowerAutoSwitchProperty.CLEANGENIUS:
                 value = get_int_value(DreameMowerCleanGenius, value)
             elif isinstance(value, bool):
                 value = int(value)
@@ -282,10 +293,10 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
             if value is None or not isinstance(value, int):
                 raise InvalidActionException("Invalid value")
 
-            if prop == DreameMowerProperty.VOLUME:
+            if resolved == DreameMowerProperty.VOLUME:
                 if value < 0 or value > 100:
                     value = None
-            elif prop == DreameMowerProperty.CAMERA_LIGHT_BRIGHTNESS:
+            elif resolved == DreameMowerProperty.CAMERA_LIGHT_BRIGHTNESS:
                 if value < 40 or value > 100:
                     value = None
 
@@ -298,25 +309,25 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
             if set_fn:
                 return set_fn(value)
 
-            if self.get_property(prop) == value or self.set_property(prop, value):
-                return
+            if not isinstance(resolved, (DreameMowerProperty, DreameMowerAutoSwitchProperty,
+                DreameMowerAIProperty, DreameMowerStrAIProperty)):
+                raise InvalidActionException("Invalid property")
+            if self.get_property(resolved) == value or self.set_property(resolved, value):
+                return None
             raise InvalidActionException("Property not updated")
         raise InvalidActionException("Invalid property or value")
 
-    def call_action_value(self, action: str):
+    def call_action_value(self, action: str) -> object:
         if action is not None:
-            if hasattr(self, action):
-                action_fn = getattr(self, action)
-            else:
-                action_fn = None
-
-            action = action.upper()
-            if action in DreameMowerAction.__members__:
-                action = DreameMowerAction(DreameMowerAction[action])
+            action_fn: Callable[[], object] | None = getattr(self, action, None)
+            action_key = action.upper()
+            resolved_action: str | DreameMowerAction = action_key
+            if action_key in DreameMowerAction.__members__:
+                resolved_action = DreameMowerAction(DreameMowerAction[action_key])
             elif action_fn is None:
                 raise InvalidActionException("Invalid action")
 
-            action_name = action.lower() if isinstance(action, str) else action.name
+            action_name = resolved_action.lower() if isinstance(resolved_action, str) else resolved_action.name
 
             if action_name in ACTION_AVAILABILITY and not ACTION_AVAILABILITY[action_name](self):
                 raise InvalidActionException("Action unavailable")
@@ -327,9 +338,11 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
             if action_fn:
                 return action_fn()
 
-            result = self.call_action(action)
+            if isinstance(resolved_action, str):
+                raise InvalidActionException("Invalid action")
+            result = self.call_action(resolved_action)
             if result and result.get("code") == 0:
-                return
+                return None
             raise InvalidActionException("Unable to call action")
         raise InvalidActionException("Invalid action")
 
