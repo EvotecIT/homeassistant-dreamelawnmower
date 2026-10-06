@@ -16,6 +16,8 @@ from .cloud_auth import CloudAuthentication, parse_cloud_authentication
 from .cloud_wire import (
     DEVICE_INFO_PATH,
     DEVICE_LIST_PATH,
+    DEVICE_METADATA_PATHS,
+    DeviceMetadataKind,
     cloud_batch_data_params,
     cloud_device_info_data,
     cloud_device_list_data,
@@ -181,6 +183,24 @@ class DreameCloudSession:
         if not isinstance(result, dict):
             raise DreameLawnMowerConnectionError("Cloud device info is invalid")
         return result
+
+    async def async_get_device_metadata(
+        self,
+        did: str,
+        kind: DeviceMetadataKind,
+        *,
+        language: str | None = None,
+        timeout: float = 20,
+        deadline: float | None = None,
+    ) -> Any:
+        """Read metadata while retaining each endpoint's vendor error contract."""
+        response = await self._async_read_response(
+            DEVICE_METADATA_PATHS[kind], cloud_device_info_data(did, language),
+            timeout=timeout, deadline=deadline,
+        )
+        if response.get("code") == 0 and "data" in response:
+            return response["data"]
+        return response if kind == "firmware" else None
 
     @property
     def authentication(self) -> CloudAuthentication:

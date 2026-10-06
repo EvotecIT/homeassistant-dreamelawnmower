@@ -7,12 +7,19 @@ import hashlib
 import json
 import zlib
 from collections.abc import Sequence
+from typing import Literal
 
 from .const import DREAME_STRINGS, MOVA_STRINGS
 from .exceptions import DreameLawnMowerAuthError
 
 DEVICE_INFO_PATH = "/dreame-user-iot/iotuserbind/device/info"
 DEVICE_LIST_PATH = "/dreame-user-iot/iotuserbind/device/listV2"
+type DeviceMetadataKind = Literal["features", "otc", "firmware"]
+DEVICE_METADATA_PATHS: dict[DeviceMetadataKind, str] = {
+    "features": "/dreame-user-iot/iotuserbind/queryDevicePermit",
+    "otc": "/dreame-user-iot/iotstatus/devOTCInfo",
+    "firmware": "/dreame-user-iot/iotuserbind/checkDeviceVersion",
+}
 
 
 def cloud_rpc_path(strings: Sequence[str], host: str | None) -> str:

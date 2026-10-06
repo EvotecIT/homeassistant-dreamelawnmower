@@ -25,7 +25,8 @@ from .exceptions import (
 )
 from .cloud_auth import CloudAuthentication, parse_cloud_authentication
 from .cloud_wire import (
-    DEVICE_INFO_PATH, DEVICE_LIST_PATH, cloud_batch_data_params, cloud_device_info_data,
+    DEVICE_INFO_PATH, DEVICE_LIST_PATH, DEVICE_METADATA_PATHS,
+    cloud_batch_data_params, cloud_device_info_data,
     cloud_device_list_data, cloud_headers, cloud_login_data,
     cloud_properties_params, cloud_rpc_params, cloud_rpc_path, cloud_strings,
 )
@@ -706,26 +707,18 @@ class DreameMowerDreameHomeCloudProtocol:
         return None
 
     def get_user_features(self, lang: str | None = None) -> Any:
-        params = {"did": self._did}
-        if lang:
-            params["lang"] = lang
-
         response = self.request(
-            f"{self.get_api_url()}/dreame-user-iot/iotuserbind/queryDevicePermit",
-            json.dumps(params, separators=(",", ":")),
+            f"{self.get_api_url()}{DEVICE_METADATA_PATHS['features']}",
+            cloud_device_info_data(self._did, lang),
         )
         if response and "data" in response and response["code"] == 0:
             return response["data"]
         return None
 
     def check_device_version(self, lang: str | None = None) -> Any:
-        params = {"did": self._did}
-        if lang:
-            params["lang"] = lang
-
         response = self.request(
-            f"{self.get_api_url()}/dreame-user-iot/iotuserbind/checkDeviceVersion",
-            json.dumps(params, separators=(",", ":")),
+            f"{self.get_api_url()}{DEVICE_METADATA_PATHS['firmware']}",
+            cloud_device_info_data(self._did, lang),
         )
         if response and response.get("code") == 0 and "data" in response:
             return response["data"]
@@ -743,13 +736,9 @@ class DreameMowerDreameHomeCloudProtocol:
         )
 
     def get_device_otc_info(self, lang: str | None = None) -> Any:
-        params = {"did": self._did}
-        if lang:
-            params["lang"] = lang
-
         response = self.request(
-            f"{self.get_api_url()}/dreame-user-iot/iotstatus/devOTCInfo",
-            json.dumps(params, separators=(",", ":")),
+            f"{self.get_api_url()}{DEVICE_METADATA_PATHS['otc']}",
+            cloud_device_info_data(self._did, lang),
         )
         if response and "data" in response and response["code"] == 0:
             return response["data"]

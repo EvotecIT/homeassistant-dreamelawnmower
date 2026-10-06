@@ -272,6 +272,81 @@ def login_response(strings, token="access-secret"):
 
 
 @pytest.mark.parametrize("account_type", ["dreame", "mova"])
+@pytest.mark.parametrize("kind", ["features", "otc", "firmware"])
+@pytest.mark.parametrize("rejected", [False, True])
+def test_public_device_metadata_reads_preserve_endpoint_contracts(
+    monkeypatch, account_type, kind, rejected,
+):
+    strings = cloud_strings(account_type)
+    paths = {
+        "features": "/dreame-user-iot/iotuserbind/queryDevicePermit",
+        "otc": "/dreame-user-iot/iotstatus/devOTCInfo",
+        "firmware": "/dreame-user-iot/iotuserbind/checkDeviceVersion",
+    }
+    payload = {"curVersion": "1.0", "newVersion": "1.1", "hasNewFirmware": True}
+    response = {"code": 17, "msg": "unavailable"} if rejected else {
+        "code": 0, "data": payload,
+    }
+    language = None if rejected else "pl"
+    requests = []
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        requests.append(request.path)
+        assert request.path == paths[kind]
+        assert request.method == "POST"
+        assert await request.json() == (
+            {"did": "42", "lang": "pl"} if language else {"did": "42"}
+        )
+        return web.json_response(response)
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **{**OPTIONS, "account_type": account_type}, session=session,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type=account_type, country="eu",
+                ),
+            )
+            try:
+                if kind == "features":
+                    result = await client.async_get_cloud_user_features(
+                        language=language,
+                    )
+                elif kind == "otc":
+                    result = await client.async_get_cloud_device_otc_info(
+                        language=language,
+                    )
+                else:
+                    result = await client.async_get_cloud_firmware_check(
+                        language=language, include_raw=True,
+                    )
+                if kind != "firmware":
+                    assert result == (None if rejected else payload)
+                else:
+                    assert result["source"] == "cloud_check_device_version"
+                    assert result["available"] is not rejected
+                    assert result["raw"] == (response if rejected else payload)
+                    if rejected:
+                        assert result["errors"][0]["code"] == 17
+                        assert result["errors"][0]["error"] == "cloud_error"
+                    else:
+                        assert result["current_version"] == "1.0"
+                        assert result["latest_version"] == "1.1"
+                        assert result["update_available"] is True
+                assert requests == [paths[kind]]
+                assert client._device is None
+                assert not client._cloud_read_tasks
+            finally:
+                await client.async_close()
+            assert not session.closed
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("account_type", ["dreame", "mova"])
 def test_discovery_uses_borrowed_session_and_shared_wire(monkeypatch, account_type):
     strings = cloud_strings(account_type)
     seen = []

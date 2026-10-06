@@ -1540,7 +1540,11 @@ class DreameLawnMowerClient(
         language: str | None = None,
     ) -> Any:
         """Fetch raw cloud feature/permit data from the mobile app endpoint."""
-        return await asyncio.to_thread(self._sync_get_cloud_user_features, language)
+        return await self._async_cloud_read(
+            lambda cloud: cloud.async_get_device_metadata(
+                self._descriptor.did, "features", language=language,
+            )
+        )
 
     async def async_get_cloud_device_otc_info(
         self,
@@ -1548,7 +1552,11 @@ class DreameLawnMowerClient(
         language: str | None = None,
     ) -> Any:
         """Fetch read-only cloud OTC metadata from the mobile app endpoint."""
-        return await asyncio.to_thread(self._sync_get_cloud_device_otc_info, language)
+        return await self._async_cloud_read(
+            lambda cloud: cloud.async_get_device_metadata(
+                self._descriptor.did, "otc", language=language,
+            )
+        )
 
     async def async_get_cloud_firmware_check(
         self,
@@ -1557,11 +1565,25 @@ class DreameLawnMowerClient(
         include_raw: bool = False,
     ) -> dict[str, Any]:
         """Fetch the app-approved mower firmware check payload."""
-        return await asyncio.to_thread(
-            self._sync_get_cloud_firmware_check,
-            language,
-            include_raw,
-        )
+        from .client_core_helpers import _normalize_cloud_firmware_check
+
+        async def read(cloud: _DreameCloudSession) -> dict[str, Any]:
+            raw = await cloud.async_get_device_metadata(
+                self._descriptor.did, "firmware", language=language,
+            )
+            result = _normalize_cloud_firmware_check(
+                raw,
+                current_version=_as_optional_text(
+                    getattr(
+                        getattr(self._device, "info", None), "firmware_version", None,
+                    )
+                ),
+            )
+            if include_raw:
+                result["raw"] = _json_safe(raw, max_depth=4)
+            return result
+
+        return await self._async_cloud_read(read)
 
     async def async_approve_firmware_update(
         self,
