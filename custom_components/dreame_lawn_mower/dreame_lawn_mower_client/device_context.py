@@ -151,3 +151,14 @@ class _DreameMowerDeviceContext:
         """Call external listener when a property changed"""
         if self._update_callback:
             self._update_callback()
+
+    @property
+    def device_connected(self) -> bool:
+        """Return connection status of the device."""
+        return self._protocol.connected
+
+    @property
+    def cloud_connected(self) -> bool:
+        """Return connection status of the device."""
+        cloud = self._protocol.cloud
+        return cloud is not None and cloud.connected

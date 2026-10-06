@@ -28,6 +28,21 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_manager im
 )
 
 
+@pytest.mark.parametrize("connected", [False, True])
+@pytest.mark.parametrize("cloud_connected", [None, False, True])
+def test_device_connection_properties_return_booleans(connected, cloud_connected):
+    cloud = (
+        None if cloud_connected is None
+        else SimpleNamespace(connected=cloud_connected)
+    )
+    mower = SimpleNamespace(
+        _protocol=SimpleNamespace(connected=connected, cloud=cloud)
+    )
+
+    assert DreameMowerDevice.device_connected.fget(mower) is connected
+    assert DreameMowerDevice.cloud_connected.fget(mower) is bool(cloud_connected)
+
+
 @pytest.mark.parametrize(
     "age,active,running,failure_age,map_recovery,expected",
     [

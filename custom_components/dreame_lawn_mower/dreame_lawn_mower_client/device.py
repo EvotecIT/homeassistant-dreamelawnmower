@@ -841,16 +841,3 @@ class DreameMowerDevice(
     def name(self) -> str:
         """Return the name of the device."""
         return self._name
-
-    @property
-    def device_connected(self) -> bool:
-        """Return connection status of the device."""
-        return self._protocol.connected
-
-    @property
-    def cloud_connected(self) -> bool:
-        """Return connection status of the device."""
-        return (
-            self._protocol.cloud
-            and self._protocol.cloud.connected
-        )
