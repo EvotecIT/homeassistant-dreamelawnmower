@@ -3255,7 +3255,16 @@ class DreameMowerMapRenderer:
                 )
         return new_layer
 
-    def render_obstacle(self, obstacle, layer_size, dimensions, size, rotation, scale):
+    def render_obstacle(
+        self,
+        obstacle: Obstacle,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        size: float,
+        rotation: int | None,
+        scale: int,
+    ) -> Image.Image | None:
+        rotation = rotation or 0
         if obstacle.ignore_status == 1:
             if (
                 obstacle.type.value not in self._obstacle_hidden_icons
@@ -3277,25 +3286,22 @@ class DreameMowerMapRenderer:
             icon_size = size * scale * (1 if obstacle.ignore_status == 1 else 0.85)
             draw = ImageDraw.Draw(new_layer, "RGBA")
 
-            if obstacle.ignore_status != 2 and self._obstacle_background is None:
-                self._obstacle_background = Image.open(BytesIO(base64.b64decode(MAP_ICON_OBSTACLE_BG_DREAME))).convert(
-                    "RGBA"
-                )
-                s = int(size * scale * 2)
-                self._obstacle_background.thumbnail((s, s), Image.Resampling.LANCZOS)
-                self._obstacle_background = self._obstacle_background.rotate(-rotation, expand=1)
-
-            if obstacle.ignore_status == 2 and self._obstacle_hidden_background is None:
-                self._obstacle_hidden_background = Image.open(
-                    BytesIO(base64.b64decode(MAP_ICON_OBSTACLE_HIDDEN_BG_DREAME))
-                ).convert("RGBA")
+            if obstacle.ignore_status == 2:
+                if self._obstacle_hidden_background is None:
+                    self._obstacle_hidden_background = Image.open(
+                        BytesIO(base64.b64decode(MAP_ICON_OBSTACLE_HIDDEN_BG_DREAME))
+                    ).convert("RGBA")
+                background_image = self._obstacle_hidden_background.copy()
                 s = int((size * 0.75) * scale * 2)
-                self._obstacle_hidden_background.thumbnail((s, s), Image.Resampling.LANCZOS)
-                self._obstacle_hidden_background = self._obstacle_hidden_background.rotate(-rotation, expand=1)
-
-            background_image = (
-                self._obstacle_hidden_background if obstacle.ignore_status == 2 else self._obstacle_background
-            )
+            else:
+                if self._obstacle_background is None:
+                    self._obstacle_background = Image.open(
+                        BytesIO(base64.b64decode(MAP_ICON_OBSTACLE_BG_DREAME))
+                    ).convert("RGBA")
+                background_image = self._obstacle_background.copy()
+                s = int(size * scale * 2)
+            background_image.thumbnail((s, s), Image.Resampling.LANCZOS)
+            background_image = background_image.rotate(-rotation, expand=1)
             bg_size = int((min(background_image.size[1], background_image.size[0]) / scale / 4) * 1.25)
             offset = int(-(size * (0.15 if obstacle.ignore_status == 2 else 0.2)) * scale)
 
@@ -3373,6 +3379,8 @@ class DreameMowerMapRenderer:
             )
 
             return new_layer
+
+        return None
 
     def render_cruise_point(self, index, cruise_point, layer_size, dimensions, size, rotation, scale):
         new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))

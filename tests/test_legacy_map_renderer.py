@@ -22,6 +22,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
     MapPixelType,
     MapRendererResources,
     Obstacle,
+    ObstacleType,
     Point,
     RecoveryMapType,
     Segment,
@@ -59,6 +60,22 @@ def test_router_icon_resizes_when_reusing_renderer() -> None:
         position, (100, 100), dimensions, 30, 0, 1,
     )
     assert resized.tobytes() == fresh.tobytes()
+
+
+@pytest.mark.parametrize("ignore_status", [0, 1, 2])
+def test_obstacle_background_tracks_marker_size_and_rotation(
+    ignore_status: int,
+) -> None:
+    obstacle = Obstacle(2500, 2500, ObstacleType.WIRE, 100, ignore_status=ignore_status)
+    dimensions = MapImageDimensions(0, 0, 100, 100, 50)
+    renderer = DreameMowerMapRenderer()
+    renderer.render_obstacle(obstacle, (100, 100), dimensions, 10, 0, 1)
+    actual = renderer.render_obstacle(obstacle, (100, 100), dimensions, 20, 90, 1)
+    expected = DreameMowerMapRenderer().render_obstacle(
+        obstacle, (100, 100), dimensions, 20, 90, 1,
+    )
+    assert actual is not None and expected is not None
+    assert actual.tobytes() == expected.tobytes()
 
 
 @pytest.mark.parametrize("icon_set", [0, 1, 2, 3])
