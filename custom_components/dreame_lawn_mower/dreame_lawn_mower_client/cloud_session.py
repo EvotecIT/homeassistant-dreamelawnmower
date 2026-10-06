@@ -7,7 +7,7 @@ import json
 import math
 import re
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from aiohttp import BasicAuth, ClientError, ClientSession, ClientTimeout
@@ -20,6 +20,8 @@ from .cloud_wire import (
     cloud_headers,
     cloud_login_data,
     cloud_properties_params,
+    cloud_rpc_params,
+    cloud_rpc_path,
     cloud_strings,
 )
 from .exceptions import DreameLawnMowerAuthError, DreameLawnMowerConnectionError
@@ -160,6 +162,35 @@ class DreameCloudSession:
             raise DreameLawnMowerConnectionError("Cloud device info is invalid")
         return result
 
+    async def async_read_device_properties(
+        self,
+        did: str,
+        host: str | None,
+        request_id: int,
+        properties: Sequence[Mapping[str, int | str]],
+        *,
+        timeout: float = 20,
+        deadline: float | None = None,
+    ) -> Any:
+        """Send only a property-read RPC; the device owner supplies its request ID."""
+        payload = await self._async_read_response(
+            f"/{cloud_rpc_path(self._strings, host)}",
+            json.dumps(
+                cloud_rpc_params(
+                    did, request_id, "get_properties",
+                    [dict(row) for row in properties],
+                ),
+                separators=(",", ":"),
+            ),
+            timeout=timeout, deadline=deadline,
+        )
+        if payload.get("code") == 80001:
+            return None
+        if payload.get("code") != 0:
+            raise DreameLawnMowerConnectionError("Device property read was rejected")
+        data = payload.get("data")
+        return data.get("result") if isinstance(data, Mapping) else None
+
     async def _async_read(
         self,
         path: str,
@@ -168,6 +199,17 @@ class DreameCloudSession:
         timeout: float,
         deadline: float | None,
     ) -> Any:
+        payload = await self._async_read_response(
+            path, data, timeout=timeout, deadline=deadline,
+        )
+        if payload.get("code") != 0:
+            raise DreameLawnMowerConnectionError("Cloud inventory request was rejected")
+        return payload.get("data")
+
+    async def _async_read_response(
+        self, path: str, data: str | None, *,
+        timeout: float, deadline: float | None,
+    ) -> dict[str, Any]:
         """Serialize a read-only request, authentication, and bounded retries."""
         end = self._deadline(timeout, deadline)
         try:
@@ -197,11 +239,7 @@ class DreameCloudSession:
                             raise DreameLawnMowerConnectionError(
                                 f"Cloud inventory request failed: HTTP {status}"
                             )
-                        if payload.get("code") != 0:
-                            raise DreameLawnMowerConnectionError(
-                                "Cloud inventory request was rejected"
-                            )
-                        return payload.get("data")
+                        return payload
         except TimeoutError as err:
             raise DreameLawnMowerConnectionError("Cloud inventory timed out") from err
         except ClientError as err:

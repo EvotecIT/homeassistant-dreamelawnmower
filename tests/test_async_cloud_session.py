@@ -1060,3 +1060,60 @@ def test_public_cloud_properties_preserves_wire_and_raw_values(
     asyncio.run(scenario())
     assert calls.count(strings[17]) == 1
     assert len(calls) == 3
+
+
+@pytest.mark.parametrize("account_type", ["dreame", "mova"])
+@pytest.mark.parametrize("response,expected", [
+    ({"code": 0, "data": {"result": [{"code": 0, "value": 7}]}},
+     [{"code": 0, "value": 7}]),
+    ({"code": 80001, "data": {"result": [{"value": "stale"}]}}, None),
+    ({"code": 0, "success": True, "data": ""}, None),
+    ({"code": 0, "data": {}}, None),
+])
+def test_native_device_read_preserves_rpc_envelope_and_absent_results(
+    monkeypatch, account_type, response, expected,
+):
+    strings = cloud_strings(account_type)
+    properties = [{"did": "1", "siid": 2, "piid": 1}]
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        assert request.path == f"/{strings[37]}-hub/{strings[27]}/{strings[38]}"
+        assert await request.json() == {
+            "did": "42", "id": 19,
+            "data": {
+                "did": "42", "id": 19,
+                "method": "get_properties", "params": properties,
+            },
+        }
+        return web.json_response(response)
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            cloud = DreameCloudSession(
+                session, **{**OPTIONS, "account_type": account_type},
+            )
+            assert await cloud.async_read_device_properties(
+                "42", "hub.example.invalid", 19, properties,
+            ) == expected
+            assert not session.closed
+
+    asyncio.run(scenario())
+
+
+def test_native_device_read_rejects_failed_rpc_even_with_result(monkeypatch):
+    strings = cloud_strings("dreame")
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        return web.json_response({"code": 500, "data": {"result": [{"value": 7}]}})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            cloud = DreameCloudSession(session, **OPTIONS)
+            with pytest.raises(DreameLawnMowerConnectionError, match="rejected"):
+                await cloud.async_read_device_properties("42", None, 1, [])
+
+    asyncio.run(scenario())
