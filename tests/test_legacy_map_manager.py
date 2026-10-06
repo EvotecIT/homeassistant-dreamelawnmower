@@ -135,3 +135,43 @@ def test_partial_frame_waits_for_pending_initial_map():
     assert manager._current_frame_id is None
     assert manager._map_request_time == 12000
     manager._request_i_map.assert_not_called()
+
+
+def test_next_partial_frame_can_retry_after_transport_failure() -> None:
+    from unittest.mock import Mock
+
+    protocol = Mock()
+    protocol.action.side_effect = [OSError("connection lost"), {"code": 0, "out": []}]
+    manager = DreameMapMowerMapManager(protocol)
+
+    assert manager._request_next_p_map(1, 2) is False
+    assert manager._request_next_p_map(1, 2) is True
+    assert protocol.action.call_count == 2
+
+
+def test_next_partial_frame_can_retry_after_device_rejection() -> None:
+    from unittest.mock import Mock
+
+    protocol = Mock()
+    protocol.action.side_effect = [{"code": 1}, {"code": 0, "out": []}]
+    manager = DreameMapMowerMapManager(protocol)
+
+    assert manager._request_next_p_map(1, 2) is False
+    assert manager._request_next_p_map(1, 2) is True
+    assert protocol.action.call_count == 2
+
+
+def test_next_partial_frame_suppresses_duplicate_only_while_inflight() -> None:
+    from unittest.mock import Mock
+
+    protocol = Mock()
+    manager = DreameMapMowerMapManager(protocol)
+
+    def respond(*args):
+        assert manager._request_next_p_map(1, 2) is None
+        return {"code": 0, "out": []}
+
+    protocol.action.side_effect = respond
+    assert manager._request_next_p_map(1, 2) is True
+    assert manager._request_next_p_map(1, 2) is True
+    assert protocol.action.call_count == 2

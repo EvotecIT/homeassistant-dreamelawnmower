@@ -417,17 +417,19 @@ class DreameMapMowerMapManager:
 
         self._request_queue[key] = True
         _LOGGER.info("Request next P map: %s", frame_id)
-        result = self._request_map(
-            {
-                MAP_REQUEST_PARAMETER_MAP_ID: map_id,
-                MAP_REQUEST_PARAMETER_REQ_TYPE: 1,
-                MAP_REQUEST_PARAMETER_FRAME_ID: frame_id,
-                MAP_REQUEST_PARAMETER_FRAME_TYPE: MapFrameType.P.name,
-            }
-        )
+        try:
+            result = self._request_map(
+                {
+                    MAP_REQUEST_PARAMETER_MAP_ID: map_id,
+                    MAP_REQUEST_PARAMETER_REQ_TYPE: 1,
+                    MAP_REQUEST_PARAMETER_FRAME_ID: frame_id,
+                    MAP_REQUEST_PARAMETER_FRAME_TYPE: MapFrameType.P.name,
+                }
+            )
+        finally:
+            # This is an in-flight guard, not a permanent record of failed work.
+            self._request_queue.pop(key, None)
         if self._map_action_succeeded(result):
-            del self._request_queue[key]
-
             object_name = None
             raw_map_data = None
             timestamp = None
