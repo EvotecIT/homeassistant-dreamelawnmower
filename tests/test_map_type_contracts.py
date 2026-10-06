@@ -113,3 +113,19 @@ def test_floor_material_does_not_infer_direction_without_bounds() -> None:
     data.segments = {3: segment}
     map_decoder.DreameMowerMapDecoder.set_floor_material(data)
     assert data.floor_material is None
+
+
+def test_material_change_clears_previously_rotated_direction() -> None:
+    data = MapData()
+    segment = Segment(3, x0=0, y0=0, x1=100, y1=50)
+    data.segments = {3: segment}
+    data.rotation = 90
+    segment.floor_material = 1
+    segment.floor_material_direction = 0
+    map_decoder.DreameMowerMapDecoder.set_floor_material(data)
+    assert segment.floor_material_rotated_direction == 90
+    segment.floor_material = 2
+    segment.floor_material_direction = None
+    map_decoder.DreameMowerMapDecoder.set_floor_material(data)
+    assert segment.floor_material_rotated_direction is None
+    assert data.floor_material == {3: 3}

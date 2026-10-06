@@ -166,11 +166,11 @@ Both map decoder entry points validate the binary header and declared image area
 Incomplete images, negative dimensions, and absent binary data return unavailable
 results; complete images remain valid without optional JSON metadata.
 
-The full standalone suite passes 2,669 tests with one skipped, including incomplete-image rejection and complete-image compatibility cases. Three robot-position boundary cases fail before the bounds correction and pass afterward; normal pixel lookup remains covered. Timestamp regressions use compressed payloads through the real decoder. An
+The full standalone suite passes 2,678 tests with one skipped, including incomplete-image rejection and complete-image compatibility cases. Three robot-position boundary cases fail before the bounds correction and pass afterward; normal pixel lookup remains covered. Timestamp regressions use compressed payloads through the real decoder. An
 independent review identified the affected refresh consumer; its correction
 passed targeted confirmation. Component/translation tests pass on HA 2025.1
-(73 passed, one version-specific skip) and HA 2026.9.4 (74 passed) at the ordering
-candidate, before the narrow refresh-loop correction. No physical-device or
+(73 passed, one version-specific skip) and HA 2026.9.4 (74 passed) on the current
+segment-consumer candidate. No physical-device or
 frontend-rendering claim follows from these local tests.
 
 The legacy mowing-trail renderer uses the shared map drawing module. It draws
@@ -205,8 +205,9 @@ capabilities. Neighbor coloring retains distinct colors where four suffice and
 handles absent segments. A focused regression verifies that a new cleaning record
 without a mode clears the previous mode. Floor-material codes and rotated
 directions are covered by focused tests; geometry-dependent orientation is not
-inferred when bounds are unavailable. This consumer update passes 89 focused
-tests; the full-suite count above predates it.
+inferred when bounds are unavailable. Changing to a material without direction
+clears the previously rotated direction. The standalone and HA component suites
+above cover these consumer updates.
 
 ## Release qualification
 

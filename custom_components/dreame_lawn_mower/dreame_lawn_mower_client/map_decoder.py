@@ -1719,6 +1719,8 @@ class DreameMowerMapDecoder:
                 direction if map_data.rotation in (0, 180)
                 else 90 if direction == 0 else 0
             )
+        else:
+            segment.floor_material_rotated_direction = None
         if material <= 0 or material > 2:
             floor_material[segment_id] = 0
         elif material == 2:
