@@ -7,9 +7,9 @@ import io
 import json
 import logging
 import time
+from collections.abc import Sequence
 from functools import cmp_to_key
 from io import BytesIO
-from typing import Any
 
 from PIL import (
     Image,
@@ -55,6 +55,7 @@ from .const import (
 from .device_types import (
     PathType,
 )
+from .map_json_types import JsonMapDocument, JsonMapEntity, JsonMapPixelLayer
 from .map_renderer_types import (
     MapRendererLayer,
 )
@@ -75,12 +76,14 @@ class DreameMowerMapDataJsonRenderer:
 
     def __init__(self) -> None:
         self._map_data: MapData | None = None
-        self._map_data_json: dict[str, Any] | None = None
+        self._map_data_json: JsonMapDocument | None = None
         self._left: int = 0
         self._top: int = 0
         self._grid_size: int = 0
         self.render_complete: bool = True
-        self._layers: dict[MapRendererLayer, dict[str, Any]] = {}
+        self._layers: dict[MapRendererLayer, list[JsonMapEntity]] = {}
+        self._positions: dict[MapRendererLayer, JsonMapEntity] = {}
+        self._image_layers: list[JsonMapPixelLayer] = []
 
         self._default_map_data: bytes = base64.b64decode(DEFAULT_MAP_DATA)
         self._default_map_image = Image.open(
@@ -88,7 +91,7 @@ class DreameMowerMapDataJsonRenderer:
         ).convert("RGBA")
 
     @staticmethod
-    def _coordinate_tuple_sort(a: list[float], b: list[float]) -> int:
+    def _coordinate_tuple_sort(a: Sequence[float], b: Sequence[float]) -> int:
         xA = a[0]
         yA = a[1]
         xB = b[0]
@@ -163,7 +166,7 @@ class DreameMowerMapDataJsonRenderer:
             )
             self._grid_size = round(map_data.dimensions.grid_size / 10)
 
-        map_data_json = {
+        map_data_json: JsonMapDocument = {
             MAP_DATA_JSON_PARAMETER_CLASS: MAP_DATA_JSON_CLASS,
             MAP_DATA_JSON_PARAMETER_SIZE: {
                 MAP_DATA_JSON_PARAMETER_X: DreameMowerMapDataJsonRenderer.MAX,
@@ -182,9 +185,9 @@ class DreameMowerMapDataJsonRenderer:
             if (
                 self._map_data is None
                 or self._map_data.robot_position != map_data.robot_position
-                or not self._layers.get(MapRendererLayer.ROBOT)
+                or not self._positions.get(MapRendererLayer.ROBOT)
             ):
-                self._layers[MapRendererLayer.ROBOT] = {
+                self._positions[MapRendererLayer.ROBOT] = {
                     MAP_DATA_JSON_PARAMETER_TYPE: (
                         MAP_DATA_JSON_PARAMETER_ROBOT_POSITION
                     ),
@@ -202,16 +205,16 @@ class DreameMowerMapDataJsonRenderer:
                     },
                 }
             map_data_json[MAP_DATA_JSON_PARAMETER_ENTITIES].append(
-                self._layers[MapRendererLayer.ROBOT]
+                self._positions[MapRendererLayer.ROBOT]
             )
 
         if map_data.charger_position:
             if (
                 self._map_data is None
                 or self._map_data.charger_position != map_data.charger_position
-                or not self._layers.get(MapRendererLayer.CHARGER)
+                or not self._positions.get(MapRendererLayer.CHARGER)
             ):
-                self._layers[MapRendererLayer.CHARGER] = {
+                self._positions[MapRendererLayer.CHARGER] = {
                     MAP_DATA_JSON_PARAMETER_TYPE: (
                         MAP_DATA_JSON_PARAMETER_CHARGER_POSITION
                     ),
@@ -229,7 +232,7 @@ class DreameMowerMapDataJsonRenderer:
                     },
                 }
             map_data_json[MAP_DATA_JSON_PARAMETER_ENTITIES].append(
-                self._layers[MapRendererLayer.CHARGER]
+                self._positions[MapRendererLayer.CHARGER]
             )
 
         if map_data.no_go_areas:
@@ -442,7 +445,7 @@ class DreameMowerMapDataJsonRenderer:
 
         floor_pixels = []
         wall_pixels = []
-        segments = {}
+        segments: dict[int, list[list[int]]] = {}
 
         if (
             self._map_data is None
@@ -450,23 +453,19 @@ class DreameMowerMapDataJsonRenderer:
             or self._map_data.active_areas != map_data.active_areas
             or self._map_data.segments != map_data.segments
             or self._map_data.data != map_data.data
-            or not self._layers.get(MapRendererLayer.IMAGE)
+            or not self._image_layers
         ):
-            self._layers[MapRendererLayer.IMAGE] = []
+            self._image_layers = []
             for y in range(map_data.dimensions.height):
                 for x in range(map_data.dimensions.width):
                     segment_id = int(map_data.pixel_type[x, y])
                     coords = [
-                        (x + (self._left / self._grid_size)),
-                        (y + (self._top / self._grid_size)),
+                        round(x + (self._left / self._grid_size)),
+                        round(
+                            DreameMowerMapDataJsonRenderer.MAX / self._grid_size
+                            - (y + (self._top / self._grid_size))
+                        ),
                     ]
-
-                    coords[1] = (
-                        DreameMowerMapDataJsonRenderer.MAX / self._grid_size
-                    ) - coords[1]
-
-                    coords[0] = round(coords[0])
-                    coords[1] = round(coords[1])
 
                     if segment_id == MapPixelType.WALL.value:
                         wall_pixels.append(coords)
@@ -490,7 +489,7 @@ class DreameMowerMapDataJsonRenderer:
                             segments[segment_id].append(coords)
 
             if floor_pixels:
-                self._layers[MapRendererLayer.IMAGE].append(
+                self._image_layers.append(
                     {
                         MAP_DATA_JSON_PARAMETER_TYPE: MAP_DATA_JSON_PARAMETER_FLOOR,
                         MAP_DATA_JSON_PARAMETER_PIXELS: [
@@ -507,7 +506,7 @@ class DreameMowerMapDataJsonRenderer:
                 )
 
             if wall_pixels:
-                self._layers[MapRendererLayer.IMAGE].append(
+                self._image_layers.append(
                     {
                         MAP_DATA_JSON_PARAMETER_TYPE: MAP_DATA_JSON_PARAMETER_WALL,
                         MAP_DATA_JSON_PARAMETER_PIXELS: [
@@ -530,7 +529,7 @@ class DreameMowerMapDataJsonRenderer:
                         name = f"Room {k}"
                         if k in map_data.segments:
                             name = map_data.segments[k].name
-                    self._layers[MapRendererLayer.IMAGE].append(
+                    self._image_layers.append(
                         {
                             MAP_DATA_JSON_PARAMETER_TYPE: (
                                 MAP_DATA_JSON_PARAMETER_SEGMENT
@@ -558,7 +557,7 @@ class DreameMowerMapDataJsonRenderer:
                         }
                     )
 
-            for layers in self._layers[MapRendererLayer.IMAGE]:
+            for layers in self._image_layers:
                 pixels = layers[MAP_DATA_JSON_PARAMETER_PIXELS]
                 layers[MAP_DATA_JSON_PARAMETER_DIMENSIONS] = {
                     MAP_DATA_JSON_PARAMETER_X: {
@@ -684,7 +683,7 @@ class DreameMowerMapDataJsonRenderer:
                 layers[MAP_DATA_JSON_PARAMETER_PIXELS] = []
 
         map_data_json[MAP_DATA_JSON_PARAMETER_LAYERS].extend(
-            self._layers[MapRendererLayer.IMAGE]
+            self._image_layers
         )
 
         self._map_data = map_data
