@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from functools import wraps
-from typing import Any
+from threading import RLock
+from typing import Any, Concatenate, Protocol
 
 from .batch_device_data import decode_batch_schedule_payload
 from .client_map_helpers import _app_map_entries_are_valid, _normalize_app_map_entries
@@ -44,11 +45,17 @@ SCHEDULE_READ_DEADLINE_SECONDS = 10.0
 SCHEDULE_READ_TIMEOUT_SECONDS = 5.0
 
 
-def _serialized_schedule_operation(method):
+class _ScheduleOperationOwner(Protocol):
+    _schedule_operation_lock: RLock
+
+
+def _serialized_schedule_operation[OwnerT: _ScheduleOperationOwner, **P, ResultT](
+    method: Callable[Concatenate[OwnerT, P], ResultT],
+) -> Callable[Concatenate[OwnerT, P], ResultT]:
     """Keep schedule reads and read/modify/write operations coherent."""
 
     @wraps(method)
-    def serialized(self, *args, **kwargs):
+    def serialized(self: OwnerT, /, *args: P.args, **kwargs: P.kwargs) -> ResultT:
         with self._schedule_operation_lock:
             return method(self, *args, **kwargs)
 
@@ -59,6 +66,12 @@ class _DreameLawnMowerClientSchedulesMixin(
     _DreameLawnMowerScheduleTablesMixin, _DreameLawnMowerScheduleEditsMixin
 ):
     """Own schedule protocol operations independently of other settings."""
+
+    _schedule_operation_lock: RLock
+    _schedule_protocols: dict[int, str]
+    _schedule_document_versions: dict[int, int]
+    _schedule_document_retry_versions: dict[int, int]
+    _account_type: str
 
     def _sync_require_schedule_write_allowed(self) -> None:
         """Check fresh normalized task state inside the schedule operation lock."""
