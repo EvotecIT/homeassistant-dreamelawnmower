@@ -52,6 +52,25 @@ class DreameMowerMapDecoder:
     HEADER_SIZE = 27
 
     @staticmethod
+    def _metadata_cleanset(value: object) -> dict[str, list[int]] | None:
+        """Validate the record shape consumed by segment cleaning settings."""
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except (ValueError, TypeError):
+                return None
+        if not isinstance(value, dict):
+            return None
+        result: dict[str, list[int]] = {}
+        for key, record in value.items():
+            if not isinstance(key, str) or not isinstance(record, list):
+                return None
+            if len(record) < 4 or not all(isinstance(item, int) for item in record):
+                return None
+            result[key] = [item for item in record if isinstance(item, int)]
+        return result
+
+    @staticmethod
     def _metadata_coordinates(value: object) -> tuple[float, float] | None:
         """Read an optional finite coordinate pair without coercing wire values."""
         if not isinstance(value, list) or len(value) < 2:
@@ -514,24 +533,25 @@ class DreameMowerMapDecoder:
                         if isinstance(segment, int)
                     ]
 
-                if data_json.get("da2"):
-                    if data_json["da2"].get("areas"):
-                        map_data.active_areas = []
-                        for area in data_json["da2"]["areas"]:
-                            x_coords = sorted([area[0], area[2]])
-                            y_coords = sorted([area[1], area[3]])
-                            map_data.active_areas.append(
-                                Area(
-                                    x_coords[0],
-                                    y_coords[0],
-                                    x_coords[1],
-                                    y_coords[0],
-                                    x_coords[1],
-                                    y_coords[1],
-                                    x_coords[0],
-                                    y_coords[1],
-                                )
+                area_data = data_json.get("da2")
+                areas = area_data.get("areas") if isinstance(area_data, dict) else None
+                if isinstance(areas, list) and areas:
+                    map_data.active_areas = []
+                    for area in areas:
+                        if not isinstance(area, list) or len(area) < 4:
+                            continue
+                        first = DreameMowerMapDecoder._metadata_coordinates(area)
+                        second = DreameMowerMapDecoder._metadata_coordinates(area[2:])
+                        if first is None or second is None:
+                            continue
+                        area_left, area_right = sorted((first[0], second[0]))
+                        area_bottom, area_top = sorted((first[1], second[1]))
+                        map_data.active_areas.append(
+                            Area(
+                                area_left, area_bottom, area_right, area_bottom,
+                                area_right, area_top, area_left, area_top,
                             )
+                        )
 
                 active_points = data_json.get("sp")
                 if isinstance(active_points, list) and active_points:
@@ -542,9 +562,9 @@ class DreameMowerMapDecoder:
                             map_data.active_points.append(Point(*coordinates))
 
                 if "cleanset" in data_json:
-                    map_data.cleanset = data_json["cleanset"]
-                    if isinstance(map_data.cleanset, str):
-                        map_data.cleanset = json.loads(map_data.cleanset)
+                    map_data.cleanset = DreameMowerMapDecoder._metadata_cleanset(
+                        data_json["cleanset"]
+                    )
             else:
                 map_data.need_optimization = True
                 map_data.wifi_map = True

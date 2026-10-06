@@ -27,6 +27,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map import (
     DreameMowerMapDecoder as LegacyMapDecoder,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_types import (
+    Area,
     MapData,
     MapDataPartial,
     MapImageDimensions,
@@ -439,4 +440,48 @@ def test_invalid_hidden_segments_do_not_enter_map_model(value: object) -> None:
     decoded, _ = map_decoder.DreameMowerMapDecoder.decode_map(payload, False)
     assert decoded is not None
     assert decoded.hidden_segments is None
+    assert decoded.router_position == Point(120, -60)
+
+
+@pytest.mark.parametrize("areas", [
+    [[40.5, 30, 10, -20], [], [1, 2, "bad", 4]],
+    [[40.5, 30, 10, -20]],
+])
+def test_area_metadata_normalizes_corners_and_preserves_following_points(
+    areas: list[object],
+) -> None:
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[4] = 73
+    metadata = {"da2": {"areas": areas}, "sp": [[120, -60]]}
+    payload = base64.b64encode(
+        zlib.compress(bytes(header) + json.dumps(metadata).encode())
+    ).decode()
+    decoded, _ = map_decoder.DreameMowerMapDecoder.decode_map(payload, False)
+    assert decoded is not None
+    assert decoded.active_areas == [Area(10, -20, 40.5, -20, 40.5, 30, 10, 30)]
+    assert decoded.active_points == [Point(120, -60)]
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+@pytest.mark.parametrize("record, expected", [
+    ({"3": [1, 3, 2, 4]}, {"3": [1, 3, 2, 4]}),
+    ({"3": [1, 3]}, None),
+    ({"3": [1, 3, "bad", 4]}, None),
+    ([], None),
+])
+def test_cleaning_metadata_validates_wire_records(
+    as_json: bool, record: object, expected: object,
+) -> None:
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[4] = 73
+    metadata = {
+        "cleanset": json.dumps(record) if as_json else record,
+        "whmp": [120, -60],
+    }
+    payload = base64.b64encode(
+        zlib.compress(bytes(header) + json.dumps(metadata).encode())
+    ).decode()
+    decoded, _ = map_decoder.DreameMowerMapDecoder.decode_map(payload, False)
+    assert decoded is not None
+    assert decoded.cleanset == expected
     assert decoded.router_position == Point(120, -60)
