@@ -1,10 +1,16 @@
 """Fresh property evidence required before state-changing command decisions."""
 
+import copy
+import time
 from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING
 
 from .app_protocol import MOWER_RAW_STATUS_PROPERTY_KEY, decode_mower_status_blob
 from .device_types import DreameMowerProperty
 from .exceptions import DeviceUpdateFailedException
+
+if TYPE_CHECKING:
+    from .device import DreameMowerDevice
 
 TASK_DECISION_PROPERTIES = frozenset(
     {
@@ -38,6 +44,27 @@ def build_device_property_request(
         # fresh read must request it even when no prior MQTT value was cached.
         requests.append({"did": "100001", "siid": 1, "piid": 1})
     return requests
+
+
+def apply_device_property_response(
+    device: "DreameMowerDevice", results: object, *, require_fresh_state: bool,
+) -> bool:
+    """Validate fresh task evidence before applying a device property response."""
+    if require_fresh_state:
+        evidence = require_fresh_task_properties(results, device.property_mapping)
+        with device._state_lock:
+            observed_at = time.time()
+            device._fresh_task_state = {
+                **copy.deepcopy(evidence), "received_at": observed_at,
+            }
+            heartbeat = evidence.get("heartbeat")
+            if heartbeat is not None:
+                device.realtime_properties[MOWER_RAW_STATUS_PROPERTY_KEY] = {
+                    **copy.deepcopy(heartbeat),
+                    "received_at": observed_at, "last_seen": observed_at,
+                }
+            return device._handle_properties(results)
+    return device._handle_properties(results)
 
 
 def _successful_row(rows):

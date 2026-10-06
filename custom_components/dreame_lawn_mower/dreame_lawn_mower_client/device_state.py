@@ -24,7 +24,7 @@ from .app_protocol import (
     mower_realtime_property_name,
     mower_state_key,
 )
-from .device_property_read import build_device_property_request, require_fresh_task_properties
+from .device_property_read import apply_device_property_response, build_device_property_request
 from .device_code_semantics import (
     MowerDeviceCodeTier,
     mower_device_code_definition,
@@ -539,20 +539,9 @@ class _DreameMowerDeviceStateMixin:
             if deadline is None
             else self._protocol.get_properties(property_list, deadline=deadline)
         )
-        if require_fresh_state:
-            evidence = require_fresh_task_properties(results, self.property_mapping)
-            with self._state_lock:
-                observed_at = time.time()
-                self._fresh_task_state = {**copy.deepcopy(evidence), "received_at": observed_at}
-                heartbeat = evidence.get("heartbeat")
-                if heartbeat is not None:
-                    self.realtime_properties[MOWER_RAW_STATUS_PROPERTY_KEY] = {
-                        **copy.deepcopy(heartbeat),
-                        "received_at": observed_at,
-                        "last_seen": observed_at,
-                    }
-                return self._handle_properties(results)
-        return self._handle_properties(results)
+        return apply_device_property_response(
+            self, results, require_fresh_state=require_fresh_state,
+        )
 
     def _update_status(self, task_status: DreameMowerTaskStatus, status: DreameMowerStatus) -> None:
         """Update status properties on memory for map renderer to update the image before action is sent to the device."""
