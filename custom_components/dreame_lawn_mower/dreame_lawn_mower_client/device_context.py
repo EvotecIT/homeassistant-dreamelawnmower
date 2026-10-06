@@ -1,9 +1,16 @@
-"""Shared member declarations for the legacy device's cooperating mixins."""
+"""Shared cached-state access for the legacy device's cooperating mixins."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
+
+from .device_types import (
+    DreameMowerAIProperty,
+    DreameMowerAutoSwitchProperty,
+    DreameMowerProperty,
+    DreameMowerStrAIProperty,
+)
 
 if TYPE_CHECKING:
     from threading import Timer
@@ -13,7 +20,6 @@ if TYPE_CHECKING:
     from .device_types import (
         DreameMowerAction,
         DreameMowerDeviceCapability,
-        DreameMowerProperty,
     )
     from .map_manager import DreameMapMowerMapManager
     from .protocol import DreameMowerProtocol
@@ -22,8 +28,9 @@ if TYPE_CHECKING:
 class _DreameMowerDeviceContext:
     """Describe members initialized by DreameMowerDevice for all its mixins.
 
-    This base owns declarations only. Device construction and property/action
-    mapping values remain in the assembled device; no defaults are supplied here.
+    This base owns cached property readers and shared declarations. Device
+    construction and property/action mapping values remain in the assembled
+    device; no defaults are supplied here.
     """
 
     status: DreameMowerDeviceStatus
@@ -57,3 +64,41 @@ class _DreameMowerDeviceContext:
     data: dict[int, Any]
     auto_switch_data: dict[str, Any] | None
     ai_data: dict[str, Any] | None
+
+    def get_property(
+        self,
+        prop: (
+            DreameMowerProperty
+            | DreameMowerAutoSwitchProperty
+            | DreameMowerStrAIProperty
+            | DreameMowerAIProperty
+        ),
+    ) -> Any:
+        """Get a device property from memory"""
+        if isinstance(prop, DreameMowerAutoSwitchProperty):
+            return self.get_auto_switch_property(prop)
+        if isinstance(prop, DreameMowerStrAIProperty) or isinstance(
+            prop, DreameMowerAIProperty
+        ):
+            return self.get_ai_property(prop)
+        if prop is not None and prop.value in self.data:
+            return self.data[prop.value]
+        return None
+
+    def get_auto_switch_property(
+        self, prop: DreameMowerAutoSwitchProperty
+    ) -> int | None:
+        """Get a device auto switch property from memory"""
+        if self.capability.auto_switch_settings and self.auto_switch_data:
+            if prop is not None and prop.name in self.auto_switch_data:
+                return int(self.auto_switch_data[prop.name])
+        return None
+
+    def get_ai_property(
+        self, prop: DreameMowerStrAIProperty | DreameMowerAIProperty
+    ) -> bool | None:
+        """Get a device AI property from memory"""
+        if self.capability.ai_detection and self.ai_data:
+            if prop is not None and prop.name in self.ai_data:
+                return bool(self.ai_data[prop.name])
+        return None

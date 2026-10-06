@@ -526,41 +526,6 @@ class DreameMowerDevice(
             )
             self._update_timer.start()
 
-    def get_property(
-        self,
-        prop: (
-            DreameMowerProperty | DreameMowerAutoSwitchProperty | DreameMowerStrAIProperty | DreameMowerAIProperty
-        ),
-    ) -> Any:
-        """Get a device property from memory"""
-        if isinstance(prop, DreameMowerAutoSwitchProperty):
-            return self.get_auto_switch_property(prop)
-        if isinstance(prop, DreameMowerStrAIProperty) or isinstance(prop, DreameMowerAIProperty):
-            return self.get_ai_property(prop)
-        if prop is not None and prop.value in self.data:
-            return self.data[prop.value]
-        return None
-
-    def get_auto_switch_property(self, prop: DreameMowerAutoSwitchProperty) -> int | None:
-        """Get a device auto switch property from memory"""
-        if self.capability.auto_switch_settings and self.auto_switch_data:
-            if prop is not None and prop.name in self.auto_switch_data:
-                return int(self.auto_switch_data[prop.name])
-        return None
-
-    def get_ai_property(self, prop: DreameMowerStrAIProperty | DreameMowerAIProperty) -> bool | None:
-        """Get a device AI property from memory"""
-        if self.capability.ai_detection and self.ai_data:
-            if prop is not None and prop.name in self.ai_data:
-                return bool(self.ai_data[prop.name])
-        return None
-
-
-
-
-
-
-
     def update(
         self,
         force_request_properties=False,
