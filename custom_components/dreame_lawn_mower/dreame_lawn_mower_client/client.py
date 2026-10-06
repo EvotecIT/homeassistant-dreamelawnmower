@@ -1850,6 +1850,20 @@ class DreameLawnMowerClient(
         shared_status: int | None = None,
     ) -> dict[str, Any] | None:
         """Fetch the raw cloud `device/listV2` page used by the mobile app."""
+        return await self._async_cloud_read(
+            lambda cloud: cloud.async_get_device_list_page(
+                current=current, size=size, language=language,
+                master=master, shared_status=shared_status,
+            )
+        )
+
+    async def _async_cloud_read[ReadResult](
+        self,
+        read: _typing.Callable[
+            [_DreameCloudSession], _typing.Coroutine[Any, Any, ReadResult]
+        ],
+    ) -> ReadResult:
+        """Own one native read from session creation through cancellation cleanup."""
         if self._closing:
             raise DreameLawnMowerConnectionError("Client is closing")
         if self._async_cloud is None:
@@ -1862,13 +1876,7 @@ class DreameLawnMowerClient(
                 country=self._country,
                 account_type=self._account_type,
             )
-        task = asyncio.create_task(self._async_cloud.async_get_device_list_page(
-            current=current,
-            size=size,
-            language=language,
-            master=master,
-            shared_status=shared_status,
-        ))
+        task = asyncio.create_task(read(self._async_cloud))
         self._cloud_read_tasks.add(task)
         try:
             return await task
