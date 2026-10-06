@@ -18,7 +18,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class DreameMowerMapOptimizer:
-    def _clean_wall(self, data, width, height):
+    def _clean_wall(self, data: list[int], width: int, height: int) -> None:
         for j in range(1, height - 1):
             for i in range(1, width - 1):
                 index = j * width + i
@@ -48,7 +48,7 @@ class DreameMowerMapOptimizer:
             if data[i] == 2:
                 data[i] = 0
 
-    def _obstacle_data(self, data, width, height):
+    def _obstacle_data(self, data: list[int], width: int, height: int) -> None:
         for _it in range(2):
             for j in range(height):
                 for i in range(width):
@@ -67,7 +67,9 @@ class DreameMowerMapOptimizer:
                         ):
                             data[index] = 0
 
-    def _find_first_empty_point(self, data, width, height):
+    def _find_first_empty_point(
+        self, data: list[int], width: int, height: int
+    ) -> list[int] | None:
         for i in range(width):
             if data[i] == 0:
                 return [i, 0]
@@ -82,7 +84,11 @@ class DreameMowerMapOptimizer:
             if data[j * width + (width - 1)] == 0:
                 return [(width - 1), j]
 
-    def _find_zero_point(self, data, width, height, point):
+        return None
+
+    def _find_zero_point(
+        self, data: list[int], width: int, height: int, point: list[int]
+    ) -> list[list[int]]:
         finds = []
         x = point[0]
         y = point[1]
@@ -95,7 +101,9 @@ class DreameMowerMapOptimizer:
                         finds.append([_i, _j])
         return finds
 
-    def _fill_map_data(self, data, width, height, fill):
+    def _fill_map_data(
+        self, data: list[int], width: int, height: int, fill: int
+    ) -> None:
         self._fill_map_data_2(data, width, height)
 
         size = len(data)
@@ -173,7 +181,7 @@ class DreameMowerMapOptimizer:
                         if startX >= 0:
                             isEmpty = True
 
-    def _denoise(self, data, width, height):
+    def _denoise(self, data: list[int], width: int, height: int) -> None:
         tmpMapInfo = data.copy()
         ssize = 20
         for i in range(width):
@@ -279,7 +287,9 @@ class DreameMowerMapOptimizer:
 
                 startX = -1
 
-    def _update_border_value(self, data, width, height, stroke):
+    def _update_border_value(
+        self, data: list[int], width: int, height: int, stroke: int
+    ) -> None:
         for j in range(height):
             for i in range(width):
                 index = j * width + i
@@ -299,7 +309,9 @@ class DreameMowerMapOptimizer:
                         if hasFind:
                             data[index] = stroke
 
-    def _fill_cross_line(self, data, width, height, stroke):
+    def _fill_cross_line(
+        self, data: list[int], width: int, height: int, stroke: int
+    ) -> None:
         size = len(data)
         for i in range(width):
             startY = -1
@@ -409,18 +421,21 @@ class DreameMowerMapOptimizer:
 
         self._update_border_value(data, width, height, stroke)
 
-    def _check_intersect(self, arr1, arr2) -> list[int]:
+    def _check_intersect(self, arr1: list[int], arr2: list[int]) -> list[int] | None:
         if arr1[0] >= arr2[1] or arr2[0] >= arr1[1]:
             return None
 
-        def sort_data(a, b):
+        def sort_data(a: int, b: int) -> int:
             return a - b
 
         tmp = arr1 + arr2
         tmp.sort(key=cmp_to_key(sort_data))
         return [tmp[1], tmp[2]]
 
-    def _find_original_points(self, original_data, data, width, xs, ys) -> float:
+    def _find_original_points(
+        self, original_data: list[int], data: list[int], width: int,
+        xs: list[int], ys: list[int],
+    ) -> float:
         if xs[0] > xs[1]:
             tmp = xs[0]
             xs[0] = xs[1]
@@ -599,7 +614,7 @@ class DreameMowerMapOptimizer:
 
         return paths
 
-    def _fill_map_data_2(self, data, width, height):
+    def _fill_map_data_2(self, data: list[int], width: int, height: int) -> None:
         while True:
             first_point = self._find_first_empty_point(data, width, height)
             if first_point is None:
