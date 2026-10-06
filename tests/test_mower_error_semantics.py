@@ -532,7 +532,10 @@ def test_client_carries_fault_state_into_recovery_reconciliation() -> None:
     client._latest_snapshot = fault
     client._sync_update_device = lambda: device
     client._sync_get_status_blob = lambda *_args: None
-    client._sync_get_cached_cloud_device_info = lambda: None
+    async def no_cloud_presence():
+        return None
+
+    client._async_get_cached_cloud_device_info = no_cloud_presence
 
     recovered = asyncio.run(client.async_refresh())
     repeated = asyncio.run(client.async_refresh())

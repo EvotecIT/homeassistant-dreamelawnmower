@@ -682,9 +682,7 @@ class DreameLawnMowerClient(
             )
 
         try:
-            cloud_device_info = await asyncio.to_thread(
-                self._sync_get_cached_cloud_device_info,
-            )
+            cloud_device_info = await self._async_get_cached_cloud_device_info()
         except DreameLawnMowerConnectionError:
             cloud_device_info = self._latest_cloud_device_info
         if isinstance(cloud_device_info, Mapping):

@@ -501,7 +501,10 @@ def test_refresh_keeps_new_untimestamped_active_observation() -> None:
     client._latest_snapshot = None
     client._sync_update_device = lambda force=False: device  # noqa: ARG005
     client._sync_get_status_blob = lambda include_cloud, refresh: status_blob  # noqa: ARG005
-    client._sync_get_cached_cloud_device_info = lambda: None
+    async def no_cloud_presence():
+        return None
+
+    client._async_get_cached_cloud_device_info = no_cloud_presence
 
     with (
         patch.object(

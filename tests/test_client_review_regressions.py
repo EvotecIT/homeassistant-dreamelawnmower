@@ -257,22 +257,22 @@ def test_cloud_presence_throttles_empty_refresh_after_cached_success(
     client = _client()
     calls = 0
 
-    def empty_refresh(language: str | None = None):
+    async def empty_refresh(*, language: str | None = None):
         nonlocal calls
         calls += 1
         return None
 
     client._latest_cloud_device_info = {"online": True}
     client._cloud_device_info_refreshed_at = 0.0
-    client._sync_get_cloud_device_info = empty_refresh
+    client.async_get_cloud_device_info = empty_refresh
     monkeypatch.setattr(
         "custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client."
         "time.monotonic",
         lambda: 100.0,
     )
 
-    first = client._sync_get_cached_cloud_device_info()
-    second = client._sync_get_cached_cloud_device_info()
+    first = asyncio.run(client._async_get_cached_cloud_device_info())
+    second = asyncio.run(client._async_get_cached_cloud_device_info())
 
     assert first == {"online": True}
     assert second == {"online": True}
@@ -284,12 +284,12 @@ def test_cloud_presence_throttles_failed_refresh_attempt(monkeypatch) -> None:
     client = _client()
     calls = 0
 
-    def failed_refresh(language: str | None = None):
+    async def failed_refresh(*, language: str | None = None):
         nonlocal calls
         calls += 1
         raise DreameLawnMowerConnectionError("presence unavailable")
 
-    client._sync_get_cloud_device_info = failed_refresh
+    client.async_get_cloud_device_info = failed_refresh
     monkeypatch.setattr(
         "custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client."
         "time.monotonic",
@@ -297,15 +297,40 @@ def test_cloud_presence_throttles_failed_refresh_attempt(monkeypatch) -> None:
     )
 
     try:
-        client._sync_get_cached_cloud_device_info()
+        asyncio.run(client._async_get_cached_cloud_device_info())
     except DreameLawnMowerConnectionError:
         pass
     else:
         raise AssertionError("Expected the first presence refresh to fail")
 
-    assert client._sync_get_cached_cloud_device_info() is None
+    assert asyncio.run(client._async_get_cached_cloud_device_info()) is None
     assert calls == 1
     assert client._cloud_device_info_refreshed_at == 100.0
+
+
+def test_cloud_presence_reuses_native_result_until_refresh_interval(monkeypatch):
+    client = _client()
+    clock = [100.0]
+    calls = []
+    core = import_module(client._async_get_cached_cloud_device_info.__module__)
+    monkeypatch.setattr(core, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    async def read_info(*, language):
+        calls.append(language)
+        return {"online": len(calls) == 1}
+
+    client.async_get_cloud_device_info = read_info
+
+    async def scenario():
+        assert await client._async_get_cached_cloud_device_info() == {"online": True}
+        clock[0] += 1
+        assert await client._async_get_cached_cloud_device_info() == {"online": True}
+        assert calls == ["en"]
+        clock[0] += core._CLOUD_PRESENCE_REFRESH_INTERVAL
+        assert await client._async_get_cached_cloud_device_info() == {"online": False}
+        assert calls == ["en", "en"]
+
+    asyncio.run(scenario())
 
 
 def test_cloud_mqtt_client_trusts_vendor_ca_with_verified_tls(monkeypatch) -> None:

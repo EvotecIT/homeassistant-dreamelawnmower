@@ -901,7 +901,7 @@ class _DreameLawnMowerClientCoreMixin:
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
 
-    def _sync_get_cached_cloud_device_info(self) -> Mapping[str, Any] | None:
+    async def _async_get_cached_cloud_device_info(self) -> Mapping[str, Any] | None:
         """Refresh cloud presence at a bounded rate and retain last-known state."""
         now = time.monotonic()
         if (
@@ -912,7 +912,7 @@ class _DreameLawnMowerClientCoreMixin:
             return self._latest_cloud_device_info
 
         self._cloud_device_info_refreshed_at = now
-        info = self._sync_get_cloud_device_info("en")
+        info = await self.async_get_cloud_device_info(language="en")
         if isinstance(info, Mapping):
             self._latest_cloud_device_info = dict(info)
         return self._latest_cloud_device_info
