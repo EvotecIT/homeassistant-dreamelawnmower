@@ -7,6 +7,7 @@ import time
 from threading import Event
 from typing import TYPE_CHECKING
 
+from .device_privacy import AI_POLICY_PROPERTY, decode_ai_policy_acceptance
 from .device_property_read import (
     apply_device_property_response,
     build_device_property_request,
@@ -91,6 +92,17 @@ async def async_start_device(
                     "Initial device properties are unavailable"
                 )
 
+            privacy_response = None
+            try:
+                privacy_response = await cloud.async_get_batch_device_datas(
+                    client._descriptor.did, [AI_POLICY_PROPERTY], deadline=deadline,
+                )
+            except DreameLawnMowerConnectionError:
+                # Optional metadata must not block a usable device, but the
+                # shared deadline and cancellation still govern this startup.
+                ensure_active()
+            accepted = decode_ai_policy_acceptance(privacy_response)
+
             def finish() -> None:
                 lock = protocol._operation_lock()
                 remaining = deadline - time.monotonic()
@@ -109,9 +121,11 @@ async def async_start_device(
                             "Initial device properties are invalid"
                         ) from err
                     ensure_active()
-                    # Map maintenance and privacy metadata remain legacy work.
-                    # Keep these callbacks owned until they finish on shutdown.
-                    device._finish_device_initialization()
+                    if accepted is not None:
+                        device.status.ai_policy_accepted = accepted
+                    # Map maintenance still owns legacy callbacks. Keep them
+                    # tracked until they finish on shutdown.
+                    device._finish_device_initialization(refresh_privacy=False)
                     ensure_active()
                 finally:
                     lock.release()

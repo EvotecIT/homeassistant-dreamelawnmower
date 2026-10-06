@@ -25,7 +25,7 @@ from .exceptions import (
 )
 from .cloud_auth import CloudAuthentication, parse_cloud_authentication
 from .cloud_wire import (
-    DEVICE_INFO_PATH, DEVICE_LIST_PATH, cloud_device_info_data,
+    DEVICE_INFO_PATH, DEVICE_LIST_PATH, cloud_batch_data_params, cloud_device_info_data,
     cloud_device_list_data, cloud_headers, cloud_login_data,
     cloud_properties_params, cloud_rpc_params, cloud_rpc_path, cloud_strings,
 )
@@ -1255,7 +1255,7 @@ class DreameMowerDreameHomeCloudProtocol:
     ) -> Any:
         api_response = self._api_call(
             f"{self._strings[23]}/{self._strings[26]}/{self._strings[44]}",
-            {"did": self._did, self._strings[35]: props},
+            cloud_batch_data_params(self._strings, self._did, props),
             timeout=timeout,
             deadline=deadline,
         )

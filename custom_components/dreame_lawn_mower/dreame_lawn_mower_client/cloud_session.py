@@ -16,6 +16,7 @@ from .cloud_auth import CloudAuthentication, parse_cloud_authentication
 from .cloud_wire import (
     DEVICE_INFO_PATH,
     DEVICE_LIST_PATH,
+    cloud_batch_data_params,
     cloud_device_info_data,
     cloud_device_list_data,
     cloud_headers,
@@ -145,6 +146,22 @@ class DreameCloudSession:
             json.dumps(cloud_properties_params(did, keys), separators=(",", ":")),
             timeout=timeout, deadline=deadline,
         )
+
+    async def async_get_batch_device_datas(
+        self, did: str, properties: Sequence[str], *, timeout: float = 20,
+        deadline: float | None = None,
+    ) -> dict[str, Any] | None:
+        """Read named device metadata through the shared borrowed-session owner."""
+        path = "/".join(self._strings[index] for index in (23, 26, 44))
+        result = await self._async_read(
+            f"/{path}", json.dumps(
+                cloud_batch_data_params(self._strings, did, properties),
+                separators=(",", ":"),
+            ), timeout=timeout, deadline=deadline,
+        )
+        if result is not None and not isinstance(result, dict):
+            raise DreameLawnMowerConnectionError("Cloud batch metadata is invalid")
+        return result
 
     async def async_get_device_info(
         self,

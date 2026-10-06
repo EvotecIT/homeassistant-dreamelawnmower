@@ -34,6 +34,13 @@ def cloud_rpc_params(
     }
 
 
+def cloud_batch_data_params(
+    strings: Sequence[str], did: str | None, properties: Sequence[str],
+) -> dict[str, object]:
+    """Preserve the vendor's batch-property field and device identity."""
+    return {"did": did, strings[35]: list(properties)}
+
+
 def cloud_properties_params(did: str | None, keys: str) -> dict[str, str]:
     """Share device identity and normalized keys between both transports."""
     return {"did": str(did), "keys": keys}

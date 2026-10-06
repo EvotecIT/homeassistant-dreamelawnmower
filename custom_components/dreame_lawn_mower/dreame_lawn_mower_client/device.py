@@ -13,6 +13,7 @@ from threading import RLock, Timer
 from typing import Any, Optional
 
 from .app_protocol import mower_realtime_property_name
+from .device_privacy import AI_POLICY_PROPERTY, decode_ai_policy_acceptance
 from .device_code_semantics import (
     MowerDeviceCodeTier,
     mower_device_code_definition,
@@ -407,7 +408,7 @@ class DreameMowerDevice(
         self._dirty_auto_switch_data = {}
         self._dirty_ai_data = {}
 
-    def _finish_device_initialization(self) -> None:
+    def _finish_device_initialization(self, *, refresh_privacy: bool = True) -> None:
         """Start map maintenance after initial properties establish capabilities."""
         self._last_update_failed = None
 
@@ -436,18 +437,15 @@ class DreameMowerDevice(
 
             if self.cloud_connected:
                 self._cleaning_history_update = -1
-                if (self.capability.ai_detection and not self.status.ai_policy_accepted) or True:
+                if refresh_privacy:
                     try:
-                        prop = "prop.s_ai_config"
-                        response = self._protocol.cloud.get_batch_device_datas([prop])
-                        if response and prop in response and response[prop]:
-                            value = json.loads(response[prop])
-                            self.status.ai_policy_acepted = (
-                                value.get("privacyAuthed")
-                                if "privacyAuthed" in value
-                                else value.get("aiPrivacyAuthed")
-                            )
-                    except:
+                        response = self._protocol.cloud.get_batch_device_datas(
+                            [AI_POLICY_PROPERTY]
+                        )
+                        accepted = decode_ai_policy_acceptance(response)
+                        if accepted is not None:
+                            self.status.ai_policy_accepted = accepted
+                    except Exception:
                         pass
 
         if not self.available:

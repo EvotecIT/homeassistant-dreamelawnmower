@@ -1,13 +1,16 @@
 """Native startup contract through the real client and local HTTP transport."""
 
 import asyncio
+import json
 import time
+from threading import Event
 from unittest.mock import Mock
 
 import pytest
 from aiohttp import ClientSession, web
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    client_startup,
     protocol_cloud,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import (
@@ -76,6 +79,11 @@ def test_startup_uses_native_metadata_and_initial_properties(
             data = {strings[34]: {strings[36]: [
                 {"did": "other"}, {**firmware, **info},
             ]}}
+        elif request.path == "/" + "/".join(strings[i] for i in (23, 26, 44)):
+            assert await request.json() == {
+                "did": "42", strings[35]: ["prop.s_ai_config"],
+            }
+            data = {"prop.s_ai_config": json.dumps({"privacyAuthed": True})}
         else:
             payload = await request.json()
             assert payload["data"]["method"] == "get_properties"
@@ -98,6 +106,9 @@ def test_startup_uses_native_metadata_and_initial_properties(
             owner = device._protocol.cloud
             owner.login = Mock(side_effect=AssertionError("Synchronous login"))
             owner.get_device_info = Mock(side_effect=AssertionError("Synchronous info"))
+            owner.get_batch_device_datas = Mock(
+                side_effect=AssertionError("Synchronous privacy metadata"),
+            )
             device._protocol.get_properties = Mock(
                 side_effect=AssertionError("Synchronous initial properties"),
             )
@@ -109,6 +120,7 @@ def test_startup_uses_native_metadata_and_initial_properties(
                     None if fallback in {"vendor_error", "http_error"} else "4.3.6_1200"
                 )
                 assert device.data[battery.value] == 55
+                assert device.status.ai_policy_accepted is True
                 assert owner._uuid == "account"
                 assert owner._uid == "device-owner"
                 assert owner._key == "access-secret"
@@ -123,6 +135,7 @@ def test_startup_uses_native_metadata_and_initial_properties(
                 mqtt.connect.assert_called_once_with("mqtt.example.invalid", 8883, 50)
                 owner.login.assert_not_called()
                 owner.get_device_info.assert_not_called()
+                owner.get_batch_device_datas.assert_not_called()
                 device._protocol.get_properties.assert_not_called()
             finally:
                 await client.async_close()
@@ -237,5 +250,93 @@ def test_optional_firmware_failure_does_not_swallow_deadline_or_cancel(
             finally:
                 release.set()
                 await asyncio.gather(read, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "outcome", ["refused", "unavailable", "invalid", "cancel", "close", "timeout"],
+)
+def test_native_privacy_metadata_preserves_startup_and_lifetime(monkeypatch, outcome):
+    strings = cloud_strings("dreame")
+    mqtt = Mock()
+    monkeypatch.setattr(protocol_cloud.mqtt_client, "Client", Mock(return_value=mqtt))
+
+    async def scenario():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def handler(request):
+            if request.path == strings[17]:
+                return web.json_response({**login_response(strings), "uid": "account"})
+            if request.path == DEVICE_INFO_PATH:
+                data = {
+                    "did": "42", strings[8]: "device-owner",
+                    strings[35]: "dreame.mower.g2408",
+                    strings[9]: "mqtt.example.invalid:8883", strings[10]: "{}",
+                }
+            elif request.path == "/" + "/".join(strings[i] for i in (23, 25, 30)):
+                data = {strings[31]: {strings[32]: {"fw_ver": "4.3.6_1200"}}}
+            elif request.path == "/" + "/".join(strings[i] for i in (23, 26, 44)):
+                entered.set()
+                await release.wait()
+                if outcome == "unavailable":
+                    return web.json_response({"code": 10001}, status=503)
+                data = [] if outcome == "invalid" else {
+                    "prop.s_ai_config": json.dumps({"aiPrivacyAuthed": False}),
+                }
+            else:
+                data = {"result": [{
+                    "did": str(DreameMowerProperty.BATTERY_LEVEL.value),
+                    "code": 0, "value": 55,
+                }]}
+            return web.json_response({"code": 0, "data": data})
+
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **OPTIONS, session=session,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type="dreame", country="eu",
+                ),
+            )
+            device = client._ensure_device()
+            device._map_manager = None
+            device.status.ai_policy_accepted = True
+            cancelled = Event()
+            startup = asyncio.create_task(client._async_cloud_read(
+                lambda cloud: client_startup.async_start_device(
+                    client, device, cloud,
+                    deadline=time.monotonic() + (0.2 if outcome == "timeout" else 5),
+                    cancelled=cancelled,
+                ),
+            ))
+            try:
+                await asyncio.wait_for(entered.wait(), 1)
+                assert not device._ready
+                if outcome == "cancel":
+                    startup.cancel()
+                elif outcome == "close":
+                    await client.async_close()
+                if outcome != "timeout":
+                    release.set()
+                if outcome in {"cancel", "close", "timeout"}:
+                    expected = (
+                        DreameLawnMowerConnectionError if outcome == "timeout"
+                        else asyncio.CancelledError
+                    )
+                    with pytest.raises(expected):
+                        await asyncio.wait_for(startup, 1)
+                    assert not device._ready
+                else:
+                    await asyncio.wait_for(startup, 1)
+                    assert device._ready and device.available
+                    assert device.status.ai_policy_accepted is (outcome != "refused")
+                assert not client._cloud_read_tasks
+                assert not session.closed
+            finally:
+                release.set()
+                await asyncio.gather(startup, return_exceptions=True)
+                await client.async_close()
 
     asyncio.run(scenario())
