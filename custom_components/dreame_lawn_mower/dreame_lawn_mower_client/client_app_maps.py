@@ -10,6 +10,8 @@ from .map_read_plan import download_map, read_map_text, read_maps
 
 
 class _DreameLawnMowerClientAppMapsMixin:
+    _app_map_payload_cache: dict[int, dict[str, Any]]
+
     def _sync_get_app_maps(
         self,
         chunk_size: int = 400,
