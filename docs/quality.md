@@ -82,7 +82,7 @@ not establish installed, cloud, native-runtime, or physical-device behavior.
 | --- | --- | --- |
 | async-dependency | Gap | The cloud protocol owns synchronous requests, queues, locks, and threads. Modernize the owning client with real async cancellation and resource ownership; executor wrapping alone does not qualify. |
 | inject-websession | Gap | Cloud HTTP uses its own synchronous session. Design injected async session ownership in the reusable client, including standalone callers. |
-| strict-typing | Gap | Combined candidate d39b5df, including the separate runtime and async branches, reports 1,298 mypy 2.4.0 errors in 72 of 325 production modules. This is combined-source evidence rather than a passing gate for this branch. Fix the full integration and bundled client before enabling a passing strict CI gate. |
+| strict-typing | Gap | Combined candidate 82742f4, including the separate runtime and async branches, reports 1,296 mypy 2.4.0 errors in 72 of 325 production modules. This is combined-source evidence rather than a passing gate for this branch. Fix the full integration and bundled client before enabling a passing strict CI gate. |
 
 ## Qualification baseline
 
