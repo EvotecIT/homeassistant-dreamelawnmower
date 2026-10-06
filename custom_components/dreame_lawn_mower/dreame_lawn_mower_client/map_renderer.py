@@ -281,7 +281,7 @@ class DreameMowerMapRenderer:
         self._robot_charging_icon: Image.Image | None = None
         self._robot_cleaning_icon: Image.Image | None = None
         self._robot_warning_icon: Image.Image | None = None
-        self._robot_sleeping_icon: list[Image.Image] | None = None
+        self._robot_sleeping_icon: Image.Image | None = None
         self._robot_emptying_icon = None
         self._robot_cleaning_direction_icon: Image.Image | None = None
         self._obstacle_background: Image.Image | None = None
@@ -1995,14 +1995,15 @@ class DreameMowerMapRenderer:
                 or self._map_data.rotation != map_data.rotation
                 or not cached_layers.get(layer)
             ):
+                changed = False
                 if layer not in cached_layers:
                     object_layers[MapRendererLayer.FURNITURE] = {}
                 else:
                     for k in list(object_layers[MapRendererLayer.FURNITURE].keys()).copy():
                         if k not in map_data.furnitures:
                             del object_layers[MapRendererLayer.FURNITURE][k]
+                            changed = True
 
-                changed = False
                 for k, v in map_data.furnitures.items():
                     if (
                         not self._cache
@@ -2052,14 +2053,15 @@ class DreameMowerMapRenderer:
                 map_data=map_data,
                 has_cached_layer=bool(cached_layers.get(layer)),
             ):
+                changed = False
                 if MapRendererLayer.SEGMENT not in object_layers:
                     object_layers[MapRendererLayer.SEGMENT] = {}
                 else:
                     for k in list(object_layers[MapRendererLayer.SEGMENT].keys()).copy():
                         if k not in map_data.segments:
                             del object_layers[MapRendererLayer.SEGMENT][k]
+                            changed = True
 
-                changed = False
                 for k in sorted(map_data.segments.keys()):
                     segment = map_data.segments[k]
                     if self._segment_needs_render(
@@ -2374,14 +2376,15 @@ class DreameMowerMapRenderer:
                 or self._map_data.rotation != map_data.rotation
                 or not cached_layers.get(layer)
             ):
+                changed = False
                 if MapRendererLayer.OBSTACLE not in object_layers:
                     object_layers[MapRendererLayer.OBSTACLE] = {}
                 else:
                     for k in list(object_layers[MapRendererLayer.OBSTACLE].keys()).copy():
                         if k not in map_data.obstacles:
                             del object_layers[MapRendererLayer.OBSTACLE][k]
+                            changed = True
 
-                changed = False
                 for k, obstacle in map_data.obstacles.items():
                     if not self.config.obstacle and obstacle.type != ObstacleType.PET:
                         continue
@@ -2410,6 +2413,7 @@ class DreameMowerMapRenderer:
                             object_layers[MapRendererLayer.OBSTACLE][k] = obstacle_image
                         elif k in object_layers[MapRendererLayer.OBSTACLE]:
                             del object_layers[MapRendererLayer.OBSTACLE][k]
+                            changed = True
 
                 if changed:
                     changes.append(layer)
@@ -2430,14 +2434,15 @@ class DreameMowerMapRenderer:
                 or self._map_data.rotation != map_data.rotation
                 or not cached_layers.get(layer)
             ):
+                changed = False
                 if MapRendererLayer.CRUISE_POINT not in object_layers:
                     object_layers[MapRendererLayer.CRUISE_POINT] = {}
                 else:
                     for k in list(object_layers[MapRendererLayer.CRUISE_POINT].keys()).copy():
                         if k not in map_data.active_cruise_points:
                             del object_layers[MapRendererLayer.CRUISE_POINT][k]
+                            changed = True
 
-                changed = False
                 for k, cruise_point in map_data.active_cruise_points.items():
                     if (
                         self._map_data is None
@@ -2724,27 +2729,22 @@ class DreameMowerMapRenderer:
 
             if robot_status == 1:
                 if self._robot_cleaning_icon is None:
-                    self._robot_cleaning_icon = (
-                        Image.open(BytesIO(base64.b64decode(MAP_ROBOT_CLEANING_IMAGE)))
-                        .convert("RGBA")
-                        .resize(
-                            ((int(icon_size * 1.25), int(icon_size * 1.25))),
-                            resample=Image.Resampling.NEAREST,
-                        )
-                    )
-                status_icon = self._robot_cleaning_icon
+                    self._robot_cleaning_icon = Image.open(
+                        BytesIO(base64.b64decode(MAP_ROBOT_CLEANING_IMAGE))
+                    ).convert("RGBA")
+                status_icon = self._robot_cleaning_icon.resize(
+                    (int(icon_size * 1.25), int(icon_size * 1.25)),
+                    resample=Image.Resampling.NEAREST,
+                )
 
                 if self.config.cleaning_direction and robot_position.a is not None:
                     if self._robot_cleaning_direction_icon is None:
-                        self._robot_cleaning_direction_icon = (
-                            Image.open(BytesIO(base64.b64decode(MAP_ROBOT_CLEANING_DIRECTION_IMAGE)))
-                            .convert("RGBA")
-                            .resize(
-                                ((int(icon_size * 1.5), int(icon_size * 1.5))),
-                            )
-                        )
-
-                    ico = self._robot_cleaning_direction_icon.rotate(robot_position.a, expand=1)
+                        self._robot_cleaning_direction_icon = Image.open(
+                            BytesIO(base64.b64decode(MAP_ROBOT_CLEANING_DIRECTION_IMAGE))
+                        ).convert("RGBA")
+                    ico = self._robot_cleaning_direction_icon.resize(
+                        (int(icon_size * 1.5), int(icon_size * 1.5)),
+                    ).rotate(robot_position.a, expand=1)
 
                     offset = int(icon_size * 0.3)
                     x = point.x + offset * math.cos(-robot_position.a * math.pi / 180)
@@ -2758,26 +2758,22 @@ class DreameMowerMapRenderer:
                     )
             elif robot_status == 2:
                 if self._robot_charging_icon is None:
-                    self._robot_charging_icon = (
-                        Image.open(BytesIO(base64.b64decode(MAP_ROBOT_CHARGING_IMAGE)))
-                        .convert("RGBA")
-                        .resize(
-                            ((int(icon_size * 1.3), int(icon_size * 1.3))),
-                            resample=Image.Resampling.NEAREST,
-                        )
-                    )
-                status_icon = self._robot_charging_icon
+                    self._robot_charging_icon = Image.open(
+                        BytesIO(base64.b64decode(MAP_ROBOT_CHARGING_IMAGE))
+                    ).convert("RGBA")
+                status_icon = self._robot_charging_icon.resize(
+                    (int(icon_size * 1.3), int(icon_size * 1.3)),
+                    resample=Image.Resampling.NEAREST,
+                )
             elif has_warning:
                 if self._robot_warning_icon is None:
-                    self._robot_warning_icon = (
-                        Image.open(BytesIO(base64.b64decode(MAP_ROBOT_WARNING_IMAGE)))
-                        .convert("RGBA")
-                        .resize(
-                            ((int(icon_size * 1.3), int(icon_size * 1.3))),
-                            resample=Image.Resampling.NEAREST,
-                        )
-                    )
-                status_icon = self._robot_warning_icon
+                    self._robot_warning_icon = Image.open(
+                        BytesIO(base64.b64decode(MAP_ROBOT_WARNING_IMAGE))
+                    ).convert("RGBA")
+                status_icon = self._robot_warning_icon.resize(
+                    (int(icon_size * 1.3), int(icon_size * 1.3)),
+                    resample=Image.Resampling.NEAREST,
+                )
 
             if status_icon:
                 mask = Image.new("L", status_icon.size, 0)
@@ -2803,31 +2799,26 @@ class DreameMowerMapRenderer:
 
         if not self._low_memory and robot_status == 3:
             if self._robot_sleeping_icon is None:
-                sleeping_icon = (
-                    Image.open(BytesIO(base64.b64decode(MAP_ROBOT_SLEEPING_IMAGE)))
-                    .convert("RGBA")
-                    .rotate(-(map_rotation or 0), expand=1)
-                )
-                enhancer = ImageEnhance.Brightness(sleeping_icon)
+                sleeping_icon = Image.open(
+                    BytesIO(base64.b64decode(MAP_ROBOT_SLEEPING_IMAGE))
+                ).convert("RGBA")
                 if not self.color_scheme.dark:
-                    sleeping_icon = enhancer.enhance(0.7)
-
-                self._robot_sleeping_icon = [
-                    sleeping_icon.resize(
-                        ((int(icon_size * 0.3), int(icon_size * 0.3))),
-                        resample=Image.Resampling.NEAREST,
-                    ),
-                    sleeping_icon.resize(
-                        ((int(icon_size * 0.35), int(icon_size * 0.35))),
-                        resample=Image.Resampling.NEAREST,
-                    ),
-                ]
+                    sleeping_icon = ImageEnhance.Brightness(sleeping_icon).enhance(0.7)
+                self._robot_sleeping_icon = sleeping_icon
+            sleeping_icon = self._robot_sleeping_icon.rotate(-(map_rotation or 0), expand=1)
+            sleeping_icons = [
+                sleeping_icon.resize(
+                    (int(icon_size * factor), int(icon_size * factor)),
+                    resample=Image.Resampling.NEAREST,
+                )
+                for factor in (0.3, 0.35)
+            ]
 
             for k in [
                 [int(icon_size * 0.34), int(icon_size * 0.18), 0],
                 [int(icon_size * 0.43), int(icon_size * 0.43), 1],
             ]:
-                status_icon = self._robot_sleeping_icon[k[2]]
+                status_icon = sleeping_icons[k[2]]
                 if map_rotation == 90:
                     x = point.x + k[1]
                     y = point.y + k[0]

@@ -500,3 +500,77 @@ def test_segments_do_not_share_default_neighbors() -> None:
     first.neighbors.append(2)
 
     assert second.neighbors == []
+
+
+@pytest.mark.parametrize("status,rotation", [(1, 0), (2, 0), (10, 0), (3, 0), (3, 90)])
+def test_mower_status_cache_tracks_size_and_rotation(
+    status: int, rotation: int
+) -> None:
+    dimensions = MapImageDimensions(0, 0, 100, 100, 50)
+    position = Point(2500, 2500, 45)
+    renderer = DreameMowerMapRenderer()
+    renderer.config.cleaning_direction = True
+    renderer.render_mower(position, status, (200, 200), dimensions, 10, 0, 1)
+    actual = renderer.render_mower(
+        position, status, (200, 200), dimensions, 30, rotation, 1
+    )
+    fresh = DreameMowerMapRenderer()
+    fresh.config.cleaning_direction = True
+    expected = fresh.render_mower(
+        position, status, (200, 200), dimensions, 30, rotation, 1
+    )
+    assert actual.tobytes() == expected.tobytes()
+
+
+@pytest.mark.parametrize(
+    "collection",
+    [
+        "furnitures",
+        "segments",
+        "obstacles",
+        "active_cruise_points",
+        "invisible_obstacle",
+    ],
+)
+def test_partial_object_removal_recomposes_cached_layer(collection: str) -> None:
+    invisible_obstacle = collection == "invisible_obstacle"
+    if invisible_obstacle:
+        collection = "obstacles"
+    data = MapData()
+    data.rotation = 0
+    data.saved_map = False
+    data.dimensions = MapImageDimensions(0, 0, 100, 100, 50)
+    data.furniture_version = 1
+    objects = {}
+    for key, position in [(1, 1500), (2, 3500)]:
+        if collection == "furnitures":
+            value = Furniture(
+                position, position, 0, 0, 0, 0, FurnitureType.COFFEE_TABLE, 0
+            )
+        elif collection == "segments":
+            value = Segment(key)
+            value.x = value.y = position
+            value.name = f"Garden {key}"
+        elif collection == "obstacles":
+            value = Obstacle(
+                position, position, ObstacleType.WIRE, 100, ignore_status=0
+            )
+        else:
+            value = Coordinate(position, position, False, 0)
+        objects[key] = value
+    setattr(data, collection, objects)
+    renderer = DreameMowerMapRenderer(cache=True)
+    image = Image.new("RGBA", (100, 100))
+    layers, object_layers = {}, {}
+    before = renderer.render_objects(layers, object_layers, data, 0, 0, image, 1)
+    renderer._map_data = copy.deepcopy(data)
+    if invisible_obstacle:
+        objects[2].type = ObstacleType.UNKNOWN
+    else:
+        del objects[2]
+    actual = renderer.render_objects(layers, object_layers, data, 0, 0, image, 1)
+    expected = DreameMowerMapRenderer(cache=True).render_objects(
+        {}, {}, data, 0, 0, image, 1
+    )
+    assert before.tobytes() != expected.tobytes()
+    assert actual.tobytes() == expected.tobytes()
