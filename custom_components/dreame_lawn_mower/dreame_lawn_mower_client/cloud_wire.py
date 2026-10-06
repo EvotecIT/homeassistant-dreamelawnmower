@@ -14,12 +14,23 @@ from .exceptions import DreameLawnMowerAuthError
 
 DEVICE_INFO_PATH = "/dreame-user-iot/iotuserbind/device/info"
 DEVICE_LIST_PATH = "/dreame-user-iot/iotuserbind/device/listV2"
+APP_PLUGIN_PATH = "/dreame-product/upgrades/appplugin"
 type DeviceMetadataKind = Literal["features", "otc", "firmware"]
 DEVICE_METADATA_PATHS: dict[DeviceMetadataKind, str] = {
     "features": "/dreame-user-iot/iotuserbind/queryDevicePermit",
     "otc": "/dreame-user-iot/iotstatus/devOTCInfo",
     "firmware": "/dreame-user-iot/iotuserbind/checkDeviceVersion",
 }
+
+
+def cloud_plugin_params(
+    model: str | None, app_version_code: int, os: int,
+) -> dict[str, str | int]:
+    """Encode the app plugin query without serializing absent model values."""
+    params: dict[str, str | int] = {"appVer": app_version_code, "os": os}
+    if model:
+        params["model"] = model
+    return params
 
 
 def cloud_rpc_path(strings: Sequence[str], host: str | None) -> str:

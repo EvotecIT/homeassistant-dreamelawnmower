@@ -98,7 +98,7 @@ def test_public_current_map_read_uses_native_http(
 
 
 @pytest.mark.parametrize("stop", ["cancel", "close", "deadline"])
-@pytest.mark.parametrize("read_kind", ["map", "batch", "batch_hint"])
+@pytest.mark.parametrize("read_kind", ["map", "batch", "batch_hint", "plugin"])
 def test_native_read_releases_ownership_when_interrupted(monkeypatch, stop, read_kind):
     import time
 
@@ -134,6 +134,12 @@ def test_native_read_releases_ownership_when_interrupted(monkeypatch, stop, read
                     client, {"m": "g", "t": "MAPL"},
                     deadline=time.monotonic() + timeout,
                 )
+            elif read_kind == "plugin":
+                operation = client._async_cloud_read(
+                    lambda cloud: cloud.async_get_app_plugin_version(
+                        "dreame.mower.g2408", timeout=timeout,
+                    )
+                )
             else:
                 operation = client.async_get_batch_schedules(
                     discover_map_index=read_kind == "batch_hint", timeout=timeout,
@@ -152,7 +158,7 @@ def test_native_read_releases_ownership_when_interrupted(monkeypatch, stop, read
                 with pytest.raises(expected):
                     await task
                 assert not client._cloud_read_tasks
-                if read_kind != "batch":
+                if read_kind in {"map", "batch_hint"}:
                     assert not protocol._async_rpc_gate.locked()
 
                 def can_acquire():
@@ -337,6 +343,66 @@ def test_public_device_metadata_reads_preserve_endpoint_contracts(
                         assert result["latest_version"] == "1.1"
                         assert result["update_available"] is True
                 assert requests == [paths[kind]]
+                assert client._device is None
+                assert not client._cloud_read_tasks
+            finally:
+                await client.async_close()
+            assert not session.closed
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("account_type", ["dreame", "mova"])
+@pytest.mark.parametrize("mode", ["normal", "reauth", "disconnect", "rejected"])
+def test_public_plugin_metadata_uses_get_with_owned_retries(
+    monkeypatch, account_type, mode,
+):
+    strings = cloud_strings(account_type)
+    logins = []
+    queries = []
+
+    async def handler(request):
+        if request.path == strings[17]:
+            assert request.method == "POST"
+            logins.append(request.path)
+            return web.json_response(login_response(strings, f"token-{len(logins)}"))
+        assert request.method == "GET"
+        assert request.path == "/dreame-product/upgrades/appplugin"
+        assert await request.read() == b""
+        query = dict(request.query)
+        assert query == {
+            "model": "dreame.mower.g2408", "appVer": "123456", "os": "2",
+        }
+        queries.append(query)
+        if len(queries) == 1:
+            if mode == "reauth":
+                return web.Response(status=401, text="expired")
+            if mode == "disconnect":
+                request.transport.close()
+                return web.Response()
+        return web.json_response({
+            "code": 5 if mode == "rejected" else 0,
+            "data": {"version": 123, "url": "https://example.invalid/plugin"},
+        })
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **{**OPTIONS, "account_type": account_type}, session=session,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type=account_type, country="eu",
+                ),
+            )
+            try:
+                result = await client.async_get_app_plugin_version(
+                    app_version_code=123456, os=2,
+                )
+                assert result == (None if mode == "rejected" else {
+                    "version": 123, "url": "https://example.invalid/plugin",
+                })
+                assert len(queries) == (2 if mode in {"reauth", "disconnect"} else 1)
+                assert len(logins) == (2 if mode == "reauth" else 1)
                 assert client._device is None
                 assert not client._cloud_read_tasks
             finally:

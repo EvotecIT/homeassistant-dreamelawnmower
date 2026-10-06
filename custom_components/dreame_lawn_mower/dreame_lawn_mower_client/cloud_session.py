@@ -8,12 +8,14 @@ import math
 import re
 import time
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import urlencode
 
 from aiohttp import BasicAuth, ClientError, ClientSession, ClientTimeout
 
 from .cloud_auth import CloudAuthentication, parse_cloud_authentication
 from .cloud_wire import (
+    APP_PLUGIN_PATH,
     DEVICE_INFO_PATH,
     DEVICE_LIST_PATH,
     DEVICE_METADATA_PATHS,
@@ -23,6 +25,7 @@ from .cloud_wire import (
     cloud_device_list_data,
     cloud_headers,
     cloud_login_data,
+    cloud_plugin_params,
     cloud_properties_params,
     cloud_rpc_params,
     cloud_rpc_path,
@@ -202,6 +205,23 @@ class DreameCloudSession:
             return response["data"]
         return response if kind == "firmware" else None
 
+    async def async_get_app_plugin_version(
+        self,
+        model: str | None,
+        app_version_code: int = 2050300,
+        os: int = 1,
+        *,
+        timeout: float = 20,
+        deadline: float | None = None,
+    ) -> Any:
+        """Read plugin metadata with the vendor's GET query contract."""
+        query = urlencode(cloud_plugin_params(model, app_version_code, os))
+        response = await self._async_read_response(
+            f"{APP_PLUGIN_PATH}?{query}", None,
+            timeout=timeout, deadline=deadline, http_method="GET",
+        )
+        return response.get("data") if response.get("code") == 0 else None
+
     @property
     def authentication(self) -> CloudAuthentication:
         """Capture validated credentials for the same account's MQTT owner."""
@@ -341,6 +361,7 @@ class DreameCloudSession:
     async def _async_read_response(
         self, path: str, data: str | None, *,
         timeout: float, deadline: float | None,
+        http_method: Literal["GET", "POST"] = "POST",
     ) -> dict[str, Any]:
         """Serialize a read-only request, authentication, and bounded retries."""
         end = self._deadline(timeout, deadline)
@@ -358,11 +379,12 @@ class DreameCloudSession:
                         headers[self._strings[51]] = self._strings[52]
                         assert self._token is not None
                         headers[self._strings[46]] = self._token
-                        status, payload = await self._post_read(
+                        status, payload = await self._request_read(
                             f"{self._base_url}{path}",
                             headers,
                             data,
                             end,
+                            http_method=http_method,
                         )
                         if status == 401 and attempt == 0:
                             await self._login(end)
@@ -382,7 +404,7 @@ class DreameCloudSession:
 
     async def _login(self, deadline: float) -> None:
         for attempt in range(2):
-            status, payload = await self._post(
+            status, payload = await self._request_json(
                 self._base_url + self._strings[17],
                 cloud_headers(self._strings, self._country, self._tenant),
                 cloud_login_data(
@@ -419,17 +441,21 @@ class DreameCloudSession:
             return
         raise DreameLawnMowerAuthError("Cloud authentication failed")
 
-    async def _post_read(
+    async def _request_read(
         self,
         url: str,
         headers: Mapping[str, str],
         data: str | None,
         deadline: float,
+        *,
+        http_method: Literal["GET", "POST"] = "POST",
     ) -> tuple[int, dict[str, Any]]:
         """Retry only read-only account requests within their shared deadline."""
         for attempt in range(3):
             try:
-                return await self._post(url, headers, data, deadline)
+                return await self._request_json(
+                    url, headers, data, deadline, http_method=http_method,
+                )
             except (ClientError, TimeoutError):
                 if attempt == 2:
                     raise
@@ -438,19 +464,21 @@ class DreameCloudSession:
                 )
         raise AssertionError("Inventory retry loop exhausted")
 
-    async def _post(
+    async def _request_json(
         self,
         url: str,
         headers: Mapping[str, str],
         data: str | None,
         deadline: float,
+        *,
+        http_method: Literal["GET", "POST"] = "POST",
     ) -> tuple[int, dict[str, Any]]:
         request_headers = dict(headers)
         # Explicit auth overrides both borrowed defaults and environment netrc
         # credentials while preserving the shared vendor wire representation.
         auth = BasicAuth.decode(request_headers.pop("Authorization"))
-        async with self._session.post(
-            url,
+        async with self._session.request(
+            http_method, url,
             headers=request_headers,
             auth=auth,
             data=data,

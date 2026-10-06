@@ -1600,10 +1600,10 @@ class DreameLawnMowerClient(
         os: int = 1,
     ) -> Any:
         """Fetch read-only mobile plugin metadata for this mower model."""
-        return await asyncio.to_thread(
-            self._sync_get_app_plugin_version,
-            app_version_code,
-            os,
+        return await self._async_cloud_read(
+            lambda cloud: cloud.async_get_app_plugin_version(
+                self._descriptor.model, app_version_code, os,
+            )
         )
 
     async def async_get_app_maps(

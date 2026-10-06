@@ -25,9 +25,9 @@ from .exceptions import (
 )
 from .cloud_auth import CloudAuthentication, parse_cloud_authentication
 from .cloud_wire import (
-    DEVICE_INFO_PATH, DEVICE_LIST_PATH, DEVICE_METADATA_PATHS,
+    APP_PLUGIN_PATH, DEVICE_INFO_PATH, DEVICE_LIST_PATH, DEVICE_METADATA_PATHS,
     cloud_batch_data_params, cloud_device_info_data,
-    cloud_device_list_data, cloud_headers, cloud_login_data,
+    cloud_device_list_data, cloud_headers, cloud_login_data, cloud_plugin_params,
     cloud_properties_params, cloud_rpc_params, cloud_rpc_path, cloud_strings,
 )
 from .deadline import DeadlineExceededError, run_with_deadline
@@ -844,15 +844,9 @@ class DreameMowerDreameHomeCloudProtocol:
         app_version_code: int = 2050300,
         os: int = 1,
     ) -> Any:
-        params = {
-            "model": model or self._model,
-            "appVer": app_version_code,
-            "os": os,
-        }
-
         response = self.get(
-            f"{self.get_api_url()}/dreame-product/upgrades/appplugin",
-            params=params,
+            f"{self.get_api_url()}{APP_PLUGIN_PATH}",
+            params=cloud_plugin_params(model or self._model, app_version_code, os),
         )
         if response and "data" in response and response["code"] == 0:
             return response["data"]
