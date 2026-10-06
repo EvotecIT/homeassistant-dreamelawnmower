@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from io import BytesIO
 
 import numpy as np
@@ -119,3 +120,23 @@ def test_legacy_mowing_trail_with_no_line_is_transparent() -> None:
             MapImageDimensions(0, 0, 100, 100, 1), 3, 1,
         )
         assert layer.getbbox() is None
+
+
+@pytest.mark.parametrize(
+    "empty,dimensions", [(True, False), (False, False), (False, True)],
+)
+def test_incomplete_map_bridge_embeds_default_metadata(
+    empty: bool, dimensions: bool,
+) -> None:
+    data = MapData()
+    data.empty_map = empty
+    if dimensions:
+        data.dimensions = MapImageDimensions(0, 0, 4, 4, 50)
+    result = legacy_map_visuals.render_legacy_map_png(data)
+    with Image.open(BytesIO(result)) as image:
+        image.load()
+        actual = json.loads(image.text[MAP_DATA_JSON_CLASS])
+    renderer = legacy_map_visuals.DreameMowerMapDataJsonRenderer()
+    with Image.open(BytesIO(renderer.default_map_image)) as default:
+        expected = json.loads(default.text[MAP_DATA_JSON_CLASS])
+    assert actual == expected

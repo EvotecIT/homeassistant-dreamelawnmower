@@ -76,7 +76,7 @@ class DreameMowerMapDataJsonRenderer:
 
     def __init__(self) -> None:
         self._map_data: MapData | None = None
-        self._map_data_json: JsonMapDocument | None = None
+        self._map_data_json: str | bytes | None = None
         self._left: int = 0
         self._top: int = 0
         self._grid_size: int = 0
@@ -132,6 +132,8 @@ class DreameMowerMapDataJsonRenderer:
             or map_data.dimensions is None
             or map_data.pixel_type is None
         ):
+            self._map_data = None
+            self._map_data_json = self._default_map_data
             self.render_complete = True
             return self.default_map_image
 
@@ -144,7 +146,7 @@ class DreameMowerMapDataJsonRenderer:
             _LOGGER.debug("Skip render map data, not changed")
             return self._to_buffer(
                 self._default_map_image,
-                json.dumps(self._map_data_json, separators=(",", ":")),
+                self._map_data_json,
             )
 
         now = time.time()
@@ -691,7 +693,7 @@ class DreameMowerMapDataJsonRenderer:
         )
 
         self._map_data = map_data
-        self._map_data_json = map_data_json
+        self._map_data_json = json.dumps(map_data_json, separators=(",", ":"))
         _LOGGER.debug(
             "Render Map Data: %s:%s took: %.2f",
             map_data.map_id,
@@ -701,7 +703,7 @@ class DreameMowerMapDataJsonRenderer:
         self.render_complete = True
         return self._to_buffer(
             self._default_map_image,
-            json.dumps(self._map_data_json, separators=(",", ":")),
+            self._map_data_json,
         )
 
     def embed_map_data(self, image_png: bytes) -> bytes:
@@ -712,7 +714,7 @@ class DreameMowerMapDataJsonRenderer:
             image.load()
             return self._to_buffer(
                 image.convert("RGBA"),
-                json.dumps(self._map_data_json, separators=(",", ":")),
+                self._map_data_json,
             )
 
     @property
