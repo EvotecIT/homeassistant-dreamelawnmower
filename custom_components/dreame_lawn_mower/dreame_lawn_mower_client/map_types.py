@@ -777,7 +777,7 @@ class MapImageDimensions:
         self.scale = 1
         self.padding = [0, 0, 0, 0]
         self.crop = [0, 0, 0, 0]
-        self.bounds = None
+        self.bounds: list[int] | None = None
 
     def to_img(self, point: Point, offset: bool = True) -> Point:
         left: float = self.left

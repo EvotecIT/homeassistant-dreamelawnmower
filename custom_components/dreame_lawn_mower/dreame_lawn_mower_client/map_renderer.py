@@ -350,7 +350,9 @@ class DreameMowerMapRenderer:
         return ico
 
     @staticmethod
-    def _calculate_bounds(dimensions, segments) -> list[int]:
+    def _calculate_bounds(
+        dimensions: MapImageDimensions, segments: Mapping[int, Segment] | None
+    ) -> list[int] | None:
         if segments:
             min_x = dimensions.width - 1
             min_y = dimensions.height - 1
@@ -366,26 +368,29 @@ class DreameMowerMapRenderer:
                 max_y = max(max(y_coords), max_y)
 
             return [min_x, min_y, max_x, max_y]
+        return None
 
     @staticmethod
     def _calculate_padding(
-        dimensions,
-        active_areas,
-        no_go_areas,
-        walls,
-        pathways,
-        furnitures,
-        furniture_version,
-        segments,
-        padding,
-        min_width,
-        min_height,
-        scale,
+        dimensions: MapImageDimensions,
+        active_areas: list[Area] | None,
+        no_go_areas: list[Area] | None,
+        walls: list[Wall] | None,
+        pathways: list[Wall] | None,
+        furnitures: Mapping[int, Furniture] | None,
+        furniture_version: int | None,
+        segments: Mapping[int, Segment] | None,
+        padding: list[int],
+        min_width: int,
+        min_height: int,
+        scale: int,
     ) -> list[int]:
-        min_x = 0
-        min_y = 0
-        max_x = dimensions.width
-        max_y = dimensions.height
+        min_x: float = 0
+        min_y: float = 0
+        max_x: float = dimensions.width
+        max_y: float = dimensions.height
+        x_coords: list[float]
+        y_coords: list[float]
 
         if segments:
             for segment in segments.values():
@@ -399,9 +404,9 @@ class DreameMowerMapRenderer:
 
         if active_areas:
             for area in active_areas:
-                p = area.to_coord(dimensions)
-                x_coords = [p.x0, p.x1, p.x2, p.x3]
-                y_coords = [p.y0, p.y1, p.y2, p.y3]
+                area_coords = area.to_coord(dimensions)
+                x_coords = [area_coords.x0, area_coords.x1, area_coords.x2, area_coords.x3]
+                y_coords = [area_coords.y0, area_coords.y1, area_coords.y2, area_coords.y3]
                 min_x = min(min(x_coords), min_x)
                 max_x = max(max(x_coords), max_x)
                 min_y = min(min(y_coords), min_y)
@@ -409,9 +414,9 @@ class DreameMowerMapRenderer:
 
         if no_go_areas:
             for area in no_go_areas:
-                p = area.to_coord(dimensions)
-                x_coords = [p.x0, p.x1, p.x2, p.x3]
-                y_coords = [p.y0, p.y1, p.y2, p.y3]
+                area_coords = area.to_coord(dimensions)
+                x_coords = [area_coords.x0, area_coords.x1, area_coords.x2, area_coords.x3]
+                y_coords = [area_coords.y0, area_coords.y1, area_coords.y2, area_coords.y3]
                 min_x = min(min(x_coords), min_x)
                 max_x = max(max(x_coords), max_x)
                 min_y = min(min(y_coords), min_y)
@@ -419,9 +424,9 @@ class DreameMowerMapRenderer:
 
         if walls:
             for wall in walls:
-                p = wall.to_coord(dimensions)
-                x_coords = [p.x0, p.x1]
-                y_coords = [p.y0, p.y1]
+                wall_coords = wall.to_coord(dimensions)
+                x_coords = [wall_coords.x0, wall_coords.x1]
+                y_coords = [wall_coords.y0, wall_coords.y1]
                 min_x = min(min(x_coords), min_x)
                 max_x = max(max(x_coords), max_x)
                 min_y = min(min(y_coords), min_y)
@@ -429,9 +434,9 @@ class DreameMowerMapRenderer:
 
         if pathways:
             for line in pathways:
-                p = line.to_coord(dimensions)
-                x_coords = [p.x0, p.x1]
-                y_coords = [p.y0, p.y1]
+                wall_coords = line.to_coord(dimensions)
+                x_coords = [wall_coords.x0, wall_coords.x1]
+                y_coords = [wall_coords.y0, wall_coords.y1]
                 min_x = min(min(x_coords), min_x)
                 max_x = max(max(x_coords), max_x)
                 min_y = min(min(y_coords), min_y)
@@ -439,7 +444,7 @@ class DreameMowerMapRenderer:
 
         if furnitures:
             for k, v in furnitures.items():
-                p = Point(v.x, v.y).to_coord(dimensions)
+                furniture_coords = Point(v.x, v.y).to_coord(dimensions)
                 w = 0
                 h = 0
                 if v.width and v.height:
@@ -453,10 +458,10 @@ class DreameMowerMapRenderer:
                     FURNITURE_V2_TYPE_TO_ICON if furniture_version == 2 else FURNITURE_TYPE_TO_ICON
                 ):
                     continue
-                min_x = min(p.x - w, min_x)
-                max_x = max(p.x + w, max_x)
-                min_y = min(p.y - h, min_y)
-                max_y = max(p.y + h, max_y)
+                min_x = min(furniture_coords.x - w, min_x)
+                max_x = max(furniture_coords.x + w, max_x)
+                min_y = min(furniture_coords.y - h, min_y)
+                max_y = max(furniture_coords.y + h, max_y)
 
         if min_x < 0:
             padding[0] = padding[0] + int(-min_x)
