@@ -12,6 +12,7 @@ from typing import Any
 
 from aiohttp import BasicAuth, ClientError, ClientSession, ClientTimeout
 
+from .cloud_auth import parse_cloud_authentication
 from .cloud_wire import (
     DEVICE_INFO_PATH,
     DEVICE_LIST_PATH,
@@ -67,6 +68,8 @@ class DreameCloudSession:
         self._token: str | None = None
         self._refresh_token: str | None = None
         self._expires_at = 0.0
+        self._user_id: str | None = None
+        self._region: str | None = None
         self._lock = asyncio.Lock()
 
     @property
@@ -274,27 +277,16 @@ class DreameCloudSession:
                 raise DreameLawnMowerAuthError(
                     f"Cloud authentication failed: HTTP {status}"
                 )
-            token = payload.get(self._strings[18])
-            expires = payload.get(self._strings[20])
-            refresh = payload.get(self._strings[19])
-            tenant = payload.get(self._strings[22], self._tenant)
-            if (
-                not isinstance(token, str)
-                or not token
-                or not isinstance(expires, int | float)
-                or isinstance(expires, bool)
-                or not math.isfinite(expires)
-                or expires <= 0
-                or (refresh is not None and not isinstance(refresh, str))
-                or (tenant is not None and not isinstance(tenant, str))
-            ):
-                raise DreameLawnMowerAuthError(
-                    "Cloud authentication response is invalid"
-                )
-            self._token = token
-            self._refresh_token = refresh
-            self._tenant = tenant
-            self._expires_at = time.time() + expires - min(120, expires / 2)
+            authentication = parse_cloud_authentication(
+                payload, self._strings, now=time.time(),
+                tenant=self._tenant, region=self._region,
+            )
+            self._token = authentication.token
+            self._refresh_token = authentication.refresh_token
+            self._tenant = authentication.tenant
+            self._expires_at = authentication.expires_at
+            self._user_id = authentication.user_id
+            self._region = authentication.region
             return
         raise DreameLawnMowerAuthError("Cloud authentication failed")
 

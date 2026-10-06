@@ -1467,3 +1467,31 @@ def test_authoritative_snapshot_worker_remains_owned_until_finished(stop):
                 await client.async_close()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("account_type", ["dreame", "mova"])
+def test_native_login_retains_mqtt_identity_atomically(monkeypatch, account_type):
+    strings = cloud_strings(account_type)
+    payload = login_response(strings)
+    payload.update({"uid": 123, strings[21]: "eu"})
+
+    async def handler(_request):
+        return web.json_response(payload)
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            cloud = DreameCloudSession(
+                session, **{**OPTIONS, "account_type": account_type},
+            )
+            await cloud.async_login()
+            assert cloud._user_id == "123"
+            assert cloud._region == "eu"
+            previous = (cloud._token, cloud._refresh_token, cloud._expires_at,
+                        cloud._user_id, cloud._region)
+            payload.update({strings[18]: "replacement-access", "uid": []})
+            with pytest.raises(DreameLawnMowerAuthError):
+                await cloud.async_login()
+            assert (cloud._token, cloud._refresh_token, cloud._expires_at,
+                    cloud._user_id, cloud._region) == previous
+
+    asyncio.run(scenario())

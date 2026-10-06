@@ -23,6 +23,7 @@ from miio.miioprotocol import MiIOProtocol
 from .exceptions import (
     DeviceException, DreameLawnMowerCloudAPIError, DreameLawnMowerConnectionError,
 )
+from .cloud_auth import parse_cloud_authentication
 from .cloud_wire import (
     DEVICE_INFO_PATH, DEVICE_LIST_PATH, cloud_device_info_data,
     cloud_device_list_data, cloud_headers, cloud_login_data,
@@ -156,7 +157,7 @@ class DreameMowerDreameHomeCloudProtocol:
         self._username = username
         self._password = password
         self._country = country
-        self._location = country
+        self._location: str | None = country
         self._did = did
         self._request_lock = RLock()
         self._deadline_operation_state = local()
@@ -170,7 +171,7 @@ class DreameMowerDreameHomeCloudProtocol:
         self._reconnect_timer = None
         self._host = None
         self._model = None
-        self._ti = None
+        self._ti: str | None = None
         self._fail_count = 0
         self._connected = False
         self._client_connected = False
@@ -178,15 +179,15 @@ class DreameMowerDreameHomeCloudProtocol:
         self._client = None
         self._message_callback = None
         self._connected_callback = None
-        self._logged_in = None
+        self._logged_in: bool | None = None
         self._stream_key = None
         self._client_key = None
-        self._secondary_key = None
-        self._key_expire = None
-        self._key = None
+        self._secondary_key: str | None = None
+        self._key_expire: float | None = None
+        self._key: str | None = None
         self._uid = None
-        self._uuid = None
-        self._strings = None
+        self._uuid: str | None = None
+        self._strings: list[str] | None = None
 
     def _operation_lock(self) -> RLock:
         """Return the shared cloud lock, including legacy constructed fixtures."""
@@ -543,14 +544,16 @@ class DreameMowerDreameHomeCloudProtocol:
         self._session = requests.session()
         self._logged_in = False
 
-        if self._strings is None:
-            self._strings = cloud_strings(self._account_type)
+        strings = self._strings
+        if strings is None:
+            strings = cloud_strings(self._account_type)
+            self._strings = strings
 
         try:
             data = cloud_login_data(
-                self._strings, self._username, self._password, self._secondary_key
+                strings, self._username, self._password, self._secondary_key
             )
-            headers = cloud_headers(self._strings, self._country, self._ti)
+            headers = cloud_headers(strings, self._country, self._ti)
 
             request_timeout = timeout
             if deadline is not None:
@@ -569,7 +572,7 @@ class DreameMowerDreameHomeCloudProtocol:
                 request_options["stream"] = True
             response = _post_cloud_response(
                 self._session,
-                self.get_api_url() + self._strings[17],
+                self.get_api_url() + strings[17],
                 request_options,
                 deadline=deadline,
                 run_in_worker=not self._deadline_operation_runs_in_worker(),
@@ -586,16 +589,18 @@ class DreameMowerDreameHomeCloudProtocol:
                 response_text = response.text
             if response.status_code == 200:
                 data = json.loads(response_text)
-                if self._strings[18] in data and not self._disconnect_is_pending():
-                    self._key = data.get(self._strings[18])
-                    self._secondary_key = data.get(self._strings[19])
-                    self._key_expire = time.time(
-                    ) + data.get(self._strings[20]) - 120
+                if strings[18] in data and not self._disconnect_is_pending():
+                    authentication = parse_cloud_authentication(
+                        data, strings, now=time.time(),
+                        tenant=self._ti, region=self._location,
+                    )
+                    self._key = authentication.token
+                    self._secondary_key = authentication.refresh_token
+                    self._key_expire = authentication.expires_at
+                    self._uuid = authentication.user_id
+                    self._location = authentication.region
+                    self._ti = authentication.tenant
                     self._logged_in = True
-                    self._uuid = data.get("uid")
-                    self._location = data.get(
-                        self._strings[21], self._location)
-                    self._ti = data.get(self._strings[22], self._ti)
             else:
                 try:
                     data = json.loads(response_text)
