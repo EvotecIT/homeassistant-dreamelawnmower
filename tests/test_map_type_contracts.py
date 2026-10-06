@@ -167,3 +167,18 @@ def test_cleaning_history_preserves_map_file_identity(value_key, filename):
     assert history.file_name == filename
     assert history.object_name == "map-object"
     assert history.key == ("decryption-key" if "," in filename else None)
+
+
+@pytest.mark.parametrize("missing", ["x0", "y0", "x1", "y1"])
+def test_segment_requires_complete_bounds_for_geometry(missing):
+    segment = Segment(1, x0=10, y0=20, x1=30, y1=40)
+    setattr(segment, missing, None)
+    assert segment.check_point(20, 30, 1) is False
+    dimensions = MapImageDimensions(0, 0, 100, 100, 1)
+    for convert in (segment.as_area, lambda: segment.to_img(dimensions),
+                    lambda: segment.to_coord(dimensions)):
+        with pytest.raises(ValueError, match="bounds are unavailable"):
+            convert()
+    setattr(segment, missing, {"x0": 10, "y0": 20, "x1": 30, "y1": 40}[missing])
+    assert segment.check_point(20, 30, 1) is True
+    assert segment.to_img(dimensions).to_coord(dimensions) == segment

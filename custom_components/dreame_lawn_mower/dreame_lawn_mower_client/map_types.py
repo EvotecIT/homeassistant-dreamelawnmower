@@ -289,7 +289,10 @@ class Obstacle(Point):
 
 
 class Zone:
-    def __init__(self, x0: float, y0: float, x1: float, y1: float) -> None:
+    def __init__(
+        self, x0: float | None, y0: float | None,
+        x1: float | None, y1: float | None,
+    ) -> None:
         self.x0 = x0
         self.y0 = y0
         self.x1 = x1
@@ -314,24 +317,38 @@ class Zone:
     def as_dict(self) -> dict[str, Any]:
         return {ATTR_X0: self.x0, ATTR_Y0: self.y0, ATTR_X1: self.x1, ATTR_Y1: self.y1}
 
+    def _bounds(self) -> tuple[float, float, float, float]:
+        if (
+            self.x0 is None or self.y0 is None
+            or self.x1 is None or self.y1 is None
+        ):
+            raise ValueError("Zone bounds are unavailable")
+        return self.x0, self.y0, self.x1, self.y1
+
     def as_area(self) -> Area:
-        return Area(
-            self.x0, self.y0, self.x0, self.y1, self.x1, self.y1, self.x1, self.y0
-        )
+        x0, y0, x1, y1 = self._bounds()
+        return Area(x0, y0, x0, y1, x1, y1, x1, y0)
 
     def to_img(self, image_dimensions: MapImageDimensions, offset: bool = True) -> Zone:
-        p0 = Point(self.x0, self.y0).to_img(image_dimensions, offset)
-        p1 = Point(self.x1, self.y1).to_img(image_dimensions, offset)
+        x0, y0, x1, y1 = self._bounds()
+        p0 = Point(x0, y0).to_img(image_dimensions, offset)
+        p1 = Point(x1, y1).to_img(image_dimensions, offset)
         return Zone(p0.x, p0.y, p1.x, p1.y)
 
     def to_coord(
         self, image_dimensions: MapImageDimensions, offset: bool = True
     ) -> Zone:
-        p0 = Point(self.x0, self.y0).to_coord(image_dimensions, offset)
-        p1 = Point(self.x1, self.y1).to_coord(image_dimensions, offset)
+        x0, y0, x1, y1 = self._bounds()
+        p0 = Point(x0, y0).to_coord(image_dimensions, offset)
+        p1 = Point(x1, y1).to_coord(image_dimensions, offset)
         return Zone(p0.x, p0.y, p1.x, p1.y)
 
     def check_point(self, x: float, y: float, size: float) -> bool:
+        if (
+            self.x0 is None or self.y0 is None
+            or self.x1 is None or self.y1 is None
+        ):
+            return False
         return self.as_area().check_point(x, y, size)
 
 
@@ -379,7 +396,7 @@ class Segment(Zone):
         self.set_name()
 
     @property
-    def outline(self) -> list[list[float]]:
+    def outline(self) -> list[list[float | None]]:
         return [
             [self.x0, self.y0],
             [self.x0, self.y1],
