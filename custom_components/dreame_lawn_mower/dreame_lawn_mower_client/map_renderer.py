@@ -112,6 +112,7 @@ from .device_types import (
     FURNITURE_V2_TYPE_TO_DIMENSIONS,
 )
 from .map_renderer_types import (
+    _CalibrationPoints,
     ALine,
     MAP_COLOR_SCHEME_LIST,
     MAP_ICON_SET_LIST,
@@ -237,8 +238,8 @@ class DreameMowerMapRenderer:
         self._square: bool = square
         self._cache: bool = cache
         self._has_mask: bool = False
-        self._calibration_points: dict[str, int] = None
-        self._default_calibration_points: dict[str, int] = [
+        self._calibration_points: _CalibrationPoints | None = None
+        self._default_calibration_points: _CalibrationPoints = [
             {
                 MAP_PARAMETER_MOWER: {
                     MAP_DATA_JSON_PARAMETER_X: 0,
@@ -295,11 +296,11 @@ class DreameMowerMapRenderer:
         self._obstacle_top_right_icon = None
         self._map_problem_icon = None
 
-        self._segment_icons = {}
-        self._obstacle_icons = {}
-        self._obstacle_hidden_icons = {}
-        self._furniture_icons = {}
-        self._furniture_images = {}
+        self._segment_icons: dict[int, Image.Image] = {}
+        self._obstacle_icons: dict[int, Image.Image] = {}
+        self._obstacle_hidden_icons: dict[int, Image.Image] = {}
+        self._furniture_icons: dict[int, Image.Image] = {}
+        self._furniture_images: dict[int, Image.Image] = {}
 
         if self._low_memory:
             self.config.obstacle = False
@@ -482,9 +483,9 @@ class DreameMowerMapRenderer:
         return padding
 
     @staticmethod
-    def _calculate_calibration_points(map_data: MapData) -> dict[str, int] | None:
+    def _calculate_calibration_points(map_data: MapData) -> _CalibrationPoints | None:
         if (map_data.dimensions.width * map_data.dimensions.height) > 0:
-            calibration_points = []
+            calibration_points: _CalibrationPoints = []
             for point in [Point(0, 0), Point(1000, 0), Point(0, 1000)]:
                 img_point = point.to_img(map_data.dimensions).rotated(map_data.dimensions, map_data.rotation)
                 calibration_points.append(
@@ -3366,9 +3367,9 @@ class DreameMowerMapRenderer:
         if draw_image:
             furniture_images = FURNITURE_V2_TYPE_TO_IMAGE if furniture_version == 2 else FURNITURE_TYPE_TO_IMAGE
             if furniture_type not in self._furniture_images and furniture_type in furniture_images:
-                img = np.array(Image.open(BytesIO(base64.b64decode(furniture_images[furniture_type]))).convert("RGBA"))
-                img[..., 3] = 235 * (img[..., 3] > 0)
-                self._furniture_images[furniture_type] = Image.fromarray(img)
+                pixels = np.array(Image.open(BytesIO(base64.b64decode(furniture_images[furniture_type]))).convert("RGBA"))
+                pixels[..., 3] = 235 * (pixels[..., 3] > 0)
+                self._furniture_images[furniture_type] = Image.fromarray(pixels)
             icon = self._furniture_images.get(furniture_type)
         else:
             furniture_icons = FURNITURE_V2_TYPE_TO_ICON if furniture_version == 2 else FURNITURE_TYPE_TO_ICON
@@ -3790,7 +3791,7 @@ class DreameMowerMapRenderer:
         return resources
 
     @property
-    def calibration_points(self) -> dict[str, int]:
+    def calibration_points(self) -> _CalibrationPoints | None:
         return self._calibration_points
 
     @property
@@ -3815,5 +3816,5 @@ class DreameMowerMapRenderer:
         return self.default_map_image
 
     @property
-    def default_calibration_points(self) -> dict[str, int]:
+    def default_calibration_points(self) -> _CalibrationPoints:
         return self._default_calibration_points

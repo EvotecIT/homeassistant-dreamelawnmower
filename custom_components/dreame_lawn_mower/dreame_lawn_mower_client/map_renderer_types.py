@@ -7,6 +7,8 @@ from enum import IntEnum
 from typing import Any, Final
 
 type _RGBA = tuple[int, int, int, int]
+# Each entry pairs world and image coordinates for one calibration anchor.
+type _CalibrationPoints = list[dict[str, dict[str, float]]]
 
 
 @dataclass
