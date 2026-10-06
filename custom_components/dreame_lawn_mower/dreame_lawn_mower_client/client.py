@@ -1802,7 +1802,7 @@ class DreameLawnMowerClient(
         refresh: bool = False,
         include_cloud: bool = True,
         language: str | None = "en",
-    ) -> DreameLawnMowerCameraFeatureSupport:
+    ) -> _client_camera.DreameLawnMowerCameraFeatureSupport:
         """Read cached camera capabilities and optional native cloud metadata."""
         from .client_camera_reads import async_camera_feature_support
 
