@@ -12,6 +12,7 @@ from aiohttp import BasicAuth, ClientError, ClientSession, ClientTimeout, DummyC
 from aiohttp.helpers import proxies_from_env
 
 from .exceptions import DreameLawnMowerConnectionError
+from .http_response import async_read_bounded_response
 
 MAX_PUBLIC_JSON_BYTES = 1024 * 1024
 
@@ -63,7 +64,8 @@ async def async_download_public_file(
         async with asyncio.timeout(max(0, deadline - time.monotonic())):
             async with ClientSession(
                 connector=session.connector, connector_owner=False,
-                cookie_jar=DummyCookieJar(), trust_env=False,
+                cookie_jar=DummyCookieJar(), trust_env=False, auto_decompress=False,
+                headers={"Accept-Encoding": "gzip, deflate"},
             ) as anonymous:
                 for attempt in range(attempts):
                     try:
@@ -101,14 +103,9 @@ async def async_download_public_file(
                                     raise DreameLawnMowerConnectionError(
                                         f"Download returned HTTP {response.status}",
                                     )
-                                body = bytearray()
-                                async for chunk in response.content.iter_chunked(8192):
-                                    if len(body) + len(chunk) > max_bytes:
-                                        raise DreameLawnMowerConnectionError(
-                                            "Download exceeds the size limit",
-                                        )
-                                    body.extend(chunk)
-                                return bytes(body)
+                                return await async_read_bounded_response(
+                                    response, max_bytes=max_bytes,
+                                )
                     except (ClientError, TimeoutError, _RetryableDownloadError):
                         if attempt + 1 == attempts:
                             raise DreameLawnMowerConnectionError(

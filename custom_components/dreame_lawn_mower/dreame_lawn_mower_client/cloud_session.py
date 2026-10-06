@@ -32,6 +32,7 @@ from .cloud_wire import (
     cloud_strings,
 )
 from .exceptions import DreameLawnMowerAuthError, DreameLawnMowerConnectionError
+from .http_response import async_read_bounded_response
 
 MAX_CLOUD_RESPONSE_BYTES = 1024 * 1024
 
@@ -484,6 +485,7 @@ class DreameCloudSession:
         http_method: Literal["GET", "POST"] = "POST",
     ) -> tuple[int, dict[str, Any]]:
         request_headers = dict(headers)
+        request_headers["Accept-Encoding"] = "gzip, deflate"
         # Explicit auth overrides both borrowed defaults and environment netrc
         # credentials while preserving the shared vendor wire representation.
         auth = BasicAuth.decode(request_headers.pop("Authorization"))
@@ -495,15 +497,11 @@ class DreameCloudSession:
             timeout=ClientTimeout(total=self._remaining(deadline)),
             allow_redirects=False,
             raise_for_status=False,
-            auto_decompress=True,
+            auto_decompress=False,
         ) as response:
-            body = bytearray()
-            async for chunk in response.content.iter_chunked(8192):
-                if len(body) + len(chunk) > MAX_CLOUD_RESPONSE_BYTES:
-                    raise DreameLawnMowerConnectionError(
-                        "Cloud response exceeds the size limit"
-                    )
-                body.extend(chunk)
+            body = await async_read_bounded_response(
+                response, max_bytes=MAX_CLOUD_RESPONSE_BYTES,
+            )
             try:
                 payload = json.loads(body)
             except (ValueError, UnicodeError) as err:
