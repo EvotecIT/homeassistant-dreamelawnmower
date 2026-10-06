@@ -272,7 +272,7 @@ class DreameMowerMapRenderer:
             },
         ]
 
-        self._image = None
+        self._image: Image.Image | None = None
         self._charger_icon = None
         self._robot_icon = None
         self._robot_charging_icon = None
@@ -289,7 +289,7 @@ class DreameMowerMapRenderer:
         self._wifi_icon = None
         self._font_file = None
         self._light_font_file = None
-        self._default_map_image = None
+        self._default_map_image: Image.Image | None = None
         self._obstacle_bottom_left_icon = None
         self._obstacle_top_left_icon = None
         self._obstacle_bottom_right_icon = None
@@ -327,11 +327,10 @@ class DreameMowerMapRenderer:
             ]
 
     @staticmethod
-    def _to_buffer(image) -> bytes:
-        if image:
-            buffer = io.BytesIO()
-            image.save(buffer, format="PNG")
-            return buffer.getvalue()
+    def _to_buffer(image: Image.Image) -> bytes:
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return buffer.getvalue()
 
     @staticmethod
     def _set_icon_color(image, size, color):
@@ -990,7 +989,7 @@ class DreameMowerMapRenderer:
 
     def render_map(
         self,
-        map_data: MapData,
+        map_data: MapData | None,
         robot_status: int = 0,
         station_status: int = 0,
         info_text: bool = False,
@@ -1639,9 +1638,13 @@ class DreameMowerMapRenderer:
                 self._image = image
         except Exception:
             _LOGGER.error("Map render Failed: %s", traceback.format_exc())
+            self.render_complete = True
+            if self._image is not None:
+                return self._to_buffer(self._image)
+            return self.default_map_image
 
         self.render_complete = True
-        return self._to_buffer(self._image if self._cache else image)
+        return self._to_buffer(image)
 
     @staticmethod
     def _segments_layer_needs_update(

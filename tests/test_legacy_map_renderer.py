@@ -2,13 +2,72 @@
 
 from __future__ import annotations
 
+from io import BytesIO
+
+import numpy as np
+import pytest
+from PIL import Image
+
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map import (
     DreameMowerMapRenderer,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
     MapData,
+    MapImageDimensions,
+    MapPixelType,
     Segment,
 )
+
+
+@pytest.mark.parametrize(
+    "cache,previous_frame", [(False, False), (True, False), (True, True)]
+)
+def test_raster_failure_returns_complete_png_and_next_frame_recovers(
+    cache: bool, previous_frame: bool, monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    renderer = DreameMowerMapRenderer(cache=cache, map_objects=[])
+
+    def frame(frame_id: int) -> MapData:
+        data = MapData()
+        data.map_id = 1
+        data.frame_id = frame_id
+        data.empty_map = False
+        data.rotation = 0
+        data.saved_map = False
+        data.dimensions = MapImageDimensions(0, 0, 4, 4, 50)
+        data.pixel_type = np.full((4, 4), MapPixelType.FLOOR.value)
+        data.data = bytes([MapPixelType.FLOOR.value] * 16)
+        data.segments = {}
+        return data
+
+    expected = (
+        renderer.render_map(frame(1)) if previous_frame else renderer.default_map_image
+    )
+
+    def fail_raster(*args: object, **kwargs: object) -> Image.Image:
+        raise OSError("Raster allocation failed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Image, "fromarray", fail_raster)
+        failed_frame = frame(2)
+        # Changed pixel data requires a fresh raster even with a completed cache.
+        failed_frame.data = bytes([MapPixelType.WALL.value] * 16)
+        result = renderer.render_map(failed_frame)
+
+    assert result == expected
+    assert "Raster allocation failed" in caplog.text
+    assert renderer.render_complete is True
+    with Image.open(BytesIO(result)) as image:
+        image.load()
+        assert image.format == "PNG"
+    recovery_frame = frame(3)
+    recovery_frame.pixel_type = np.full((4, 4), MapPixelType.WALL.value)
+    recovery_frame.data = bytes([MapPixelType.WALL.value] * 16)
+    recovered = renderer.render_map(recovery_frame)
+    assert recovered != expected
+    assert recovered != renderer.default_map_image
+    assert renderer.render_complete is True
 
 
 def _map_with_segment() -> MapData:
