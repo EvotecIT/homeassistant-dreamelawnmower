@@ -89,13 +89,10 @@ async def async_read_firmware_support(
             )
         if include_debug_ota_catalog:
             try:
-                debug_ota_catalog = await _run_state_worker(
-                    lambda: client._sync_get_debug_ota_catalog(
-                        current_version=_as_optional_text(
-                            getattr(device.info, "firmware_version", None)
-                        ),
+                debug_ota_catalog = await client.async_get_debug_ota_catalog(
+                    current_version=_as_optional_text(
+                        getattr(device.info, "firmware_version", None),
                     ),
-                    cancelled,
                 )
             except DreameLawnMowerConnectionError as err:
                 debug_ota_catalog = {

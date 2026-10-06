@@ -1747,11 +1747,11 @@ class DreameLawnMowerClient(
         include_raw: bool = False,
     ) -> dict[str, Any]:
         """Fetch the public debug/manual OTA catalog for the mower model."""
-        return await asyncio.to_thread(
-            self._sync_get_debug_ota_catalog,
-            model_name,
-            current_version,
-            include_raw,
+        from .client_public_reads import async_read_debug_catalog
+
+        return await async_read_debug_catalog(
+            self, model_name=model_name, current_version=current_version,
+            include_raw=include_raw,
         )
 
     async def async_get_app_map_objects(
@@ -2001,10 +2001,9 @@ class DreameLawnMowerClient(
         language: str | None = "en",
     ) -> dict[str, Any]:
         """Fetch the public device status translation JSON advertised by cloud."""
-        return await asyncio.to_thread(
-            self._sync_get_cloud_key_definition,
-            language,
-        )
+        from .client_public_reads import async_read_key_definition
+
+        return await async_read_key_definition(self, language=language)
 
     async def async_probe_map_sources(
         self,

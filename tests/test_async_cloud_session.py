@@ -2045,8 +2045,7 @@ def test_firmware_support_uses_native_metadata(monkeypatch, account_type, mode):
 
 
 @pytest.mark.parametrize("stop", ["cancel", "close"])
-@pytest.mark.parametrize("stage", ["snapshot", "debug_catalog"])
-def test_firmware_support_drains_started_workers(monkeypatch, stop, stage):
+def test_firmware_support_drains_started_workers(monkeypatch, stop):
     from threading import Event
     from unittest.mock import AsyncMock
 
@@ -2075,15 +2074,12 @@ def test_firmware_support_drains_started_workers(monkeypatch, stop, stage):
                 finished.set()
                 return {}
 
-            if stage == "snapshot":
-                monkeypatch.setattr(
-                    client_firmware_reads,
-                    "firmware_update_support_from_device", blocked,
-                )
-            else:
-                client._sync_get_debug_ota_catalog = blocked
+            monkeypatch.setattr(
+                client_firmware_reads,
+                "firmware_update_support_from_device", blocked,
+            )
             task = asyncio.create_task(client.async_get_firmware_update_support(
-                include_cloud=False, include_debug_ota_catalog=stage == "debug_catalog",
+                include_cloud=False,
             ))
             close = None
             try:
