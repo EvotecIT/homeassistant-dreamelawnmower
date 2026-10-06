@@ -47,7 +47,7 @@ def test_rpc_envelope_preserves_routing_and_request_identity(host, path, callbac
     else:
         assert cloud.send("get_properties", parameters, retry_count=1) == result
         route, payload, retries = cloud._api_call.call_args.args[:3]
-        expected_id = 10
+        expected_id = 11
     assert route == path
     assert retries == 1
     assert payload == {
@@ -60,6 +60,31 @@ def test_rpc_envelope_preserves_routing_and_request_identity(host, path, callbac
     assert cloud._id == 11
 
 
+def test_mixed_callback_native_and_sync_rpcs_never_reuse_request_ids():
+    cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
+    cloud._request_lock = RLock()
+    cloud._id = 10
+    cloud._host = None
+    cloud._did = "42"
+    cloud._strings = [f"part{index}" for index in range(53)]
+    ids = []
+    def queue_callback(callback, path, payload, retry):
+        ids.append(payload["id"])
+
+    cloud._api_call_async = queue_callback
+    cloud._api_call = lambda path, payload, *args, **kwargs: ids.append(payload["id"])
+
+    async def scenario():
+        cloud.send_async(lambda result: None, "get_properties", [])
+        async with cloud.async_rpc_operation(deadline=time.monotonic() + 1) as rid:
+            ids.append(rid)
+        cloud.send("get_properties", [])
+        cloud.send_async(lambda result: None, "get_properties", [])
+
+    asyncio.run(scenario())
+    assert ids == [11, 12, 13, 14]
+
+
 def test_native_rpc_serializes_tasks_and_legacy_threads_and_releases_on_cancel():
     cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
     cloud._request_lock = RLock()
@@ -69,8 +94,7 @@ def test_native_rpc_serializes_tasks_and_legacy_threads_and_releases_on_cancel()
 
     def legacy():
         with cloud._operation_lock():
-            ids.append(cloud._id)
-            cloud._id += 1
+            ids.append(cloud._reserve_request_id())
             legacy_entered.set()
 
     async def scenario():
@@ -107,7 +131,7 @@ def test_native_rpc_serializes_tasks_and_legacy_threads_and_releases_on_cancel()
 
     asyncio.run(scenario())
     assert legacy_entered.is_set()
-    assert sorted(ids) == [10, 11, 12]
+    assert sorted(ids) == [11, 12, 13]
 
 
 def test_native_rpc_lock_wait_has_deadline_without_consuming_id():

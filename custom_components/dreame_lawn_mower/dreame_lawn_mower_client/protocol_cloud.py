@@ -224,8 +224,7 @@ class DreameMowerDreameHomeCloudProtocol:
                             )
                         if time.monotonic() >= deadline:
                             raise TimeoutError
-                        request_id = self._id
-                        self._id += 1
+                        request_id = self._reserve_request_id()
                         yield request_id
                     finally:
                         # Acquire/release on this same thread; never delegate
@@ -233,6 +232,11 @@ class DreameMowerDreameHomeCloudProtocol:
                         lock.release()
         except TimeoutError as err:
             raise DreameLawnMowerConnectionError("Device RPC timed out") from err
+
+    def _reserve_request_id(self) -> int:
+        """Reserve once under the operation lock before any RPC is dispatched."""
+        self._id += 1
+        return self._id
 
     def _disconnect_is_pending(self) -> bool:
         """Return whether teardown is waiting for an active transport to exit."""
@@ -942,7 +946,7 @@ class DreameMowerDreameHomeCloudProtocol:
         parameters,
         retry_count: int = 2,
     ):
-        self._id = self._id + 1
+        request_id = self._reserve_request_id()
         self._api_call_async(
             lambda api_response: callback(
                 None
@@ -950,7 +954,7 @@ class DreameMowerDreameHomeCloudProtocol:
                 else api_response["data"]["result"]
             ),
             cloud_rpc_path(self._strings, self._host),
-            cloud_rpc_params(self._did, self._id, method, parameters),
+            cloud_rpc_params(self._did, request_id, method, parameters),
             retry_count,
         )
 
@@ -992,9 +996,10 @@ class DreameMowerDreameHomeCloudProtocol:
         on_dispatch: Callable[[], None] | None = None,
         raise_on_api_error: bool = False,
     ) -> Any:
+        request_id = self._reserve_request_id()
         api_response = self._api_call(
             cloud_rpc_path(self._strings, self._host),
-            cloud_rpc_params(self._did, self._id, method, parameters),
+            cloud_rpc_params(self._did, request_id, method, parameters),
             retry_count,
             timeout,
             deadline=deadline,
@@ -1009,7 +1014,6 @@ class DreameMowerDreameHomeCloudProtocol:
             "DreameMowerDreameHomeCloudProtocol.send api_response: %s",
             logged_response,
         )
-        self._id = self._id + 1
         response_code = (
             api_response.get("code") if isinstance(api_response, Mapping) else None
         )
