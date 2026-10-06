@@ -2473,7 +2473,16 @@ class DreameMowerMapRenderer:
             cached_layers[MapRendererLayer.OBJECTS],
         )
 
-    def render_areas(self, areas, color, fill, layer_size, dimensions, width, scale):
+    def render_areas(
+        self,
+        areas: Sequence[Area],
+        color: _RGBA,
+        fill: _RGBA,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        width: int,
+        scale: int,
+    ) -> Image.Image:
         new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(new_layer, "RGBA")
         for area in areas:
@@ -2491,7 +2500,16 @@ class DreameMowerMapRenderer:
             draw.polygon(coords, fill, color, width=(width * scale))
         return new_layer
 
-    def render_points(self, points, color, fill, layer_size, dimensions, width, scale):
+    def render_points(
+        self,
+        points: Sequence[Point],
+        color: _RGBA,
+        fill: _RGBA,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        width: int,
+        scale: int,
+    ) -> Image.Image:
         new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(new_layer, "RGBA")
         size = 15 * dimensions.grid_size
@@ -2521,7 +2539,15 @@ class DreameMowerMapRenderer:
             draw.polygon(coords, fill, color, width=(width * scale))
         return new_layer
 
-    def render_walls(self, walls, color, layer_size, dimensions, width, scale):
+    def render_walls(
+        self,
+        walls: Sequence[Wall],
+        color: _RGBA,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        width: int,
+        scale: int,
+    ) -> Image.Image:
         new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(new_layer, "RGBA")
         for wall in walls:
