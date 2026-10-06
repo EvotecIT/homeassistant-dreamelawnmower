@@ -561,6 +561,7 @@ class DreameLawnMowerClient(
         self._refresh_lock = asyncio.Lock()
         self._schedule_operation_lock = _threading.RLock()
         self._schedule_async_gate = asyncio.Lock()
+        self._device_settings_write_lock = asyncio.Lock()
         self._app_schedule_retry_offset = 0
         self._schedule_protocols: dict[int, str] = {}
         self._schedule_document_versions: dict[int, int] = {}
@@ -1613,6 +1614,46 @@ class DreameLawnMowerClient(
         return await async_update_preferences(
             self, map_index, area_id, changes, execute, confirm_write,
         )
+
+    async def async_set_charging_period(
+        self, *, enabled: bool | None = None, start_minutes: int | None = None,
+        end_minutes: int | None = None,
+    ) -> dict[str, Any]:
+        """Set and confirm the mower-native charging period."""
+        from .client_settings_writes import async_write_device_settings
+        from .device_settings_write_plan import plan_charging_period
+
+        return await async_write_device_settings(self, plan_charging_period(
+            enabled=enabled, start_minutes=start_minutes, end_minutes=end_minutes,
+        ))
+
+    async def async_set_rain_protection(
+        self, *, enabled: bool | None = None, delay_hours: int | None = None,
+    ) -> dict[str, Any]:
+        """Set and confirm rain protection while preserving sensitivity."""
+        from .client_settings_writes import async_write_device_settings
+        from .device_settings_write_plan import plan_rain_protection
+
+        return await async_write_device_settings(self, plan_rain_protection(
+            enabled=enabled, delay_hours=delay_hours,
+        ))
+
+    async def async_set_anti_theft_settings(
+        self, *, lift_alarm_enabled: bool | None = None,
+        off_map_alarm_enabled: bool | None = None,
+        real_time_location_enabled: bool | None = None,
+        pin_check_before_power_off_enabled: bool | None = None,
+    ) -> dict[str, Any]:
+        """Set anti-theft flags and require exact configuration readback."""
+        from .client_settings_writes import async_write_device_settings
+        from .device_settings_write_plan import plan_anti_theft_settings
+
+        return await async_write_device_settings(self, plan_anti_theft_settings(
+            lift_alarm_enabled=lift_alarm_enabled,
+            off_map_alarm_enabled=off_map_alarm_enabled,
+            real_time_location_enabled=real_time_location_enabled,
+            pin_check_before_power_off_enabled=pin_check_before_power_off_enabled,
+        ))
 
     async def async_get_device_settings(
         self, *, include_raw: bool = False,
