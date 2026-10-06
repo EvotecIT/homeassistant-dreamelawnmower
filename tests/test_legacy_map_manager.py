@@ -111,3 +111,27 @@ def test_map_download_failure_logs_only_exception_type(caplog):
     assert "RuntimeError" in caplog.text
     assert secret not in caplog.text
     assert manager._need_map_list_request is None
+
+
+def test_partial_frame_waits_for_pending_initial_map():
+    """A delta arriving before the initial frame stays queued until its base exists."""
+    from unittest.mock import Mock
+
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import map_types
+
+    manager = DreameMapMowerMapManager(_DummyProtocol())
+    manager._latest_map_id = 8
+    manager._map_request_time = 12000
+    manager._request_i_map = Mock()
+    partial = map_types.MapDataPartial()
+    partial.map_id = 8
+    partial.frame_id = 2
+    partial.frame_type = map_types.MapFrameType.P.value
+    partial.timestamp_ms = 13000
+
+    assert manager._add_map_data(partial) is True
+    assert manager._map_data_queue[8][2] is partial
+    assert manager._map_data is None
+    assert manager._current_frame_id is None
+    assert manager._map_request_time == 12000
+    manager._request_i_map.assert_not_called()

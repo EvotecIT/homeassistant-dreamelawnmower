@@ -781,7 +781,7 @@ class DreameMapMowerMapManager:
 
                 if self._map_request_time is None:
                     self._request_i_map()
-                    return True
+                return True
 
             if partial_map.frame_id != self._current_frame_id + 1:
                 if partial_map.frame_id <= self._current_frame_id:
