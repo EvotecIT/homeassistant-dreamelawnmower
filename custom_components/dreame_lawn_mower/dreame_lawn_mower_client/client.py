@@ -1662,13 +1662,17 @@ class DreameLawnMowerClient(
         map_slot_index_hints: Sequence[int] | None = None,
     ) -> dict[str, Any]:
         """Fetch and decode mower preferences from batch device data."""
-        return await asyncio.to_thread(
-            self._sync_get_batch_mowing_preferences,
-            include_raw,
-            map_indices,
-            map_index_hints,
-            map_slot_index_hints,
-        )
+        async def read(cloud: _DreameCloudSession) -> dict[str, Any]:
+            data = await cloud.async_get_batch_device_datas(
+                self._descriptor.did, _batch_settings_keys(),
+            )
+            return decode_batch_mowing_preferences(
+                data, include_raw=include_raw, map_indices=map_indices,
+                map_index_hints=map_index_hints,
+                map_slot_index_hints=map_slot_index_hints,
+            )
+
+        return await self._async_cloud_read(read)
 
     async def async_get_batch_ota_info(
         self,
@@ -1676,7 +1680,13 @@ class DreameLawnMowerClient(
         include_raw: bool = False,
     ) -> dict[str, Any]:
         """Fetch and decode OTA state from batch device data."""
-        return await asyncio.to_thread(self._sync_get_batch_ota_info, include_raw)
+        async def read(cloud: _DreameCloudSession) -> dict[str, Any]:
+            data = await cloud.async_get_batch_device_datas(
+                self._descriptor.did, _batch_ota_keys(),
+            )
+            return decode_batch_ota_info(data, include_raw=include_raw)
+
+        return await self._async_cloud_read(read)
 
     async def async_get_debug_ota_catalog(
         self,

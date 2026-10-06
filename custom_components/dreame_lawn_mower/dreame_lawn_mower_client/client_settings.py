@@ -774,19 +774,6 @@ class _DreameLawnMowerClientSettingsMixin:
     ) -> dict[str, Any]:
         """Fetch and decode mower preferences from batch device data."""
         batch_data = self._sync_get_batch_device_data(_batch_settings_keys())
-        if batch_data is None:
-            return {
-                "source": "batch_device_data_mowing_preferences",
-                "available": False,
-                "property_hint": MOWING_PREFERENCE_PROPERTY_KEY,
-                "maps": [],
-                "errors": [
-                    {
-                        "stage": "settings",
-                        "error": "Batch device data returned no settings payload.",
-                    }
-                ],
-            }
         return decode_batch_mowing_preferences(
             batch_data,
             include_raw=include_raw,
@@ -801,20 +788,6 @@ class _DreameLawnMowerClientSettingsMixin:
     ) -> dict[str, Any]:
         """Fetch and decode OTA state from batch device data."""
         batch_data = self._sync_get_batch_device_data(_batch_ota_keys())
-        if batch_data is None:
-            return {
-                "source": "batch_device_data_ota_info",
-                "available": False,
-                "ota_info": None,
-                "update_available": None,
-                "auto_upgrade_enabled": None,
-                "errors": [
-                    {
-                        "stage": "ota",
-                        "error": "Batch device data returned no OTA payload.",
-                    }
-                ],
-            }
         return decode_batch_ota_info(batch_data, include_raw=include_raw)
 
     def _sync_get_debug_ota_catalog(

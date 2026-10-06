@@ -1902,3 +1902,65 @@ def test_native_login_retains_mqtt_identity_atomically(monkeypatch, account_type
                     cloud._user_id, cloud._region) == previous
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("account_type", ["dreame", "mova"])
+@pytest.mark.parametrize("kind", ["ota", "preferences"])
+@pytest.mark.parametrize("missing", [False, True])
+def test_public_batch_metadata_reads_use_native_http(
+    monkeypatch, account_type, kind, missing,
+):
+    strings = cloud_strings(account_type)
+    seen = []
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        seen.append(request.path)
+        assert request.path == "/" + "/".join(strings[i] for i in (23, 26, 44))
+        keys = ([*(f"OTA_INFO.{i}" for i in range(4)), "OTA_INFO.info",
+                 "prop.s_auto_upgrade"] if kind == "ota" else
+                [*(f"SETTINGS.{i}" for i in range(10)), "SETTINGS.info"])
+        assert await request.json() == {"did": "42", strings[35]: keys}
+        data = ({"OTA_INFO.0": "[2,35]", "prop.s_auto_upgrade": "1"}
+                if kind == "ota" else {"SETTINGS.0": "[]"})
+        return web.json_response({"code": 0, "data": None if missing else data})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **{**OPTIONS, "account_type": account_type}, session=session,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type=account_type, country="eu",
+                ),
+            )
+            try:
+                result = (await client.async_get_batch_ota_info(include_raw=True)
+                          if kind == "ota" else
+                          await client.async_get_batch_mowing_preferences(
+                              include_raw=True,
+                          ))
+                if missing:
+                    assert result["available"] is False
+                    label = "OTA" if kind == "ota" else "settings"
+                    assert result["errors"] == [{
+                        "stage": "ota" if kind == "ota" else "settings",
+                        "error": f"Batch device data returned no {label} payload.",
+                    }]
+                elif kind == "ota":
+                    assert result["ota_state"] == 2
+                    assert result["ota_progress"] == 35
+                    assert result["auto_upgrade_enabled"] is True
+                    assert result["raw_text"] == "[2,35]"
+                else:
+                    assert result["maps"] == []
+                    assert result["errors"] == []
+                assert len(seen) == 1
+                assert client._device is None
+                assert not client._cloud_read_tasks
+            finally:
+                await client.async_close()
+            assert not session.closed
+
+    asyncio.run(scenario())
