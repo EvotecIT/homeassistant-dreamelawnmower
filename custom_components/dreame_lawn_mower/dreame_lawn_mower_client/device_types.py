@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable as _Callable
 from dataclasses import dataclass
 from enum import Enum, IntEnum
 from typing import Any, Final
@@ -1075,7 +1076,7 @@ PROPERTY_AVAILABILITY: Final = {
     "off_peak_charging_end": lambda device: device.status.off_peak_charging,
 }
 
-ACTION_AVAILABILITY: Final = {
+ACTION_AVAILABILITY: Final[dict[str, _Callable[[Any], Any]]] = {
     DreameMowerAction.RESET_BLADES.name: lambda device: bool(
         device.status.blades_life < 100
     ),
