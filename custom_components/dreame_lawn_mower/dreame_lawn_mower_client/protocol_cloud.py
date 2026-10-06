@@ -188,7 +188,7 @@ class DreameMowerDreameHomeCloudProtocol:
         self._uuid = None
         self._strings = None
 
-    def _operation_lock(self):
+    def _operation_lock(self) -> RLock:
         """Return the shared cloud lock, including legacy constructed fixtures."""
         lock = getattr(self, "_request_lock", None)
         if lock is None:

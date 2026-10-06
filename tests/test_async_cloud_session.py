@@ -1125,7 +1125,9 @@ def test_native_device_read_rejects_failed_rpc_even_with_result(monkeypatch):
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("result_code", [0, 80001, 5])
+@pytest.mark.parametrize(
+    "result_code", [0, 80001, 5, "missing_did", "bad_did", "callback"],
+)
 def test_public_refresh_uses_native_rpc_and_applies_real_device_state(
     monkeypatch, result_code,
 ):
@@ -1154,11 +1156,14 @@ def test_public_refresh_uses_native_rpc_and_applies_real_device_state(
             return web.json_response(login_response(strings))
         payload = await request.json()
         requests.append(payload)
+        row = {"did": str(battery.value), "code": 0, "value": 55}
+        if result_code == "missing_did":
+            del row["did"]
+        elif result_code == "bad_did":
+            row["did"] = "invalid"
         return web.json_response({
-            "code": result_code,
-            "data": {"result": [{
-                "did": str(battery.value), "code": 0, "value": 55,
-            }]},
+            "code": result_code if isinstance(result_code, int) else 0,
+            "data": {"result": [row]},
         })
 
     async def scenario():
@@ -1177,11 +1182,17 @@ def test_public_refresh_uses_native_rpc_and_applies_real_device_state(
             client.async_get_status_blob = AsyncMock(return_value=None)
             client._async_get_cached_cloud_device_info = AsyncMock(return_value=None)
             client._snapshot_from_device = lambda mower: mower.data[battery.value]
+            if result_code == "callback":
+                def fail_callback(_previous):
+                    raise ValueError("callback rejected state")
+
+                device._property_update_callback[battery.value] = [fail_callback]
             try:
-                if result_code == 5:
+                if result_code not in (0, 80001):
                     with pytest.raises(DreameLawnMowerConnectionError):
                         await client.async_refresh()
-                    assert device.data[battery.value] == 20
+                    if result_code != "callback":
+                        assert device.data[battery.value] == 20
                 else:
                     assert await client.async_refresh() == (
                         55 if result_code == 0 else 20

@@ -13,7 +13,11 @@ from .device_property_read import (
     build_device_property_request,
 )
 from .device_types import DreameMowerProperty
-from .exceptions import DeviceException, DreameLawnMowerConnectionError
+from .exceptions import (
+    DeviceException,
+    DeviceUpdateFailedException,
+    DreameLawnMowerConnectionError,
+)
 
 if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
@@ -110,9 +114,14 @@ async def async_update_device(client: DreameLawnMowerClient) -> DreameMowerDevic
                                 "Device changed during refresh"
                             )
                         if properties:
-                            apply_device_property_response(
-                                device, results, require_fresh_state=False,
-                            )
+                            try:
+                                apply_device_property_response(
+                                    device, results, require_fresh_state=False,
+                                )
+                            except Exception as err:
+                                # Match device.update's request/application
+                                # boundary; cancellation remains a BaseException.
+                                raise DeviceUpdateFailedException(err) from None
                         device._finish_update()
                     finally:
                         lock.release()

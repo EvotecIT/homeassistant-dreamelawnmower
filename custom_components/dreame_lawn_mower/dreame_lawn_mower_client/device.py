@@ -181,7 +181,7 @@ class DreameMowerDevice(
         self.token: str = None  # Local api token
         self.host: str = None  # IP address or host name of the device
         # Dictionary for storing the current property values
-        self.data: dict[DreameMowerProperty, Any] = {}
+        self.data: dict[int, Any] = {}
         self.unknown_properties: dict[int, dict[str, Any]] = {}
         self.realtime_properties: dict[str, dict[str, Any]] = {}
         self.last_realtime_message: dict[str, Any] | None = None
