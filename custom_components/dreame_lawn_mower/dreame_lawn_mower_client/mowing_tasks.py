@@ -5,6 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from .exceptions import (
+    DreameLawnMowerCommandRejectedError,
+    DreameLawnMowerConnectionError,
+)
+
 MOWING_TASK_EDGE = 101
 MOWING_TASK_ZONE = 102
 MOWING_TASK_SPOT = 103
@@ -59,6 +64,26 @@ def build_maintenance_point_request(
         "point",
         normalized,
     )
+
+
+def build_map_switch_request(map_index: int) -> dict[str, Any]:
+    """Build a switch request for a nonnegative app map index."""
+    if map_index < 0:
+        raise ValueError("map_index must be zero or greater.")
+    return {"m": "a", "p": 0, "o": 200, "d": {"idx": int(map_index)}}
+
+
+def client_task_result(response: Any, *, task_name: str) -> Any:
+    """Preserve the reusable client's rejected-versus-missing reply contract."""
+    try:
+        return ensure_mowing_task_succeeded(response, task_name=task_name)
+    except MowingTaskResponseError as error:
+        error_type = (
+            DreameLawnMowerCommandRejectedError
+            if isinstance(response, Mapping)
+            else DreameLawnMowerConnectionError
+        )
+        raise error_type(str(error)) from error
 
 
 def ensure_mowing_task_succeeded(

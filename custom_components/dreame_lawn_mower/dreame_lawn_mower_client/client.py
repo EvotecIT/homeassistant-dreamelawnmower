@@ -1097,15 +1097,32 @@ class DreameLawnMowerClient(
             "state before retrying."
         )
 
+    async def _async_call_mowing_task(
+        self, action: Mapping[str, Any], *, task_name: str,
+    ) -> Any:
+        """Dispatch one app task through the native command and reply owners."""
+        from .client_app_reads import async_command_app_action
+        from .mowing_tasks import client_task_result
+
+        try:
+            response = await async_command_app_action(
+                self, action, deadline=time.monotonic() + 20,
+            )
+        except DeviceException as err:
+            raise DreameLawnMowerConnectionError(str(err)) from err
+        return client_task_result(response, task_name=task_name)
+
     async def async_go_to_maintenance_point(self, point_id: int) -> Any:
         """Drive to one configured map maintenance point."""
         snapshot = await self.async_refresh_authoritative_snapshot()
         block_reason = _maintenance_point_command_block_reason(snapshot)
         if block_reason is not None:
             raise _DreameLawnMowerCommandRejectedError(block_reason)
-        return await asyncio.to_thread(
-            self._sync_go_to_maintenance_point,
-            int(point_id),
+        from .mowing_tasks import build_maintenance_point_request
+
+        return await self._async_call_mowing_task(
+            build_maintenance_point_request([int(point_id)]),
+            task_name="maintenance point",
         )
 
     async def async_switch_current_map(self, map_index: int) -> Any:
@@ -1123,7 +1140,11 @@ class DreameLawnMowerClient(
                 "cancel the task first."
             )
         try:
-            response = await asyncio.to_thread(self._sync_switch_current_map, map_index)
+            from .mowing_tasks import build_map_switch_request
+
+            response = await self._async_call_mowing_task(
+                build_map_switch_request(map_index), task_name="map switch",
+            )
         except _DreameLawnMowerCommandRejectedError:
             raise
         except DreameLawnMowerConnectionError:

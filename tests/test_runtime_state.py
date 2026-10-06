@@ -327,8 +327,8 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
     client._ensure_device = lambda **kwargs: device
     client._async_update_device = AsyncMock(return_value=device)
     device._fresh_task_state = {"legacy_task_status": 6, "received_at": 101.0}
-    client._sync_switch_current_map = Mock(
-        side_effect=lambda map_index: {"map_index": map_index}
+    client._async_call_mowing_task = AsyncMock(
+        side_effect=lambda action, **kwargs: {"map_index": action["d"]["idx"]}
     )
     client.async_get_current_app_map_index = AsyncMock(return_value=1)
 
@@ -349,7 +349,7 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
 
     assert first_snapshot.state == "paused"
     assert first_snapshot.activity == "paused"
-    client._sync_switch_current_map.assert_not_called()
+    client._async_call_mowing_task.assert_not_awaited()
 
     heartbeat_received_at = 102.0
     device.realtime_properties[MOWER_RAW_STATUS_PROPERTY_KEY]["last_seen"] = (
@@ -388,7 +388,9 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
     assert client._latest_snapshot.state == "idle"
     assert client._latest_snapshot.activity == "docked"
     assert switch_result == {"map_index": 1}
-    client._sync_switch_current_map.assert_called_once_with(1)
+    client._async_call_mowing_task.assert_awaited_once_with(
+        {"m": "a", "p": 0, "o": 200, "d": {"idx": 1}}, task_name="map switch"
+    )
     client.async_get_current_app_map_index.assert_awaited_once_with()
 
 
@@ -684,7 +686,7 @@ def test_expired_a3_heartbeat_cannot_bypass_map_switch_guard() -> None:
     client._latest_snapshot = None
     client._async_update_device = AsyncMock(return_value=device)
     device._fresh_task_state = {"legacy_task_status": 6, "received_at": time.time()}
-    client._sync_switch_current_map = Mock()
+    client._async_call_mowing_task = AsyncMock()
 
     with patch.object(
         client_core_module,
@@ -697,7 +699,7 @@ def test_expired_a3_heartbeat_cannot_bypass_map_switch_guard() -> None:
         ):
             asyncio.run(client.async_switch_current_map(1))
 
-    client._sync_switch_current_map.assert_not_called()
+    client._async_call_mowing_task.assert_not_awaited()
 
 
 @pytest.mark.parametrize("age_seconds", [154.614, 300.013, 365.0])

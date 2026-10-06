@@ -62,6 +62,7 @@ from .mowing_tasks import (
     build_maintenance_point_request,
     build_spot_mowing_request,
     build_zone_mowing_request,
+    client_task_result,
     ensure_mowing_task_succeeded,
 )
 from .payload_utils import (
@@ -871,19 +872,9 @@ class _DreameLawnMowerClientCoreMixin:
             response = self._sync_call_app_action(
                 build_maintenance_point_request([point_id])
             )
-            return ensure_mowing_task_succeeded(
-                response,
-                task_name="maintenance point",
-            )
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
-        except MowingTaskResponseError as err:
-            error_type = (
-                DreameLawnMowerCommandRejectedError
-                if isinstance(response, Mapping)
-                else DreameLawnMowerConnectionError
-            )
-            raise error_type(str(err)) from err
+        return client_task_result(response, task_name="maintenance point")
 
     async def _async_read_device_properties(
         self, device: Any, properties: Sequence[Mapping[str, int | str]], *,

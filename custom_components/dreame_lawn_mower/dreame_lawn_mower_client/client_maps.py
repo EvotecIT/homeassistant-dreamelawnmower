@@ -43,7 +43,6 @@ from .client_vector_map_view import vector_map_details, vector_map_view
 from .exceptions import (
     DeviceException,
     DreameLawnMowerCloudAPIError,
-    DreameLawnMowerCommandRejectedError,
     DreameLawnMowerConnectionError,
 )
 from .exceptions import (
@@ -68,8 +67,8 @@ from .models import (
     map_summary_from_map_data,
 )
 from .mowing_tasks import (
-    MowingTaskResponseError,
-    ensure_mowing_task_succeeded,
+    build_map_switch_request,
+    client_task_result,
 )
 from .payload_utils import (
     _json_safe,
@@ -146,27 +145,12 @@ class _DreameLawnMowerClientMapsMixin(
 
     def _sync_switch_current_map(self, map_index: int) -> Any:
         """Switch the active mower map by app map index."""
-        if map_index < 0:
-            raise ValueError("map_index must be zero or greater.")
+        action = build_map_switch_request(map_index)
         try:
-            response = self._sync_call_app_action(
-                {
-                    "m": "a",
-                    "p": 0,
-                    "o": 200,
-                    "d": {"idx": int(map_index)},
-                }
-            )
-            return ensure_mowing_task_succeeded(response, task_name="map switch")
+            response = self._sync_call_app_action(action)
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
-        except MowingTaskResponseError as err:
-            error_type = (
-                DreameLawnMowerCommandRejectedError
-                if isinstance(response, Mapping)
-                else DreameLawnMowerConnectionError
-            )
-            raise error_type(str(err)) from err
+        return client_task_result(response, task_name="map switch")
 
     def _sync_get_vector_map_details(self) -> dict[str, Any]:
         """Return parsed batch vector-map details without rendering an image."""
