@@ -85,7 +85,7 @@ async def async_update_preferences(
             while True:
                 try:
                     response = await dispatch(request)
-                except Exception as error:
+                except (Exception, asyncio.CancelledError) as error:
                     request = driver.throw(error)
                 else:
                     request = driver.send(response)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Generator, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -255,7 +256,7 @@ def plan_preference_update(
                     )
                     result["changed"] = bool(result["changed_fields"])
                     result["changes"].update(refreshed["changes"])
-                except Exception as err:
+                except (Exception, asyncio.CancelledError) as err:
                     mark_write_attempted(err, fields=possibly_applied_fields)
                     raise
             request_fields = (
@@ -277,7 +278,7 @@ def plan_preference_update(
                 if possibly_applied_fields:
                     mark_write_attempted(err, fields=possibly_applied_fields)
                 raise
-            except Exception as err:
+            except (Exception, asyncio.CancelledError) as err:
                 mark_write_attempted(
                     err,
                     fields=(*possibly_applied_fields, *request_fields),
@@ -287,7 +288,7 @@ def plan_preference_update(
             try:
                 responses.append(_json_safe(response, max_depth=4))
                 response_payloads.append(_json_safe(response_data, max_depth=4))
-            except Exception as err:
+            except (Exception, asyncio.CancelledError) as err:
                 mark_write_attempted(err, fields=possibly_applied_fields)
                 raise
         try:
@@ -311,7 +312,7 @@ def plan_preference_update(
             else:
                 result["responses"] = responses
                 result["response_data"] = response_payloads
-        except Exception as err:
+        except (Exception, asyncio.CancelledError) as err:
             if possibly_applied_fields:
                 mark_write_attempted(err, fields=possibly_applied_fields)
             raise

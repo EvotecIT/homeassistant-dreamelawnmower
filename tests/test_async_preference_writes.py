@@ -5,16 +5,22 @@ from __future__ import annotations
 import asyncio
 import time
 from copy import deepcopy
+from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from aiohttp import ClientSession, web
 
+from custom_components.dreame_lawn_mower.coordinator import DreameLawnMowerCoordinator
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     client_preference_writes,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
     attempted_write_fields,
+)
+from custom_components.dreame_lawn_mower.preference_cache import (
+    PendingPreferenceConfirmation,
 )
 
 from .test_async_app_commands import client_for
@@ -148,12 +154,14 @@ def test_native_preference_write(monkeypatch, account_type, mode):
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("stage", ["read", "write", "delay"])
+@pytest.mark.parametrize("stage", ["read", "write", "delay", "mode_read"])
 @pytest.mark.parametrize("stop", ["cancel", "close"])
 def test_preference_cancellation_stops_requests_and_readback_delay(
     monkeypatch, stage, stop
 ):
     peer = _FakePreferenceCloud()
+    if stage == "mode_read":
+        peer.modes[0] = 0
     strings = cloud_strings("dreame")
     actions = []
 
@@ -169,7 +177,10 @@ def test_preference_cancellation_stops_requests_and_readback_delay(
             monkeypatch.setattr(
                 client_preference_writes,
                 "asyncio",
-                SimpleNamespace(sleep=pause, timeout=asyncio.timeout),
+                SimpleNamespace(
+                    sleep=pause, timeout=asyncio.timeout,
+                    CancelledError=asyncio.CancelledError,
+                ),
             )
 
         async def handler(request):
@@ -177,8 +188,14 @@ def test_preference_cancellation_stops_requests_and_readback_delay(
                 return web.json_response(login_response(strings))
             action = (await request.json())["data"]["params"]["in"][0]
             actions.append(deepcopy(action))
-            if (stage == "read" and action["m"] == "g") or (
-                stage == "write" and action["m"] == "s"
+            if (
+                (stage == "read" and action["m"] == "g")
+                or (stage == "write" and action["m"] == "s")
+                or (
+                    stage == "mode_read"
+                    and action["m"] == "g"
+                    and any(a["m"] == "s" for a in actions)
+                )
             ):
                 entered.set()
                 await release.wait()
@@ -191,11 +208,36 @@ def test_preference_cancellation_stops_requests_and_readback_delay(
 
         async with server(monkeypatch, handler), ClientSession() as session:
             client = client_for(session)
+            coordinator = object.__new__(DreameLawnMowerCoordinator)
+            coordinator.client = client
+            coordinator._preference_write_lock = asyncio.Lock()
+            coordinator.async_update_listeners = Mock()
+            cached_at = datetime.now(UTC)
+            coordinator.batch_device_data_refreshed_at = cached_at
+            coordinator._pending_preference_confirmations = [
+                PendingPreferenceConfirmation(
+                    cached_at,
+                    map_index,
+                    area,
+                    field,
+                    {},
+                    {},
+                )
+                for map_index, area, field in [
+                    (0, 11, "mowing_height_cm"),
+                    (0, None, "preference_mode"),
+                    (1, 11, "mowing_height_cm"),
+                ]
+            ]
+            earlier_read = coordinator._begin_preference_read()
+            changes = {"mowing_height_cm": 5.0}
+            if stage == "mode_read":
+                changes["preference_mode"] = "custom"
             operation = asyncio.create_task(
-                client.async_plan_app_mowing_preference_update(
+                coordinator.async_plan_mowing_preference_update(
                     map_index=0,
                     area_id=11,
-                    changes={"mowing_height_cm": 5.0},
+                    changes=changes,
                     execute=True,
                     confirm_write=True,
                 )
@@ -207,8 +249,30 @@ def test_preference_cancellation_stops_requests_and_readback_delay(
                     await asyncio.wait_for(client.async_close(), 2)
                 else:
                     operation.cancel()
-                with pytest.raises(asyncio.CancelledError):
+                with pytest.raises(asyncio.CancelledError) as caught:
                     await operation
+                fields = attempted_write_fields(caught.value)
+                pending = {
+                    (item.map_index, item.field)
+                    for item in coordinator._pending_preference_confirmations
+                }
+                assert (1, "mowing_height_cm") in pending
+                if stage == "read":
+                    assert not fields
+                    assert coordinator.batch_device_data_refreshed_at == cached_at
+                    assert coordinator._preference_read_can_publish(earlier_read)
+                else:
+                    changed = (
+                        "preference_mode"
+                        if stage == "mode_read"
+                        else "mowing_height_cm"
+                    )
+                    assert changed in fields
+                    assert (0, changed) not in pending
+                    assert coordinator.batch_device_data_refreshed_at is None
+                    assert not coordinator._preference_read_can_publish(earlier_read)
+                    coordinator.async_update_listeners.assert_called_once_with()
+                assert not coordinator._preference_write_lock.locked()
                 release.set()
                 await client.async_close()
                 assert len(actions) == count

@@ -2242,7 +2242,7 @@ class DreameLawnMowerCoordinator(
                     execute=execute,
                     confirm_write=confirm_write,
                 )
-            except Exception as err:  # noqa: BLE001 - reconcile attempted writes
+            except (Exception, asyncio.CancelledError) as err:
                 attempted_fields = attempted_write_fields(err)
                 if execute and attempted_fields:
                     self._pending_preference_confirmations = (
@@ -2253,9 +2253,20 @@ class DreameLawnMowerCoordinator(
                             fields=attempted_fields,
                         )
                     )
-                    await self._async_reconcile_mowing_preference_write(
-                        suppress_errors=True,
-                    )
+                    if isinstance(err, asyncio.CancelledError):
+                        # Shutdown may make fresh I/O unavailable. Expire the
+                        # cache and fence older reads before cancellation escapes.
+                        self.batch_device_data_refreshed_at = None
+                        self._mark_preference_read_published(
+                            getattr(self, "_preference_read_generation", 0),
+                            complete=False,
+                        )
+                        with suppress(Exception):
+                            self.async_update_listeners()
+                    else:
+                        await self._async_reconcile_mowing_preference_write(
+                            suppress_errors=True,
+                        )
                 raise
             self.last_preference_write_result = result
             if execute:
