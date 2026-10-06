@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from homeassistant.components.camera import Camera
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .coordinator import DreameLawnMowerCoordinator
+from .dreame_lawn_mower_client.lan_video import DreameLawnMowerLanVideoEndpoint
 from .dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
 )
@@ -62,6 +63,20 @@ class _DreameVideoRuntime(Protocol):
 
     def stop_live_stream(self, session: DreameLawnMowerXp2pLiveStreamSession) -> None:
         """Stop a previously started stream session."""
+
+
+@runtime_checkable
+class _DreameLanVideoRuntime(Protocol):
+    """Optional same-LAN startup capability of a video runtime adapter."""
+
+    def start_lan_stream(
+        self,
+        inputs: DreameLawnMowerCameraStreamRuntimeInputs,
+        *,
+        endpoint: DreameLawnMowerLanVideoEndpoint | None = None,
+        preferred_address: str | None = None,
+    ) -> DreameLawnMowerXp2pLiveStreamSession:
+        """Start from a cached endpoint or discover the preferred address."""
 
 
 class _VideoCameraState(CoordinatorEntity[DreameLawnMowerCoordinator], Camera):

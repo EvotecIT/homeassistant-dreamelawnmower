@@ -39,6 +39,7 @@ from .dreame_lawn_mower_client.video_runtime import (
 from .video_cached_xp2p import async_start_cached_xp2p as _async_start_cached_xp2p
 from .video_camera_cleanup import _VideoCameraCleanup
 from .video_camera_types import (
+    _DreameLanVideoRuntime,
     _DreameVideoRuntime,
     _facade_binding,
     _FacadeModuleProxy,
@@ -588,11 +589,13 @@ class DreameLawnMowerVideoStartupMixin(_VideoCameraCleanup):
         inputs: DreameLawnMowerCameraStreamRuntimeInputs,
     ) -> DreameLawnMowerXp2pLiveStreamSession:
         """Start LAN mode and clean up a late native result after cancellation."""
-        start_lan = getattr(runtime, "start_lan_stream", None)
-        if not callable(start_lan):
+        if not isinstance(runtime, _DreameLanVideoRuntime) or not callable(
+            runtime.start_lan_stream
+        ):
             raise DreameLawnMowerVideoRuntimeError(
                 "The configured advanced XP2P runtime does not support same-LAN video."
             )
+        start_lan = runtime.start_lan_stream
         cached_endpoint = self._lan_cache.endpoint
 
         def _start() -> DreameLawnMowerXp2pLiveStreamSession:
