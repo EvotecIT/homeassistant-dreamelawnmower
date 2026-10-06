@@ -85,6 +85,11 @@ class DreameMowerMapDecoder:
         return x, y
 
     @staticmethod
+    def _optional_int(value: object) -> int | None:
+        """Keep integer flags without coercing strings or container values."""
+        return value if isinstance(value, int) else None
+
+    @staticmethod
     def _metadata_int(value: object) -> int:
         """Convert JSON numeric metadata without changing legacy int semantics."""
         if not isinstance(value, str | int | float):
@@ -424,7 +429,9 @@ class DreameMowerMapDecoder:
                         data_json["clean_finish_remain_electricity"]
                     )
 
-                map_data.customized_cleaning = data_json.get("customeClean")
+                map_data.customized_cleaning = DreameMowerMapDecoder._optional_int(
+                    data_json.get("customeClean")
+                )
                 map_data.docked = bool("oc" in data_json and data_json["oc"])
                 map_data.line_to_robot = bool("l2r" in data_json and data_json["l2r"])
                 map_data.frame_map = bool(
@@ -458,7 +465,9 @@ class DreameMowerMapDecoder:
                         TaskEndType.OTHER,
                     )
                 map_data.multiple_cleaning_time = data_json.get("multime")
-                map_data.dos = data_json.get("dos")
+                map_data.dos = DreameMowerMapDecoder._optional_int(
+                    data_json.get("dos")
+                )
                 map_data.temporary_map = bool(
                     data_json.get("suw")
                     and (data_json["suw"] == 6 or data_json["suw"] == 5)

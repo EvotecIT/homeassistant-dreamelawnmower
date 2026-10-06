@@ -620,3 +620,20 @@ def test_segment_metadata_shape_does_not_drop_later_map_fields(segment_info):
     assert decoded.segments is not None and 1 in decoded.segments
     assert decoded.router_position == Point(120, -60)
     assert decoded.segments[1].name == "Zone 1"
+
+
+@pytest.mark.parametrize("value,expected", [(0, 0), (1, 1), (None, None),
+                                           ("1", None), ({"value": 1}, None)])
+def test_optional_integer_map_flags_do_not_coerce_vendor_values(value, expected):
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[4] = 73
+    metadata = {"customeClean": value, "dos": value,
+                "whmp": [120, -60]}
+    payload = base64.b64encode(zlib.compress(
+        bytes(header) + json.dumps(metadata).encode()
+    )).decode()
+    decoded, _ = map_decoder.DreameMowerMapDecoder.decode_map(payload, False)
+    assert decoded is not None
+    assert decoded.customized_cleaning == expected
+    assert decoded.dos == expected
+    assert decoded.router_position == Point(120, -60)
