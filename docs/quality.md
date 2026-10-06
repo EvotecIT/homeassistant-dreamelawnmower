@@ -166,7 +166,7 @@ Both map decoder entry points validate the binary header and declared image area
 Incomplete images, negative dimensions, and absent binary data return unavailable
 results; complete images remain valid without optional JSON metadata.
 
-The full standalone suite passes 2,654 tests with one skipped, including incomplete-image rejection and complete-image compatibility cases. Three robot-position boundary cases fail before the bounds correction and pass afterward; normal pixel lookup remains covered. Timestamp regressions use compressed payloads through the real decoder. An
+The full standalone suite passes 2,669 tests with one skipped, including incomplete-image rejection and complete-image compatibility cases. Three robot-position boundary cases fail before the bounds correction and pass afterward; normal pixel lookup remains covered. Timestamp regressions use compressed payloads through the real decoder. An
 independent review identified the affected refresh consumer; its correction
 passed targeted confirmation. Component/translation tests pass on HA 2025.1
 (73 passed, one version-specific skip) and HA 2026.9.4 (74 passed) at the ordering
@@ -194,8 +194,8 @@ saved map from decoding. Valid Wi-Fi maps retain inherited router positions.
 
 Active-segment and point collections retain valid entries while ignoring malformed
 entries. Hidden-segment metadata requires an integer list. The subsequent collection
-validation batch passes 87 focused codec/manager tests; the full-suite count above
-predates this batch. Area records use finite coordinate validation and retain
+validation batch is covered by the full standalone suite above. An independent
+read-only review accepted the decoder and consumer changes. Area records use finite coordinate validation and retain
 valid rectangles among malformed entries. Cleaning settings accept dictionaries
 or their JSON-string representation only when each record has at least four
 integer values, matching the segment consumer.

@@ -468,6 +468,7 @@ def test_area_metadata_normalizes_corners_and_preserves_following_points(
     ({"3": [1, 3]}, None),
     ({"3": [1, 3, "bad", 4]}, None),
     ([], None),
+    ("{invalid", None),
 ])
 def test_cleaning_metadata_validates_wire_records(
     as_json: bool, record: object, expected: object,
@@ -485,3 +486,15 @@ def test_cleaning_metadata_validates_wire_records(
     assert decoded is not None
     assert decoded.cleanset == expected
     assert decoded.router_position == Point(120, -60)
+    segment = Segment(3)
+    decoded.segments = {3: segment}
+    map_decoder.DreameMowerMapDecoder.set_segment_cleanset(
+        decoded, decoded.cleanset
+    )
+    if expected is None:
+        assert segment.cleaning_times is None
+        assert segment.order is None
+    else:
+        assert segment.cleaning_times == 2
+        assert segment.order == 4
+
