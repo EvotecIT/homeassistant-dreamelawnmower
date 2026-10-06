@@ -1601,8 +1601,8 @@ class DreameMowerMapDecoder:
     @staticmethod
     def set_segment_cleanset(
         map_data: MapData,
-        cleanset: dict[str, list[int]],
-        capability: DreameMowerDeviceCapability = None,
+        cleanset: dict[str, list[int]] | None,
+        capability: DreameMowerDeviceCapability | None = None,
     ) -> None:
         if map_data is not None and map_data.segments is not None:
             # Restored maps can omit cleanset values even though the mower
@@ -1641,7 +1641,7 @@ class DreameMowerMapDecoder:
 
             for k, _segment in map_data.segments.items():
                 map_data.segments[k].cleanset_type = cleanset_type
-                if cleanset_type != CleansetType.NONE:
+                if cleanset_type != CleansetType.NONE and cleanset is not None:
                     segment_id = str(k)
                     if segment_id not in cleanset:
                         cleanset[segment_id] = default_cleanset.copy()
@@ -1652,6 +1652,7 @@ class DreameMowerMapDecoder:
                     if len(item) > 4:
                         map_data.segments[k].cleaning_mode = item[4]
                     else:
+                        map_data.segments[k].cleaning_mode = None
                         map_data.segments[k].cleaning_route = None
                 else:
                     map_data.segments[k].cleaning_times = None
@@ -1662,9 +1663,12 @@ class DreameMowerMapDecoder:
     @staticmethod
     def set_segment_color_index(map_data: MapData) -> None:
         """Find segment color index as implemented on the app"""
-        area_color_index = {}
+        segments = map_data.segments
+        if not segments:
+            return
+        area_color_index: dict[int, int] = {}
         sorted_segments = sorted(
-            map_data.segments.values(),
+            segments.values(),
             key=cmp_to_key(DreameMowerMapDecoder._compare_segment_neighbors),
         )
         for segment in sorted_segments:
@@ -1681,12 +1685,12 @@ class DreameMowerMapDecoder:
             for _segment_id, j in area_color_index.items():
                 area_color_num[j][1] = area_color_num[j][1] + 1
 
-            area_color_num = sorted(
+            sorted_colors = sorted(
                 area_color_num.values(),
                 key=cmp_to_key(DreameMowerMapDecoder._compare_colors),
             )
 
-            for area_color in area_color_num:
+            for area_color in sorted_colors:
                 color = area_color[0]
                 if color not in used_ids:
                     area_color_index[segment.segment_id] = color
@@ -1696,7 +1700,7 @@ class DreameMowerMapDecoder:
                 area_color_index[segment.segment_id] = 0
 
         for k, v in area_color_index.items():
-            map_data.segments[k].color_index = v
+            segments[k].color_index = v
 
     @staticmethod
     def set_segment_floor_material(

@@ -4,6 +4,7 @@ from copy import deepcopy
 
 import pytest
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import map_decoder
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_types import (
     Area,
     Coordinate,
@@ -56,3 +57,31 @@ def test_obstacle_object_name_uses_available_vendor_identity(
 ):
     obstacle = Obstacle(1, 2, 0, 99, object_id=object_id, file_name=filename)
     assert obstacle.object_name == expected
+
+
+def test_segment_coloring_separates_neighbors_and_handles_missing_geometry() -> None:
+    map_data = MapData()
+    map_decoder.DreameMowerMapDecoder.set_segment_color_index(map_data)
+    map_data.segments = {
+        index: Segment(index, neighbors=[other for other in range(4) if other != index])
+        for index in range(4)
+    }
+    map_decoder.DreameMowerMapDecoder.set_segment_color_index(map_data)
+    colors = {segment.color_index for segment in map_data.segments.values()}
+    assert colors == {0, 1, 2, 3}
+
+
+def test_segment_cleaning_mode_clears_when_new_record_omits_it() -> None:
+    map_data = MapData()
+    segment = Segment(3)
+    map_data.segments = {3: segment}
+    map_decoder.DreameMowerMapDecoder.set_segment_cleanset(
+        map_data, {"3": [1, 3, 2, 4, 2]}
+    )
+    assert segment.cleaning_mode == 2
+    map_decoder.DreameMowerMapDecoder.set_segment_cleanset(
+        map_data, {"3": [1, 3, 1, 0]}
+    )
+    assert segment.cleaning_mode is None
+    assert segment.cleaning_times == 1
+    assert segment.order == 0
