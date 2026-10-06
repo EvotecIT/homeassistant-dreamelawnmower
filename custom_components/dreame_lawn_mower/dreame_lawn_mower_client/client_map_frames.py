@@ -105,7 +105,9 @@ async def async_download_frame_object(
 class NativeMissingMapFrames:
     """Coalesce missing-frame requests; frame delivery stays with MQTT."""
 
-    def __init__(self, client: DreameLawnMowerClient, device: DreameMowerDevice) -> None:
+    def __init__(
+        self, client: DreameLawnMowerClient, device: DreameMowerDevice
+    ) -> None:
         self._client = client
         self._device = device
         self._manager = device._map_manager
