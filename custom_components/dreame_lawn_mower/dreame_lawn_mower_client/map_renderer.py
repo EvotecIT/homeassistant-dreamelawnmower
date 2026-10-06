@@ -2081,7 +2081,7 @@ class DreameMowerMapRenderer:
                                 and (not map_data.hidden_segments or k not in map_data.hidden_segments)
                                 and not map_data.cleaning_map
                             ),
-                            (
+                            bool(
                                 map_data.cleaning_map
                                 and map_data.neglected_segments
                                 and k in map_data.neglected_segments
@@ -2850,16 +2850,17 @@ class DreameMowerMapRenderer:
 
     def render_segment(
         self,
-        segment,
-        cleanset,
-        layer_size,
-        dimensions,
-        size,
-        rotation,
-        scale,
-        active,
-        neglected,
-    ):
+        segment: Segment,
+        cleanset: bool,
+        layer_size: tuple[int, int],
+        dimensions: MapImageDimensions,
+        size: int,
+        rotation: int | None,
+        scale: int,
+        active: bool,
+        neglected: bool,
+    ) -> Image.Image:
+        rotation = rotation or 0
         new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(new_layer, "RGBA")
         if segment.x is not None and segment.y is not None:
@@ -2906,7 +2907,7 @@ class DreameMowerMapRenderer:
                     int((size * 1.9)) if segment.index or icon is None else int((size * 1.7)),
                 )
 
-            if active and segment.order and self.config.order:
+            if active and segment.order and self.config.order and self._font_file is not None:
                 order_font = ImageFont.truetype(BytesIO(self._font_file), int((size * 2.1)))
 
             p = Point(segment.x, segment.y).to_img(dimensions, False)
@@ -2915,7 +2916,7 @@ class DreameMowerMapRenderer:
 
             if neglected:
                 offset = size * 1.5
-                x_offset = 0
+                x_offset: float = 0
                 y_offset = -offset
                 if rotation == 90:
                     y_offset = 0
@@ -2937,7 +2938,7 @@ class DreameMowerMapRenderer:
                     x1 = x + size
                     y1 = y + size
 
-                    if text_font:
+                    if text_font and text is not None:
                         left, top, tw, th = draw.textbbox((0, 0), text, text_font)
                         ws = tw / 4
 
@@ -2945,7 +2946,7 @@ class DreameMowerMapRenderer:
                             icon_size = size * 1.35
                             padding = icon_size / 2
                             text_offset = (icon_size / 2) + 2
-                            icon_offset = 2
+                            icon_offset: float = 2
                             th = int(round(size * 2.3))
                         else:
                             icon_size = size * 1.15
@@ -3033,7 +3034,7 @@ class DreameMowerMapRenderer:
                                 radius=((size * scale)),
                             )
 
-                        icon_text = Image.new("RGBA", (tw, th), (255, 255, 255, 0))
+                        icon_text = Image.new("RGBA", (int(tw), int(th)), (255, 255, 255, 0))
                         draw_text = ImageDraw.Draw(icon_text, "RGBA")
 
                         draw_text.text(
@@ -3198,7 +3199,7 @@ class DreameMowerMapRenderer:
                             s = icon_size * 0.85 * scale
 
                         ico = DreameMowerMapRenderer._set_icon_color(
-                            self._cleaning_mode_icon[segment.cleaning_mode],
+                            self._cleaning_mode_icon[cleaning_mode],
                             s,
                             self.color_scheme.segment[segment.color_index][1],
                         )
