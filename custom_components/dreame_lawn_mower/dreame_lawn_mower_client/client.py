@@ -1798,6 +1798,21 @@ class DreameLawnMowerClient(
 
         return await self._async_cloud_read(read)
 
+    async def async_probe_camera_stream_handshake(
+        self, *, timeout: float = 6.0, interval: float = 0.75,
+        operation: str = "monitor", payload_mode: str = "app_action",
+    ) -> dict[str, Any]:
+        """Start a short camera session and always attempt a bounded end call.
+
+        This does not start audio, remote control, or mowing.
+        """
+        from .client_camera_handshake import async_camera_handshake
+
+        return await async_camera_handshake(
+            self, timeout=timeout, interval=interval,
+            operation=operation, payload_mode=payload_mode,
+        )
+
     async def async_get_camera_stream_inputs(self) -> dict[str, Any]:
         """Fetch camera provisioning through native owned cloud HTTP."""
         from .client_camera_credentials import async_camera_stream_inputs

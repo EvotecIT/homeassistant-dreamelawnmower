@@ -12,6 +12,7 @@ from .client_rpc import async_device_rpc
 
 if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
+    from .client_cleanup import OwnedCleanup
     from .cloud_session import DreameCloudSession
 
 
@@ -41,6 +42,7 @@ async def async_command_app_action(
     *,
     deadline: float,
     on_dispatch: Callable[[], None] | None = None,
+    _cleanup: OwnedCleanup | None = None,
 ) -> Any:
     """Share device routing and RPC ownership without retrying mutations."""
     if action.get("m") not in {"a", "s"}:
@@ -53,6 +55,7 @@ async def async_command_app_action(
         deadline=deadline,
         command=True,
         on_dispatch=on_dispatch,
+        _cleanup=_cleanup,
     )
 
 
@@ -64,6 +67,7 @@ async def _async_app_action(
     strict_response: bool = False,
     command: bool = False,
     on_dispatch: Callable[[], None] | None = None,
+    _cleanup: OwnedCleanup | None = None,
 ) -> Any:
     async def operation(device: Any, cloud: DreameCloudSession,
                         protocol: Any, request_id: int) -> Any:
@@ -87,7 +91,9 @@ async def _async_app_action(
             timeout=max(0.001, deadline - time.monotonic()),
         )
 
-    return await async_device_rpc(client, operation, deadline=deadline)
+    return await async_device_rpc(
+        client, operation, deadline=deadline, _cleanup=_cleanup,
+    )
 
 
 async def async_run_app_read(

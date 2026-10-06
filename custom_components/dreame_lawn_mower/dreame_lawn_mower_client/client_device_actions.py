@@ -17,20 +17,25 @@ _ACTION_TIMEOUT = 20
 
 if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
+    from .client_cleanup import OwnedCleanup
     from .cloud_session import DreameCloudSession
 
 
 async def async_run_device_plan(
     client: DreameLawnMowerClient,
     create_plan: Callable[[Any], Generator[ActionDelay | ActionRequest, Any, Any]],
+    *, _cleanup: OwnedCleanup | None = None,
 ) -> Any:
     """Own bounded state steps, cancellable delays and non-replayed actions."""
     deadline = time.monotonic() + _ACTION_TIMEOUT
+    if _cleanup is not None:
+        _cleanup.require_active(client)
+        deadline = min(deadline, _cleanup.deadline)
     cancelled = Event()
     attempted = False
 
     async def run(_cloud: DreameCloudSession) -> Any:
-        device = await _run_state_worker(
+        device = _cleanup.device if _cleanup is not None else await _run_state_worker(
             lambda: client._ensure_device(deadline=deadline, cancelled=cancelled),
             cancelled,
         )
@@ -38,7 +43,9 @@ async def async_run_device_plan(
         started = False
 
         def require_active() -> None:
-            if (cancelled.is_set() or client._closing
+            if _cleanup is not None:
+                _cleanup.require_active(client)
+            if (cancelled.is_set() or (_cleanup is None and client._closing)
                     or client._device is not device
                     or time.monotonic() >= deadline):
                 raise DreameLawnMowerConnectionError(
@@ -87,7 +94,7 @@ async def async_run_device_plan(
                                 deadline=deadline,
                             )
                         response = await async_device_rpc(
-                            client, command, deadline=deadline,
+                            client, command, deadline=deadline, _cleanup=_cleanup,
                         )
                 except Exception as error:
                     done, effect = await advance(error=error)
@@ -116,4 +123,6 @@ async def async_run_device_plan(
         finally:
             cancelled.set()
 
+    if _cleanup is not None:
+        return await bounded(_cleanup.cloud)
     return await client._async_cloud_read(bounded)

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from .device_action_plan import ActionDelay, ActionRequest
 
 from .app_protocol import mower_realtime_property_name
+from .stream_commands import stream_action_parameters
 from .device_privacy import AI_POLICY_PROPERTY, decode_ai_policy_acceptance
 from .device_code_semantics import (
     MowerDeviceCodeTier,
@@ -414,17 +415,11 @@ class _DreameMowerDeviceCommandMixin:
         property: DreameMowerProperty,
         parameters=None,
     ):
-        params = {"session": self.status.stream_session}
-        if parameters:
-            params.update(parameters)
         return self.call_action(
             action,
-            [
-                {
-                    "piid": PIID(property),
-                    "value": str(json.dumps(params, separators=(",", ":"))).replace(" ", ""),
-                }
-            ],
+            stream_action_parameters(
+                PIID(property), parameters, session=self.status.stream_session,
+            ),
         )
 
     def call_shortcut_action(self, command: str, parameters={}):

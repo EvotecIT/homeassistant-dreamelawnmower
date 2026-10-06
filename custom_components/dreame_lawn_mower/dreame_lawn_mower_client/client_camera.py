@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import time
 from collections.abc import Generator, Mapping
 from dataclasses import replace
@@ -30,6 +28,7 @@ from .payload_utils import (
     _lower_enum_name,
     _optional_bool,
 )
+from .stream_commands import stream_action_parameters
 from .video_credentials import derive_tx_video_app_credentials
 
 
@@ -282,27 +281,6 @@ class _DreameLawnMowerCameraMixin:
         """Return the latest privacy-safe TX video cloud operation summary."""
         return self._last_camera_stream_diagnostics
 
-    async def async_probe_camera_stream_handshake(
-        self,
-        *,
-        timeout: float = 6.0,
-        interval: float = 0.75,
-        operation: str = "monitor",
-        payload_mode: str = "app_action",
-    ) -> dict[str, Any]:
-        """Try the camera stream start/end handshake and return debug details.
-
-        This can start a short camera streaming session. It does not start
-        audio, remote control, or mowing, and it always attempts an end call.
-        """
-        return await asyncio.to_thread(
-            self._sync_probe_camera_stream_handshake,
-            timeout,
-            interval,
-            operation,
-            payload_mode,
-        )
-
     def _sync_get_camera_feature_support(
         self,
         refresh: bool = False,
@@ -490,15 +468,9 @@ class _DreameLawnMowerCameraMixin:
 
         return device.call_action(
             DreameMowerAction.STREAM_VIDEO,
-            [
-                {
-                    "piid": PIID(property_enum.STREAM_STATUS),
-                    "value": str(json.dumps(payload, separators=(",", ":"))).replace(
-                        " ",
-                        "",
-                    ),
-                }
-            ],
+            stream_action_parameters(
+                PIID(property_enum.STREAM_STATUS), payload, include_session=False,
+            ),
         )
 
     def _sync_get_camera_stream_inputs(self) -> dict[str, Any]:

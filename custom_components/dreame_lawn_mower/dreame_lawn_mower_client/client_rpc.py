@@ -14,6 +14,7 @@ from .exceptions import DreameLawnMowerConnectionError
 
 if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
+    from .client_cleanup import OwnedCleanup
     from .cloud_session import DreameCloudSession
 
 
@@ -22,21 +23,27 @@ async def async_device_rpc(
     operation: Callable[[Any, DreameCloudSession, Any, int], Awaitable[Any]],
     *, deadline: float,
     prepare: Callable[[Any], Awaitable[None]] | None = None,
+    _cleanup: OwnedCleanup | None = None,
 ) -> Any:
     """Run one RPC under existing device routing and request-ID ownership."""
     if not math.isfinite(deadline):
         raise ValueError("Device RPC deadline must be finite")
+    if _cleanup is not None:
+        _cleanup.require_active(client)
+        deadline = min(deadline, _cleanup.deadline)
     cancelled = Event()
 
     async def read(cloud: DreameCloudSession) -> Any:
         try:
             async with asyncio.timeout(max(0, deadline - time.monotonic())):
-                device = await _run_state_worker(
-                    lambda: client._ensure_device(
-                        deadline=deadline, cancelled=cancelled
-                    ),
-                    cancelled,
-                )
+                if _cleanup is not None:
+                    device = _cleanup.device
+                else:
+                    device = await _run_state_worker(
+                        lambda: client._ensure_device(
+                            deadline=deadline, cancelled=cancelled
+                        ), cancelled,
+                    )
                 if prepare is not None:
                     await prepare(device)
                 protocol = device._protocol.cloud
@@ -47,7 +54,10 @@ async def async_device_rpc(
                 async with protocol.async_rpc_operation(
                     deadline=deadline
                 ) as request_id:
-                    if client._closing or client._device is not device:
+                    if _cleanup is not None:
+                        _cleanup.require_active(client)
+                    if ((_cleanup is None and client._closing)
+                            or client._device is not device):
                         raise DreameLawnMowerConnectionError(
                             "Device changed during app operation"
                         )
@@ -71,7 +81,10 @@ async def async_device_rpc(
                             raise DreameLawnMowerConnectionError(
                                 "Cloud device routing is invalid"
                             ) from err
-                    if client._closing or client._device is not device:
+                    if _cleanup is not None:
+                        _cleanup.require_active(client)
+                    if ((_cleanup is None and client._closing)
+                            or client._device is not device):
                         raise DreameLawnMowerConnectionError(
                             "Device changed during app operation"
                         )
@@ -83,4 +96,6 @@ async def async_device_rpc(
         finally:
             cancelled.set()
 
+    if _cleanup is not None:
+        return await read(_cleanup.cloud)
     return await client._async_cloud_read(read)

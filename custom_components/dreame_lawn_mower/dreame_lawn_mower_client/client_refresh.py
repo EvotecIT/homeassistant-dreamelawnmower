@@ -23,6 +23,7 @@ from .exceptions import (
 
 if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
+    from .client_cleanup import OwnedCleanup
     from .cloud_session import DreameCloudSession
     from .device import DreameMowerDevice
 
@@ -68,8 +69,12 @@ async def _run_state_worker[T](operation: Callable[[], T], cancelled: Event) -> 
 async def async_update_device(
     client: DreameLawnMowerClient, *, force_request_properties: bool = False,
     deadline: float | None = None,
+    _cleanup: OwnedCleanup | None = None,
 ) -> DreameMowerDevice:
     """Use native startup metadata and RPC with owned legacy state callbacks."""
+    if _cleanup is not None:
+        _cleanup.require_active(client)
+        deadline = min(deadline, _cleanup.deadline) if deadline else _cleanup.deadline
     cancelled = Event()
     supplied_deadline = deadline
     if deadline is not None and not math.isfinite(deadline):
@@ -78,14 +83,17 @@ async def async_update_device(
         deadline = time.monotonic() + 20
 
     def ensure_active() -> None:
-        if cancelled.is_set() or client._closing:
+        if _cleanup is not None:
+            _cleanup.require_active(client)
+        if cancelled.is_set() or (_cleanup is None and client._closing):
             raise DreameLawnMowerConnectionError("Device refresh was cancelled")
         if deadline is not None and time.monotonic() >= deadline:
             raise DreameLawnMowerConnectionError("Device refresh timed out")
 
     def prepare() -> tuple[DreameMowerDevice, list[DreameMowerProperty] | None]:
         ensure_active()
-        device = client._ensure_device(deadline=deadline, cancelled=cancelled)
+        device = (_cleanup.device if _cleanup is not None else
+                  client._ensure_device(deadline=deadline, cancelled=cancelled))
         if device._update_running:
             if force_request_properties:
                 raise DeviceUpdateFailedException(
@@ -193,4 +201,6 @@ async def async_update_device(
         except TimeoutError as err:
             raise DreameLawnMowerConnectionError("Device refresh timed out") from err
 
+    if _cleanup is not None:
+        return await bounded_refresh(_cleanup.cloud)
     return await client._async_cloud_read(bounded_refresh)
