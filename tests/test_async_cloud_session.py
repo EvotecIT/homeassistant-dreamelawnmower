@@ -672,8 +672,9 @@ def test_client_page_reads_own_only_standalone_session(monkeypatch, borrowed):
 
 @pytest.mark.parametrize("borrowed", [True, False])
 @pytest.mark.parametrize("caller_continues", [True, False])
+@pytest.mark.parametrize("device_info", [True, False])
 def test_client_close_cancels_active_native_read(
-    monkeypatch, borrowed, caller_continues,
+    monkeypatch, borrowed, caller_continues, device_info,
 ):
     strings = cloud_strings("dreame")
 
@@ -702,7 +703,10 @@ def test_client_close_cancels_active_native_read(
             )
             async def read_then_continue():
                 try:
-                    await client.async_get_cloud_device_list_page()
+                    if device_info:
+                        await client.async_get_cloud_device_info()
+                    else:
+                        await client.async_get_cloud_device_list_page()
                 except asyncio.CancelledError:
                     if not caller_continues:
                         raise
@@ -847,3 +851,124 @@ def test_device_info_preserves_identity_language_and_borrowed_session(
     asyncio.run(scenario())
     assert calls.count(strings[17]) == 1
     assert len(calls) == 3
+
+
+@pytest.mark.parametrize("account_type", ["dreame", "mova"])
+@pytest.mark.parametrize("borrowed", [True, False])
+def test_public_device_info_uses_native_http_and_updates_mqtt(
+    monkeypatch, account_type, borrowed,
+):
+    import requests
+
+    strings = cloud_strings(account_type)
+    info = {
+        "did": "42", strings[8]: "owner", strings[35]: "dreame.mower.g2408",
+        strings[9]: "mqtt.example.invalid",
+        strings[10]: json.dumps({strings[11]: "stream-key"}),
+    }
+    calls = []
+
+    def reject_sync_http(*args, **kwargs):
+        pytest.fail("Public native read attempted synchronous HTTP")
+
+    monkeypatch.setattr(requests.Session, "request", reject_sync_http)
+
+    async def handler(request):
+        calls.append(request.path)
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        assert await request.json() == {"did": "42", "lang": "pl"}
+        return web.json_response({"code": 0, "data": info})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as shared:
+            client = DreameLawnMowerClient(
+                **{**OPTIONS, "account_type": account_type},
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type=account_type, country="eu",
+                ),
+                session=shared if borrowed else None,
+            )
+            try:
+                for _ in range(2):
+                    result = await client.async_get_cloud_device_info(language="pl")
+                    assert result == info
+                cloud = client._device._protocol.cloud
+                assert (cloud._uid, cloud._did, cloud._model, cloud._host) == (
+                    "owner", "42", "dreame.mower.g2408", "mqtt.example.invalid",
+                )
+                assert cloud._stream_key == "stream-key"
+                assert not cloud._logged_in
+                used_session = client._http_session
+            finally:
+                await client.async_close()
+            assert used_session.closed is (not borrowed)
+            assert not shared.closed
+            with pytest.raises(DreameLawnMowerConnectionError, match="closing"):
+                await client.async_get_cloud_device_info()
+
+    asyncio.run(scenario())
+    assert calls.count(strings[17]) == 1
+    assert len(calls) == 3
+
+
+def test_cancelled_device_info_cannot_apply_after_device_lock_releases(monkeypatch):
+    from threading import Event
+
+    strings = cloud_strings("dreame")
+    info = {
+        "did": "late-device", strings[8]: "owner",
+        strings[35]: "dreame.mower.g2408", strings[9]: "mqtt.example.invalid",
+        strings[10]: "",
+    }
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        return web.json_response({"code": 0, "data": info})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **OPTIONS,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type="dreame", country="eu",
+                ),
+                session=session,
+            )
+            device = await asyncio.to_thread(client._ensure_device)
+            cloud = device._protocol.cloud
+            entered = Event()
+            finished = Event()
+            apply_info = client._sync_apply_cloud_device_info
+
+            def apply_and_signal(*args):
+                entered.set()
+                try:
+                    apply_info(*args)
+                finally:
+                    finished.set()
+
+            monkeypatch.setattr(
+                client, "_sync_apply_cloud_device_info", apply_and_signal,
+            )
+            lock = cloud._operation_lock()
+            lock.acquire()
+            task = asyncio.create_task(client.async_get_cloud_device_info())
+            try:
+                assert await asyncio.to_thread(entered.wait, 2)
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            finally:
+                lock.release()
+                await asyncio.gather(task, return_exceptions=True)
+                assert await asyncio.to_thread(finished.wait, 2)
+                await client.async_close()
+            assert cloud._did == "42"
+            assert cloud._host is None
+            assert not session.closed
+
+    asyncio.run(scenario())

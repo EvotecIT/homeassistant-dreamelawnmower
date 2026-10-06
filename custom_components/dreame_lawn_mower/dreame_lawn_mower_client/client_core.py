@@ -8,6 +8,7 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import replace
 from datetime import UTC, datetime
+from threading import Event
 from typing import Any
 
 from .app_protocol import (
@@ -851,6 +852,32 @@ class _DreameLawnMowerClientCoreMixin:
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
         return response if isinstance(response, Mapping) else None
+
+    def _sync_apply_cloud_device_info(
+        self, info: dict[str, Any], cancelled: Event, deadline: float,
+    ) -> None:
+        """Apply native HTTP state under the legacy device's ownership locks."""
+        if cancelled.is_set():
+            return
+        device = self._ensure_device()
+        cloud = device._protocol.cloud
+        lock = cloud._operation_lock()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not lock.acquire(timeout=remaining):
+            raise DreameLawnMowerConnectionError(
+                "Cloud device info timed out waiting for device state."
+            )
+        try:
+            with self._device_ownership_lock:
+                if cancelled.is_set() or self._closing or self._device is not device:
+                    return
+                if time.monotonic() >= deadline:
+                    raise DreameLawnMowerConnectionError(
+                        "Cloud device info timed out waiting for device state."
+                    )
+                cloud._handle_device_info(info)
+        finally:
+            lock.release()
 
     def _sync_get_cloud_device_info(
         self,

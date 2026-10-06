@@ -1514,7 +1514,25 @@ class DreameLawnMowerClient(
         language: str | None = None,
     ) -> dict[str, Any] | None:
         """Fetch the raw cloud `device/info` payload used by the mobile app."""
-        return await asyncio.to_thread(self._sync_get_cloud_device_info, language)
+        deadline = time.monotonic() + 20
+        cancelled = _threading.Event()
+
+        async def read(cloud: _DreameCloudSession) -> dict[str, Any] | None:
+            try:
+                info = await cloud.async_get_device_info(
+                    self._descriptor.did, language=language, deadline=deadline,
+                )
+                if info:
+                    await asyncio.to_thread(
+                        self._sync_apply_cloud_device_info, info, cancelled, deadline,
+                    )
+                return info
+            finally:
+                # Cancelling an executor await cannot stop its worker. Prevent
+                # that worker from applying a response after this read ends.
+                cancelled.set()
+
+        return await self._async_cloud_read(read)
 
     async def async_get_cloud_user_features(
         self,
