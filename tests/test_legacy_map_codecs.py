@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import json
 import logging
@@ -33,6 +34,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_types impo
     MapData,
     MapDataPartial,
     MapImageDimensions,
+    Path,
     Point,
     Segment,
 )
@@ -529,3 +531,30 @@ def test_json_renderer_preserves_fractional_position_conversion() -> None:
     robot = output["entities"][0]
     assert robot["points"] == [3278, 3278]
     assert robot["metaData"]["angle"] == 44.5
+
+
+@pytest.mark.parametrize("change", ["unchanged", "coordinates", "path_type"])
+def test_json_path_cache_matches_fresh_frame(change: str) -> None:
+    data = MapData()
+    data.empty_map = False
+    data.map_id = data.frame_id = 1
+    data.rotation = 0
+    data.dimensions = MapImageDimensions(0, 0, 2, 2, 50)
+    data.pixel_type = np.full((2, 2), 255, dtype=np.uint8)
+    data.data = bytes([255] * 4)
+    data.path = [
+        Path(0, 0, map_json_renderer.PathType.LINE),
+        Path(100, 100, map_json_renderer.PathType.LINE),
+        Path(200, 100, map_json_renderer.PathType.LINE),
+    ]
+    renderer = map_json_renderer.DreameMowerMapDataJsonRenderer()
+    renderer.render_map(data)
+    updated = copy.deepcopy(data)
+    updated.frame_id = 2
+    if change == "coordinates":
+        updated.path[1].x = 150
+    elif change == "path_type":
+        updated.path[1].path_type = map_json_renderer.PathType.SWEEP
+    actual = renderer.render_map(updated)
+    expected = map_json_renderer.DreameMowerMapDataJsonRenderer().render_map(updated)
+    assert actual == expected

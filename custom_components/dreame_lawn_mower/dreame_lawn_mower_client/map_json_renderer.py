@@ -400,7 +400,8 @@ class DreameMowerMapDataJsonRenderer:
         if map_data.path and (
             self._map_data is None
             or self._map_data.path is None
-            or len(self._map_data.path) != len(map_data.path)
+            or [(p.x, p.y, p.path_type) for p in self._map_data.path]
+            != [(p.x, p.y, p.path_type) for p in map_data.path]
             or not self._layers.get(MapRendererLayer.PATH)
         ):
             points = []
@@ -409,7 +410,6 @@ class DreameMowerMapDataJsonRenderer:
                 s = map_data.path[0]
                 for point in map_data.path[1:]:
                     if point.path_type == PathType.LINE:
-                        point = point
                         a = DreameMowerMapDataJsonRenderer._convert_coordinates(
                             s.x, s.y
                         )
@@ -435,6 +435,7 @@ class DreameMowerMapDataJsonRenderer:
                     MAP_DATA_JSON_PARAMETER_POINTS: points,
                 }
             )
+        if map_data.path:
             map_data_json[MAP_DATA_JSON_PARAMETER_ENTITIES].extend(
                 self._layers[MapRendererLayer.PATH]
             )
