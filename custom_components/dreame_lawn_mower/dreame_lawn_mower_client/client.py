@@ -82,12 +82,7 @@ from .client_core_helpers import (
 )
 from .client_core_helpers import async_discover_devices as _async_discover_devices
 from .client_device_settings import _DreameLawnMowerClientDeviceSettingsMixin
-from .client_maps import (
-    _POINT_CLOUD_CLOUD_SETUP_TIMEOUT_SECONDS,
-    _POINT_CLOUD_GENERATION_PREFLIGHT_BUDGET_SECONDS,
-    _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS,
-    _DreameLawnMowerClientMapsMixin,
-)
+from .client_maps import _DreameLawnMowerClientMapsMixin
 from .client_schedules import (
     SCHEDULE_READ_TIMEOUT_SECONDS as _SCHEDULE_READ_TIMEOUT_SECONDS,
 )
@@ -196,6 +191,11 @@ from .point_cloud import (
     DreameLawnMowerPointCloudError,
 )
 from .point_cloud import parse_pcd_metadata as parse_pcd_metadata
+from .point_cloud_policy import (
+    _POINT_CLOUD_CLOUD_SETUP_TIMEOUT_SECONDS,
+    _POINT_CLOUD_GENERATION_PREFLIGHT_BUDGET_SECONDS,
+    _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS,
+)
 from .point_cloud_trace import PointCloudTrace as _PointCloudTrace
 from .point_cloud_trace import active_point_cloud_trace as _active_point_cloud_trace
 from .position_tracking import MowerPositionTracker as _MowerPositionTracker
