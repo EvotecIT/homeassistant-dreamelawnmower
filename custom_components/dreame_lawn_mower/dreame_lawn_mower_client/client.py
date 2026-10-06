@@ -1800,25 +1800,28 @@ class DreameLawnMowerClient(
         timeout_scope = asyncio.timeout(operation_timeout)
         try:
             async with timeout_scope:
-                worker = asyncio.create_task(
-                    asyncio.to_thread(
-                        self._sync_download_app_map_point_cloud_singleflight,
-                        map_index,
-                        timeout,
-                        poll_interval,
-                        download_timeout,
-                        max_bytes,
-                        deadline,
-                        allow_stored,
-                        allow_unscoped_stored,
-                        abandoned,
+                from .client_refresh import _run_state_worker
+
+                def download() -> DreameLawnMowerPointCloudDownload:
+                    return self._sync_download_app_map_point_cloud_singleflight(
+                        map_index, timeout, poll_interval, download_timeout,
+                        max_bytes, deadline, allow_stored,
+                        allow_unscoped_stored, abandoned,
                     )
-                )
-                worker.add_done_callback(
-                    lambda completed: (
-                        completed.exception() if not completed.cancelled() else None
-                    )
-                )
+
+                def completed(task: asyncio.Task[Any]) -> None:
+                    self._cloud_read_tasks.discard(task)
+                    if not task.cancelled():
+                        task.exception()
+
+                with self._device_ownership_lock:
+                    if self._closing:
+                        raise DreameLawnMowerConnectionError("Client is closing")
+                    worker = asyncio.create_task(_run_state_worker(download, abandoned))
+                    # Caller cancellation is prompt, but shutdown owns this task
+                    # until its already-started thread has actually finished.
+                    self._cloud_read_tasks.add(worker)
+                    worker.add_done_callback(completed)
                 return await asyncio.shield(worker)
         except (TimeoutError, _RequestsTimeout) as err:
             abandoned.set()

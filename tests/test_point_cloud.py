@@ -3870,15 +3870,14 @@ def test_point_cloud_preflight_has_a_separate_time_budget(
     client = _client()
     captured: dict[str, Any] = {}
 
-    async def capture_to_thread(function: Any, *args: Any) -> Any:
-        captured["function"] = function
+    def capture_download(*args: Any) -> Any:
         captured["args"] = args
         return SimpleNamespace(content=b"pcd")
 
     monkeypatch.setattr(
-        _internal_client_facade_module.asyncio,
-        "to_thread",
-        capture_to_thread,
+        client,
+        "_sync_download_app_map_point_cloud_singleflight",
+        capture_download,
     )
 
     async def run() -> None:
@@ -3891,10 +3890,6 @@ def test_point_cloud_preflight_has_a_separate_time_budget(
     started = time.monotonic()
     asyncio.run(run())
 
-    assert (
-        captured["function"]
-        == client._sync_download_app_map_point_cloud_singleflight
-    )
     assert captured["args"][-3] is allow_stored
     assert captured["args"][-2] is allow_stored
     assert captured["args"][-4] - started == pytest.approx(
@@ -4556,3 +4551,96 @@ def test_download_point_cloud_classifies_invalid_request_values(
     assert captured.value.code == "point_cloud_invalid_request"
     assert captured.value.stage == "request"
     assert captured.value.retryable is False
+
+
+@pytest.mark.parametrize("cancel_request", [False, True])
+@pytest.mark.parametrize("worker_fails", [False, True])
+def test_point_cloud_shutdown_drains_started_worker(
+    cancel_request: bool, worker_fails: bool,
+) -> None:
+    client = _client()
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
+    def download(*args: Any, **kwargs: Any) -> SimpleNamespace:
+        started.set()
+        assert release.wait(3)
+        finished.set()
+        if worker_fails:
+            raise RuntimeError("worker failed after cancellation")
+        return SimpleNamespace(content=b"pcd")
+
+    client._sync_download_app_map_point_cloud = download
+
+    async def run() -> None:
+        request = asyncio.create_task(client.async_download_app_map_point_cloud())
+        assert await asyncio.to_thread(started.wait, 1)
+        if cancel_request:
+            request.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await request
+        closing = asyncio.create_task(client.async_close())
+        try:
+            await asyncio.sleep(0.02)
+            assert not closing.done(), "Shutdown returned before the worker finished"
+        finally:
+            release.set()
+            await closing
+            await asyncio.gather(request, return_exceptions=True)
+        assert finished.is_set()
+        assert not client._cloud_read_tasks
+
+    asyncio.run(run())
+
+
+def test_point_cloud_request_after_close_does_not_start_worker() -> None:
+    client = _client()
+    calls: list[bool] = []
+
+    def download(*args: Any, **kwargs: Any) -> None:
+        calls.append(True)
+
+    client._sync_download_app_map_point_cloud = download
+
+    async def run() -> None:
+        await client.async_close()
+        with pytest.raises(DreameLawnMowerPointCloudError) as captured:
+            await client.async_download_app_map_point_cloud()
+        assert captured.value.code == "point_cloud_failed"
+        assert not calls
+        assert not client._cloud_read_tasks
+
+    asyncio.run(run())
+
+
+def test_point_cloud_shutdown_cancels_queued_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _client()
+    calls: list[bool] = []
+
+    def download(*args: Any, **kwargs: Any) -> None:
+        calls.append(True)
+
+    client._sync_download_app_map_point_cloud = download
+
+    async def run() -> None:
+        queued = asyncio.Event()
+
+        async def wait_in_queue(function: Any, *args: Any) -> None:
+            queued.set()
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(
+            _internal_client_facade_module.asyncio, "to_thread", wait_in_queue,
+        )
+        request = asyncio.create_task(client.async_download_app_map_point_cloud())
+        await queued.wait()
+        await asyncio.wait_for(client.async_close(), 1)
+        with pytest.raises(asyncio.CancelledError):
+            await request
+        assert not calls
+        assert not client._cloud_read_tasks
+
+    asyncio.run(run())
