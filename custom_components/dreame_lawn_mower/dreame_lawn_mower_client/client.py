@@ -557,6 +557,7 @@ class DreameLawnMowerClient(
         self._cloud_read_tasks: set[asyncio.Task[Any]] = set()
         self._device: Any | None = None
         self._device_ownership_lock = _threading.Lock()
+        self._refresh_lock = asyncio.Lock()
         self._schedule_operation_lock = _threading.RLock()
         self._schedule_protocols: dict[int, str] = {}
         self._schedule_document_versions: dict[int, int] = {}
@@ -637,7 +638,7 @@ class DreameLawnMowerClient(
 
     async def async_refresh(self) -> DreameLawnMowerSnapshot:
         """Refresh device state and return a normalized snapshot."""
-        device = await asyncio.to_thread(self._sync_update_device)
+        device = await self._async_update_device()
         info_raw = getattr(getattr(device, "info", None), "raw", {}) or {}
         device_info = info_raw.get("deviceInfo", {}) or {}
         refreshed_model = (

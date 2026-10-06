@@ -525,7 +525,7 @@ def test_refresh_keeps_new_untimestamped_active_observation() -> None:
     client = object.__new__(DreameLawnMowerClient)
     client._descriptor = raw_snapshot.descriptor
     client._latest_snapshot = None
-    client._sync_update_device = lambda force=False: device  # noqa: ARG005
+    client._async_update_device = AsyncMock(return_value=device)
     client.async_get_status_blob = AsyncMock(return_value=status_blob)
     async def no_cloud_presence():
         return None

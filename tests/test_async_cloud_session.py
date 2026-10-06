@@ -1123,3 +1123,166 @@ def test_native_device_read_rejects_failed_rpc_even_with_result(monkeypatch):
                 await cloud.async_read_device_properties("42", None, 1, [])
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("result_code", [0, 80001, 5])
+def test_public_refresh_uses_native_rpc_and_applies_real_device_state(
+    monkeypatch, result_code,
+):
+    from unittest.mock import AsyncMock
+
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        device_types,
+    )
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device import (
+        DreameMowerDevice,
+    )
+
+
+    strings = cloud_strings("dreame")
+    battery = device_types.DreameMowerProperty.BATTERY_LEVEL
+    requests = []
+    monkeypatch.setattr(
+        DreameMowerDevice, "cloud_connected", property(lambda _: True),
+    )
+    monkeypatch.setattr(
+        DreameMowerDevice, "device_connected", property(lambda _: False),
+    )
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        payload = await request.json()
+        requests.append(payload)
+        return web.json_response({
+            "code": result_code,
+            "data": {"result": [{
+                "did": str(battery.value), "code": 0, "value": 55,
+            }]},
+        })
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **OPTIONS,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type="dreame", country="eu",
+                ), session=session,
+            )
+            device = client._ensure_device()
+            device._ready = True
+            device.data = {battery.value: 20}
+            device._last_settings_request = 10**20
+            client.async_get_status_blob = AsyncMock(return_value=None)
+            client._async_get_cached_cloud_device_info = AsyncMock(return_value=None)
+            client._snapshot_from_device = lambda mower: mower.data[battery.value]
+            try:
+                if result_code == 5:
+                    with pytest.raises(DreameLawnMowerConnectionError):
+                        await client.async_refresh()
+                    assert device.data[battery.value] == 20
+                else:
+                    assert await client.async_refresh() == (
+                        55 if result_code == 0 else 20
+                    )
+                assert len(requests) == 1
+                assert requests[0]["data"]["method"] == "get_properties"
+            finally:
+                await client.async_close()
+            assert not session.closed
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("stop", ["cancel", "close"])
+def test_refresh_keeps_state_callback_owned_through_shutdown(monkeypatch, stop):
+    from threading import Event, get_ident
+    from unittest.mock import AsyncMock
+
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        device as device_module,
+    )
+    from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+        device_types,
+    )
+
+    strings = cloud_strings("dreame")
+    battery = device_types.DreameMowerProperty.BATTERY_LEVEL
+    monkeypatch.setattr(
+        device_module.DreameMowerDevice,
+        "cloud_connected", property(lambda _: True),
+    )
+    monkeypatch.setattr(
+        device_module.DreameMowerDevice,
+        "device_connected", property(lambda _: False),
+    )
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        return web.json_response({"code": 0, "data": {"result": [{
+            "did": str(battery.value), "code": 0, "value": 55,
+        }]}})
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        loop_thread = get_ident()
+        started = asyncio.Event()
+        release = Event()
+        callback_finished = Event()
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = DreameLawnMowerClient(
+                **OPTIONS,
+                descriptor=DreameLawnMowerDescriptor(
+                    did="42", name="Garden", model="dreame.mower.g2408",
+                    display_model="A2", account_type="dreame", country="eu",
+                ), session=session,
+            )
+            device = client._ensure_device()
+            device._ready = True
+            device.data = {battery.value: 20}
+            device._last_settings_request = 10**20
+            client.async_get_status_blob = AsyncMock(return_value=None)
+            client._async_get_cached_cloud_device_info = AsyncMock(return_value=None)
+            client._snapshot_from_device = lambda mower: mower.data[battery.value]
+
+            def callback(_previous):
+                assert get_ident() != loop_thread
+                lock = device._protocol.cloud._operation_lock()
+                assert lock.acquire(blocking=False)
+                lock.release()
+                loop.call_soon_threadsafe(started.set)
+                assert release.wait(3)
+                callback_finished.set()
+
+            device._property_update_callback[battery.value] = [callback]
+            refresh = asyncio.create_task(client.async_refresh())
+            close = None
+            try:
+                await asyncio.wait_for(started.wait(), 2)
+                if stop == "close":
+                    close = asyncio.create_task(client.async_close())
+                else:
+                    refresh.cancel()
+                await asyncio.sleep(0.02)
+                assert not refresh.done()
+                assert client._cloud_read_tasks
+                if close is not None:
+                    assert not close.done()
+                release.set()
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(refresh, 2)
+                if close is not None:
+                    await asyncio.wait_for(close, 2)
+                assert callback_finished.is_set()
+                assert not client._cloud_read_tasks
+                assert not session.closed
+            finally:
+                release.set()
+                await asyncio.gather(refresh, return_exceptions=True)
+                if close is not None:
+                    await asyncio.gather(close, return_exceptions=True)
+                await client.async_close()
+
+    asyncio.run(scenario())

@@ -9,7 +9,10 @@ from contextlib import nullcontext
 from dataclasses import replace
 from datetime import UTC, datetime
 from threading import Event
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .device import DreameMowerDevice
 
 from .app_protocol import (
     MOWER_BLUETOOTH_PROPERTY_KEY,
@@ -307,6 +310,12 @@ class _DreameLawnMowerClientCoreMixin:
         """Apply heartbeat reconciliation to the current in-memory device state."""
         device = await asyncio.to_thread(self._ensure_device)
         return await asyncio.to_thread(self._snapshot_from_device, device)
+
+    async def _async_update_device(self) -> DreameMowerDevice:
+        """Use native polling while retaining owned synchronous startup."""
+        from .client_refresh import async_update_device
+
+        return await async_update_device(self)
 
     def _sync_update_device(
         self,

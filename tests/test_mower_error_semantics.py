@@ -530,7 +530,10 @@ def test_client_carries_fault_state_into_recovery_reconciliation() -> None:
     client = object.__new__(DreameLawnMowerClient)
     client._descriptor = descriptor
     client._latest_snapshot = fault
-    client._sync_update_device = lambda: device
+    async def update_device():
+        return device
+
+    client._async_update_device = update_device
     async def no_cloud_presence():
         return None
 
