@@ -463,6 +463,11 @@ class _DreameLawnMowerClientCoreMixin:
         else:
             device = self._ensure_device()
 
+        return self._remote_control_support_from_device(device)
+
+    def _remote_control_support_from_device(
+        self, device: Any,
+    ) -> DreameLawnMowerRemoteControlSupport:
         try:
             from .device_types import DreameMowerProperty, DreameMowerStatus
         except ImportError:
@@ -668,6 +673,13 @@ class _DreameLawnMowerClientCoreMixin:
         else:
             device = self._ensure_device()
 
+        cached = self._bluetooth_connected_from_device(device)
+        if cached is not None or not include_cloud:
+            return cached
+        response = self._sync_get_cloud_properties(MOWER_BLUETOOTH_PROPERTY_KEY)
+        return self._decode_cloud_bluetooth(response)
+
+    def _bluetooth_connected_from_device(self, device: Any) -> bool | None:
         realtime_entry = (getattr(device, "realtime_properties", {}) or {}).get(
             MOWER_BLUETOOTH_PROPERTY_KEY
         )
@@ -676,10 +688,9 @@ class _DreameLawnMowerClientCoreMixin:
             if parsed is not None:
                 return parsed
 
-        if not include_cloud:
-            return None
+        return None
 
-        response = self._sync_get_cloud_properties(MOWER_BLUETOOTH_PROPERTY_KEY)
+    def _decode_cloud_bluetooth(self, response: Any) -> bool | None:
         for entry in self._normalize_cloud_property_entries(response):
             if str(entry.get("key", "")) != MOWER_BLUETOOTH_PROPERTY_KEY:
                 continue
@@ -687,19 +698,6 @@ class _DreameLawnMowerClientCoreMixin:
             if parsed is not None:
                 return parsed
         return None
-
-    async def _async_get_decoded_status_blob(
-        self, property_key: str, *, refresh: bool, include_cloud: bool,
-    ) -> DreameLawnMowerStatusBlob | None:
-        """Prefer device realtime data, then fetch missing status with native HTTP."""
-        decoded = await asyncio.to_thread(
-            self._sync_get_decoded_status_blob, property_key,
-            refresh=refresh, include_cloud=False,
-        )
-        if decoded is not None or not include_cloud:
-            return decoded
-        response = await self.async_get_cloud_properties(property_key)
-        return self._decode_cloud_status_blob(response, property_key)
 
     def _sync_get_decoded_status_blob(
         self,

@@ -1165,7 +1165,11 @@ class DreameLawnMowerClient(
         refresh: bool = False,
     ) -> DreameLawnMowerRemoteControlSupport:
         """Return whether the mower currently exposes remote-control support."""
-        return await asyncio.to_thread(self._sync_get_remote_control_support, refresh)
+        from .client_state_reads import async_read_device_state
+
+        return await async_read_device_state(
+            self, self._remote_control_support_from_device, refresh=refresh,
+        )
 
     async def async_remote_control_move_step(
         self,
@@ -1211,6 +1215,20 @@ class DreameLawnMowerClient(
             include_debug_ota_catalog=include_debug_ota_catalog, language=language,
         )
 
+    async def _async_get_decoded_status_blob(
+        self, property_key: str, *, refresh: bool, include_cloud: bool,
+    ) -> DreameLawnMowerStatusBlob | None:
+        """Prefer device realtime data, then fetch missing status with native HTTP."""
+        from .client_core import _decoded_realtime_status_blob
+        from .client_state_reads import async_read_cached_property
+
+        return await async_read_cached_property(
+            self, property_key,
+            lambda device: _decoded_realtime_status_blob(device, property_key),
+            lambda response: self._decode_cloud_status_blob(response, property_key),
+            refresh=refresh, include_cloud=include_cloud,
+        )
+
     async def async_get_status_blob(
         self,
         *,
@@ -1242,10 +1260,12 @@ class DreameLawnMowerClient(
         include_cloud: bool = True,
     ) -> bool | None:
         """Return whether the mower reports an active Bluetooth connection."""
-        return await asyncio.to_thread(
-            self._sync_get_bluetooth_connected,
-            refresh,
-            include_cloud,
+        from .client_state_reads import async_read_cached_property
+
+        return await async_read_cached_property(
+            self, MOWER_BLUETOOTH_PROPERTY_KEY,
+            self._bluetooth_connected_from_device, self._decode_cloud_bluetooth,
+            refresh=refresh, include_cloud=include_cloud,
         )
 
     async def async_capture_operation_snapshot(
