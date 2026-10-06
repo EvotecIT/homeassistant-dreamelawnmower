@@ -1796,6 +1796,20 @@ class DreameLawnMowerClient(
 
         return await self._async_cloud_read(read)
 
+    async def async_get_camera_feature_support(
+        self,
+        *,
+        refresh: bool = False,
+        include_cloud: bool = True,
+        language: str | None = "en",
+    ) -> DreameLawnMowerCameraFeatureSupport:
+        """Read cached camera capabilities and optional native cloud metadata."""
+        from .client_camera_reads import async_camera_feature_support
+
+        return await async_camera_feature_support(
+            self, refresh=refresh, include_cloud=include_cloud, language=language
+        )
+
     async def async_get_cloud_user_features(
         self,
         *,

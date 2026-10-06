@@ -6,6 +6,7 @@ import asyncio
 import json
 import time
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any
 
 from .camera_probe import CAMERA_PROBE_PROPERTY_KEYS, build_camera_probe_payload
@@ -280,25 +281,6 @@ class _DreameLawnMowerCameraMixin:
         """Return the latest privacy-safe TX video cloud operation summary."""
         return self._last_camera_stream_diagnostics
 
-    async def async_get_camera_feature_support(
-        self,
-        *,
-        refresh: bool = False,
-        include_cloud: bool = True,
-        language: str | None = "en",
-    ) -> DreameLawnMowerCameraFeatureSupport:
-        """Return read-only camera/photo feature discovery details.
-
-        This only inspects cached protocol mappings, device metadata, and safe
-        cloud feature endpoints. It does not start a stream or take a photo.
-        """
-        return await asyncio.to_thread(
-            self._sync_get_camera_feature_support,
-            refresh,
-            include_cloud,
-            language,
-        )
-
     async def async_request_photo_info(
         self,
         parameters: Any = None,
@@ -364,133 +346,17 @@ class _DreameLawnMowerCameraMixin:
         include_cloud: bool = True,
         language: str | None = "en",
     ) -> DreameLawnMowerCameraFeatureSupport:
-        if refresh:
-            device = self._sync_update_device()
-        else:
-            device = self._ensure_device()
-
+        device = self._sync_update_device() if refresh else self._ensure_device()
+        support = camera_feature_support_from_device(device)
+        if not include_cloud:
+            return support
         try:
-            from .device_types import DreameMowerAction, DreameMowerProperty
-        except ImportError:
-            return DreameLawnMowerCameraFeatureSupport(
-                supported=False,
-                advertised=False,
-                reason="Camera protocol types are unavailable.",
+            features = _cloud_user_feature_summary(
+                self._sync_get_cloud_user_features(language)
             )
-
-        property_mappings = _protocol_mapping_summary(
-            getattr(device, "property_mapping", {}),
-            {
-                "stream_status": DreameMowerProperty.STREAM_STATUS,
-                "stream_audio": DreameMowerProperty.STREAM_AUDIO,
-                "stream_record": DreameMowerProperty.STREAM_RECORD,
-                "take_photo": DreameMowerProperty.TAKE_PHOTO,
-                "stream_keep_alive": DreameMowerProperty.STREAM_KEEP_ALIVE,
-                "stream_fault": DreameMowerProperty.STREAM_FAULT,
-                "stream_property": DreameMowerProperty.STREAM_PROPERTY,
-                "stream_task": DreameMowerProperty.STREAM_TASK,
-                "stream_upload": DreameMowerProperty.STREAM_UPLOAD,
-                "stream_code": DreameMowerProperty.STREAM_CODE,
-            },
-        )
-        action_mappings = _protocol_mapping_summary(
-            getattr(device, "action_mapping", {}),
-            {
-                "get_photo_info": DreameMowerAction.GET_PHOTO_INFO,
-                "stream_video": DreameMowerAction.STREAM_VIDEO,
-                "stream_audio": DreameMowerAction.STREAM_AUDIO,
-                "stream_property": DreameMowerAction.STREAM_PROPERTY,
-                "stream_code": DreameMowerAction.STREAM_CODE,
-            },
-        )
-
-        info_raw = getattr(getattr(device, "info", None), "raw", {}) or {}
-        device_info = info_raw.get("deviceInfo", {}) or {}
-        permit = _as_optional_text(device_info.get("permit") or info_raw.get("permit"))
-        feature = _as_optional_text(
-            device_info.get("feature") or info_raw.get("feature")
-        )
-        live_key_define = device_info.get("liveKeyDefine") or {}
-        capability = getattr(device, "capability", None)
-        status = getattr(device, "status", None)
-        camera_streaming = bool(getattr(capability, "camera_streaming", False))
-        camera_light = _optional_bool(
-            getattr(capability, "fill_light", None)
-            if hasattr(capability, "fill_light")
-            else getattr(capability, "camera_light", None)
-        )
-        ai_detection = bool(getattr(capability, "ai_detection", False))
-        obstacles = bool(getattr(capability, "obstacles", False))
-        stream_status_raw = _safe_get_device_property(
-            device,
-            DreameMowerProperty.STREAM_STATUS,
-        )
-        stream_status = _lower_enum_name(getattr(status, "stream_status", None))
-        stream_session_present = bool(getattr(status, "stream_session", None))
-        advertised = _camera_feature_advertised(
-            camera_streaming=camera_streaming,
-            camera_light=camera_light,
-            ai_detection=ai_detection,
-            obstacles=obstacles,
-            permit=permit,
-            feature=feature,
-            live_key_define=live_key_define,
-            video_status=device_info.get("videoStatus") or info_raw.get("videoStatus"),
-        )
-        protocol_mappings_available = bool(
-            action_mappings.get("get_photo_info")
-            or action_mappings.get("stream_video")
-            or property_mappings.get("stream_status")
-            or property_mappings.get("take_photo")
-        )
-        cloud_user_features = None
-        cloud_user_features_error = None
-        if include_cloud:
-            try:
-                cloud_user_features = _cloud_user_feature_summary(
-                    self._sync_get_cloud_user_features(language)
-                )
-            except DreameLawnMowerConnectionError as err:
-                cloud_user_features_error = str(err)
-
-        reason = None
-        if not protocol_mappings_available:
-            reason = "Camera/photo protocol mappings are not available."
-        elif not advertised:
-            reason = "Cloud/device metadata does not advertise camera or photo support."
-
-        return DreameLawnMowerCameraFeatureSupport(
-            supported=protocol_mappings_available and advertised,
-            advertised=advertised,
-            camera_streaming=camera_streaming,
-            camera_light=camera_light,
-            ai_detection=ai_detection,
-            obstacles=obstacles,
-            permit=permit,
-            feature=feature,
-            extend_sc_type=tuple(
-                str(item) for item in device_info.get("extendScType", []) or []
-            ),
-            video_status=_json_safe(
-                device_info.get("videoStatus") or info_raw.get("videoStatus")
-            ),
-            video_dynamic_vendor=_optional_bool(
-                device_info.get("videoDynamicVendor")
-                if "videoDynamicVendor" in device_info
-                else info_raw.get("videoDynamicVendor")
-            ),
-            live_key_count=(
-                len(live_key_define) if isinstance(live_key_define, Mapping) else 0
-            ),
-            stream_session_present=stream_session_present,
-            stream_status=stream_status,
-            stream_status_raw=_json_safe(stream_status_raw),
-            property_mappings=property_mappings,
-            action_mappings=action_mappings,
-            cloud_user_features=cloud_user_features,
-            cloud_user_features_error=cloud_user_features_error,
-            reason=reason,
-        )
+        except DreameLawnMowerConnectionError as err:
+            return replace(support, cloud_user_features_error=str(err))
+        return replace(support, cloud_user_features=features)
 
     def _sync_request_photo_info(self, parameters: Any = None) -> Any:
         support = self._sync_get_camera_feature_support(
@@ -1019,3 +885,121 @@ class _DreameLawnMowerCameraMixin:
             "stream_session_present": bool(getattr(status, "stream_session", None)),
             "stream_status": _lower_enum_name(getattr(status, "stream_status", None)),
         }
+
+
+def camera_feature_support_from_device(
+    device: Any,
+) -> DreameLawnMowerCameraFeatureSupport:
+    """Evaluate cached camera capabilities without performing network operations."""
+    try:
+        from .device_types import DreameMowerAction, DreameMowerProperty
+    except ImportError:
+        return DreameLawnMowerCameraFeatureSupport(
+            supported=False,
+            advertised=False,
+            reason="Camera protocol types are unavailable.",
+        )
+
+    property_mappings = _protocol_mapping_summary(
+        getattr(device, "property_mapping", {}),
+        {
+            "stream_status": DreameMowerProperty.STREAM_STATUS,
+            "stream_audio": DreameMowerProperty.STREAM_AUDIO,
+            "stream_record": DreameMowerProperty.STREAM_RECORD,
+            "take_photo": DreameMowerProperty.TAKE_PHOTO,
+            "stream_keep_alive": DreameMowerProperty.STREAM_KEEP_ALIVE,
+            "stream_fault": DreameMowerProperty.STREAM_FAULT,
+            "stream_property": DreameMowerProperty.STREAM_PROPERTY,
+            "stream_task": DreameMowerProperty.STREAM_TASK,
+            "stream_upload": DreameMowerProperty.STREAM_UPLOAD,
+            "stream_code": DreameMowerProperty.STREAM_CODE,
+        },
+    )
+    action_mappings = _protocol_mapping_summary(
+        getattr(device, "action_mapping", {}),
+        {
+            "get_photo_info": DreameMowerAction.GET_PHOTO_INFO,
+            "stream_video": DreameMowerAction.STREAM_VIDEO,
+            "stream_audio": DreameMowerAction.STREAM_AUDIO,
+            "stream_property": DreameMowerAction.STREAM_PROPERTY,
+            "stream_code": DreameMowerAction.STREAM_CODE,
+        },
+    )
+
+    info_raw = getattr(getattr(device, "info", None), "raw", {}) or {}
+    device_info = info_raw.get("deviceInfo", {}) or {}
+    permit = _as_optional_text(device_info.get("permit") or info_raw.get("permit"))
+    feature = _as_optional_text(
+        device_info.get("feature") or info_raw.get("feature")
+    )
+    live_key_define = device_info.get("liveKeyDefine") or {}
+    capability = getattr(device, "capability", None)
+    status = getattr(device, "status", None)
+    camera_streaming = bool(getattr(capability, "camera_streaming", False))
+    camera_light = _optional_bool(
+        getattr(capability, "fill_light", None)
+        if hasattr(capability, "fill_light")
+        else getattr(capability, "camera_light", None)
+    )
+    ai_detection = bool(getattr(capability, "ai_detection", False))
+    obstacles = bool(getattr(capability, "obstacles", False))
+    stream_status_raw = _safe_get_device_property(
+        device,
+        DreameMowerProperty.STREAM_STATUS,
+    )
+    stream_status = _lower_enum_name(getattr(status, "stream_status", None))
+    stream_session_present = bool(getattr(status, "stream_session", None))
+    advertised = _camera_feature_advertised(
+        camera_streaming=camera_streaming,
+        camera_light=camera_light,
+        ai_detection=ai_detection,
+        obstacles=obstacles,
+        permit=permit,
+        feature=feature,
+        live_key_define=live_key_define,
+        video_status=device_info.get("videoStatus") or info_raw.get("videoStatus"),
+    )
+    protocol_mappings_available = bool(
+        action_mappings.get("get_photo_info")
+        or action_mappings.get("stream_video")
+        or property_mappings.get("stream_status")
+        or property_mappings.get("take_photo")
+    )
+    reason = None
+    if not protocol_mappings_available:
+        reason = "Camera/photo protocol mappings are not available."
+    elif not advertised:
+        reason = "Cloud/device metadata does not advertise camera or photo support."
+
+    return DreameLawnMowerCameraFeatureSupport(
+        supported=protocol_mappings_available and advertised,
+        advertised=advertised,
+        camera_streaming=camera_streaming,
+        camera_light=camera_light,
+        ai_detection=ai_detection,
+        obstacles=obstacles,
+        permit=permit,
+        feature=feature,
+        extend_sc_type=tuple(
+            str(item) for item in device_info.get("extendScType", []) or []
+        ),
+        video_status=_json_safe(
+            device_info.get("videoStatus") or info_raw.get("videoStatus")
+        ),
+        video_dynamic_vendor=_optional_bool(
+            device_info.get("videoDynamicVendor")
+            if "videoDynamicVendor" in device_info
+            else info_raw.get("videoDynamicVendor")
+        ),
+        live_key_count=(
+            len(live_key_define) if isinstance(live_key_define, Mapping) else 0
+        ),
+        stream_session_present=stream_session_present,
+        stream_status=stream_status,
+        stream_status_raw=_json_safe(stream_status_raw),
+        property_mappings=property_mappings,
+        action_mappings=action_mappings,
+        cloud_user_features=None,
+        cloud_user_features_error=None,
+        reason=reason,
+    )
