@@ -1495,11 +1495,9 @@ class DreameMowerMapOptimizer:
         if map_data.saved_map:
             return map_data
 
-        assert map_data.dimensions is not None
-        assert map_data.pixel_type is not None
-        if saved_map_data is not None:
-            assert saved_map_data.dimensions is not None
-            assert saved_map_data.pixel_type is not None
+        # Decoded zero-sized maps have no pixel buffer to optimize.
+        if map_data.dimensions is None or map_data.pixel_type is None:
+            return map_data
 
         if map_data.wifi_map:
             map_data.optimized_pixel_type = np.copy(map_data.pixel_type)

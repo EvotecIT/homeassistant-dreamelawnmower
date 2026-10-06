@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import zlib
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 
@@ -133,3 +135,20 @@ def test_python_optimizer_snaps_charger_to_wall_in_heading_direction(
 
     assert result is charger
     assert (result.x, result.y, result.a) == expected
+
+
+@pytest.mark.parametrize("frame_type", [80, 87], ids=["partial-vslam", "wifi"])
+def test_optimizer_preserves_decoder_zero_sized_map(frame_type):
+    decoder = load_internal_module("map_decoder").DreameMowerMapDecoder
+    header = bytearray(decoder.HEADER_SIZE)
+    header[4] = frame_type
+    payload = base64.b64encode(zlib.compress(bytes(header) + b"{}")).decode()
+    current, saved = decoder.decode_map(payload, True)
+    assert current is not None
+    assert current.need_optimization
+    assert current.pixel_type is None
+
+    result = _optimizer.DreameMowerMapOptimizer().optimize(current, saved)
+
+    assert result is current
+    assert result.optimized_pixel_type is None
