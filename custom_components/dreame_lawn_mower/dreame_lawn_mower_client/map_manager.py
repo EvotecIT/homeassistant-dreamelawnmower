@@ -1,6 +1,7 @@
 """Legacy map acquisition, queueing, and lifecycle management."""
 
 from __future__ import annotations
+from .map_frame_request import map_frame_parameters
 import io
 import math
 import time
@@ -165,6 +166,7 @@ class DreameMapMowerMapManager:
         self._available: bool = False
         self._disconnected: bool = False
         self._native_list_request: Callable[[bool], None] | None = None
+        self._native_missing_frame_request: Callable[[], None] | None = None
         self._ready: bool = False
         self._connected: bool = True
         self._vslam_map: bool = False
@@ -279,17 +281,7 @@ class DreameMapMowerMapManager:
         return len(map_data_result) or object_name is not None
 
     def _request_map(self, parameters: dict[str, Any] = None) -> dict[str, Any] | None:
-        if parameters is None:
-            parameters = {
-                MAP_REQUEST_PARAMETER_FRAME_TYPE: MapFrameType.I.name,
-            }
-
-        payload = [
-            {
-                "piid": PIID(DreameMowerProperty.FRAME_INFO),
-                MAP_PARAMETER_VALUE: str(json.dumps(parameters, separators=(",", ":"))).replace(" ", ""),
-            }
-        ]
+        payload = map_frame_parameters(parameters)
 
         try:
             _LOGGER.debug("DreameMapMowerMapManager._request_map %s", payload)
@@ -307,6 +299,50 @@ class DreameMapMowerMapManager:
             return False
         return result.get(MAP_PARAMETER_CODE) == 0
 
+    def _read_i_map_response(self, result: Mapping, start_time: int | None) -> tuple[str | None, str | None]:
+        """Read frame metadata without downloading or applying map contents."""
+        out = result[MAP_PARAMETER_OUT]
+        _LOGGER.debug("Response from device %s", out)
+        has_map = False
+        object_name = None
+        raw_map_data = None
+        for prop in out:
+            value = prop.get(MAP_PARAMETER_VALUE)
+            if value is None:
+                _LOGGER.debug(
+                    "Map response property has no value field: %s",
+                    prop,
+                )
+                continue
+            if value != "":
+                piid = prop["piid"]
+                if piid == PIID(DreameMowerProperty.OBJECT_NAME):
+                    has_map = True
+                    object_name = value
+                elif piid == PIID(DreameMowerProperty.MAP_DATA):
+                    has_map = True
+                    raw_map_data = value
+                elif piid == PIID(DreameMowerProperty.ROBOT_TIME):
+                    self._last_robot_time = int(value)
+                    if start_time is None:
+                        self._map_request_time = self._last_robot_time
+                        self._map_request_count = 1
+                elif piid == PIID(DreameMowerProperty.OLD_MAP_DATA):
+                    if not has_map:
+                        values = value.split(",")
+                        if values[0] == "0":
+                            raw_map_data = values[1]
+                        else:
+                            object_name = values[1]
+                            if len(values) == 3:
+                                object_name = f"{object_name},{values[2]}"
+
+        if has_map:
+            self._latest_object_name_time = int(self._last_robot_time / 1000) + 1
+            self._map_request_time = None
+
+        return object_name, raw_map_data
+
     def _request_i_map(self, start_time: int = None) -> bool:
         if not self._request_i_map_available and not self._protocol.dreame_cloud:
             return self.request_new_map()
@@ -322,45 +358,7 @@ class DreameMapMowerMapManager:
 
         result = self._request_map(parameters)
         if self._map_action_succeeded(result):
-            out = result[MAP_PARAMETER_OUT]
-            _LOGGER.debug("Response from device %s", out)
-            has_map = False
-            object_name = None
-            raw_map_data = None
-            for prop in out:
-                value = prop.get(MAP_PARAMETER_VALUE)
-                if value is None:
-                    _LOGGER.debug(
-                        "Map response property has no value field: %s",
-                        prop,
-                    )
-                    continue
-                if value != "":
-                    piid = prop["piid"]
-                    if piid == PIID(DreameMowerProperty.OBJECT_NAME):
-                        has_map = True
-                        object_name = value
-                    elif piid == PIID(DreameMowerProperty.MAP_DATA):
-                        has_map = True
-                        raw_map_data = value
-                    elif piid == PIID(DreameMowerProperty.ROBOT_TIME):
-                        self._last_robot_time = int(value)
-                        if start_time is None:
-                            self._map_request_time = self._last_robot_time
-                            self._map_request_count = 1
-                    elif piid == PIID(DreameMowerProperty.OLD_MAP_DATA):
-                        if not has_map:
-                            values = value.split(",")
-                            if values[0] == "0":
-                                raw_map_data = values[1]
-                            else:
-                                object_name = values[1]
-                                if len(values) == 3:
-                                    object_name = f"{object_name},{values[2]}"
-
-            if has_map:
-                self._latest_object_name_time = int(self._last_robot_time / 1000) + 1
-                self._map_request_time = None
+            object_name, raw_map_data = self._read_i_map_response(result, start_time)
 
             if object_name:
                 self._add_map_data_file(object_name, self._last_robot_time)
@@ -374,6 +372,16 @@ class DreameMapMowerMapManager:
         return False
 
     def _request_missing_p_map(self) -> bool:
+        if self._native_missing_frame_request is not None:
+            self._native_missing_frame_request()
+            return None
+        parameters = self._prepare_missing_p_map()
+        if parameters is None:
+            return None
+        return self._map_action_succeeded(self._request_map(parameters))
+
+    def _prepare_missing_p_map(self) -> dict[str, Any] | None:
+        """Apply existing queue and retry policy without network I/O."""
         if self._map_data is None:
             return
 
@@ -396,14 +404,11 @@ class DreameMapMowerMapManager:
         self._last_p_request_time = time.time()
 
         _LOGGER.info("Request missing P map: %s", frame_id)
-        result = self._request_map(
-            {
-                MAP_REQUEST_PARAMETER_MAP_ID: map_id,
-                MAP_REQUEST_PARAMETER_FRAME_ID: frame_id,
-                MAP_REQUEST_PARAMETER_FRAME_TYPE: MapFrameType.P.name,
-            }
-        )
-        return self._map_action_succeeded(result)
+        return {
+            MAP_REQUEST_PARAMETER_MAP_ID: map_id,
+            MAP_REQUEST_PARAMETER_FRAME_ID: frame_id,
+            MAP_REQUEST_PARAMETER_FRAME_TYPE: MapFrameType.P.name,
+        }
 
     def _request_next_p_map(self, map_id: int, frame_id: int) -> bool:
         key = f"{map_id}:{frame_id}"
