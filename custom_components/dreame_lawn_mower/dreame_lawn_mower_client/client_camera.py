@@ -276,6 +276,8 @@ class _DreameLawnMowerCameraMixin(_DreameLawnMowerClientTransport):
     owner while isolating the complete camera responsibility.
     """
 
+    _last_camera_stream_diagnostics: Mapping[str, Any]
+
     @property
     def last_camera_stream_diagnostics(self) -> Mapping[str, Any]:
         """Return the latest privacy-safe TX video cloud operation summary."""

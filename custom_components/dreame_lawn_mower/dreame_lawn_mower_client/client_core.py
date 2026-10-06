@@ -8,7 +8,7 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .app_protocol import (
     MOWER_BLUETOOTH_PROPERTY_KEY,
@@ -68,6 +68,10 @@ from .runtime_state import (
     RESUME_MOWING_REQUEST,
     snapshot_with_heartbeat_task_state,
 )
+
+if TYPE_CHECKING:
+    from .device import DreameMowerDevice
+
 
 _MUTATION_CONFIRMATION_DELAYS_SECONDS = (0.5, 1.5, 3.0)
 
@@ -142,6 +146,10 @@ def _device_start_session_identity(device: Any) -> bool | None:
 
 
 class _DreameLawnMowerClientCoreMixin(_DreameLawnMowerClientTransport):
+    _latest_snapshot: DreameLawnMowerSnapshot | None
+    _latest_cloud_device_info: Mapping[str, Any] | None
+    _cloud_device_info_refreshed_at: float
+
     async def async_get_cached_snapshot(self) -> DreameLawnMowerSnapshot:
         """Return a snapshot from the latest in-memory device state."""
         device = await asyncio.to_thread(self._ensure_device)
@@ -312,7 +320,7 @@ class _DreameLawnMowerClientCoreMixin(_DreameLawnMowerClientTransport):
         force_request_properties: bool = False,
         *,
         deadline: float | None = None,
-    ):
+    ) -> DreameMowerDevice:
         device = self._ensure_device()
         try:
             if force_request_properties:
