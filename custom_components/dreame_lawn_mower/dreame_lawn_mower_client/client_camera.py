@@ -315,10 +315,6 @@ class _DreameLawnMowerCameraMixin:
             payload_mode,
         )
 
-    async def async_set_camera_stream_enabled(self, enabled: bool) -> Any:
-        """Call the stream toggle used by the Dreame app."""
-        return await asyncio.to_thread(self._sync_set_camera_stream_enabled, enabled)
-
     async def async_get_camera_stream_inputs(self) -> dict[str, Any]:
         """Fetch the cloud TX/XP2P inputs needed by Dreame's video runtime."""
         return await asyncio.to_thread(self._sync_get_camera_stream_inputs)
@@ -486,19 +482,9 @@ class _DreameLawnMowerCameraMixin:
 
     def _sync_call_app_stream_video(self, enabled: bool) -> Any:
         """Call Control.switchVideo(on) from the mower React Native bundle."""
-        response = self._sync_call_app_action(
-            {
-                "m": "a",
-                "p": 0,
-                "o": 400,
-                "d": {"on": bool(enabled)},
-            }
+        return require_stream_toggle_response(
+            self._sync_call_app_action(stream_toggle_action(enabled))
         )
-        if not isinstance(response, Mapping) or response.get("r") != 0:
-            raise DreameLawnMowerConnectionError(
-                "Dreame app video toggle returned an invalid response."
-            )
-        return response
 
     def _call_stream_video_status(
         self,
@@ -870,6 +856,20 @@ class _DreameLawnMowerCameraMixin:
             "stream_session_present": bool(getattr(status, "stream_session", None)),
             "stream_status": _lower_enum_name(getattr(status, "stream_status", None)),
         }
+
+
+def stream_toggle_action(enabled: bool) -> dict[str, Any]:
+    """Build the app's Control.switchVideo command."""
+    return {"m": "a", "p": 0, "o": 400, "d": {"on": bool(enabled)}}
+
+
+def require_stream_toggle_response(response: Any) -> Any:
+    """Keep the stream toggle's existing app acknowledgement contract."""
+    if not isinstance(response, Mapping) or response.get("r") != 0:
+        raise DreameLawnMowerConnectionError(
+            "Dreame app video toggle returned an invalid response."
+        )
+    return response
 
 
 def require_photo_support(support: DreameLawnMowerCameraFeatureSupport) -> None:

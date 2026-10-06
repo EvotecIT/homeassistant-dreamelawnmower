@@ -1797,6 +1797,12 @@ class DreameLawnMowerClient(
 
         return await self._async_cloud_read(read)
 
+    async def async_set_camera_stream_enabled(self, enabled: bool) -> Any:
+        """Toggle app video with a fresh safety guard before enabling."""
+        from .client_camera_actions import async_set_camera_stream_enabled
+
+        return await async_set_camera_stream_enabled(self, enabled)
+
     async def async_request_photo_info(self, parameters: Any = None) -> Any:
         """Request photo metadata through the native device action transport."""
         from .client_camera_actions import async_request_photo_info
