@@ -13,6 +13,7 @@ import logging
 import traceback
 import copy
 import numpy as np
+from numpy.typing import NDArray
 import hashlib
 import textwrap
 from datetime import datetime
@@ -113,6 +114,7 @@ from .device_types import (
 )
 from .map_renderer_types import (
     _CalibrationPoints,
+    _RGBA,
     ALine,
     MAP_COLOR_SCHEME_LIST,
     MAP_ICON_SET_LIST,
@@ -333,16 +335,23 @@ class DreameMowerMapRenderer:
         return buffer.getvalue()
 
     @staticmethod
-    def _set_icon_color(image, size, color):
+    def _set_icon_color(
+        image: Image.Image, size: float, color: tuple[int, int, int] | _RGBA
+    ) -> Image.Image:
         ico = image.resize((int(size), int(size)))
         pixdata = ico.load()
+        if pixdata is None:
+            raise ValueError("Icon image has no pixel data")
         for yy in range(ico.size[1]):
             for xx in range(ico.size[0]):
+                pixel = pixdata[xx, yy]
+                if not isinstance(pixel, tuple) or len(pixel) != 4:
+                    raise ValueError("Icon image must use RGBA pixels")
                 if (
-                    pixdata[xx, yy][0] > 80
-                    and pixdata[xx, yy][1] > 80
-                    and pixdata[xx, yy][2] > 80
-                    and pixdata[xx, yy][3] > 80
+                    pixel[0] > 80
+                    and pixel[1] > 80
+                    and pixel[2] > 80
+                    and pixel[3] > 80
                 ):
                     pixdata[xx, yy] = color
 
@@ -510,7 +519,7 @@ class DreameMowerMapRenderer:
         return None
 
     @staticmethod
-    def _alpha_composite(source, destination):
+    def _alpha_composite(source: _RGBA, destination: NDArray[np.uint8]) -> _RGBA:
         srcA = source[3] / 255.0
         dstA = destination[3] / 255.0
         outA = srcA + dstA * (1 - srcA)
