@@ -1139,7 +1139,8 @@ class DreameMowerMapRenderer:
                 map_data.dimensions.padding = self._map_data.dimensions.padding
 
             map_data.dimensions.scale = scale
-            segment_mask = None
+            segment_mask_pixels: NDArray[np.uint8] | None = None
+            segment_mask: Image.Image | None = None
 
             if not self._low_memory and self.config.path and map_data.path and self._robot_type != RobotType.VSLAM:
                 if not self._cache or self._map_data is None or self._map_data.path != map_data.path:
@@ -1272,7 +1273,7 @@ class DreameMowerMapRenderer:
                     )
 
                 if map_data.history_map and map_data.neglected_segments:
-                    segment_mask = np.full(
+                    segment_mask_pixels = np.full(
                         (
                             map_data.dimensions.height,
                             map_data.dimensions.width,
@@ -1302,9 +1303,9 @@ class DreameMowerMapRenderer:
                             if self._has_mask and px_type != 255:
                                 mask[y, x] = mask_color
 
-                            if segment_mask is not None:
+                            if segment_mask_pixels is not None and map_data.neglected_segments is not None:
                                 if px_type in map_data.neglected_segments:
-                                    segment_mask[y, x] = self.color_scheme.neglected_segment
+                                    segment_mask_pixels[y, x] = self.color_scheme.neglected_segment
 
                 if render_material:
                     floor_scale = 2
@@ -1330,8 +1331,8 @@ class DreameMowerMapRenderer:
                 if self._has_mask:
                     mask = mask.repeat(scale, axis=0).repeat(scale, axis=1)
 
-                if segment_mask is not None:
-                    segment_mask = segment_mask.repeat(scale, axis=0).repeat(scale, axis=1)
+                if segment_mask_pixels is not None:
+                    segment_mask_pixels = segment_mask_pixels.repeat(scale, axis=0).repeat(scale, axis=1)
 
                 if map_data.dimensions.bounds:
                     # min_x = max(0, min(map_data.dimensions.bounds[0], min_x))
@@ -1361,8 +1362,8 @@ class DreameMowerMapRenderer:
                     pixels = pixels[from_y:to_y, from_x:to_x]
                     if self._has_mask:
                         mask = mask[from_y:to_y, from_x:to_x]
-                    if segment_mask is not None:
-                        segment_mask = segment_mask[from_y:to_y, from_x:to_x]
+                    if segment_mask_pixels is not None:
+                        segment_mask_pixels = segment_mask_pixels[from_y:to_y, from_x:to_x]
                     map_data.dimensions.crop = [
                         from_x,
                         from_y,
@@ -1410,9 +1411,9 @@ class DreameMowerMapRenderer:
                         fill=(255, 255, 255, 0),
                     )
 
-                if segment_mask is not None:
+                if segment_mask_pixels is not None:
                     segment_mask = ImageOps.expand(
-                        Image.fromarray(segment_mask),
+                        Image.fromarray(segment_mask_pixels),
                         border=(
                             map_data.dimensions.padding[0],
                             map_data.dimensions.padding[1],
@@ -1455,7 +1456,7 @@ class DreameMowerMapRenderer:
 
             image = self.render_objects(cached_layers, map_data, robot_status, station_status, image, object_scale)
 
-            if segment_mask is not None:
+            if segment_mask is not None and map_data.neglected_segments is not None:
                 image = Image.alpha_composite(
                     image,
                     self.render_neglected_segments(
@@ -1464,7 +1465,7 @@ class DreameMowerMapRenderer:
                         image.size,
                         segment_mask,
                         map_data.dimensions,
-                        map_data.rotation,
+                        map_data.rotation or 0,
                         map_data.cleaning_map,
                     ),
                 )
@@ -3673,14 +3674,14 @@ class DreameMowerMapRenderer:
 
     def render_neglected_segments(
         self,
-        neglected_segments,
-        segments,
-        layer_size,
-        segment_mask,
-        dimensions,
-        rotation,
-        cleaning_map,
-    ):
+        neglected_segments: Mapping[int, int],
+        segments: Mapping[int, Segment] | None,
+        layer_size: tuple[int, int],
+        segment_mask: Image.Image,
+        dimensions: MapImageDimensions,
+        rotation: int,
+        cleaning_map: bool | None,
+    ) -> Image.Image:
         mask_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         mask_layer.paste(segment_mask, (0, 0))
 
@@ -3707,8 +3708,10 @@ class DreameMowerMapRenderer:
 
         mask_layer.paste(segment_mask, (0, 0))
         for k in neglected_segments.keys():
-            if k in segments:
+            if segments is not None and k in segments:
                 segment = segments[k]
+                if segment.x is None or segment.y is None:
+                    continue
                 p = Point(segment.x, segment.y).to_img(dimensions, False)
                 mask_layer.paste(
                     problem_icon,

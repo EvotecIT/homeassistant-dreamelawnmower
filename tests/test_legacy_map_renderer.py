@@ -81,6 +81,17 @@ def test_layer_composition_uses_key_order_and_preserves_source_images() -> None:
     assert blue.getpixel((0, 0)) == (0, 0, 255, 128)
 
 
+@pytest.mark.parametrize("segments", [None, {1: Segment(1)}])
+def test_neglected_segment_mask_survives_missing_center(segments) -> None:
+    mask = Image.new("RGBA", (100, 100), (200, 100, 10, 110))
+    rendered = DreameMowerMapRenderer().render_neglected_segments(
+        {1: 1}, segments, mask.size, mask,
+        MapImageDimensions(0, 0, 100, 100, 50), 0, False,
+    )
+    assert rendered.size == mask.size
+    assert rendered.tobytes() == mask.tobytes()
+
+
 @pytest.mark.parametrize("point_kind", ["active", "predefined"])
 def test_map_json_exports_fractional_point_coordinates(point_kind: str) -> None:
     data = MapData()
