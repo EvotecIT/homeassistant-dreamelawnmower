@@ -5,6 +5,8 @@ import asyncio
 import pytest
 from aiohttp import ClientSession
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import cloud_session
+
 from .test_async_cloud_session import (
     OPTIONS,
     DreameLawnMowerClient,
@@ -35,11 +37,9 @@ def test_closed_borrowed_session_raises_connection_error(monkeypatch, operation)
             client = client_for(session)
             try:
                 # A cached token exercises the authenticated request rather than login.
-                from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
-                    cloud_session,
+                client._async_cloud = cloud_session.DreameCloudSession(
+                    session, **OPTIONS
                 )
-
-                client._async_cloud = cloud_session.DreameCloudSession(session, **OPTIONS)
                 client._async_cloud._token = "cached"
                 client._async_cloud._expires_at = float("inf")
                 with pytest.raises(
