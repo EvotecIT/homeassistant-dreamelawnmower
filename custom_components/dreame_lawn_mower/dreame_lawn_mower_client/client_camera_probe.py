@@ -82,8 +82,11 @@ async def async_camera_property_probe(client: DreameLawnMowerClient) -> dict[str
                 # Transport expiry must remain a diagnostic field. Give the
                 # state-only error result a separate bounded lock budget.
                 state_deadline = time.monotonic() + _DIAGNOSTIC_TIMEOUT
-                done, result = await _run_state_worker(
-                    lambda error=error: step(error=error), cancelled)
+
+                def finish_error(error: Exception = error) -> tuple[bool, Any]:
+                    return step(error=error)
+
+                done, result = await _run_state_worker(finish_error, cancelled)
             else:
                 done, result = await _run_state_worker(
                     lambda: step(response), cancelled)
