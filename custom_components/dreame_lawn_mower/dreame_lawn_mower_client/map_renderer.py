@@ -3812,7 +3812,7 @@ class DreameMowerMapRenderer:
 
         return mask_layer
 
-    def get_resources(self, capability) -> MapRendererResources:
+    def get_resources(self, capability: DreameMowerDeviceCapability) -> MapRendererResources:
         if self.icon_set == 2:
             if self._robot_type == RobotType.VSLAM:
                 robot_image = MAP_ROBOT_VSLAM_IMAGE_MIJIA
@@ -3863,7 +3863,7 @@ class DreameMowerMapRenderer:
 
         resources = MapRendererResources(
             icon_set=self.icon_set,
-            robot_type=self._robot_type.value,
+            robot_type=int(self._robot_type),
             robot=robot_image,
             charger=charger_image,
             charging=MAP_ROBOT_CHARGING_IMAGE,

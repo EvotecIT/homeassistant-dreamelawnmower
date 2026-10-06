@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Any, Final
+from typing import Any, Final, TypedDict
 
 type _RGBA = tuple[int, int, int, int]
 # Each entry pairs world and image coordinates for one calibration anchor.
@@ -248,6 +248,25 @@ class Angle:
     verticalDir: int = 0
 
 
+class _SegmentResource(TypedDict):
+    name: str | None
+    icon: str
+    mdi: str
+
+
+class _ObstacleResource(TypedDict):
+    name: str
+    icon: str | None
+    hidden_icon: str | None
+
+
+class _FurnitureResource(TypedDict):
+    name: str
+    icon: str | None
+    image: str | None
+    dimensions: list[int] | None
+
+
 @dataclass
 class MapRendererResources:
     renderer: str = ""
@@ -262,7 +281,7 @@ class MapRendererResources:
     cleaning_direction: str | None = None
     selected_segment: str | None = None
     cruise_point_background: str | None = None
-    segment: dict[int, dict[str, str]] | None = None
+    segment: dict[int, _SegmentResource] | None = None
     default_map_image: str | None = None
     font: str | None = None
     repeats: list[str] | None = None
@@ -272,8 +291,8 @@ class MapRendererResources:
     cruise_path_point_background: str | None = None
     obstacle_background: str | None = None
     obstacle_hidden_background: str | None = None
-    obstacle: dict[int, dict[str, str]] | None = None
-    furniture: dict[int, dict[str, str]] | None = None
+    obstacle: dict[int, _ObstacleResource] | None = None
+    furniture: dict[int, _FurnitureResource] | None = None
     rotate: str | None = None
     delete: str | None = None
     resize: str | None = None

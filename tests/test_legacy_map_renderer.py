@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+from dataclasses import asdict
 from io import BytesIO
 from types import SimpleNamespace
 
@@ -29,6 +30,27 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
     RecoveryMapType,
     Segment,
 )
+
+
+@pytest.mark.parametrize("new_furnitures", [False, True])
+def test_default_renderer_resources_serialize_optional_assets(
+    new_furnitures: bool,
+) -> None:
+    capability = SimpleNamespace(
+        customized_cleaning=True, custom_cleaning_mode=True, cleaning_route=True,
+        wifi_map=True, camera_streaming=True, pet_furniture=True,
+        extended_furnitures=True, new_furnitures=new_furnitures,
+    )
+    resources = DreameMowerMapRenderer().get_resources(capability)
+    output = json.loads(json.dumps(asdict(resources)))
+    assert output["robot_type"] == 0
+    assert output["segment"]
+    assert output["obstacle"]
+    assert output["furniture"]
+    assert all(
+        item["dimensions"] is None or isinstance(item["dimensions"], list)
+        for item in output["furniture"].values()
+    )
 
 
 @pytest.mark.parametrize("icon_set", [0, 1, 2, 3])
