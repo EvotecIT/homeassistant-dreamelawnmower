@@ -281,17 +281,6 @@ class _DreameLawnMowerCameraMixin:
         """Return the latest privacy-safe TX video cloud operation summary."""
         return self._last_camera_stream_diagnostics
 
-    async def async_request_photo_info(
-        self,
-        parameters: Any = None,
-    ) -> Any:
-        """Request mower photo metadata through the app protocol.
-
-        This is an active cloud/device action, but it does not start video
-        streaming, audio, remote control, or mowing.
-        """
-        return await asyncio.to_thread(self._sync_request_photo_info, parameters)
-
     async def async_probe_camera_sources(
         self,
         *,
@@ -363,9 +352,7 @@ class _DreameLawnMowerCameraMixin:
             refresh=False,
             include_cloud=False,
         )
-        if not support.supported:
-            reason = support.reason or "Camera/photo support is not available."
-            raise DreameLawnMowerConnectionError(reason)
+        require_photo_support(support)
 
         device = self._ensure_device()
         try:
@@ -374,9 +361,7 @@ class _DreameLawnMowerCameraMixin:
             result = device.call_action(DreameMowerAction.GET_PHOTO_INFO, parameters)
         except (DeviceException, InvalidActionException) as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
-        if result is None:
-            raise DreameLawnMowerConnectionError("GET_PHOTO_INFO returned no response.")
-        return result
+        return require_photo_response(result)
 
     def _sync_probe_camera_sources(
         self,
@@ -885,6 +870,21 @@ class _DreameLawnMowerCameraMixin:
             "stream_session_present": bool(getattr(status, "stream_session", None)),
             "stream_status": _lower_enum_name(getattr(status, "stream_status", None)),
         }
+
+
+def require_photo_support(support: DreameLawnMowerCameraFeatureSupport) -> None:
+    """Reject photo requests unless cached device capabilities advertise support."""
+    if not support.supported:
+        raise DreameLawnMowerConnectionError(
+            support.reason or "Camera/photo support is not available."
+        )
+
+
+def require_photo_response(result: Any) -> Any:
+    """Retain the public photo-metadata response and missing-reply contract."""
+    if result is None:
+        raise DreameLawnMowerConnectionError("GET_PHOTO_INFO returned no response.")
+    return result
 
 
 def camera_feature_support_from_device(

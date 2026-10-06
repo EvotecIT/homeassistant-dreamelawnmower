@@ -1797,6 +1797,12 @@ class DreameLawnMowerClient(
 
         return await self._async_cloud_read(read)
 
+    async def async_request_photo_info(self, parameters: Any = None) -> Any:
+        """Request photo metadata through the native device action transport."""
+        from .client_camera_actions import async_request_photo_info
+
+        return await async_request_photo_info(self, parameters)
+
     async def async_get_camera_feature_support(
         self,
         *,
