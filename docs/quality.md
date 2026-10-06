@@ -82,7 +82,7 @@ not establish installed, cloud, native-runtime, or physical-device behavior.
 | --- | --- | --- |
 | async-dependency | Gap | The cloud protocol owns synchronous requests, queues, locks, and threads. Modernize the owning client with real async cancellation and resource ownership; executor wrapping alone does not qualify. |
 | inject-websession | Gap | Cloud HTTP uses its own synchronous session. Design injected async session ownership in the reusable client, including standalone callers. |
-| strict-typing | Gap | Combined candidate a4233da, including the separate runtime and async branches, reports 1,284 mypy 2.4.0 errors in 72 of 325 production modules. This is combined-source evidence rather than a passing gate for this branch. Fix the full integration and bundled client before enabling a passing strict CI gate. |
+| strict-typing | Gap | Combined candidate 5e905c5, including the separate runtime and async branches, reports 1,185 mypy 2.4.0 errors in 69 of 326 production modules. This is combined-source evidence rather than a passing gate for this branch. Fix the full integration and bundled client before enabling a passing strict CI gate. |
 
 ## Qualification baseline
 
@@ -98,8 +98,13 @@ imports. Map renderer models describe RGBA tuples and optional resources;
 geometry and map-state annotations match the values produced by the decoder.
 Map values follow Python's equality protocol for unrelated objects, and obstacle
 object names use their vendor ID when available. Regression tests cover both
-contracts. Strict typing remains incomplete at 2,325 errors in 87 modules;
-`map_renderer_types.py` passes strict checking on its own. Renderer payload
+contracts. Strict typing remains incomplete;
+`map_renderer_types.py` passes strict checking on its own. The optimizer and its
+JavaScript bridge also report no errors in the combined strict run. The compiled
+QuickJS import has one documented missing-type-declaration exception. Tests cover
+Python contour joining, four charger headings, and decoder-produced zero-sized
+VSLAM and Wi-Fi maps; maps without pixels return unchanged. The corrected batch
+passes 187 optimizer, codec, model, and renderer tests on current and minimum HA. Renderer payload
 annotations match the nested crop data, hidden-segment list, and per-segment
 material/status dictionaries; 32 focused map tests pass after these declaration
 corrections. This does not establish full renderer typing. Domain-model annotations also
