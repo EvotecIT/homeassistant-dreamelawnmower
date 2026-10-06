@@ -636,6 +636,23 @@ class DreameLawnMowerClient(
         """Force a device-property read for a safety-critical decision."""
         return await self._async_refresh_authoritative_snapshot(deadline=deadline)
 
+    async def _async_get_cached_start_mowing_session_identity(self) -> bool | None:
+        """Read the device's current start branch under its MQTT state lock."""
+        from .client_core import _device_start_session_identity
+        from .client_state_reads import async_read_device_state
+
+        return await async_read_device_state(
+            self, _device_start_session_identity, refresh=False,
+        )
+
+    async def _async_cached_authoritative_snapshot(self) -> DreameLawnMowerSnapshot:
+        """Apply heartbeat reconciliation to the current in-memory device state."""
+        from .client_state_reads import async_read_device_state
+
+        return await async_read_device_state(
+            self, self._snapshot_from_device, refresh=False,
+        )
+
     async def async_refresh(self) -> DreameLawnMowerSnapshot:
         """Refresh device state and return a normalized snapshot."""
         device = await self._async_update_device()
