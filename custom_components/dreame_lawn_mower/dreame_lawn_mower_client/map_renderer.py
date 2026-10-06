@@ -1471,11 +1471,11 @@ class DreameMowerMapRenderer:
                 )
 
             if map_data.rotation == 90:
-                image = image.transpose(Image.ROTATE_90)
+                image = image.transpose(Image.Transpose.ROTATE_90)
             elif map_data.rotation == 180:
-                image = image.transpose(Image.ROTATE_180)
+                image = image.transpose(Image.Transpose.ROTATE_180)
             elif map_data.rotation == 270:
-                image = image.transpose(Image.ROTATE_270)
+                image = image.transpose(Image.Transpose.ROTATE_270)
 
             if info_text:
                 base_width = 490  # int(round(image.size[0] / 4 * 3))
@@ -1519,9 +1519,9 @@ class DreameMowerMapRenderer:
                 if map_data.history_map:
                     value_font = ImageFont.truetype(BytesIO(self._light_font_file), int(text_size * 1.8))
                     name_font = ImageFont.truetype(BytesIO(self._light_font_file), int(text_size * 0.8))
-                left, top, width, height = text_draw.textbbox((0, 0), header_text, font=text_font)
+                _, _, text_width, text_height = text_draw.textbbox((0, 0), header_text, font=text_font)
                 max_width = image_width * 0.9
-                if width > max_width:
+                if text_width > max_width:
                     lines = textwrap.wrap(header_text, width=int(max_width / (text_size / 2)))
                 else:
                     lines = [header_text]
@@ -1534,14 +1534,14 @@ class DreameMowerMapRenderer:
 
                 max_width = 0
                 header_height = int(text_size * 5) if map_data.history_map else text_size
-                total_height = header_height
+                total_height: float = header_height
 
                 line_sizes = []
                 for line in lines:
-                    left, top, width, height = text_draw.textbbox((0, 0), line, font=text_font)
-                    line_sizes.append((width, height))
-                    max_width = max(max_width, width)
-                    total_height = total_height + height
+                    _, _, text_width, text_height = text_draw.textbbox((0, 0), line, font=text_font)
+                    line_sizes.append((text_width, text_height))
+                    max_width = max(max_width, text_width)
+                    total_height = total_height + text_height
 
                 padding = int((min_width - image.size[0]) / 2)
                 if padding < 0:
@@ -1671,10 +1671,10 @@ class DreameMowerMapRenderer:
                             style = (value_color, value_font) if k == 0 else (text_color, name_font)
                             text_draw.text(pos[k], header_lines[i][k], fill=style[0], font=style[1])
 
-                x = (image_width - max_width) / 2
-                line_y = header_height
+                header_x = (image_width - max_width) / 2
+                line_y: float = header_height
                 for i in range(len(lines)):
-                    line_x = x + (max_width - line_sizes[i][0]) / 2
+                    line_x = header_x + (max_width - line_sizes[i][0]) / 2
                     text_draw.text((line_x, line_y), lines[i], fill=text_color, font=text_font)
                     line_y = line_y + line_sizes[i][1]
 
