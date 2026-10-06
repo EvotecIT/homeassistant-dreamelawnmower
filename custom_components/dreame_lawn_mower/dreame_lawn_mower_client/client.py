@@ -228,6 +228,7 @@ from .vector_map import vector_map_to_summary as vector_map_to_summary
 
 if _typing.TYPE_CHECKING:
     from .map_visuals import MapRenderStyle
+    from .mowing_map import MowingMapScene
     from .work_log import DreameLawnMowerWorkLogTotals
 
 _CLOUD_PRESENCE_REFRESH_INTERVAL = _client_constants.CLOUD_PRESENCE_REFRESH_INTERVAL
@@ -1493,6 +1494,16 @@ class DreameLawnMowerClient(
         return await async_map_view(
             self, timeout=timeout, interval=interval,
             label_scale=label_scale, style=style,
+        )
+
+    async def async_get_mowing_map_scene(
+        self, *, map_index: int, style: MapRenderStyle, label_scale: float = 1.0
+    ) -> MowingMapScene:
+        """Read current geometry natively and render off the event loop."""
+        from .client_vector_reads import async_mowing_scene
+
+        return await async_mowing_scene(
+            self, map_index=map_index, style=style, label_scale=label_scale
         )
 
     async def async_refresh_vector_map_view(

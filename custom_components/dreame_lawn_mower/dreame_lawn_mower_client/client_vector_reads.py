@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import time
+from threading import Event
 from typing import TYPE_CHECKING, Any
 
 from .client_app_reads import async_read_app_action
 from .client_map_helpers import _normalize_app_map_entries
+from .client_mowing_map import mowing_scene_from_batch
+from .client_refresh import _run_state_worker
 from .client_shared_helpers import _positive_int
 from .client_state_reads import async_read_device_state
 from .client_vector_map_view import vector_map_details, vector_map_view
@@ -17,6 +20,27 @@ if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
     from .cloud_session import DreameCloudSession
     from .map_visuals import MapRenderStyle
+    from .mowing_map import MowingMapScene
+
+
+async def async_mowing_scene(
+    client: DreameLawnMowerClient,
+    *,
+    map_index: int,
+    style: MapRenderStyle,
+    label_scale: float,
+) -> MowingMapScene:
+    """Own native geometry retrieval and drain any started rendering worker."""
+    async def read(cloud: DreameCloudSession) -> MowingMapScene:
+        data = await cloud.async_get_batch_device_datas(client._descriptor.did, [])
+        return await _run_state_worker(
+            lambda: mowing_scene_from_batch(
+                data, map_index=map_index, style=style, label_scale=label_scale
+            ),
+            Event(),
+        )
+
+    return await client._async_cloud_read(read)
 
 
 async def _map_hint(client: DreameLawnMowerClient) -> int | None:
