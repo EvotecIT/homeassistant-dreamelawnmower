@@ -924,10 +924,47 @@ class DreameLawnMowerClient(
 
     async def async_dock(self) -> None:
         """End an active mowing session and return the mower to base."""
+        async def dock(_cloud: _DreameCloudSession) -> None:
+            await self._async_stop_then_dock()
+
+        await self._async_cloud_read(dock)
+
+    async def _async_device_control(self, *, dock: bool) -> None:
+        """Run a native dock or ordinary STOP with existing confirmation policy."""
+        from .client_device_actions import async_run_device_plan
+
+        async def control(_cloud: _DreameCloudSession) -> None:
+            try:
+                await async_run_device_plan(
+                    self, lambda device: (
+                        device._dock_plan() if dock else device._ordinary_stop_plan()
+                    ),
+                )
+            except _DeviceCommandRejectedException as error:
+                raise _DreameLawnMowerCommandRejectedError(str(error)) from error
+            except DeviceException as error:
+                await self._async_reconcile_ambiguous_mutation(
+                    "return to dock" if dock else "stop mowing",
+                    DreameLawnMowerConnectionError(str(error)),
+                    lambda snapshot: bool(
+                        snapshot.returning or snapshot.docked or snapshot.state
+                        in {"returning", "charging", "charging_completed"}
+                    ) if dock else bool(
+                        snapshot.mowing_session_active is False or (
+                            not snapshot.started and not snapshot.mowing
+                            and not snapshot.paused
+                        )
+                    ),
+                )
+
+        await self._async_cloud_read(control)
+
+    async def _async_stop_then_dock(self) -> None:
+        """Keep the complete dock sequence under the caller's operation lifetime."""
         try:
             snapshot = await self.async_refresh()
         except DreameLawnMowerConnectionError:
-            await self._async_call_device_method("dock")
+            await self._async_device_control(dock=True)
             return
         initial_state = snapshot_session_control_state(snapshot)
 
@@ -936,14 +973,14 @@ class DreameLawnMowerClient(
 
         await async_stop_then_dock(
             initial_state=initial_state,
-            stop=lambda: self._async_call_device_method("stop"),
-            dock=lambda: self._async_call_device_method("dock"),
+            stop=lambda: self._async_device_control(dock=False),
+            dock=lambda: self._async_device_control(dock=True),
             refresh_state=async_refresh_state,
         )
 
     async def async_dock_without_stopping(self) -> None:
         """Return to base while preserving a resumable mowing session."""
-        await self._async_call_device_method("dock")
+        await self._async_device_control(dock=True)
 
     async def async_start_zone_mowing(
         self, zone_ids: Sequence[int], *, require_inactive_task: bool = False

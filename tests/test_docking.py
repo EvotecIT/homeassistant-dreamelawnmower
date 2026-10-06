@@ -179,11 +179,14 @@ def test_docking_continues_when_stop_action_fails() -> None:
 
 def test_dock_without_stopping_preserves_session_by_docking_directly() -> None:
     client = object.__new__(DreameLawnMowerClient)
-    client._async_call_device_method = AsyncMock()
+    client._closing = False
+    client._async_cloud = object()
+    client._cloud_read_tasks = set()
+    client._async_device_control = AsyncMock()
 
     asyncio.run(client.async_dock_without_stopping())
 
-    client._async_call_device_method.assert_awaited_once_with("dock")
+    client._async_device_control.assert_awaited_once_with(dock=True)
 
 
 def test_device_stop_dispatches_before_optimistic_idle_update() -> None:
@@ -2263,6 +2266,9 @@ def test_acknowledged_spot_task_rejects_different_area_ids() -> None:
 
 def test_normal_dock_uses_heartbeat_session_state_at_base() -> None:
     client = object.__new__(DreameLawnMowerClient)
+    client._closing = False
+    client._async_cloud = object()
+    client._cloud_read_tasks = set()
     client.async_refresh = AsyncMock(
         return_value=SimpleNamespace(
             state="charging_completed",
@@ -2270,7 +2276,7 @@ def test_normal_dock_uses_heartbeat_session_state_at_base() -> None:
             mowing_session_active=True,
         )
     )
-    client._async_call_device_method = AsyncMock()
+    client._async_device_control = AsyncMock()
     orchestrator = AsyncMock()
 
     with patch(
@@ -2288,15 +2294,18 @@ def test_normal_dock_uses_heartbeat_session_state_at_base() -> None:
 
 def test_normal_dock_falls_back_when_preflight_refresh_fails() -> None:
     client = object.__new__(DreameLawnMowerClient)
+    client._closing = False
+    client._async_cloud = object()
+    client._cloud_read_tasks = set()
     client.async_refresh = AsyncMock(
         side_effect=DreameLawnMowerConnectionError("status unavailable")
     )
-    client._async_call_device_method = AsyncMock()
+    client._async_device_control = AsyncMock()
 
     asyncio.run(client.async_dock())
 
     client.async_refresh.assert_awaited_once()
-    client._async_call_device_method.assert_awaited_once_with("dock")
+    client._async_device_control.assert_awaited_once_with(dock=True)
 
 
 @pytest.mark.parametrize(

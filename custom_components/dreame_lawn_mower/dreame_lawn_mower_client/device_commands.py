@@ -823,6 +823,14 @@ class _DreameMowerDeviceCommandMixin:
 
     def return_to_base(self) -> dict[str, Any] | None:
         """Set the mower cleaner to return to the dock."""
+        from .device_action_plan import run_device_plan
+
+        return run_device_plan(self, self._dock_plan())
+
+    def _dock_plan(self) -> Generator[ActionDelay | ActionRequest, Any, Any]:
+        """Share return-to-base state preparation and device acknowledgement."""
+        from .device_action_plan import device_action_plan
+
         if self._map_manager:
             self._map_manager.editor.set_cruise_points([])
 
@@ -837,25 +845,17 @@ class _DreameMowerDeviceCommandMixin:
 
         if not self.capability.cruising:
             self._restore_go_to_zone()
-        return self.call_action(DreameMowerAction.DOCK)
+        return (yield from device_action_plan(self, DreameMowerAction.DOCK))
 
     def dock(self) -> dict[str, Any] | None:
         """Set the mower cleaner to return to the dock."""
-        if self._map_manager:
-            self._map_manager.editor.set_cruise_points([])
+        return self.return_to_base()
 
-        # if self.status.started:
-        if not self.status.docked:
-            self._update_property(DreameMowerProperty.STATUS, DreameMowerStatus.BACK_HOME.value)
-            self._update_property(DreameMowerProperty.STATE, DreameMowerState.RETURNING.value)
-
-        # Clear active segments on current map data
-        # if self._map_manager:
-        #    self._map_manager.editor.set_active_segments([])
-
-        if not self.capability.cruising:
-            self._restore_go_to_zone()
-        return self.call_action(DreameMowerAction.DOCK)
+    def _ordinary_stop_plan(self) -> Generator[ActionDelay | ActionRequest, Any, Any]:
+        """Preserve ordinary STOP's mapping return-to-base behavior."""
+        if self.status.fast_mapping:
+            return (yield from self._dock_plan())
+        return (yield from self._stop_plan())
 
     def start_pause(self) -> dict[str, Any] | None:
         """Start or resume the cleaning task."""
