@@ -892,31 +892,34 @@ class DreameLawnMowerClient(
             requested_target_ids=requested_zone_ids,
             require_inactive_task=require_inactive_task,
         )
-        try:
-            response = await asyncio.to_thread(
-                self._sync_start_zone_mowing,
-                normalized_zone_ids,
-            )
-        except _DreameLawnMowerCommandRejectedError:
-            raise
-        except DreameLawnMowerConnectionError as err:
+        async def start_task(_cloud: _DreameCloudSession) -> Any:
+            try:
+                response = await self._async_call_mowing_task(
+                    build_zone_mowing_request(normalized_zone_ids),
+                    task_name="zone mowing",
+                )
+            except _DreameLawnMowerCommandRejectedError:
+                raise
+            except DreameLawnMowerConnectionError as err:
+                await self._async_require_targeted_task_confirmation(
+                    "zone mowing",
+                    baseline,
+                    _ZONE_TASK_CONFIRMATION_STATUSES,
+                    expected_operation=_MOWING_TASK_ZONE,
+                    requested_target_ids=requested_zone_ids,
+                    original_error=err,
+                )
+                return None
             await self._async_require_targeted_task_confirmation(
                 "zone mowing",
                 baseline,
                 _ZONE_TASK_CONFIRMATION_STATUSES,
                 expected_operation=_MOWING_TASK_ZONE,
                 requested_target_ids=requested_zone_ids,
-                original_error=err,
             )
-            return None
-        await self._async_require_targeted_task_confirmation(
-            "zone mowing",
-            baseline,
-            _ZONE_TASK_CONFIRMATION_STATUSES,
-            expected_operation=_MOWING_TASK_ZONE,
-            requested_target_ids=requested_zone_ids,
-        )
-        return response
+            return response
+
+        return await self._async_cloud_read(start_task)
 
     async def async_start_edge_mowing(
         self,
@@ -936,29 +939,32 @@ class DreameLawnMowerClient(
             _MOWING_TASK_EDGE,
             require_inactive_task=require_inactive_task,
         )
-        try:
-            response = await asyncio.to_thread(
-                self._sync_start_edge_mowing,
-                normalized_contour_ids,
-            )
-        except _DreameLawnMowerCommandRejectedError:
-            raise
-        except DreameLawnMowerConnectionError as err:
+        async def start_task(_cloud: _DreameCloudSession) -> Any:
+            try:
+                response = await self._async_call_mowing_task(
+                    build_edge_mowing_request(normalized_contour_ids),
+                    task_name="edge mowing",
+                )
+            except _DreameLawnMowerCommandRejectedError:
+                raise
+            except DreameLawnMowerConnectionError as err:
+                await self._async_require_targeted_task_confirmation(
+                    "edge mowing",
+                    baseline,
+                    _EDGE_TASK_CONFIRMATION_STATUSES,
+                    expected_operation=_MOWING_TASK_EDGE,
+                    original_error=err,
+                )
+                return None
             await self._async_require_targeted_task_confirmation(
                 "edge mowing",
                 baseline,
                 _EDGE_TASK_CONFIRMATION_STATUSES,
                 expected_operation=_MOWING_TASK_EDGE,
-                original_error=err,
             )
-            return None
-        await self._async_require_targeted_task_confirmation(
-            "edge mowing",
-            baseline,
-            _EDGE_TASK_CONFIRMATION_STATUSES,
-            expected_operation=_MOWING_TASK_EDGE,
-        )
-        return response
+            return response
+
+        return await self._async_cloud_read(start_task)
 
     async def async_start_spot_mowing(
         self, spot_ids: Sequence[int], *, require_inactive_task: bool = False
@@ -974,31 +980,34 @@ class DreameLawnMowerClient(
             requested_target_ids=requested_spot_ids,
             require_inactive_task=require_inactive_task,
         )
-        try:
-            response = await asyncio.to_thread(
-                self._sync_start_spot_mowing,
-                normalized_spot_ids,
-            )
-        except _DreameLawnMowerCommandRejectedError:
-            raise
-        except DreameLawnMowerConnectionError as err:
+        async def start_task(_cloud: _DreameCloudSession) -> Any:
+            try:
+                response = await self._async_call_mowing_task(
+                    build_spot_mowing_request(normalized_spot_ids),
+                    task_name="spot mowing",
+                )
+            except _DreameLawnMowerCommandRejectedError:
+                raise
+            except DreameLawnMowerConnectionError as err:
+                await self._async_require_targeted_task_confirmation(
+                    "spot mowing",
+                    baseline,
+                    _SPOT_TASK_CONFIRMATION_STATUSES,
+                    expected_operation=_MOWING_TASK_SPOT,
+                    requested_target_ids=requested_spot_ids,
+                    original_error=err,
+                )
+                return None
             await self._async_require_targeted_task_confirmation(
                 "spot mowing",
                 baseline,
                 _SPOT_TASK_CONFIRMATION_STATUSES,
                 expected_operation=_MOWING_TASK_SPOT,
                 requested_target_ids=requested_spot_ids,
-                original_error=err,
             )
-            return None
-        await self._async_require_targeted_task_confirmation(
-            "spot mowing",
-            baseline,
-            _SPOT_TASK_CONFIRMATION_STATUSES,
-            expected_operation=_MOWING_TASK_SPOT,
-            requested_target_ids=requested_spot_ids,
-        )
-        return response
+            return response
+
+        return await self._async_cloud_read(start_task)
 
     @staticmethod
     def _require_targeted_task_preflight(
