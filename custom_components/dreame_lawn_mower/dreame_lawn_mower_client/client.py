@@ -228,6 +228,7 @@ from .vector_map import vector_map_to_summary as vector_map_to_summary
 
 if _typing.TYPE_CHECKING:
     from .map_visuals import MapRenderStyle
+    from .models import DreameLawnMowerCameraFeatureSupport as _CameraFeatureSupport
     from .mowing_map import MowingMapScene
     from .work_log import DreameLawnMowerWorkLogTotals
 
@@ -1802,7 +1803,7 @@ class DreameLawnMowerClient(
         refresh: bool = False,
         include_cloud: bool = True,
         language: str | None = "en",
-    ) -> _client_camera.DreameLawnMowerCameraFeatureSupport:
+    ) -> _CameraFeatureSupport:
         """Read cached camera capabilities and optional native cloud metadata."""
         from .client_camera_reads import async_camera_feature_support
 
