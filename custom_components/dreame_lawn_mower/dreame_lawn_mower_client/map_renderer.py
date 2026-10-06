@@ -2864,6 +2864,11 @@ class DreameMowerMapRenderer:
         new_layer = Image.new("RGBA", layer_size, (255, 255, 255, 0))
         draw = ImageDraw.Draw(new_layer, "RGBA")
         if segment.x is not None and segment.y is not None:
+            segment_color = (
+                self.color_scheme.segment[segment.color_index][1]
+                if segment.color_index is not None
+                else self.color_scheme.icon_background
+            )
             active = active and not neglected
             text = None
             if segment.type not in self._segment_icons:
@@ -3027,7 +3032,7 @@ class DreameMowerMapRenderer:
                                     int(y1 * scale),
                                 ],
                                 fill=(
-                                    self.color_scheme.segment[segment.color_index][1]
+                                    segment_color
                                     if name_background and self.config.name_background and self.icon_set != 2
                                     else self.color_scheme.icon_background
                                 ),
@@ -3053,7 +3058,7 @@ class DreameMowerMapRenderer:
                         draw.ellipse(
                             [x0 * scale, y0 * scale, x1 * scale, y1 * scale],
                             fill=(
-                                self.color_scheme.segment[segment.color_index][1]
+                                segment_color
                                 if self.config.name_background and self.icon_set != 2
                                 else self.color_scheme.icon_background
                             ),
@@ -3170,7 +3175,7 @@ class DreameMowerMapRenderer:
                 if order_font:
                     icon_draw.ellipse(
                         [ellipse_x1, padding, ellipse_x2, icon_h - padding],
-                        fill=self.color_scheme.segment[segment.color_index][1],
+                        fill=segment_color,
                     )
                     text = str(segment.order)
                     left, top, tw, th = icon_draw.textbbox((0, 0), text, order_font)
@@ -3201,7 +3206,7 @@ class DreameMowerMapRenderer:
                         ico = DreameMowerMapRenderer._set_icon_color(
                             self._cleaning_mode_icon[cleaning_mode],
                             s,
-                            self.color_scheme.segment[segment.color_index][1],
+                            segment_color,
                         )
 
                         icon_draw.ellipse(
@@ -3229,7 +3234,7 @@ class DreameMowerMapRenderer:
                         ico = DreameMowerMapRenderer._set_icon_color(
                             self._cleaning_times_icon[segment.cleaning_times - 1],
                             s,
-                            self.color_scheme.segment[segment.color_index][1],
+                            segment_color,
                         )
 
                         icon_draw.ellipse(

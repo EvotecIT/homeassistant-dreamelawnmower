@@ -64,6 +64,32 @@ def test_router_icon_resizes_when_reusing_renderer() -> None:
     assert resized.tobytes() == fresh.tobytes()
 
 
+def test_segment_without_palette_assignment_preserves_label_and_order() -> None:
+    segment = Segment(1)
+    segment.x = segment.y = 2500
+    segment.name = "Garden"
+    segment.order = 1
+    renderer = DreameMowerMapRenderer()
+    actual = renderer.render_segment(
+        segment, False, (200, 200), MapImageDimensions(0, 0, 100, 100, 50),
+        10, 0, 1, True, False,
+    )
+    assert actual.getbbox() is not None
+    assert segment.color_index is None
+    # Supplying the same neutral background as a palette color must preserve
+    # the complete label and order marker, not merely avoid an exception.
+    reference = copy.deepcopy(segment)
+    reference.color_index = 0
+    neutral_renderer = DreameMowerMapRenderer()
+    neutral_renderer.color_scheme = copy.deepcopy(neutral_renderer.color_scheme)
+    neutral_renderer.color_scheme.segment[0][1] = renderer.color_scheme.icon_background
+    expected = neutral_renderer.render_segment(
+        reference, False, (200, 200), MapImageDimensions(0, 0, 100, 100, 50),
+        10, 0, 1, True, False,
+    )
+    assert actual.tobytes() == expected.tobytes()
+
+
 @pytest.mark.parametrize("ignore_status", [0, 1, 2])
 def test_obstacle_background_tracks_marker_size_and_rotation(
     ignore_status: int,
