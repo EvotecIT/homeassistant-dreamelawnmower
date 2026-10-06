@@ -86,7 +86,7 @@ from .client_maps import (
     _POINT_CLOUD_STORED_PREFLIGHT_BUDGET_SECONDS,
     _DreameLawnMowerClientMapsMixin,
 )
-from .client_schedules import (
+from .client_schedule_reads import (
     SCHEDULE_READ_TIMEOUT_SECONDS as _SCHEDULE_READ_TIMEOUT_SECONDS,
 )
 from .client_schedules import _DreameLawnMowerClientSchedulesMixin

@@ -23,7 +23,7 @@ from .client_map_helpers import (
     _app_map_entries_are_valid,
     _normalize_app_map_entries,
 )
-from .client_schedules import SCHEDULE_READ_TIMEOUT_SECONDS
+from .client_schedule_reads import SCHEDULE_READ_TIMEOUT_SECONDS
 from .client_settings_helpers import (
     _as_optional_int,
     _batch_ota_keys,
