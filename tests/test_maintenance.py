@@ -37,6 +37,9 @@ class _FakeMaintenanceCloud:
         self.calls.append(payload)
         command = payload.get("t")
         method = payload.get("m")
+        if method == "g":
+            assert retry_count == 2
+            assert timeout == 20
         if command == "CMS" and method == "g":
             if self.cms_error:
                 raise RuntimeError("CMS unavailable")

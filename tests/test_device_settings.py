@@ -184,6 +184,9 @@ def test_charging_write_preserves_times_and_requires_cfg_readback() -> None:
     requests: list[dict] = []
 
     def call(request: dict, **kwargs) -> dict:  # noqa: ARG001
+        if request["m"] == "g":
+            assert kwargs["retry_count"] == 2
+            assert kwargs["timeout"] == 20
         requests.append(request)
         return next(responses)
 

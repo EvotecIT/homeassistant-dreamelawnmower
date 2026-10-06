@@ -17,6 +17,11 @@ from .maintenance import CMS_GET_REQUEST, maintenance_status_from_app_data
 from .payload_utils import _json_safe
 
 
+def _settings_request(action: Mapping[str, Any]) -> AppReadRequest:
+    """Retain the legacy settings read policy, including setter confirmations."""
+    return AppReadRequest(action, retry_count=2, timeout=20.0)
+
+
 def read_device_settings(
     include_raw: bool = False, include_rain_end_time: bool = True,
 ) -> Generator[AppReadRequest, Any, dict[str, Any]]:
@@ -30,7 +35,7 @@ def read_device_settings(
         "warnings": [],
     }
     try:
-        config_result = yield AppReadRequest({"m": "g", "t": "CFG"})
+        config_result = yield _settings_request({"m": "g", "t": "CFG"})
         if include_raw:
             result["raw_config"] = _json_safe(config_result, max_depth=4)
         config = _app_action_data(config_result)
@@ -54,7 +59,7 @@ def read_device_settings(
 
     if include_rain_end_time:
         try:
-            rain_end_result = yield AppReadRequest({"m": "g", "t": "RPET"})
+            rain_end_result = yield _settings_request({"m": "g", "t": "RPET"})
             if include_raw:
                 result["raw_rain_end_time"] = _json_safe(
                     rain_end_result,
@@ -99,7 +104,7 @@ def read_maintenance(
     }
 
     try:
-        cms_result = yield AppReadRequest(CMS_GET_REQUEST)
+        cms_result = yield _settings_request(CMS_GET_REQUEST)
         if include_raw:
             result["raw_cms_response"] = _json_safe(cms_result, max_depth=4)
         cms_data = _app_action_data(cms_result)
@@ -115,7 +120,7 @@ def read_maintenance(
         result["errors"].append({"stage": "cms", "error": str(err)})
 
     try:
-        config_result = yield AppReadRequest({"m": "g", "t": "CFG"})
+        config_result = yield _settings_request({"m": "g", "t": "CFG"})
         if include_raw:
             result["raw_config_response"] = _json_safe(config_result, max_depth=4)
         config = _app_action_data(config_result)
@@ -142,7 +147,7 @@ def read_voice(
     }
 
     try:
-        config_result = yield AppReadRequest({"m": "g", "t": "CFG"})
+        config_result = yield _settings_request({"m": "g", "t": "CFG"})
         config = _app_action_data(config_result)
         if not isinstance(config, Mapping):
             weather_result = yield from read_device_settings(include_raw=True)
