@@ -6,6 +6,7 @@ import asyncio
 import base64
 import json
 import time
+from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
 
@@ -42,7 +43,14 @@ class _DreameLawnMowerScheduleEditsMixin(_DreameLawnMowerClientTransport):
         )
 
     def _sync_set_app_schedule_task_start_time(
-        self, map_index, plan_id, week_day, task_index, start, execute, confirm_write
+        self,
+        map_index: int,
+        plan_id: int,
+        week_day: int,
+        task_index: int,
+        start: int,
+        execute: bool,
+        confirm_write: bool,
     ) -> dict[str, Any]:
         if execute and not confirm_write:
             raise ValueError("Schedule writes require confirm_write=True.")
@@ -208,7 +216,9 @@ class _DreameLawnMowerScheduleEditsMixin(_DreameLawnMowerClientTransport):
         return schedule, native
 
     @staticmethod
-    def _require_exact_schedule_edit(actual, target):
+    def _require_exact_schedule_edit(
+        actual: Mapping[str, object], target: Mapping[str, object]
+    ) -> None:
         # Document v is a regenerated token; every other native field must match.
         if {k: v for k, v in actual.items() if k != "v"} != {
             k: v for k, v in target.items() if k != "v"
