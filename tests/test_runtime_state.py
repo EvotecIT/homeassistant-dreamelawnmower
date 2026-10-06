@@ -61,11 +61,14 @@ def test_async_status_blob_preserves_realtime_precedence_and_cloud_timestamp(
 ):
     key = MOWER_RAW_STATUS_PROPERTY_KEY
     entry = {"value": list(_A3_STANDBY_FRAME), "last_seen": 123.0}
-    device = SimpleNamespace(realtime_properties={key: entry} if realtime else {})
+    device = SimpleNamespace(
+        realtime_properties={key: entry} if realtime else {}, _state_lock=RLock(),
+    )
     client = object.__new__(DreameLawnMowerClient)
     client._closing = False
     client._async_cloud_read = lambda read: read(None)
-    client._ensure_device = lambda: device
+    client._device = device
+    client._ensure_device = lambda **kwargs: device
     client.async_get_cloud_properties = AsyncMock(return_value=[
         {"key": "unrelated", "value": []}, {"key": key, **entry},
     ])
