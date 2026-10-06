@@ -1,13 +1,15 @@
 """Dreame Home cloud transport and authentication protocol."""
 
+import asyncio
 import logging
+import math
 import random
 import json
 import hmac
 import requests
 import queue
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from threading import RLock, Thread, Timer, local
 from time import sleep
 import time
@@ -18,7 +20,9 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 from Crypto.Cipher import ARC4
 from miio.miioprotocol import MiIOProtocol
 
-from .exceptions import DeviceException, DreameLawnMowerCloudAPIError
+from .exceptions import (
+    DeviceException, DreameLawnMowerCloudAPIError, DreameLawnMowerConnectionError,
+)
 from .cloud_wire import (
     DEVICE_INFO_PATH, DEVICE_LIST_PATH, cloud_device_info_data,
     cloud_device_list_data, cloud_headers, cloud_login_data,
@@ -196,6 +200,39 @@ class DreameMowerDreameHomeCloudProtocol:
         """Return whether this thread owns a deadline-bounded cloud operation."""
         state = getattr(self, "_deadline_operation_state", None)
         return bool(state is not None and getattr(state, "active", False))
+
+    @asynccontextmanager
+    async def async_rpc_operation(self, *, deadline: float) -> AsyncIterator[int]:
+        """Reserve a request ID while excluding both legacy threads and async reads."""
+        if not math.isfinite(deadline):
+            raise ValueError("Device RPC deadline must be finite")
+        gate = getattr(self, "_async_rpc_gate", None)
+        if gate is None:
+            gate = asyncio.Lock()
+            self._async_rpc_gate = gate
+        try:
+            async with asyncio.timeout(max(0, deadline - time.monotonic())):
+                # RLock alone cannot distinguish tasks on the event-loop thread.
+                async with gate:
+                    lock = self._operation_lock()
+                    while not lock.acquire(blocking=False):
+                        await asyncio.sleep(0.01)
+                    try:
+                        if self._shutdown_is_requested():
+                            raise DreameLawnMowerConnectionError(
+                                "Device RPC owner is shutting down"
+                            )
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError
+                        request_id = self._id
+                        self._id += 1
+                        yield request_id
+                    finally:
+                        # Acquire/release on this same thread; never delegate
+                        # RLock acquisition to an executor that may outlive us.
+                        lock.release()
+        except TimeoutError as err:
+            raise DreameLawnMowerConnectionError("Device RPC timed out") from err
 
     def _disconnect_is_pending(self) -> bool:
         """Return whether teardown is waiting for an active transport to exit."""

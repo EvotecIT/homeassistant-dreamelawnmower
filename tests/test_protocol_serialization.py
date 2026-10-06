@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Callable
@@ -57,6 +58,87 @@ def test_rpc_envelope_preserves_routing_and_request_identity(host, path, callbac
         },
     }
     assert cloud._id == 11
+
+
+def test_native_rpc_serializes_tasks_and_legacy_threads_and_releases_on_cancel():
+    cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
+    cloud._request_lock = RLock()
+    cloud._id = 10
+    legacy_entered = Event()
+    ids = []
+
+    def legacy():
+        with cloud._operation_lock():
+            ids.append(cloud._id)
+            cloud._id += 1
+            legacy_entered.set()
+
+    async def scenario():
+        entered = asyncio.Event()
+        second_entered = asyncio.Event()
+
+        async def first():
+            async with cloud.async_rpc_operation(deadline=time.monotonic() + 2) as rid:
+                ids.append(rid)
+                entered.set()
+                await asyncio.Future()
+
+        async def second():
+            async with cloud.async_rpc_operation(deadline=time.monotonic() + 2) as rid:
+                ids.append(rid)
+                second_entered.set()
+
+        task = asyncio.create_task(first())
+        await entered.wait()
+        thread = Thread(target=legacy)
+        thread.start()
+        next_task = asyncio.create_task(second())
+        try:
+            await asyncio.sleep(0.03)
+            assert not legacy_entered.is_set()
+            assert not second_entered.is_set()
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await asyncio.wait_for(next_task, 2)
+        await asyncio.to_thread(thread.join, 2)
+        assert not thread.is_alive()
+        assert task.cancelled()
+
+    asyncio.run(scenario())
+    assert legacy_entered.is_set()
+    assert sorted(ids) == [10, 11, 12]
+
+
+def test_native_rpc_lock_wait_has_deadline_without_consuming_id():
+    cloud = object.__new__(protocol_cloud.DreameMowerDreameHomeCloudProtocol)
+    cloud._request_lock = RLock()
+    cloud._id = 10
+    entered = Event()
+    release = Event()
+
+    def legacy():
+        with cloud._operation_lock():
+            entered.set()
+            release.wait(2)
+
+    async def scenario():
+        with pytest.raises(
+            protocol_cloud.DreameLawnMowerConnectionError, match="timed out",
+        ):
+            async with cloud.async_rpc_operation(deadline=time.monotonic() + 0.03):
+                pytest.fail("Legacy operation still owns the request lock")
+        assert cloud._id == 10
+
+    thread = Thread(target=legacy)
+    thread.start()
+    assert entered.wait(1)
+    try:
+        asyncio.run(scenario())
+    finally:
+        release.set()
+        thread.join(2)
+    assert not thread.is_alive()
 
 
 def test_cloud_request_lock_serializes_app_and_device_operations() -> None:

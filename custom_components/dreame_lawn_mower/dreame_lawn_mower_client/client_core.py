@@ -30,6 +30,7 @@ from .client_core_helpers import (
 from .client_shared_helpers import (
     _property_entry_received_at,
 )
+from .cloud_session import DreameCloudSession
 from .device_types import DreameMowerTaskStatus
 from .exceptions import (
     DeviceCommandRejectedException,
@@ -842,6 +843,22 @@ class _DreameLawnMowerClientCoreMixin:
                 else DreameLawnMowerConnectionError
             )
             raise error_type(str(err)) from err
+
+    async def _async_read_device_properties(
+        self, device: Any, properties: Sequence[Mapping[str, int | str]], *,
+        deadline: float,
+    ) -> Any:
+        """Read device RPC properties under the existing protocol's ID/lock owner."""
+        protocol = device._protocol.cloud
+
+        async def read(cloud: DreameCloudSession) -> Any:
+            async with protocol.async_rpc_operation(deadline=deadline) as request_id:
+                return await cloud.async_read_device_properties(
+                    self._descriptor.did, protocol._host, request_id, properties,
+                    deadline=deadline,
+                )
+
+        return await self._async_cloud_read(read)
 
     def _sync_get_batch_device_data(
         self,

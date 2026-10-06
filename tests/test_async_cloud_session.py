@@ -672,7 +672,7 @@ def test_client_page_reads_own_only_standalone_session(monkeypatch, borrowed):
 
 @pytest.mark.parametrize("borrowed", [True, False])
 @pytest.mark.parametrize("caller_continues", [True, False])
-@pytest.mark.parametrize("read_kind", ["info", "page", "properties"])
+@pytest.mark.parametrize("read_kind", ["info", "page", "properties", "rpc"])
 def test_client_close_cancels_active_native_read(
     monkeypatch, borrowed, caller_continues, read_kind,
 ):
@@ -707,6 +707,12 @@ def test_client_close_cancels_active_native_read(
                         await client.async_get_cloud_device_info()
                     elif read_kind == "properties":
                         await client.async_get_cloud_properties("1.1")
+                    elif read_kind == "rpc":
+                        device = await asyncio.to_thread(client._ensure_device)
+                        await client._async_read_device_properties(
+                            device, [],
+                            deadline=asyncio.get_running_loop().time() + 2,
+                        )
                     else:
                         await client.async_get_cloud_device_list_page()
                 except asyncio.CancelledError:
