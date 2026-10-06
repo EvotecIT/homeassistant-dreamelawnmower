@@ -12,7 +12,7 @@ from typing import Any
 
 from aiohttp import BasicAuth, ClientError, ClientSession, ClientTimeout
 
-from .cloud_auth import parse_cloud_authentication
+from .cloud_auth import CloudAuthentication, parse_cloud_authentication
 from .cloud_wire import (
     DEVICE_INFO_PATH,
     DEVICE_LIST_PATH,
@@ -164,6 +164,50 @@ class DreameCloudSession:
         if not isinstance(result, dict):
             raise DreameLawnMowerConnectionError("Cloud device info is invalid")
         return result
+
+    @property
+    def authentication(self) -> CloudAuthentication:
+        """Capture validated credentials for the same account's MQTT owner."""
+        if self._token is None:
+            raise DreameLawnMowerAuthError("Cloud authentication is unavailable")
+        return CloudAuthentication(
+            token=self._token, refresh_token=self._refresh_token,
+            expires_at=self._expires_at, tenant=self._tenant,
+            user_id=self._user_id, region=self._region,
+        )
+
+    async def async_get_connection_info(
+        self, did: str, *, deadline: float,
+    ) -> dict[str, Any] | None:
+        """Read startup identity and firmware metadata within one shared deadline."""
+        info = await self.async_get_device_info(did, deadline=deadline)
+        if not info:
+            return None
+        strings = self._strings
+        path = "/".join(strings[index] for index in (23, 25, 30))
+        otc = await self._async_read(
+            f"/{path}", cloud_device_info_data(did, None),
+            timeout=20, deadline=deadline,
+        )
+        if not otc:
+            return info
+        if not isinstance(otc, dict):
+            raise DreameLawnMowerConnectionError("Cloud firmware info is invalid")
+        if strings[31] in otc:
+            status = otc[strings[31]]
+            properties = status.get(strings[32]) if isinstance(status, dict) else None
+            if not isinstance(properties, dict):
+                raise DreameLawnMowerConnectionError("Cloud firmware info is invalid")
+            return {**properties, **info}
+        devices = await self.async_get_devices(deadline=deadline)
+        page = devices.get(strings[34]) if isinstance(devices, dict) else None
+        records = page.get(strings[36]) if isinstance(page, dict) else None
+        if not isinstance(records, list):
+            raise DreameLawnMowerConnectionError("Cloud device inventory is invalid")
+        for record in records:
+            if isinstance(record, dict) and str(record.get("did")) == did:
+                return record
+        return None
 
     async def async_read_device_properties(
         self,

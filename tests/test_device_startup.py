@@ -62,7 +62,15 @@ def test_connect_device_defers_initial_map_request(monkeypatch) -> None:
         capability=SimpleNamespace(),
     )
 
-    DreameMowerDevice.connect_device(mower)
+    state = vars(mower)
+    mower = object.__new__(DreameMowerDevice)
+    mower.__dict__.update(state)
+    monkeypatch.setattr(DreameMowerDevice, "device_connected", property(lambda _: True))
+    monkeypatch.setattr(DreameMowerDevice, "cloud_connected", property(lambda _: False))
+    monkeypatch.setattr(
+        DreameMowerDevice, "_map_update_interval", property(lambda _: 10),
+    )
+    mower.connect_device()
 
     mower._request_properties.assert_called_once_with()
     map_manager.set_update_interval.assert_called_once_with(10)

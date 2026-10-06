@@ -8,7 +8,7 @@ import json
 import hmac
 import requests
 import queue
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from contextlib import asynccontextmanager, contextmanager
 from threading import RLock, Thread, Timer, local
 from time import sleep
@@ -23,7 +23,7 @@ from miio.miioprotocol import MiIOProtocol
 from .exceptions import (
     DeviceException, DreameLawnMowerCloudAPIError, DreameLawnMowerConnectionError,
 )
-from .cloud_auth import parse_cloud_authentication
+from .cloud_auth import CloudAuthentication, parse_cloud_authentication
 from .cloud_wire import (
     DEVICE_INFO_PATH, DEVICE_LIST_PATH, cloud_device_info_data,
     cloud_device_list_data, cloud_headers, cloud_login_data,
@@ -187,7 +187,7 @@ class DreameMowerDreameHomeCloudProtocol:
         self._key: str | None = None
         self._uid = None
         self._uuid: str | None = None
-        self._strings: list[str] | None = None
+        self._strings: Sequence[str] | None = None
 
     def _operation_lock(self) -> RLock:
         """Return the shared cloud lock, including legacy constructed fixtures."""
@@ -530,6 +530,19 @@ class DreameMowerDreameHomeCloudProtocol:
         self._connected = True
         return info
 
+    def _apply_authentication(self, authentication: CloudAuthentication) -> None:
+        """Adopt validated account credentials while holding the operation lock."""
+        if self._shutdown_is_requested() or authentication.expires_at <= time.time():
+            raise DreameLawnMowerConnectionError("Cloud authentication is no longer active")
+        self._strings = cloud_strings(self._account_type)
+        self._key = authentication.token
+        self._secondary_key = authentication.refresh_token
+        self._key_expire = authentication.expires_at
+        self._uuid = authentication.user_id
+        self._location = authentication.region or self._location
+        self._ti = authentication.tenant
+        self._logged_in = True
+
     def login(
         self,
         timeout: float = 10,
@@ -601,13 +614,7 @@ class DreameMowerDreameHomeCloudProtocol:
                         data, strings, now=time.time(),
                         tenant=self._ti, region=self._location,
                     )
-                    self._key = authentication.token
-                    self._secondary_key = authentication.refresh_token
-                    self._key_expire = authentication.expires_at
-                    self._uuid = authentication.user_id
-                    self._location = authentication.region
-                    self._ti = authentication.tenant
-                    self._logged_in = True
+                    self._apply_authentication(authentication)
             else:
                 try:
                     data = json.loads(response_text)

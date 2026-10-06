@@ -224,7 +224,7 @@ class DreameMowerDevice(
         self.mac = mac
         self.token = token
         self.host = host
-        self.two_factor_url = None
+        self.two_factor_url: str | None = None
         self.account_type = account_type
         self.status = DreameMowerDeviceStatus(self)
         self.capability = DreameMowerDeviceCapability(self)
@@ -381,70 +381,82 @@ class DreameMowerDevice(
         """Connect to the device api."""
         _LOGGER.debug("Connecting to device")
         info = self._protocol.connect(self._message_callback, self._connected_callback)
+        self._initialize_device(info)
+
+    def _initialize_device(self, info) -> None:
+        """Initialize capabilities and maps from an established cloud connection."""
         if info:
-            self.info = DreameMowerDeviceInfo(info)
-            if self.mac is None:
-                self.mac = self.info.mac_address
-            _LOGGER.info(
-                "Connected to device: %s %s",
-                self.info.model,
-                self.info.firmware_version,
-            )
-
-            self._last_settings_request = time.time()
-            self._last_map_list_request = self._last_settings_request
-            self._dirty_data = {}
-            self._dirty_auto_switch_data = {}
-            self._dirty_ai_data = {}
+            self._prepare_device_initialization(info)
             self._request_properties()
-            self._last_update_failed = None
+            self._finish_device_initialization()
 
-            if self.device_connected and self._protocol.cloud is not None and (not self._ready or not self.available):
-                if self._map_manager:
-                    model = self.info.model.split(".")
-                    if len(model) == 3:
-                        for k, v in json.loads(
-                            zlib.decompress(base64.b64decode(DEVICE_KEY), zlib.MAX_WBITS | 32)
-                        ).items():
-                            if model[2] in v:
-                                self._map_manager.set_aes_iv(k)
-                                break
-                    self._map_manager.set_capability(self.capability)
-                    self._map_manager.set_update_interval(self._map_update_interval)
-                    self._map_manager.set_device_running(
-                        self.status.running,
-                        self.status.docked and not self.status.started,
-                    )
+    def _prepare_device_initialization(self, info) -> None:
+        """Apply connection identity before the first property response."""
+        self.info = DreameMowerDeviceInfo(info)
+        if self.mac is None:
+            self.mac = self.info.mac_address
+        _LOGGER.info(
+            "Connected to device: %s %s",
+            self.info.model,
+            self.info.firmware_version,
+        )
 
-                    # set_update_interval starts the existing map-manager worker.
-                    # Do not also run its cloud map request synchronously in the
-                    # first state snapshot; app-map metadata hydrates separately.
-                    if self.status.current_map is not None:
-                        self.update_map()
+        self._last_settings_request = time.time()
+        self._last_map_list_request = self._last_settings_request
+        self._dirty_data = {}
+        self._dirty_auto_switch_data = {}
+        self._dirty_ai_data = {}
 
-                if self.cloud_connected:
-                    self._cleaning_history_update = -1
-                    if (self.capability.ai_detection and not self.status.ai_policy_accepted) or True:
-                        try:
-                            prop = "prop.s_ai_config"
-                            response = self._protocol.cloud.get_batch_device_datas([prop])
-                            if response and prop in response and response[prop]:
-                                value = json.loads(response[prop])
-                                self.status.ai_policy_acepted = (
-                                    value.get("privacyAuthed")
-                                    if "privacyAuthed" in value
-                                    else value.get("aiPrivacyAuthed")
-                                )
-                        except:
-                            pass
+    def _finish_device_initialization(self) -> None:
+        """Start map maintenance after initial properties establish capabilities."""
+        self._last_update_failed = None
 
-            if not self.available:
-                self.available = True
+        if self.device_connected and self._protocol.cloud is not None and (not self._ready or not self.available):
+            if self._map_manager:
+                model = self.info.model.split(".")
+                if len(model) == 3:
+                    for k, v in json.loads(
+                        zlib.decompress(base64.b64decode(DEVICE_KEY), zlib.MAX_WBITS | 32)
+                    ).items():
+                        if model[2] in v:
+                            self._map_manager.set_aes_iv(k)
+                            break
+                self._map_manager.set_capability(self.capability)
+                self._map_manager.set_update_interval(self._map_update_interval)
+                self._map_manager.set_device_running(
+                    self.status.running,
+                    self.status.docked and not self.status.started,
+                )
 
-            if not self._ready:
-                self._ready = True
-            else:
-                self._property_changed()
+                # set_update_interval starts the existing map-manager worker.
+                # Do not also run its cloud map request synchronously in the
+                # first state snapshot; app-map metadata hydrates separately.
+                if self.status.current_map is not None:
+                    self.update_map()
+
+            if self.cloud_connected:
+                self._cleaning_history_update = -1
+                if (self.capability.ai_detection and not self.status.ai_policy_accepted) or True:
+                    try:
+                        prop = "prop.s_ai_config"
+                        response = self._protocol.cloud.get_batch_device_datas([prop])
+                        if response and prop in response and response[prop]:
+                            value = json.loads(response[prop])
+                            self.status.ai_policy_acepted = (
+                                value.get("privacyAuthed")
+                                if "privacyAuthed" in value
+                                else value.get("aiPrivacyAuthed")
+                            )
+                    except:
+                        pass
+
+        if not self.available:
+            self.available = True
+
+        if not self._ready:
+            self._ready = True
+        else:
+            self._property_changed()
 
     def connect_cloud(self) -> None:
         """Connect to the cloud api."""

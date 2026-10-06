@@ -9,6 +9,7 @@ from collections.abc import Callable
 from threading import Event
 from typing import TYPE_CHECKING
 
+from .client_startup import async_start_device
 from .device_property_read import (
     apply_device_property_response,
     build_device_property_request,
@@ -51,7 +52,7 @@ async def async_update_device(
     client: DreameLawnMowerClient, *, force_request_properties: bool = False,
     deadline: float | None = None,
 ) -> DreameMowerDevice:
-    """Poll native RPC once connected, retaining synchronous startup ownership."""
+    """Use native startup metadata and RPC with owned legacy state callbacks."""
     cancelled = Event()
     supplied_deadline = deadline
     if deadline is not None and not math.isfinite(deadline):
@@ -75,25 +76,23 @@ async def async_update_device(
                     "while another update is running."
                 )
             return device, None
-        # Startup still owns MQTT initialization, initial capabilities and maps.
-        # Keep that existing path tracked until its remaining HTTP is migrated.
         if supplied_deadline is None and (
             not device.cloud_connected or not device._ready
         ):
-            ensure_active()
-            client._sync_update_device()
-            if not force_request_properties:
-                return device, None
+            return device, []
+        return device, select_properties(device)
+
+    def select_properties(device: DreameMowerDevice) -> list[DreameMowerProperty]:
         ensure_active()
         properties = device._select_update_properties()
         if (force_request_properties or not device._protocol.dreame_cloud
                 or not device.device_connected):
-            return device, properties
+            return properties
         if device.status.map_backup_status:
-            return device, [DreameMowerProperty.MAP_BACKUP_STATUS]
+            return [DreameMowerProperty.MAP_BACKUP_STATUS]
         if device.status.map_recovery_status:
-            return device, [DreameMowerProperty.MAP_RECOVERY_STATUS]
-        return device, []
+            return [DreameMowerProperty.MAP_RECOVERY_STATUS]
+        return []
 
     async def refresh(cloud: DreameCloudSession) -> DreameMowerDevice:
         async with client._refresh_lock:
@@ -105,6 +104,16 @@ async def async_update_device(
                 rpc_deadline = (
                     deadline if deadline is not None else time.monotonic() + 20
                 )
+                if supplied_deadline is None and (
+                    not device.cloud_connected or not device._ready
+                ):
+                    await async_start_device(
+                        client, device, cloud, deadline=rpc_deadline,
+                        cancelled=cancelled,
+                    )
+                    properties = await _run_state_worker(
+                        lambda: select_properties(device), cancelled,
+                    )
                 protocol = device._protocol.cloud
                 results: object = None
                 if properties:
