@@ -2,12 +2,23 @@
 
 from collections.abc import Callable
 from time import monotonic
+from typing import TypedDict
+
+
+class VideoStartupDiagnostics(TypedDict):
+    """Numeric timings with media verification distinct from source readiness."""
+
+    phase: str
+    outcome: str
+    total_ms: float
+    phases_ms: dict[str, float]
+    verified_media_ms: float | None
 
 
 class VideoStartupTiming:
     """Retain one startup attempt without transport URLs or device credentials."""
 
-    def __init__(self, clock: Callable[[], float] = monotonic):
+    def __init__(self, clock: Callable[[], float] = monotonic) -> None:
         self._clock = clock
         self._started = self._phase_started = clock()
         self.phase = "safety"
@@ -36,7 +47,7 @@ class VideoStartupTiming:
         if self._verified is None:
             self._verified = self._clock()
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> VideoStartupDiagnostics:
         """Return only phase names, outcomes, and milliseconds."""
         now = self._clock()
         phases = dict(self._phases)
