@@ -45,6 +45,7 @@ async def async_run_schedule_write(
                         read_schedules(
                             client,
                             map_indices=[request.map_index],
+                            include_raw=request.include_raw,
                             include_current_task=False,
                         ),
                         deadline=deadline,
@@ -61,7 +62,9 @@ async def async_run_schedule_write(
                     return await async_command_app_action(
                         client,
                         request.action,
-                        deadline=min(deadline, time.monotonic() + 20),
+                        deadline=min(
+                            deadline, time.monotonic() + (request.timeout or 20),
+                        ),
                     )
                 case ReadTableFlags():
                     return await async_run_app_read(

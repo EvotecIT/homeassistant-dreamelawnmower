@@ -32,11 +32,17 @@ def run_schedule_write(
         match request:
             case ReadSchedules():
                 return client._sync_get_app_schedules(
-                    map_indices=[request.map_index], include_current_task=False
+                    map_indices=[request.map_index], include_current_task=False,
+                    **({"include_raw": True} if request.include_raw else {}),
                 )
             case RequireWriteAllowed():
                 return client._sync_require_schedule_write_allowed()
             case ScheduleCommand():
+                if request.timeout is not None:
+                    return client._sync_call_app_action(
+                        request.action, retry_count=request.retry_count,
+                        timeout=request.timeout,
+                    )
                 if request.retry_count is None:
                     return client._sync_call_app_action(request.action)
                 return client._sync_call_app_action(

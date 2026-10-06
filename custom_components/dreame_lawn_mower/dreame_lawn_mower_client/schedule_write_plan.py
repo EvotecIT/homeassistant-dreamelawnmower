@@ -29,6 +29,7 @@ from .schedule_tables import schedule_table_ids
 @dataclass(frozen=True)
 class ReadSchedules:
     map_index: int
+    include_raw: bool = False
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,7 @@ class RequireWriteAllowed:
 class ScheduleCommand:
     action: Mapping[str, Any]
     retry_count: int | None = None
+    timeout: float | None = None
 
 
 @dataclass(frozen=True)

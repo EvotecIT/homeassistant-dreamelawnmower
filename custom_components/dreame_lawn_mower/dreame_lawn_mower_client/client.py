@@ -1381,6 +1381,26 @@ class DreameLawnMowerClient(
             chunk_size=chunk_size, include_current_task=include_current_task,
         )
 
+    async def async_set_app_schedule_task_start_time(
+        self,
+        *,
+        map_index: int,
+        plan_id: int,
+        week_day: int,
+        task_index: int,
+        start: int,
+        execute: bool = False,
+        confirm_write: bool = False,
+    ) -> dict[str, Any]:
+        """Preview or change one existing A2 daily all-area start time."""
+        from .client_schedule_writes import async_run_schedule_write
+        from .schedule_edit_plan import plan_schedule_start_time
+
+        return await async_run_schedule_write(self, plan_schedule_start_time(
+            self._descriptor.model, map_index, plan_id, week_day, task_index,
+            start, execute, confirm_write,
+        ))
+
     async def async_set_app_schedule_plan_enabled(
         self,
         *,
