@@ -827,7 +827,9 @@ class _DreameMowerDeviceCommandMixin:
 
         return run_device_plan(self, self._dock_plan())
 
-    def _dock_plan(self) -> Generator[ActionDelay | ActionRequest, Any, Any]:
+    def _dock_plan(
+        self,
+    ) -> Generator[ActionDelay | ActionRequest, Any, dict[str, Any] | None]:
         """Share return-to-base state preparation and device acknowledgement."""
         from .device_action_plan import device_action_plan
 
@@ -845,7 +847,10 @@ class _DreameMowerDeviceCommandMixin:
 
         if not self.capability.cruising:
             self._restore_go_to_zone()
-        return (yield from device_action_plan(self, DreameMowerAction.DOCK))
+        response: dict[str, Any] | None = yield from device_action_plan(
+            self, DreameMowerAction.DOCK,
+        )
+        return response
 
     def dock(self) -> dict[str, Any] | None:
         """Set the mower cleaner to return to the dock."""
