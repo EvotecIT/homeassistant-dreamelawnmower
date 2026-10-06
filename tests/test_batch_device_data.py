@@ -570,15 +570,16 @@ def test_async_batch_schedule_recovery_has_an_overall_deadline() -> None:
 
     cloud.async_get_batch_device_datas = read_batch
     client._async_cloud = cloud
-    started = time.monotonic()
+    async def scenario():
+        started = time.monotonic()
+        result = await client.async_get_batch_schedules(map_index_hint=0)
+        return started, time.monotonic(), result
 
-    result = asyncio.run(
-        client.async_get_batch_schedules(map_index_hint=0)
-    )
+    started, finished, result = asyncio.run(scenario())
 
     assert result["schedules"][0]["version"] == 19383
     assert request_options["deadline"] is not None
-    assert started < request_options["deadline"] <= started + 5.1
+    assert started + 5 <= request_options["deadline"] <= finished + 5
 
 
 def test_vector_map_batch_fetch_requests_all_device_sized_path_chunks() -> None:
