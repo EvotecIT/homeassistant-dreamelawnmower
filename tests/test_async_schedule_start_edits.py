@@ -58,13 +58,17 @@ def test_native_start_edit_preserves_transaction_contract(
         blocked = mode == "blocked" or (
             mode == "blocked_before_commit" and len(preflights) == 2
         )
-        return SimpleNamespace(
+        snapshot = SimpleNamespace(
             available=True,
             activity="mowing" if blocked else "docked",
             state="mowing" if blocked else "idle",
             mowing_session_active=blocked,
             task_resumable=False,
         )
+        client._snapshot_from_device = lambda device, *, fresh_task_state: (
+            snapshot if fresh_task_state else pytest.fail("Fresh task state required")
+        )
+        return client._device
 
     monkeypatch.setattr(DreameLawnMowerClient, "_async_update_device", refresh)
 
@@ -87,7 +91,6 @@ def test_native_start_edit_preserves_transaction_contract(
     async def scenario():
         async with server(monkeypatch, handler), ClientSession() as session:
             client = client_for(session, account_type)
-            client._snapshot_from_device = lambda device, **kwargs: device
             try:
                 operation = client.async_set_app_schedule_task_start_time(
                     map_index=0,
@@ -159,13 +162,17 @@ def test_native_start_edit_cancellation_stops_followup_requests(
     actions = []
 
     async def refresh(client, **kwargs):
-        return SimpleNamespace(
+        snapshot = SimpleNamespace(
             available=True,
             activity="docked",
             state="idle",
             mowing_session_active=False,
             task_resumable=False,
         )
+        client._snapshot_from_device = lambda device, *, fresh_task_state: (
+            snapshot if fresh_task_state else pytest.fail("Fresh task state required")
+        )
+        return client._device
 
     monkeypatch.setattr(DreameLawnMowerClient, "_async_update_device", refresh)
 
@@ -187,7 +194,6 @@ def test_native_start_edit_cancellation_stops_followup_requests(
 
         async with server(monkeypatch, handler), ClientSession() as session:
             client = client_for(session)
-            client._snapshot_from_device = lambda device, **kwargs: device
             task = asyncio.create_task(
                 client.async_set_app_schedule_task_start_time(
                     map_index=0,

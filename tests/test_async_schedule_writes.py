@@ -42,13 +42,17 @@ def test_native_schedule_write(monkeypatch, account_type, kind, mode):
         assert force_request_properties
         assert client._schedule_async_gate.locked()
         preflights.append(True)
-        return SimpleNamespace(
+        snapshot = SimpleNamespace(
             available=True,
             activity="mowing" if mode == "blocked" else "docked",
             state="mowing" if mode == "blocked" else "idle",
             mowing_session_active=mode == "blocked",
             task_resumable=False,
         )
+        client._snapshot_from_device = lambda device, *, fresh_task_state: (
+            snapshot if fresh_task_state else pytest.fail("Fresh task state required")
+        )
+        return client._device
 
     monkeypatch.setattr(DreameLawnMowerClient, "_async_update_device", refresh)
 
@@ -80,9 +84,6 @@ def test_native_schedule_write(monkeypatch, account_type, kind, mode):
     async def scenario():
         async with server(monkeypatch, handler), ClientSession() as session:
             client = client_for(session, account_type)
-            client._snapshot_from_device = lambda device, *, fresh_task_state: (
-                device if fresh_task_state else pytest.fail("Fresh task state required")
-            )
             try:
                 options = {
                     "execute": mode != "dry_run",
@@ -225,13 +226,17 @@ def test_schedule_write_holds_transaction_and_cancels_without_later_legs(
     peer = _FakeAppScheduleCloud()
 
     async def refresh(client, **kwargs):
-        return SimpleNamespace(
+        snapshot = SimpleNamespace(
             available=True,
             activity="docked",
             state="idle",
             mowing_session_active=False,
             task_resumable=False,
         )
+        client._snapshot_from_device = lambda device, *, fresh_task_state: (
+            snapshot if fresh_task_state else pytest.fail("Fresh task state required")
+        )
+        return client._device
 
     monkeypatch.setattr(DreameLawnMowerClient, "_async_update_device", refresh)
 
@@ -257,7 +262,6 @@ def test_schedule_write_holds_transaction_and_cancels_without_later_legs(
 
         async with server(monkeypatch, handler), ClientSession() as session:
             client = client_for(session)
-            client._snapshot_from_device = lambda device, **kwargs: device
             operation = asyncio.create_task(
                 client.async_plan_app_schedule_upload(
                     map_index=0,

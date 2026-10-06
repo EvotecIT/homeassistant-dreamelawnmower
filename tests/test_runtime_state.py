@@ -419,6 +419,7 @@ def test_authoritative_preflight_snapshot_applies_newer_idle_heartbeat() -> None
     client._async_cloud_read = lambda read: read(None)
     client._descriptor = raw_snapshot.descriptor
     client._latest_snapshot = None
+    client._device = device
     client._async_update_device = AsyncMock(return_value=device)
     device._fresh_task_state = {"legacy_task_status": 6, "received_at": 101.0}
 
@@ -686,6 +687,7 @@ def test_expired_a3_heartbeat_cannot_bypass_map_switch_guard() -> None:
     client._async_cloud_read = lambda read: read(None)
     client._descriptor = raw_snapshot.descriptor
     client._latest_snapshot = None
+    client._device = device
     client._async_update_device = AsyncMock(return_value=device)
     device._fresh_task_state = {"legacy_task_status": 6, "received_at": time.time()}
     client._async_call_mowing_task = AsyncMock()
