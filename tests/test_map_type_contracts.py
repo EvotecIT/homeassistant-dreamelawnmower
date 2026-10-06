@@ -129,3 +129,26 @@ def test_material_change_clears_previously_rotated_direction() -> None:
     map_decoder.DreameMowerMapDecoder.set_floor_material(data)
     assert segment.floor_material_rotated_direction is None
     assert data.floor_material == {3: 3}
+
+
+@pytest.mark.parametrize("has_dimensions", [False, True])
+def test_point_validation_rejects_incomplete_map(has_dimensions):
+    data = MapData()
+    if has_dimensions:
+        data.dimensions = MapImageDimensions(0, 0, 2, 2, 5)
+    assert data.check_point(0, 0) is False
+
+
+def test_point_validation_respects_grid_bounds_and_blocked_pixels():
+    import numpy as np
+
+    data = MapData()
+    data.dimensions = MapImageDimensions(10, 20, 2, 2, 5)
+    data.pixel_type = np.array([[1, 0], [255, 2]], dtype=np.uint8)
+    assert data.check_point(20, 10) is True
+    assert data.check_point(20, 15) is False
+    assert data.check_point(25, 10) is False
+    assert data.check_point(25, 15) is True
+    assert data.check_point(30, 10) is False
+    assert data.check_point(-1, 0, absolute=True) is False
+    assert data.check_point(1, 1, absolute=True) is True

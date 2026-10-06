@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import time
+from collections.abc import Mapping
 from datetime import datetime
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any
@@ -378,7 +379,7 @@ class Segment(Zone):
         self.set_name()
 
     @property
-    def outline(self) -> list[list[int]]:
+    def outline(self) -> list[list[float]]:
         return [
             [self.x0, self.y0],
             [self.x0, self.y1],
@@ -387,7 +388,7 @@ class Segment(Zone):
         ]
 
     @property
-    def center(self) -> list[int]:
+    def center(self) -> list[int | None]:
         return [self.x, self.y]
 
     @property
@@ -410,7 +411,7 @@ class Segment(Zone):
             self.name = f"Zone {self.segment_id}"
         self.icon = SEGMENT_TYPE_CODE_TO_HA_ICON.get(self.type, "mdi:home-outline")
 
-    def next_type_index(self, type, segments) -> int:
+    def next_type_index(self, type: int, segments: Mapping[int, Segment]) -> int:
         index = 0
         if type > 0:
             for segment_id in sorted(
@@ -424,8 +425,8 @@ class Segment(Zone):
                     index = index + 1
         return index
 
-    def name_list(self, segments) -> dict[int, str]:
-        list = {}
+    def name_list(self, segments: Mapping[int, Segment]) -> dict[str | None, int]:
+        list: dict[int, str | None] = {}
         for k, v in SEGMENT_TYPE_CODE_TO_NAME.items():
             index = self.next_type_index(k, segments)
             name = f"{v}"
@@ -1269,7 +1270,9 @@ class MapData:
             ]
         return attributes_list
 
-    def check_point(self, x, y, absolute=False) -> bool:
+    def check_point(self, x: int, y: int, absolute: bool = False) -> bool:
+        if self.dimensions is None or self.pixel_type is None:
+            return False
         if not absolute:
             x = int((x - self.dimensions.left) / self.dimensions.grid_size)
             y = int((y - self.dimensions.top) / self.dimensions.grid_size)
