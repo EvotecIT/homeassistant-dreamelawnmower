@@ -30,15 +30,19 @@ from .coordinator import DreameLawnMowerCoordinator
 from .debug import (
     sanitize_debug_data as sanitize_debug_data,
 )
-from .debug import sanitize_diagnostic_text
+from .debug import sanitize_diagnostic_text as sanitize_diagnostic_text
 from .dreame_lawn_mower_client.feature_capabilities import (
     CAPABILITY_SUPPORTED,
     FEATURE_LIVE_VIDEO,
 )
 from .dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
-    camera_stream_block_reason,
-    snapshot_advertises_video,
+)
+from .dreame_lawn_mower_client.models import (
+    camera_stream_block_reason as camera_stream_block_reason,
+)
+from .dreame_lawn_mower_client.models import (
+    snapshot_advertises_video as snapshot_advertises_video,
 )
 from .dreame_lawn_mower_client.stream_health import (
     DreameLawnMowerStreamUrlProbeResult as DreameLawnMowerStreamUrlProbeResult,

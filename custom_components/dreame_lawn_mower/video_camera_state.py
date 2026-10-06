@@ -15,17 +15,11 @@ from .dreame_lawn_mower_client.feature_capabilities import (
     DreameLawnMowerFeatureCapability,
     resolve_feature_capability,
 )
-from .dreame_lawn_mower_client.models import (
-    camera_stream_block_reason as _camera_stream_block_reason,
-)
-from .dreame_lawn_mower_client.models import (
-    snapshot_advertises_video as _snapshot_advertises_video,
-)
 from .dreame_lawn_mower_client.video_runtime import (
     DreameLawnMowerXp2pLiveStreamSession,
 )
 from .video_camera_cleanup import _VideoCameraCleanup
-from .video_camera_types import _facade_binding, _FacadeModuleProxy
+from .video_camera_types import _FacadeModuleProxy
 from .video_session_lifecycle import (
     mower_video_mowing_session_is_current,
     mower_video_session_should_stay_warm,
@@ -36,18 +30,16 @@ video_helpers = _FacadeModuleProxy("video_helpers", _video_helpers)
 
 def camera_stream_block_reason(snapshot: Any) -> str | None:
     """Route state gating through the historical facade binding."""
-    return _facade_binding(
-        "camera_stream_block_reason",
-        _camera_stream_block_reason,
-    )(snapshot)
+    from . import video_camera
+
+    return video_camera.camera_stream_block_reason(snapshot)
 
 
 def snapshot_advertises_video(snapshot: Any) -> bool:
     """Route capability detection through the historical facade binding."""
-    return _facade_binding(
-        "snapshot_advertises_video",
-        _snapshot_advertises_video,
-    )(snapshot)
+    from . import video_camera
+
+    return video_camera.snapshot_advertises_video(snapshot)
 
 
 class DreameLawnMowerVideoStateMixin(_VideoCameraCleanup):

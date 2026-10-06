@@ -17,13 +17,9 @@ from .const import (
 from .debug import (
     sanitize_debug_data as _sanitize_debug_data,
 )
-from .debug import sanitize_diagnostic_text as _sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event as _record_diagnostic_event
 from .dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
-)
-from .dreame_lawn_mower_client.models import (
-    camera_stream_block_reason as _camera_stream_block_reason,
 )
 from .dreame_lawn_mower_client.stream_health import (
     DreameLawnMowerStreamUrlProbeResult,
@@ -55,12 +51,11 @@ def sanitize_debug_data(value: Any) -> Any:
     return _facade_binding("sanitize_debug_data", _sanitize_debug_data)(value)
 
 
-def sanitize_diagnostic_text(value: Any) -> str:
+def sanitize_diagnostic_text(value: object) -> str:
     """Route diagnostic text through the historical facade binding."""
-    return _facade_binding(
-        "sanitize_diagnostic_text",
-        _sanitize_diagnostic_text,
-    )(value)
+    from . import video_camera
+
+    return video_camera.sanitize_diagnostic_text(value)
 
 
 def record_diagnostic_event(*args: Any, **kwargs: Any) -> Any:
@@ -73,10 +68,9 @@ def record_diagnostic_event(*args: Any, **kwargs: Any) -> Any:
 
 def camera_stream_block_reason(snapshot: Any) -> str | None:
     """Route state gating through the historical facade binding."""
-    return _facade_binding(
-        "camera_stream_block_reason",
-        _camera_stream_block_reason,
-    )(snapshot)
+    from . import video_camera
+
+    return video_camera.camera_stream_block_reason(snapshot)
 
 
 async def async_start_cached_xp2p(*args: Any, **kwargs: Any) -> Any:
@@ -709,7 +703,9 @@ class DreameLawnMowerVideoStartupMixin(_VideoCameraRuntime):
 
     def _with_lan_failure(self, cloud_error: str) -> str:
         """Preserve Auto-mode failures without leaking runtime inputs."""
-        return video_helpers.format_video_start_failures(
+        from . import video_camera
+
+        return video_camera.video_helpers.format_video_start_failures(
             cloud_error,
             lan_error=self._last_lan_error,
             cached_xp2p_error=self._last_cached_xp2p_error,

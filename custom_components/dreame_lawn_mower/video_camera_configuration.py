@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from . import video_stream_helpers as _video_helpers
 from .const import (
     CONF_XP2P_LIBRARY_PATH,
     CONF_XP2P_RUNNER_COMMAND,
@@ -10,9 +9,7 @@ from .const import (
     XP2P_RUNNER_MODE_ONE_SHOT,
     XP2P_RUNNER_MODE_PROCESS,
 )
-from .video_camera_types import _FacadeModuleProxy, _VideoCameraState
-
-video_helpers = _FacadeModuleProxy("video_helpers", _video_helpers)
+from .video_camera_types import _VideoCameraState
 
 
 class _VideoCameraConfiguration(_VideoCameraState):
@@ -20,12 +17,13 @@ class _VideoCameraConfiguration(_VideoCameraState):
 
     @property
     def _runtime_configured(self) -> bool:
+        from . import video_camera
+
         return bool(
             self._runner_command
             or self._native_library_path
-            or video_helpers.managed_runtime_supported()
+            or video_camera.video_helpers.managed_runtime_supported()
         )
-
 
     @property
     def _runtime_mode(self) -> str:
@@ -36,11 +34,11 @@ class _VideoCameraConfiguration(_VideoCameraState):
             return XP2P_RUNNER_MODE_ONE_SHOT
         return XP2P_RUNNER_MODE_PROCESS
 
-
     @property
     def _video_transport(self) -> str:
-        return video_helpers.video_transport(self._entry)
+        from . import video_camera
 
+        return video_camera.video_helpers.video_transport(self._entry)
 
     @property
     def _persisted_video_capability(self) -> bool:
@@ -56,12 +54,18 @@ class _VideoCameraConfiguration(_VideoCameraState):
             )
         )
 
-
     @property
     def _native_library_path(self) -> str | None:
-        return video_helpers.option_text(self._entry, CONF_XP2P_LIBRARY_PATH)
+        from . import video_camera
 
+        return video_camera.video_helpers.option_text(
+            self._entry, CONF_XP2P_LIBRARY_PATH
+        )
 
     @property
     def _runner_command(self) -> str | None:
-        return video_helpers.option_text(self._entry, CONF_XP2P_RUNNER_COMMAND)
+        from . import video_camera
+
+        return video_camera.video_helpers.option_text(
+            self._entry, CONF_XP2P_RUNNER_COMMAND
+        )
