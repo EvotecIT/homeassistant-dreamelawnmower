@@ -22,8 +22,36 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.types import (
     MapRendererResources,
     Obstacle,
     Point,
+    RecoveryMapType,
     Segment,
 )
+
+
+@pytest.mark.parametrize(
+    "recovery_type", [None, RecoveryMapType.UNKNOWN, RecoveryMapType.BACKUP],
+)
+def test_recovery_map_header_accepts_optional_type(
+    recovery_type: RecoveryMapType | None, caplog: pytest.LogCaptureFixture,
+) -> None:
+    data = MapData()
+    data.map_id = 1
+    data.frame_id = 1
+    data.empty_map = False
+    data.rotation = 0
+    data.recovery_map = True
+    data.recovery_map_type = recovery_type
+    data.last_updated = 1700000000
+    data.dimensions = MapImageDimensions(0, 0, 4, 4, 50)
+    data.pixel_type = np.full((4, 4), MapPixelType.FLOOR.value)
+    data.data = bytes([MapPixelType.FLOOR.value] * 16)
+    data.segments = {}
+    renderer = DreameMowerMapRenderer(cache=False, map_objects=[])
+    rendered = renderer.render_map(data, info_text=True)
+    assert rendered != renderer.default_map_image
+    assert "Map render Failed" not in caplog.text
+    with Image.open(BytesIO(rendered)) as image:
+        image.load()
+        assert image.width >= 490
 
 
 def test_obstacle_box_bottom_clip_preserves_horizontal_extent() -> None:

@@ -1498,7 +1498,11 @@ class DreameMowerMapRenderer:
                             header_text = f"{header_text} | Second Cleaning"
                         elif map_data.cleanup_method is not None:
                             header_text = f"{header_text} | {map_data.cleanup_method.name.replace('_', ' ').title()}"
-                elif map_data.recovery_map and map_data.recovery_map_type is not RecoveryMapType.UNKNOWN:
+                elif (
+                    map_data.recovery_map
+                    and map_data.recovery_map_type is not None
+                    and map_data.recovery_map_type is not RecoveryMapType.UNKNOWN
+                ):
                     header_text = f"{header_text} | {map_data.recovery_map_type.name.replace('_', ' ').title()}"
 
                 image_width = image.size[0]
