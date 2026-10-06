@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
-from pathlib import Path
 from time import monotonic
 from typing import Any
 
@@ -19,16 +18,13 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import MATCH_ALL
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import video_stream_helpers as video_helpers
+from . import video_stream_helpers as _video_helpers
 from .const import (
     CONF_VIDEO_RETENTION,
     DEFAULT_VIDEO_RETENTION,
-    DOMAIN,
     VIDEO_RETENTION_OPTIONS,
-    VIDEO_TRANSPORT_AUTO,
     VIDEO_TRANSPORT_CLOUD,
     VIDEO_TRANSPORT_LAN,
-    XP2P_RUNNER_MODE_ONE_SHOT,
 )
 from .coordinator import DreameLawnMowerCoordinator
 from .debug import (
@@ -51,20 +47,31 @@ from .dreame_lawn_mower_client.video_provisioning_status import (
     XP2P_PROVISIONING_DEVICE_TRIPLE_MISSING as XP2P_PROVISIONING_DEVICE_TRIPLE_MISSING,
 )
 from .dreame_lawn_mower_client.video_runtime import (
-    DreameLawnMowerNativeXp2pRuntime,
-    DreameLawnMowerVideoRuntimeError,
-    DreameLawnMowerXp2pExternalRunner,
-    DreameLawnMowerXp2pLiveStreamSession,
-    DreameLawnMowerXp2pProcessRunner,
-    diagnose_native_xp2p_runtime,
+    DreameLawnMowerNativeXp2pRuntime as DreameLawnMowerNativeXp2pRuntime,
 )
-from .dreame_lawn_mower_client.xp2p_config import DreameLawnMowerXp2pDeviceConfig
+from .dreame_lawn_mower_client.video_runtime import (
+    DreameLawnMowerVideoRuntimeError as DreameLawnMowerVideoRuntimeError,
+)
+from .dreame_lawn_mower_client.video_runtime import (
+    DreameLawnMowerXp2pExternalRunner as DreameLawnMowerXp2pExternalRunner,
+)
+from .dreame_lawn_mower_client.video_runtime import (
+    DreameLawnMowerXp2pLiveStreamSession,
+)
+from .dreame_lawn_mower_client.video_runtime import (
+    DreameLawnMowerXp2pProcessRunner as DreameLawnMowerXp2pProcessRunner,
+)
+from .dreame_lawn_mower_client.video_runtime import (
+    diagnose_native_xp2p_runtime as diagnose_native_xp2p_runtime,
+)
 from .dreame_lawn_mower_client.xp2p_host_runtime import (
     DEFAULT_XP2P_HOST_STARTUP_TIMEOUT,
-    DreameLawnMowerXp2pHostRuntime,
+)
+from .dreame_lawn_mower_client.xp2p_host_runtime import (
+    DreameLawnMowerXp2pHostRuntime as DreameLawnMowerXp2pHostRuntime,
 )
 from .dreame_lawn_mower_client.xp2p_runtime_bootstrap import (
-    ensure_xp2p_host_runtime,
+    ensure_xp2p_host_runtime as ensure_xp2p_host_runtime,
 )
 from .video_cached_xp2p import async_start_cached_xp2p as async_start_cached_xp2p
 from .video_camera_cleanup import _PENDING_RUNTIME_STOPS as _PENDING_RUNTIME_STOPS
@@ -88,6 +95,7 @@ from .video_session_lifecycle import (
 from .video_snapshot import VideoSnapshotRequest
 
 _LOGGER = logging.getLogger(__name__)
+video_helpers = _video_helpers
 _VIDEO_UPSTREAM_START_TIMEOUT = DEFAULT_XP2P_HOST_STARTUP_TIMEOUT
 _SNAPSHOT_STREAM_START_TIMEOUT = 15.0
 _SNAPSHOT_IMAGE_TIMEOUT = 15.0
@@ -312,31 +320,6 @@ class DreameLawnMowerVideoCamera(
         self._runtime_prepare_task = self.hass.async_create_task(
             self._async_prepare_runtime()
         )
-
-    async def _async_prepare_runtime(self) -> None:
-        """Prepare a configured runtime in the background before first playback."""
-        try:
-            await self.hass.async_add_executor_job(self._create_runtime)
-        except asyncio.CancelledError:
-            raise
-        except Exception as err:  # noqa: BLE001 - retry remains available on play.
-            self._runtime_preparation_error = sanitize_diagnostic_text(err)
-            _LOGGER.warning(
-                "Failed to prepare Dreame mower live video: %s",
-                self._runtime_preparation_error,
-            )
-        else:
-            self._runtime_preparation_error = None
-
-    async def _async_get_runtime(self) -> _DreameVideoRuntime:
-        """Reuse in-flight background preparation before starting a stream."""
-        prepare_task = self._runtime_prepare_task
-        if prepare_task is not None and not prepare_task.done():
-            await prepare_task
-        self._runtime_prepare_task = None
-        if self._prepared_runtime is not None:
-            return self._prepared_runtime
-        return await self.hass.async_add_executor_job(self._create_runtime)
 
     async def stream_source(self) -> str | None:
         """Return a dormant local FLV source for HA HLS or WebRTC providers.
@@ -927,76 +910,3 @@ class DreameLawnMowerVideoCamera(
             else:
                 await self._stream_idle_monitor.async_cancel()
         await super().async_will_remove_from_hass()
-
-    def _create_runtime(self) -> _DreameVideoRuntime:
-        """Create the configured runtime adapter."""
-        if self._prepared_runtime is not None:
-            return self._prepared_runtime
-        if runner_command := self._runner_command:
-            self._last_native_runtime_diagnostics = None
-            command = video_helpers.split_runner_command(runner_command)
-            if self._runtime_mode == XP2P_RUNNER_MODE_ONE_SHOT:
-                runtime: _DreameVideoRuntime = DreameLawnMowerXp2pExternalRunner(
-                    command
-                )
-            else:
-                runtime = DreameLawnMowerXp2pProcessRunner(command)
-            self._prepared_runtime = runtime
-            return runtime
-
-        if library_path := self._native_library_path:
-            path = Path(library_path)
-            diagnostics = diagnose_native_xp2p_runtime(path)
-            self._last_native_runtime_diagnostics = video_helpers.safe_state_attribute(
-                diagnostics.as_dict()
-            )
-            if not diagnostics.ready:
-                raise DreameLawnMowerVideoRuntimeError(
-                    diagnostics.error or "Configured XP2P native library is not ready."
-                )
-            runtime = DreameLawnMowerNativeXp2pRuntime(
-                path,
-                config_fetcher=self._resolve_xp2p_config,
-            )
-            self._prepared_runtime = runtime
-            return runtime
-
-        if video_helpers.managed_runtime_supported():
-            runtime_root = Path(
-                self.hass.config.path(
-                    ".storage",
-                    DOMAIN,
-                    "xp2p-runtime",
-                )
-            )
-            runtime = DreameLawnMowerXp2pHostRuntime(
-                ensure_xp2p_host_runtime(runtime_root),
-                config_fetcher=self._resolve_xp2p_config,
-            )
-            try:
-                runtime.require_compatible_worker()
-            except DreameLawnMowerVideoRuntimeError:
-                self._last_managed_runtime_diagnostics = (
-                    video_helpers.safe_state_attribute(runtime.last_failure)
-                )
-                raise
-            self._prepared_runtime = runtime
-            self._last_native_runtime_diagnostics = None
-            self._last_managed_runtime_diagnostics = None
-            return runtime
-
-        raise DreameLawnMowerVideoRuntimeError(
-            "Managed XP2P video requires a Linux aarch64 or x86_64 host. "
-            "Configure an advanced native XP2P library or runner override on "
-            "this platform."
-        )
-
-    def _resolve_xp2p_config(
-        self,
-        inputs: DreameLawnMowerCameraStreamRuntimeInputs,
-    ) -> DreameLawnMowerXp2pDeviceConfig:
-        """Resolve once, reusing persisted config for cached startup."""
-        return self._provisioning_cache.resolve_for_transport(
-            inputs,
-            auto=self._video_transport == VIDEO_TRANSPORT_AUTO,
-        )
