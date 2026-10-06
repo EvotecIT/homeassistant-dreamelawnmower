@@ -1504,12 +1504,9 @@ class DreameLawnMowerClient(
         confirm_write: bool = False,
     ) -> dict[str, Any]:
         """Build or execute a guarded CMS maintenance counter reset."""
-        return await asyncio.to_thread(
-            self._sync_plan_maintenance_reset,
-            item,
-            execute,
-            confirm_write,
-        )
+        from .client_maintenance_reset import async_reset_maintenance
+
+        return await async_reset_maintenance(self, item, execute, confirm_write)
 
     async def async_get_voice_settings(
         self,

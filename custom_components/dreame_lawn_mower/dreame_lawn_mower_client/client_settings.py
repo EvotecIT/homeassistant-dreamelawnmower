@@ -42,12 +42,7 @@ from .exceptions import (
 from .exceptions import (
     DreameLawnMowerError as DreameLawnMowerError,
 )
-from .maintenance import (
-    build_cms_set_request,
-    maintenance_item_status,
-    maintenance_status_from_app_data,
-    reset_cms_counter,
-)
+from .maintenance_reset_plan import plan_maintenance_reset, run_maintenance_reset
 from .mowing_height_capabilities import mowing_height_adjustment_supported
 from .mowing_preferences import (
     MOWING_PREFERENCE_MODE_FIELD,
@@ -633,63 +628,11 @@ class _DreameLawnMowerClientSettingsMixin:
         confirm_write: bool = False,
     ) -> dict[str, Any]:
         """Build or execute a guarded CMS maintenance counter reset request."""
-        if execute and not confirm_write:
-            raise ValueError(
-                "Maintenance resets require confirm_write=True when execute=True."
-            )
-
-        status = self._sync_get_maintenance_status(include_raw=False)
-        values = status.get("raw_cms")
-        if not isinstance(values, Sequence) or isinstance(
-            values,
-            str | bytes | bytearray,
-        ):
-            raise DreameLawnMowerConnectionError(
-                "Could not read CMS maintenance counters before planning reset."
-            )
-
-        updated_values = reset_cms_counter(values, item)
-        request = build_cms_set_request(updated_values)
-        before = maintenance_item_status(status, item)
-        planned_status = maintenance_status_from_app_data(
-            {"value": updated_values},
-            source="planned_maintenance_reset",
+        return run_maintenance_reset(
+            plan_maintenance_reset(item, execute, confirm_write),
+            lambda: self._sync_get_maintenance_status(include_raw=False),
+            self._sync_call_app_action,
         )
-        after = maintenance_item_status(planned_status, item)
-        result: dict[str, Any] = {
-            "source": "app_action_maintenance_cms",
-            "action": "reset_maintenance_counter",
-            "item": after.get("key") if isinstance(after, Mapping) else item,
-            "item_name": after.get("name") if isinstance(after, Mapping) else item,
-            "dry_run": not execute,
-            "executed": False,
-            "changed": list(values) != updated_values,
-            "previous_cms": list(values),
-            "updated_cms": updated_values,
-            "previous_item": before,
-            "updated_item": after,
-            "request": request,
-        }
-
-        if not execute:
-            return result
-
-        response = self._sync_call_app_action(request)
-        response_data = _ensure_app_write_succeeded(
-            response,
-            operation="Maintenance reset",
-        )
-        result["dry_run"] = False
-        result["executed"] = True
-        result["response"] = _json_safe(response, max_depth=4)
-        result["response_data"] = _json_safe(response_data, max_depth=4)
-        try:
-            refreshed = self._sync_get_maintenance_status(include_raw=False)
-            result["refreshed_cms"] = refreshed.get("raw_cms")
-            result["refreshed_item"] = maintenance_item_status(refreshed, item)
-        except Exception as err:  # noqa: BLE001 - write result is still useful
-            result["refresh_error"] = str(err)
-        return result
 
     def _sync_get_voice_settings(
         self,

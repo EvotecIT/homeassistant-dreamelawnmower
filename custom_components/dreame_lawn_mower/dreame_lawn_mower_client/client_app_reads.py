@@ -146,6 +146,7 @@ async def _async_app_action(
 async def async_run_app_read(
     client: DreameLawnMowerClient,
     plan: Generator[AppReadRequest, Any, dict[str, Any]],
+    *, deadline: float | None = None,
 ) -> dict[str, Any]:
     """Own all requests and cleanup in one read-only protocol plan."""
     async def read(_cloud: DreameCloudSession) -> dict[str, Any]:
@@ -154,14 +155,16 @@ async def async_run_app_read(
         try:
             request = next(plan_with_result)
             while True:
-                deadline = time.monotonic() + request.timeout
+                request_deadline = time.monotonic() + request.timeout
+                if deadline is not None:
+                    request_deadline = min(request_deadline, deadline)
                 if request.deadline is not None:
-                    deadline = min(deadline, request.deadline)
+                    request_deadline = min(request_deadline, request.deadline)
                 try:
                     response = await async_read_app_action(
                         client,
                         request.action,
-                        deadline=deadline,
+                        deadline=request_deadline,
                     )
                 except Exception as error:
                     request = plan_with_result.throw(error)
