@@ -1797,6 +1797,16 @@ class DreameLawnMowerClient(
 
         return await self._async_cloud_read(read)
 
+    async def async_probe_camera_sources(
+        self, *, language: str = "en", request_device_properties: bool = True,
+    ) -> dict[str, Any]:
+        """Probe camera sources natively without starting a stream."""
+        from .client_camera_reads import async_probe_camera_sources
+
+        return await async_probe_camera_sources(
+            self, language=language, request_device_properties=request_device_properties
+        )
+
     async def async_set_camera_stream_enabled(self, enabled: bool) -> Any:
         """Toggle app video with a fresh safety guard before enabling."""
         from .client_camera_actions import async_set_camera_stream_enabled
