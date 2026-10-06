@@ -136,7 +136,7 @@ def run_sync_point_cloud[T](
                     max_bytes=request.max_bytes,
                 )
             case ResolveObjectURL():
-                options: dict[str, Any] = {}
+                options = {}
                 if request.require_response:
                     options["require_response"] = True
                 return client._sync_get_point_cloud_download_url(
