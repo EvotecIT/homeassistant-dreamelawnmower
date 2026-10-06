@@ -10,11 +10,11 @@ from time import monotonic
 from typing import Any
 
 from homeassistant.components.camera import (
-    DATA_CAMERA_PREFS,
     Camera,
     CameraEntityFeature,
 )
-from homeassistant.components.stream import create_stream
+from homeassistant.components.camera.const import DATA_CAMERA_PREFS
+from homeassistant.components.stream import Stream, create_stream
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import MATCH_ALL
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -255,26 +255,28 @@ class DreameLawnMowerVideoCamera(
         self._last_managed_runtime_diagnostics: dict[str, Any] | None = None
         self._runtime_preparation_error: str | None = None
         self._last_image: bytes | None = None
-        self._lan_cache = getattr(coordinator, "video_lan_cache", None)
-        if self._lan_cache is None:
-            self._lan_cache = DreameLawnMowerVideoLanCache(
+        lan_cache = getattr(coordinator, "video_lan_cache", None)
+        if lan_cache is None:
+            lan_cache = DreameLawnMowerVideoLanCache(
                 coordinator.hass,
                 entry_id=entry.entry_id,
                 did=self._descriptor.did,
             )
+        self._lan_cache = lan_cache
         self._lan_cache_error: str | None = None
         self._last_lan_error: str | None = None
-        self._provisioning_cache = getattr(
+        provisioning_cache = getattr(
             coordinator,
             "video_provisioning_cache",
             None,
         )
-        if self._provisioning_cache is None:
-            self._provisioning_cache = DreameLawnMowerVideoProvisioningCache(
+        if provisioning_cache is None:
+            provisioning_cache = DreameLawnMowerVideoProvisioningCache(
                 coordinator.hass,
                 entry_id=entry.entry_id,
                 did=self._descriptor.did,
             )
+        self._provisioning_cache = provisioning_cache
         self._provisioning_cache_error: str | None = None
         self._last_cached_xp2p_error: str | None = None
         self._bypass_cached_xp2p = False
@@ -679,11 +681,12 @@ class DreameLawnMowerVideoCamera(
                 return await self._async_start_stream(skip_cached_xp2p=True)
             return await self._async_start_stream()
 
-    async def async_create_stream(self) -> Any | None:
+    async def async_create_stream(self) -> Stream | None:
         """Create HA's stream with enough time for native XP2P startup."""
-        if not getattr(self, "_create_stream_lock", None):
-            self._create_stream_lock = asyncio.Lock()
-        async with self._create_stream_lock:
+        create_stream_lock = getattr(self, "_create_stream_lock", None)
+        if create_stream_lock is None:
+            create_stream_lock = self._create_stream_lock = asyncio.Lock()
+        async with create_stream_lock:
             ha_stream = await self._async_create_stream_locked()
             if ha_stream is not None:
                 self._mark_video_live_view()
@@ -694,7 +697,7 @@ class DreameLawnMowerVideoCamera(
                 self._snapshot_owned_stream = None
             return ha_stream
 
-    async def _async_create_stream_locked(self) -> Any | None:
+    async def _async_create_stream_locked(self) -> Stream | None:
         """Create or reuse HA's HLS stream over the local fan-out relay."""
         async with self._stream_lock:
             if self.stream is not None:
@@ -789,9 +792,10 @@ class DreameLawnMowerVideoCamera(
         height: int | None,
     ) -> bytes | None:
         """Return one JPEG from Home Assistant's single FLV consumer."""
-        if not getattr(self, "_create_stream_lock", None):
-            self._create_stream_lock = asyncio.Lock()
-        async with self._create_stream_lock:
+        create_stream_lock = getattr(self, "_create_stream_lock", None)
+        if create_stream_lock is None:
+            create_stream_lock = self._create_stream_lock = asyncio.Lock()
+        async with create_stream_lock:
             previous_stream = getattr(self, "stream", None)
             try:
                 async with asyncio.timeout(_SNAPSHOT_STREAM_START_TIMEOUT):
@@ -845,7 +849,7 @@ class DreameLawnMowerVideoCamera(
             self._last_image = image
         return image or self._last_image
 
-    async def _async_stop_owned_stream(self, ha_stream: Any) -> None:
+    async def _async_stop_owned_stream(self, ha_stream: Stream) -> None:
         """Stop a one-shot HA decoder without interrupting another relay viewer."""
         async with self._stream_lock:
             snapshot_owned_stream = getattr(
