@@ -817,7 +817,7 @@ class DreameMowerDevice(
             return 2
         if self._last_update_failed:
             return 5 if now - self._last_update_failed <= 60 else 10 if now - self._last_update_failed <= 300 else 30
-        if not -self._last_change <= 60:
+        if now - self._last_change <= 60:
             return 3 if self.status.active else 5
         if self.status.active or self.status.started:
             return 3 if self.status.running else 5
