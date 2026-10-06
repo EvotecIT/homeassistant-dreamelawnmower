@@ -227,7 +227,8 @@ class DreameMowerMapRenderer:
 
         self._map_data: MapData | None = None
         self.render_complete: bool = True
-        self._layers: dict[MapRendererLayer, Any] = {}
+        self._layers: dict[MapRendererLayer, Image.Image] = {}
+        self._object_layers: dict[MapRendererLayer, dict[int, Image.Image | None]] = {}
         self._robot_status: int | None = None
         self._station_status: int | None = None
         self._robot_type: int = robot_type
@@ -1149,6 +1150,7 @@ class DreameMowerMapRenderer:
                 self._has_mask = False
 
             cached_layers = self._layers if self._cache else {}
+            object_layers = self._object_layers if self._cache else {}
             if self._cache and not self._has_mask and cached_layers.get(MapRendererLayer.PATH_MASK):
                 del cached_layers[MapRendererLayer.PATH_MASK]
 
@@ -1454,7 +1456,7 @@ class DreameMowerMapRenderer:
             elif self._cache and cached_layers.get(MapRendererLayer.PATH):
                 del cached_layers[MapRendererLayer.PATH]
 
-            image = self.render_objects(cached_layers, map_data, robot_status, station_status, image, object_scale)
+            image = self.render_objects(cached_layers, object_layers, map_data, robot_status, station_status, image, object_scale)
 
             if segment_mask is not None and map_data.neglected_segments is not None:
                 image = Image.alpha_composite(
@@ -1803,7 +1805,8 @@ class DreameMowerMapRenderer:
 
     def render_objects(
         self,
-        cached_layers,
+        cached_layers: dict[MapRendererLayer, Image.Image],
+        object_layers: dict[MapRendererLayer, dict[int, Image.Image | None]],
         map_data: MapData,
         robot_status: int,
         station_status: int,
@@ -1993,25 +1996,25 @@ class DreameMowerMapRenderer:
                 or not cached_layers.get(layer)
             ):
                 if layer not in cached_layers:
-                    cached_layers[MapRendererLayer.FURNITURE] = {}
+                    object_layers[MapRendererLayer.FURNITURE] = {}
                 else:
-                    for k in list(cached_layers[MapRendererLayer.FURNITURE].keys()).copy():
+                    for k in list(object_layers[MapRendererLayer.FURNITURE].keys()).copy():
                         if k not in map_data.furnitures:
-                            del cached_layers[MapRendererLayer.FURNITURE][k]
+                            del object_layers[MapRendererLayer.FURNITURE][k]
 
                 changed = False
                 for k, v in map_data.furnitures.items():
                     if (
                         not self._cache
                         or self._map_data is None
-                        or k not in cached_layers[MapRendererLayer.FURNITURE]
+                        or k not in object_layers[MapRendererLayer.FURNITURE]
                         or not self._map_data.furnitures
                         or k not in self._map_data.furnitures
                         or self._map_data.furnitures[k] != v
                         or self._map_data.rotation != map_data.rotation
                     ):
                         changed = True
-                        cached_layers[MapRendererLayer.FURNITURE][k] = self.render_furniture(
+                        object_layers[MapRendererLayer.FURNITURE][k] = self.render_furniture(
                             v,
                             map_data.furniture_version,
                             layer_size,
@@ -2024,7 +2027,7 @@ class DreameMowerMapRenderer:
                 if changed:
                     changes.append(layer)
                     cached_layers[layer] = self._combine_layers(
-                        layer_size, cached_layers.get(MapRendererLayer.FURNITURE)
+                        layer_size, object_layers.get(MapRendererLayer.FURNITURE)
                     )
         elif self._cache and cached_layers.get(layer):
             changes.append(layer)
@@ -2049,12 +2052,12 @@ class DreameMowerMapRenderer:
                 map_data=map_data,
                 has_cached_layer=bool(cached_layers.get(layer)),
             ):
-                if MapRendererLayer.SEGMENT not in cached_layers:
-                    cached_layers[MapRendererLayer.SEGMENT] = {}
+                if MapRendererLayer.SEGMENT not in object_layers:
+                    object_layers[MapRendererLayer.SEGMENT] = {}
                 else:
-                    for k in list(cached_layers[MapRendererLayer.SEGMENT].keys()).copy():
+                    for k in list(object_layers[MapRendererLayer.SEGMENT].keys()).copy():
                         if k not in map_data.segments:
-                            del cached_layers[MapRendererLayer.SEGMENT][k]
+                            del object_layers[MapRendererLayer.SEGMENT][k]
 
                 changed = False
                 for k in sorted(map_data.segments.keys()):
@@ -2062,13 +2065,13 @@ class DreameMowerMapRenderer:
                     if self._segment_needs_render(
                         cache_enabled=self._cache,
                         previous_map=self._map_data,
-                        cached_segments=cached_layers[MapRendererLayer.SEGMENT],
+                        cached_segments=object_layers[MapRendererLayer.SEGMENT],
                         map_data=map_data,
                         segment_id=k,
                         segment=segment,
                     ):
                         changed = True
-                        cached_layers[MapRendererLayer.SEGMENT][k] = self.render_segment(
+                        object_layers[MapRendererLayer.SEGMENT][k] = self.render_segment(
                             segment,
                             bool((not map_data.saved_map or map_data.recovery_map) and map_data.cleanset),
                             layer_size,
@@ -2091,7 +2094,7 @@ class DreameMowerMapRenderer:
                 if changed:
                     changes.append(layer)
                     cached_layers[layer] = self._combine_layers(
-                        layer_size, cached_layers.get(MapRendererLayer.SEGMENT)
+                        layer_size, object_layers.get(MapRendererLayer.SEGMENT)
                     )
         elif self._cache and cached_layers.get(layer):
             changes.append(layer)
@@ -2371,12 +2374,12 @@ class DreameMowerMapRenderer:
                 or self._map_data.rotation != map_data.rotation
                 or not cached_layers.get(layer)
             ):
-                if MapRendererLayer.OBSTACLE not in cached_layers:
-                    cached_layers[MapRendererLayer.OBSTACLE] = {}
+                if MapRendererLayer.OBSTACLE not in object_layers:
+                    object_layers[MapRendererLayer.OBSTACLE] = {}
                 else:
-                    for k in list(cached_layers[MapRendererLayer.OBSTACLE].keys()).copy():
+                    for k in list(object_layers[MapRendererLayer.OBSTACLE].keys()).copy():
                         if k not in map_data.obstacles:
-                            del cached_layers[MapRendererLayer.OBSTACLE][k]
+                            del object_layers[MapRendererLayer.OBSTACLE][k]
 
                 changed = False
                 for k, obstacle in map_data.obstacles.items():
@@ -2388,7 +2391,7 @@ class DreameMowerMapRenderer:
                     if (
                         not self._cache
                         or self._map_data is None
-                        or k not in cached_layers[MapRendererLayer.OBSTACLE]
+                        or k not in object_layers[MapRendererLayer.OBSTACLE]
                         or not self._map_data.obstacles
                         or k not in self._map_data.obstacles
                         or self._map_data.obstacles[k] != obstacle
@@ -2404,14 +2407,14 @@ class DreameMowerMapRenderer:
                         )
                         if obstacle_image:
                             changed = True
-                            cached_layers[MapRendererLayer.OBSTACLE][k] = obstacle_image
-                        elif k in cached_layers[MapRendererLayer.OBSTACLE]:
-                            del cached_layers[MapRendererLayer.OBSTACLE][k]
+                            object_layers[MapRendererLayer.OBSTACLE][k] = obstacle_image
+                        elif k in object_layers[MapRendererLayer.OBSTACLE]:
+                            del object_layers[MapRendererLayer.OBSTACLE][k]
 
                 if changed:
                     changes.append(layer)
                     cached_layers[layer] = self._combine_layers(
-                        layer_size, cached_layers.get(MapRendererLayer.OBSTACLE)
+                        layer_size, object_layers.get(MapRendererLayer.OBSTACLE)
                     )
         elif self._cache and cached_layers.get(layer):
             changes.append(layer)
@@ -2427,25 +2430,25 @@ class DreameMowerMapRenderer:
                 or self._map_data.rotation != map_data.rotation
                 or not cached_layers.get(layer)
             ):
-                if MapRendererLayer.CRUISE_POINT not in cached_layers:
-                    cached_layers[MapRendererLayer.CRUISE_POINT] = {}
+                if MapRendererLayer.CRUISE_POINT not in object_layers:
+                    object_layers[MapRendererLayer.CRUISE_POINT] = {}
                 else:
-                    for k in list(cached_layers[MapRendererLayer.CRUISE_POINT].keys()).copy():
+                    for k in list(object_layers[MapRendererLayer.CRUISE_POINT].keys()).copy():
                         if k not in map_data.active_cruise_points:
-                            del cached_layers[MapRendererLayer.CRUISE_POINT][k]
+                            del object_layers[MapRendererLayer.CRUISE_POINT][k]
 
                 changed = False
                 for k, cruise_point in map_data.active_cruise_points.items():
                     if (
                         self._map_data is None
-                        or k not in cached_layers[MapRendererLayer.CRUISE_POINT]
+                        or k not in object_layers[MapRendererLayer.CRUISE_POINT]
                         or not self._map_data.active_cruise_points
                         or k not in self._map_data.active_cruise_points
                         or self._map_data.active_cruise_points[k] != cruise_point
                         or self._map_data.rotation != map_data.rotation
                     ):
                         changed = True
-                        cached_layers[MapRendererLayer.CRUISE_POINT][k] = self.render_cruise_point(
+                        object_layers[MapRendererLayer.CRUISE_POINT][k] = self.render_cruise_point(
                             k,
                             cruise_point,
                             layer_size,
@@ -2458,7 +2461,7 @@ class DreameMowerMapRenderer:
                 if changed:
                     changes.append(layer)
                     cached_layers[layer] = self._combine_layers(
-                        layer_size, cached_layers.get(MapRendererLayer.CRUISE_POINT)
+                        layer_size, object_layers.get(MapRendererLayer.CRUISE_POINT)
                     )
         elif self._cache and cached_layers.get(layer):
             changes.append(layer)
