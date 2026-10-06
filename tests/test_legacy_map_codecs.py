@@ -273,3 +273,48 @@ def test_numeric_map_metadata_preserves_wire_conversion(
     assert decoded.cleaning_time == expected
     assert decoded.work_status == expected
     assert decoded.remaining_battery == expected
+
+
+@pytest.mark.parametrize(
+    "value, startup, ending",
+    [(1, 1, 1), (2.0, 2, 2), (99, -1, 0), ("1", -1, 0), ([], -1, 0)],
+)
+def test_map_enum_metadata_keeps_unknown_fallback_and_trajectory(
+    value: object, startup: int, ending: int,
+) -> None:
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[4] = 73
+    metadata = {"smd": value, "ctyi": value, "tr": "S10,20L5,-3l40,50"}
+    payload = base64.b64encode(
+        zlib.compress(bytes(header) + json.dumps(metadata).encode())
+    ).decode()
+
+    decoded, _ = map_decoder.DreameMowerMapDecoder.decode_map(payload, False)
+
+    assert decoded is not None
+    assert decoded.startup_method == startup
+    assert decoded.task_end_type == ending
+    assert decoded.path is not None
+    assert [(point.x, point.y, point.path_type) for point in decoded.path] == [
+        (10, 20, map_decoder.PathType.SWEEP),
+        (15, 17, map_decoder.PathType.LINE),
+        (40, 50, map_decoder.PathType.LINE),
+    ]
+
+
+@pytest.mark.parametrize("trajectory", [12, ["S10,20"], {"path": "S10,20"}])
+def test_invalid_trajectory_does_not_discard_later_map_metadata(
+    trajectory: object,
+) -> None:
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[4] = 73
+    metadata = {"tr": trajectory, "delsr": [3]}
+    payload = base64.b64encode(
+        zlib.compress(bytes(header) + json.dumps(metadata).encode())
+    ).decode()
+
+    decoded, _ = map_decoder.DreameMowerMapDecoder.decode_map(payload, False)
+
+    assert decoded is not None
+    assert not decoded.path
+    assert decoded.hidden_segments == [3]

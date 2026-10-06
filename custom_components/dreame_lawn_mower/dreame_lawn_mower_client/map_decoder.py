@@ -411,16 +411,20 @@ class DreameMowerMapDecoder:
                 map_data.recovery_map = bool("us" in data_json and data_json["us"] == 1)
                 map_data.new_map = bool("risp" in data_json and data_json["risp"] == 0)
                 if "smd" in data_json:
-                    map_data.startup_method = (
-                        StartupMethod(data_json["smd"])
-                        if data_json["smd"] in StartupMethod._value2member_map_
-                        else StartupMethod.OTHER
+                    map_data.startup_method = next(
+                        (
+                            item for item in StartupMethod
+                            if item.value == data_json["smd"]
+                        ),
+                        StartupMethod.OTHER,
                     )
                 if "ctyi" in data_json:
-                    map_data.task_end_type = (
-                        TaskEndType(data_json["ctyi"])
-                        if data_json["ctyi"] in TaskEndType._value2member_map_
-                        else TaskEndType.OTHER
+                    map_data.task_end_type = next(
+                        (
+                            item for item in TaskEndType
+                            if item.value == data_json["ctyi"]
+                        ),
+                        TaskEndType.OTHER,
                     )
                 map_data.multiple_cleaning_time = data_json.get("multime")
                 map_data.dos = data_json.get("dos")
@@ -450,12 +454,13 @@ class DreameMowerMapDecoder:
                 if not map_data.saved_map and not map_data.recovery_map:
                     map_data.index = 0
 
-                if data_json.get("tr"):
+                trajectory = data_json.get("tr")
+                if isinstance(trajectory, str) and trajectory:
                     matches = [
                         m.groupdict()
                         for m in re.compile(
                             r"(?P<operator>[MWSLl])(?P<x>-?\d+),(?P<y>-?\d+)"
-                        ).finditer(data_json["tr"])
+                        ).finditer(trajectory)
                     ]
                     current_position = Point(0, 0)
                     map_data.path = []
