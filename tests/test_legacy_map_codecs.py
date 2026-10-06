@@ -497,4 +497,3 @@ def test_cleaning_metadata_validates_wire_records(
     else:
         assert segment.cleaning_times == 2
         assert segment.order == 4
-
