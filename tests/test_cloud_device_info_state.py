@@ -10,20 +10,42 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
 )
 
 
-@pytest.mark.parametrize("payload", [None, [], "unexpected"])
-def test_device_info_v2_rejects_nonobject_data_without_identity_change(monkeypatch, payload):
+@pytest.mark.parametrize("response", [
+    {"code": 0, "data": None},
+    {"code": 0, "data": []},
+    {"code": 0, "data": "unexpected"},
+    {"data": {}},
+    ["data"],
+    "data",
+])
+def test_device_info_v2_rejects_malformed_response_without_identity_change(monkeypatch, response):
     cloud = protocol_cloud.DreameMowerDreameHomeCloudProtocol(
         "account@example.invalid", "password",
     )
     cloud._did = "existing-device"
     cloud._strings = cloud_wire.cloud_strings("dreame")
     cloud._host = "existing.example.invalid"
-    monkeypatch.setattr(cloud, "request", lambda *args, **kwargs: {"code": 0, "data": payload})
+    monkeypatch.setattr(cloud, "request", lambda *args, **kwargs: response)
     try:
-        with pytest.raises(protocol_cloud.DeviceException, match="not an object"):
+        with pytest.raises(protocol_cloud.DeviceException):
             cloud.get_device_info_v2()
         assert cloud._did == "existing-device"
         assert cloud._host == "existing.example.invalid"
+    finally:
+        cloud._session.close()
+
+
+@pytest.mark.parametrize("response", [None, {}, {"code": 401, "data": None}])
+def test_device_info_v2_retains_empty_and_failed_response_contract(monkeypatch, response):
+    cloud = protocol_cloud.DreameMowerDreameHomeCloudProtocol(
+        "account@example.invalid", "password",
+    )
+    cloud._strings = cloud_wire.cloud_strings("dreame")
+    cloud._did = "existing-device"
+    monkeypatch.setattr(cloud, "request", lambda *args, **kwargs: response)
+    try:
+        assert cloud.get_device_info_v2() is None
+        assert cloud._did == "existing-device"
     finally:
         cloud._session.close()
 

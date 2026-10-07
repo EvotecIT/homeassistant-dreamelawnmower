@@ -709,7 +709,11 @@ class DreameMowerDreameHomeCloudProtocol:
             timeout=timeout,
             deadline=deadline,
         )
-        if response and "data" in response and response["code"] == 0:
+        if not response:
+            return None
+        if not isinstance(response, dict) or "code" not in response:
+            raise DeviceException("Invalid cloud device info response")
+        if "data" in response and response["code"] == 0:
             data = response["data"]
             if not isinstance(data, dict):
                 raise DeviceException("Cloud device info is not an object")
