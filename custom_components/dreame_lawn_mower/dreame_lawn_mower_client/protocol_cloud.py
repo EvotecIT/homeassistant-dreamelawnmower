@@ -851,7 +851,7 @@ class DreameMowerDreameHomeCloudProtocol:
         timeout: float = 20,
         *,
         deadline: float | None = None,
-    ) -> Any:
+    ) -> dict[str, Any] | None:
         response = self._api_call(
             f"{self._strings[23]}/{self._strings[24]}/{self._strings[27]}/{self._strings[29]}",
             {"did": self._did},
@@ -859,8 +859,14 @@ class DreameMowerDreameHomeCloudProtocol:
             timeout=timeout,
             deadline=deadline,
         )
-        if response and "data" in response and response["code"] == 0:
+        if not response:
+            return None
+        if not isinstance(response, dict) or "code" not in response:
+            raise DeviceException("Invalid cloud device info response")
+        if "data" in response and response["code"] == 0:
             data = response["data"]
+            if not isinstance(data, dict):
+                raise DeviceException("Cloud device info is not an object")
             self._handle_device_info(data)
             response = self._api_call(
                 f"{self._strings[23]}/{self._strings[25]}/{self._strings[30]}",
@@ -869,30 +875,40 @@ class DreameMowerDreameHomeCloudProtocol:
                 timeout=timeout,
                 deadline=deadline,
             )
+            if response and (not isinstance(response, dict) or "code" not in response):
+                raise DeviceException("Invalid cloud device metadata response")
             if response and "data" in response and response["code"] == 0:
-                if self._strings[31] in response["data"]:
+                metadata = response["data"]
+                if not isinstance(metadata, dict):
+                    raise DeviceException("Cloud device metadata is not an object")
+                if self._strings[31] in metadata:
+                    container = metadata[self._strings[31]]
+                    extra = container.get(self._strings[32]) if isinstance(container, dict) else None
+                    if not isinstance(extra, dict):
+                        raise DeviceException("Cloud device metadata properties are not an object")
                     data = {
-                        **response["data"][self._strings[31]][self._strings[32]],
+                        **extra,
                         **data,
                     }
                 else:
                     _LOGGER.debug(
-                        "Get Device OTC Info Retrying with fallback... (%s)", response)
+                        "Get Device OTC Info Retrying with fallback...")
                     devices = self.get_devices(
                         retry_count=retry_count,
                         timeout=timeout,
                         deadline=deadline,
                     )
                     if devices is not None:
-                        found = list(
-                            filter(
-                                lambda d: str(d["did"]) == self._did,
-                                devices[self._strings[34]][self._strings[36]],
-                            )
-                        )
-                        if len(found) > 0:
-                            self._handle_device_info(found[0])
-                            return found[0]
+                        container = devices.get(self._strings[34]) if isinstance(devices, dict) else None
+                        entries = container.get(self._strings[36]) if isinstance(container, dict) else None
+                        if not isinstance(entries, list):
+                            raise DeviceException("Invalid cloud device list response")
+                        for candidate in entries:
+                            if not isinstance(candidate, dict) or "did" not in candidate:
+                                raise DeviceException("Invalid cloud device list entry")
+                            if str(candidate["did"]) == self._did:
+                                self._handle_device_info(candidate)
+                                return candidate
                     _LOGGER.error("Get Device OTC Info Failed!")
                     return None
             return data
