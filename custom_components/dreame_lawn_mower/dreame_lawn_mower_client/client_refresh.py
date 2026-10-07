@@ -45,7 +45,10 @@ async def _run_state_worker[T](operation: Callable[[], T], cancelled: Event) -> 
     interrupted = False
     while not worker.done():
         try:
-            await asyncio.shield(worker)
+            # Waiting does not cancel the worker or create a shield future
+            # that reports its expected cancellation failure independently.
+            # This owner retrieves the result after the worker has drained.
+            await asyncio.wait({worker})
         except asyncio.CancelledError:
             with start_lock:
                 cancelled.set()
@@ -55,9 +58,6 @@ async def _run_state_worker[T](operation: Callable[[], T], cancelled: Event) -> 
                     # its body starting if the executor races cancellation.
                     worker.cancel()
             interrupted = True
-        except Exception:
-            if not interrupted:
-                raise
     if interrupted:
         # Retrieve any worker failure while preserving the caller's cancellation.
         if not worker.cancelled():
