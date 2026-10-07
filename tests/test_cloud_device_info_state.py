@@ -10,8 +10,26 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
 )
 
 
+@pytest.mark.parametrize("payload", [None, [], "unexpected"])
+def test_device_info_v2_rejects_nonobject_data_without_identity_change(monkeypatch, payload):
+    cloud = protocol_cloud.DreameMowerDreameHomeCloudProtocol(
+        "account@example.invalid", "password",
+    )
+    cloud._did = "existing-device"
+    cloud._strings = cloud_wire.cloud_strings("dreame")
+    cloud._host = "existing.example.invalid"
+    monkeypatch.setattr(cloud, "request", lambda *args, **kwargs: {"code": 0, "data": payload})
+    try:
+        with pytest.raises(protocol_cloud.DeviceException, match="not an object"):
+            cloud.get_device_info_v2()
+        assert cloud._did == "existing-device"
+        assert cloud._host == "existing.example.invalid"
+    finally:
+        cloud._session.close()
+
+
 @pytest.mark.parametrize("account_type", ["dreame", "mova"])
-def test_device_info_updates_mqtt_identity_without_legacy_login(account_type):
+def test_device_info_updates_mqtt_identity_without_legacy_login(account_type, monkeypatch):
     cloud = protocol_cloud.DreameMowerDreameHomeCloudProtocol(
         "account@example.invalid", "password", account_type=account_type,
     )
@@ -29,6 +47,10 @@ def test_device_info_updates_mqtt_identity_without_legacy_login(account_type):
         assert cloud._host == "mqtt.example.invalid"
         assert cloud._stream_key == "stream-key"
         assert not cloud._logged_in
+
+        cloud._strings = strings
+        monkeypatch.setattr(cloud, "request", lambda *args, **kwargs: {"code": 0, "data": info})
+        assert cloud.get_device_info_v2() == info
 
         # A response without a new key retains the existing stream credential.
         cloud._handle_device_info({**info, strings[10]: ""})

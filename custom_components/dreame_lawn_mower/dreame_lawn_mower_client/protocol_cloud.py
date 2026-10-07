@@ -701,7 +701,7 @@ class DreameMowerDreameHomeCloudProtocol:
         timeout: float = 20,
         *,
         deadline: float | None = None,
-    ) -> Any:
+    ) -> dict[str, Any] | None:
         response = self.request(
             f"{self.get_api_url()}{DEVICE_INFO_PATH}",
             cloud_device_info_data(self._did, lang),
@@ -711,6 +711,8 @@ class DreameMowerDreameHomeCloudProtocol:
         )
         if response and "data" in response and response["code"] == 0:
             data = response["data"]
+            if not isinstance(data, dict):
+                raise DeviceException("Cloud device info is not an object")
             self._handle_device_info(data)
             return data
         return None
