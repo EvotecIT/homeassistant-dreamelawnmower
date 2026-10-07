@@ -4004,6 +4004,7 @@ def test_video_camera_lan_handoff_raises_when_probe_stop_fails() -> None:
             def start_lan_stream(
                 self,
                 _inputs: object,
+                *, endpoint: object,
             ) -> DreameLawnMowerXp2pLiveStreamSession:
                 self.starts += 1
                 return DreameLawnMowerXp2pLiveStreamSession(
@@ -4027,6 +4028,10 @@ def test_video_camera_lan_handoff_raises_when_probe_stop_fails() -> None:
             flv_header_present=True,
         )
         with patch.object(
+            video_camera_startup_module,
+            "async_discover_lan_video_endpoint",
+            return_value=object(),
+        ), patch.object(
             video_camera_module.video_helpers,
             "async_probe_stream_health_and_route",
             return_value=health,

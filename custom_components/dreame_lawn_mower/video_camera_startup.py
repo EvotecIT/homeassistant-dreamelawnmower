@@ -19,6 +19,10 @@ from .debug import (
 )
 from .debug import sanitize_diagnostic_text as _sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event as _record_diagnostic_event
+from .dreame_lawn_mower_client.lan_video import (
+    DreameLawnMowerLanVideoEndpoint,
+    async_discover_lan_video_endpoint,
+)
 from .dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
 )
@@ -34,6 +38,7 @@ from .dreame_lawn_mower_client.video_provisioning_status import (
 )
 from .dreame_lawn_mower_client.video_runtime import (
     DreameLawnMowerVideoRuntimeError,
+    DreameLawnMowerXp2pLiveStreamRequest,
     DreameLawnMowerXp2pLiveStreamSession,
 )
 from .video_cached_xp2p import async_start_cached_xp2p as _async_start_cached_xp2p
@@ -589,26 +594,36 @@ class DreameLawnMowerVideoStartupMixin:
             )
         cached_endpoint = self._lan_cache.endpoint
 
-        def _start() -> DreameLawnMowerXp2pLiveStreamSession:
-            if cached_endpoint is None:
-                return start_lan(inputs)
+        async def start_at_endpoint(
+            endpoint: DreameLawnMowerLanVideoEndpoint,
+        ) -> DreameLawnMowerXp2pLiveStreamSession:
+            start_job = self.hass.async_add_executor_job(
+                lambda: start_lan(inputs, endpoint=endpoint)
+            )
             try:
-                return start_lan(inputs, endpoint=cached_endpoint)
-            except DreameLawnMowerVideoRuntimeError:
-                return start_lan(
-                    inputs,
-                    preferred_address=cached_endpoint.address,
-                )
+                session = await asyncio.shield(start_job)
+                session.provisioning_source = inputs.source
+                session.camera_toggle_managed = False
+                return session
+            except asyncio.CancelledError:
+                self._schedule_late_start_cleanup(runtime, start_job)
+                raise
 
-        start_job = self.hass.async_add_executor_job(_start)
-        try:
-            session = await asyncio.shield(start_job)
-            session.provisioning_source = inputs.source
-            session.camera_toggle_managed = False
-            return session
-        except asyncio.CancelledError:
-            self._schedule_late_start_cleanup(runtime, start_job)
-            raise
+        if cached_endpoint is not None:
+            try:
+                return await start_at_endpoint(cached_endpoint)
+            except DreameLawnMowerVideoRuntimeError:
+                pass
+        request = DreameLawnMowerXp2pLiveStreamRequest.from_lan_runtime_inputs(inputs)
+        endpoint = await async_discover_lan_video_endpoint(
+            request.product_id,
+            device_name=request.device_name,
+            client_token=inputs.lan_client_token,
+            preferred_address=(
+                cached_endpoint.address if cached_endpoint is not None else None
+            ),
+        )
+        return await start_at_endpoint(endpoint)
 
     def _adopt_stream_session(
         self,

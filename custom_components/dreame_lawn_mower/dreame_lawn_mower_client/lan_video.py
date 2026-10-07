@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import json
 import secrets
@@ -233,6 +234,96 @@ def discover_lan_video_endpoints(
                     endpoint
                 )
         return tuple(endpoints.values())
+    finally:
+        sock.close()
+
+
+async def async_discover_lan_video_endpoint(
+    product_id: str,
+    *,
+    device_name: str,
+    client_token: str | None = None,
+    timeout: float = DEFAULT_LAN_DISCOVERY_TIMEOUT,
+    attempts: int = DEFAULT_LAN_DISCOVERY_ATTEMPTS,
+    probe_interval: float = DEFAULT_LAN_DISCOVERY_INTERVAL,
+    port: int = DEFAULT_LAN_DISCOVERY_PORT,
+    broadcast_addresses: Iterable[str] = DEFAULT_LAN_DISCOVERY_BROADCASTS,
+    preferred_address: str | None = None,
+    bind_address: str = "",
+) -> DreameLawnMowerLanVideoEndpoint:
+    """Discover through asyncio while preserving the synchronous wire policy.
+
+    Keep the socket owned until the discovery window ends or cancellation closes
+    it. As in the synchronous API, the first distinct validated endpoint wins.
+    """
+    targets = _discovery_targets(broadcast_addresses, preferred_address)
+    if not targets:
+        raise ValueError("At least one LAN discovery target is required")
+    discovery_port = _valid_port(port)
+    if discovery_port is None:
+        raise ValueError("LAN discovery port must be between 1 and 65535")
+    packet, token = build_lan_video_probe_packet(
+        product_id, client_token=client_token,
+    )
+    loop = asyncio.get_running_loop()
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.setblocking(False)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((bind_address, discovery_port))
+        except OSError as err:
+            raise DreameLawnMowerLanVideoDiscoveryError(
+                f"Could not bind UDP {discovery_port} for LAN video discovery."
+            ) from err
+        started = loop.time()
+        deadline = started + max(float(timeout), 0.1)
+        send_interval = max(float(probe_interval), 0.05)
+        max_attempts = max(int(attempts), 1)
+        sent_attempts = 0
+        next_send = started
+        endpoints: dict[tuple[str, int, str], DreameLawnMowerLanVideoEndpoint] = {}
+        while loop.time() < deadline:
+            if sent_attempts < max_attempts and loop.time() >= next_send:
+                try:
+                    async with asyncio.timeout_at(deadline):
+                        for target in targets:
+                            await loop.sock_sendto(
+                                sock, packet, (target, discovery_port)
+                            )
+                except TimeoutError:
+                    break
+                sent_attempts += 1
+                next_send = started + sent_attempts * send_interval
+            receive_deadline = (
+                min(deadline, next_send) if sent_attempts < max_attempts else deadline
+            )
+            try:
+                async with asyncio.timeout_at(receive_deadline):
+                    data, sender = await loop.sock_recvfrom(sock, _MAX_DATAGRAM_LENGTH)
+            except TimeoutError:
+                continue
+            except OSError as err:
+                raise DreameLawnMowerLanVideoDiscoveryError(
+                    "LAN video discovery receive failed."
+                ) from err
+            endpoint = parse_lan_video_probe_response(
+                data, str(sender[0]), expected_token=token,
+                product_id=product_id, device_name=device_name,
+            )
+            if endpoint is not None:
+                endpoints[(endpoint.address, endpoint.port, endpoint.device_name)] = (
+                    endpoint
+                )
+            # A busy socket can complete recvfrom without yielding. Keep HA
+            # responsive and cancellation observable even during a datagram burst.
+            await asyncio.sleep(0)
+        if not endpoints:
+            raise DreameLawnMowerLanVideoDiscoveryError(
+                "The mower did not advertise a same-LAN video endpoint."
+            )
+        return next(iter(endpoints.values()))
     finally:
         sock.close()
 
