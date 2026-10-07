@@ -41,7 +41,9 @@ async def async_start_device(
         client._native_mqtt_connection = NativeMqttConnection(client)
         mqtt_protocol._native_mqtt_connection = client._native_mqtt_connection
     if device._native_message_receiver is None:
-        device._native_message_receiver = NativeMqttMessages(client, device).request
+        message_owner = NativeMqttMessages(client, device)
+        device._native_message_receiver = message_owner.request
+        device._native_connected_receiver = message_owner.request_connected
     manager = device._map_manager
     if manager is not None and manager._native_update_request is None:
         manager._native_update_request = NativeMapPolling(client, device).request

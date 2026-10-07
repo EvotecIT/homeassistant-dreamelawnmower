@@ -939,6 +939,10 @@ class DreameMapMowerMapManager:
                 yield from self._add_next_map_data_plan()
                 return True
 
+            frame_owner = (
+                self._current_map_id, self._current_frame_id,
+                self._current_timestamp_ms, self._latest_map_id,
+            )
             if saved_map_data is not None and saved_map_data.saved_map:
                 if saved_map_data.map_id in self._saved_map_data:
                     map_data.temporary_map = False
@@ -980,6 +984,14 @@ class DreameMapMowerMapManager:
                         self.request_next_map_list()
                     else:
                         yield MapUpdateRequest("list")
+
+            if frame_owner != (
+                self._current_map_id, self._current_frame_id,
+                self._current_timestamp_ms, self._latest_map_id,
+            ):
+                # A follow-up released state ownership. Re-enter the existing
+                # freshness checks before committing the previously decoded frame.
+                return (yield from self._add_map_data_plan(partial_map))
 
             DreameMowerMapDecoder.set_segment_cleanset(map_data, map_data.cleanset, self._capability)
 

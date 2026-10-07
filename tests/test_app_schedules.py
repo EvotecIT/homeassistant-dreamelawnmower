@@ -28,6 +28,13 @@ DreameMowerPropertyMapping = load_internal_module(
 ).DreameMowerPropertyMapping
 
 
+class _PropertyReadDeviceStub(SimpleNamespace):
+    """Retain the real property plan when isolating schedule transport."""
+
+    _request_properties_plan = DreameMowerDevice._request_properties_plan
+
+
+
 class _FakeAppScheduleCloud:
     logged_in = True
 
@@ -271,8 +278,9 @@ def test_failed_property_read_cannot_reuse_cached_idle_for_schedule_write(
     elif failure == "duplicate":
         rows.append(dict(rows[-1]))
     cached_data = {prop.value: 0 for prop in required}
-    device = SimpleNamespace(
+    device = _PropertyReadDeviceStub(
         _update_running=False,
+        _state_lock=RLock(),
         _update_interval=10,
         available=True,
         cloud_connected=True,
@@ -349,7 +357,7 @@ def test_unchanged_fresh_properties_accept_unknown_optional_fields():
         for prop in required
     ]
     rows.append({"did": "9999", "code": -1})
-    device = SimpleNamespace(
+    device = _PropertyReadDeviceStub(
         _ready=True,
         data={},
         _state_lock=RLock(),
@@ -407,7 +415,7 @@ def test_native_heartbeat_is_fresh_task_evidence_without_legacy_properties(failu
         {"did": "100001", "siid": 1, "piid": 1, "code": 0, "value": frame},
     ]
     retained = {"value": [206, 0, 206], "received_at": 1.0}
-    device = SimpleNamespace(
+    device = _PropertyReadDeviceStub(
         _ready=True,
         data={},
         _state_lock=RLock(),

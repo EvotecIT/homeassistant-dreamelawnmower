@@ -6,10 +6,11 @@ import asyncio
 import copy
 import logging
 from collections import deque
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from typing import TYPE_CHECKING, Any
 
 from .client_device_actions import async_run_device_plan
+from .client_state_reads import async_read_device_state
 from .device_action_plan import DevicePlanEffect
 from .exceptions import DreameLawnMowerConnectionError
 
@@ -29,7 +30,8 @@ class NativeMqttMessages:
         self._client, self._device = client, device
         self._protocol = device._protocol.cloud
         self._loop = asyncio.get_running_loop()
-        self._messages: deque[tuple[int, dict[str, Any]]] = deque()
+        self._messages: deque[tuple[int, dict[str, Any] | None]] = deque()
+        self._generation = device._mqtt_generation
         self._task: asyncio.Task[None] | None = None
 
     def _active(self) -> bool:
@@ -41,19 +43,37 @@ class NativeMqttMessages:
         )
 
     def request(self, message: dict[str, Any]) -> None:
-        """Snapshot each message before returning to the MQTT callback thread."""
+        """Detach a Paho payload without waiting for worker-owned device state."""
         if not self._active() or not self._device._ready or self._loop.is_closed():
             return
         try:
-            with self._device._state_lock:
-                generation = self._device._mqtt_generation
-                snapshot = copy.deepcopy(message)
-            self._loop.call_soon_threadsafe(self._enqueue, generation, snapshot)
+            snapshot = copy.deepcopy(message)
+            self._dispatch(lambda: self._enqueue(self._generation, snapshot))
         except RuntimeError:
             if not self._loop.is_closed():
                 raise
 
-    def _enqueue(self, generation: int, message: dict[str, Any]) -> None:
+    def request_connected(self) -> None:
+        """Order reconnect before subsequent Paho messages without taking a lock."""
+        if self._active() and not self._loop.is_closed():
+            self._dispatch(self._enqueue_connected)
+
+    def _dispatch(self, callback: Callable[[], None]) -> None:
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        if running_loop is self._loop:
+            callback()
+        else:
+            self._loop.call_soon_threadsafe(callback)
+
+    def _enqueue_connected(self) -> None:
+        if self._active():
+            self._generation += 1
+            self._enqueue(self._generation, None)
+
+    def _enqueue(self, generation: int, message: dict[str, Any] | None) -> None:
         if not self._active():
             return
         self._messages.append((generation, message))
@@ -66,6 +86,7 @@ class NativeMqttMessages:
         if (
             device is not self._device
             or not self._active()
+            or generation != self._generation
             or device._mqtt_generation != generation
         ):
             raise DreameLawnMowerConnectionError("MQTT message owner changed")
@@ -74,9 +95,22 @@ class NativeMqttMessages:
         try:
             while self._messages and self._active():
                 generation, message = self._messages.popleft()
-                if generation != self._device._mqtt_generation:
-                    continue
                 try:
+                    if message is None:
+
+                        def connected(device: DreameMowerDevice) -> None:
+                            if device is not self._device or not self._active():
+                                raise DreameLawnMowerConnectionError(
+                                    "MQTT connection owner changed"
+                                )
+                            device._apply_connected_callback()
+
+                        await async_read_device_state(
+                            self._client, connected, refresh=False
+                        )
+                        continue
+                    if generation != self._generation:
+                        continue
 
                     def message_plan(
                         device: DreameMowerDevice,

@@ -217,6 +217,7 @@ class DreameMowerDevice(
         self._native_update_scheduler: Callable[[Any, float, bool], None] | None = None
         self._mqtt_generation = 0
         self._native_message_receiver: Callable[[dict[str, Any]], None] | None = None
+        self._native_connected_receiver: Callable[[], None] | None = None
         # Used for requesting consumable properties after reset action otherwise they will only requested when cleaning completed
         self._consumable_change: bool = False
         self._remote_control: bool = False

@@ -169,6 +169,9 @@ def test_fresh_legacy_task_does_not_reuse_retained_idle_heartbeat(task_code, act
     client._async_cloud_read = lambda read: read(None)
     client._descriptor = _snapshot().descriptor
     client._latest_snapshot = None
+    device._request_properties_plan = device_type._request_properties_plan.__get__(
+        device
+    )
     with patch.object(client_core_module.time, "time", return_value=101.0):
         cached = client._snapshot_from_device(device)
         device_type._request_properties(device, list(values), require_fresh_state=True)

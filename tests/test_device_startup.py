@@ -205,7 +205,11 @@ def test_poll_completion_preserves_new_device_values(monkeypatch):
     monkeypatch.setattr(device_module.time, "time", lambda: 100.0)
     observed = []
     map_manager = Mock()
-    mower = SimpleNamespace(
+    class PollingDevice(DreameMowerDevice):
+        _map_update_interval = 10
+
+    mower = object.__new__(PollingDevice)
+    mower.__dict__.update(
         _dirty_data={
             1: DirtyData(value=20, previous_value=10, update_time=80.0),
             2: DirtyData(value=30, previous_value=15, update_time=80.0),

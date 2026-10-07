@@ -175,6 +175,7 @@ def test_native_auto_switch_write(monkeypatch, reply, entrypoint):
                 device._default_properties.append(DreameMowerProperty.CLEANING_MODE)
                 receiver = client_mqtt_messages.NativeMqttMessages(client, device)
                 device._native_message_receiver = receiver.request
+                device._native_connected_receiver = receiver.request_connected
                 mapping = device.property_mapping[DreameMowerProperty.CLEANING_MODE]
                 message = {
                     "method": "properties_changed",
@@ -241,8 +242,8 @@ def test_native_auto_switch_write(monkeypatch, reply, entrypoint):
                 if reply == "reconnect":
                     monkeypatch.setattr(device, "schedule_update", Mock())
                     await asyncio.to_thread(device._connected_callback)
-                    assert device.last_realtime_message is None
                     release.set()
+                    # The ordered owner resets state after draining the old plan.
                     await task
                     assert len(calls) == 1
                     assert device.last_realtime_message is None

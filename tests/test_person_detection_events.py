@@ -37,6 +37,7 @@ def _device(model="mova.mower.g2529b", state=DreameMowerState.MOWING):
     device._dirty_data = {}
     device._property_update_callback = {}
     device._ready = True
+    device._native_message_receiver = None
     device._last_change = 0
     device._default_properties = [DreameMowerProperty.ERROR, DreameMowerProperty.STATE]
     device._map_manager = None
