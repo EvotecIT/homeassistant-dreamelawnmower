@@ -1143,8 +1143,7 @@ class DreameMowerMapDecoder:
 
             if "tpointinfo" in data_json:
                 map_data.task_cruise_points = {}
-                for point in data_json["tpointinfo"]:
-                    index = index + 1
+                for index, point in enumerate(data_json["tpointinfo"], start=1):
                     map_data.task_cruise_points[index] = Coordinate(
                         point[0],
                         point[1],
