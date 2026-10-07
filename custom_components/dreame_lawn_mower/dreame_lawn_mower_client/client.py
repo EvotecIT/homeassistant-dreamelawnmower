@@ -228,6 +228,7 @@ from .vector_map import vector_map_to_details as vector_map_to_details
 from .vector_map import vector_map_to_summary as vector_map_to_summary
 
 if _typing.TYPE_CHECKING:
+    from .client_mqtt_connection import NativeMqttConnection as _NativeMqttConnection
     from .client_update_scheduler import NativeDeviceUpdates as _NativeDeviceUpdates
     from .map_visuals import MapRenderStyle
     from .models import DreameLawnMowerCameraFeatureSupport as _CameraFeatureSupport
@@ -562,6 +563,7 @@ class DreameLawnMowerClient(
         self._async_cloud: _DreameCloudSession | None = None
         self._cloud_read_tasks: set[asyncio.Task[Any]] = set()
         self._native_updates: _NativeDeviceUpdates | None = None
+        self._native_mqtt_connection: _NativeMqttConnection | None = None
         self._device: Any | None = None
         self._device_ownership_lock = _threading.Lock()
         self._refresh_lock = asyncio.Lock()
@@ -2344,6 +2346,27 @@ class DreameLawnMowerClient(
                         raise
 
     async def _async_disconnect_device(self, device: Any) -> None:
+        """Finish both transport owners before propagating cancellation."""
+        async def cleanup() -> None:
+            try:
+                mqtt_owner = self._native_mqtt_connection
+                if mqtt_owner is not None:
+                    await mqtt_owner.async_close()
+            finally:
+                await self._async_disconnect_legacy_device(device)
+
+        task = asyncio.create_task(cleanup())
+        interrupted = False
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                interrupted = True
+        task.result()
+        if interrupted:
+            raise asyncio.CancelledError
+
+    async def _async_disconnect_legacy_device(self, device: Any) -> None:
         """Bound device disconnect without retaining HA's default executor."""
         loop = asyncio.get_running_loop()
         completed: asyncio.Future[None] = loop.create_future()

@@ -9,13 +9,258 @@ from collections.abc import Callable
 from threading import Event, RLock, Thread
 from unittest.mock import Mock
 
+import paho.mqtt.client as mqtt
 import pytest
 import requests
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    client_mqtt_connection,
+    mqtt_event_loop,
     protocol,
     protocol_cloud,
 )
+
+
+@pytest.mark.parametrize(
+    "external_loop,reconnect,managed,silent_first",
+    [
+        (False, False, False, False),
+        (True, False, False, False),
+        (True, True, False, False),
+        (True, True, True, False),
+        (True, False, True, True),
+    ],
+)
+def test_real_mqtt_connections_release_network_threads_on_shutdown(
+    external_loop: bool,
+    reconnect: bool,
+    managed: bool,
+    silent_first: bool,
+    monkeypatch,
+) -> None:
+    """Repeated owned connections close on the wire and release Paho threads."""
+    if silent_first:
+        monkeypatch.setattr(
+            "custom_components.dreame_lawn_mower.dreame_lawn_mower_client."
+            "client_mqtt_connection.MQTT_CONNECT_TIMEOUT",
+            0.2,
+        )
+
+    async def scenario() -> None:
+        loop = asyncio.get_running_loop()
+        disconnected: asyncio.Queue[None] = asyncio.Queue()
+        handlers: set[asyncio.Task[None]] = set()
+        drop_connection = reconnect
+        ignore_connect = silent_first
+
+        async def broker(
+            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        ) -> None:
+            nonlocal drop_connection
+            nonlocal ignore_connect
+            acknowledged_connection = False
+            task = asyncio.current_task()
+            handlers.add(task)
+            try:
+                while True:
+                    kind = (await reader.readexactly(1))[0]
+                    remaining = 0
+                    multiplier = 1
+                    while True:
+                        byte = (await reader.readexactly(1))[0]
+                        remaining += (byte & 127) * multiplier
+                        if not byte & 128:
+                            break
+                        multiplier *= 128
+                    payload = await reader.readexactly(remaining)
+                    if kind == 0x10:
+                        if ignore_connect:
+                            ignore_connect = False
+                            continue
+                        writer.write(b"\x20\x02\x00\x00")
+                        await writer.drain()
+                        acknowledged_connection = True
+                    elif kind == 0x82:
+                        writer.write(b"\x90\x03" + payload[:2] + b"\x00")
+                        await writer.drain()
+                        if drop_connection:
+                            drop_connection = False
+                            return
+                    elif kind == 0xE0:
+                        if acknowledged_connection:
+                            disconnected.put_nowait(None)
+                        return
+            except asyncio.IncompleteReadError:
+                pass
+            finally:
+                writer.close()
+                await writer.wait_closed()
+                handlers.discard(task)
+
+        server = await asyncio.start_server(broker, "127.0.0.1", 0)
+        async with server:
+            port = server.sockets[0].getsockname()[1]
+            for cycle in range(3):
+                connected = asyncio.Event()
+                subscribed = asyncio.Event()
+                connection_lost = asyncio.Event()
+                client = mqtt.Client()
+
+                def on_connect(mqtt_client, *_, event=connected):
+                    loop.call_soon_threadsafe(event.set)
+                    if managed:
+                        mqtt_client.subscribe("test/mower/state")
+
+                client.on_connect = on_connect
+                client.on_subscribe = lambda *_, event=subscribed: (
+                    loop.call_soon_threadsafe(event.set)
+                )
+                client.on_disconnect = lambda *_, event=connection_lost: (
+                    loop.call_soon_threadsafe(event.set)
+                )
+                cloud = object.__new__(
+                    protocol_cloud.DreameMowerDreameHomeCloudProtocol
+                )
+                cloud._client = client
+                cloud._client_connected = True
+                cloud._client_connecting = True
+                owner = (
+                    client_mqtt_connection.NativeMqttConnection(Mock(_closing=False))
+                    if managed
+                    else None
+                )
+                driver = (
+                    mqtt_event_loop.MqttEventLoop(client)
+                    if external_loop and not managed
+                    else None
+                )
+                try:
+                    if owner is not None:
+                        owner.request(client, "127.0.0.1", port)
+                    elif driver is not None:
+                        await driver.async_connect("127.0.0.1", port)
+                    else:
+                        client.connect_async("127.0.0.1", port)
+                        client.loop_start()
+                    network_thread = client._thread
+                    await asyncio.wait_for(connected.wait(), 3)
+                    if not managed:
+                        client.subscribe("test/mower/state")
+                    await asyncio.wait_for(subscribed.wait(), 3)
+                    if reconnect and cycle == 0:
+                        await asyncio.wait_for(connection_lost.wait(), 3)
+                        connected.clear()
+                        subscribed.clear()
+                        if not managed:
+                            await driver.async_connect("127.0.0.1", port)
+                        await asyncio.wait_for(connected.wait(), 3)
+                        if not managed:
+                            client.subscribe("test/mower/state")
+                        await asyncio.wait_for(subscribed.wait(), 3)
+                        assert client._thread is None
+                    if owner is not None:
+                        await owner.async_close()
+                    elif driver is not None:
+                        await driver.async_close()
+                    else:
+                        await asyncio.wait_for(
+                            asyncio.to_thread(cloud._disconnect_mqtt_client), 3
+                        )
+                    await asyncio.wait_for(disconnected.get(), 3)
+                    if external_loop:
+                        assert network_thread is None
+                    else:
+                        assert network_thread is not None
+                        assert not network_thread.is_alive()
+                        assert cloud._client is None
+                        assert not cloud._client_connected
+                        assert not cloud._client_connecting
+                finally:
+                    if owner is not None:
+                        await owner.async_close()
+                    client.disconnect()
+                    await asyncio.to_thread(client.loop_stop)
+                    if driver is not None:
+                        await driver.async_close()
+            if handlers:
+                await asyncio.gather(*handlers)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("close_owner", [False, True])
+def test_mqtt_cancelled_connection_drains_before_disconnecting(close_owner) -> None:
+    async def scenario() -> None:
+        started = Event()
+        release = Event()
+        finished = Event()
+        client = Mock()
+
+        def connect(*_):
+            started.set()
+            assert release.wait(3)
+            finished.set()
+            return mqtt.MQTT_ERR_SUCCESS
+
+        client.connect.side_effect = connect
+        driver = mqtt_event_loop.MqttEventLoop(client)
+        task = asyncio.create_task(driver.async_connect("localhost", 1883))
+        closing = None
+        try:
+            assert await asyncio.to_thread(started.wait, 3)
+            if close_owner:
+                closing = asyncio.create_task(driver.async_close())
+                await asyncio.sleep(0)
+            target = closing if closing is not None else task
+            target.cancel()
+            await asyncio.sleep(0)
+            target.cancel()
+            await asyncio.sleep(0)
+            assert not target.done()
+            client.disconnect.assert_not_called()
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await target
+            if closing is not None:
+                with pytest.raises(RuntimeError, match="closed during"):
+                    await task
+            assert finished.is_set()
+            client.disconnect.assert_called_once_with()
+            with pytest.raises(RuntimeError, match="closed"):
+                await driver.async_connect("localhost", 1883)
+        finally:
+            release.set()
+            await asyncio.gather(task, return_exceptions=True)
+            if closing is not None:
+                await asyncio.gather(closing, return_exceptions=True)
+            await driver.async_close()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("native_owner", [False, True])
+def test_cloud_reconnect_timer_belongs_only_to_sync_path(monkeypatch, native_owner):
+    cloud = protocol_cloud.DreameMowerDreameHomeCloudProtocol("user", "password")
+    timer = Mock()
+    monkeypatch.setattr(protocol_cloud, "Timer", timer)
+    cloud._client_connected = True
+    cloud._client_connecting = False
+    cloud._connected = True
+    cloud._set_client_key = Mock(return_value=False)
+    cloud._native_mqtt_connection = Mock() if native_owner else None
+    try:
+        cloud._on_client_disconnect(Mock(), cloud, 1)
+        assert cloud._client_connecting
+        if native_owner:
+            assert not cloud.connected
+            timer.assert_not_called()
+            assert cloud._reconnect_timer is None
+        else:
+            timer.assert_called_once_with(10, cloud._reconnect_timer_task)
+            timer.return_value.start.assert_called_once_with()
+    finally:
+        cloud._session.close()
+
 
 
 @pytest.mark.parametrize("host,path", [

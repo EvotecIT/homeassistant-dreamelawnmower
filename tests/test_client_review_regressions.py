@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    client_mqtt_connection,
     mqtt_tls,
     protocol,
 )
@@ -661,3 +662,49 @@ def test_cloud_firmware_check_keeps_error_description_unavailable() -> None:
         "success": False,
         "msg": "missing lang",
     }
+
+
+@pytest.mark.parametrize("failure", ["cancel", "error"])
+def test_mqtt_close_failure_still_drains_device_cleanup(failure) -> None:
+    async def scenario() -> None:
+        client = _client()
+        draining = asyncio.Event()
+        release = asyncio.Event()
+        disconnected = threading.Event()
+
+        async def connection() -> None:
+            try:
+                await asyncio.Future()
+            finally:
+                draining.set()
+                await release.wait()
+                if failure == "error":
+                    raise RuntimeError("connection cleanup failed")
+
+        class Device:
+            def listen(self, callback) -> None:
+                assert callback is None
+
+            def disconnect(self) -> None:
+                disconnected.set()
+
+        client._device = Device()
+        owner = client_mqtt_connection.NativeMqttConnection(client)
+        client._native_mqtt_connection = owner
+        owner._task = asyncio.create_task(connection())
+        await asyncio.sleep(0)
+        closing = asyncio.create_task(client.async_close())
+        await asyncio.wait_for(draining.wait(), 1)
+        if failure == "cancel":
+            closing.cancel()
+            await asyncio.sleep(0)
+            closing.cancel()
+            await asyncio.sleep(0)
+        assert not disconnected.is_set()
+        release.set()
+        expected = asyncio.CancelledError if failure == "cancel" else RuntimeError
+        with pytest.raises(expected):
+            await asyncio.wait_for(closing, 1)
+        assert disconnected.is_set()
+
+    asyncio.run(scenario())

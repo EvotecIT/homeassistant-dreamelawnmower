@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from .device_privacy import AI_POLICY_PROPERTY, decode_ai_policy_acceptance
 from .device_property_read import (
-    apply_device_property_response,
+    apply_device_property_response_plan,
     build_device_property_request,
 )
 from .exceptions import DreameLawnMowerConnectionError
@@ -25,14 +25,21 @@ async def async_start_device(
     cloud: DreameCloudSession, *, deadline: float, cancelled: Event,
 ) -> None:
     """Reuse native login and metadata before starting the existing MQTT owner."""
+    from .client_device_actions import async_run_device_plan
     from .client_map_frames import NativeMissingMapFrames
     from .client_map_maintenance import NativeMapLists
     from .client_map_poll import NativeMapPolling
     from .client_mqtt_auth import NativeMqttAuthentication
+    from .client_mqtt_connection import NativeMqttConnection
     from .client_mqtt_messages import NativeMqttMessages
     from .client_refresh import _run_state_worker
 
     mqtt_protocol = device._protocol.cloud
+    if mqtt_protocol._native_mqtt_connection is None:
+        if client._native_mqtt_connection is not None:
+            await client._native_mqtt_connection.async_close()
+        client._native_mqtt_connection = NativeMqttConnection(client)
+        mqtt_protocol._native_mqtt_connection = client._native_mqtt_connection
     if device._native_message_receiver is None:
         device._native_message_receiver = NativeMqttMessages(client, device).request
     manager = device._map_manager
@@ -126,6 +133,26 @@ async def async_start_device(
                 ensure_active()
             accepted = decode_ai_policy_acceptance(privacy_response)
 
+            def require_current(current: DreameMowerDevice) -> None:
+                ensure_active()
+                if current is not device:
+                    raise DreameLawnMowerConnectionError(
+                        "Device changed during startup"
+                    )
+
+            try:
+                await async_run_device_plan(
+                    client,
+                    lambda current: apply_device_property_response_plan(
+                        current, results, require_fresh_state=False,
+                    ),
+                    deadline=deadline, require_device=require_current,
+                )
+            except Exception as err:
+                raise DreameLawnMowerConnectionError(
+                    "Initial device properties are invalid"
+                ) from err
+
             def finish() -> None:
                 lock = protocol._operation_lock()
                 remaining = deadline - time.monotonic()
@@ -134,15 +161,6 @@ async def async_start_device(
                         "Device startup timed out waiting to apply properties"
                     )
                 try:
-                    ensure_active()
-                    try:
-                        apply_device_property_response(
-                            device, results, require_fresh_state=False,
-                        )
-                    except Exception as err:
-                        raise DreameLawnMowerConnectionError(
-                            "Initial device properties are invalid"
-                        ) from err
                     ensure_active()
                     if accepted is not None:
                         device.status.ai_policy_accepted = accepted

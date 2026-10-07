@@ -37,6 +37,7 @@ from .cloud_wire import (
 )
 from .deadline import DeadlineExceededError, run_with_deadline
 from .mqtt_tls import create_cloud_mqtt_ssl_context
+from .client_mqtt_connection import NativeMqttConnection
 
 _LOGGER = logging.getLogger(__name__)
 _TX_VIDEO_API_PATH = "/dreame-third-video/tx/"
@@ -175,6 +176,7 @@ class DreameMowerDreameHomeCloudProtocol:
         self._id = random.randint(1, 100)
         self._reconnect_timer = None
         self._native_authentication_request: Callable[[], None] | None = None
+        self._native_mqtt_connection: NativeMqttConnection | None = None
         self._host = None
         self._model = None
         self._ti: str | None = None
@@ -390,14 +392,19 @@ class DreameMowerDreameHomeCloudProtocol:
             _LOGGER.warn("Device client reconnect failed! Retrying...")
 
     def _set_client_key(self) -> bool:
+        client = self._client
+        if client is None:
+            return False
         if self._client_key != self._key:
             self._client_key = self._key
-            self._client.username_pw_set(self._uuid, self._client_key)
+            client.username_pw_set(self._uuid, self._client_key)
             return True
         return False
 
     @staticmethod
     def _on_client_connect(client, self, flags, rc):
+        if self._shutdown_is_requested():
+            return
         self._client_connecting = False
         self._reconnect_timer_cancel()
         if rc == 0:
@@ -423,6 +430,12 @@ class DreameMowerDreameHomeCloudProtocol:
             self._client_connected = False
             self._client_connecting = False
             return
+        if self._native_mqtt_connection is not None:
+            # The asyncio owner retries without the legacy timer that used to
+            # clear this flag. HTTP reachability cannot imply MQTT connectivity.
+            self._reconnect_timer_cancel()
+            self._client_connected = False
+            self._client_connecting = True
         if rc != 0 and not self._set_client_key():
             if rc == 5 and self._key_expire:
                 if self._native_authentication_request is not None:
@@ -435,8 +448,9 @@ class DreameMowerDreameHomeCloudProtocol:
                     _LOGGER.info(
                         "Device Client disconnected (%s) Reconnecting...", rc)
                 self._reconnect_timer_cancel()
-                self._reconnect_timer = Timer(10, self._reconnect_timer_task)
-                self._reconnect_timer.start()
+                if self._native_mqtt_connection is None:
+                    self._reconnect_timer = Timer(10, self._reconnect_timer_task)
+                    self._reconnect_timer.start()
 
     @staticmethod
     def _on_client_message(client, self, message):
@@ -527,11 +541,16 @@ class DreameMowerDreameHomeCloudProtocol:
                     )
                     self._client.tls_insecure_set(False)
                     self._set_client_key()
-                    if nonblocking:
+                    if self._native_mqtt_connection is not None:
+                        self._native_mqtt_connection.request(
+                            self._client, host[0], int(host[1])
+                        )
+                    elif nonblocking:
                         self._client.connect_async(host[0], int(host[1]), 50)
                     else:
                         self._client.connect(host[0], int(host[1]), 50)
-                    self._client.loop_start()
+                    if self._native_mqtt_connection is None:
+                        self._client.loop_start()
                 except Exception as e:
                     _LOGGER.error("Connect failed (%s)", type(e).__name__)
                     pass

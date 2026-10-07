@@ -92,6 +92,14 @@ def test_startup_uses_native_metadata_and_initial_properties(
         return web.json_response({"code": 0, "data": data})
 
     async def scenario():
+        mqtt_started = asyncio.Event()
+        loop = asyncio.get_running_loop()
+
+        def connect(*args):
+            loop.call_soon_threadsafe(mqtt_started.set)
+            return 0
+
+        mqtt.connect.side_effect = connect
         async with server(monkeypatch, handler), ClientSession() as session:
             client = DreameLawnMowerClient(
                 **{**OPTIONS, "account_type": account_type}, session=session,
@@ -104,6 +112,14 @@ def test_startup_uses_native_metadata_and_initial_properties(
             # Map maintenance has a separate lifecycle and transport migration.
             device._map_manager = None
             owner = device._protocol.cloud
+            applied = []
+            device._property_update_callback.setdefault(battery.value, []).append(
+                lambda previous: applied.append((
+                    device._state_lock._is_owned(),
+                    owner._operation_lock()._is_owned(),
+                    device._ready,
+                ))
+            )
             owner.login = Mock(side_effect=AssertionError("Synchronous login"))
             owner.get_device_info = Mock(side_effect=AssertionError("Synchronous info"))
             owner.get_batch_device_datas = Mock(
@@ -120,6 +136,7 @@ def test_startup_uses_native_metadata_and_initial_properties(
                     None if fallback in {"vendor_error", "http_error"} else "4.3.6_1200"
                 )
                 assert device.data[battery.value] == 55
+                assert applied == [(True, False, False)]
                 assert device.status.ai_policy_accepted is True
                 assert owner._uuid == "account"
                 assert owner._uid == "device-owner"
@@ -132,10 +149,12 @@ def test_startup_uses_native_metadata_and_initial_properties(
                     for row in rpc[0]["data"]["params"]
                 )
                 mqtt.username_pw_set.assert_called_once_with("account", "access-secret")
-                mqtt.connect_async.assert_called_once_with(
+                await asyncio.wait_for(mqtt_started.wait(), 3)
+                mqtt.connect.assert_called_once_with(
                     "mqtt.example.invalid", 8883, 50,
                 )
-                mqtt.connect.assert_not_called()
+                mqtt.connect_async.assert_not_called()
+                mqtt.loop_start.assert_not_called()
                 owner.login.assert_not_called()
                 owner.get_device_info.assert_not_called()
                 owner.get_batch_device_datas.assert_not_called()
