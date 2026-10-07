@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from .client_refresh import _run_state_worker
 from .client_rpc import async_device_rpc
 from .client_state_reads import read_locked_device_state
-from .device_action_plan import ActionDelay, ActionRequest
+from .device_action_plan import ActionDelay, ActionRequest, PropertyRequest
 from .exceptions import DeviceException, DreameLawnMowerConnectionError
 
 _ACTION_TIMEOUT = 20
@@ -23,8 +23,11 @@ if TYPE_CHECKING:
 
 async def async_run_device_plan(
     client: DreameLawnMowerClient,
-    create_plan: Callable[[Any], Generator[ActionDelay | ActionRequest, Any, Any]],
-    *, _cleanup: OwnedCleanup | None = None,
+    create_plan: Callable[
+        [Any], Generator[ActionDelay | ActionRequest | PropertyRequest, Any, Any]
+    ],
+    *,
+    _cleanup: OwnedCleanup | None = None,
 ) -> Any:
     """Own bounded state steps, cancellable delays and non-replayed actions."""
     deadline = time.monotonic() + _ACTION_TIMEOUT
@@ -78,9 +81,14 @@ async def async_run_device_plan(
                         await asyncio.sleep(effect.seconds)
                         response = None
                     else:
-                        async def command(current: Any, cloud: DreameCloudSession,
-                                          protocol: Any, request_id: int,
-                                          request: ActionRequest = effect) -> Any:
+
+                        async def command(
+                            current: Any,
+                            cloud: DreameCloudSession,
+                            protocol: Any,
+                            request_id: int,
+                            request: ActionRequest | PropertyRequest = effect,
+                        ) -> Any:
                             nonlocal attempted
                             require_active()
                             if current is not device:
@@ -88,6 +96,12 @@ async def async_run_device_plan(
                                     "Device changed before action dispatch"
                                 )
                             attempted = True
+                            if isinstance(request, PropertyRequest):
+                                return await cloud.async_command_device_property(
+                                    client._descriptor.did, protocol._host, request_id,
+                                    request.siid, request.piid, request.value,
+                                    deadline=deadline,
+                                )
                             return await cloud.async_command_device_action(
                                 client._descriptor.did, protocol._host, request_id,
                                 request.siid, request.aiid, request.parameters,

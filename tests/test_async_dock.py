@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from aiohttp import ClientSession, web
@@ -11,6 +11,7 @@ from aiohttp import ClientSession, web
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import device_commands
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device_types import (
     DreameMowerAction,
+    DreameMowerCleaningMode,
     DreameMowerProperty,
     DreameMowerState,
     DreameMowerStatus,
@@ -32,6 +33,7 @@ def configure_dock(client, *, mapping=False):
     fake.action_mapping[DreameMowerAction.DOCK] = {"siid": 2, "aiid": 3}
     owner = device_commands._DreameMowerDeviceCommandMixin
     fake._restore_go_to_zone = lambda: owner._restore_go_to_zone(fake)
+    fake._restore_go_to_zone_plan = lambda: owner._restore_go_to_zone_plan(fake)
     fake._dock_plan = lambda: owner._dock_plan(fake)
     fake._stop_plan = lambda: owner._stop_plan(fake)
     client._device._dock_plan = fake._dock_plan
@@ -83,6 +85,72 @@ def test_native_dock_policy(monkeypatch, account, reply):
                 assert not client._cloud_read_tasks
             finally:
                 await client.async_close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("account", ["dreame", "mova"])
+@pytest.mark.parametrize("property_code", [0, 7])
+def test_native_dock_does_not_restore_mode_through_sync_transport(
+    monkeypatch, account, property_code
+):
+    strings = cloud_strings(account)
+    requests = []
+
+    async def handler(request):
+        if request.path == strings[17]:
+            return web.json_response(login_response(strings))
+        payload = (await request.json())["data"]
+        requests.append(payload)
+        result = (
+            [{"code": property_code}]
+            if payload["method"] == "set_properties"
+            else {"code": 0}
+        )
+        return web.json_response({"code": 0, "data": {"result": result}})
+
+    async def scenario():
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = client_for(session, account)
+            fake, _, _ = configure_dock(client)
+            fake.status.go_to_zone.cleaning_mode = DreameMowerCleaningMode.MOWING.value
+            fake.status.cleaning_mode = DreameMowerCleaningMode.UNKNOWN
+            fake._update_cleaning_mode = Mock(return_value=True)
+            fake._discarded_properties = set()
+            fake._dirty_data = {}
+            fake._update_property = Mock(return_value=17)
+            fake.property_mapping = {
+                DreameMowerProperty.CLEANING_MODE: {"siid": 2, "piid": 4}
+            }
+            fake._set_property_plan = lambda prop, value: (
+                device_commands._DreameMowerDeviceCommandMixin._set_property_plan(
+                    fake, prop, value
+                )
+            )
+            try:
+                await client.async_dock_without_stopping()
+                fake._update_cleaning_mode.assert_not_called()
+                assert [item["method"] for item in requests] == [
+                    "set_properties",
+                    "action",
+                ]
+                assert requests[0]["params"] == [
+                    {"did": "42", "siid": 2, "piid": 4, "value": 0}
+                ]
+                if property_code:
+                    fake._update_property.assert_any_call(
+                        DreameMowerProperty.CLEANING_MODE, 17
+                    )
+                    assert (
+                        DreameMowerProperty.CLEANING_MODE.value not in fake._dirty_data
+                    )
+                else:
+                    assert (
+                        fake._dirty_data[DreameMowerProperty.CLEANING_MODE.value].value
+                        == 0
+                    )
+            finally:
+                await client.async_close()
+
     asyncio.run(scenario())
 
 

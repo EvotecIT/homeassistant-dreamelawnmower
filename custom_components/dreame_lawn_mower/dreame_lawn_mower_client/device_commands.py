@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from collections.abc import Generator
 
 if TYPE_CHECKING:
-    from .device_action_plan import ActionDelay, ActionRequest
+    from .device_action_plan import ActionDelay, ActionRequest, PropertyRequest
 
 from .app_protocol import mower_realtime_property_name
 from .stream_commands import stream_action_parameters
@@ -173,7 +173,16 @@ class _DreameMowerDeviceCommandMixin:
             size=size,
         )
 
-    def _restore_go_to_zone(self, stop=False):
+    def _restore_go_to_zone(self, stop: bool = False) -> None:
+        from .device_action_plan import run_device_plan
+
+        run_device_plan(self, self._restore_go_to_zone_plan(stop))
+
+    def _restore_go_to_zone_plan(
+        self, stop: bool = False,
+    ) -> Generator[ActionDelay | ActionRequest | PropertyRequest, Any, None]:
+        from .device_action_plan import ActionRequest
+
         if self.status.go_to_zone is not None:
             if self.status.go_to_zone:
                 stop = stop and self.status.go_to_zone.stop
@@ -183,18 +192,21 @@ class _DreameMowerDeviceCommandMixin:
                     self.schedule_update(10, True)
                     try:
                         mapping = self.action_mapping[DreameMowerAction.STOP]
-                        self._protocol.action(mapping["siid"], mapping["aiid"])
-                    except:
+                        yield ActionRequest(mapping["siid"], mapping["aiid"], None)
+                    except Exception:
                         pass
 
                 try:
                     self._cleaning_history_update = time.time()
-                    if cleaning_mode is not None and self.status.cleaning_mode.value != cleaning_mode:
-                        self._update_cleaning_mode(cleaning_mode)
+                    current_mode = self.status.cleaning_mode
+                    if cleaning_mode is not None and current_mode is not None and current_mode.value != cleaning_mode:
+                        if cleaning_mode != DreameMowerCleaningMode.MOWING.value:
+                            raise InvalidValueException("Unsupported mower cleaning mode")
+                        yield from self._set_property_plan(DreameMowerProperty.CLEANING_MODE, cleaning_mode)
 
                     if stop and self.status.started:
                         self._update_status(DreameMowerTaskStatus.COMPLETED, DreameMowerStatus.STANDBY)
-                except:
+                except Exception:
                     pass
 
                 if self._protocol.dreame_cloud:
@@ -356,6 +368,16 @@ class _DreameMowerDeviceCommandMixin:
         if isinstance(prop, DreameMowerStrAIProperty) or isinstance(prop, DreameMowerAIProperty):
             return self.set_ai_property(prop, value)
 
+        from .device_action_plan import run_device_plan
+
+        return run_device_plan(self, self._set_property_plan(prop, value))
+
+    def _set_property_plan(
+        self, prop: DreameMowerProperty, value: Any,
+    ) -> Generator[PropertyRequest, Any, bool]:
+        """Share optimistic state, rollback and acknowledgement across transports."""
+        from .device_action_plan import PropertyRequest
+
         self.schedule_update(10)
         current_value = self._update_property(prop, value)
         if current_value is not None:
@@ -367,7 +389,7 @@ class _DreameMowerDeviceCommandMixin:
 
             try:
                 mapping = self.property_mapping[prop]
-                result = self._protocol.set_property(mapping["siid"], mapping["piid"], value)
+                result = yield PropertyRequest(mapping["siid"], mapping["piid"], value)
 
                 if result is None or result[0]["code"] != 0:
                     _LOGGER.error(
@@ -635,7 +657,7 @@ class _DreameMowerDeviceCommandMixin:
 
     def _start_mowing_plan(
         self,
-    ) -> Generator[ActionDelay | ActionRequest, Any, dict[str, Any] | None]:
+    ) -> Generator[ActionDelay | ActionRequest | PropertyRequest, Any, dict[str, Any] | None]:
         """Select the start/resume branch before yielding its transport effects."""
         from .device_action_plan import device_action_plan
 
@@ -649,7 +671,7 @@ class _DreameMowerDeviceCommandMixin:
             if self.status.cruising_paused:
                 return (yield from self._start_custom_plan(self.status.status.value))
         elif not self.status.paused:
-            self._restore_go_to_zone()
+            yield from self._restore_go_to_zone_plan()
 
 
         self.schedule_update(10, True)
@@ -689,12 +711,12 @@ class _DreameMowerDeviceCommandMixin:
 
     def _start_custom_plan(
         self, status: int, parameters: Any = None,
-    ) -> Generator[ActionDelay | ActionRequest, Any, dict[str, Any] | None]:
+    ) -> Generator[ActionDelay | ActionRequest | PropertyRequest, Any, dict[str, Any] | None]:
         """Share custom-task payload and availability across transports."""
         from .device_action_plan import device_action_plan
 
         if not self.capability.cruising and status != DreameMowerStatus.ZONE_CLEANING.value:
-            self._restore_go_to_zone()
+            yield from self._restore_go_to_zone_plan()
 
         if status is not DreameMowerStatus.FAST_MAPPING.value and self.status.fast_mapping:
             raise InvalidActionException("Cannot start cleaning while fast mapping")
@@ -747,7 +769,7 @@ class _DreameMowerDeviceCommandMixin:
 
     def _stop_plan(
         self, *, authoritative_task_active: bool = False,
-    ) -> Generator[ActionDelay | ActionRequest, Any, dict[str, Any] | None]:
+    ) -> Generator[ActionDelay | ActionRequest | PropertyRequest, Any, dict[str, Any] | None]:
         """Share STOP acknowledgement and subsequent local task cleanup."""
         from .device_action_plan import device_action_plan
 
@@ -786,7 +808,7 @@ class _DreameMowerDeviceCommandMixin:
 
         return run_device_plan(self, self._pause_plan())
 
-    def _pause_plan(self) -> Generator[ActionDelay | ActionRequest, Any, Any]:
+    def _pause_plan(self) -> Generator[ActionDelay | ActionRequest | PropertyRequest, Any, Any]:
         """Share pause state transitions and action policy across transports."""
         from .device_action_plan import device_action_plan
 
@@ -817,7 +839,7 @@ class _DreameMowerDeviceCommandMixin:
 
     def _dock_plan(
         self,
-    ) -> Generator[ActionDelay | ActionRequest, Any, dict[str, Any] | None]:
+    ) -> Generator[ActionDelay | ActionRequest | PropertyRequest, Any, dict[str, Any] | None]:
         """Share return-to-base state preparation and device acknowledgement."""
         from .device_action_plan import device_action_plan
 
@@ -834,7 +856,7 @@ class _DreameMowerDeviceCommandMixin:
         #    self._map_manager.editor.set_active_segments([])
 
         if not self.capability.cruising:
-            self._restore_go_to_zone()
+            yield from self._restore_go_to_zone_plan()
         response: dict[str, Any] | None = yield from device_action_plan(
             self, DreameMowerAction.DOCK,
         )
@@ -844,7 +866,7 @@ class _DreameMowerDeviceCommandMixin:
         """Set the mower cleaner to return to the dock."""
         return self.return_to_base()
 
-    def _ordinary_stop_plan(self) -> Generator[ActionDelay | ActionRequest, Any, Any]:
+    def _ordinary_stop_plan(self) -> Generator[ActionDelay | ActionRequest | PropertyRequest, Any, Any]:
         """Preserve ordinary STOP's mapping return-to-base behavior."""
         if self.status.fast_mapping:
             return (yield from self._dock_plan())

@@ -31,6 +31,14 @@ class ActionRequest:
     parameters: Any
 
 
+@dataclass(frozen=True)
+class PropertyRequest:
+    """One property write with state and acknowledgement policy in the plan."""
+    siid: int
+    piid: int
+    value: Any
+
+
 def device_action_plan(
     self: Any, action: DreameMowerAction, parameters: Any = None, *,
     enforce_availability: bool = True,
@@ -169,7 +177,8 @@ def run_device_action(
 
 
 def run_device_plan[Result](
-    device: Any, plan: Generator[ActionDelay | ActionRequest, Any, Result],
+    device: Any,
+    plan: Generator[ActionDelay | ActionRequest | PropertyRequest, Any, Result],
 ) -> Result:
     """Execute state policy with legacy sleeps and RPC calls."""
     try:
@@ -179,6 +188,10 @@ def run_device_plan[Result](
                 if isinstance(effect, ActionDelay):
                     time.sleep(effect.seconds)
                     response = None
+                elif isinstance(effect, PropertyRequest):
+                    response = device._protocol.set_property(
+                        effect.siid, effect.piid, effect.value,
+                    )
                 else:
                     response = device._protocol.action(
                         effect.siid, effect.aiid, effect.parameters,
