@@ -71,6 +71,28 @@ to find the package installer error and check DNS connectivity.
 2. Restart Home Assistant.
 3. Add **Dreame Lawn Mower** from **Settings → Devices & services**.
 
+## Removal
+
+1. Disable or update automations and dashboard cards that use this mower.
+2. Open **Settings → Devices & services → Dreame Lawn Mower**. Open the menu
+   for the mower's integration entry and choose **Delete**. Repeat for each
+   mower you want to remove.
+3. To uninstall the integration completely, remove **Dreame Lawn Mower** in
+   HACS after deleting all its entries. For a manual installation, remove
+   `config/custom_components/dreame_lawn_mower`. Restart Home Assistant.
+
+Deleting an entry removes its saved map preview, observation history, video
+provisioning material, and cached LAN video identity and endpoint. It does not
+unpair the mower from Dreamehome or MOVAhome, change its onboard schedules, or
+send a stop command. Use the vendor app to manage the mower independently.
+Update or remove the separately installed Lawn Mower Card as needed.
+
+Downloaded video runtime files are shared by entries and remain under
+`config/.storage/dreame_lawn_mower/xp2p-runtime`. After removing all entries
+and stopping Home Assistant, you may delete that runtime directory if you no
+longer need it. Files you explicitly exported, recordings, and backups are
+separate from entry storage and are not deleted by this integration.
+
 ## Configuration
 
 1. Choose **Dreame** or **MOVA**, matching the app you use.

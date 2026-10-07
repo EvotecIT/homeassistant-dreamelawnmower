@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -106,10 +107,13 @@ def test_lan_cache_clear_endpoint_persists_identity_without_endpoint() -> None:
         saved: dict[str, object] = {}
 
         class _Store:
+            hass = SimpleNamespace(state=None)
             async def async_save(self, payload: dict[str, object]) -> None:
                 saved.update(payload)
 
         cache = object.__new__(DreameLawnMowerVideoLanCache)
+        cache._write_lock = asyncio.Lock()
+        cache._removed = False
         cache._store = _Store()
         cache._did = "did-1"
         cache.inputs = DreameLawnMowerCameraStreamRuntimeInputs(

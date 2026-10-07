@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import base64
+import json
 import zlib
+
+import pytest
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     device as device_module,
@@ -50,3 +53,23 @@ def test_json_renderer_packages_default_map_png() -> None:
     renderer = map_json_renderer.DreameMowerMapDataJsonRenderer()
 
     assert renderer.render_map(None).startswith(b"\x89PNG\r\n\x1a\n")
+
+
+@pytest.mark.parametrize("include_predefined", [False, True])
+def test_task_cruise_points_have_independent_ids(include_predefined: bool) -> None:
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[4] = 73
+    metadata = {"tpointinfo": [[120, -60, 0, 2], [240, 80, 1, 3]]}
+    if include_predefined:
+        metadata["pointinfo"] = {"spoint": [[10, 20, 0, 1]]}
+    payload = base64.b64encode(
+        zlib.compress(bytes(header) + json.dumps(metadata).encode())
+    ).decode()
+
+    decoded, _ = map_decoder.DreameMowerMapDecoder.decode_map(payload, False)
+
+    assert decoded is not None
+    assert list(decoded.task_cruise_points) == [1, 2]
+    first, second = decoded.task_cruise_points.values()
+    assert (first.x, first.y, first.completed, first.type) == (120, -60, False, 2)
+    assert (second.x, second.y, second.completed, second.type) == (240, 80, True, 3)

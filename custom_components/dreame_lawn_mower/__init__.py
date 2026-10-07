@@ -36,8 +36,11 @@ from .point_cloud_api import (
 )
 from .runtime_data import DreameLawnMowerConfigEntry, get_coordinator, iter_coordinators
 from .services import async_setup_services, async_unload_services
-from .video_lan_cache import DreameLawnMowerVideoLanCache
-from .video_provisioning_cache import DreameLawnMowerVideoProvisioningCache
+from .video_lan_cache import DreameLawnMowerVideoLanCache, async_remove_video_lan_cache
+from .video_provisioning_cache import (
+    DreameLawnMowerVideoProvisioningCache,
+    async_remove_video_provisioning_cache,
+)
 
 _LOGGER = logging.getLogger(__name__)
 SLOW_SETUP_SECONDS = 15.0
@@ -191,12 +194,23 @@ async def async_setup_entry(
             _LOGGER.info(message, *args)
 
 
+async def _async_close_video_caches(coordinator: DreameLawnMowerCoordinator) -> None:
+    """Retire entry cache writers before their coordinator is released."""
+    lan = getattr(coordinator, "video_lan_cache", None)
+    provisioning = getattr(coordinator, "video_provisioning_cache", None)
+    if isinstance(lan, DreameLawnMowerVideoLanCache):
+        await lan.async_close()
+    if isinstance(provisioning, DreameLawnMowerVideoProvisioningCache):
+        await provisioning.async_close()
+
+
 async def _async_cleanup_failed_setup(
     hass: HomeAssistant,
     entry: DreameLawnMowerConfigEntry,
     coordinator: DreameLawnMowerCoordinator,
 ) -> None:
     """Drain coordinator resources registered before a failed setup."""
+    await _async_close_video_caches(coordinator)
     if getattr(entry, "runtime_data", None) is coordinator:
         del entry.runtime_data
     try:
@@ -216,6 +230,7 @@ async def async_unload_entry(
     platforms = getattr(coordinator, "loaded_platforms", tuple(PLATFORMS))
     unload_ok = await hass.config_entries.async_unload_platforms(entry, platforms)
     if unload_ok:
+        await _async_close_video_caches(coordinator)
         del entry.runtime_data
         point_cloud_api = hass.data[DOMAIN].get(POINT_CLOUD_API_DATA_KEY)
         if isinstance(point_cloud_api, DreameLawnMowerPointCloudAPI):
@@ -262,3 +277,5 @@ async def async_remove_entry(
     """Remove private cached evidence when its entry is deleted."""
     await async_remove_restart_preview(hass, entry)
     await async_remove_observation_checkpoint(hass, entry)
+    await async_remove_video_lan_cache(hass, entry)
+    await async_remove_video_provisioning_cache(hass, entry)
