@@ -502,14 +502,15 @@ class DreameLawnMowerXp2pProcessRunner:
                 name="dreame-xp2p-stderr",
                 tail=stderr_tail,
             )
-            _write_json_line(
-                process,
-                {
-                    "operation": "start",
-                    "request": request.as_dict(redact=False),
-                    "command_timeout_us": command_timeout_us,
-                },
-            )
+            def write_request() -> None:
+                _write_json_line(
+                    process,
+                    {
+                        "operation": "start",
+                        "request": request.as_dict(redact=False),
+                        "command_timeout_us": command_timeout_us,
+                    },
+                )
             sensitive_values = payload_sensitive_values(
                 {
                     "request": request.as_dict(redact=False),
@@ -518,6 +519,7 @@ class DreameLawnMowerXp2pProcessRunner:
             response = _read_json_line(
                 process,
                 timeout=self.timeout,
+                write_request=write_request,
                 sensitive_values=sensitive_values,
                 stderr_thread=stderr_thread,
                 stderr_tail=stderr_tail,
@@ -1125,18 +1127,29 @@ def _read_json_line(
     sensitive_values: Sequence[str] = (),
     stderr_thread: threading.Thread | None = None,
     stderr_tail: Sequence[str] = (),
+    write_request: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
+    """Bound request delivery and response reading before terminating a stall."""
     if process.stdout is None:
         raise DreameLawnMowerVideoRuntimeError(
             "XP2P process runner stdout is not available."
         )
 
     result: dict[str, str | None] = {"line": None}
+    read_error: Exception | None = None
 
     def _readline() -> None:
-        result["line"] = process.stdout.readline()
+        nonlocal read_error
+        try:
+            if write_request is not None:
+                write_request()
+            result["line"] = process.stdout.readline()
+        except Exception as error:
+            read_error = error
 
-    thread = threading.Thread(target=_readline, daemon=True)
+    thread = threading.Thread(
+        target=_readline, name="dreame-xp2p-response", daemon=True,
+    )
     thread.start()
     thread.join(timeout=max(timeout, 0.1))
     if thread.is_alive():
@@ -1148,6 +1161,8 @@ def _read_json_line(
             + output_preview("stdout", result["line"], sensitive_values)
             + output_preview("stderr", _stream_tail_text(stderr_tail), sensitive_values)
         )
+    if read_error is not None:
+        raise read_error
     line = result["line"]
     if not line:
         _join_stream_drain_thread(stderr_thread)
