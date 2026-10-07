@@ -2,8 +2,8 @@
 
 import copy
 import time
-from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING
+from collections.abc import Generator, Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 from .app_protocol import MOWER_RAW_STATUS_PROPERTY_KEY, decode_mower_status_blob
 from .device_types import DreameMowerProperty
@@ -11,6 +11,7 @@ from .exceptions import DeviceUpdateFailedException
 
 if TYPE_CHECKING:
     from .device import DreameMowerDevice
+    from .device_action_plan import DevicePlanEffect
 
 TASK_DECISION_PROPERTIES = frozenset(
     {
@@ -34,9 +35,14 @@ def build_device_property_request(
     requests: list[dict[str, int | str]] = []
     for prop in properties:
         mapping = property_mapping.get(prop)
-        if mapping is not None and "aiid" not in mapping and (
-            not ready or prop.value in known_properties
-            or (require_fresh_state and prop in TASK_DECISION_PROPERTIES)
+        if (
+            mapping is not None
+            and "aiid" not in mapping
+            and (
+                not ready
+                or prop.value in known_properties
+                or (require_fresh_state and prop in TASK_DECISION_PROPERTIES)
+            )
         ):
             requests.append({"did": str(prop.value), **mapping})
     if require_fresh_state:
@@ -47,24 +53,56 @@ def build_device_property_request(
 
 
 def apply_device_property_response(
-    device: "DreameMowerDevice", results: object, *, require_fresh_state: bool,
+    device: "DreameMowerDevice",
+    results: object,
+    *,
+    require_fresh_state: bool,
 ) -> bool:
     """Validate fresh task evidence before applying a device property response."""
     if require_fresh_state:
-        evidence = require_fresh_task_properties(results, device.property_mapping)
         with device._state_lock:
-            observed_at = time.time()
-            device._fresh_task_state = {
-                **copy.deepcopy(evidence), "received_at": observed_at,
-            }
-            heartbeat = evidence.get("heartbeat")
-            if heartbeat is not None:
-                device.realtime_properties[MOWER_RAW_STATUS_PROPERTY_KEY] = {
-                    **copy.deepcopy(heartbeat),
-                    "received_at": observed_at, "last_seen": observed_at,
-                }
+            _record_fresh_property_evidence(device, results, require_fresh_state=True)
             return device._handle_properties(results)
     return device._handle_properties(results)
+
+
+def apply_device_property_response_plan(
+    device: "DreameMowerDevice",
+    results: object,
+    *,
+    require_fresh_state: bool,
+) -> Generator["DevicePlanEffect", Any, bool]:
+    """Apply the same validated response through the caller's transport driver.
+
+    The driver owns the state lock for each step, releasing it across I/O.
+    """
+    _record_fresh_property_evidence(
+        device, results, require_fresh_state=require_fresh_state
+    )
+    return (yield from device._handle_properties_plan(results))
+
+
+def _record_fresh_property_evidence(
+    device: "DreameMowerDevice",
+    results: object,
+    *,
+    require_fresh_state: bool,
+) -> None:
+    """Record validated decision evidence while the caller owns the state lock."""
+    if require_fresh_state:
+        evidence = require_fresh_task_properties(results, device.property_mapping)
+        observed_at = time.time()
+        device._fresh_task_state = {
+            **copy.deepcopy(evidence),
+            "received_at": observed_at,
+        }
+        heartbeat = evidence.get("heartbeat")
+        if heartbeat is not None:
+            device.realtime_properties[MOWER_RAW_STATUS_PROPERTY_KEY] = {
+                **copy.deepcopy(heartbeat),
+                "received_at": observed_at,
+                "last_seen": observed_at,
+            }
 
 
 def _successful_row(rows):

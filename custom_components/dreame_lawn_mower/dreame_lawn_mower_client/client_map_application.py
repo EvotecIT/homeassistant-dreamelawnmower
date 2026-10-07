@@ -44,6 +44,7 @@ class NativeMapApplication:
         manager: DreameMapMowerMapManager,
         *,
         deadline: float,
+        require_device: Callable[[DreameMowerDevice], None] | None = None,
     ) -> None:
         if not math.isfinite(deadline):
             raise ValueError("Map application deadline must be finite")
@@ -51,8 +52,11 @@ class NativeMapApplication:
         self.protocol = device._protocol
         self.cloud_protocol = device._protocol.cloud
         self.deadline = deadline
+        self._require_device = require_device
 
     def require_owner(self, device: DreameMowerDevice) -> None:
+        if self._require_device is not None:
+            self._require_device(device)
         if (
             device is not self.device
             or device._map_manager is not self.manager

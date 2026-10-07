@@ -11,10 +11,11 @@ from datetime import datetime
 from random import randrange
 from threading import RLock, Timer
 from typing import Any, Optional
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 
 from .app_protocol import mower_realtime_property_name
 from .device_privacy import AI_POLICY_PROPERTY, decode_ai_policy_acceptance
+from .device_action_plan import DevicePlanEffect, run_device_plan
 from .device_code_semantics import (
     MowerDeviceCodeTier,
     mower_device_code_definition,
@@ -214,6 +215,8 @@ class DreameMowerDevice(
         self._property_update_callback = {}
         self._update_timer: Timer = None  # Update schedule timer
         self._native_update_scheduler: Callable[[Any, float, bool], None] | None = None
+        self._mqtt_generation = 0
+        self._native_message_receiver: Callable[[dict[str, Any]], None] | None = None
         # Used for requesting consumable properties after reset action otherwise they will only requested when cleaning completed
         self._consumable_change: bool = False
         self._remote_control: bool = False
@@ -704,10 +707,25 @@ class DreameMowerDevice(
         self._finish_update()
 
     def _finish_update(self) -> None:
+        run_device_plan(self, self._finish_update_plan())
+
+    def _finish_update_plan(self) -> Generator[DevicePlanEffect, Any, None]:
         """Reconcile expired optimistic changes and update map polling state."""
+        pending = getattr(self, "_pending_property_callbacks", [])
+        self._pending_property_callbacks = []
+        if pending:
+            yield from self._deliver_property_callbacks_plan(pending)
+            self._property_changed()
+            self.schedule_update(1, True)
         if self._dirty_data:
-            for k, v in copy.deepcopy(self._dirty_data).items():
+            for k, v in list(self._dirty_data.items()):
+                if self._dirty_data.get(k) is not v:
+                    continue
                 if time.time() - v.update_time >= self._restore_timeout:
+                    # Retire this attempt before callbacks can suspend or issue
+                    # another write. Neither cancellation nor a later iteration
+                    # may replay it or remove the replacement dirty record.
+                    del self._dirty_data[k]
                     if v.previous_value is not None:
                         value = self.data.get(k)
                         if value is None or v.value == value:
@@ -719,12 +737,13 @@ class DreameMowerDevice(
                             )
                             self.data[k] = v.previous_value
                             if k in self._property_update_callback:
-                                for callback in self._property_update_callback[k]:
-                                    callback(v.previous_value)
+                                yield from self._deliver_property_callbacks_plan([
+                                    (callback, v.previous_value)
+                                    for callback in self._property_update_callback[k]
+                                ])
 
                             self._property_changed()
                             self.schedule_update(1, True)
-                    del self._dirty_data[k]
 
         if self._dirty_auto_switch_data:
             for k, v in copy.deepcopy(self._dirty_auto_switch_data).items():

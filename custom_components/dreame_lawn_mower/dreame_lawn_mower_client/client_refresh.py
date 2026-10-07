@@ -5,13 +5,14 @@ from __future__ import annotations
 import asyncio
 import math
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from threading import Event, Lock
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .client_startup import async_start_device
+from .device_action_plan import DevicePlanEffect
 from .device_property_read import (
-    apply_device_property_response,
+    apply_device_property_response_plan,
     build_device_property_request,
 )
 from .device_types import DreameMowerProperty
@@ -67,7 +68,9 @@ async def _run_state_worker[T](operation: Callable[[], T], cancelled: Event) -> 
 
 
 async def async_update_device(
-    client: DreameLawnMowerClient, *, force_request_properties: bool = False,
+    client: DreameLawnMowerClient,
+    *,
+    force_request_properties: bool = False,
     deadline: float | None = None,
     _cleanup: OwnedCleanup | None = None,
 ) -> DreameMowerDevice:
@@ -92,8 +95,11 @@ async def async_update_device(
 
     def prepare() -> tuple[DreameMowerDevice, list[DreameMowerProperty] | None]:
         ensure_active()
-        device = (_cleanup.device if _cleanup is not None else
-                  client._ensure_device(deadline=deadline, cancelled=cancelled))
+        device = (
+            _cleanup.device
+            if _cleanup is not None
+            else client._ensure_device(deadline=deadline, cancelled=cancelled)
+        )
         if device._update_running:
             if force_request_properties:
                 raise DeviceUpdateFailedException(
@@ -110,8 +116,11 @@ async def async_update_device(
     def select_properties(device: DreameMowerDevice) -> list[DreameMowerProperty]:
         ensure_active()
         properties = device._select_update_properties()
-        if (force_request_properties or not device._protocol.dreame_cloud
-                or not device.device_connected):
+        if (
+            force_request_properties
+            or not device._protocol.dreame_cloud
+            or not device.device_connected
+        ):
             return properties
         if device.status.map_backup_status:
             return [DreameMowerProperty.MAP_BACKUP_STATUS]
@@ -133,17 +142,23 @@ async def async_update_device(
                     not device.cloud_connected or not device._ready
                 ):
                     await async_start_device(
-                        client, device, cloud, deadline=rpc_deadline,
+                        client,
+                        device,
+                        cloud,
+                        deadline=rpc_deadline,
                         cancelled=cancelled,
                     )
                     properties = await _run_state_worker(
-                        lambda: select_properties(device), cancelled,
+                        lambda: select_properties(device),
+                        cancelled,
                     )
                 protocol = device._protocol.cloud
                 results: object = None
                 if properties:
                     requests = build_device_property_request(
-                        properties, device.property_mapping, device.data,
+                        properties,
+                        device.property_mapping,
+                        device.data,
                         ready=device._ready,
                         require_fresh_state=force_request_properties,
                     )
@@ -152,39 +167,43 @@ async def async_update_device(
                             deadline=rpc_deadline,
                         ) as request_id:
                             results = await cloud.async_read_device_properties(
-                                client._descriptor.did, protocol._host,
-                                request_id, requests, deadline=rpc_deadline,
+                                client._descriptor.did,
+                                protocol._host,
+                                request_id,
+                                requests,
+                                deadline=rpc_deadline,
                             )
 
-                def apply() -> None:
-                    # Acquire on this worker: callbacks can re-enter legacy RPC.
-                    lock = protocol._operation_lock()
-                    remaining = rpc_deadline - time.monotonic()
-                    if remaining <= 0 or not lock.acquire(timeout=remaining):
+                from .client_device_actions import async_run_device_plan
+
+                def require_current(current: DreameMowerDevice) -> None:
+                    ensure_active()
+                    if current is not device:
                         raise DreameLawnMowerConnectionError(
-                            "Device refresh timed out waiting to apply state"
+                            "Device changed during refresh"
                         )
-                    try:
-                        ensure_active()
-                        if client._device is not device:
-                            raise DreameLawnMowerConnectionError(
-                                "Device changed during refresh"
-                            )
-                        if properties:
-                            try:
-                                apply_device_property_response(
-                                    device, results,
-                                    require_fresh_state=force_request_properties,
-                                )
-                            except Exception as err:
-                                # Match device.update's request/application
-                                # boundary; cancellation remains a BaseException.
-                                raise DeviceUpdateFailedException(err) from None
-                        device._finish_update()
-                    finally:
-                        lock.release()
 
-                await _run_state_worker(apply, cancelled)
+                def apply(
+                    current: DreameMowerDevice,
+                ) -> Generator[DevicePlanEffect, Any]:
+                    if properties:
+                        try:
+                            yield from apply_device_property_response_plan(
+                                current,
+                                results,
+                                require_fresh_state=force_request_properties,
+                            )
+                        except Exception as err:
+                            raise DeviceUpdateFailedException(err) from None
+                    yield from current._finish_update_plan()
+
+                await async_run_device_plan(
+                    client,
+                    apply,
+                    deadline=rpc_deadline,
+                    _cleanup=_cleanup,
+                    require_device=require_current,
+                )
                 ensure_active()
                 return device
             except DeviceException as err:

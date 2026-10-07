@@ -1384,16 +1384,32 @@ class _DreameMowerDeviceCommandMixin:
             return result
 
     def set_auto_switch_settings(self, settings) -> dict[str, Any] | None:
+        from .device_action_plan import run_device_plan
+
+        return run_device_plan(self, self._set_auto_switch_settings_plan(settings))
+
+    def _set_auto_switch_settings_plan(
+        self, settings: Any,
+    ) -> Generator[PropertyRequest, Any, Any]:
+        from .device_action_plan import PropertyRequest
+
         if self.capability.auto_switch_settings:
             mapping = self.property_mapping[DreameMowerProperty.AUTO_SWITCH_SETTINGS]
-            return self._protocol.set_property(
+            return (yield PropertyRequest(
                 mapping["siid"],
                 mapping["piid"],
                 str(json.dumps(settings, separators=(",", ":"))).replace(" ", ""),
-                1,
-            )
+                legacy_retry_count=1,
+            ))
 
     def set_auto_switch_property(self, prop: DreameMowerAutoSwitchProperty, value: int) -> dict[str, Any] | None:
+        from .device_action_plan import run_device_plan
+
+        return run_device_plan(self, self._set_auto_switch_property_plan(prop, value))
+
+    def _set_auto_switch_property_plan(
+        self, prop: DreameMowerAutoSwitchProperty, value: int,
+    ) -> Generator[PropertyRequest, Any, Any]:
         if self.capability.auto_switch_settings:
             if prop.name not in self.auto_switch_data:
                 raise InvalidActionException("Not supported")
@@ -1402,8 +1418,9 @@ class _DreameMowerDeviceCommandMixin:
                 self._dirty_auto_switch_data[prop.name] = DirtyData(value, current_value, time.time())
                 self.auto_switch_data[prop.name] = value
                 self._property_changed()
+                result = None
                 try:
-                    result = self.set_auto_switch_settings({"k": prop.value, "v": int(value)})
+                    result = yield from self._set_auto_switch_settings_plan({"k": prop.value, "v": int(value)})
                     if result is None or result[0]["code"] != 0:
                         _LOGGER.error(
                             "Auto Switch Property not updated: %s: %s -> %s",
@@ -1419,7 +1436,7 @@ class _DreameMowerDeviceCommandMixin:
                         _LOGGER.info("Update Property: %s: %s -> %s", prop.name, current_value, value)
                         if prop.name in self._dirty_auto_switch_data:
                             self._dirty_auto_switch_data[prop.name].update_time = time.time()
-                except:
+                except Exception:
                     if prop.name in self._dirty_auto_switch_data:
                         del self._dirty_auto_switch_data[prop.name]
                     self.auto_switch_data[prop.name] = current_value

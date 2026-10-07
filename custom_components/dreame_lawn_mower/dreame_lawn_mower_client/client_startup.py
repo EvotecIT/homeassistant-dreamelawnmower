@@ -29,9 +29,12 @@ async def async_start_device(
     from .client_map_maintenance import NativeMapLists
     from .client_map_poll import NativeMapPolling
     from .client_mqtt_auth import NativeMqttAuthentication
+    from .client_mqtt_messages import NativeMqttMessages
     from .client_refresh import _run_state_worker
 
     mqtt_protocol = device._protocol.cloud
+    if device._native_message_receiver is None:
+        device._native_message_receiver = NativeMqttMessages(client, device).request
     manager = device._map_manager
     if manager is not None and manager._native_update_request is None:
         manager._native_update_request = NativeMapPolling(client, device).request

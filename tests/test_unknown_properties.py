@@ -23,6 +23,7 @@ def _device_stub() -> tuple[DreameMowerDevice, list[str]]:
     device.realtime_properties = {}
     device.last_realtime_message = None
     device._state_lock = RLock()
+    device._native_message_receiver = None
     device._dirty_data = {}
     device._property_update_callback = {}
     device._ready = True
@@ -34,6 +35,43 @@ def _device_stub() -> tuple[DreameMowerDevice, list[str]]:
     device.status = SimpleNamespace()
     device._property_changed = lambda: updates.append("changed")
     return device, updates
+
+
+@pytest.mark.parametrize("planned", [False, True])
+def test_message_map_application_precedes_known_property_notification(planned):
+    device, _ = _device_stub()
+    events = []
+    battery = DreameMowerProperty.BATTERY_LEVEL
+    device._map_manager = SimpleNamespace(
+        handle_properties=lambda params: events.append(
+            ("map", device.data.get(battery.value))
+        ),
+    )
+    device._property_changed = lambda: events.append(
+        ("changed", device.data.get(battery.value))
+    )
+    map_id = device.property_mapping[DreameMowerProperty.MAP_DATA]
+    battery_id = device.property_mapping[battery]
+    message = {
+        "method": "properties_changed",
+        "params": [
+            {"siid": map_id["siid"], "piid": map_id["piid"], "value": "frame"},
+            {"siid": battery_id["siid"], "piid": battery_id["piid"], "value": 80},
+        ],
+    }
+    if planned:
+        with device._state_lock:
+            plan = device._message_plan(message)
+            params = next(plan).properties
+            assert len(params) == 1
+            assert params[0]["value"] == "frame"
+            assert battery.value not in device.data
+            device._map_manager.handle_properties(params)
+            with pytest.raises(StopIteration):
+                next(plan)
+    else:
+        device._message_callback(message)
+    assert events == [("map", None), ("changed", 80)]
 
 
 def test_handle_properties_tolerates_unknown_property_ids() -> None:
@@ -209,9 +247,7 @@ def test_message_callback_publishes_external_realtime_property_changes(
 def test_message_callback_publishes_task_region_changes() -> None:
     device, updates = _device_stub()
     first_task = '{"d":{"exe":true,"region_id":[1],"status":true},"t":"TASK"}'
-    second_task = (
-        '{"d":{"exe":true,"region_id":[1,2],"status":true},"t":"TASK"}'
-    )
+    second_task = '{"d":{"exe":true,"region_id":[1,2],"status":true},"t":"TASK"}'
 
     for task in (first_task, second_task, second_task):
         DreameMowerDevice._message_callback(
@@ -271,10 +307,7 @@ def test_realtime_state_tracks_continuous_active_session_boundary() -> None:
             {"siid": 2, "piid": 1, "value": value},
             None,
         )
-        assert (
-            device.realtime_properties["2.1"]["active_session_started_at"]
-            == 100.0
-        )
+        assert device.realtime_properties["2.1"]["active_session_started_at"] == 100.0
 
     device.last_realtime_message = {"received_at": 105.0}
     DreameMowerDevice._remember_realtime_property(
@@ -290,9 +323,7 @@ def test_realtime_state_tracks_continuous_active_session_boundary() -> None:
         {"siid": 2, "piid": 1, "value": 3},
         None,
     )
-    assert (
-        device.realtime_properties["2.1"]["active_session_started_at"] == 106.0
-    )
+    assert device.realtime_properties["2.1"]["active_session_started_at"] == 106.0
 
 
 def test_viax_error_pause_remains_in_the_active_session() -> None:
@@ -306,10 +337,7 @@ def test_viax_error_pause_remains_in_the_active_session() -> None:
             {"siid": 2, "piid": 1, "value": value},
             None,
         )
-        assert (
-            device.realtime_properties["2.1"]["active_session_started_at"]
-            == 100.0
-        )
+        assert device.realtime_properties["2.1"]["active_session_started_at"] == 100.0
 
 
 def test_reconnect_starts_a_new_realtime_ordering_epoch() -> None:
@@ -342,9 +370,7 @@ def test_reconnect_starts_a_new_realtime_ordering_epoch() -> None:
         {"siid": 2, "piid": 1, "value": 1},
         None,
     )
-    assert (
-        device.realtime_properties["2.1"]["active_session_started_at"] == 200.0
-    )
+    assert device.realtime_properties["2.1"]["active_session_started_at"] == 200.0
 
 
 @pytest.mark.parametrize("piid", [51, 52])
@@ -421,19 +447,17 @@ def test_message_callback_does_not_publish_unmapped_diagnostic_changes() -> None
 
 def test_message_callback_applies_known_and_realtime_state_under_one_lock() -> None:
     device, _updates = _device_stub()
-    original_handle_properties = device._handle_properties
+    original_handle_properties = device._handle_properties_plan
     lock_owned_during_update = False
 
-    def handle_properties(
-        properties: list[dict[str, object]], *, notify: bool = True
-    ) -> bool:
+    def handle_properties(properties: list[dict[str, object]], *, notify: bool = True):
         nonlocal lock_owned_during_update
         lock_owned_during_update = device._state_lock._is_owned()
         assert "2.1" in device.realtime_properties
         assert "2.2" in device.realtime_properties
-        return original_handle_properties(properties, notify=notify)
+        return (yield from original_handle_properties(properties, notify=notify))
 
-    device._handle_properties = handle_properties
+    device._handle_properties_plan = handle_properties
 
     DreameMowerDevice._message_callback(
         device,

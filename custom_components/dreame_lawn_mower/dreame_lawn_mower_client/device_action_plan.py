@@ -5,7 +5,7 @@ import logging
 import time
 from collections.abc import Generator
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from .device_types import ACTION_AVAILABILITY, DreameMowerAction, DreameMowerProperty
 from .exceptions import (
@@ -15,6 +15,9 @@ from .exceptions import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from .map_manager import DreameMapMowerMapManager
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,35 @@ class PropertyRequest:
     siid: int
     piid: int
     value: Any
+    # Preserve explicit legacy transport policy; native commands never replay.
+    legacy_retry_count: int | None = None
+
+@dataclass(frozen=True)
+class PropertyReadRequest:
+    """A selected property read whose response is applied by its state plan."""
+    properties: list[dict[str, int | str]]
+    deadline: float | None = None
+
+@dataclass(frozen=True)
+class PropertyResponse:
+    """Apply read results using the driver's callback and locking contract."""
+    results: object
+    require_fresh_state: bool = False
+
+@dataclass(frozen=True)
+class MapProperties:
+    """Deliver MQTT map properties before applying the message's device state."""
+    manager: DreameMapMowerMapManager
+    properties: list[dict[str, Any]]
+
+@dataclass(frozen=True)
+class DeviceReconnect:
+    """Reinitialize the same device through the transport's startup owner."""
+
+type DevicePlanEffect = (
+    ActionDelay | ActionRequest | PropertyRequest | PropertyReadRequest
+    | PropertyResponse | MapProperties | DeviceReconnect
+)
 
 
 def device_action_plan(
@@ -177,8 +209,7 @@ def run_device_action(
 
 
 def run_device_plan[Result](
-    device: Any,
-    plan: Generator[ActionDelay | ActionRequest | PropertyRequest, Any, Result],
+    device: Any, plan: Generator[DevicePlanEffect, Any, Result],
 ) -> Result:
     """Execute state policy with legacy sleeps and RPC calls."""
     try:
@@ -188,9 +219,30 @@ def run_device_plan[Result](
                 if isinstance(effect, ActionDelay):
                     time.sleep(effect.seconds)
                     response = None
+                elif isinstance(effect, DeviceReconnect):
+                    response = device.connect_device()
+                elif isinstance(effect, MapProperties):
+                    effect.manager.handle_properties(effect.properties)
+                    response = None
+                elif isinstance(effect, PropertyResponse):
+                    from .device_property_read import apply_device_property_response
+
+                    response = apply_device_property_response(
+                        device, effect.results,
+                        require_fresh_state=effect.require_fresh_state,
+                    )
+                elif isinstance(effect, PropertyReadRequest):
+                    response = (
+                        device._protocol.get_properties(effect.properties)
+                        if effect.deadline is None else device._protocol.get_properties(
+                            effect.properties, deadline=effect.deadline,
+                        )
+                    )
                 elif isinstance(effect, PropertyRequest):
                     response = device._protocol.set_property(
                         effect.siid, effect.piid, effect.value,
+                        **({"retry_count": effect.legacy_retry_count}
+                           if effect.legacy_retry_count is not None else {}),
                     )
                 else:
                     response = device._protocol.action(
