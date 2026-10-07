@@ -14,7 +14,7 @@ from .device_types import PIID, DreameMowerProperty
 class MapUpdateRequest:
     """Follow-up selected by frame application, before performing network I/O."""
 
-    kind: Literal["base", "full", "missing", "next", "list", "changed"]
+    kind: Literal["base", "full", "missing", "next", "list", "changed", "new"]
     map_id: int | None = None
     frame_id: int | None = None
 

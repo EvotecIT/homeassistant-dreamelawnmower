@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from .map_frame_request import MapUpdateRequest, map_frame_parameters
+from .map_poll_request import MapPollRequest
 import io
 import math
 import time
@@ -168,6 +169,7 @@ class DreameMapMowerMapManager:
         self._disconnected: bool = False
         self._native_list_request: Callable[[bool], None] | None = None
         self._native_missing_frame_request: Callable[[], None] | None = None
+        self._native_update_request: Callable[[], None] | None = None
         self._ready: bool = False
         self._connected: bool = True
         self._vslam_map: bool = False
@@ -689,10 +691,23 @@ class DreameMapMowerMapManager:
         return partial_map
 
     def _add_cloud_map_data(self, partial_map_data, object_name, object_name_timestamp):
+        self._run_map_update_plan(self._add_cloud_map_prefix_plan(partial_map_data, object_name))
+
+        if object_name is not None:
+            _LOGGER.info("New object name received: %s", object_name)
+            response, key = self._get_object_file_data(object_name, object_name_timestamp)
+            if response:
+                partial_map = self._decode_map_partial(response.decode(), object_name_timestamp, key)
+                return self._run_map_update_plan(self._add_object_map_plan(partial_map))
+
+    def _add_cloud_map_prefix_plan(
+        self, partial_map_data: list[MapDataPartial] | None, object_name: str | None,
+    ) -> Generator[MapUpdateRequest, None, None]:
+        """Apply queued/cloud frames before selecting object-download recovery."""
         if partial_map_data:
             for partial_map in partial_map_data:
                 if partial_map.frame_type == MapFrameType.I.value:
-                    self._add_map_data(partial_map)
+                    (yield from self._add_map_data_plan(partial_map))
                 else:
                     self._queue_partial_map(partial_map)
 
@@ -701,41 +716,39 @@ class DreameMapMowerMapManager:
             next_frame_id = self._current_frame_id + 1
 
         if (
-            not self._add_map_data(self._unqueue_partial_map(self._latest_map_id, next_frame_id))
+            not (yield from self._add_map_data_plan(self._unqueue_partial_map(self._latest_map_id, next_frame_id)))
             and object_name is None
         ):
             self._delete_invalid_partial_maps()
             tmpLen = self._partial_map_queue_size()
             if tmpLen > 8:
                 if self._protocol.dreame_cloud:
-                    self._request_map()
+                    yield MapUpdateRequest("full")
                 else:
-                    self.request_new_map()
+                    yield MapUpdateRequest("new")
             elif tmpLen > 4:
-                self._request_missing_p_map()
+                yield MapUpdateRequest("missing")
             elif tmpLen > 0 and partial_map_data and len(partial_map_data) > 0:
-                self._request_next_p_map(self._latest_map_id, next_frame_id)
+                yield MapUpdateRequest("next", self._latest_map_id, next_frame_id)
 
-        if object_name is not None:
-            _LOGGER.info("New object name received: %s", object_name)
-            response, key = self._get_object_file_data(object_name, object_name_timestamp)
-            if response:
-                partial_map = self._decode_map_partial(response.decode(), object_name_timestamp, key)
-                if partial_map:
-                    if self._map_data is None or partial_map.frame_type == MapFrameType.I.value:
-                        return self._add_map_data(partial_map)
+    def _add_object_map_plan(
+        self, partial_map: MapDataPartial | None,
+    ) -> Generator[MapUpdateRequest, None, bool | None]:
+        """Reconcile a downloaded cloud object with the existing frame queue."""
+        if partial_map is None:
+            return None
+        if self._map_data is None or partial_map.frame_type == MapFrameType.I.value:
+            return (yield from self._add_map_data_plan(partial_map))
 
-                    self._queue_partial_map(partial_map)
-                    next_partial_map = self._unqueue_next_partial_map()
-                    if next_partial_map:
-                        self._add_map_data(next_partial_map)
-                    else:
-                        self._delete_invalid_partial_maps()
-                        if self._partial_map_queue_size() > 8:
-                            if self._protocol.dreame_cloud:
-                                self._request_map()
-                            else:
-                                self.request_new_map()
+        self._queue_partial_map(partial_map)
+        next_partial_map = self._unqueue_next_partial_map()
+        if next_partial_map:
+            yield from self._add_map_data_plan(next_partial_map)
+        else:
+            self._delete_invalid_partial_maps()
+            if self._partial_map_queue_size() > 8:
+                yield MapUpdateRequest("full" if self._protocol.dreame_cloud else "new")
+        return None
 
     def _add_map_data_file(self, object_name: str, timestamp) -> None:
         response, key = self._get_object_file_data(object_name, timestamp)
@@ -751,6 +764,8 @@ class DreameMapMowerMapManager:
             self._request_i_map()
         elif request.kind == "full":
             self._request_map()
+        elif request.kind == "new":
+            self.request_new_map()
         elif request.kind == "missing":
             self._request_missing_p_map()
         elif request.kind == "next":
@@ -1102,9 +1117,16 @@ class DreameMapMowerMapManager:
                     recovery_map_data.map_index = index
                     index = index + 1
 
-    def handle_properties(self, properties):
+    def handle_properties(self, properties: list[dict[str, Any]]) -> None:
+        prepared = self._prepare_map_properties(properties)
+        if prepared is not None:
+            self._add_cloud_map_data(*prepared)
+
+    def _prepare_map_properties(
+        self, properties: list[dict[str, Any]],
+    ) -> tuple[list[MapDataPartial] | None, str | None, int] | None:
         if not self._ready:
-            return
+            return None
 
         has_map = False
         object_name = None
@@ -1144,8 +1166,12 @@ class DreameMapMowerMapManager:
             timestamp = int(time.time() * 1000)
 
             if raw_map_data:
-                partial_map_data = [self._decode_map_partial(raw_map_data, timestamp)]
-            self._add_cloud_map_data(partial_map_data, object_name, timestamp)
+                partial = self._decode_map_partial(raw_map_data, timestamp)
+                if partial is not None:
+                    partial_map_data = [partial]
+            if partial_map_data or object_name:
+                return partial_map_data, object_name, timestamp
+        return None
 
     def get_map(self, map_index: int = 0) -> MapData | None:
         if map_index:
@@ -1303,6 +1329,47 @@ class DreameMapMowerMapManager:
             self._update_timer.start()
 
     def update(self) -> None:
+        if self._native_update_request is not None:
+            self._native_update_request()
+            return
+        plan = self._update_plan()
+        response = None
+        error = None
+        try:
+            while True:
+                try:
+                    request = plan.throw(error) if error is not None else plan.send(response)
+                except StopIteration:
+                    return
+                try:
+                    response = self._dispatch_poll_request(request)
+                    error = None
+                except Exception as ex:
+                    error = ex
+        finally:
+            plan.close()
+
+    def _dispatch_poll_request(self, request: MapPollRequest) -> Any:
+        if request.kind == "list":
+            return self.request_map_list()
+        if request.kind == "recovery":
+            return self.request_recovery_map_list()
+        if request.kind == "current":
+            return self._request_current_map(request.start_time)
+        if request.kind == "cloud":
+            return self._request_map_from_cloud()
+        if request.kind == "delay":
+            return sleep(1)
+        if request.kind == "full":
+            return self._request_map()
+        if request.kind == "changed":
+            return self._map_data_changed()
+        result = self._protocol.cloud.get_properties(DIID(DreameMowerProperty.OBJECT_NAME))
+        if result and MAP_PARAMETER_VALUE in result[0]:
+            return self._add_cloud_map_data(None, result[0][MAP_PARAMETER_VALUE], result[0].get("updateDate"))
+        return None
+
+    def _update_plan(self) -> Generator[MapPollRequest, Any, None]:
         if self._update_running:
             return
 
@@ -1313,10 +1380,10 @@ class DreameMapMowerMapManager:
             if (self._map_list_object_name and self._need_map_list_request is None) or (
                 self._need_map_list_request and not self._device_running
             ):
-                self.request_map_list()
+                yield MapPollRequest("list")
 
             if self._recovery_map_list_object_name and self._need_recovery_map_list_request:
-                self.request_recovery_map_list()
+                yield MapPollRequest("recovery")
 
             if self._map_request_time is not None or self._need_map_request:
                 self._updated_frame_id = None
@@ -1325,39 +1392,43 @@ class DreameMapMowerMapManager:
                     self._map_request_time = None
                     self._need_map_request = False
                 elif (
-                    not self._request_current_map(self._map_request_time)
+                    not (yield MapPollRequest("current", self._map_request_time))
                     and self._protocol.dreame_cloud
                     and self._map_request_count == 2
                     and self._map_data is None
                 ):
-                    object_name_result = self._protocol.cloud.get_properties(DIID(DreameMowerProperty.OBJECT_NAME))
-                    if object_name_result and MAP_PARAMETER_VALUE in object_name_result[0]:
-                        self._add_cloud_map_data(
-                            None, object_name_result[0][MAP_PARAMETER_VALUE], object_name_result[0].get("updateDate")
-                        )
+                    yield MapPollRequest("object")
             elif not self._protocol.dreame_cloud:
                 if self._map_data is None or (
                     self._device_running
-                    and (time.time() - (self._current_timestamp_ms / 1000.0) > 15 or self._map_data.empty_map)
+                    and (
+                        self._current_timestamp_ms is None
+                        or time.time() - (self._current_timestamp_ms / 1000.0) > 15
+                        or self._map_data.empty_map
+                    )
                 ):
                     self._updated_frame_id = None
-                    if self._map_data and not self._map_data.empty_map:
+                    if (
+                        self._map_data
+                        and not self._map_data.empty_map
+                        and self._current_timestamp_ms is not None
+                    ):
                         _LOGGER.info(
                             "Need map request: %.2f",
                             time.time() - (self._current_timestamp_ms / 1000.0),
                         )
                     if self._protocol.cloud.logged_in:
-                        self._request_current_map()
-                elif not self._request_map_from_cloud() and self._device_running:
+                        yield MapPollRequest("current")
+                elif not (yield MapPollRequest("cloud")) and self._device_running:
                     _LOGGER.debug("No new map data received, retrying")
-                    sleep(1)
-                    if not self._request_map_from_cloud():
+                    yield MapPollRequest("delay")
+                    if not (yield MapPollRequest("cloud")):
                         self.schedule_update(1)
                         _LOGGER.debug("No new map data received on second try")
             elif self._protocol.cloud.connected:
                 if not self._connected:
                     self._connected = True
-                    self._map_data_changed()
+                    yield MapPollRequest("changed")
 
                 if self._map_data is None or (
                     self._device_running
@@ -1371,16 +1442,16 @@ class DreameMapMowerMapManager:
                             "Need map request: %.2f",
                             time.time() - (self._map_data.last_updated),
                         )
-                        self._request_map()
+                        yield MapPollRequest("full")
                     else:
-                        self._request_current_map()
+                        yield MapPollRequest("current")
             elif self._connected:
                 self._connected = False
-                self._map_data_changed()
+                yield MapPollRequest("changed")
 
             if not self._available and self._connected:
                 self._available = True
-                self._map_data_changed()
+                yield MapPollRequest("changed")
         except Exception as ex:
             if self._available:
                 _LOGGER.warning("Map update Failed: %s", type(ex).__name__)
@@ -1388,8 +1459,9 @@ class DreameMapMowerMapManager:
                 if self._error_callback:
                     self._error_callback(DeviceUpdateFailedException(ex))
 
-        self._ready = True
-        self._update_running = False
+        finally:
+            self._ready = True
+            self._update_running = False
 
     def set_aes_iv(self, aes_iv: str) -> None:
         if aes_iv:

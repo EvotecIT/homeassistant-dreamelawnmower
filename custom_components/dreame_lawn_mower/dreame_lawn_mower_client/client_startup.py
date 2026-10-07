@@ -27,11 +27,14 @@ async def async_start_device(
     """Reuse native login and metadata before starting the existing MQTT owner."""
     from .client_map_frames import NativeMissingMapFrames
     from .client_map_maintenance import NativeMapLists
+    from .client_map_poll import NativeMapPolling
     from .client_mqtt_auth import NativeMqttAuthentication
     from .client_refresh import _run_state_worker
 
     mqtt_protocol = device._protocol.cloud
     manager = device._map_manager
+    if manager is not None and manager._native_update_request is None:
+        manager._native_update_request = NativeMapPolling(client, device).request
     if manager is not None and manager._native_list_request is None:
         manager._native_list_request = NativeMapLists(client, device).request
     if manager is not None and manager._native_missing_frame_request is None:

@@ -254,3 +254,18 @@ def test_queued_frames_notify_before_applying_the_next_frame(monkeypatch, planne
     else:
         assert manager._add_map_data(partial(2)) is True
         assert notified == [2, 3]
+
+
+def test_handle_properties_ignores_undecodable_frame_without_losing_object():
+    manager = DreameMapMowerMapManager(_DummyProtocol())
+    manager._ready = True
+    manager.handle_properties([{"piid": 1, "value": "x"}])
+    assert manager._map_data is None
+    prepared = manager._prepare_map_properties([
+        {"piid": 1, "value": "x"}, {"piid": 3, "value": "valid-object"},
+    ])
+    assert prepared is not None
+    partials, name, timestamp = prepared
+    assert partials is None
+    assert name == "valid-object"
+    assert isinstance(timestamp, int)
