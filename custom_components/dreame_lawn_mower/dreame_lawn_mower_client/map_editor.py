@@ -249,8 +249,9 @@ class DreameMapMowerMapEditor:
     def reset_map(self) -> None:
         map_data = self._map_data
         if map_data is not None:
-            map_data.dimensions.width = 0
-            map_data.dimensions.height = 0
+            if map_data.dimensions is not None:
+                map_data.dimensions.width = 0
+                map_data.dimensions.height = 0
             map_data.segments = {}
             map_data.floor_material = None
             map_data.hidden_segments = None
@@ -258,7 +259,9 @@ class DreameMapMowerMapEditor:
             map_data.obstacles = None
             map_data.empty_map = True
             map_data.saved_map_status = 0
-            self._set_updated_frame_id(map_data.frame_id + 1)
+            self._set_updated_frame_id(
+                map_data.frame_id + 1 if map_data.frame_id is not None else None
+            )
             self.refresh_map()
 
     def set_rotation(self, map_id: int, rotation: int) -> None:
