@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
@@ -17,21 +19,42 @@ from .dreame_lawn_mower_client.xp2p_config import (
     DreameLawnMowerXp2pDeviceConfig,
     resolve_xp2p_device_config,
 )
+from .video_cache_storage import async_save_video_cache
 
 _STORAGE_VERSION = 1
 PROVISIONING_CACHE_SOURCE = "video_provisioning_cache"
+
+
+def _cache_store(hass: HomeAssistant, entry_id: str) -> Store[dict[str, Any]]:
+    """Use the same entry-scoped key for loading and removal."""
+    return Store[dict[str, Any]](
+        hass,
+        _STORAGE_VERSION,
+        f"{DOMAIN}.video_provisioning.{entry_id}",
+        private=True,
+    )
+
+
+async def async_remove_video_provisioning_cache(
+    hass: HomeAssistant, entry: ConfigEntry,
+) -> None:
+    """Remove persisted data even if this entry never loaded successfully."""
+    owner = getattr(
+        hass.data.get(DOMAIN, {}).get(entry.entry_id), "video_provisioning_cache", None,
+    )
+    if isinstance(owner, DreameLawnMowerVideoProvisioningCache):
+        await owner.async_remove()
+    else:
+        await _cache_store(hass, entry.entry_id).async_remove()
 
 
 class DreameLawnMowerVideoProvisioningCache:
     """Persist the minimum private XP2P material for one exact mower."""
 
     def __init__(self, hass: HomeAssistant, *, entry_id: str, did: str) -> None:
-        self._store = Store[dict[str, Any]](
-            hass,
-            _STORAGE_VERSION,
-            f"{DOMAIN}.video_provisioning.{entry_id}",
-            private=True,
-        )
+        self._store = _cache_store(hass, entry_id)
+        self._write_lock = asyncio.Lock()
+        self._removed = False
         self._did = did
         self.loaded = False
         self.inputs: DreameLawnMowerCameraStreamRuntimeInputs | None = None
@@ -40,6 +63,21 @@ class DreameLawnMowerVideoProvisioningCache:
             DreameLawnMowerCameraStreamRuntimeInputs,
             DreameLawnMowerXp2pDeviceConfig,
         ] | None = None
+
+    async def async_close(self) -> None:
+        """Fence late writes and drain disk work while preserving reload data."""
+        self._removed = True
+        async with self._write_lock:
+            pass
+
+    async def async_remove(self) -> None:
+        """Fence late writes and remove data when the entry is deleted."""
+        self._removed = True
+        async with self._write_lock:
+            await self._store.async_remove()
+            self.inputs = None
+            self.device_config = None
+            self._runtime_input_config = None
 
     async def async_load(self) -> None:
         """Load complete provisioning only when it belongs to this mower."""
@@ -56,36 +94,39 @@ class DreameLawnMowerVideoProvisioningCache:
         device_config: DreameLawnMowerXp2pDeviceConfig,
     ) -> None:
         """Save only fields consumed by the native runtime, never cloud tokens."""
-        if inputs.did != self._did or not inputs.ready:
-            return
-        cached = _cached_inputs(inputs)
-        payload: dict[str, Any] = {
-            "did": self._did,
-            "inputs": {
-                "channel_id": cached.channel_id,
-                "product_id": cached.product_id,
-                "device_name": cached.device_name,
-                "p2p_info": cached.p2p_info,
-                "secret_id": cached.secret_id,
-                "secret_key": cached.secret_key,
-                "app_id": cached.app_id,
-                "app_secret": cached.app_secret,
-                "stream_channel": cached.stream_channel,
-                "live_command": cached.live_command,
-                "flv_path_template": cached.flv_path_template,
-            },
-            "device_config": {
-                "server": device_config.server,
-                "ip": device_config.ip,
-                "port": device_config.port,
-                "protocol_type": device_config.protocol_type,
-                "cross": device_config.cross,
-            },
-        }
-        await self._store.async_save(payload)
-        self._runtime_input_config = (inputs, device_config)
-        self.inputs = cached
-        self.device_config = device_config
+        async with self._write_lock:
+            if self._removed:
+                return
+            if inputs.did != self._did or not inputs.ready:
+                return
+            cached = _cached_inputs(inputs)
+            payload: dict[str, Any] = {
+                "did": self._did,
+                "inputs": {
+                    "channel_id": cached.channel_id,
+                    "product_id": cached.product_id,
+                    "device_name": cached.device_name,
+                    "p2p_info": cached.p2p_info,
+                    "secret_id": cached.secret_id,
+                    "secret_key": cached.secret_key,
+                    "app_id": cached.app_id,
+                    "app_secret": cached.app_secret,
+                    "stream_channel": cached.stream_channel,
+                    "live_command": cached.live_command,
+                    "flv_path_template": cached.flv_path_template,
+                },
+                "device_config": {
+                    "server": device_config.server,
+                    "ip": device_config.ip,
+                    "port": device_config.port,
+                    "protocol_type": device_config.protocol_type,
+                    "cross": device_config.cross,
+                },
+            }
+            await async_save_video_cache(self._store, payload)
+            self._runtime_input_config = (inputs, device_config)
+            self.inputs = cached
+            self.device_config = device_config
 
     async def async_clear(self) -> None:
         """Discard persisted and in-memory provisioning after failed playback."""

@@ -273,7 +273,11 @@ class DreameMowerMapDecoder:
         if len(raw_map) < 3:
             return None
 
-        raw_bytes = base64.decodebytes(raw_map.encode("utf8"))
+        try:
+            raw_bytes = base64.decodebytes(raw_map.encode("utf8"))
+        except ValueError:
+            _LOGGER.error("Map data encoding is invalid")
+            return None
 
         if key is not None:
             if iv is None:
@@ -343,7 +347,8 @@ class DreameMowerMapDecoder:
     def decode_saved_map(
         raw_map: str, vslam_map: bool, rotation: int = 0, iv: str | None = None
     ) -> MapData | None:
-        return DreameMowerMapDecoder.decode_map(raw_map, vslam_map, rotation, iv)[0]
+        decoded = DreameMowerMapDecoder.decode_map(raw_map, vslam_map, rotation, iv)
+        return decoded[0] if decoded is not None else None
 
     @staticmethod
     def decode_map_data_from_partial(
@@ -1237,8 +1242,7 @@ class DreameMowerMapDecoder:
 
             if "tpointinfo" in data_json:
                 map_data.task_cruise_points = {}
-                for point in data_json["tpointinfo"]:
-                    index = index + 1
+                for index, point in enumerate(data_json["tpointinfo"], start=1):
                     map_data.task_cruise_points[index] = Coordinate(
                         point[0],
                         point[1],

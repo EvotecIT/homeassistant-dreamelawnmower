@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
@@ -68,10 +69,13 @@ def test_provisioning_cache_save_omits_access_token_and_raw_cloud_payload() -> N
         saved: dict[str, object] = {}
 
         class _Store:
+            hass = SimpleNamespace(state=None)
             async def async_save(self, payload: dict[str, object]) -> None:
                 saved.update(payload)
 
         cache = object.__new__(DreameLawnMowerVideoProvisioningCache)
+        cache._write_lock = asyncio.Lock()
+        cache._removed = False
         cache._store = _Store()
         cache._did = "did-1"
         cache.inputs = None
@@ -108,6 +112,8 @@ def test_provisioning_cache_clear_removes_persisted_and_runtime_state() -> None:
                 removes += 1
 
         cache = object.__new__(DreameLawnMowerVideoProvisioningCache)
+        cache._write_lock = asyncio.Lock()
+        cache._removed = False
         cache._store = _Store()
         cache.inputs = object()
         cache.device_config = object()

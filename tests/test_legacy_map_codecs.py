@@ -637,3 +637,23 @@ def test_optional_integer_map_flags_do_not_coerce_vendor_values(value, expected)
     assert decoded.customized_cleaning == expected
     assert decoded.dos == expected
     assert decoded.router_position == Point(120, -60)
+
+
+@pytest.mark.parametrize("include_predefined", [False, True])
+def test_task_cruise_points_have_independent_ids(include_predefined: bool) -> None:
+    header = bytearray(map_decoder.DreameMowerMapDecoder.HEADER_SIZE)
+    header[4] = 73
+    metadata = {"tpointinfo": [[120, -60, 0, 2], [240, 80, 1, 3]]}
+    if include_predefined:
+        metadata["pointinfo"] = {"spoint": [[10, 20, 0, 1]]}
+    payload = base64.b64encode(
+        zlib.compress(bytes(header) + json.dumps(metadata).encode())
+    ).decode()
+
+    decoded, _ = map_decoder.DreameMowerMapDecoder.decode_map(payload, False)
+
+    assert decoded is not None
+    assert list(decoded.task_cruise_points) == [1, 2]
+    first, second = decoded.task_cruise_points.values()
+    assert (first.x, first.y, first.completed, first.type) == (120, -60, False, 2)
+    assert (second.x, second.y, second.completed, second.type) == (240, 80, True, 3)

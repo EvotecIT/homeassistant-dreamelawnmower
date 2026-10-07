@@ -253,8 +253,9 @@ class DreameMapMowerMapEditor:
     def reset_map(self) -> None:
         map_data = self._map_data
         if map_data is not None:
-            map_data.dimensions.width = 0
-            map_data.dimensions.height = 0
+            if map_data.dimensions is not None:
+                map_data.dimensions.width = 0
+                map_data.dimensions.height = 0
             map_data.segments = {}
             map_data.floor_material = None
             map_data.hidden_segments = None
@@ -262,7 +263,9 @@ class DreameMapMowerMapEditor:
             map_data.obstacles = None
             map_data.empty_map = True
             map_data.saved_map_status = 0
-            self._set_updated_frame_id(map_data.frame_id + 1)
+            self._set_updated_frame_id(
+                map_data.frame_id + 1 if map_data.frame_id is not None else None
+            )
             self.refresh_map()
 
     def set_rotation(self, map_id: int, rotation: int) -> None:
@@ -289,7 +292,9 @@ class DreameMapMowerMapEditor:
     def set_current_map(self, map_id: int) -> None:
         if map_id and map_id in self._saved_map_data:
             saved_map_data = copy.deepcopy(self._saved_map_data[map_id])
-            saved_map_data.docked = self._map_data.docked
+            current_map = self._map_data
+            if current_map is not None:
+                saved_map_data.docked = current_map.docked
             saved_map_data.timestamp_ms = self._current_timestamp_ms
             saved_map_data.frame_id = None
             saved_map_data.map_name = None
@@ -510,18 +515,18 @@ class DreameMapMowerMapEditor:
     def restore_map(self, recovery_map_info: RecoveryMapInfo) -> None:
         if recovery_map_info and recovery_map_info.map_id in self.map_manager._map_list:
             self.map_manager.schedule_update(15)
-            recovery_map_data = (
-                (
-                    DreameMowerMapDecoder.decode_saved_map(
-                        recovery_map_info.raw_map,
-                        self.map_manager._vslam_map,
-                        self._saved_map_data[recovery_map_info.map_id].rotation,
-                        self.map_manager._aes_iv,
-                    )
+            recovery_map_data = recovery_map_info.map_data
+            if recovery_map_data is None:
+                if recovery_map_info.raw_map is None:
+                    return
+                recovery_map_data = DreameMowerMapDecoder.decode_saved_map(
+                    recovery_map_info.raw_map,
+                    self.map_manager._vslam_map,
+                    self._saved_map_data[recovery_map_info.map_id].rotation,
+                    self.map_manager._aes_iv,
                 )
-                if recovery_map_info.map_data is None
-                else recovery_map_info.map_data
-            )
+            if recovery_map_data is None:
+                return
             recovery_map_data.recovery_map = False
             recovery_map_data.saved_map = True
             recovery_map_data.map_name = self._saved_map_data[recovery_map_info.map_id].map_name
@@ -531,15 +536,16 @@ class DreameMapMowerMapEditor:
             recovery_map_data.recovery_map_list = self._saved_map_data[recovery_map_info.map_id].recovery_map_list
             recovery_map_data.timestamp_ms = self._saved_map_data[recovery_map_info.map_id].timestamp_ms
             recovery_map_data.last_updated = time.time()
-            if recovery_map_data.wifi_map:
-                recovery_map_data.wifi_map.last_updated = time.time()
+            if recovery_map_data.wifi_map_data is not None:
+                recovery_map_data.wifi_map_data.last_updated = time.time()
 
             self._saved_map_data[recovery_map_info.map_id] = recovery_map_data
             self.refresh_map(recovery_map_info.map_id)
             if recovery_map_info.map_id == self._selected_map_id:
                 self.set_current_map(recovery_map_info.map_id)
                 # self._map_data.restored_map = False
-                DreameMowerMapDecoder.set_floor_material(self._map_data)
+                if self._map_data is not None:
+                    DreameMowerMapDecoder.set_floor_material(self._map_data)
 
             self.map_manager._map_request_count = 0
             self.map_manager._map_request_time = None

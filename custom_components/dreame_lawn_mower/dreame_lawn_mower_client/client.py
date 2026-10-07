@@ -25,6 +25,7 @@ from requests.exceptions import Timeout as _RequestsTimeout
 from . import client_camera as _client_camera
 from . import client_constants as _client_constants
 from . import client_helpers as _client_helpers
+from . import task_confirmation as _task_confirmation
 from .app_protocol import (
     MOWER_BLUETOOTH_PROPERTY_KEY as MOWER_BLUETOOTH_PROPERTY_KEY,
 )
@@ -1013,6 +1014,15 @@ class DreameLawnMowerClient(
                 "Scheduled mowing requires a docked mower with no active or "
                 "resumable task at dispatch."
             )
+        if (
+            _targeted_task_is_active(baseline)
+            and getattr(baseline, "task_operation", None) is None
+        ):
+            raise _DreameLawnMowerCommandRejectedError(
+                "The mower has an active task whose exact mode is not yet "
+                "reported. Wait for it to finish or stop it before starting "
+                "another targeted task."
+            )
         if _targeted_task_matches_preflight(
             baseline,
             expected_operation,
@@ -1036,6 +1046,8 @@ class DreameLawnMowerClient(
     ) -> None:
         """Require bounded task-type evidence after a targeted write attempt."""
         readable = False
+        last_fresh_snapshot: DreameLawnMowerSnapshot | None = None
+        conflicting_task_seen = False
         loop = asyncio.get_running_loop()
         started_at = loop.time()
         deadline = time.monotonic() + _TARGETED_TASK_CONFIRMATION_TIMEOUT_SECONDS
@@ -1054,6 +1066,7 @@ class DreameLawnMowerClient(
                     deadline=deadline,
                 )
             except DreameLawnMowerConnectionError:
+                last_fresh_snapshot = None
                 try:
                     snapshot = await self._async_cached_authoritative_snapshot()
                 except DreameLawnMowerConnectionError:
@@ -1064,6 +1077,13 @@ class DreameLawnMowerClient(
                 )
             else:
                 readable = True
+                last_fresh_snapshot = snapshot
+            conflicting_task_seen = (
+                conflicting_task_seen
+                or _task_confirmation.targeted_task_conflicts(
+                    snapshot, expected_operation, requested_target_ids
+                )
+            )
             if _targeted_task_confirmed(
                 snapshot,
                 baseline,
@@ -1079,6 +1099,20 @@ class DreameLawnMowerClient(
                 "targeted task could not be confirmed after the connection was "
                 "interrupted. Refresh the mower state before trying again."
             ) from original_error
+        if (
+            last_fresh_snapshot is not None
+            and not conflicting_task_seen
+            and _task_confirmation.acknowledged_task_started_without_metadata(
+                last_fresh_snapshot, baseline
+            )
+        ):
+            _LOGGER.warning(
+                "The mower acknowledged %s and a fresh heartbeat confirms a new "
+                "mowing session; exact task targets remain unverified because "
+                "the mower has not yet published native task metadata.",
+                label,
+            )
+            return
         if readable:
             raise _DreameLawnMowerCommandRejectedError(
                 f"The mower acknowledged the {label} request but did not enter "
