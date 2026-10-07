@@ -14,6 +14,7 @@ from collections.abc import Callable
 from typing import Any, Optional, overload
 
 from .app_protocol import mower_realtime_property_name
+from .device_privacy import AI_POLICY_PROPERTY, decode_ai_policy_acceptance
 from .device_code_semantics import (
     MowerDeviceCodeTier,
     mower_device_code_definition,
@@ -427,15 +428,12 @@ class DreameMowerDevice(
                     self._cleaning_history_update = -1
                     if (self.capability.ai_detection and not self.status.ai_policy_accepted) or True:
                         try:
-                            prop = "prop.s_ai_config"
-                            response = self._protocol.cloud.get_batch_device_datas([prop])
-                            if response and prop in response and response[prop]:
-                                value = json.loads(response[prop])
-                                self.status.ai_policy_accepted = (
-                                    value.get("privacyAuthed")
-                                    if "privacyAuthed" in value
-                                    else value.get("aiPrivacyAuthed")
-                                )
+                            response = self._protocol.cloud.get_batch_device_datas(
+                                [AI_POLICY_PROPERTY]
+                            )
+                            accepted = decode_ai_policy_acceptance(response)
+                            if accepted is not None:
+                                self.status.ai_policy_accepted = accepted
                         except:
                             pass
 

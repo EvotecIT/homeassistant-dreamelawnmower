@@ -1998,7 +1998,10 @@ class DreameMowerMapRenderer:
                 or not cached_layers.get(layer)
             ):
                 changed = False
-                if layer not in cached_layers:
+                if (
+                    layer not in cached_layers
+                    or MapRendererLayer.FURNITURE not in object_layers
+                ):
                     object_layers[MapRendererLayer.FURNITURE] = {}
                 else:
                     for k in list(object_layers[MapRendererLayer.FURNITURE].keys()).copy():

@@ -65,7 +65,7 @@ class _DreameLawnMowerClientTransport:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise DreameLawnMowerConnectionError(
-                        "Point-cloud cloud login timed out."
+                        "Mower cloud login timed out."
                     )
                 login_options = {
                     "timeout": remaining,
@@ -129,7 +129,7 @@ class _DreameLawnMowerClientTransport:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         raise DreameLawnMowerConnectionError(
-                            "Point-cloud cloud setup timed out."
+                            "Mower cloud setup timed out."
                         )
                     preflight_options = {
                         "retry_count": 0,
@@ -152,7 +152,7 @@ class _DreameLawnMowerClientTransport:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise DreameLawnMowerConnectionError(
-                        "Point-cloud cloud request timed out."
+                        "Mower cloud request timed out."
                     )
                 request_options["timeout"] = (
                     min(timeout, remaining) if timeout is not None else remaining
