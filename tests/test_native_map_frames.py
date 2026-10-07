@@ -423,3 +423,156 @@ def test_next_frame_metadata_preserves_inline_file_and_timestamp(properties, exp
     assert map_manager.DreameMapMowerMapManager._read_p_map_response(
         {"code": 0, "out": properties}
     ) == expected
+
+
+@pytest.mark.parametrize(
+    "outcome", ["success", "failure", "cancel", "close", "replace", "timeout"]
+)
+def test_native_next_frame_releases_reservation(monkeypatch, outcome):
+    async def scenario():
+        async with ClientSession() as session:
+            client = client_for(session)
+            device = client._ensure_device()
+            manager = map_manager.DreameMapMowerMapManager(Mock())
+            device._map_manager = manager
+            started, release = asyncio.Event(), asyncio.Event()
+            result = {"code": 0, "out": []}
+
+            async def rpc(*args, **kwargs):
+                started.set()
+                await release.wait()
+                if outcome == "failure":
+                    raise OSError("disconnected")
+                return result
+
+            monkeypatch.setattr(client_map_frames, "async_request_map_frame", rpc)
+            request = asyncio.create_task(
+                client_map_frames.async_request_next_map_frame(
+                    client, device, manager, 1, 2,
+                    deadline=time.monotonic() + (2 if outcome == "timeout" else 5)
+                )
+            )
+            try:
+                await asyncio.wait_for(started.wait(), 2)
+                assert manager._request_queue == {"1:2": True}
+                duplicate = await client_map_frames.async_request_next_map_frame(
+                    client, device, manager, 1, 2,
+                    deadline=time.monotonic() + (2 if outcome == "timeout" else 5)
+                )
+                assert duplicate is None
+                assert manager._request_queue == {"1:2": True}
+                if outcome == "cancel":
+                    request.cancel()
+                elif outcome == "close":
+                    await client.async_close()
+                elif outcome == "replace":
+                    device._map_manager = map_manager.DreameMapMowerMapManager(Mock())
+                if outcome != "timeout":
+                    release.set()
+                if outcome in {"cancel", "close"}:
+                    with pytest.raises(asyncio.CancelledError):
+                        await request
+                elif outcome == "failure":
+                    with pytest.raises(OSError):
+                        await request
+                elif outcome in {"replace", "timeout"}:
+                    with pytest.raises(
+                        client_map_frames.DreameLawnMowerConnectionError
+                    ):
+                        await request
+                else:
+                    assert await request == result
+                assert manager._request_queue == {}
+            finally:
+                release.set()
+                await client.async_close()
+                await asyncio.gather(request, return_exceptions=True)
+            assert not session.closed
+
+    asyncio.run(scenario())
+
+
+def test_next_frame_cancellation_during_reservation_drains_cleanup(monkeypatch):
+    from threading import Event
+    from unittest.mock import AsyncMock
+
+    async def scenario():
+        async with ClientSession() as session:
+            client = client_for(session)
+            device = client._ensure_device()
+            manager = map_manager.DreameMapMowerMapManager(Mock())
+            device._map_manager = manager
+            prepared, release = Event(), Event()
+            original = manager._prepare_next_p_map
+
+            def prepare(map_id, frame_id):
+                parameters = original(map_id, frame_id)
+                prepared.set()
+                assert release.wait(5)
+                return parameters
+
+            monkeypatch.setattr(manager, "_prepare_next_p_map", prepare)
+            rpc = AsyncMock()
+            monkeypatch.setattr(client_map_frames, "async_request_map_frame", rpc)
+            request = asyncio.create_task(
+                client_map_frames.async_request_next_map_frame(
+                    client, device, manager, 1, 2, deadline=time.monotonic() + 5
+                )
+            )
+            try:
+                assert await asyncio.to_thread(prepared.wait, 2)
+                request.cancel()
+                await asyncio.sleep(0)
+                release.set()
+                with pytest.raises(asyncio.CancelledError):
+                    await request
+                assert manager._request_queue == {}
+                rpc.assert_not_awaited()
+            finally:
+                release.set()
+                await client.async_close()
+                await asyncio.gather(request, return_exceptions=True)
+
+    asyncio.run(scenario())
+
+
+def test_next_frame_cancel_releases_reservation_while_device_lock_is_busy(monkeypatch):
+    async def scenario():
+        async with ClientSession() as session:
+            client = client_for(session)
+            device = client._ensure_device()
+            manager = device._map_manager
+            started = asyncio.Event()
+
+            async def rpc(*args, **kwargs):
+                started.set()
+                await asyncio.Event().wait()
+
+            monkeypatch.setattr(client_map_frames, "async_request_map_frame", rpc)
+            request = asyncio.create_task(
+                client_map_frames.async_request_next_map_frame(
+                    client, device, manager, 1, 2, deadline=time.monotonic() + 5
+                )
+            )
+            locked = False
+            try:
+                await asyncio.wait_for(started.wait(), 2)
+                locked = device._state_lock.acquire(blocking=False)
+                assert locked
+                request.cancel()
+                done, _ = await asyncio.wait({request}, timeout=1)
+                assert request in done, (
+                    "Reservation cleanup waited on unrelated device work"
+                )
+                with pytest.raises(asyncio.CancelledError):
+                    await request
+                assert manager._prepare_next_p_map(1, 2) is not None
+                manager._finish_next_p_map(1, 2)
+            finally:
+                if locked:
+                    device._state_lock.release()
+                request.cancel()
+                await asyncio.gather(request, return_exceptions=True)
+                await client.async_close()
+
+    asyncio.run(scenario())

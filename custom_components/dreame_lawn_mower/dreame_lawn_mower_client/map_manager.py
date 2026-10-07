@@ -34,7 +34,7 @@ from time import sleep
 from io import BytesIO
 from typing import Optional, Tuple
 from functools import cmp_to_key
-from threading import Timer
+from threading import Lock, Timer
 from .protocol import DreameMowerProtocol
 from .exceptions import DeviceUpdateFailedException
 from .map_decoder import DreameMowerMapDecoder
@@ -193,6 +193,7 @@ class DreameMapMowerMapManager:
         self._updated_frame_id: int = None
         self._selected_map_id: int = None
         self._request_queue: dict[str, bool] = {}
+        self._request_queue_lock = Lock()
         self._latest_map_data_time: int = None
         self._latest_object_name_time: int = None
         self._latest_map_timestamp_ms: int = None
@@ -412,25 +413,36 @@ class DreameMapMowerMapManager:
             MAP_REQUEST_PARAMETER_FRAME_TYPE: MapFrameType.P.name,
         }
 
-    def _request_next_p_map(self, map_id: int, frame_id: int) -> bool | None:
+    def _prepare_next_p_map(
+        self, map_id: int, frame_id: int
+    ) -> dict[str, Any] | None:
+        """Reserve an in-flight frame and build its request without network I/O."""
         key = f"{map_id}:{frame_id}"
-        if key in self._request_queue and self._request_queue[key]:
-            return
+        with self._request_queue_lock:
+            if self._request_queue.get(key):
+                return None
+            self._request_queue[key] = True
+        return {
+            MAP_REQUEST_PARAMETER_MAP_ID: map_id,
+            MAP_REQUEST_PARAMETER_REQ_TYPE: 1,
+            MAP_REQUEST_PARAMETER_FRAME_ID: frame_id,
+            MAP_REQUEST_PARAMETER_FRAME_TYPE: MapFrameType.P.name,
+        }
 
-        self._request_queue[key] = True
+    def _finish_next_p_map(self, map_id: int, frame_id: int) -> None:
+        """Release the reservation after success, failure, or cancellation."""
+        with self._request_queue_lock:
+            self._request_queue.pop(f"{map_id}:{frame_id}", None)
+
+    def _request_next_p_map(self, map_id: int, frame_id: int) -> bool | None:
+        parameters = self._prepare_next_p_map(map_id, frame_id)
+        if parameters is None:
+            return None
         _LOGGER.info("Request next P map: %s", frame_id)
         try:
-            result = self._request_map(
-                {
-                    MAP_REQUEST_PARAMETER_MAP_ID: map_id,
-                    MAP_REQUEST_PARAMETER_REQ_TYPE: 1,
-                    MAP_REQUEST_PARAMETER_FRAME_ID: frame_id,
-                    MAP_REQUEST_PARAMETER_FRAME_TYPE: MapFrameType.P.name,
-                }
-            )
+            result = self._request_map(parameters)
         finally:
-            # This is an in-flight guard, not a permanent record of failed work.
-            self._request_queue.pop(key, None)
+            self._finish_next_p_map(map_id, frame_id)
         if self._map_action_succeeded(result):
             object_name, raw_map_data, timestamp = self._read_p_map_response(result)
 

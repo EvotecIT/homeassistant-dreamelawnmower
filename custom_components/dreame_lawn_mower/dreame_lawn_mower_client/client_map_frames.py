@@ -55,6 +55,57 @@ async def async_request_map_frame(
     return await async_device_rpc(client, request, deadline=deadline)
 
 
+async def async_request_next_map_frame(
+    client: DreameLawnMowerClient,
+    device: DreameMowerDevice,
+    manager: DreameMapMowerMapManager,
+    map_id: int,
+    frame_id: int,
+    *, deadline: float,
+) -> Any:
+    """Reserve, request and release a frame; leave result application to the caller."""
+    if not math.isfinite(deadline):
+        raise ValueError("Map frame deadline must be finite")
+
+    def require_owner(current: DreameMowerDevice) -> None:
+        if (current is not device or current._map_manager is not manager
+                or manager._disconnected):
+            raise DreameLawnMowerConnectionError("Map frame owner changed")
+
+    async def request(cloud: DreameCloudSession) -> Any:
+        reserved = False
+
+        def prepare(current: DreameMowerDevice) -> dict[str, Any] | None:
+            nonlocal reserved
+            require_owner(current)
+            parameters = manager._prepare_next_p_map(map_id, frame_id)
+            reserved = parameters is not None
+            return parameters
+
+        try:
+            async with asyncio.timeout(max(0, deadline - time.monotonic())):
+                parameters = await async_read_device_state(
+                    client, prepare, refresh=False
+                )
+                if parameters is None:
+                    return None
+                result = await async_request_map_frame(
+                    client, parameters, deadline=deadline, manager=manager
+                )
+                await async_read_device_state(client, require_owner, refresh=False)
+                return result
+        except TimeoutError as error:
+            raise DreameLawnMowerConnectionError(
+                "Next map frame request timed out"
+            ) from error
+        finally:
+            if reserved:
+                # Queue-only cleanup must not wait for device I/O or owner lifetime.
+                manager._finish_next_p_map(map_id, frame_id)
+
+    return await client._async_cloud_read(request)
+
+
 async def async_download_frame_object(
     client: DreameLawnMowerClient,
     device: DreameMowerDevice,
