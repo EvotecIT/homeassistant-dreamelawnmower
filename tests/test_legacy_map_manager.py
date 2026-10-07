@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
+import pytest
+
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    map_manager as map_manager_module,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.const import (
     MAP_PARAMETER_CODE,
     MAP_PARAMETER_OUT,
@@ -14,6 +21,11 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map import (
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_optimizer import (
     DreameMowerMapOptimizer,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_types import (
+    MapData,
+    MapDataPartial,
+    MapFrameType,
 )
 
 
@@ -175,3 +187,70 @@ def test_next_partial_frame_suppresses_duplicate_only_while_inflight() -> None:
     assert manager._request_next_p_map(1, 2) is True
     assert manager._request_next_p_map(1, 2) is True
     assert protocol.action.call_count == 2
+
+@pytest.mark.parametrize("queue_size,kind", [(1, "next"), (5, "missing"), (9, "full")])
+def test_partial_frame_collects_recovery_requests_without_network(queue_size, kind):
+    protocol = Mock()
+    protocol.dreame_cloud = True
+    manager = DreameMapMowerMapManager(protocol)
+    manager._latest_map_id = manager._current_map_id = 7
+    manager._latest_map_timestamp_ms = 1700000000000
+    manager._current_frame_id = 1
+    manager._map_data = MapData()
+    for frame_id in range(3, 3 + queue_size):
+        partial = MapDataPartial()
+        partial.map_id = 7
+        partial.frame_id = frame_id
+        partial.frame_type = MapFrameType.P.value
+        manager._queue_partial_map(partial)
+    pending = list(manager._add_map_data_plan(partial))
+
+    protocol.action.assert_not_called()
+    assert len(pending) == 1
+    assert pending[0].kind == kind
+    if kind == "next":
+        assert (pending[0].map_id, pending[0].frame_id) == (7, 2)
+
+
+@pytest.mark.parametrize("planned", [False, True])
+def test_queued_frames_notify_before_applying_the_next_frame(monkeypatch, planned):
+    manager = DreameMapMowerMapManager(_DummyProtocol())
+    manager._latest_map_id = manager._current_map_id = 7
+    manager._current_frame_id = 1
+    manager._latest_map_timestamp_ms = 1000
+    manager._map_data = MapData()
+
+    def partial(frame_id):
+        frame = MapDataPartial()
+        frame.map_id, frame.frame_id = 7, frame_id
+        frame.frame_type = MapFrameType.P.value
+        return frame
+
+    def decode(frame, current, vslam):
+        result = MapData()
+        result.map_id, result.frame_id = frame.map_id, frame.frame_id
+        result.timestamp_ms = frame.frame_id * 1000
+        return result
+
+    monkeypatch.setattr(
+        map_manager_module.DreameMowerMapDecoder,
+        "decode_p_map_data_from_partial",
+        decode,
+    )
+    manager._queue_partial_map(partial(3))
+    notified = []
+    manager._change_callback = lambda: notified.append(manager._current_frame_id)
+
+    if planned:
+        plan = manager._add_map_data_plan(partial(2))
+        assert next(plan).kind == "changed"
+        assert manager._current_frame_id == 2
+        assert notified == []
+        assert next(plan).kind == "changed"
+        assert manager._current_frame_id == 3
+        with pytest.raises(StopIteration) as completed:
+            next(plan)
+        assert completed.value.value is True
+    else:
+        assert manager._add_map_data(partial(2)) is True
+        assert notified == [2, 3]

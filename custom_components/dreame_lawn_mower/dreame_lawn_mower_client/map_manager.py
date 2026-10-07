@@ -1,7 +1,7 @@
 """Legacy map acquisition, queueing, and lifecycle management."""
 
 from __future__ import annotations
-from .map_frame_request import map_frame_parameters
+from .map_frame_request import MapUpdateRequest, map_frame_parameters
 import io
 import math
 import time
@@ -28,7 +28,8 @@ from PIL import (
     PngImagePlugin,
     ImageFilter,
 )
-from typing import Any, Mapping, Callable, TypeGuard
+from typing import Any, Callable, Mapping, TypeGuard, cast
+from collections.abc import Generator
 from time import sleep
 from io import BytesIO
 from typing import Optional, Tuple
@@ -732,7 +733,40 @@ class DreameMapMowerMapManager:
     def _add_raw_map_data(self, raw_map: str, timestamp=None, key=None) -> bool:
         return self._add_map_data(self._decode_map_partial(raw_map, timestamp, key))
 
-    def _add_map_data(self, partial_map: MapDataPartial) -> None:
+    def _dispatch_map_update(self, request: MapUpdateRequest) -> None:
+        """Execute one legacy effect at the point selected by the shared plan."""
+        if request.kind == "base":
+            self._request_i_map()
+        elif request.kind == "full":
+            self._request_map()
+        elif request.kind == "missing":
+            self._request_missing_p_map()
+        elif request.kind == "next":
+            if request.map_id is not None and request.frame_id is not None:
+                self._request_next_p_map(request.map_id, request.frame_id)
+        elif request.kind == "list":
+            self.request_map_list()
+        elif request.kind == "changed":
+            self._map_data_changed()
+
+    def _run_map_update_plan[T](self, plan: Generator[MapUpdateRequest, None, T]) -> T:
+        try:
+            while True:
+                try:
+                    request = next(plan)
+                except StopIteration as completed:
+                    return cast(T, completed.value)
+                self._dispatch_map_update(request)
+        finally:
+            plan.close()
+
+    def _add_map_data(self, partial_map: MapDataPartial | None) -> bool:
+        return self._run_map_update_plan(self._add_map_data_plan(partial_map))
+
+    def _add_map_data_plan(
+        self, partial_map: MapDataPartial | None,
+    ) -> Generator[MapUpdateRequest, None, bool]:
+        """Apply state in order, yielding before each I/O-capable follow-up."""
         if partial_map is None:
             return False
 
@@ -803,12 +837,12 @@ class DreameMapMowerMapManager:
                 self._queue_partial_map(partial_map)
 
                 if self._map_request_time is None:
-                    self._request_i_map()
+                    yield MapUpdateRequest("base")
                 return True
 
             if partial_map.frame_id != self._current_frame_id + 1:
                 if partial_map.frame_id <= self._current_frame_id:
-                    self._add_next_map_data()
+                    yield from self._add_next_map_data_plan()
                     return True
 
                 self._queue_partial_map(partial_map)
@@ -818,18 +852,18 @@ class DreameMapMowerMapManager:
                 if tmpLen > 0:
                     if self._protocol.dreame_cloud:
                         if tmpLen > 8:
-                            self._request_map()
+                            yield MapUpdateRequest("full")
                         elif tmpLen > 4:
-                            self._request_missing_p_map()
+                            yield MapUpdateRequest("missing")
                         else:
                             next_frame_id = 1
                             if self._current_frame_id:
                                 next_frame_id = self._current_frame_id + 1
-                            self._request_next_p_map(self._latest_map_id, next_frame_id)
+                            yield MapUpdateRequest("next", self._latest_map_id, next_frame_id)
                     else:
-                        self._request_next_p_map(partial_map.map_id, self._current_frame_id + 1)
+                        yield MapUpdateRequest("next", partial_map.map_id, self._current_frame_id + 1)
                 else:
-                    self._add_next_map_data()
+                    yield from self._add_next_map_data_plan()
                 return True
 
             current_robot_position = (
@@ -852,7 +886,7 @@ class DreameMapMowerMapManager:
                 _LOGGER.info("Decode P map %d %d", map_data.map_id, map_data.frame_id)
 
                 if not self._device_running or current_robot_position != map_data.robot_position:
-                    self._map_data_changed()
+                    yield MapUpdateRequest("changed")
 
         elif partial_map.frame_type == MapFrameType.I.value:
             self._need_map_request = False
@@ -863,7 +897,7 @@ class DreameMapMowerMapManager:
                 saved_map_data,
             ) = DreameMowerMapDecoder.decode_map_data_from_partial(partial_map, self._vslam_map)
             if map_data is None:
-                self._add_next_map_data()
+                yield from self._add_next_map_data_plan()
                 return True
 
             if map_data.empty_map:
@@ -874,8 +908,8 @@ class DreameMapMowerMapManager:
                     self._current_map_id = map_data.map_id
                     self._current_timestamp_ms = map_data.timestamp_ms
 
-                    self._map_data_changed()
-                self._add_next_map_data()
+                    yield MapUpdateRequest("changed")
+                yield from self._add_next_map_data_plan()
                 return True
 
             if saved_map_data is not None and saved_map_data.saved_map:
@@ -913,12 +947,12 @@ class DreameMapMowerMapManager:
                         _LOGGER.info("Add saved map from new map %s", saved_map_data.map_id)
                         self._refresh_map_list()
                         if self._map_data:
-                            self._map_data_changed()
+                            yield MapUpdateRequest("changed")
 
                     if self._device_running:
                         self.request_next_map_list()
                     else:
-                        self.request_map_list()
+                        yield MapUpdateRequest("list")
 
             DreameMowerMapDecoder.set_segment_cleanset(map_data, map_data.cleanset, self._capability)
 
@@ -1004,7 +1038,7 @@ class DreameMapMowerMapManager:
                     if changed:
                         _LOGGER.info("Decode I map %d %d", map_data.map_id, map_data.frame_id)
                         self._map_data.last_updated = time.time()
-                        self._map_data_changed()
+                        yield MapUpdateRequest("changed")
                     else:
                         _LOGGER.info(
                             "Decode map %d %d not changed",
@@ -1014,16 +1048,19 @@ class DreameMapMowerMapManager:
 
         if self._current_frame_id is None and self._map_data is not None:
             self._map_data = None
-            self._map_data_changed()
+            yield MapUpdateRequest("changed")
 
-        self._add_next_map_data()
+        yield from self._add_next_map_data_plan()
         return True
 
     def _add_next_map_data(self) -> None:
+        self._run_map_update_plan(self._add_next_map_data_plan())
+
+    def _add_next_map_data_plan(self) -> Generator[MapUpdateRequest, None, None]:
         next_partial_map = self._unqueue_next_partial_map()
         if next_partial_map is not None:
             _LOGGER.debug("Continue to next map data")
-            self._add_map_data(next_partial_map)
+            yield from self._add_map_data_plan(next_partial_map)
 
     def _refresh_map_list(self) -> None:
         index = 1

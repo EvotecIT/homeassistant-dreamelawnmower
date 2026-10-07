@@ -13,6 +13,8 @@ from datetime import datetime
 from random import randrange
 from threading import RLock, Timer
 from typing import Any, Optional
+from collections.abc import Generator
+from .device_action_plan import ActionDelay, ActionRequest, PropertyRequest
 
 from .app_protocol import (
     MOWER_BLUETOOTH_PROPERTY_KEY,
@@ -1099,7 +1101,14 @@ class _DreameMowerDeviceStateMixin:
             self._update_callback()
 
     def _map_changed(self) -> None:
-        """Call external listener when a map changed"""
+        from .device_action_plan import run_device_plan
+
+        run_device_plan(self, self._map_changed_plan())
+
+    def _map_changed_plan(
+        self,
+    ) -> Generator[ActionDelay | ActionRequest | PropertyRequest, Any, None]:
+        """Keep map notification state ordered around restoration commands."""
         map_data = self.status.current_map
         if self._map_select_time:
             self._map_select_time = None
@@ -1137,7 +1146,7 @@ class _DreameMowerDeviceStateMixin:
                         and position.y >= y - size
                         and position.y <= y + size
                     ):
-                        self._restore_go_to_zone(True)
+                        yield from self._restore_go_to_zone_plan(True)
 
             if self.status.docked != map_data.docked and self._protocol.prefer_cloud:
                 self.schedule_update(self._update_interval, True)

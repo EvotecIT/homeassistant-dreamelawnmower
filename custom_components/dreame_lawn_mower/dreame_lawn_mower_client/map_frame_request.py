@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from .const import MAP_PARAMETER_VALUE, MAP_REQUEST_PARAMETER_FRAME_TYPE
 from .device_types import PIID, DreameMowerProperty
+
+
+@dataclass(frozen=True)
+class MapUpdateRequest:
+    """Follow-up selected by frame application, before performing network I/O."""
+
+    kind: Literal["base", "full", "missing", "next", "list", "changed"]
+    map_id: int | None = None
+    frame_id: int | None = None
 
 
 def map_frame_parameters(parameters: dict[str, Any] | None) -> list[dict[str, Any]]:

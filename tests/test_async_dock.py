@@ -44,6 +44,25 @@ def configure_dock(client, *, mapping=False):
     return fake, changes, updates
 
 
+def configure_mode_restoration(client):
+    fake, _, _ = configure_dock(client)
+    fake.status.go_to_zone.cleaning_mode = DreameMowerCleaningMode.MOWING.value
+    fake.status.cleaning_mode = DreameMowerCleaningMode.UNKNOWN
+    fake._update_cleaning_mode = Mock(return_value=True)
+    fake._discarded_properties = set()
+    fake._dirty_data = {}
+    fake._update_property = Mock(return_value=17)
+    fake.property_mapping = {
+        DreameMowerProperty.CLEANING_MODE: {"siid": 2, "piid": 4}
+    }
+    fake._set_property_plan = lambda prop, value: (
+        device_commands._DreameMowerDeviceCommandMixin._set_property_plan(
+            fake, prop, value
+        )
+    )
+    return fake
+
+
 @pytest.mark.parametrize("account", ["dreame", "mova"])
 @pytest.mark.parametrize("reply", ["success", "missing", "disconnect", "rejected"])
 def test_native_dock_policy(monkeypatch, account, reply):
@@ -111,21 +130,7 @@ def test_native_dock_does_not_restore_mode_through_sync_transport(
     async def scenario():
         async with server(monkeypatch, handler), ClientSession() as session:
             client = client_for(session, account)
-            fake, _, _ = configure_dock(client)
-            fake.status.go_to_zone.cleaning_mode = DreameMowerCleaningMode.MOWING.value
-            fake.status.cleaning_mode = DreameMowerCleaningMode.UNKNOWN
-            fake._update_cleaning_mode = Mock(return_value=True)
-            fake._discarded_properties = set()
-            fake._dirty_data = {}
-            fake._update_property = Mock(return_value=17)
-            fake.property_mapping = {
-                DreameMowerProperty.CLEANING_MODE: {"siid": 2, "piid": 4}
-            }
-            fake._set_property_plan = lambda prop, value: (
-                device_commands._DreameMowerDeviceCommandMixin._set_property_plan(
-                    fake, prop, value
-                )
-            )
+            fake = configure_mode_restoration(client)
             try:
                 await client.async_dock_without_stopping()
                 fake._update_cleaning_mode.assert_not_called()
