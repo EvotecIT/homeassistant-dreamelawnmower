@@ -15,14 +15,15 @@ import tarfile
 import tempfile
 import threading
 import zipfile
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 
 import requests
 
-from .android_build_artifact import read_android_build_zip_entries
+from .android_build_artifact import _HttpResponse, read_android_build_zip_entries
 from .video_runtime import DreameLawnMowerVideoRuntimeError
 from .xp2p_host_probe import probe_xp2p_host_worker
 from .xp2p_host_runtime import DreameLawnMowerXp2pHostAssets
@@ -193,13 +194,10 @@ _EXT4_EXTENTS_FLAG = 0x00080000
 _EXTENT_MAGIC = 0xF30A
 
 
-class _HttpResponse(Protocol):
-    status_code: int
-    content: bytes
-
-
 class _HttpClient(Protocol):
-    def get(self, url: str, *, timeout: float) -> _HttpResponse: ...
+    def get(
+        self, url: str, *, timeout: float, headers: Mapping[str, str] | None = None
+    ) -> _HttpResponse: ...
 
 
 def ensure_xp2p_host_runtime(
@@ -209,6 +207,7 @@ def ensure_xp2p_host_runtime(
     page_size: int | None = None,
     http_client: _HttpClient | None = None,
     timeout: float = 60.0,
+    _cancelled: threading.Event | None = None,
 ) -> DreameLawnMowerXp2pHostAssets:
     """Return a complete, verified XP2P runtime, installing it when absent."""
     architecture = _normalize_machine(machine or platform.machine())
@@ -226,7 +225,7 @@ def ensure_xp2p_host_runtime(
     )
     root_path = Path(root)
     runtime_path = root_path / f"runtime-v{layout_version}-{architecture}"
-    with _INSTALL_LOCK:
+    with _installation_owner(_cancelled):
         assets = _validated_assets(
             runtime_path,
             architecture,
@@ -250,6 +249,7 @@ def ensure_xp2p_host_runtime(
                     http_client=http_client or requests,
                     timeout=timeout,
                 )
+                _check_install_active(_cancelled)
                 installed = _validated_assets(
                     staging,
                     architecture,
@@ -260,6 +260,7 @@ def ensure_xp2p_host_runtime(
                     raise DreameLawnMowerVideoRuntimeError(
                         "Installed XP2P host runtime failed integrity validation."
                     )
+                _check_install_active(_cancelled)
                 if runtime_path.exists():
                     _remove_runtime_path(runtime_path, root_path)
                 staging.replace(runtime_path)
@@ -276,7 +277,26 @@ def ensure_xp2p_host_runtime(
                 raise DreameLawnMowerVideoRuntimeError(
                     "XP2P host runtime disappeared after installation."
                 )
+    _check_install_active(_cancelled)
     return _with_startup_probe(assets)
+
+
+def _check_install_active(cancelled: threading.Event | None) -> None:
+    if cancelled is not None and cancelled.is_set():
+        raise DreameLawnMowerVideoRuntimeError("Runtime installation was cancelled.")
+
+
+@contextmanager
+def _installation_owner(cancelled: threading.Event | None) -> Iterator[None]:
+    while True:
+        _check_install_active(cancelled)
+        if _INSTALL_LOCK.acquire(timeout=0.05):
+            break
+    try:
+        _check_install_active(cancelled)
+        yield
+    finally:
+        _INSTALL_LOCK.release()
 
 
 def _host_page_size() -> int:

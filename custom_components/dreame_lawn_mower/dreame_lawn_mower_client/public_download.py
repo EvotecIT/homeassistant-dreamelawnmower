@@ -31,6 +31,7 @@ class PublicDownload:
     content_type: str
     etag: str | None
     last_modified: str | None
+    url: str = ""
 
 
 class PublicDownloadError(DreameLawnMowerConnectionError):
@@ -105,6 +106,7 @@ async def async_download_public_response(
     attempts: int = 1,
     timeout: float = 20,
     https_only: bool = False,
+    byte_range: tuple[int, int, int] | None = None,
 ) -> PublicDownload:
     """Never copy origin credentials, cookies, default headers or middleware.
 
@@ -120,6 +122,13 @@ async def async_download_public_response(
         or attempts not in (1, 2)
     ):
         raise ValueError("Invalid download deadline, size or retry policy")
+    headers = {"Accept-Encoding": "gzip, deflate"}
+    if byte_range is not None:
+        start, end, total = byte_range
+        if not 0 <= start <= end < total or end - start + 1 > max_bytes:
+            raise ValueError("Invalid download byte range or size budget")
+        max_bytes = end - start + 1
+        headers = {"Accept-Encoding": "identity", "Range": f"bytes={start}-{end}"}
     _validate_url(url, https_only=https_only)
     if session.closed or session.connector is None:
         raise DreameLawnMowerConnectionError("Download session is closed")
@@ -131,7 +140,7 @@ async def async_download_public_response(
                 cookie_jar=DummyCookieJar(),
                 trust_env=False,
                 auto_decompress=False,
-                headers={"Accept-Encoding": "gzip, deflate"},
+                headers=headers,
             ) as anonymous:
                 for attempt in range(attempts):
                     try:
@@ -176,21 +185,41 @@ async def async_download_public_response(
                                         reason="http_error",
                                         status=response.status,
                                     )
-                                if response.status != 200:
+                                if response.status != (206 if byte_range else 200):
                                     raise PublicDownloadError(
                                         f"Download returned HTTP {response.status}",
                                         reason="http_error",
                                         status=response.status,
                                     )
+                                if byte_range is not None and (
+                                    response.headers.get("Content-Range")
+                                    != f"bytes {start}-{end}/{total}"
+                                    or response.headers.get(
+                                        "Content-Encoding", "identity"
+                                    )
+                                    .strip()
+                                    .lower()
+                                    != "identity"
+                                ):
+                                    raise PublicDownloadError(
+                                        "Download returned an invalid byte range",
+                                        reason="range_mismatch",
+                                    )
                                 content = await async_read_bounded_response(
                                     response,
                                     max_bytes=max_bytes,
                                 )
+                                if byte_range is not None and len(content) != max_bytes:
+                                    raise PublicDownloadError(
+                                        "Download returned an incomplete byte range",
+                                        reason="range_mismatch",
+                                    )
                                 return PublicDownload(
                                     content,
                                     response.content_type,
                                     response.headers.get("ETag"),
                                     response.headers.get("Last-Modified"),
+                                    str(response.url),
                                 )
                     except (ClientError, TimeoutError, _RetryableDownloadError) as err:
                         if attempt + 1 == attempts:

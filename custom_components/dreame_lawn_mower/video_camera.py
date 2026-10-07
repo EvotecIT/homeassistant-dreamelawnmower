@@ -6,6 +6,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Event
 from time import monotonic
 from typing import Any
 
@@ -23,6 +24,7 @@ from homeassistant.components.stream.const import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import MATCH_ALL
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import video_stream_helpers as video_helpers
@@ -46,6 +48,7 @@ from .debug import (
 )
 from .debug import sanitize_diagnostic_text
 from .diagnostic_events import record_diagnostic_event
+from .dreame_lawn_mower_client.client_refresh import _run_state_worker
 from .dreame_lawn_mower_client.feature_capabilities import (
     CAPABILITY_SUPPORTED,
     FEATURE_LIVE_VIDEO,
@@ -72,8 +75,10 @@ from .dreame_lawn_mower_client.video_runtime import (
 from .dreame_lawn_mower_client.xp2p_config import DreameLawnMowerXp2pDeviceConfig
 from .dreame_lawn_mower_client.xp2p_host_runtime import (
     DEFAULT_XP2P_HOST_STARTUP_TIMEOUT,
+    DreameLawnMowerXp2pHostAssets,
     DreameLawnMowerXp2pHostRuntime,
 )
+from .dreame_lawn_mower_client.xp2p_runtime_async import async_ensure_xp2p_host_runtime
 from .dreame_lawn_mower_client.xp2p_runtime_bootstrap import (
     ensure_xp2p_host_runtime,
 )
@@ -338,7 +343,7 @@ class DreameLawnMowerVideoCamera(
     async def _async_prepare_runtime(self) -> None:
         """Prepare a configured runtime in the background before first playback."""
         try:
-            await self.hass.async_add_executor_job(self._create_runtime)
+            await self._async_create_runtime()
         except asyncio.CancelledError:
             raise
         except Exception as err:  # noqa: BLE001 - retry remains available on play.
@@ -358,7 +363,23 @@ class DreameLawnMowerVideoCamera(
         self._runtime_prepare_task = None
         if self._prepared_runtime is not None:
             return self._prepared_runtime
-        return await self.hass.async_add_executor_job(self._create_runtime)
+        return await self._async_create_runtime()
+
+    async def _async_create_runtime(self) -> _DreameVideoRuntime:
+        """Download managed assets asynchronously before owned worker startup."""
+        if self._prepared_runtime is not None:
+            return self._prepared_runtime
+        if (
+            self._runner_command
+            or self._native_library_path
+            or not video_helpers.managed_runtime_supported()
+        ):
+            return await self.hass.async_add_executor_job(self._create_runtime)
+        assets = await async_ensure_xp2p_host_runtime(
+            Path(self.hass.config.path(".storage", DOMAIN, "xp2p-runtime")),
+            async_get_clientsession(self.hass),
+        )
+        return await _run_state_worker(lambda: self._create_runtime(assets), Event())
 
     async def stream_source(self) -> str | None:
         """Return a dormant local FLV source for HA HLS or WebRTC providers.
@@ -1240,7 +1261,10 @@ class DreameLawnMowerVideoCamera(
             safe_error,
         )
 
-    def _create_runtime(self) -> _DreameVideoRuntime:
+    def _create_runtime(
+        self,
+        managed_assets: DreameLawnMowerXp2pHostAssets | None = None,
+    ) -> _DreameVideoRuntime:
         """Create the configured runtime adapter."""
         if self._prepared_runtime is not None:
             return self._prepared_runtime
@@ -1282,7 +1306,11 @@ class DreameLawnMowerVideoCamera(
                 )
             )
             runtime = DreameLawnMowerXp2pHostRuntime(
-                ensure_xp2p_host_runtime(runtime_root),
+                (
+                    managed_assets
+                    if managed_assets is not None
+                    else ensure_xp2p_host_runtime(runtime_root)
+                ),
                 config_fetcher=self._resolve_xp2p_config,
             )
             try:
