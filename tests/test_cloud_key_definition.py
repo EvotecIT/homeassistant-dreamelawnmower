@@ -710,5 +710,8 @@ def test_device_page_rejects_non_object_payload(monkeypatch, data):
     cloud = object.__new__(protocol_module.DreameMowerDreameHomeCloudProtocol)
     monkeypatch.setattr(cloud, "get_api_url", lambda: "https://cloud.invalid")
     monkeypatch.setattr(cloud, "request", lambda *args: {"code": 0, "data": data})
-    with pytest.raises(protocol_module.DreameLawnMowerConnectionError, match="Cloud device page is invalid"):
+    with pytest.raises(
+        protocol_module.DreameLawnMowerConnectionError,
+        match="Cloud device page is invalid",
+    ):
         cloud.get_device_list_v2()

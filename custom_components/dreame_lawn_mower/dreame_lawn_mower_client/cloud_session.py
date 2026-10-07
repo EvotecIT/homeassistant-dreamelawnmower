@@ -23,7 +23,6 @@ from .cloud_video import (
     video_read_result,
 )
 from .cloud_wire import (
-    cloud_device_list_page,
     APP_PLUGIN_PATH,
     DEVICE_INFO_PATH,
     DEVICE_LIST_PATH,
@@ -33,6 +32,7 @@ from .cloud_wire import (
     cloud_batch_data_params,
     cloud_device_info_data,
     cloud_device_list_data,
+    cloud_device_list_page,
     cloud_headers,
     cloud_login_data,
     cloud_plugin_params,
