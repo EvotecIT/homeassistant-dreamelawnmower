@@ -28,6 +28,7 @@ async def async_run_device_plan(
     ],
     *,
     _cleanup: OwnedCleanup | None = None,
+    require_device: Callable[[Any], None] | None = None,
 ) -> Any:
     """Own bounded state steps, cancellable delays and non-replayed actions."""
     deadline = time.monotonic() + _ACTION_TIMEOUT
@@ -54,6 +55,8 @@ async def async_run_device_plan(
                 raise DreameLawnMowerConnectionError(
                     "Device action expired or was cancelled"
                 )
+            if require_device is not None:
+                require_device(device)
 
         async def advance(
             response: Any = None, error: Exception | None = None,

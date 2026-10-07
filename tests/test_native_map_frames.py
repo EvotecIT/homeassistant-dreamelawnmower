@@ -426,7 +426,7 @@ def test_next_frame_metadata_preserves_inline_file_and_timestamp(properties, exp
 
 
 @pytest.mark.parametrize(
-    "outcome", ["success", "failure", "cancel", "close", "replace", "timeout"]
+    "outcome", ["success", "empty", "failure", "cancel", "close", "replace", "timeout"]
 )
 def test_native_next_frame_releases_reservation(monkeypatch, outcome):
     async def scenario():
@@ -436,7 +436,7 @@ def test_native_next_frame_releases_reservation(monkeypatch, outcome):
             manager = map_manager.DreameMapMowerMapManager(Mock())
             device._map_manager = manager
             started, release = asyncio.Event(), asyncio.Event()
-            result = {"code": 0, "out": []}
+            result = None if outcome == "empty" else {"code": 0, "out": []}
 
             async def rpc(*args, **kwargs):
                 started.set()
@@ -481,7 +481,7 @@ def test_native_next_frame_releases_reservation(monkeypatch, outcome):
                     ):
                         await request
                 else:
-                    assert await request == result
+                    assert await request == (False if outcome == "empty" else result)
                 assert manager._request_queue == {}
             finally:
                 release.set()

@@ -74,6 +74,7 @@ async def async_refresh_saved_map_list(
     client: DreameLawnMowerClient,
     *,
     recovery: bool = False,
+    expected_owner: tuple[DreameMowerDevice, DreameMapMowerMapManager] | None = None,
 ) -> None:
     """Download outside state ownership, then reject stale manager/object results."""
     deadline = time.monotonic() + 20
@@ -90,6 +91,10 @@ async def async_refresh_saved_map_list(
         | None
     ):
         manager = device._map_manager
+        if expected_owner is not None and (
+            device is not expected_owner[0] or manager is not expected_owner[1]
+        ):
+            raise DreameLawnMowerConnectionError("Map list owner changed")
         if manager is None or manager._disconnected:
             return None
         if (

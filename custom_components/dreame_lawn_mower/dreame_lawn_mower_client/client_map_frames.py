@@ -63,7 +63,7 @@ async def async_request_next_map_frame(
     frame_id: int,
     *, deadline: float,
 ) -> Any:
-    """Reserve, request and release a frame; leave result application to the caller."""
+    """Return the response, False for an empty response, or None for a duplicate."""
     if not math.isfinite(deadline):
         raise ValueError("Map frame deadline must be finite")
 
@@ -93,7 +93,7 @@ async def async_request_next_map_frame(
                     client, parameters, deadline=deadline, manager=manager
                 )
                 await async_read_device_state(client, require_owner, refresh=False)
-                return result
+                return False if result is None else result
         except TimeoutError as error:
             raise DreameLawnMowerConnectionError(
                 "Next map frame request timed out"
