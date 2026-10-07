@@ -1049,7 +1049,7 @@ def test_host_startup_timeout_covers_blocked_request_write(
         assert not worker.is_alive()
         for thread in threading.enumerate():
             if thread not in existing_threads and thread.name.startswith(
-                "dreame-xp2p-host"
+                "dreame-xp2p"
             ):
                 thread.join(timeout=2)
                 assert not thread.is_alive()

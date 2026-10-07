@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import quote
 
+from .deadline import DeadlineExceededError, run_with_deadline
 from .models import DreameLawnMowerCameraStreamRuntimeInputs
 from .video_runner_diagnostics import (
     RUNNER_OUTPUT_PREVIEW_LIMIT,
@@ -565,7 +566,8 @@ class DreameLawnMowerXp2pProcessRunner:
             _join_stream_drain_thread(session.runner_stdout_thread)
             _join_stream_drain_thread(session.runner_stderr_thread)
             return
-        try:
+
+        def stop_worker() -> None:
             _write_json_line(
                 process,
                 {
@@ -579,7 +581,17 @@ class DreameLawnMowerXp2pProcessRunner:
                 },
             )
             process.wait(timeout=self.shutdown_timeout)
-        except (BrokenPipeError, OSError, subprocess.TimeoutExpired):
+
+        try:
+            run_with_deadline(
+                stop_worker, deadline=time.monotonic() + self.shutdown_timeout
+            )
+        except (
+            BrokenPipeError,
+            OSError,
+            subprocess.TimeoutExpired,
+            DeadlineExceededError,
+        ):
             _terminate_process(process)
         finally:
             _join_stream_drain_thread(session.runner_stdout_thread)
