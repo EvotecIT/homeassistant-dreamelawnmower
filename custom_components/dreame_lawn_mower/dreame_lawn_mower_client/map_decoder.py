@@ -211,7 +211,11 @@ class DreameMowerMapDecoder:
             key = values[1]
             raw_map = values[0]
 
-        raw_map = base64.decodebytes(raw_map.encode("utf8"))
+        try:
+            raw_map = base64.decodebytes(raw_map.encode("utf8"))
+        except ValueError:
+            _LOGGER.error("Map data encoding is invalid")
+            return None
 
         if key is not None:
             if iv is None:
@@ -281,7 +285,8 @@ class DreameMowerMapDecoder:
     def decode_saved_map(
         raw_map: str, vslam_map: bool, rotation: int = 0, iv: str = None
     ) -> MapData | None:
-        return DreameMowerMapDecoder.decode_map(raw_map, vslam_map, rotation, iv)[0]
+        decoded = DreameMowerMapDecoder.decode_map(raw_map, vslam_map, rotation, iv)
+        return decoded[0] if decoded is not None else None
 
     @staticmethod
     def decode_map_data_from_partial(
