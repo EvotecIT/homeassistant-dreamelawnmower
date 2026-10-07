@@ -28,6 +28,7 @@ from .cloud_files import interim_file_params, interim_file_result
 from .cloud_history import history_params, history_result
 from .cloud_video import VIDEO_READ_PATHS, video_read_params, video_read_result
 from .cloud_wire import (
+    cloud_device_list_page,
     FIRMWARE_APPROVAL_PATH,
     APP_PLUGIN_PATH, DEVICE_INFO_PATH, DEVICE_LIST_PATH, DEVICE_METADATA_PATHS,
     cloud_batch_data_params, cloud_device_info_data,
@@ -684,16 +685,13 @@ class DreameMowerDreameHomeCloudProtocol:
         lang: str | None = None,
         master: bool | None = None,
         shared_status: int | None = None,
-    ) -> Any:
+    ) -> dict[str, Any] | None:
         response = self.request(
             f"{self.get_api_url()}{DEVICE_LIST_PATH}",
             cloud_device_list_data(current, size, lang, master, shared_status),
         )
         if response and "data" in response and response["code"] == 0:
-            data = response["data"]
-            if "page" in data:
-                return data["page"]
-            return data
+            return cloud_device_list_page(response["data"])
         return None
 
     def get_device_info_v2(

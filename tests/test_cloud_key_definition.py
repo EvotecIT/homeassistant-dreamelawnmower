@@ -704,3 +704,11 @@ def test_camera_stream_inputs_keep_lan_probe_token_transient_and_redacted() -> N
     assert redacted["lan_client_token_present"] is True
     assert "lan_client_token" not in redacted
     assert "token-1" not in repr(result)
+
+@pytest.mark.parametrize("data", [[], {"page": []}, "invalid"])
+def test_device_page_rejects_non_object_payload(monkeypatch, data):
+    cloud = object.__new__(protocol_module.DreameMowerDreameHomeCloudProtocol)
+    monkeypatch.setattr(cloud, "get_api_url", lambda: "https://cloud.invalid")
+    monkeypatch.setattr(cloud, "request", lambda *args: {"code": 0, "data": data})
+    with pytest.raises(protocol_module.DreameLawnMowerConnectionError, match="Cloud device page is invalid"):
+        cloud.get_device_list_v2()

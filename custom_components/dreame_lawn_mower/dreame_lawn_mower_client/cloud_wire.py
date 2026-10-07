@@ -7,10 +7,10 @@ import hashlib
 import json
 import zlib
 from collections.abc import Sequence
-from typing import Literal
+from typing import Any, Literal
 
 from .const import DREAME_STRINGS, MOVA_STRINGS
-from .exceptions import DreameLawnMowerAuthError
+from .exceptions import DreameLawnMowerAuthError, DreameLawnMowerConnectionError
 
 DEVICE_INFO_PATH = "/dreame-user-iot/iotuserbind/device/info"
 DEVICE_LIST_PATH = "/dreame-user-iot/iotuserbind/device/listV2"
@@ -135,3 +135,15 @@ def cloud_login_data(
         return f"{strings[12]}{strings[13]}{refresh_token}"
     digest = hashlib.md5((password + strings[2]).encode("utf-8")).hexdigest()
     return f"{strings[12]}{strings[14]}{username}{strings[15]}{digest}{strings[16]}"
+
+
+def cloud_device_list_page(result: Any) -> dict[str, Any] | None:
+    """Decode a device page identically for synchronous and async transports."""
+    if result is None:
+        return None
+    if not isinstance(result, dict):
+        raise DreameLawnMowerConnectionError("Cloud device page is invalid")
+    page = result.get("page", result)
+    if not isinstance(page, dict):
+        raise DreameLawnMowerConnectionError("Cloud device page is invalid")
+    return page

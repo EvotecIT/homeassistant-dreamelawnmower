@@ -23,6 +23,7 @@ from .cloud_video import (
     video_read_result,
 )
 from .cloud_wire import (
+    cloud_device_list_page,
     APP_PLUGIN_PATH,
     DEVICE_INFO_PATH,
     DEVICE_LIST_PATH,
@@ -219,14 +220,7 @@ class DreameCloudSession:
             timeout=timeout,
             deadline=deadline,
         )
-        if result is None:
-            return None
-        if not isinstance(result, dict):
-            raise DreameLawnMowerConnectionError("Cloud device page is invalid")
-        page = result.get("page", result)
-        if not isinstance(page, dict):
-            raise DreameLawnMowerConnectionError("Cloud device page is invalid")
-        return page
+        return cloud_device_list_page(result)
 
     async def async_get_properties(
         self, did: str, keys: str, *, timeout: float = 20,
