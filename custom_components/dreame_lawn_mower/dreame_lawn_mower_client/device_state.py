@@ -186,13 +186,16 @@ class _DreameMowerDeviceStateMixin:
             return
         self._apply_connected_callback()
 
-    def _apply_connected_callback(self):
+    def _apply_connected_callback(self, generation: int | None = None) -> None:
         with self._state_lock:
             # A clean-session MQTT reconnect is a new ordering epoch. The
             # mower can complete one task and start another while disconnected,
             # so timestamps from the prior transport session cannot establish
             # freshness between state, task, and settings properties.
-            self._mqtt_generation = getattr(self, "_mqtt_generation", 0) + 1
+            self._mqtt_generation = (
+                getattr(self, "_mqtt_generation", 0) + 1
+                if generation is None else generation
+            )
             self._pending_property_callbacks = []
             self.realtime_properties.clear()
             self.last_realtime_message = None

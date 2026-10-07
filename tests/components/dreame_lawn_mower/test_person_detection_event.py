@@ -99,6 +99,9 @@ async def test_queued_ha_update_survives_reconnect_before_snapshot(hass):
         _notice_events=buffer,
         schedule_update=Mock(),
     )
+    device._apply_connected_callback = (
+        lambda: DreameMowerDevice._apply_connected_callback(device)
+    )
     try:
         buffer.record(received_at=100, message_id=11)
         DreameLawnMowerCoordinator._handle_client_update(bridge)

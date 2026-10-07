@@ -13,6 +13,9 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     map_manager,
     map_types,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
+    DreameLawnMowerConnectionError,
+)
 
 from .test_unknown_properties import _device_stub
 
@@ -134,6 +137,62 @@ def test_reconnect_discards_callbacks_retained_before_the_new_epoch():
     device._connected_callback()
     device._handle_properties([])
     assert observed == []
+
+
+@pytest.mark.parametrize("reconnect_again", [False, True])
+def test_failed_connection_reset_recovers_before_delivering_a_packet(
+    monkeypatch, reconnect_again
+):
+    async def scenario():
+        device, _ = _device_stub()
+        device._protocol = SimpleNamespace(
+            cloud=SimpleNamespace(_shutdown_requested=False)
+        )
+        device._mqtt_generation = 0
+        device.schedule_update = Mock()
+        device._pending_property_callbacks = [(Mock(), "old")]
+
+        async def read_cloud(read):
+            return await read(None)
+
+        client = SimpleNamespace(
+            _closing=False,
+            _device=device,
+            _cloud_read_tasks=set(),
+            _async_cloud_read=read_cloud,
+            _ensure_device=lambda **kwargs: device,
+        )
+        owner = client_mqtt_messages.NativeMqttMessages(client, device)
+        read_state = client_mqtt_messages.async_read_device_state
+        first_read = True
+
+        async def fail_once(*args, **kwargs):
+            nonlocal first_read
+            if first_read:
+                first_read = False
+                raise DreameLawnMowerConnectionError("Device state read timed out")
+            return await read_state(*args, **kwargs)
+
+        observed = []
+
+        async def apply(client, plan, **kwargs):
+            kwargs["require_device"](device)
+            observed.append(device._mqtt_generation)
+
+        monkeypatch.setattr(client_mqtt_messages, "async_read_device_state", fail_once)
+        monkeypatch.setattr(client_mqtt_messages, "async_run_device_plan", apply)
+        owner.request_connected()
+        await owner._task
+        assert device._mqtt_generation == 0
+        if reconnect_again:
+            owner.request_connected()
+            await owner._task
+        owner.request({"method": "properties_changed", "params": []})
+        await owner._task
+        assert observed == [2 if reconnect_again else 1]
+        assert device._pending_property_callbacks == []
+
+    asyncio.run(scenario())
 
 
 def test_suspended_saved_list_refresh_cannot_restore_an_older_iframe(monkeypatch):

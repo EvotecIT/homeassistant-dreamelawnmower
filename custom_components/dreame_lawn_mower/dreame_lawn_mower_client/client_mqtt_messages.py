@@ -96,21 +96,25 @@ class NativeMqttMessages:
             while self._messages and self._active():
                 generation, message = self._messages.popleft()
                 try:
-                    if message is None:
+                    if message is not None and generation != self._generation:
+                        continue
+                    if message is None or self._device._mqtt_generation != generation:
 
-                        def connected(device: DreameMowerDevice) -> None:
+                        def connected(
+                            device: DreameMowerDevice,
+                            current_generation: int = generation,
+                        ) -> None:
                             if device is not self._device or not self._active():
                                 raise DreameLawnMowerConnectionError(
                                     "MQTT connection owner changed"
                                 )
-                            device._apply_connected_callback()
+                            device._apply_connected_callback(current_generation)
 
                         await async_read_device_state(
                             self._client, connected, refresh=False
                         )
-                        continue
-                    if generation != self._generation:
-                        continue
+                        if message is None:
+                            continue
 
                     def message_plan(
                         device: DreameMowerDevice,
