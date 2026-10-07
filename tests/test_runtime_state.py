@@ -11,6 +11,9 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    device_plan_cleanup,
+)
 from dreame_lawn_mower_client import (
     MOWER_RAW_STATUS_PROPERTY_KEY,
     DreameLawnMowerDescriptor,
@@ -62,7 +65,9 @@ def test_async_status_blob_preserves_realtime_precedence_and_cloud_timestamp(
     key = MOWER_RAW_STATUS_PROPERTY_KEY
     entry = {"value": list(_A3_STANDBY_FRAME), "last_seen": 123.0}
     device = SimpleNamespace(
-        realtime_properties={key: entry} if realtime else {}, _state_lock=RLock(),
+        realtime_properties={key: entry} if realtime else {},
+        _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
     )
     client = object.__new__(DreameLawnMowerClient)
     client._closing = False
@@ -129,6 +134,7 @@ def test_fresh_legacy_task_does_not_reuse_retained_idle_heartbeat(task_code, act
     device = SimpleNamespace(
         _ready=True,
         _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
         _protocol=SimpleNamespace(
             get_properties=Mock(
                 return_value=[
@@ -314,6 +320,7 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
     first_heartbeat_received_at = 100.0
     device = SimpleNamespace(
         _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
         realtime_properties={
             MOWER_RAW_STATUS_PROPERTY_KEY: {
                 "value": list(_A3_STANDBY_FRAME),
@@ -409,6 +416,7 @@ def test_authoritative_preflight_snapshot_applies_newer_idle_heartbeat() -> None
     )
     device = SimpleNamespace(
         _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
         update=Mock(),
         realtime_properties={
             MOWER_RAW_STATUS_PROPERTY_KEY: {
@@ -530,6 +538,7 @@ def test_refresh_keeps_new_untimestamped_active_observation() -> None:
     )
     device = SimpleNamespace(
         _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
         info=SimpleNamespace(raw={}, model=raw_snapshot.descriptor.model),
         name=raw_snapshot.descriptor.name,
         host=None,
@@ -678,6 +687,7 @@ def test_expired_a3_heartbeat_cannot_bypass_map_switch_guard() -> None:
     )
     device = SimpleNamespace(
         _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
         realtime_properties={
             MOWER_RAW_STATUS_PROPERTY_KEY: {
                 "value": list(_A3_STANDBY_FRAME),

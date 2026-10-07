@@ -16,6 +16,7 @@ from collections.abc import Callable, Generator
 from .app_protocol import mower_realtime_property_name
 from .device_privacy import AI_POLICY_PROPERTY, decode_ai_policy_acceptance
 from .device_action_plan import DevicePlanEffect, run_device_plan
+from .device_plan_cleanup import _DevicePlanCleanup
 from .device_code_semantics import (
     MowerDeviceCodeTier,
     mower_device_code_definition,
@@ -189,6 +190,7 @@ class DreameMowerDevice(
         self.realtime_properties: dict[str, dict[str, Any]] = {}
         self.last_realtime_message: dict[str, Any] | None = None
         self._state_lock = RLock()
+        self._plan_cleanup = _DevicePlanCleanup()
         self.auto_switch_data: dict[DreameMowerAutoSwitchProperty, Any] = None
         self.ai_data: dict[DreameMowerStrAIProperty | DreameMowerAIProperty, Any] = None
         self.available: bool = False  # Last update is successful or not
@@ -491,6 +493,8 @@ class DreameMowerDevice(
         if self._map_manager:
             self._map_manager.disconnect()
         self._protocol.disconnect()
+        with self._state_lock:
+            self._plan_cleanup.drain()
         self._property_changed()
 
     def listen(self, callback, property: DreameMowerProperty = None) -> None:

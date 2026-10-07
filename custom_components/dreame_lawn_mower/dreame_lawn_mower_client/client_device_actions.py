@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import Callable, Generator
 from threading import Event
@@ -24,6 +25,12 @@ from .device_action_plan import (
 from .exceptions import DeviceException, DreameLawnMowerConnectionError
 
 _ACTION_TIMEOUT = 20
+_ACTION_CLEANUP_GRACE = 2.0
+_LOGGER = logging.getLogger(__name__)
+
+
+class _PlanCleanupExpired(Exception):
+    """The state lock stayed unavailable beyond the cleanup grace period."""
 
 if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
@@ -223,21 +230,53 @@ async def async_run_device_plan(
             # Property applications retain unstarted callbacks on close. Drain
             # that bookkeeping under the same state lock as normal plan steps,
             # even if the caller is cancelled again while the worker is queued.
-            closing = asyncio.create_task(
-                _run_state_worker(
-                    lambda: read_locked_device_state(
-                        device, lambda current: plan.close(), lambda: None
-                    ),
-                    Event(),
-                )
-            )
+            cleanup_deadline = min(deadline, time.monotonic()) + _ACTION_CLEANUP_GRACE
+
+            def cleanup_active() -> None:
+                if time.monotonic() >= cleanup_deadline:
+                    raise _PlanCleanupExpired
+
+            transferred = Event()
+
+            def close_plan() -> None:
+                try:
+                    read_locked_device_state(
+                        device, lambda current: plan.close(), cleanup_active
+                    )
+                except _PlanCleanupExpired:
+                    # A finalizer can mutate callback bookkeeping. Keep the
+                    # plan alive until another state owner can close it safely.
+                    device._plan_cleanup.defer(plan)
+                    transferred.set()
+                    raise
+                else:
+                    transferred.set()
+
+            async def close_owned() -> None:
+                try:
+                    async with asyncio.timeout(
+                        max(0, cleanup_deadline - time.monotonic())
+                    ):
+                        await _run_state_worker(close_plan, Event())
+                except TimeoutError as error:
+                    # A queued worker can be stopped before its body starts.
+                    # A started worker drains before returning, so this owner
+                    # can transfer a still-unclosed plan exactly once.
+                    if not transferred.is_set():
+                        device._plan_cleanup.defer(plan)
+                    raise _PlanCleanupExpired from error
+
+            closing = asyncio.create_task(close_owned())
             interrupted = False
             while not closing.done():
                 try:
                     await asyncio.wait({closing})
                 except asyncio.CancelledError:
                     interrupted = True
-            closing.result()
+            try:
+                closing.result()
+            except _PlanCleanupExpired:
+                _LOGGER.warning("Deferred device-plan cleanup while state was busy")
             if interrupted:
                 raise asyncio.CancelledError
 

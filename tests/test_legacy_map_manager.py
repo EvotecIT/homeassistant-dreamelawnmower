@@ -269,3 +269,27 @@ def test_handle_properties_ignores_undecodable_frame_without_losing_object():
     assert partials is None
     assert name == "valid-object"
     assert isinstance(timestamp, int)
+
+
+def test_empty_iframe_preserves_inflight_frame_reservation(monkeypatch):
+    manager = DreameMapMowerMapManager(Mock())
+    assert manager._prepare_next_p_map(7, 2) is not None
+    empty = MapData()
+    empty.empty_map = True
+    empty.map_id, empty.frame_id, empty.timestamp_ms = 7, 1, 1700000000000
+    partial = MapDataPartial()
+    partial.map_id, partial.frame_id, partial.timestamp_ms = 7, 1, empty.timestamp_ms
+    partial.frame_type = MapFrameType.I.value
+    manager._latest_map_id = 7
+    monkeypatch.setattr(
+        map_manager_module.DreameMowerMapDecoder,
+        "decode_map_data_from_partial", Mock(return_value=(empty, None)),
+    )
+    list(manager._add_map_data_plan(partial))
+    assert manager._map_data is empty
+    assert manager._prepare_next_p_map(7, 2) is None, (
+        "Map reset discarded an active request"
+    )
+    manager._finish_next_p_map(7, 2)
+    assert manager._prepare_next_p_map(7, 2) is not None
+    manager._finish_next_p_map(7, 2)

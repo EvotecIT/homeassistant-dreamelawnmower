@@ -9,6 +9,9 @@ from unittest.mock import Mock
 
 import pytest
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    device_plan_cleanup,
+)
 from dreame_lawn_mower_client import (
     DreameLawnMowerClient,
     DreameLawnMowerCommandRejectedError,
@@ -281,6 +284,7 @@ def test_failed_property_read_cannot_reuse_cached_idle_for_schedule_write(
     device = _PropertyReadDeviceStub(
         _update_running=False,
         _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
         _update_interval=10,
         available=True,
         cloud_connected=True,
@@ -361,6 +365,7 @@ def test_unchanged_fresh_properties_accept_unknown_optional_fields():
         _ready=True,
         data={},
         _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
         property_mapping=DreameMowerPropertyMapping,
         _protocol=SimpleNamespace(get_properties=Mock(return_value=rows)),
         _handle_properties=Mock(return_value=False),
@@ -419,6 +424,7 @@ def test_native_heartbeat_is_fresh_task_evidence_without_legacy_properties(failu
         _ready=True,
         data={},
         _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
         property_mapping=DreameMowerPropertyMapping,
         realtime_properties={"1.1": retained},
         _protocol=SimpleNamespace(get_properties=Mock(return_value=rows)),

@@ -10,6 +10,9 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    device_plan_cleanup,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import (
     DreameLawnMowerClient,
     DreameLawnMowerConnectionError,
@@ -960,7 +963,10 @@ def test_authoritative_confirmation_forces_device_property_request() -> None:
     client._closing = False
     client._native_updates = None
     client._async_cloud_read = lambda read: read(None)
-    device = SimpleNamespace(update=Mock(), _state_lock=RLock())
+    device = SimpleNamespace(
+        update=Mock(), _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
+    )
     client._device = device
     snapshot = SimpleNamespace(state="paused")
     client._async_update_device = AsyncMock(return_value=device)
@@ -981,7 +987,10 @@ def test_authoritative_confirmation_forwards_shared_deadline() -> None:
     client._closing = False
     client._native_updates = None
     client._async_cloud_read = lambda read: read(None)
-    device = SimpleNamespace(update=Mock(), _state_lock=RLock())
+    device = SimpleNamespace(
+        update=Mock(), _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
+    )
     client._device = device
     snapshot = SimpleNamespace(state="paused")
     client._async_update_device = AsyncMock(return_value=device)

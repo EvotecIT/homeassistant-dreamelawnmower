@@ -15,6 +15,9 @@ from homeassistant.setup import async_setup_component
 
 from custom_components.dreame_lawn_mower.const import DOMAIN
 from custom_components.dreame_lawn_mower.coordinator import DreameLawnMowerCoordinator
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    device_plan_cleanup,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device import (
     DreameMowerDevice,
 )
@@ -94,6 +97,7 @@ async def test_queued_ha_update_survives_reconnect_before_snapshot(hass):
     device = SimpleNamespace(
         _ready=True,
         _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
         realtime_properties={},
         last_realtime_message=None,
         _notice_events=buffer,

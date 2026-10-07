@@ -10,6 +10,7 @@ import pytest
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     device_code_semantics,
+    device_plan_cleanup,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import (
     DreameLawnMowerClient,
@@ -530,6 +531,7 @@ def test_client_carries_fault_state_into_recovery_reconciliation() -> None:
     device = _ErrorDevice(0, "drop", state="MOWING")
     client = object.__new__(DreameLawnMowerClient)
     device._state_lock = RLock()
+    device._plan_cleanup = device_plan_cleanup._DevicePlanCleanup()
     client._closing = False
     client._device = device
     client._ensure_device = lambda **kwargs: device

@@ -29,6 +29,8 @@ def read_locked_device_state[T](
             break
     try:
         require_active()
+        device._plan_cleanup.drain()
+        require_active()
         result = read_state(device)
         require_active()
         return result

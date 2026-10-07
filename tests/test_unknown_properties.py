@@ -7,6 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    device_plan_cleanup,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device import (
     DreameMowerDevice,
 )
@@ -23,6 +26,7 @@ def _device_stub() -> tuple[DreameMowerDevice, list[str]]:
     device.realtime_properties = {}
     device.last_realtime_message = None
     device._state_lock = RLock()
+    device._plan_cleanup = device_plan_cleanup._DevicePlanCleanup()
     device._native_message_receiver = None
     device._dirty_data = {}
     device._property_update_callback = {}

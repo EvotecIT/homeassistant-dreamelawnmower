@@ -8,6 +8,9 @@ from threading import RLock
 import pytest
 from aiohttp import ClientSession, web
 
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    device_plan_cleanup,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.cloud_wire import (
     DEVICE_METADATA_PATHS,
 )
@@ -22,6 +25,7 @@ def camera_client(session, account):
     original = client._device
     device = _FakeCameraDevice()
     device._state_lock = RLock()
+    device._plan_cleanup = device_plan_cleanup._DevicePlanCleanup()
     device.disconnect = original.disconnect
     device.listen = original.listen
     client._device = device

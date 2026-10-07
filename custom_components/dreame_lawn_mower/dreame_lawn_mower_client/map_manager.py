@@ -174,6 +174,11 @@ class DreameMapMowerMapManager:
         self._connected: bool = True
         self._vslam_map: bool = False
 
+        # In-flight RPCs own reservations until cleanup, including across
+        # map-data resets. Keep both the lock and entries for their lifetime.
+        self._request_queue_lock = Lock()
+        self._request_queue: dict[str, bool] = {}
+
         self._init_data()
 
         self._protocol = _protocol
@@ -194,8 +199,6 @@ class DreameMapMowerMapManager:
         self._map_data_queue: dict[int, MapData] = {}
         self._updated_frame_id: int = None
         self._selected_map_id: int = None
-        self._request_queue: dict[str, bool] = {}
-        self._request_queue_lock = Lock()
         self._latest_map_data_time: int = None
         self._latest_object_name_time: int = None
         self._latest_map_timestamp_ms: int = None
