@@ -115,8 +115,7 @@ def test_operation_snapshot_cancellation_drains_map_and_stops_later_sections(
             return web.json_response(login_response(strings))
         return refresh_response()
 
-    def read_map(timeout, interval, **kwargs):
-        assert (timeout, interval) == (2, 0.1)
+    def read_map(map_data, **kwargs):
         started.set()
         assert release.wait(5)
         finished.set()
@@ -126,7 +125,7 @@ def test_operation_snapshot_cancellation_drains_map_and_stops_later_sections(
         async with server(monkeypatch, handler), ClientSession() as session:
             client = make_client(session)
             device = ready_device(monkeypatch, client)
-            client._sync_refresh_legacy_map_view = read_map
+            client._render_legacy_map_view = read_map
             client.async_get_app_maps = AsyncMock(return_value={"maps": []})
             client.async_refresh_vector_map_view = AsyncMock(
                 return_value=DreameLawnMowerMapView(source="batch_vector_map"),
