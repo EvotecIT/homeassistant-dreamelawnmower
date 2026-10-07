@@ -493,8 +493,9 @@ class DreameMowerDevice(
         if self._map_manager:
             self._map_manager.disconnect()
         self._protocol.disconnect()
-        with self._state_lock:
-            self._plan_cleanup.drain()
+        if self._plan_cleanup.pending:
+            with self._state_lock:
+                self._plan_cleanup.drain()
         self._property_changed()
 
     def listen(self, callback, property: DreameMowerProperty = None) -> None:

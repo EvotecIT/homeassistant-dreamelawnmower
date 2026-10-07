@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from threading import RLock
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -9,6 +10,9 @@ import pytest
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     device as device_module,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    device_plan_cleanup,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device import (
     DreameMowerDevice,
@@ -151,6 +155,8 @@ def test_disconnect_quiesces_map_before_protocol_teardown() -> None:
     order: list[str] = []
     mower = SimpleNamespace(
         disconnected=False,
+        _state_lock=RLock(),
+        _plan_cleanup=device_plan_cleanup._DevicePlanCleanup(),
         schedule_update=Mock(side_effect=lambda _wait: order.append("device")),
         _map_manager=SimpleNamespace(
             disconnect=Mock(side_effect=lambda: order.append("map")),

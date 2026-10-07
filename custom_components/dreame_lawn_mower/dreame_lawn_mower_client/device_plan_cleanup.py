@@ -15,6 +15,11 @@ class _DevicePlanCleanup:
         """Retain a plan after the action's cleanup grace period expires."""
         self._plans.put(plan)
 
+    @property
+    def pending(self) -> bool:
+        """Whether disconnect needs the state lock after operations quiesce."""
+        return not self._plans.empty()
+
     def drain(self) -> None:
         """Close retained plans while the caller owns the device state lock."""
         while True:
