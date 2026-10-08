@@ -3339,6 +3339,11 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
             options={},
         )
 
+        class VideoCache:
+            def __init__(self, *args, **kwargs):
+                self.__dict__.update(vars(cache))
+                self.async_close = AsyncMock()
+
         with (
             patch.object(
                 integration_module, "ObservationCheckpoint", return_value=cache
@@ -3354,12 +3359,12 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
             patch.object(
                 integration_module,
                 "DreameLawnMowerVideoLanCache",
-                return_value=cache,
+                new=VideoCache,
             ),
             patch.object(
                 integration_module,
                 "DreameLawnMowerVideoProvisioningCache",
-                return_value=cache,
+                new=VideoCache,
             ),
             patch.object(integration_module, "async_setup_point_cloud_api"),
             patch.object(integration_module, "async_setup_mowing_map_api"),
@@ -3376,6 +3381,8 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
             else:
                 raise AssertionError("setup failure was not propagated")
 
+        coordinator.video_lan_cache.async_close.assert_awaited_once_with()
+        coordinator.video_provisioning_cache.async_close.assert_awaited_once_with()
         coordinator.async_shutdown.assert_awaited_once_with()
         assert "entry-1" not in hass.data[DOMAIN]
         sample = performance.as_dict()["latest_by_operation"]["setup"]
@@ -3500,6 +3507,11 @@ def test_initial_connection_failure_keeps_complete_platform_setup_pending() -> N
         )
         entry = SimpleNamespace(entry_id="entry-1", data={}, options={})
 
+        class VideoCache:
+            def __init__(self, *args, **kwargs):
+                self.__dict__.update(vars(cache))
+                self.async_close = AsyncMock()
+
         with (
             patch.object(
                 integration_module, "ObservationCheckpoint", return_value=cache
@@ -3515,12 +3527,12 @@ def test_initial_connection_failure_keeps_complete_platform_setup_pending() -> N
             patch.object(
                 integration_module,
                 "DreameLawnMowerVideoLanCache",
-                return_value=cache,
+                new=VideoCache,
             ),
             patch.object(
                 integration_module,
                 "DreameLawnMowerVideoProvisioningCache",
-                return_value=cache,
+                new=VideoCache,
             ),
         ):
             try:
@@ -3531,6 +3543,8 @@ def test_initial_connection_failure_keeps_complete_platform_setup_pending() -> N
                 raise AssertionError("initial connectivity failure was hidden")
 
         forward.assert_not_awaited()
+        coordinator.video_lan_cache.async_close.assert_awaited_once_with()
+        coordinator.video_provisioning_cache.async_close.assert_awaited_once_with()
         coordinator.async_shutdown.assert_awaited_once_with()
         assert entry.entry_id not in hass.data.get(DOMAIN, {})
 
