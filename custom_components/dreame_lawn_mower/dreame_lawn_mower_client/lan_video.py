@@ -253,8 +253,8 @@ async def async_discover_lan_video_endpoint(
 ) -> DreameLawnMowerLanVideoEndpoint:
     """Discover through asyncio while preserving the synchronous wire policy.
 
-    Keep the socket owned until the discovery window ends or cancellation closes
-    it. As in the synchronous API, the first distinct validated endpoint wins.
+    Return the first validated matching endpoint. Keep the socket owned until
+    success, the discovery deadline or cancellation closes it.
     """
     targets = _discovery_targets(broadcast_addresses, preferred_address)
     if not targets:
@@ -283,7 +283,6 @@ async def async_discover_lan_video_endpoint(
         max_attempts = max(int(attempts), 1)
         sent_attempts = 0
         next_send = started
-        endpoints: dict[tuple[str, int, str], DreameLawnMowerLanVideoEndpoint] = {}
         while loop.time() < deadline:
             if sent_attempts < max_attempts and loop.time() >= next_send:
                 try:
@@ -313,17 +312,13 @@ async def async_discover_lan_video_endpoint(
                 product_id=product_id, device_name=device_name,
             )
             if endpoint is not None:
-                endpoints[(endpoint.address, endpoint.port, endpoint.device_name)] = (
-                    endpoint
-                )
+                return endpoint
             # A busy socket can complete recvfrom without yielding. Keep HA
             # responsive and cancellation observable even during a datagram burst.
             await asyncio.sleep(0)
-        if not endpoints:
-            raise DreameLawnMowerLanVideoDiscoveryError(
-                "The mower did not advertise a same-LAN video endpoint."
-            )
-        return next(iter(endpoints.values()))
+        raise DreameLawnMowerLanVideoDiscoveryError(
+            "The mower did not advertise a same-LAN video endpoint."
+        )
     finally:
         sock.close()
 

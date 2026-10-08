@@ -31,32 +31,37 @@ def test_async_discovery_validates_responses_and_retains_probe_cadence():
             received = []
 
             async def respond():
-                for _ in range(3):
+                for attempt in range(3):
                     packet, sender = await loop.sock_recvfrom(server, 65535)
                     received.append(loop.time())
                     body = json.loads(packet[4:])
                     assert body["params"] == {"productId": "product-1"}
                     assert body["clientToken"] == "token-1"
-                    for reply in (
+                    replies = (
                         _response(token="wrong"),
                         _response(device_name="other-mower"),
-                        _response(),
-                    ):
+                    )
+                    if attempt == 2:
+                        replies += (_response(),)
+                    for reply in replies:
                         await loop.sock_sendto(server, reply, sender)
 
             responder = asyncio.create_task(respond())
             try:
-                endpoint = await lan_video.async_discover_lan_video_endpoint(
+                discovery = lan_video.async_discover_lan_video_endpoint(
                     "product-1",
                     device_name="mower-camera",
                     client_token="token-1",
-                    timeout=0.3,
+                    timeout=5,
                     attempts=3,
                     probe_interval=0.08,
                     port=port,
                     bind_address="127.0.0.1",
                     broadcast_addresses=("127.0.0.2",),
                 )
+                # The first two invalid replies require retries; a validated
+                # endpoint then ends discovery without the remaining window.
+                endpoint = await asyncio.wait_for(discovery, 1)
                 await asyncio.wait_for(responder, 1)
                 assert endpoint.address == "192.0.2.25"
                 assert endpoint.device_name == "mower-camera"
