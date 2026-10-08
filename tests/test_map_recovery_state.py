@@ -69,11 +69,13 @@ def test_recovery_map_getter_initializes_metadata_before_caching(timestamp):
     assert manager.get_recovery_map(7, 1) is recovered
 
 
-@pytest.mark.parametrize("raw_map", [None, "invalid-map", "x"])
+@pytest.mark.parametrize("raw_map", [None, "invalid-map", "x", 37, [], {}])
 def test_recovery_map_getter_keeps_failed_decode_retryable(raw_map):
     manager = DreameMapMowerMapManager(_DummyProtocol())
     saved = MapData()
     recovery = RecoveryMapInfo(7, {"thb": raw_map, "time": 1700000000})
+    if not isinstance(raw_map, str):
+        assert recovery.raw_map is None
     saved.recovery_map_list = [recovery]
     manager._map_list = [7]
     manager._saved_map_data = {7: saved}
@@ -128,7 +130,7 @@ def test_history_map_preserves_optional_date_in_main_and_cleaning_map(
     cloud.get_file.assert_called_once()
 
 
-@pytest.mark.parametrize("raw_map", [None, "invalid-map", "x"])
+@pytest.mark.parametrize("raw_map", [None, "invalid-map", "x", 37, [], {}])
 def test_restore_map_keeps_saved_state_when_recovery_cannot_decode(raw_map):
     manager = DreameMapMowerMapManager(_DummyProtocol())
     saved = MapData()

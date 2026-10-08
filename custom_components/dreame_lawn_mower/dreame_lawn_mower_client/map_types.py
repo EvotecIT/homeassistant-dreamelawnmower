@@ -942,7 +942,8 @@ class RecoveryMapInfo:
     def __init__(self, map_id: int, map_info: Mapping[str, Any]) -> None:
         timestamp = map_info.get("time")
         self.date = datetime.fromtimestamp(timestamp) if timestamp is not None else None
-        self.raw_map: str | None = map_info.get("thb")
+        raw_map = map_info.get("thb")
+        self.raw_map: str | None = raw_map if isinstance(raw_map, str) else None
         self.object_name: str | None = map_info.get("objname")
         self.map_data: MapData | None = None
         self.map_id: int = map_id
