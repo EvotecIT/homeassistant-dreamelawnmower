@@ -1636,8 +1636,7 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
                 if counter > 1:
                     shortcut_name = f"{shortcut_name}{counter}"
 
-                target_shortcut.name = shortcut_name
-                shortcut_name = base64.b64encode(shortcut_name.encode("utf-8")).decode("utf-8")
+                encoded_name = base64.b64encode(shortcut_name.encode("utf-8")).decode("utf-8")
                 previous_shortcuts = self.get_property(DreameMowerProperty.SHORTCUTS)
                 shortcuts = previous_shortcuts
                 if shortcuts and shortcuts != "":
@@ -1645,13 +1644,9 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
                     if shortcuts:
                         for raw_shortcut in shortcuts:
                             if raw_shortcut["id"] == shortcut_id:
-                                raw_shortcut["name"] = shortcut_name
+                                raw_shortcut["name"] = encoded_name
                                 break
-                self._update_property(
-                    DreameMowerProperty.SHORTCUTS,
-                    str(json.dumps(shortcuts, separators=(",", ":"))).replace(" ", ""),
-                )
-                self._property_changed()
+                updated_shortcuts = str(json.dumps(shortcuts, separators=(",", ":"))).replace(" ", "")
 
                 def rollback() -> None:
                     target_shortcut.name = current_name
@@ -1659,10 +1654,13 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
                     self._property_changed()
 
                 try:
+                    target_shortcut.name = shortcut_name
+                    self._update_property(DreameMowerProperty.SHORTCUTS, updated_shortcuts)
+                    self._property_changed()
                     success = False
                     response = self.call_shortcut_action(
                         "EDIT_COMMAND",
-                        {"id": shortcut_id, "name": shortcut_name, "type": 3},
+                        {"id": shortcut_id, "name": encoded_name, "type": 3},
                     )
                     if response and "out" in response:
                         data = response["out"]
