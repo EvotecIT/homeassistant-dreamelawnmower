@@ -335,6 +335,7 @@ def test_a3_realtime_standby_is_shared_by_callback_and_map_guard() -> None:
     client._latest_snapshot = None
     client._device = device
     client._ensure_device = lambda **kwargs: device
+    client._task_control_gate = asyncio.Lock()
     client._async_update_device = AsyncMock(return_value=device)
     device._fresh_task_state = {"legacy_task_status": 6, "received_at": 101.0}
     client._async_call_mowing_task = AsyncMock(
@@ -702,6 +703,7 @@ def test_expired_a3_heartbeat_cannot_bypass_map_switch_guard() -> None:
     client._latest_snapshot = None
     client._device = device
     client._async_update_device = AsyncMock(return_value=device)
+    client._task_control_gate = asyncio.Lock()
     device._fresh_task_state = {"legacy_task_status": 6, "received_at": time.time()}
     client._async_call_mowing_task = AsyncMock()
 
