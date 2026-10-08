@@ -82,6 +82,7 @@ from .point_cloud_diagnostics import (
 from .point_cloud_trace import record_point_cloud_stage
 
 if TYPE_CHECKING:
+    from .map_types import MapData
     from .map_visuals import MapRenderStyle
 
 from .point_cloud_policy import (
