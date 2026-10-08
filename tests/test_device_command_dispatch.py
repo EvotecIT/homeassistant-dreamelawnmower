@@ -13,6 +13,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device_types i
     DreameMowerAutoSwitchProperty,
     DreameMowerCleaningMode,
     DreameMowerProperty,
+    DreameMowerStrAIProperty,
     DreameMowerTaskStatus,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
@@ -167,6 +168,33 @@ def test_string_enum_uses_canonical_property_availability(device, monkeypatch):
         device.set_property_value(prop.name, 1)
 
     device.set_property.assert_not_called()
+
+
+@pytest.mark.parametrize("setting", ["auto_switch", "ai"])
+def test_settings_transport_failure_rolls_back_and_returns_no_result(device, setting):
+    if setting == "auto_switch":
+        prop = DreameMowerAutoSwitchProperty.WIDER_CORNER_COVERAGE
+        device.capability.auto_switch_settings = True
+        device.auto_switch_data = {prop.name: 0}
+        device.set_auto_switch_settings = Mock(
+            side_effect=TimeoutError("transport timed out")
+        )
+        write = device.set_auto_switch_property
+        data = device.auto_switch_data
+        dirty = device._dirty_auto_switch_data
+    else:
+        prop = DreameMowerStrAIProperty.AI_OBSTACLE_DETECTION
+        device.capability.ai_detection = True
+        device.ai_data = {prop.name: False}
+        device._dirty_ai_data = {}
+        device.set_ai_detection = Mock(side_effect=TimeoutError("transport timed out"))
+        write = device.set_ai_property
+        data = device.ai_data
+        dirty = device._dirty_ai_data
+
+    assert write(prop, 1) is None
+    assert data[prop.name] == 0
+    assert prop.name not in dirty
 
 
 def test_read_only_property_never_reaches_device(device):

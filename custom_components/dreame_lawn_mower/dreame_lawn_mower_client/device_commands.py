@@ -1451,6 +1451,7 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
                     del self._dirty_ai_data[prop.name]
                 self.ai_data[prop.name] = current_value
                 self._property_changed()
+                return None
             return result
 
     def set_auto_switch_settings(self, settings) -> dict[str, Any] | None:
@@ -1494,6 +1495,7 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
                         del self._dirty_auto_switch_data[prop.name]
                     self.auto_switch_data[prop.name] = current_value
                     self._property_changed()
+                    return None
                 return result
 
     def set_camera_light_brightness(self, brightness: int) -> dict[str, Any] | None:
