@@ -182,6 +182,7 @@ def test_camera_discovers_before_native_start_and_preserves_cached_fallback(
                 device_name="mower-camera",
                 client_token="token-1",
                 preferred_address=original.address if cached else None,
+                timeout=5.0,
             )
             assert calls == ([original, discovered] if cached else [discovered])
 
