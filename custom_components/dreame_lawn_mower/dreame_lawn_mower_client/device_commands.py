@@ -13,13 +13,15 @@ import traceback
 from datetime import datetime
 from random import randrange
 from threading import RLock, Timer
-from typing import TYPE_CHECKING, Any, Optional
-from collections.abc import Callable, Generator
+from typing import TYPE_CHECKING, Any, Literal, Optional, overload
+from collections.abc import Callable, Generator, Mapping
+from enum import Enum, IntEnum
 
 if TYPE_CHECKING:
     from .device_action_plan import ActionDelay, ActionRequest, PropertyRequest
 
 from .app_protocol import mower_realtime_property_name
+from .device_context import _DreameMowerDeviceContext
 from .stream_commands import stream_action_parameters
 from .device_privacy import AI_POLICY_PROPERTY, decode_ai_policy_acceptance
 from .device_code_semantics import (
@@ -154,8 +156,10 @@ from .map_decoder import DreameMowerMapDecoder
 
 _LOGGER = logging.getLogger(__name__)
 
-class _DreameMowerDeviceCommandMixin:
-    def _set_go_to_zone(self, x, y, size):
+class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
+    def _set_go_to_zone(self, x: float, y: float, size: int) -> None:
+        if self.status.cleaning_mode is None:
+            raise InvalidActionException("Cleaning mode is unavailable. Wait for a device status update.")
         current_cleaning_mode = int(self.status.cleaning_mode.value)
 
         new_cleaning_mode = None
@@ -215,39 +219,44 @@ class _DreameMowerDeviceCommandMixin:
             else:
                 self.status.go_to_zone = None
 
-    def set_property_value(self, prop: str, value: Any):
+    def set_property_value(self, prop: str, value: Any) -> Any:
         if prop is not None and value is not None:
-            set_fn = "set_" + prop.lower()
-            if hasattr(self, set_fn):
-                set_fn = getattr(self, set_fn)
-            else:
+            set_fn = getattr(self, "set_" + prop.lower(), None)
+            if not callable(set_fn):
                 set_fn = None
+            resolved_prop: (
+                DreameMowerProperty | DreameMowerAutoSwitchProperty
+                | DreameMowerAIProperty | DreameMowerStrAIProperty | str
+            )
 
             prop = prop.upper()
             if prop in DreameMowerProperty.__members__:
-                prop = DreameMowerProperty(DreameMowerProperty[prop])
-                if prop not in self._read_write_properties:
+                resolved_prop = DreameMowerProperty[prop]
+                if resolved_prop not in self._read_write_properties:
                     raise InvalidActionException("Invalid property")
             elif prop in DreameMowerAutoSwitchProperty.__members__:
-                prop = DreameMowerAutoSwitchProperty(DreameMowerAutoSwitchProperty[prop])
+                resolved_prop = DreameMowerAutoSwitchProperty[prop]
             elif prop in DreameMowerAIProperty.__members__:
-                prop = DreameMowerAIProperty(DreameMowerAIProperty[prop])
+                resolved_prop = DreameMowerAIProperty[prop]
             elif prop in DreameMowerStrAIProperty.__members__:
-                prop = DreameMowerStrAIProperty(DreameMowerStrAIProperty[prop])
+                resolved_prop = DreameMowerStrAIProperty[prop]
             elif set_fn is None:
                 raise InvalidActionException("Invalid property")
+            else:
+                resolved_prop = prop
 
-            if set_fn is None and self.get_property(prop) is None:
-                raise InvalidActionException("Invalid property")
+            if set_fn is None:
+                if not isinstance(resolved_prop, Enum) or self.get_property(resolved_prop) is None:
+                    raise InvalidActionException("Invalid property")
 
-            prop_name = prop.lower() if isinstance(prop, str) else prop.name
+            prop_name = resolved_prop.name if isinstance(resolved_prop, Enum) else resolved_prop.lower()
 
             if (
                 (
                     self.status.started
                     or not (
-                        prop is DreameMowerProperty.CLEANING_MODE
-                        or prop is DreameMowerAutoSwitchProperty.CLEANING_ROUTE
+                        resolved_prop is DreameMowerProperty.CLEANING_MODE
+                        or resolved_prop is DreameMowerAutoSwitchProperty.CLEANING_ROUTE
                     )
                 )
                 and prop_name in PROPERTY_AVAILABILITY
@@ -255,7 +264,26 @@ class _DreameMowerDeviceCommandMixin:
             ):
                 raise InvalidActionException("Property unavailable")
 
-            def get_int_value(enum, value, enum_list=None):
+            if resolved_prop is DreameMowerProperty.VOICE_ASSISTANT_LANGUAGE:
+                if not isinstance(value, str):
+                    raise InvalidActionException("Invalid value")
+                requested_language = value.upper()
+                language = DreameMowerVoiceAssistantLanguage.__members__.get(requested_language)
+                if language is None:
+                    language = next((
+                        item for item in DreameMowerVoiceAssistantLanguage
+                        if item.value == requested_language
+                    ), None)
+                if language is None:
+                    raise InvalidActionException("Invalid value")
+                if not self.device_connected:
+                    raise InvalidActionException("Device unavailable")
+                return self.set_voice_assistant_language(language.name)
+
+            def get_int_value(
+                enum: type[IntEnum], value: Any,
+                enum_list: Mapping[str, int] | None = None,
+            ) -> int | None:
                 if isinstance(value, str):
                     value = value.upper()
                     if value.isnumeric():
@@ -263,7 +291,7 @@ class _DreameMowerDeviceCommandMixin:
                     elif value in enum.__members__:
                         value = enum[value].value
                         if enum_list is None:
-                            return value
+                            return int(value)
 
                 if isinstance(value, int):
                     if enum_list is None:
@@ -271,18 +299,15 @@ class _DreameMowerDeviceCommandMixin:
                             return value
                     elif value in enum_list.values():
                         return value
+                return None
 
-            if prop is DreameMowerProperty.CLEANING_MODE:
+            if resolved_prop is DreameMowerProperty.CLEANING_MODE:
                 value = get_int_value(DreameMowerCleaningMode, value)
-            elif prop is DreameMowerProperty.VOICE_ASSISTANT_LANGUAGE:
-                value = get_int_value(
-                    DreameMowerVoiceAssistantLanguage, value, self.status.voice_assistant_language_list
-                )
-            elif prop is DreameMowerAutoSwitchProperty.WIDER_CORNER_COVERAGE:
+            elif resolved_prop is DreameMowerAutoSwitchProperty.WIDER_CORNER_COVERAGE:
                 value = get_int_value(DreameMowerWiderCornerCoverage, value)
-            elif prop is DreameMowerAutoSwitchProperty.CLEANING_ROUTE:
+            elif resolved_prop is DreameMowerAutoSwitchProperty.CLEANING_ROUTE:
                 value = get_int_value(DreameMowerCleaningRoute, value, self.status.cleaning_route_list)
-            elif prop is DreameMowerAutoSwitchProperty.CLEANGENIUS:
+            elif resolved_prop is DreameMowerAutoSwitchProperty.CLEANGENIUS:
                 value = get_int_value(DreameMowerCleanGenius, value)
             elif isinstance(value, bool):
                 value = int(value)
@@ -300,10 +325,10 @@ class _DreameMowerDeviceCommandMixin:
             if value is None or not isinstance(value, int):
                 raise InvalidActionException("Invalid value")
 
-            if prop == DreameMowerProperty.VOLUME:
+            if resolved_prop == DreameMowerProperty.VOLUME:
                 if value < 0 or value > 100:
                     value = None
-            elif prop == DreameMowerProperty.CAMERA_LIGHT_BRIGHTNESS:
+            elif resolved_prop == DreameMowerProperty.CAMERA_LIGHT_BRIGHTNESS:
                 if value < 40 or value > 100:
                     value = None
 
@@ -316,25 +341,30 @@ class _DreameMowerDeviceCommandMixin:
             if set_fn:
                 return set_fn(value)
 
-            if self.get_property(prop) == value or self.set_property(prop, value):
+            if not isinstance(resolved_prop, Enum):
+                raise InvalidActionException("Invalid property")
+            if self.get_property(resolved_prop) == value or self.set_property(resolved_prop, value):
                 return
             raise InvalidActionException("Property not updated")
         raise InvalidActionException("Invalid property or value")
 
-    def call_action_value(self, action: str):
+    def call_action_value(self, action: str) -> Any:
         if action is not None:
             if hasattr(self, action):
                 action_fn = getattr(self, action)
             else:
                 action_fn = None
+            if not callable(action_fn):
+                action_fn = None
 
-            action = action.upper()
-            if action in DreameMowerAction.__members__:
-                action = DreameMowerAction(DreameMowerAction[action])
+            action_key = action.upper()
+            resolved_action: DreameMowerAction | str = action_key
+            if action_key in DreameMowerAction.__members__:
+                resolved_action = DreameMowerAction[action_key]
             elif action_fn is None:
                 raise InvalidActionException("Invalid action")
 
-            action_name = action.lower() if isinstance(action, str) else action.name
+            action_name = resolved_action.lower() if isinstance(resolved_action, str) else resolved_action.name
 
             if action_name in ACTION_AVAILABILITY and not ACTION_AVAILABILITY[action_name](self):
                 raise InvalidActionException("Action unavailable")
@@ -345,11 +375,22 @@ class _DreameMowerDeviceCommandMixin:
             if action_fn:
                 return action_fn()
 
-            result = self.call_action(action)
+            if isinstance(resolved_action, str):
+                raise InvalidActionException("Invalid action")
+            result = self.call_action(resolved_action)
             if result and result.get("code") == 0:
                 return
             raise InvalidActionException("Unable to call action")
         raise InvalidActionException("Invalid action")
+
+    @overload
+    def set_property(self, prop: DreameMowerProperty, value: Any) -> bool: ...
+
+    @overload
+    def set_property(
+        self, prop: DreameMowerAutoSwitchProperty | DreameMowerStrAIProperty | DreameMowerAIProperty,
+        value: Any,
+    ) -> list[dict[str, Any]] | bool | None: ...
 
     def set_property(
         self,
@@ -357,7 +398,7 @@ class _DreameMowerDeviceCommandMixin:
             DreameMowerProperty | DreameMowerAutoSwitchProperty | DreameMowerStrAIProperty | DreameMowerAIProperty
         ),
         value: Any,
-    ) -> bool:
+    ) -> bool | list[dict[str, Any]] | None:
         """Sets property value using the existing property mapping and notify listeners
         Property must be set on memory first and notify its listeners because device does not return new value immediately.
         """
@@ -444,21 +485,21 @@ class _DreameMowerDeviceCommandMixin:
         self.schedule_update(1)
         return False
 
-    def call_stream_audio_action(self, property: DreameMowerProperty, parameters=None):
+    def call_stream_audio_action(self, property: DreameMowerProperty, parameters: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
         return self.call_stream_action(DreameMowerAction.STREAM_AUDIO, property, parameters)
 
-    def call_stream_video_action(self, property: DreameMowerProperty, parameters=None):
+    def call_stream_video_action(self, property: DreameMowerProperty, parameters: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
         return self.call_stream_action(DreameMowerAction.STREAM_VIDEO, property, parameters)
 
-    def call_stream_property_action(self, property: DreameMowerProperty, parameters=None):
+    def call_stream_property_action(self, property: DreameMowerProperty, parameters: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
         return self.call_stream_action(DreameMowerAction.STREAM_PROPERTY, property, parameters)
 
     def call_stream_action(
         self,
         action: DreameMowerAction,
         property: DreameMowerProperty,
-        parameters=None,
-    ):
+        parameters: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
         return self.call_action(
             action,
             stream_action_parameters(
@@ -466,7 +507,9 @@ class _DreameMowerDeviceCommandMixin:
             ),
         )
 
-    def call_shortcut_action(self, command: str, parameters={}):
+    def call_shortcut_action(self, command: str, parameters: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        if parameters is None:
+            parameters = {}
         return self.call_action(
             DreameMowerAction.SHORTCUTS,
             [
@@ -485,7 +528,7 @@ class _DreameMowerDeviceCommandMixin:
     def call_action(
         self,
         action: DreameMowerAction,
-        parameters: dict[str, Any] = None,
+        parameters: dict[str, Any] | list[Any] | None = None,
         *,
         enforce_availability: bool = True,
     ) -> dict[str, Any] | None:
@@ -496,7 +539,7 @@ class _DreameMowerDeviceCommandMixin:
             self, action, parameters, enforce_availability=enforce_availability,
         )
 
-    def send_command(self, command: str, parameters: dict[str, Any] = None) -> dict[str, Any] | None:
+    def send_command(self, command: str, parameters: dict[str, Any] | None = None) -> Any:
         """Send a raw command to the device. This is mostly useful when trying out
         commands which are not implemented by a given device instance. (Not likely)"""
 
@@ -533,13 +576,15 @@ class _DreameMowerDeviceCommandMixin:
             raise InvalidActionException("Cannot set cleaning mode when customized cleaning is enabled")
 
         cleaning_mode = int(cleaning_mode)
+        if cleaning_mode != DreameMowerCleaningMode.MOWING.value:
+            raise InvalidValueException("Unsupported mower cleaning mode")
 
         if self.status.started and not PROPERTY_AVAILABILITY[DreameMowerProperty.CLEANING_MODE.name](self):
             raise InvalidActionException("Cleaning mode unavailable")
 
-        return self._update_cleaning_mode(cleaning_mode)
+        return self.set_property(DreameMowerProperty.CLEANING_MODE, cleaning_mode)
 
-    def set_dnd_task(self, enabled: bool, dnd_start: str, dnd_end: str) -> bool:
+    def set_dnd_task(self, enabled: bool | None, dnd_start: str | None, dnd_end: str | None) -> bool:
         """Set do not disturb task"""
         if dnd_start is None or dnd_start == "":
             dnd_start = "22:00"
@@ -604,7 +649,7 @@ class _DreameMowerDeviceCommandMixin:
             return self.set_property(DreameMowerProperty.DND_END, dnd_end)
         return self.set_dnd_task(self.status.dnd, self.status.dnd_start, str(dnd_end))
 
-    def set_off_peak_charging_config(self, enabled: bool, start: str, end: str) -> bool:
+    def set_off_peak_charging_config(self, enabled: bool | None, start: str | None, end: str | None) -> bool:
         """Set of peak charging config"""
         if start is None or start == "":
             start = "22:00"
@@ -725,7 +770,7 @@ class _DreameMowerDeviceCommandMixin:
         """Start or resume the cleaning task."""
         return self.start_mowing()
 
-    def start_custom(self, status, parameters: dict[str, Any] = None) -> dict[str, Any] | None:
+    def start_custom(self, status: int, parameters: str | dict[str, Any] | None = None) -> dict[str, Any] | None:
         """Start custom cleaning task."""
         from .device_action_plan import run_device_plan
 
@@ -830,7 +875,7 @@ class _DreameMowerDeviceCommandMixin:
 
         return run_device_plan(self, self._pause_plan())
 
-    def _pause_plan(self) -> Generator[ActionDelay | ActionRequest | PropertyRequest, Any, Any]:
+    def _pause_plan(self) -> Generator[ActionDelay | ActionRequest | PropertyRequest, Any, dict[str, Any]]:
         """Share pause state transitions and action policy across transports."""
         from .device_action_plan import device_action_plan
 
@@ -888,7 +933,7 @@ class _DreameMowerDeviceCommandMixin:
         """Set the mower cleaner to return to the dock."""
         return self.return_to_base()
 
-    def _ordinary_stop_plan(self) -> Generator[ActionDelay | ActionRequest | PropertyRequest, Any, Any]:
+    def _ordinary_stop_plan(self) -> Generator[ActionDelay | ActionRequest | PropertyRequest, Any, dict[str, Any] | None]:
         """Preserve ordinary STOP's mapping return-to-base behavior."""
         if self.status.fast_mapping:
             return (yield from self._dock_plan())
@@ -907,22 +952,23 @@ class _DreameMowerDeviceCommandMixin:
     def clean_zone(
         self,
         zones: list[int] | list[list[int]],
-        cleaning_times: int | list[int],
+        cleaning_times: int | list[int] | Literal[""] | None,
     ) -> dict[str, Any] | None:
         """Clean selected area."""
 
         if not isinstance(zones, list) or not zones:
             raise InvalidActionException(f"Invalid zone coordinates: %s", zones)
 
-        if not isinstance(zones[0], list):
-            zones = [zones]
+        zone_rows = (
+            [zones] if not isinstance(zones[0], list) else zones
+        )
 
         if cleaning_times is None or cleaning_times == "":
             cleaning_times = 1
 
         cleanlist = []
         index = 0
-        for zone in zones:
+        for zone in zone_rows:
             if not isinstance(zone, list) or len(zone) != 4:
                 raise InvalidActionException(f"Invalid zone coordinates: %s", zone)
 
@@ -939,7 +985,10 @@ class _DreameMowerDeviceCommandMixin:
             x_coords = sorted([zone[0], zone[2]])
             y_coords = sorted([zone[1], zone[3]])
 
-            grid_size = self.status.current_map.dimensions.grid_size if self.status.current_map else 50
+            current_map = self.status.current_map
+            if current_map is not None and current_map.dimensions is None:
+                raise InvalidActionException("Map dimensions are unavailable. Wait for a map update.")
+            grid_size = current_map.dimensions.grid_size if current_map and current_map.dimensions else 50
             w = (x_coords[1] - x_coords[0]) / grid_size
             h = (y_coords[1] - y_coords[0]) / grid_size
 
@@ -966,7 +1015,7 @@ class _DreameMowerDeviceCommandMixin:
                 # Set active areas on current map data is implemented on the app
                 if not self.status.started:
                     self._map_manager.editor.clear_path()
-                self._map_manager.editor.set_active_areas(zones)
+                self._map_manager.editor.set_active_areas(zone_rows)
 
         return self.start_custom(
             DreameMowerStatus.ZONE_CLEANING.value,
@@ -976,7 +1025,7 @@ class _DreameMowerDeviceCommandMixin:
     def clean_segment(
         self,
         selected_segments: int | list[int],
-        cleaning_times: int | list[int] | None = None,
+        cleaning_times: int | list[int] | Literal[""] | None = None,
         timestamp: int | None = None,
     ) -> dict[str, Any] | None:
         """Clean selected segment using id."""
@@ -1000,7 +1049,7 @@ class _DreameMowerDeviceCommandMixin:
                     repeat = cleaning_times[index]
                 else:
                     if segments and segment_id in segments and self.status.customized_cleaning:
-                        repeat = segments[segment_id].cleaning_times
+                        repeat = segments[segment_id].cleaning_times or 1
                     else:
                         repeat = 1
             else:
@@ -1024,7 +1073,7 @@ class _DreameMowerDeviceCommandMixin:
                 # Set active segments on current map data is implemented on the app
                 self._map_manager.editor.set_active_segments(selected_segments)
 
-        data = {"selects": cleanlist}
+        data: dict[str, Any] = {"selects": cleanlist}
         if timestamp is not None:
             data["timestamp"] = timestamp
 
@@ -1036,22 +1085,23 @@ class _DreameMowerDeviceCommandMixin:
     def clean_spot(
         self,
         points: list[int] | list[list[int]],
-        cleaning_times: int | list[int] | None,
+        cleaning_times: int | list[int] | Literal[""] | None,
     ) -> dict[str, Any] | None:
         """Clean 1.5 square meters area of selected points."""
 
         if not isinstance(points, list) or not points:
             raise InvalidActionException(f"Invalid point coordinates: %s", points)
 
-        if not isinstance(points[0], list):
-            points = [points]
+        point_rows = (
+            [points] if not isinstance(points[0], list) else points
+        )
 
         if cleaning_times is None or cleaning_times == "":
             cleaning_times = 1
 
         cleanlist = []
         index = 0
-        for point in points:
+        for point in point_rows:
             if isinstance(cleaning_times, list):
                 if index < len(cleaning_times):
                     repeat = cleaning_times[index]
@@ -1083,25 +1133,31 @@ class _DreameMowerDeviceCommandMixin:
                     self._map_manager.editor.clear_path()
 
                 # Set active points on current map data is implemented on the app
-                self._map_manager.editor.set_active_points(points)
+                self._map_manager.editor.set_active_points(point_rows)
 
         return self.start_custom(
             DreameMowerStatus.SPOT_CLEANING.value,
             str(json.dumps({"points": cleanlist}, separators=(",", ":"))).replace(" ", ""),
         )
 
-    def go_to(self, x, y) -> dict[str, Any] | None:
+    def go_to(self, x: int, y: int) -> dict[str, Any] | None:
         """Go to a point and take pictures around."""
         if self.status.current_map and not self.status.current_map.check_point(x, y):
             raise InvalidActionException("Coordinate is not inside the map")
 
-        if self.status.battery_level < 15:
+        battery_level = self.status.battery_level
+        if battery_level is None:
+            raise InvalidActionException("Battery level is unavailable. Wait for a device status update.")
+        if battery_level < 15:
             raise InvalidActionException(
                 "Low battery capacity. Please start the robot for working after it being fully charged."
             )
 
         if not self.capability.cruising:
-            size = self.status.current_map.dimensions.grid_size if self.status.current_map else 50
+            current_map = self.status.current_map
+            if current_map is not None and current_map.dimensions is None:
+                raise InvalidActionException("Map dimensions are unavailable. Wait for a map update.")
+            size = current_map.dimensions.grid_size if current_map and current_map.dimensions else 50
             if self.status.current_map and self.status.current_map.robot_position:
                 position = self.status.current_map.robot_position
                 if abs(x - position.x) <= size and abs(y - position.y) <= size:
@@ -1164,30 +1220,35 @@ class _DreameMowerDeviceCommandMixin:
         if self.status.stream_status != DreameMowerStreamStatus.IDLE:
             raise InvalidActionException(f"Follow path only works with live camera streaming")
 
-        if self.status.battery_level < 15:
+        battery_level = self.status.battery_level
+        if battery_level is None:
+            raise InvalidActionException("Battery level is unavailable. Wait for a device status update.")
+        if battery_level < 15:
             raise InvalidActionException(
                 "Low battery capacity. Please start the robot for working after it being fully charged."
             )
 
+        point_rows: list[list[int]]
         if not points:
-            points = []
-
-        if points and not isinstance(points[0], list):
-            points = [points]
+            point_rows = []
+        elif not isinstance(points[0], list):
+            point_rows = [points]
+        else:
+            point_rows = points
 
         if self.status.current_map:
-            for point in points:
+            for point in point_rows:
                 if not self.status.current_map.check_point(point[0], point[1]):
                     raise InvalidActionException(f"Coordinate ({point[0]}, {point[1]}) is not inside the map")
 
         path = []
-        for point in points:
+        for point in point_rows:
             path.append([int(round(point[0])), int(round(point[1])), 0, 1])
 
         predefined_points = []
         if self.status.current_map and self.status.current_map.predefined_points:
-            for point in self.status.current_map.predefined_points.values():
-                predefined_points.append([int(round(point.x)), int(round(point.y)), 0, 1])
+            for saved_point in self.status.current_map.predefined_points.values():
+                predefined_points.append([int(round(saved_point.x)), int(round(saved_point.y)), 0, 1])
 
         if len(path) == 0:
             path.extend(predefined_points)
@@ -1241,9 +1302,12 @@ class _DreameMowerDeviceCommandMixin:
     def start_fast_mapping(self) -> dict[str, Any] | None:
         """Fast map."""
         if self.status.fast_mapping:
-            return
+            return None
 
-        if self.status.battery_level < 15:
+        battery_level = self.status.battery_level
+        if battery_level is None:
+            raise InvalidActionException("Battery level is unavailable. Wait for a device status update.")
+        if battery_level < 15:
             raise InvalidActionException(
                 "Low battery capacity. Please start the robot for working after it being fully charged."
             )
@@ -1281,15 +1345,17 @@ class _DreameMowerDeviceCommandMixin:
                     }
                 ],
             )
+        return None
 
     def remote_control_move_step(
         self, rotation: int = 0, velocity: int = 0, prompt: bool | None = None
-    ) -> dict[str, Any] | None:
+    ) -> list[dict[str, Any]] | None:
         """Send remote control command to device."""
         siid, piid, payload = self._prepare_remote_control_step(
             rotation, velocity, prompt
         )
-        return self._protocol.set_property(siid, piid, payload, 1)
+        response: list[dict[str, Any]] | None = self._protocol.set_property(siid, piid, payload, 1)
+        return response
 
     def _prepare_remote_control_step(
         self, rotation: int, velocity: int, prompt: bool | None,
@@ -1316,7 +1382,7 @@ class _DreameMowerDeviceCommandMixin:
         mapping = self.property_mapping[DreameMowerProperty.REMOTE_CONTROL]
         return mapping["siid"], mapping["piid"], payload
 
-    def install_voice_pack(self, lang_id: int, url: str, md5: str, size: int) -> dict[str, Any] | None:
+    def install_voice_pack(self, lang_id: int, url: str, md5: str, size: int) -> list[dict[str, Any]] | None:
         """install a custom language pack"""
         payload = '{"id":"%(lang_id)s","url":"%(url)s","md5":"%(md5)s","size":%(size)d}' % {
             "lang_id": lang_id,
@@ -1325,9 +1391,10 @@ class _DreameMowerDeviceCommandMixin:
             "size": size,
         }
         mapping = self.property_mapping[DreameMowerProperty.VOICE_CHANGE]
-        return self._protocol.set_property(mapping["siid"], mapping["piid"], payload, 3)
+        response: list[dict[str, Any]] | None = self._protocol.set_property(mapping["siid"], mapping["piid"], payload, 3)
+        return response
 
-    def set_ai_detection(self, settings: dict[str, bool] | int) -> dict[str, Any] | None:
+    def set_ai_detection(self, settings: dict[str, bool] | int) -> list[dict[str, Any]] | None:
         """Send ai detection parameters to the device."""
         if self.capability.ai_detection:
             if isinstance(settings, int):
@@ -1343,6 +1410,7 @@ class _DreameMowerDeviceCommandMixin:
                 )
             self._require_ai_policy_acceptance(requires_acceptance)
             return self._send_ai_detection(settings)
+        return None
 
     def _require_ai_policy_acceptance(self, requires_acceptance: bool) -> None:
         """Validate explicit consent without changing device settings."""
@@ -1357,35 +1425,41 @@ class _DreameMowerDeviceCommandMixin:
                     "You need to accept privacy policy from the App before enabling AI obstacle detection feature"
                 )
 
-    def _send_ai_detection(self, settings: dict[str, bool] | int) -> dict[str, Any] | None:
+    def _send_ai_detection(self, settings: dict[str, bool] | int) -> list[dict[str, Any]] | None:
         """Send settings after the caller has validated the requested edit."""
         mapping = self.property_mapping[DreameMowerProperty.AI_DETECTION]
         if isinstance(settings, int):
-            return self._protocol.set_property(mapping["siid"], mapping["piid"], settings, 3)
-        return self._protocol.set_property(
-            mapping["siid"], mapping["piid"],
-            str(json.dumps(settings, separators=(",", ":"))).replace(" ", ""), 3,
-        )
+            response: list[dict[str, Any]] | None = self._protocol.set_property(mapping["siid"], mapping["piid"], settings, 3)
+        else:
+            response = self._protocol.set_property(
+                mapping["siid"], mapping["piid"],
+                str(json.dumps(settings, separators=(",", ":"))).replace(" ", ""), 3,
+            )
+        return response
 
     def set_ai_property(
         self, prop: DreameMowerStrAIProperty | DreameMowerAIProperty, value: bool
-    ) -> dict[str, Any] | None:
+    ) -> list[dict[str, Any]] | None:
         if self.capability.ai_detection:
-            if prop.name not in self.ai_data:
+            ai_data = self.ai_data
+            if ai_data is None or prop.name not in ai_data:
                 raise InvalidActionException("Not supported")
+            if self._dirty_ai_data is None:
+                self._dirty_ai_data = {}
+            dirty_ai_data = self._dirty_ai_data
             current_value = self.get_ai_property(prop)
-            previous_dirty = self._dirty_ai_data.get(prop.name)
+            previous_dirty = dirty_ai_data.get(prop.name)
 
             def rollback() -> None:
                 if previous_dirty is None:
-                    self._dirty_ai_data.pop(prop.name, None)
+                    dirty_ai_data.pop(prop.name, None)
                 else:
-                    self._dirty_ai_data[prop.name] = previous_dirty
-                self.ai_data[prop.name] = current_value
+                    dirty_ai_data[prop.name] = previous_dirty
+                ai_data[prop.name] = current_value
                 self._property_changed()
 
-            self._dirty_ai_data[prop.name] = DirtyData(value, current_value, time.time())
-            self.ai_data[prop.name] = value
+            dirty_ai_data[prop.name] = DirtyData(value, current_value, time.time())
+            ai_data[prop.name] = value
             ai_value = self.get_property(DreameMowerProperty.AI_DETECTION)
             self._property_changed()
             try:
@@ -1396,9 +1470,9 @@ class _DreameMowerDeviceCommandMixin:
                 if isinstance(ai_value, int):
                     # Preserve acknowledged edits that are newer than raw readback.
                     for cached_prop in DreameMowerAIProperty:
-                        if cached_prop.name in self.ai_data:
+                        if cached_prop.name in ai_data:
                             bit = cached_prop.value
-                            ai_value = (ai_value | bit) if self.ai_data[cached_prop.name] else (ai_value & ~bit)
+                            ai_value = (ai_value | bit) if ai_data[cached_prop.name] else (ai_value & ~bit)
                     result = self._send_ai_detection(ai_value)
                 else:
                     result = self._send_ai_detection({DreameMowerStrAIProperty[prop.name].value: bool(value)})
@@ -1415,44 +1489,48 @@ class _DreameMowerDeviceCommandMixin:
                 rollback()
                 raise
             return result
+        return None
 
-    def set_auto_switch_settings(self, settings) -> dict[str, Any] | None:
+    def set_auto_switch_settings(self, settings: dict[str, Any] | list[dict[str, Any]]) -> list[dict[str, Any]] | None:
         from .device_action_plan import run_device_plan
 
         return run_device_plan(self, self._set_auto_switch_settings_plan(settings))
 
     def _set_auto_switch_settings_plan(
         self, settings: Any, *, on_dispatch: Callable[[], None] | None = None,
-    ) -> Generator[PropertyRequest, Any, Any]:
+    ) -> Generator[PropertyRequest, Any, list[dict[str, Any]] | None]:
         from .device_action_plan import PropertyRequest
 
         if self.capability.auto_switch_settings:
             mapping = self.property_mapping[DreameMowerProperty.AUTO_SWITCH_SETTINGS]
-            return (yield PropertyRequest(
+            response: list[dict[str, Any]] | None = yield PropertyRequest(
                 mapping["siid"],
                 mapping["piid"],
                 str(json.dumps(settings, separators=(",", ":"))).replace(" ", ""),
                 legacy_retry_count=1,
                 on_dispatch=on_dispatch,
-            ))
+            )
+            return response
+        return None
 
-    def set_auto_switch_property(self, prop: DreameMowerAutoSwitchProperty, value: int) -> dict[str, Any] | None:
+    def set_auto_switch_property(self, prop: DreameMowerAutoSwitchProperty, value: int) -> list[dict[str, Any]] | None:
         from .device_action_plan import run_device_plan
 
         return run_device_plan(self, self._set_auto_switch_property_plan(prop, value))
 
     def _set_auto_switch_property_plan(
         self, prop: DreameMowerAutoSwitchProperty, value: int,
-    ) -> Generator[PropertyRequest, Any, Any]:
+    ) -> Generator[PropertyRequest, Any, list[dict[str, Any]] | None]:
         if self.capability.auto_switch_settings:
-            if prop.name not in self.auto_switch_data:
+            auto_switch_data = self.auto_switch_data
+            if auto_switch_data is None or prop.name not in auto_switch_data:
                 raise InvalidActionException("Not supported")
             current_value = self.get_auto_switch_property(prop)
             if current_value != value:
                 previous_dirty = self._dirty_auto_switch_data.get(prop.name)
                 pending_write = DirtyData(value, current_value, time.time())
                 self._dirty_auto_switch_data[prop.name] = pending_write
-                self.auto_switch_data[prop.name] = value
+                auto_switch_data[prop.name] = value
                 self._property_changed()
                 result = None
                 dispatched = False
@@ -1468,7 +1546,7 @@ class _DreameMowerDeviceCommandMixin:
                         self._dirty_auto_switch_data.pop(prop.name, None)
                     else:
                         self._dirty_auto_switch_data[prop.name] = previous_dirty
-                    self.auto_switch_data[prop.name] = current_value
+                    auto_switch_data[prop.name] = current_value
                     self._property_changed()
 
                 try:
@@ -1495,6 +1573,7 @@ class _DreameMowerDeviceCommandMixin:
                 except Exception:
                     rollback()
                 return result
+        return None
 
     def set_camera_light_brightness(self, brightness: int) -> dict[str, Any] | None:
         if self.capability.auto_switch_settings:
@@ -1508,15 +1587,17 @@ class _DreameMowerDeviceCommandMixin:
             if result is None or result.get("code") != 0:
                 self._update_property(DreameMowerProperty.CAMERA_LIGHT_BRIGHTNESS, str(current_value))
             return result
+        return None
 
-    def set_wider_corner_coverage(self, value: int) -> dict[str, Any] | None:
+    def set_wider_corner_coverage(self, value: int) -> list[dict[str, Any]] | None:
         if self.capability.auto_switch_settings:
             current_value = self.get_auto_switch_property(DreameMowerAutoSwitchProperty.WIDER_CORNER_COVERAGE)
             if current_value is not None and current_value > 0 and value <= 0:
                 value = -current_value
             return self.set_auto_switch_property(DreameMowerAutoSwitchProperty.WIDER_CORNER_COVERAGE, value)
+        return None
 
-    def set_resume_cleaning(self, value: int) -> dict[str, Any] | None:
+    def set_resume_cleaning(self, value: int) -> bool:
         if self.capability.auto_charging and bool(value):
             value = 2
         return self.set_property(DreameMowerProperty.RESUME_CLEANING, value)
@@ -1542,9 +1623,10 @@ class _DreameMowerDeviceCommandMixin:
 
         if shortcut_id not in self.status.shortcuts:
             raise InvalidActionException(f"Shortcut {shortcut_id} not found")
+        target_shortcut = self.status.shortcuts[shortcut_id]
 
         if shortcut_name and len(shortcut_name) > 0:
-            current_name = self.status.shortcuts[shortcut_id]
+            current_name = target_shortcut.name
             if current_name != shortcut_name:
                 counter = 1
                 for id, shortcut in self.status.shortcuts.items():
@@ -1554,15 +1636,16 @@ class _DreameMowerDeviceCommandMixin:
                 if counter > 1:
                     shortcut_name = f"{shortcut_name}{counter}"
 
-                self.status.shortcuts[shortcut_id].name = shortcut_name
+                target_shortcut.name = shortcut_name
                 shortcut_name = base64.b64encode(shortcut_name.encode("utf-8")).decode("utf-8")
-                shortcuts = self.get_property(DreameMowerProperty.SHORTCUTS)
+                previous_shortcuts = self.get_property(DreameMowerProperty.SHORTCUTS)
+                shortcuts = previous_shortcuts
                 if shortcuts and shortcuts != "":
                     shortcuts = json.loads(shortcuts)
                     if shortcuts:
-                        for shortcut in shortcuts:
-                            if shortcut["id"] == shortcut_id:
-                                shortcut["name"] = shortcut_name
+                        for raw_shortcut in shortcuts:
+                            if raw_shortcut["id"] == shortcut_id:
+                                raw_shortcut["name"] = shortcut_name
                                 break
                 self._update_property(
                     DreameMowerProperty.SHORTCUTS,
@@ -1570,22 +1653,31 @@ class _DreameMowerDeviceCommandMixin:
                 )
                 self._property_changed()
 
-                success = False
-                response = self.call_shortcut_action(
-                    "EDIT_COMMAND",
-                    {"id": shortcut_id, "name": shortcut_name, "type": 3},
-                )
-                if response and "out" in response:
-                    data = response["out"]
-                    if data and len(data):
-                        if "value" in data[0] and data[0]["value"] != "":
-                            success = data[0]["value"] == "0"
-                if not success:
-                    self.status.shortcuts[shortcut_id].name = current_name
+                def rollback() -> None:
+                    target_shortcut.name = current_name
+                    self._update_property(DreameMowerProperty.SHORTCUTS, previous_shortcuts)
                     self._property_changed()
-                return response
 
-    def set_obstacle_ignore(self, x, y, obstacle_ignored) -> dict[str, Any] | None:
+                try:
+                    success = False
+                    response = self.call_shortcut_action(
+                        "EDIT_COMMAND",
+                        {"id": shortcut_id, "name": shortcut_name, "type": 3},
+                    )
+                    if response and "out" in response:
+                        data = response["out"]
+                        if data and len(data):
+                            if "value" in data[0] and data[0]["value"] != "":
+                                success = data[0]["value"] == "0"
+                    if not success:
+                        rollback()
+                except Exception:
+                    rollback()
+                    raise
+                return response
+        return None
+
+    def set_obstacle_ignore(self, x: float, y: float, obstacle_ignored: bool) -> None:
         if not self.capability.ai_detection:
             raise InvalidActionException("Obstacle detection is not available on this device")
 
@@ -1595,18 +1687,18 @@ class _DreameMowerDeviceCommandMixin:
         if self.status.started:
             raise InvalidActionException("Cannot set obstacle ignore status while mower is running")
 
-        if not self.status.current_map and not self.status.current_map.obstacles:
+        current_map = self.status.current_map
+        if current_map is None or not current_map.obstacles:
             raise InvalidActionException("Obstacle not found")
 
-        if self.status.current_map.obstacles is None or (
-            len(self.status.current_map.obstacles)
-            and next(iter(self.status.current_map.obstacles.values())).ignore_status is None
+        if (
+            next(iter(current_map.obstacles.values())).ignore_status is None
         ):
             raise InvalidActionException("Obstacle ignore is not supported on this device")
 
         found = False
         obstacle_type = 142
-        for k, v in self.status.current_map.obstacles.items():
+        for k, v in current_map.obstacles.items():
             if int(v.x) == int(x) and int(v.y) == int(y):
                 if v.ignore_status.value == 2:
                     raise InvalidActionException("Cannot ignore a dynamically ignored obstacle")
@@ -1629,7 +1721,7 @@ class _DreameMowerDeviceCommandMixin:
             }
         )
 
-    def set_router_position(self, x, y):
+    def set_router_position(self, x: float, y: float) -> None:
         if not self.capability.wifi_map:
             raise InvalidActionException("WiFi map is not available on this device")
 

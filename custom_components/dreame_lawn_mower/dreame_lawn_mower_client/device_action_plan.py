@@ -78,7 +78,7 @@ type DevicePlanEffect = (
 def device_action_plan(
     self: Any, action: DreameMowerAction, parameters: Any = None, *,
     enforce_availability: bool = True,
-) -> Generator[ActionDelay | ActionRequest, Any, Any]:
+) -> Generator[ActionDelay | ActionRequest, Any, dict[str, Any]]:
     """Preserve validation, state notifications and acknowledgement policy."""
     if not enforce_availability and action is not DreameMowerAction.STOP:
         raise InvalidActionException(
@@ -146,6 +146,12 @@ def device_action_plan(
         self._update_property(DreameMowerProperty.SILVER_ION_LEFT, 100)
         self._update_property(DreameMowerProperty.SILVER_ION_TIME_LEFT, 365)
     elif action is DreameMowerAction.RESET_LENSBRUSH:
+        if parameters is None:
+            parameters = {}
+        if not isinstance(parameters, dict):
+            raise InvalidActionException(
+                "Lensbrush reset parameters must be a dictionary"
+            )
         parameters['in'] = {
             "CMS": {
                 "type": "set",
@@ -157,8 +163,8 @@ def device_action_plan(
             }
         }
         self._consumable_change = True
-        self._update_property(DreameMowerProperty.LENSBRUSH_LEFT, 100)
-        self._update_property(DreameMowerProperty.LENSBRUSH_TIME_LEFT, 18)
+        # The acknowledgement has no updated CMS counters. Keep the structured
+        # readings until the property refresh scheduled after dispatch.
     elif action is DreameMowerAction.RESET_SQUEEGEE:
         self._consumable_change = True
         self._update_property(DreameMowerProperty.SQUEEGEE_LEFT, 100)
@@ -173,7 +179,9 @@ def device_action_plan(
         self._property_changed()
 
     try:
-        result = yield ActionRequest(mapping["siid"], mapping["aiid"], parameters)
+        result: dict[str, Any] | None = yield ActionRequest(
+            mapping["siid"], mapping["aiid"], parameters,
+        )
     except Exception as ex:
         _LOGGER.error("Send action failed %s: %s", action.name, ex)
         self.schedule_update(1, True)
@@ -205,7 +213,7 @@ def device_action_plan(
 def run_device_action(
     device: Any, action: DreameMowerAction, parameters: Any = None, *,
     enforce_availability: bool = True,
-) -> Any:
+) -> dict[str, Any]:
     """Run the shared policy through the existing synchronous device protocol."""
     return run_device_plan(device, device_action_plan(
         device, action, parameters, enforce_availability=enforce_availability,

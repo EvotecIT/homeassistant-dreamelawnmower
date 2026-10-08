@@ -11,9 +11,6 @@ from datetime import UTC, datetime
 from threading import Event
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    from .device import DreameMowerDevice
-
 from .app_protocol import (
     MOWER_BLUETOOTH_PROPERTY_KEY,
     MOWER_RAW_STATUS_PROPERTY_KEY,
@@ -33,6 +30,7 @@ from .client_core_helpers import (
 from .client_shared_helpers import (
     _property_entry_received_at,
 )
+from .client_transport import _DreameLawnMowerClientTransport
 from .cloud_session import DreameCloudSession
 from .device_types import DreameMowerTaskStatus
 from .exceptions import (
@@ -73,6 +71,11 @@ from .runtime_state import (
     RESUME_MOWING_REQUEST,
     snapshot_with_heartbeat_task_state,
 )
+
+if TYPE_CHECKING:
+    from .device import DreameMowerDevice
+    from .map_visuals import MapRenderStyle
+
 
 _MUTATION_CONFIRMATION_DELAYS_SECONDS = (0.5, 1.5, 3.0)
 
@@ -146,7 +149,24 @@ def _device_start_session_identity(device: Any) -> bool | None:
     return None
 
 
-class _DreameLawnMowerClientCoreMixin:
+class _DreameLawnMowerClientCoreMixin(_DreameLawnMowerClientTransport):
+    if TYPE_CHECKING:
+        # Native refresh dispatch belongs to the complete client.
+        async def _async_update_device(
+            self, *, force_request_properties: bool = False,
+            deadline: float | None = None,
+        ) -> DreameMowerDevice: ...
+
+        # Implemented by the map mixin on the concrete client.
+        def _sync_refresh_map_view(
+            self, timeout: float, interval: float, label_scale: float = 1.0,
+            style: MapRenderStyle | None = None,
+        ) -> DreameLawnMowerMapView: ...
+
+    _latest_snapshot: DreameLawnMowerSnapshot | None
+    _latest_cloud_device_info: Mapping[str, Any] | None
+    _cloud_device_info_refreshed_at: float
+
     async def _async_reconcile_ambiguous_mutation(
         self,
         label: str,
@@ -227,23 +247,13 @@ class _DreameLawnMowerClientCoreMixin:
         return await self._async_cloud_read(read)
 
 
-    async def _async_update_device(
-        self, *, force_request_properties: bool = False,
-        deadline: float | None = None,
-    ) -> DreameMowerDevice:
-        """Use native polling while retaining owned synchronous startup."""
-        from .client_refresh import async_update_device
-
-        return await async_update_device(
-            self, force_request_properties=force_request_properties, deadline=deadline,
-        )
 
     def _sync_update_device(
         self,
         force_request_properties: bool = False,
         *,
         deadline: float | None = None,
-    ):
+    ) -> DreameMowerDevice:
         device = self._ensure_device()
         try:
             if force_request_properties:
@@ -314,8 +324,11 @@ class _DreameLawnMowerClientCoreMixin:
                     # An older idle heartbeat must not clear newly read legacy
                     # paused tasks merely because the physical mower is docked.
                     try:
-                        legacy_task = DreameMowerTaskStatus(
-                            evidence.get("legacy_task_status")
+                        legacy_value = evidence.get("legacy_task_status")
+                        legacy_task = (
+                            DreameMowerTaskStatus(legacy_value)
+                            if legacy_value is not None
+                            else DreameMowerTaskStatus.UNKNOWN
                         )
                     except (ValueError, TypeError):
                         legacy_task = DreameMowerTaskStatus.UNKNOWN
@@ -1015,80 +1028,3 @@ class _DreameLawnMowerClientCoreMixin:
             return None
         except DeviceException as err:
             raise DreameLawnMowerConnectionError(str(err)) from err
-
-    def _sync_get_cloud_protocol(self, *, deadline: float | None = None):
-        device = self._ensure_device()
-        protocol = getattr(device, "_protocol", None)
-        cloud = getattr(protocol, "cloud", None)
-        if cloud is None:
-            raise DreameLawnMowerConnectionError("Cloud connection is unavailable.")
-        if not getattr(cloud, "logged_in", False):
-            login_options: dict[str, Any] = {}
-            if deadline is not None:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise DreameLawnMowerConnectionError(
-                        "Point-cloud cloud login timed out."
-                    )
-                login_options = {
-                    "timeout": remaining,
-                    "deadline": deadline,
-                }
-            if not cloud.login(**login_options):
-                raise DreameLawnMowerConnectionError(
-                    "Unable to log in to the mower cloud API."
-                )
-        return cloud
-
-    def _ensure_device(
-        self, *, deadline: float | None = None, cancelled: Event | None = None,
-    ):
-        if deadline is None:
-            self._device_ownership_lock.acquire()
-        else:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0 or not self._device_ownership_lock.acquire(
-                timeout=remaining,
-            ):
-                raise DreameLawnMowerConnectionError(
-                    "Cloud device info timed out waiting for device ownership."
-                )
-        try:
-            if (cancelled is not None and cancelled.is_set()) or (
-                deadline is not None and time.monotonic() >= deadline
-            ):
-                raise DreameLawnMowerConnectionError(
-                    "Cloud device info ended before device initialization."
-                )
-            if self._closing:
-                raise DreameLawnMowerConnectionError(
-                    "The mower client is shutting down."
-                )
-            if self._device is not None:
-                if self._native_updates is not None:
-                    self._device._native_update_scheduler = (
-                        self._native_updates.schedule
-                    )
-                return self._device
-
-            from .device import DreameMowerDevice
-
-            self._device = DreameMowerDevice(
-                self._descriptor.name,
-                self._descriptor.host,
-                self._descriptor.token or " ",
-                self._descriptor.mac,
-                self._username,
-                self._password,
-                self._country,
-                True,
-                self._account_type,
-                self._descriptor.did,
-            )
-            if self._native_updates is not None:
-                self._device._native_update_scheduler = self._native_updates.schedule
-            if self._update_callback is not None:
-                self._device.listen(self._update_callback)
-            return self._device
-        finally:
-            self._device_ownership_lock.release()

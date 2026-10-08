@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, TypeGuard
 
 from .client_shared_helpers import _operation_value_type
 
@@ -114,7 +114,9 @@ def app_map_point_record_diagnostics(
     }
 
 
-def is_app_map_maintenance_point_record(value: object) -> bool:
+def is_app_map_maintenance_point_record(
+    value: object,
+) -> TypeGuard[Mapping[str, object]]:
     """Recognize A2-family maintenance points, excluding patrol points."""
     return (
         _is_app_map_point_record(value)
@@ -122,7 +124,7 @@ def is_app_map_maintenance_point_record(value: object) -> bool:
     )
 
 
-def _is_app_map_point_record(value: object) -> bool:
+def _is_app_map_point_record(value: object) -> TypeGuard[Mapping[str, object]]:
     """Recognize an exact A2-family point record without assigning semantics."""
     if not isinstance(value, Mapping) or set(value) != _REQUIRED_KEYS:
         return False
@@ -168,7 +170,7 @@ def _maintenance_point_rejection_reasons(value: object) -> list[str]:
     return reasons
 
 
-def _is_supported_point_vector(value: object) -> bool:
+def _is_supported_point_vector(value: object) -> TypeGuard[Sequence[object]]:
     """Accept observed XY and opaque three-value mower point vectors."""
     return (
         isinstance(value, Sequence)

@@ -27,6 +27,7 @@ from .app_protocol import (
     mower_state_key,
 )
 from .device_property_read import build_device_property_request
+from .device_context import _DreameMowerDeviceContext
 from .device_code_semantics import (
     MowerDeviceCodeTier,
     mower_device_code_definition,
@@ -176,8 +177,8 @@ _EXTERNAL_REALTIME_ANNOUNCEMENT_KEYS = frozenset(
 )
 
 
-class _DreameMowerDeviceStateMixin:
-    def _connected_callback(self):
+class _DreameMowerDeviceStateMixin(_DreameMowerDeviceContext):
+    def _connected_callback(self) -> None:
         if not self._ready:
             return
         receiver = getattr(self, "_native_connected_receiver", None)
@@ -260,8 +261,9 @@ class _DreameMowerDeviceStateMixin:
                 known_property_changed = yield from self._handle_properties_plan(params, notify=False)
                 if len(map_params) and self._map_manager:
                     yield MapProperties(self._map_manager, map_params)
-                notice_announced = remember_notice_events(
-                    self, self.last_realtime_message
+                notice_announced = bool(
+                    self.last_realtime_message is not None
+                    and remember_notice_events(self, self.last_realtime_message)
                 )
                 if known_property_changed or external_realtime_changed or notice_announced:
                     self._property_changed()
@@ -330,10 +332,11 @@ class _DreameMowerDeviceStateMixin:
             if prop["code"] == 0 and "value" in prop:
                 value = prop["value"]
                 if data_id in self._dirty_data:
+                    updated_at = self._dirty_data[data_id].update_time
                     if (
                         self._dirty_data[data_id].value != value
-                        and time.time() - self._dirty_data[data_id].update_time
-                        < self._discard_timeout
+                        and updated_at is not None
+                        and time.time() - updated_at < self._discard_timeout
                     ):
                         _LOGGER.info(
                             "Property %s Value Discarded: %s <- %s",
@@ -692,8 +695,9 @@ class _DreameMowerDeviceStateMixin:
             if self.status.map_recovery_status == DreameMapRecoveryStatus.SUCCESS.value:
                 if not self._protocol.dreame_cloud:
                     self._last_map_list_request = 0
-                self._map_manager.request_next_map()
-                self._map_manager.request_next_recovery_map_list()
+                if self._map_manager is not None:
+                    self._map_manager.request_next_map()
+                    self._map_manager.request_next_recovery_map_list()
 
             if self.status.map_recovery_status != DreameMapRecoveryStatus.RUNNING.value:
                 yield from self._request_properties_plan([DreameMowerProperty.MAP_RECOVERY_STATUS])
@@ -708,7 +712,8 @@ class _DreameMowerDeviceStateMixin:
             if self.status.map_backup_status == DreameMapBackupStatus.SUCCESS.value:
                 if not self._protocol.dreame_cloud:
                     self._last_map_list_request = 0
-                self._map_manager.request_next_recovery_map_list()
+                if self._map_manager is not None:
+                    self._map_manager.request_next_recovery_map_list()
             if self.status.map_backup_status != DreameMapBackupStatus.RUNNING.value:
                 yield from self._request_properties_plan([DreameMowerProperty.MAP_BACKUP_STATUS])
 
@@ -973,29 +978,33 @@ class _DreameMowerDeviceStateMixin:
         """AI Detection property returns multiple values as json or int this function parses and sets the sub properties to memory"""
         ai_value = self.get_property(DreameMowerProperty.AI_DETECTION)
         changed = False
+        dirty_ai_data = self._dirty_ai_data or {}
         if isinstance(ai_value, str):
             settings = json.loads(ai_value)
             if settings and self.ai_data is None:
                 self.ai_data = {}
+            ai_data = self.ai_data if self.ai_data is not None else {}
 
             for prop in DreameMowerStrAIProperty:
                 if prop.value in settings:
                     value = settings[prop.value]
-                    if prop.name in self._dirty_ai_data:
+                    if prop.name in dirty_ai_data:
+                        updated_at = dirty_ai_data[prop.name].update_time
                         if (
-                            self._dirty_ai_data[prop.name].value != value
-                            and time.time() - self._dirty_ai_data[prop.name].update_time < self._discard_timeout
+                            dirty_ai_data[prop.name].value != value
+                            and updated_at is not None
+                            and time.time() - updated_at < self._discard_timeout
                         ):
                             _LOGGER.info(
                                 "AI Property %s Value Discarded: %s <- %s",
                                 prop.name,
-                                self._dirty_ai_data[prop.name].value,
+                                dirty_ai_data[prop.name].value,
                                 value,
                             )
                             continue
-                        del self._dirty_ai_data[prop.name]
+                        del dirty_ai_data[prop.name]
 
-                    current_value = self.ai_data.get(prop.name)
+                    current_value = ai_data.get(prop.name)
                     if current_value != value:
                         if current_value is not None:
                             _LOGGER.info(
@@ -1007,41 +1016,43 @@ class _DreameMowerDeviceStateMixin:
                         else:
                             _LOGGER.info("AI Property %s Added: %s", prop.name, value)
                         changed = True
-                        self.ai_data[prop.name] = value
+                        ai_data[prop.name] = value
         elif isinstance(ai_value, int):
             if self.ai_data is None:
                 self.ai_data = {}
 
-            for prop in DreameMowerAIProperty:
-                bit = int(prop.value)
+            for int_prop in DreameMowerAIProperty:
+                bit = int(int_prop.value)
                 value = (ai_value & bit) == bit
-                if prop.name in self._dirty_ai_data:
+                if int_prop.name in dirty_ai_data:
+                    updated_at = dirty_ai_data[int_prop.name].update_time
                     if (
-                        self._dirty_ai_data[prop.name].value != value
-                        and time.time() - self._dirty_ai_data[prop.name].update_time < self._discard_timeout
+                        dirty_ai_data[int_prop.name].value != value
+                        and updated_at is not None
+                        and time.time() - updated_at < self._discard_timeout
                     ):
                         _LOGGER.info(
                             "AI Property %s Value Discarded: %s <- %s",
-                            prop.name,
-                            self._dirty_ai_data[prop.name].value,
+                            int_prop.name,
+                            dirty_ai_data[int_prop.name].value,
                             value,
                         )
                         continue
-                    del self._dirty_ai_data[prop.name]
+                    del dirty_ai_data[int_prop.name]
 
-                current_value = self.ai_data.get(prop.name)
+                current_value = self.ai_data.get(int_prop.name)
                 if current_value != value:
                     if current_value is not None:
                         _LOGGER.info(
                             "AI Property %s Changed: %s -> %s",
-                            prop.name,
+                            int_prop.name,
                             current_value,
                             value,
                         )
                     else:
-                        _LOGGER.info("AI Property %s Added: %s", prop.name, value)
+                        _LOGGER.info("AI Property %s Added: %s", int_prop.name, value)
                     changed = True
-                    self.ai_data[prop.name] = value
+                    self.ai_data[int_prop.name] = value
 
         if changed:
             self._last_change = time.time()
@@ -1067,6 +1078,7 @@ class _DreameMowerDeviceStateMixin:
 
                 if settings_dict and self.auto_switch_data is None:
                     self.auto_switch_data = {}
+                auto_switch_data = self.auto_switch_data if self.auto_switch_data is not None else {}
 
                 changed = False
                 for prop in DreameMowerAutoSwitchProperty:
@@ -1074,10 +1086,11 @@ class _DreameMowerDeviceStateMixin:
                         value = settings_dict[prop.value]
 
                         if prop.name in self._dirty_auto_switch_data:
+                            updated_at = self._dirty_auto_switch_data[prop.name].update_time
                             if (
                                 self._dirty_auto_switch_data[prop.name].value != value
-                                and time.time() - self._dirty_auto_switch_data[prop.name].update_time
-                                < self._discard_timeout
+                                and updated_at is not None
+                                and time.time() - updated_at < self._discard_timeout
                             ):
                                 _LOGGER.info(
                                     "Property %s Value Discarded: %s <- %s",
@@ -1088,7 +1101,7 @@ class _DreameMowerDeviceStateMixin:
                                 continue
                             del self._dirty_auto_switch_data[prop.name]
 
-                        current_value = self.auto_switch_data.get(prop.name)
+                        current_value = auto_switch_data.get(prop.name)
                         if current_value != value:
                             if prop == DreameMowerAutoSwitchProperty.CLEANGENIUS:
                                 cleangenius_changed = True
@@ -1103,7 +1116,7 @@ class _DreameMowerDeviceStateMixin:
                             else:
                                 _LOGGER.info("Property %s Added: %s", prop.name, value)
                             changed = True
-                            self.auto_switch_data[prop.name] = value
+                            auto_switch_data[prop.name] = value
 
                 if changed:
                     self._last_change = time.time()
@@ -1174,9 +1187,9 @@ class _DreameMowerDeviceStateMixin:
         value = self.get_property(DreameMowerProperty.VOICE_ASSISTANT_LANGUAGE)
         language_list = self.status.voice_assistant_language_list
         if value and len(value):
-            language_list = VOICE_ASSISTANT_LANGUAGE_TO_NAME.copy()
-            language_list.pop(DreameMowerVoiceAssistantLanguage.DEFAULT)
-            language_list = {v: k for k, v in language_list.items()}
+            language_names = VOICE_ASSISTANT_LANGUAGE_TO_NAME.copy()
+            language_names.pop(DreameMowerVoiceAssistantLanguage.DEFAULT)
+            language_list = {v: k for k, v in language_names.items()}
         elif DreameMowerVoiceAssistantLanguage.DEFAULT.value not in language_list:
             language_list = {v: k for k, v in VOICE_ASSISTANT_LANGUAGE_TO_NAME.items()}
         self.status.voice_assistant_language_list = language_list
@@ -1220,10 +1233,17 @@ class _DreameMowerDeviceStateMixin:
     ) -> Generator[ActionDelay | ActionRequest | PropertyRequest, Any, None]:
         """Keep map notification state ordered around restoration commands."""
         map_data = self.status.current_map
+        map_manager = self._map_manager
         if self._map_select_time:
             self._map_select_time = None
         if map_data and self.status.started:
-            if self.status.go_to_zone is None and not self.status._capability.cruising and self.status.zone_cleaning:
+            if (
+                self.status.go_to_zone is None
+                and not self.status._capability.cruising
+                and self.status.zone_cleaning
+                and map_data.dimensions is not None
+                and map_manager is not None
+            ):
                 if map_data.active_areas and len(map_data.active_areas) == 1:
                     area = map_data.active_areas[0]
                     size = map_data.dimensions.grid_size
@@ -1234,11 +1254,11 @@ class _DreameMowerDeviceStateMixin:
                         self.status.go_to_zone = GoToZoneSettings(
                             x=area.x0 + size,
                             y=area.y0 + size,
-                            stop=bool(not self._map_manager.ready),
+                            stop=bool(not map_manager.ready),
                             size=size,
                             cleaning_mode=new_cleaning_mode,
                         )
-                        self._map_manager.editor.set_active_areas([])
+                        map_manager.editor.set_active_areas([])
                     else:
                         self.status.go_to_zone = False
                 else:
@@ -1250,7 +1270,7 @@ class _DreameMowerDeviceStateMixin:
                     size = self.status.go_to_zone.size
                     x = self.status.go_to_zone.x
                     y = self.status.go_to_zone.y
-                    if (
+                    if x is not None and y is not None and (
                         position.x >= x - size
                         and position.x <= x + size
                         and position.y >= y - size
@@ -1261,10 +1281,10 @@ class _DreameMowerDeviceStateMixin:
             if self.status.docked != map_data.docked and self._protocol.prefer_cloud:
                 self.schedule_update(self._update_interval, True)
 
-        if self._map_manager.ready:
+        if map_manager is not None and map_manager.ready:
             self._property_changed()
 
-    def _update_failed(self, ex) -> None:
+    def _update_failed(self, ex: Exception) -> None:
         """Call external listener when update failed"""
         if self._error_callback:
             self._error_callback(ex)
@@ -1272,9 +1292,19 @@ class _DreameMowerDeviceStateMixin:
     def _action_update_task(self) -> None:
         self._update_task(True)
 
-    def _update_task(self, force_request_properties=False) -> None:
+    def _update_task(
+        self, force_request_properties: bool = False, *, _timer: Timer | None = None,
+    ) -> None:
         """Timer task for updating properties periodically"""
-        self._update_timer = None
+        with self._update_timer_lock:
+            if _timer is not None:
+                if self._update_timer is not _timer:
+                    return
+            elif self._update_timer is not None:
+                self._update_timer.cancel()
+            self._update_timer = None
+            if self.disconnected:
+                return
         if self._native_update_scheduler is not None:
             self._native_update_scheduler(self, 0, force_request_properties)
             return

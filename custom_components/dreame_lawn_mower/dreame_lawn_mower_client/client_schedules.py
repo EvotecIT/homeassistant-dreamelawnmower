@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from functools import wraps
-from typing import Any
+from threading import RLock
+from typing import TYPE_CHECKING, Any, Concatenate, Protocol
 
 from .app_read_transport import run_app_read
 from .batch_device_data import decode_batch_schedule_payload
@@ -33,16 +34,26 @@ from .schedule_read_plan import (
 )
 from .schedule_write_plan import plan_schedule_enabled, plan_schedule_upload
 
+if TYPE_CHECKING:
+    from .device import DreameMowerDevice
+    from .models import DreameLawnMowerSnapshot
+
 SCHEDULE_CURRENT_TASK_TIMEOUT_SECONDS = 5.0
 SCHEDULE_READ_DEADLINE_SECONDS = 10.0
 SCHEDULE_READ_TIMEOUT_SECONDS = 5.0
 
 
-def _serialized_schedule_operation(method):
+class _ScheduleOperationOwner(Protocol):
+    _schedule_operation_lock: RLock
+
+
+def _serialized_schedule_operation[OwnerT: _ScheduleOperationOwner, **P, ResultT](
+    method: Callable[Concatenate[OwnerT, P], ResultT],
+) -> Callable[Concatenate[OwnerT, P], ResultT]:
     """Keep schedule reads and read/modify/write operations coherent."""
 
     @wraps(method)
-    def serialized(self, *args, **kwargs):
+    def serialized(self: OwnerT, /, *args: P.args, **kwargs: P.kwargs) -> ResultT:
         with self._schedule_operation_lock:
             return method(self, *args, **kwargs)
 
@@ -53,6 +64,31 @@ class _DreameLawnMowerClientSchedulesMixin(
     _DreameLawnMowerScheduleTablesMixin, _DreameLawnMowerScheduleEditsMixin
 ):
     """Own schedule protocol operations independently of other settings."""
+
+    _schedule_protocols: dict[int, str]
+    _schedule_document_versions: dict[int, int]
+    _schedule_document_retry_versions: dict[int, int]
+    _app_schedule_retry_offset: int
+
+    if TYPE_CHECKING:
+        # Providers supplied by settings and core on the concrete client.
+        def _sync_get_current_app_map_index(
+            self, *, deadline: float | None = None,
+        ) -> int | None: ...
+
+        def _sync_get_batch_device_data(
+            self, keys: Sequence[str] | None = None,
+            *, deadline: float | None = None,
+        ) -> Mapping[str, Any] | None: ...
+
+        def _sync_update_device(
+            self, force_request_properties: bool = False,
+            *, deadline: float | None = None,
+        ) -> DreameMowerDevice: ...
+
+        def _snapshot_from_device(
+            self, device: Any, *, fresh_task_state: bool = False,
+        ) -> DreameLawnMowerSnapshot: ...
 
     def _sync_require_schedule_write_allowed(self) -> None:
         """Check fresh normalized task state inside the schedule operation lock."""

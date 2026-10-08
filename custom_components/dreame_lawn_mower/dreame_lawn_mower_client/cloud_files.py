@@ -12,7 +12,7 @@ def interim_file_params(
     strings: Sequence[str],
     did: str | None,
     model: str | None,
-    country: str,
+    country: str | None,
     object_name: str,
 ) -> dict[str, str | None]:
     """Preserve account-specific fields without logging private object names."""

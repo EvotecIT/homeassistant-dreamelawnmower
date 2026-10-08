@@ -10,7 +10,7 @@ def history_params(
     strings: Sequence[str],
     user_id: str | None,
     did: str | None,
-    country: str,
+    country: str | None,
     key: str,
     kind: str,
     limit: int,

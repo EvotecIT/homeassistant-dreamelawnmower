@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .app_read_transport import run_app_read
+from .client_transport import _DreameLawnMowerClientTransport
 from .device_settings_read_plan import read_device_settings
 from .device_settings_write_plan import (
     plan_anti_theft_settings,
@@ -14,7 +15,7 @@ from .device_settings_write_plan import (
 )
 
 
-class _DreameLawnMowerClientDeviceSettingsMixin:
+class _DreameLawnMowerClientDeviceSettingsMixin(_DreameLawnMowerClientTransport):
     def _sync_get_device_settings(
         self,
         include_raw: bool = False,

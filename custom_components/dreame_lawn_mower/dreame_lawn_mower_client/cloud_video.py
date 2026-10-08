@@ -14,7 +14,7 @@ VIDEO_READ_PATHS: dict[VideoReadKind, str] = {
 
 
 def video_read_params(
-    kind: VideoReadKind, did: str, access_token: str | None = None,
+    kind: VideoReadKind, did: str | None, access_token: str | None = None,
     os: int = 1, uid: str | None = None, model: str | None = None,
 ) -> dict[str, Any]:
     """Retain both vendor token spellings and identity-only account fields."""

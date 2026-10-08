@@ -3,7 +3,7 @@
 import copy
 import time
 from collections.abc import Generator, Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from .app_protocol import MOWER_RAW_STATUS_PROPERTY_KEY, decode_mower_status_blob
 from .device_types import DreameMowerProperty
@@ -105,13 +105,23 @@ def _record_fresh_property_evidence(
             }
 
 
-def _successful_row(rows):
+class _FreshTaskEvidence(TypedDict, total=False):
+    """Validated task evidence retained after a successful property read."""
+
+    heartbeat: dict[str, Any]
+    legacy_task_status: Any
+
+
+def _successful_row(rows: Sequence[Mapping[str, Any]]) -> bool:
     return (
         len(rows) == 1 and rows[0].get("code") == 0 and rows[0].get("value") is not None
     )
 
 
-def require_fresh_task_properties(results, property_mapping):
+def require_fresh_task_properties(
+    results: object,
+    property_mapping: Mapping[DreameMowerProperty, Mapping[str, int]],
+) -> _FreshTaskEvidence:
     """Reject missing, failed or ambiguous task properties without changing caches."""
     if not isinstance(results, list | tuple):
         raise DeviceUpdateFailedException(

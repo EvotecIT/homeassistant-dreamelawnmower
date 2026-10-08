@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Final
+from typing import Any, Final, cast
 
 
 class MowerDeviceCodeTier(StrEnum):
@@ -285,7 +285,8 @@ def mower_device_code(value: object) -> int | None:
     if value is None:
         return None
     try:
-        return int(value)
+        # Preserve Python's numeric protocol conversion at this dynamic boundary.
+        return int(cast(Any, value))
     except (TypeError, ValueError):
         return None
 

@@ -3,24 +3,34 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Generator, Mapping
+from collections.abc import Generator, Mapping, Sequence
 from dataclasses import replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from typing import cast as _cast
 
-from .camera_probe import CAMERA_PROBE_PROPERTY_KEYS, build_camera_probe_payload
+from .camera_probe import CAMERA_PROBE_PROPERTY_KEYS as CAMERA_PROBE_PROPERTY_KEYS
+from .camera_probe import build_camera_probe_payload as build_camera_probe_payload
+from .client_transport import _DreameLawnMowerClientTransport
 from .exceptions import (
     DeviceException,
     DreameLawnMowerConnectionError,
     InvalidActionException,
 )
 from .models import (
-    DreameLawnMowerCameraFeatureSupport,
-    DreameLawnMowerCameraStreamRuntimeInputs,
-    camera_metadata_advertises_video,
-    camera_stream_block_reason,
+    DreameLawnMowerCameraFeatureSupport as DreameLawnMowerCameraFeatureSupport,
 )
-from .operation_diagnostics import build_operation_stage_diagnostics
+from .models import (
+    DreameLawnMowerCameraStreamRuntimeInputs as _CameraStreamRuntimeInputs,
+)
+from .models import (
+    camera_metadata_advertises_video as camera_metadata_advertises_video,
+)
+from .models import (
+    camera_stream_block_reason as camera_stream_block_reason,
+)
+from .operation_diagnostics import (
+    build_operation_stage_diagnostics as build_operation_stage_diagnostics,
+)
 from .payload_utils import (
     _as_optional_text,
     _find_text_by_key,
@@ -29,7 +39,15 @@ from .payload_utils import (
     _optional_bool,
 )
 from .stream_commands import stream_action_parameters
-from .video_credentials import derive_tx_video_app_credentials
+from .video_credentials import (
+    derive_tx_video_app_credentials as derive_tx_video_app_credentials,
+)
+
+if TYPE_CHECKING:
+    from .device import DreameMowerDevice
+    from .models import DreameLawnMowerSnapshot
+
+DreameLawnMowerCameraStreamRuntimeInputs = _CameraStreamRuntimeInputs
 
 
 def _protocol_mapping_summary(
@@ -215,6 +233,7 @@ def _camera_stream_runtime_inputs_from_cloud_payload(
     p2p = p2p if isinstance(p2p, Mapping) else {}
     raw = value.get("raw")
     raw = raw if isinstance(raw, Mapping) else {}
+    diagnostics = value.get("diagnostics")
     return DreameLawnMowerCameraStreamRuntimeInputs(
         source=str(value.get("source") or "dreame_third_video_tx"),
         did=str(value.get("did") or ""),
@@ -235,8 +254,8 @@ def _camera_stream_runtime_inputs_from_cloud_payload(
             ("accessToken", "accesstoken", "token"),
         ),
         diagnostics=(
-            value.get("diagnostics")
-            if isinstance(value.get("diagnostics"), Mapping)
+            diagnostics
+            if isinstance(diagnostics, Mapping)
             else {}
         ),
         raw=_json_safe(value, max_depth=5),
@@ -268,13 +287,35 @@ def _cloud_user_feature_summary(value: Any) -> Mapping[str, Any]:
     return {"type": type(value).__name__, "value": safe}
 
 
-class _DreameLawnMowerCameraMixin:
+class _DreameLawnMowerCameraMixin(_DreameLawnMowerClientTransport):
     """Camera/video domain for :class:`DreameLawnMowerClient`.
 
     The host client supplies device lifecycle, cloud protocol, app action, and
     snapshot hooks. Keeping those hooks in the client preserves one connection
     owner while isolating the complete camera responsibility.
     """
+
+    _last_camera_stream_diagnostics: Mapping[str, Any]
+
+    if TYPE_CHECKING:
+        # Existing providers on the concrete client's core and map owners.
+        def _sync_update_device(
+            self, force_request_properties: bool = False,
+            *, deadline: float | None = None,
+        ) -> DreameMowerDevice: ...
+
+        def _snapshot_from_device(
+            self, device: Any, *, fresh_task_state: bool = False,
+        ) -> DreameLawnMowerSnapshot: ...
+
+        def _sync_get_cloud_user_features(self, language: str | None = None) -> Any: ...
+
+        def _sync_scan_cloud_properties(
+            self, keys: str | Sequence[str] | None, siids: Sequence[int] | None,
+            piid_start: int, piid_end: int, chunk_size: int, language: str,
+            only_values: bool, include_key_definition: bool = True,
+            key_definition: Mapping[str, Any] | None = None,
+        ) -> dict[str, Any]: ...
 
     @property
     def last_camera_stream_diagnostics(self) -> Mapping[str, Any]:

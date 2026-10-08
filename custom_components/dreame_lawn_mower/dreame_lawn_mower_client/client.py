@@ -23,6 +23,9 @@ from typing import Any
 from aiohttp import ClientSession as _ClientSession
 from requests.exceptions import Timeout as _RequestsTimeout
 
+if _typing.TYPE_CHECKING:
+    from .device import DreameMowerDevice
+
 from . import client_camera as _client_camera
 from . import client_constants as _client_constants
 from . import client_helpers as _client_helpers
@@ -665,6 +668,17 @@ class DreameLawnMowerClient(
 
         return await async_read_device_state(
             self, self._snapshot_from_device, refresh=False,
+        )
+
+    async def _async_update_device(
+        self, *, force_request_properties: bool = False,
+        deadline: float | None = None,
+    ) -> DreameMowerDevice:
+        """Use native polling while retaining owned synchronous startup."""
+        from .client_refresh import async_update_device
+
+        return await async_update_device(
+            self, force_request_properties=force_request_properties, deadline=deadline,
         )
 
     async def async_refresh(self) -> DreameLawnMowerSnapshot:

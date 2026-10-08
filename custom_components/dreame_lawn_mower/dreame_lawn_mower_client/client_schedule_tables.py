@@ -7,11 +7,12 @@ from typing import Any
 
 from .app_read_transport import run_app_read
 from .client_schedule_write_transport import run_schedule_write
+from .client_transport import _DreameLawnMowerClientTransport
 from .schedule_read_plan import read_tables
 from .schedule_write_plan import plan_table_enabled
 
 
-class _DreameLawnMowerScheduleTablesMixin:
+class _DreameLawnMowerScheduleTablesMixin(_DreameLawnMowerClientTransport):
     """Adapt table records to the same model used by document schedules."""
 
     def _sync_read_schedule_tables(

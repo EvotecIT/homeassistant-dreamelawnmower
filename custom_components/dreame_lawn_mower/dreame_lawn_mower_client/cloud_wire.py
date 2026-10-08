@@ -106,7 +106,7 @@ def cloud_strings(account_type: str) -> tuple[str, ...]:
 
 def cloud_headers(
     strings: Sequence[str],
-    country: str,
+    country: str | None,
     tenant: str | None,
 ) -> dict[str, str]:
     """Format shared headers without retaining account credentials."""
@@ -126,13 +126,15 @@ def cloud_headers(
 
 def cloud_login_data(
     strings: Sequence[str],
-    username: str,
-    password: str,
+    username: str | None,
+    password: str | None,
     refresh_token: str | None,
 ) -> str:
     """Preserve the vendor's credential and refresh-token wire encoding."""
     if refresh_token:
         return f"{strings[12]}{strings[13]}{refresh_token}"
+    if username is None or password is None:
+        raise ValueError("Cloud login credentials are missing")
     digest = hashlib.md5((password + strings[2]).encode("utf-8")).hexdigest()
     return f"{strings[12]}{strings[14]}{username}{strings[15]}{digest}{strings[16]}"
 

@@ -10,8 +10,8 @@ import traceback
 from datetime import datetime
 from random import randrange
 from threading import RLock, Timer
-from typing import Any, Optional
-from collections.abc import Callable, Generator
+from typing import Any, Optional, overload
+from collections.abc import Callable, Generator, Mapping
 
 from .app_protocol import mower_realtime_property_name
 from .device_privacy import AI_POLICY_PROPERTY, decode_ai_policy_acceptance
@@ -169,21 +169,21 @@ class DreameMowerDevice(
     def __init__(
         self,
         name: str,
-        host: str,
-        token: str,
-        mac: str = None,
-        username: str = None,
-        password: str = None,
-        country: str = None,
+        host: str | None,
+        token: str | None,
+        mac: str | None = None,
+        username: str | None = None,
+        password: str | None = None,
+        country: str | None = None,
         prefer_cloud: bool = True,
         account_type: str = "dreame",
-        device_id: str = None,
+        device_id: str | None = None,
     ) -> None:
         # Used for easy filtering the device from cloud device list and generating unique ids
         self.info = None
-        self.mac: str = None
-        self.token: str = None  # Local api token
-        self.host: str = None  # IP address or host name of the device
+        self.mac: str | None = None
+        self.token: str | None = None  # Local api token
+        self.host: str | None = None  # IP address or host name of the device
         # Dictionary for storing the current property values
         self.data: dict[int, Any] = {}
         self.unknown_properties: dict[int, dict[str, Any]] = {}
@@ -191,13 +191,13 @@ class DreameMowerDevice(
         self.last_realtime_message: dict[str, Any] | None = None
         self._state_lock = RLock()
         self._plan_cleanup = _DevicePlanCleanup()
-        self.auto_switch_data: dict[DreameMowerAutoSwitchProperty, Any] = None
-        self.ai_data: dict[DreameMowerStrAIProperty | DreameMowerAIProperty, Any] = None
+        self.auto_switch_data: dict[str, Any] | None = None
+        self.ai_data: dict[str, Any] | None = None
         self.available: bool = False  # Last update is successful or not
         self.disconnected: bool = False
 
         self._update_running: bool = False  # Update is running
-        self._previous_cleaning_mode: DreameMowerCleaningMode = None
+        self._previous_cleaning_mode: DreameMowerCleaningMode | None = None
         # Device do not request properties that returned -1 as result. This property used for overriding that behavior at first connection
         self._ready: bool = False
         # Last settings properties requested time
@@ -205,17 +205,19 @@ class DreameMowerDevice(
         self._last_map_list_request: float = 0  # Last map list property requested time
         self._last_map_request: float = 0  # Last map request trigger time
         self._last_change: float = 0  # Last property change time
-        self._last_update_failed: float = 0  # Last update failed time
+        self._last_update_failed: float | None = 0  # Last update failed time
         self._cleaning_history_update: float = 0  # Cleaning history update time
         self._update_fail_count: int = 0  # Update failed counter
-        self._map_select_time: float = None
+        self._map_select_time: float | None = None
         # Map Manager object. Only available when cloud connection is present
-        self._map_manager: DreameMapMowerMapManager = None
+        self._map_manager: DreameMapMowerMapManager | None = None
         self._update_callback = None  # External update callback for device
         self._error_callback = None  # External update failed callback
         # External update callbacks for specific device property
         self._property_update_callback = {}
-        self._update_timer: Timer = None  # Update schedule timer
+        # Timer ownership must not wait behind a state update during shutdown.
+        self._update_timer_lock = RLock()
+        self._update_timer: Timer | None = None  # Update schedule timer
         self._native_update_scheduler: Callable[[Any, float, bool], None] | None = None
         self._mqtt_generation = 0
         self._native_message_receiver: Callable[[dict[str, Any]], None] | None = None
@@ -223,9 +225,9 @@ class DreameMowerDevice(
         # Used for requesting consumable properties after reset action otherwise they will only requested when cleaning completed
         self._consumable_change: bool = False
         self._remote_control: bool = False
-        self._dirty_data: dict[DreameMowerProperty, DirtyData] = {}
-        self._dirty_auto_switch_data: dict[DreameMowerAutoSwitchProperty, DirtyData] = {}
-        self._dirty_ai_data: dict[DreameMowerStrAIProperty | DreameMowerAIProperty, Any] = None
+        self._dirty_data: dict[int, DirtyData] = {}
+        self._dirty_auto_switch_data: dict[str, DirtyData] = {}
+        self._dirty_ai_data: dict[str, DirtyData] | None = None
         self._discard_timeout = 5
         self._restore_timeout = 15
 
@@ -382,9 +384,10 @@ class DreameMowerDevice(
             return value_list
 
     @staticmethod
-    def combine_group_value(values: list[int]) -> int:
+    def combine_group_value(values: list[int]) -> int | None:
         if values and len(values) == 3:
             return ((((0 ^ values[2]) << 8) ^ values[1]) << 8) ^ values[0]
+        return None
 
     def connect_device(self) -> None:
         """Connect to the device api."""
@@ -392,14 +395,14 @@ class DreameMowerDevice(
         info = self._protocol.connect(self._message_callback, self._connected_callback)
         self._initialize_device(info)
 
-    def _initialize_device(self, info) -> None:
+    def _initialize_device(self, info: Mapping[str, object] | None) -> None:
         """Initialize capabilities and maps from an established cloud connection."""
         if info:
             self._prepare_device_initialization(info)
             self._request_properties()
             self._finish_device_initialization()
 
-    def _prepare_device_initialization(self, info) -> None:
+    def _prepare_device_initialization(self, info: Mapping[str, object]) -> None:
         """Apply connection identity before the first property response."""
         self.info = DreameMowerDeviceInfo(info)
         if self.mac is None:
@@ -424,7 +427,8 @@ class DreameMowerDevice(
         # may still be connecting; map decoding must not depend on its timing.
         if self._protocol.cloud is not None and (not self._ready or not self.available):
             if self._map_manager:
-                model = self.info.model.split(".")
+                model_name = self.info.model if self.info else None
+                model = model_name.split(".") if model_name else []
                 if len(model) == 3:
                     for k, v in json.loads(
                         zlib.decompress(base64.b64decode(DEVICE_KEY), zlib.MAX_WBITS | 32)
@@ -474,13 +478,14 @@ class DreameMowerDevice(
                 if self._protocol.cloud.two_factor_url:
                     self.two_factor_url = self._protocol.cloud.two_factor_url
                     self._property_changed()
-                self._map_manager.schedule_update(-1)
+                if self._map_manager is not None:
+                    self._map_manager.schedule_update(-1)
             elif self._protocol.cloud.logged_in:
                 if self.two_factor_url:
                     self.two_factor_url = None
                     self._property_changed()
 
-                if self._protocol.connected:
+                if self._protocol.connected and self._map_manager is not None:
                     self._map_manager.schedule_update(5)
 
                 self.token, self.host = self._protocol.cloud.get_info(self.mac)
@@ -500,7 +505,18 @@ class DreameMowerDevice(
                 self._plan_cleanup.drain()
         self._property_changed()
 
-    def listen(self, callback, property: DreameMowerProperty = None) -> None:
+    @overload
+    def listen(self, callback: Callable[[], None] | None, property: None = None) -> None: ...
+
+    @overload
+    def listen(
+        self, callback: Callable[[Any], None] | None, property: DreameMowerProperty
+    ) -> None: ...
+
+    def listen(
+        self, callback: Callable[..., None] | None,
+        property: DreameMowerProperty | None = None,
+    ) -> None:
         """Set callback functions for external listeners"""
         if callback is None:
             self._update_callback = None
@@ -514,29 +530,31 @@ class DreameMowerDevice(
                 self._property_update_callback[property.value] = []
             self._property_update_callback[property.value].append(callback)
 
-    def listen_error(self, callback) -> None:
+    def listen_error(self, callback: Callable[[Exception], None] | None) -> None:
         """Set error callback function for external listeners"""
         self._error_callback = callback
 
-    def schedule_update(self, wait: float = None, force_request_properties=False) -> None:
+    def schedule_update(self, wait: float | None = None, force_request_properties: bool = False) -> None:
         """Schedule a device update for future"""
         if wait == None:
             wait = self._update_interval
 
-        if self._update_timer is not None:
-            self._update_timer.cancel()
-            del self._update_timer
-            self._update_timer = None
+        with self._update_timer_lock:
+            if self._update_timer is not None:
+                self._update_timer.cancel()
+                self._update_timer = None
 
-        if self._native_update_scheduler is not None:
-            self._native_update_scheduler(self, wait, force_request_properties)
-            return
+            native_scheduler = self._native_update_scheduler
+            if native_scheduler is None and wait >= 0 and not self.disconnected:
+                def update_task() -> None:
+                    self._update_task(force_request_properties, _timer=timer)
 
-        if wait >= 0:
-            self._update_timer = Timer(
-                wait, self._action_update_task if force_request_properties else self._update_task
-            )
-            self._update_timer.start()
+                timer = Timer(wait, update_task)
+                self._update_timer = timer
+                timer.start()
+
+        if native_scheduler is not None:
+            native_scheduler(self, wait, force_request_properties)
 
     def get_property(
         self,
@@ -553,14 +571,14 @@ class DreameMowerDevice(
             return self.data[prop.value]
         return None
 
-    def get_auto_switch_property(self, prop: DreameMowerAutoSwitchProperty) -> int:
+    def get_auto_switch_property(self, prop: DreameMowerAutoSwitchProperty) -> int | None:
         """Get a device auto switch property from memory"""
         if self.capability.auto_switch_settings and self.auto_switch_data:
             if prop is not None and prop.name in self.auto_switch_data:
                 return int(self.auto_switch_data[prop.name])
         return None
 
-    def get_ai_property(self, prop: DreameMowerStrAIProperty | DreameMowerAIProperty) -> bool:
+    def get_ai_property(self, prop: DreameMowerStrAIProperty | DreameMowerAIProperty) -> bool | None:
         """Get a device AI property from memory"""
         if self.capability.ai_detection and self.ai_data:
             if prop is not None and prop.name in self.ai_data:
@@ -661,7 +679,7 @@ class DreameMowerDevice(
 
     def update(
         self,
-        force_request_properties=False,
+        force_request_properties: bool = False,
         *,
         deadline: float | None = None,
     ) -> None:
@@ -729,7 +747,10 @@ class DreameMowerDevice(
             for k, v in list(self._dirty_data.items()):
                 if self._dirty_data.get(k) is not v:
                     continue
-                if time.time() - v.update_time >= self._restore_timeout:
+                if (
+                    v.update_time is not None
+                    and time.time() - v.update_time >= self._restore_timeout
+                ):
                     # Retire this attempt before callbacks can suspend or issue
                     # another write. Neither cancellation nor a later iteration
                     # may replay it or remove the replacement dirty record.
@@ -754,40 +775,20 @@ class DreameMowerDevice(
                             self.schedule_update(1, True)
 
         if self._dirty_auto_switch_data:
-            for k, v in copy.deepcopy(self._dirty_auto_switch_data).items():
-                if time.time() - v.update_time >= self._restore_timeout:
-                    if v.previous_value is not None:
-                        value = self.auto_switch_data.get(k)
-                        ## TODO
-                        # if value is None or v.value == value:
-                        #    _LOGGER.info(
-                        #        "Property %s Value Restored: %s <- %s",
-                        #        k,
-                        #        v.previous_value,
-                        #        value,
-                        #    )
-                        #    self.auto_switch_data[k] = v.previous_value
-                        #    self._property_changed()
-                        #    self.schedule_update(1, True)
-                    del self._dirty_auto_switch_data[k]
+            for auto_key, record in copy.deepcopy(self._dirty_auto_switch_data).items():
+                if (
+                    record.update_time is not None
+                    and time.time() - record.update_time >= self._restore_timeout
+                ):
+                    del self._dirty_auto_switch_data[auto_key]
 
         if self._dirty_ai_data:
-            for k, v in copy.deepcopy(self._dirty_ai_data).items():
-                if time.time() - v.update_time >= self._restore_timeout:
-                    if v.previous_value is not None:
-                        value = self.ai_data.get(k)
-                        ## TODO
-                        # if value is None or v.value == value:
-                        #    _LOGGER.info(
-                        #        "AI Property %s Value Restored: %s <- %s",
-                        #        k,
-                        #        v.previous_value,
-                        #        value,
-                        #    )
-                        #    self.ai_data[k] = v.previous_value
-                        #    self._property_changed()
-                        #    self.schedule_update(1, True)
-                    del self._dirty_ai_data[k]
+            for ai_key, record in copy.deepcopy(self._dirty_ai_data).items():
+                if (
+                    record.update_time is not None
+                    and time.time() - record.update_time >= self._restore_timeout
+                ):
+                    del self._dirty_ai_data[ai_key]
 
         if self._consumable_change:
             self._consumable_change = False
@@ -923,7 +924,7 @@ class DreameMowerDevice(
     @property
     def cloud_connected(self) -> bool:
         """Return connection status of the device."""
-        return (
+        return bool(
             self._protocol.cloud
             and self._protocol.cloud.connected
         )

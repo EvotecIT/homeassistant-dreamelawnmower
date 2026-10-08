@@ -8,7 +8,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .device import DreameMowerDevice
+    from .models import DreameLawnMowerDescriptor
 
 from .app_read_transport import run_app_read
 from .batch_device_data import (
@@ -26,6 +30,7 @@ from .client_settings_helpers import (
 from .client_shared_helpers import (
     _positive_int,
 )
+from .client_transport import _DreameLawnMowerClientTransport
 from .debug_ota_catalog import (
     build_debug_ota_catalog_url,
     normalize_debug_ota_catalog_payload,
@@ -60,7 +65,22 @@ from .work_log import (
 )
 
 
-class _DreameLawnMowerClientSettingsMixin:
+class _DreameLawnMowerClientSettingsMixin(_DreameLawnMowerClientTransport):
+    if TYPE_CHECKING:
+        # Supplied by the concrete client's core; no runtime overrides.
+        @property
+        def descriptor(self) -> DreameLawnMowerDescriptor: ...
+
+        def _sync_get_batch_device_data(
+            self, keys: Sequence[str] | None = None,
+            *, deadline: float | None = None,
+        ) -> Mapping[str, Any] | None: ...
+
+        def _sync_update_device(
+            self, force_request_properties: bool = False,
+            *, deadline: float | None = None,
+        ) -> DreameMowerDevice: ...
+
     def _sync_get_work_log_totals(self) -> DreameLawnMowerWorkLogTotals:
         """Fetch mower-owned lifetime totals through the MIHIS app action."""
         response = self._sync_call_app_action(
