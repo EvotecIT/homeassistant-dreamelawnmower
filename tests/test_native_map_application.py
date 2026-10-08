@@ -387,7 +387,9 @@ def test_downloaded_encrypted_frame_precedes_inline_frame(
                     deadline=deadline,
                 )
                 download.assert_awaited_once_with(
-                    "https://example.invalid/map", deadline=deadline
+                    "https://example.invalid/map",
+                    deadline=deadline,
+                    max_bytes=public_download.MAX_PUBLIC_MAP_BYTES,
                 )
             finally:
                 await client.async_close()
