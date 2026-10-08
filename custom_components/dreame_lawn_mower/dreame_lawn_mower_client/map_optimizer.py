@@ -1540,7 +1540,10 @@ class DreameMowerMapOptimizer:
         saved_geometry = (
             self._valid_raster(saved_map_data) if saved_map_data is not None else None
         )
-        if saved_geometry is not None and saved_geometry[0].grid_size != dimensions.grid_size:
+        if (
+            saved_geometry is not None
+            and saved_geometry[0].grid_size != dimensions.grid_size
+        ):
             saved_geometry = None
         if saved_geometry is None:
             saved_map_data = None
