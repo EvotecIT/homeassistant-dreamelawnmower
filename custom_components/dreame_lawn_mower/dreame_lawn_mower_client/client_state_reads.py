@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from collections.abc import Callable
 from threading import Event
@@ -41,25 +42,35 @@ def read_locked_device_state[T](
 async def async_read_device_state[T](
     client: DreameLawnMowerClient,
     read_state: Callable[[DreameMowerDevice], T],
-    *, refresh: bool,
+    *, refresh: bool, deadline: float | None = None,
 ) -> T:
     """Refresh natively, then drain any started state reader before closing."""
     cancelled = Event()
-    deadline = time.monotonic() + 20.0
+    read_deadline = time.monotonic() + 20.0
+    if deadline is not None:
+        if not math.isfinite(deadline):
+            raise ValueError("Device state read deadline must be finite")
+        read_deadline = min(read_deadline, deadline)
 
     async def read(_cloud: DreameCloudSession) -> T:
-        device = (
-            await client._async_update_device()
-            if refresh else await _run_state_worker(
-                lambda: client._ensure_device(deadline=deadline, cancelled=cancelled),
+        if refresh:
+            device = (
+                await client._async_update_device()
+                if deadline is None
+                else await client._async_update_device(deadline=read_deadline)
+            )
+        else:
+            device = await _run_state_worker(
+                lambda: client._ensure_device(
+                    deadline=read_deadline, cancelled=cancelled,
+                ),
                 cancelled,
             )
-        )
 
         def active() -> None:
             if cancelled.is_set() or client._closing or client._device is not device:
                 raise DreameLawnMowerConnectionError("Device state read was cancelled")
-            if time.monotonic() >= deadline:
+            if time.monotonic() >= read_deadline:
                 raise DreameLawnMowerConnectionError("Device state read timed out")
 
         def build() -> T:
@@ -69,7 +80,7 @@ async def async_read_device_state[T](
 
     async def bounded(cloud: DreameCloudSession) -> T:
         try:
-            async with asyncio.timeout(max(0, deadline - time.monotonic())):
+            async with asyncio.timeout(max(0, read_deadline - time.monotonic())):
                 return await read(cloud)
         except TimeoutError as error:
             raise DreameLawnMowerConnectionError(
