@@ -24,9 +24,6 @@ from custom_components.dreame_lawn_mower import (
 from custom_components.dreame_lawn_mower import (
     video_camera_types as video_camera_types_module,
 )
-from custom_components.dreame_lawn_mower import (
-    video_provisioning_cache as provisioning_cache_module,
-)
 from custom_components.dreame_lawn_mower.const import (
     CONF_VIDEO_RETENTION,
     CONF_VIDEO_TRANSPORT,
@@ -88,11 +85,11 @@ def _uninitialized_entity(*, snapshot: object | None = None):
             self.device_config = None
             self._staged = None
 
-        def stage_fresh_device_config(
+        async def async_stage_fresh_device_config(
             self,
             inputs: DreameLawnMowerCameraStreamRuntimeInputs,
         ) -> DreameLawnMowerXp2pDeviceConfig:
-            config = provisioning_cache_module.resolve_xp2p_device_config(inputs)
+            config = DreameLawnMowerXp2pDeviceConfig()
             self._staged = (inputs, config)
             return config
 
@@ -119,7 +116,7 @@ def _uninitialized_entity(*, snapshot: object | None = None):
         ) -> DreameLawnMowerXp2pDeviceConfig:
             config = self.resolve_device_config(inputs)
             if config is None:
-                config = self.stage_fresh_device_config(inputs)
+                raise RuntimeError("XP2P device configuration was not staged.")
             if not auto:
                 return config
             return DreameLawnMowerXp2pDeviceConfig(
@@ -646,12 +643,8 @@ def test_video_camera_auto_policy_prefers_direct_capable_sdk_negotiation() -> No
         cross=True,
     )
 
-    with patch.object(
-        provisioning_cache_module,
-        "resolve_xp2p_device_config",
-        return_value=fetched,
-    ):
-        config = entity._resolve_xp2p_config(inputs)
+    entity._provisioning_cache._staged = (inputs, fetched)
+    config = entity._resolve_xp2p_config(inputs)
 
     assert config.server == fetched.server
     assert config.ip == fetched.ip
@@ -3796,7 +3789,9 @@ def test_video_camera_caches_provisioning_only_after_relay_media_ready() -> None
                 self.staged_inputs = None
                 self.saves = 0
 
-            def stage_fresh_device_config(self, actual_inputs: object) -> object:
+            async def async_stage_fresh_device_config(
+                self, actual_inputs: object,
+            ) -> object:
                 self.staged_inputs = actual_inputs
                 return config
 

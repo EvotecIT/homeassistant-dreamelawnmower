@@ -554,10 +554,7 @@ class DreameLawnMowerVideoStartupMixin:
                     self._lan_cache_error,
                 )
         if inputs.ready:
-            await self.hass.async_add_executor_job(
-                self._provisioning_cache.stage_fresh_device_config,
-                inputs,
-            )
+            await self._provisioning_cache.async_stage_fresh_device_config(inputs)
         return inputs
 
     async def _async_cache_healthy_provisioning(
