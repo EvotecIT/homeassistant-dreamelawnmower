@@ -45,16 +45,8 @@ async def async_map_view(
             )
         except Exception as err:  # noqa: BLE001 - retain map-source failure evidence
             error = f"Legacy map unavailable; app map failed: {err}"
-            app_view = await async_read_device_state(
-                client,
-                lambda _device: DreameLawnMowerMapView(
-                    source="app_action_map",
-                    error=error,
-                    diagnostics=client._safe_map_diagnostics(
-                        source="app_action_map", reason="app_action_map_failed"
-                    ),
-                ),
-                refresh=False,
+            app_view = DreameLawnMowerMapView(
+                source="app_action_map", error=error,
             )
         vector_view = client._with_fallback_app_maps(
             await client.async_refresh_vector_map_view(
@@ -108,16 +100,10 @@ async def async_legacy_map_view(
                     client, lambda device: device.status.current_map, refresh=False,
                 )
         except (DeviceException, DreameLawnMowerConnectionError) as err:
-            error = str(err)
-            return await async_read_device_state(
-                client,
-                lambda _device: DreameLawnMowerMapView(
-                    source="legacy_current_map", error=error,
-                    diagnostics=client._safe_map_diagnostics(
-                        source="legacy_current_map", reason=error,
-                    ),
-                ),
-                refresh=False,
+            # State may be unavailable after the failed read. Diagnostics are
+            # optional; reporting the original error must not acquire it again.
+            return DreameLawnMowerMapView(
+                source="legacy_current_map", error=str(err),
             )
         return await async_read_device_state(
             client,

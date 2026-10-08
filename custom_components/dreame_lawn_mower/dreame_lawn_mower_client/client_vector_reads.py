@@ -82,17 +82,8 @@ async def async_vector_view(
         try:
             data = await cloud.async_get_batch_device_datas(client._descriptor.did, [])
         except DreameLawnMowerConnectionError as err:
-            error = str(err)
-            return await async_read_device_state(
-                client,
-                lambda _device: DreameLawnMowerMapView(
-                    source="batch_vector_map",
-                    error=error,
-                    diagnostics=client._safe_map_diagnostics(
-                        source="batch_vector_map", reason=error
-                    ),
-                ),
-                refresh=False,
+            return DreameLawnMowerMapView(
+                source="batch_vector_map", error=str(err),
             )
         hint = (
             current_map_index
