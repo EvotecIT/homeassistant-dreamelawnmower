@@ -73,7 +73,9 @@ class NativeMapApplication:
             self.require_owner(device)
             return operation()
 
-        return await async_read_device_state(self.client, apply, refresh=False)
+        return await async_read_device_state(
+            self.client, apply, refresh=False, deadline=self.deadline,
+        )
 
     async def request_next(self, map_id: int, frame_id: int) -> bool | None:
         """Own RPC, downloads, decoded frames and all resulting follow-ups."""

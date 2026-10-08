@@ -212,7 +212,7 @@ class _DreameMowerDeviceStateMixin:
             run_device_plan(self, self._message_plan(message))
 
     def _message_plan(self, message: dict[str, Any]) -> Generator[DevicePlanEffect, Any, None]:
-        """Advance under the state lock; apply yielded maps before resuming."""
+        """Apply message state before I/O; notify after its maps are applied."""
         if not self._ready:
             return
 
@@ -257,10 +257,9 @@ class _DreameMowerDeviceStateMixin:
                         )
                         or external_realtime_changed
                     )
+                known_property_changed = yield from self._handle_properties_plan(params, notify=False)
                 if len(map_params) and self._map_manager:
                     yield MapProperties(self._map_manager, map_params)
-
-                known_property_changed = yield from self._handle_properties_plan(params, notify=False)
                 notice_announced = remember_notice_events(
                     self, self.last_realtime_message
                 )
@@ -318,8 +317,7 @@ class _DreameMowerDeviceStateMixin:
         pending = getattr(self, "_pending_property_callbacks", [])
         self._pending_property_callbacks = []
         changed = bool(pending)
-        yield from self._deliver_property_callbacks_plan(pending)
-        callbacks: list[tuple[Callable[[Any], None], Any]] = []
+        callbacks: list[tuple[Callable[[Any], None], Any]] = list(pending)
         for prop in properties:
             if not isinstance(prop, dict):
                 continue
