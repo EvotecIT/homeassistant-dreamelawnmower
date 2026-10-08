@@ -84,6 +84,19 @@ def test_connect_device_defers_initial_map_request(monkeypatch, mqtt_connected) 
     assert mower._ready is True
 
 
+def test_docked_map_state_defers_request_to_maintenance() -> None:
+    """Startup and charging callbacks must not dispatch map RPC synchronously."""
+    protocol = Mock()
+    manager = DreameMapMowerMapManager(protocol)
+    manager.schedule_update = Mock()
+
+    manager.set_device_running(False, True)
+
+    protocol.action.assert_not_called()
+    assert manager._need_map_request is True
+    manager.schedule_update.assert_called_once_with(2)
+
+
 def test_bounded_update_skips_reconnection_and_attempts_http_readback() -> None:
     readback_error = RuntimeError("stop after bounded readback dispatch")
     mower = SimpleNamespace(

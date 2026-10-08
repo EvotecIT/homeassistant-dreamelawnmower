@@ -76,6 +76,7 @@ async def async_update_device(
         _cleanup.require_active(client)
         deadline = min(deadline, _cleanup.deadline) if deadline else _cleanup.deadline
     cancelled = Event()
+    supplied_deadline = deadline
     if deadline is not None and not math.isfinite(deadline):
         raise ValueError("Device refresh deadline must be finite")
     if force_request_properties and deadline is None:
@@ -101,7 +102,8 @@ async def async_update_device(
                 )
             return device, None
         if _cleanup is None and (
-            not device.cloud_connected or not device._ready
+            not device._ready
+            or (supplied_deadline is None and not device.cloud_connected)
         ):
             return device, []
         return device, select_properties(device)
@@ -129,7 +131,8 @@ async def async_update_device(
                     deadline if deadline is not None else time.monotonic() + 20
                 )
                 if _cleanup is None and (
-                    not device.cloud_connected or not device._ready
+                    not device._ready
+                    or (supplied_deadline is None and not device.cloud_connected)
                 ):
                     await async_start_device(
                         client, device, cloud, deadline=rpc_deadline,

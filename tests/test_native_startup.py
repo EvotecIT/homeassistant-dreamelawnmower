@@ -103,7 +103,17 @@ def test_startup_uses_native_metadata_and_initial_properties(
             payload = await request.json()
             assert payload["data"]["method"] == "get_properties"
             rpc.append(payload)
-            data = {"result": [{"did": str(battery.value), "code": 0, "value": 55}]}
+            rows = [{"did": str(battery.value), "code": 0, "value": 55}]
+            if initialize_maps:
+                rows.append({
+                    "did": str(DreameMowerProperty.CHARGING_STATUS.value),
+                    "code": 0, "value": 3,
+                })
+                rows.append({
+                    "did": str(DreameMowerProperty.TASK_STATUS.value),
+                    "code": 0, "value": 0,
+                })
+            data = {"result": rows}
         return web.json_response({"code": 0, "data": data})
 
     async def scenario():
@@ -122,7 +132,9 @@ def test_startup_uses_native_metadata_and_initial_properties(
                 # Keep timers/network requests inert while using the real map
                 # initialization and decoder configuration owners.
                 manager.schedule_update = Mock()
-                manager._request_map = Mock(return_value=None)
+                device._protocol.action = Mock(
+                    side_effect=AssertionError("Synchronous startup map request"),
+                )
             owner = device._protocol.cloud
             owner.login = Mock(side_effect=AssertionError("Synchronous login"))
             owner.get_device_info = Mock(side_effect=AssertionError("Synchronous info"))
@@ -146,6 +158,10 @@ def test_startup_uses_native_metadata_and_initial_properties(
                     assert not device.device_connected  # CONNACK has not arrived.
                     assert manager._aes_iv == "0123456789abcdef"
                     assert manager._capability is device.capability
+                    assert device.status.docked
+                    assert manager._device_docked is True
+                    assert manager._need_map_request is True
+                    device._protocol.action.assert_not_called()
                 assert device.status.ai_policy_accepted is True
                 assert owner._uuid == "account"
                 assert owner._uid == "device-owner"
