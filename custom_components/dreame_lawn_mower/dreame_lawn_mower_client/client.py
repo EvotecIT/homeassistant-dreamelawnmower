@@ -1520,6 +1520,21 @@ class DreameLawnMowerClient(
         )
         return view.image_png
 
+    async def _async_refresh_legacy_map_view(
+        self,
+        timeout: float,
+        interval: float,
+        *,
+        label_scale: float = 1.0,
+        style: MapRenderStyle | None = None,
+    ) -> DreameLawnMowerMapView:
+        from .client_map_views import async_legacy_map_view
+
+        return await async_legacy_map_view(
+            self, timeout=timeout, interval=interval,
+            label_scale=label_scale, style=style,
+        )
+
     async def async_refresh_map_view(
         self,
         *,

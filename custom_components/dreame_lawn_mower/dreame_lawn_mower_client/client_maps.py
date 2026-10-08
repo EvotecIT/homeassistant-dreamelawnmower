@@ -273,6 +273,19 @@ class _DreameLawnMowerClientMapsMixin(
                 ),
             )
 
+        return self._render_legacy_map_view(
+            map_data, label_scale=label_scale, style=style
+        )
+
+    def _render_legacy_map_view(
+        self,
+        map_data: MapData | None,
+        *,
+        label_scale: float = 1.0,
+        style: MapRenderStyle | None = None,
+    ) -> DreameLawnMowerMapView:
+        """Compose the legacy result without refreshing or waiting for map data."""
+        source = "legacy_current_map"
         if map_data is None:
             error = "No map data returned by the legacy current-map path."
             return DreameLawnMowerMapView(
