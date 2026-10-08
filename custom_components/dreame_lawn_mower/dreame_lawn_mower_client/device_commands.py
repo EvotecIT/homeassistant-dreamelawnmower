@@ -221,7 +221,8 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
             ):
                 raise InvalidActionException("Invalid property")
 
-            prop_name = resolved.lower() if isinstance(resolved, str) else resolved.name
+            prop_name = resolved.name if isinstance(resolved, Enum) else resolved.lower()
+            availability_key = prop_name if prop_name in PROPERTY_AVAILABILITY else prop_name.lower()
 
             if (
                 (
@@ -231,8 +232,8 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
                         or resolved is DreameMowerAutoSwitchProperty.CLEANING_ROUTE
                     )
                 )
-                and prop_name in PROPERTY_AVAILABILITY
-                and not PROPERTY_AVAILABILITY[prop_name](self)
+                and availability_key in PROPERTY_AVAILABILITY
+                and not PROPERTY_AVAILABILITY[availability_key](self)
             ):
                 raise InvalidActionException("Property unavailable")
 

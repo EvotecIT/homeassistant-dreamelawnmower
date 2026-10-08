@@ -125,7 +125,9 @@ def test_string_enum_dispatch_uses_auto_switch_cache(device):
 def test_dnd_property_dispatch_uses_existing_dedicated_setters(
     device, name, value, prop
 ):
+    device.capability.dnd = True
     device.capability.dnd_task = False
+    device.data[DreameMowerProperty.DND.value] = 1
 
     assert device.set_property_value(name, value) is True
 
@@ -134,8 +136,36 @@ def test_dnd_property_dispatch_uses_existing_dedicated_setters(
 
 @pytest.mark.parametrize("value", ["24:00", "22:99", 1])
 def test_invalid_dnd_time_never_reaches_device(device, value):
+    device.capability.dnd = True
+    device.data[DreameMowerProperty.DND.value] = 1
     with pytest.raises(InvalidActionException, match="Invalid value"):
         device.set_property_value("DND_START", value)
+    device.set_property.assert_not_called()
+
+
+@pytest.mark.parametrize("name", ["DND_START", "DND_END"])
+def test_disabled_dnd_rejects_time_commands(device, name):
+    device.capability.dnd = True
+    device.capability.dnd_task = False
+    device.data[DreameMowerProperty.DND.value] = 0
+
+    with pytest.raises(InvalidActionException, match="Property unavailable"):
+        device.set_property_value(name, "22:00")
+
+    device.set_property.assert_not_called()
+
+
+def test_string_enum_uses_canonical_property_availability(device, monkeypatch):
+    prop = DreameMowerAutoSwitchProperty.WIDER_CORNER_COVERAGE
+    device.capability.auto_switch_settings = True
+    device.auto_switch_data = {prop.name: 0}
+    monkeypatch.setitem(
+        device_commands.PROPERTY_AVAILABILITY, prop.name, lambda _: False
+    )
+
+    with pytest.raises(InvalidActionException, match="Property unavailable"):
+        device.set_property_value(prop.name, 1)
+
     device.set_property.assert_not_called()
 
 
