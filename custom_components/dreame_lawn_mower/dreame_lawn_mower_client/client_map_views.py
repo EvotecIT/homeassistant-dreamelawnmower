@@ -92,25 +92,30 @@ async def async_legacy_map_view(
                 if remaining <= 0:
                     break
                 await asyncio.sleep(min(max(interval, 0.1), remaining))
+                if time.monotonic() >= deadline:
+                    break
                 map_data = await async_read_device_state(
                     client, lambda device: device.status.current_map, refresh=False,
+                    deadline=deadline,
                 )
             if pending and map_data is None:
-                map_data = await async_read_device_state(
-                    client, lambda device: device.status.current_map, refresh=False,
+                return DreameLawnMowerMapView(
+                    source="legacy_current_map",
+                    error="No map data returned by the legacy current-map path.",
                 )
+            return await async_read_device_state(
+                client,
+                lambda _device: client._render_legacy_map_view(
+                    map_data, label_scale=label_scale, style=style,
+                ),
+                refresh=False,
+                deadline=deadline if timeout > 0 else None,
+            )
         except (DeviceException, DreameLawnMowerConnectionError) as err:
             # State may be unavailable after the failed read. Diagnostics are
             # optional; reporting the original error must not acquire it again.
             return DreameLawnMowerMapView(
                 source="legacy_current_map", error=str(err),
             )
-        return await async_read_device_state(
-            client,
-            lambda _device: client._render_legacy_map_view(
-                map_data, label_scale=label_scale, style=style,
-            ),
-            refresh=False,
-        )
 
     return await client._async_cloud_read(read)

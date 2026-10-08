@@ -61,7 +61,7 @@ class PropertyResponse:
 
 @dataclass(frozen=True)
 class MapProperties:
-    """Deliver MQTT map properties before applying the message's device state."""
+    """Deliver MQTT map properties before the complete message notification."""
     manager: DreameMapMowerMapManager
     properties: list[dict[str, Any]]
 

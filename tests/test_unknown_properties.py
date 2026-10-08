@@ -69,13 +69,13 @@ def test_message_map_application_precedes_known_property_notification(planned):
             params = next(plan).properties
             assert len(params) == 1
             assert params[0]["value"] == "frame"
-            assert battery.value not in device.data
+            assert device.data[battery.value] == 80
             device._map_manager.handle_properties(params)
             with pytest.raises(StopIteration):
                 next(plan)
     else:
         device._message_callback(message)
-    assert events == [("map", None), ("changed", 80)]
+    assert events == [("map", 80), ("changed", 80)]
 
 
 def test_handle_properties_tolerates_unknown_property_ids() -> None:

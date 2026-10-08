@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from threading import Event, Thread
 from unittest.mock import AsyncMock
 
@@ -25,6 +26,53 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_visuals im
 from .test_async_app_preferences import make_client
 from .test_async_cloud_session import cloud_strings, login_response, server
 from .test_async_operation_reads import ready_device, refresh_response
+
+
+def test_map_arrival_timeout_bounds_waiting_for_a_busy_state_lock(monkeypatch):
+    async def scenario():
+        async with ClientSession() as session:
+            client = make_client(session)
+            device = client._device
+            client._async_update_device = AsyncMock(return_value=device)
+            requested = asyncio.Event()
+            loop = asyncio.get_running_loop()
+            monkeypatch.setattr(device, "_map_manager", object())
+            monkeypatch.setattr(
+                device, "update_map", lambda: loop.call_soon_threadsafe(requested.set)
+            )
+            monkeypatch.setattr(
+                type(device.status), "current_map", property(lambda _: None)
+            )
+            locked, release = Event(), Event()
+
+            def hold_state():
+                with device._state_lock:
+                    locked.set()
+                    release.wait(3)
+
+            task = asyncio.create_task(client._async_refresh_legacy_map_view(0.15, 0.1))
+            worker = Thread(target=hold_state, name="map-budget-state-holder")
+            try:
+                await asyncio.wait_for(requested.wait(), 1)
+                worker.start()
+                assert await asyncio.to_thread(locked.wait, 1)
+                started = time.monotonic()
+                result = await asyncio.wait_for(task, 0.6)
+                assert time.monotonic() - started < 0.5
+                assert result.source == "legacy_current_map"
+                assert result.error and "timed out" in result.error
+                assert not release.is_set()
+                assert worker.is_alive()
+            finally:
+                release.set()
+                if worker.ident is not None:
+                    await asyncio.to_thread(worker.join, 1)
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                monkeypatch.undo()
+                await client.async_close()
+
+    asyncio.run(scenario())
 
 
 def test_legacy_view_refreshes_over_async_http_and_keeps_rendering(monkeypatch):
@@ -162,7 +210,7 @@ def test_legacy_map_wait_and_error_lifetime(monkeypatch, outcome):
                     assert result.error == "refresh offline"
                     assert not rendered
                 else:
-                    assert rendered == [current]
+                    assert rendered == ([] if outcome == "timeout" else [current])
                     assert result.error == (
                         "No map data returned by the legacy current-map path."
                     )
