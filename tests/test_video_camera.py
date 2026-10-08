@@ -4028,7 +4028,7 @@ def test_video_camera_lan_handoff_raises_when_probe_stop_fails() -> None:
         )
         with patch.object(
             video_camera_module.video_helpers,
-            "probe_stream_health_and_route",
+            "async_probe_stream_health_and_route",
             return_value=health,
         ):
             with pytest.raises(DreameLawnMowerVideoRuntimeError):

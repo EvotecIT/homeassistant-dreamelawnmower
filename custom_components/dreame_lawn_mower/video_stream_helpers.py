@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import platform
 import shlex
-from collections.abc import Callable
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CONF_VIDEO_TRANSPORT,
@@ -18,8 +20,8 @@ from .const import (
 )
 from .dreame_lawn_mower_client.stream_health import (
     DreameLawnMowerStreamUrlProbeResult,
-    probe_stream_url,
 )
+from .dreame_lawn_mower_client.stream_health_async import async_probe_stream_url
 from .dreame_lawn_mower_client.video_runtime import (
     DreameLawnMowerVideoRuntimeError,
     DreameLawnMowerXp2pLiveStreamSession,
@@ -140,22 +142,6 @@ def managed_runtime_environment() -> dict[str, str | bool | int]:
     }
 
 
-def probe_stream_health(
-    stream_url: str,
-    *,
-    on_stream_open: Callable[[], Any] | None = None,
-) -> DreameLawnMowerStreamUrlProbeResult:
-    """Check the local stream before Home Assistant advertises it."""
-    return probe_stream_url(
-        stream_url,
-        timeout=_STREAM_HEALTH_TIMEOUT,
-        read_bytes=_STREAM_HEALTH_BYTES,
-        attempts=_STREAM_HEALTH_ATTEMPTS,
-        retry_interval=_STREAM_HEALTH_RETRY_INTERVAL,
-        on_stream_open=on_stream_open,
-    )
-
-
 def stream_health_error(health: DreameLawnMowerStreamUrlProbeResult) -> str:
     """Render a redacted reason for a local stream URL that did not serve FLV."""
     details = [f"error_category={health.error_category or 'unknown'}"]
@@ -169,16 +155,6 @@ def stream_health_error(health: DreameLawnMowerStreamUrlProbeResult) -> str:
         "XP2P runtime returned a local stream URL, but it did not emit an FLV "
         f"header ({', '.join(details)})."
     )
-
-
-def probe_stream_health_and_route(
-    runtime: Any,
-    session: DreameLawnMowerXp2pLiveStreamSession,
-) -> DreameLawnMowerStreamUrlProbeResult:
-    """Probe FLV while querying Tencent's opaque network-type metadata."""
-    refresh = getattr(runtime, "refresh_stream_link_mode", None)
-    callback = (lambda: refresh(session)) if callable(refresh) else None
-    return probe_stream_health(session.stream_url, on_stream_open=callback)
 
 
 def format_video_start_failures(
@@ -195,3 +171,34 @@ def format_video_start_failures(
         failures.append(f"Cached XP2P failed: {cached_xp2p_error}")
     failures.append(f"Cloud fallback failed: {cloud_error}")
     return " ".join(failures) if len(failures) > 1 else cloud_error
+
+
+async def async_probe_stream_health_and_route(
+    hass: HomeAssistant,
+    runtime: Any,
+    session: DreameLawnMowerXp2pLiveStreamSession,
+) -> DreameLawnMowerStreamUrlProbeResult:
+    """Keep the probe connection open until native route inspection finishes."""
+    async def refresh_route() -> None:
+        refresh = getattr(runtime, "refresh_stream_link_mode", None)
+        if not callable(refresh):
+            return
+        worker = asyncio.ensure_future(hass.async_add_executor_job(refresh, session))
+        try:
+            await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            while not worker.done():
+                try:
+                    await asyncio.wait({worker})
+                except asyncio.CancelledError:
+                    continue
+            if not worker.cancelled():
+                worker.exception()
+            raise
+
+    return await async_probe_stream_url(
+        session.stream_url, session=async_get_clientsession(hass),
+        timeout=_STREAM_HEALTH_TIMEOUT, read_bytes=_STREAM_HEALTH_BYTES,
+        attempts=_STREAM_HEALTH_ATTEMPTS,
+        retry_interval=_STREAM_HEALTH_RETRY_INTERVAL, on_stream_open=refresh_route,
+    )

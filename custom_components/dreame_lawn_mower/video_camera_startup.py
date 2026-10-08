@@ -420,10 +420,8 @@ class DreameLawnMowerVideoStartupMixin:
         session: DreameLawnMowerXp2pLiveStreamSession | None = None
         try:
             session = await self._async_start_lan_runtime_session(runtime, inputs)
-            stream_health = await self.hass.async_add_executor_job(
-                video_helpers.probe_stream_health_and_route,
-                runtime,
-                session,
+            stream_health = await video_helpers.async_probe_stream_health_and_route(
+                self.hass, runtime, session,
             )
         except asyncio.CancelledError:
             if session is not None:
