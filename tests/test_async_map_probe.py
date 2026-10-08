@@ -21,6 +21,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import 
 
 from .test_async_cloud_session import cloud_strings, login_response, server
 from .test_async_map_objects import make_client
+from .test_async_operation_reads import ready_device
 
 
 def prepare_client(session):
@@ -39,8 +40,8 @@ def prepare_client(session):
     )
     client.async_get_cloud_device_otc_info = AsyncMock(return_value={"supported": True})
     client.async_get_app_maps = AsyncMock(return_value={"maps": []})
-    client._sync_refresh_legacy_map_view = lambda *args: DreameLawnMowerMapView(
-        source="legacy_current_map"
+    client._async_refresh_legacy_map_view = AsyncMock(
+        return_value=DreameLawnMowerMapView(source="legacy_current_map")
     )
     return client
 
@@ -101,15 +102,18 @@ def test_probe_close_stops_later_sections_and_drains_legacy(monkeypatch, phase):
                 await history_release.wait()
             return web.json_response({"code": 0, "data": {strings[33]: []}})
 
-        def legacy(*args):
+        def legacy(*args, **kwargs):
             worker_entered.set()
             assert worker_release.wait(5)
             return DreameLawnMowerMapView(source="legacy_current_map")
 
         async with server(monkeypatch, handler), ClientSession() as session:
             client = prepare_client(session)
-            client._sync_refresh_legacy_map_view = legacy
-            task = asyncio.create_task(client.async_probe_map_sources())
+            ready_device(monkeypatch, client)
+            client._async_update_device = AsyncMock(return_value=client._device)
+            del client._async_refresh_legacy_map_view
+            client._render_legacy_map_view = legacy
+            task = asyncio.create_task(client.async_probe_map_sources(timeout=0))
             close = None
             try:
                 if phase == "history":

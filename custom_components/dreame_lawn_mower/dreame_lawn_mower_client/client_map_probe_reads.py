@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from threading import Event
 from typing import TYPE_CHECKING, Any
 
 from .client_property_scan import async_scan_properties
 from .client_public_reads import async_read_key_definition
-from .client_refresh import _run_state_worker
 from .client_state_reads import async_read_device_state
 from .exceptions import DreameLawnMowerConnectionError
 from .map_probe import (
@@ -29,8 +27,6 @@ async def async_probe_maps(
     interval: float,
     language: str,
 ) -> dict[str, Any]:
-    cancelled = Event()
-
     async def read(cloud: DreameCloudSession) -> dict[str, Any]:
         selected_map_view = await client.async_refresh_map_view(
             timeout=timeout, interval=interval
@@ -100,10 +96,7 @@ async def async_probe_maps(
             )
         except DreameLawnMowerConnectionError as err:
             app_maps = {"error": str(err)}
-        legacy_map_view = await _run_state_worker(
-            lambda: client._sync_refresh_legacy_map_view(timeout, interval),
-            cancelled,
-        )
+        legacy_map_view = await client._async_refresh_legacy_map_view(timeout, interval)
         vector_map_view = await client.async_refresh_vector_map_view()
 
         return await async_read_device_state(

@@ -215,7 +215,7 @@ def test_native_composed_map_keeps_source_and_current_lawn(monkeypatch, mode):
     fake = _FakeAppMapCloud({"map": [{"data": [[0, 0], [20, 0], [20, 20]]}]})
     legacy_calls = []
 
-    def legacy(timeout, interval, **kwargs):
+    async def legacy(timeout, interval, **kwargs):
         legacy_calls.append((timeout, interval))
         return DreameLawnMowerMapView(
             source="legacy_current_map", image_png=b"legacy-image"
@@ -243,7 +243,7 @@ def test_native_composed_map_keeps_source_and_current_lawn(monkeypatch, mode):
 
         async with server(monkeypatch, handler), ClientSession() as session:
             client = make_client(session)
-            client._sync_refresh_legacy_map_view = legacy
+            client._async_refresh_legacy_map_view = legacy
             try:
                 view = await client.async_refresh_map_view(timeout=2, interval=0.1)
                 if mode == "vector":
