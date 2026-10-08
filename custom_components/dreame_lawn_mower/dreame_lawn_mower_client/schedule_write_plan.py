@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Generator, Mapping, Sequence
 from dataclasses import dataclass
@@ -336,6 +337,6 @@ def plan_table_enabled(
             observed_plan["tasks_complete"] = original["tasks_complete"]
         result.update(executed=True, confirmed=True, confirmed_schedule=observed)
         return result
-    except Exception as err:
+    except (Exception, asyncio.CancelledError) as err:
         mark_write_attempted(err, fields=["schedule"])
         raise

@@ -145,6 +145,104 @@ def test_ai_property_refusal_rolls_back_optimistic_state(privacy_device):
     mower._protocol.set_property.assert_not_called()
 
 
+@pytest.mark.parametrize("wire", ["mask", "json"])
+def test_ai_pending_edits_survive_repeated_stale_readback(privacy_device, wire):
+    mower = privacy_device
+    mower.ai_data = {"AI_OBSTACLE_DETECTION": False}
+    mower.status.ai_policy_accepted = True
+    mower.data[DreameMowerProperty.AI_DETECTION.value] = 0 if wire == "mask" else "{}"
+    mower.set_ai_property(DreameMowerStrAIProperty.AI_OBSTACLE_DETECTION, True)
+    mower.data[DreameMowerProperty.AI_DETECTION.value] = (
+        0 if wire == "mask" else '{"obstacle_detect_switch":false}'
+    )
+    for _ in range(2):
+        mower._ai_obstacle_detection_changed()
+        assert mower.status.ai_obstacle_detection is True
+        assert "AI_OBSTACLE_DETECTION" in mower._dirty_ai_data
+    mower.data[DreameMowerProperty.AI_DETECTION.value] = (
+        2 if wire == "mask" else '{"obstacle_detect_switch":true}'
+    )
+    mower._ai_obstacle_detection_changed()
+    assert "AI_OBSTACLE_DETECTION" not in mower._dirty_ai_data
+
+
+@pytest.mark.parametrize("failure", [
+    None, TimeoutError("transport timed out"), [{"code": -1}],
+])
+def test_ai_whole_masks_preserve_edits_after_failed_write(privacy_device, failure):
+    mower = privacy_device
+    mower.ai_data = {
+        "AI_OBSTACLE_DETECTION": False, "AI_OBSTACLE_IMAGE_UPLOAD": False,
+        "AI_PET_DETECTION": False,
+    }
+    mower.status.ai_policy_accepted = True
+    unknown_bit = 1 << 20
+    mower.data[DreameMowerProperty.AI_DETECTION.value] = unknown_bit
+    mower._protocol.set_property.side_effect = [
+        [{"code": 0}], [{"code": 0}] if failure is None else failure, [{"code": 0}],
+    ]
+    mower.set_ai_property(DreameMowerStrAIProperty.AI_OBSTACLE_DETECTION, True)
+    if isinstance(failure, BaseException):
+        with pytest.raises(TimeoutError):
+            mower.set_ai_property(
+                DreameMowerStrAIProperty.AI_OBSTACLE_IMAGE_UPLOAD, True,
+            )
+    else:
+        mower.set_ai_property(DreameMowerStrAIProperty.AI_OBSTACLE_IMAGE_UPLOAD, True)
+    mower.set_ai_property(DreameMowerStrAIProperty.AI_PET_DETECTION, True)
+    assert [call.args[2] for call in mower._protocol.set_property.call_args_list] == [
+        unknown_bit | 2, unknown_bit | 34,
+        unknown_bit | (50 if failure is None else 18),
+    ]
+
+
+@pytest.mark.parametrize("prop,remaining_mask", [
+    (DreameMowerStrAIProperty.AI_OBSTACLE_DETECTION, 32),
+    (DreameMowerStrAIProperty.AI_OBSTACLE_IMAGE_UPLOAD, 2),
+])
+def test_ai_disable_then_reenable_requires_consent_before_readback(
+    privacy_device, prop, remaining_mask,
+):
+    mower = privacy_device
+    mower.data[DreameMowerProperty.AI_DETECTION.value] = 34
+    mower._protocol.cloud.get_batch_device_datas = Mock(return_value={
+        device_privacy.AI_POLICY_PROPERTY: '{"privacyAuthed":false}',
+    })
+    assert mower.set_ai_property(prop, False) == [{"code": 0}]
+    with pytest.raises(InvalidActionException, match="accept privacy policy"):
+        mower.set_ai_property(prop, True)
+    assert mower.ai_data[prop.name] is False
+    assert mower._protocol.set_property.call_args.args[2] == remaining_mask
+    mower._protocol.set_property.assert_called_once()
+
+
+@pytest.mark.parametrize("wire", ["mask", "json"])
+@pytest.mark.parametrize("failure", [
+    TimeoutError("transport timed out"), [{"code": -1}],
+])
+def test_repeated_ai_failure_restores_pending_edit(privacy_device, wire, failure):
+    mower = privacy_device
+    mower.ai_data = {"AI_OBSTACLE_DETECTION": False}
+    mower.status.ai_policy_accepted = True
+    mower.data[DreameMowerProperty.AI_DETECTION.value] = 0 if wire == "mask" else "{}"
+    mower._protocol.set_property.side_effect = [[{"code": 0}], failure]
+    prop = DreameMowerStrAIProperty.AI_OBSTACLE_DETECTION
+    mower.set_ai_property(prop, True)
+    pending = mower._dirty_ai_data[prop.name]
+    if isinstance(failure, BaseException):
+        with pytest.raises(TimeoutError):
+            mower.set_ai_property(prop, False)
+    else:
+        mower.set_ai_property(prop, False)
+    assert mower._dirty_ai_data[prop.name] is pending
+    mower.data[DreameMowerProperty.AI_DETECTION.value] = (
+        0 if wire == "mask" else '{"obstacle_detect_switch":false}'
+    )
+    for _ in range(2):
+        mower._ai_obstacle_detection_changed()
+        assert mower.status.ai_obstacle_detection is True
+
+
 @pytest.mark.parametrize("settings", [0, {"obstacle_detect_switch": False}])
 def test_disabling_ai_does_not_require_privacy_acceptance(privacy_device, settings):
     mower = privacy_device
