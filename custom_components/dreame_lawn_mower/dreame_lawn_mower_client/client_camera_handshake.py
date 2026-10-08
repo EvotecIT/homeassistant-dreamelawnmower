@@ -113,15 +113,20 @@ async def async_camera_handshake(
             output["start_result"] = _json_safe(await command("start"))
             deadline = time.monotonic() + max(timeout, 0)
             while True:
+                if timeout > 0 and time.monotonic() >= deadline:
+                    break
                 poll = await async_read_device_state(
                     client, client._stream_status_payload, refresh=True,
+                    deadline=deadline if timeout > 0 else None,
                 )
                 output["polls"].append(poll)
                 if poll["stream_session_present"] or poll["stream_status"]:
                     break
                 if time.monotonic() >= deadline:
                     break
-                await asyncio.sleep(max(interval, 0.1))
+                await asyncio.sleep(min(
+                    max(interval, 0.1), max(0, deadline - time.monotonic()),
+                ))
         finally:
             try:
                 await finish_owned_cleanup(client, device, cloud, cleanup)
