@@ -485,7 +485,8 @@ class _DreameMowerDeviceMapMixin:
                     map_data = self._map_manager.get_history_map(item.object_name, item.key)
                     if map_data is None:
                         return None
-                    map_data.last_updated = item.date.timestamp()
+                    last_updated = item.date.timestamp() if item.date is not None else None
+                    map_data.last_updated = last_updated
                     map_data.completed = item.completed
                     map_data.neglected_segments = item.neglected_segments
                     map_data.second_cleaning = item.second_cleaning
@@ -494,7 +495,7 @@ class _DreameMowerDeviceMapMixin:
                     if item.cleanup_method is not None:
                         map_data.cleanup_method = item.cleanup_method
                     if map_data.cleaning_map_data:
-                        map_data.cleaning_map_data.last_updated = item.date.timestamp()
+                        map_data.cleaning_map_data.last_updated = last_updated
                         map_data.cleaning_map_data.completed = item.completed
                         map_data.cleaning_map_data.neglected_segments = item.neglected_segments
                         map_data.cleaning_map_data.second_cleaning = item.second_cleaning

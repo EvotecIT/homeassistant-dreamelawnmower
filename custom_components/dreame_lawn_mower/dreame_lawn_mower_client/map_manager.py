@@ -1163,22 +1163,29 @@ class DreameMapMowerMapManager:
                     traceback.format_exc(),
                 )
 
-    def get_recovery_map(self, map_id, index):
+    def get_recovery_map(self, map_id: int, index: int | str) -> MapData | None:
         if map_id in self._map_list:
             recovery_map_list = self._saved_map_data[map_id].recovery_map_list
             index = int(index) - 1
             if recovery_map_list and len(recovery_map_list) > index:
-                if recovery_map_list[index].map_data is None:
-                    recovery_map_list[index].map_data = DreameMowerMapDecoder.decode_saved_map(
-                        recovery_map_list[index].raw_map,
+                recovery = recovery_map_list[index]
+                if recovery.map_data is None:
+                    if recovery.raw_map is None:
+                        return None
+                    map_data = DreameMowerMapDecoder.decode_saved_map(
+                        recovery.raw_map,
                         self._vslam_map,
                         self._saved_map_data[map_id].rotation,
                         self._aes_iv,
                     )
-                    recovery_map_list[index].map_data.last_updated = recovery_map_list[index].date.timestamp()
-                    recovery_map_list[index].map_data.recovery_map_type = recovery_map_list[index].map_type
-                    recovery_map_list[index].map_data.recovery_map = True
-                return recovery_map_list[index].map_data
+                    if map_data is None:
+                        return None
+                    map_data.last_updated = recovery.date.timestamp() if recovery.date is not None else None
+                    map_data.recovery_map_type = recovery.map_type
+                    map_data.recovery_map = True
+                    recovery.map_data = map_data
+                return recovery.map_data
+        return None
 
     def get_recovery_map_file(self, map_id, index):
         if map_id in self._map_list:
