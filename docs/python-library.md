@@ -44,19 +44,22 @@ Login and inventory responses have a one MiB decoded-body limit, a total
 operation deadline, cancellation cleanup, and no automatic redirect following.
 Only read-only inventory requests retry transport failures.
 
-The client constructor also accepts `session=session` for native account-page
-reads through `async_get_cloud_device_list_page()`. Without an injected session,
-the first page read opens a session that is reused until `await client.async_close()`.
-Always close the client when finished. Closing cancels outstanding native reads,
-awaits their cleanup, and closes only a session the client created. A closed client
-rejects further page reads. Page filters and pagination retain the same wire format
-as the synchronous transport; malformed pages and rejected requests raise
-`DreameLawnMowerConnectionError`.
+The client constructor accepts `session=session` for native account reads,
+device polling, supported mower commands, schedules, maps and camera discovery.
+Without an injected session, the first native operation opens a reusable session.
+Home Assistant lends its shared session to each client. Existing payload builders,
+authentication rules, command confirmation and device routing remain shared with
+the synchronous protocol owner.
 
-Home Assistant lends its shared session to each client. Mower commands, polling,
-and map downloads still use the existing worker-based protocol paths and their
-existing HTTP/MQTT authentication owner. Native account reads do not replace that
-device owner or establish complete async qualification.
+Always call `await client.async_close()` when finished. Closing cancels outstanding
+native operations, drains started HTTP and state work, and closes only a session
+the client created. Borrowed sessions remain open; a closed client rejects further
+operations. Page filters and pagination retain the synchronous wire format, while
+malformed pages and rejected requests raise `DreameLawnMowerConnectionError`.
+
+MQTT external-loop delivery, remaining native map callbacks, managed video assets
+and signed Tencent configuration requests have separate follow-up owners. Native
+HTTP alone does not establish complete async or hardware qualification.
 
 ## Minimal Example
 

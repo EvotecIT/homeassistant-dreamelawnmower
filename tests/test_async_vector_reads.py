@@ -10,11 +10,43 @@ from aiohttp import ClientSession, web
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     client_vector_map_view,
+    client_vector_reads,
 )
 
 from .test_async_cloud_session import cloud_strings, login_response, server
 from .test_async_map_objects import make_client
 from .test_vector_map import _batch_payload
+
+
+@pytest.mark.parametrize("rows,expected", [
+    ([[0, 1, 1, 0]], 0),
+    ([[0, 1, 0, 0]], None),
+    ([[0, 1, 1]], None),
+    ([[0, 1, 1, 0], [1, 1, 1, 0]], None),
+])
+def test_vector_hint_requires_a_complete_unambiguous_created_map(
+    monkeypatch, rows, expected,
+):
+    strings = cloud_strings("dreame")
+
+    async def scenario():
+        async def handler(request):
+            if request.path == strings[17]:
+                return web.json_response(login_response(strings))
+            (action,) = (await request.json())["data"]["params"]["in"]
+            assert action == {"m": "g", "t": "MAPL"}
+            return web.json_response(
+                {"code": 0, "data": {"result": {"out": [{"d": rows}]}}}
+            )
+
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = make_client(session)
+            try:
+                assert await client_vector_reads._map_hint(client) == expected
+            finally:
+                await client.async_close()
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("account_type", ["dreame", "mova"])
