@@ -10,14 +10,76 @@ import pytest
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     client_mqtt_messages,
+    device_action_plan,
     map_manager,
     map_types,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device_types import (
+    DreameMapRecoveryStatus,
+    DreameMowerProperty,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
     DreameLawnMowerConnectionError,
 )
 
 from .test_unknown_properties import _device_stub
+
+
+def test_map_io_cannot_apply_older_mqtt_state_after_a_newer_refresh():
+    device, _ = _device_stub()
+    battery = DreameMowerProperty.BATTERY_LEVEL
+    device.data[battery.value] = 20
+    device._map_manager = SimpleNamespace()
+    observed = []
+    device._property_update_callback[battery.value] = [
+        lambda previous: observed.append(device.data[battery.value])
+    ]
+    mapping = device.property_mapping
+    message = {"method": "properties_changed", "params": [
+        {**mapping[DreameMowerProperty.MAP_DATA], "value": "frame"},
+        {**mapping[battery], "value": 80},
+    ]}
+    plan = device._message_plan(message)
+    try:
+        with device._state_lock:
+            assert isinstance(next(plan), device_action_plan.MapProperties)
+        # The native driver releases state ownership during map acquisition.
+        device._handle_properties([
+            {"did": str(battery.value), "code": 0, "value": 90}
+        ])
+        with device._state_lock, pytest.raises(StopIteration):
+            next(plan)
+        assert device.data[battery.value] == 90
+        assert observed == [80, 90]
+    finally:
+        plan.close()
+
+
+def test_pending_callback_io_cannot_apply_older_property_values_after_refresh():
+    device, _ = _device_stub()
+    battery = DreameMowerProperty.BATTERY_LEVEL
+    recovery = DreameMowerProperty.MAP_RECOVERY_STATUS
+    device.data = {battery.value: 20, recovery.value: DreameMapRecoveryStatus.FAIL}
+    device.status.map_recovery_status = DreameMapRecoveryStatus.FAIL
+    device._pending_property_callbacks = [
+        (device._map_recovery_status_changed, DreameMapRecoveryStatus.RUNNING)
+    ]
+    plan = device._handle_properties_plan([
+        {"did": str(battery.value), "code": 0, "value": 80}
+    ])
+    try:
+        with device._state_lock:
+            assert isinstance(next(plan), device_action_plan.PropertyReadRequest)
+        device._handle_properties([
+            {"did": str(battery.value), "code": 0, "value": 90}
+        ])
+        with device._state_lock:
+            assert isinstance(plan.send([]), device_action_plan.PropertyResponse)
+            with pytest.raises(StopIteration):
+                plan.send(False)
+        assert device.data[battery.value] == 90
+    finally:
+        plan.close()
 
 
 @pytest.mark.parametrize("callback", ["message", "connected"])
