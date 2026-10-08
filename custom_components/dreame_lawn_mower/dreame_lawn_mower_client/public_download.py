@@ -105,6 +105,7 @@ async def async_download_public_response(
     max_bytes: int = MAX_PUBLIC_JSON_BYTES,
     attempts: int = 1,
     timeout: float = 20,
+    total_timeout: float | None = None,
     https_only: bool = False,
     byte_range: tuple[int, int, int] | None = None,
 ) -> PublicDownload:
@@ -113,11 +114,17 @@ async def async_download_public_response(
     The temporary session owns only request metadata. Its connector belongs to
     the injected session and remains open on completion, cancellation or failure.
     Environment proxies are resolved separately so origin netrc auth is disabled.
+    With total_timeout, timeout bounds connection/read stalls instead of the
+    request total. The shared deadline still bounds the complete operation.
     """
     if (
         not math.isfinite(deadline)
         or not math.isfinite(timeout)
         or timeout <= 0
+        or (
+            total_timeout is not None
+            and (not math.isfinite(total_timeout) or total_timeout <= 0)
+        )
         or max_bytes <= 0
         or attempts not in (1, 2)
     ):
@@ -155,7 +162,15 @@ async def async_download_public_response(
                             async with anonymous.get(
                                 current,
                                 allow_redirects=False,
-                                timeout=ClientTimeout(total=timeout),
+                                timeout=(
+                                    ClientTimeout(total=timeout)
+                                    if total_timeout is None
+                                    else ClientTimeout(
+                                        total=total_timeout,
+                                        sock_connect=timeout,
+                                        sock_read=timeout,
+                                    )
+                                ),
                                 proxy=proxy,
                                 proxy_auth=proxy_auth,
                             ) as response:

@@ -8,6 +8,7 @@ import pytest
 from aiohttp import ClientSession, web
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    public_download,
     xp2p_host_runtime,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
@@ -18,6 +19,49 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
 )
 
 from .test_async_cloud_session import server
+
+
+@pytest.mark.parametrize("mode", ["progress", "stall", "total"])
+def test_runtime_asset_separates_transfer_budget_and_stall_timeout(monkeypatch, mode):
+    monkeypatch.setattr(
+        native, "_ASSET_DOWNLOAD_BUDGET", 0.18 if mode == "total" else 1.0
+    )
+
+    async def scenario():
+        release = asyncio.Event()
+
+        async def handler(request):
+            response = web.StreamResponse()
+            await response.prepare(request)
+            try:
+                for _ in range(6):
+                    await response.write(b"x")
+                    if mode == "stall":
+                        await release.wait()
+                    else:
+                        await asyncio.sleep(0.04)
+                await response.write_eof()
+            except ConnectionResetError:
+                pass
+            return response
+
+        async with server(monkeypatch, handler) as url, ClientSession() as session:
+            http = native._RuntimeHttp(session)
+            try:
+                if mode == "progress":
+                    result = await http.download(url, timeout=0.15, headers=None)
+                    assert result.content == b"x" * 6
+                else:
+                    with pytest.raises(public_download.PublicDownloadError) as failure:
+                        await http.download(url, timeout=0.15, headers=None)
+                    assert failure.value.reason == "download_timeout"
+                assert not http.tasks
+                assert not session.closed
+                assert not session.connector.closed
+            finally:
+                release.set()
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("mode", ["success", "http_error", "cancel"])

@@ -23,6 +23,7 @@ from .xp2p_runtime_bootstrap import (
 
 # Individual SDK/runtime assets and selected ZIP members, never the whole build ZIP.
 _MAX_ASSET_BYTES = 256 * 1024 * 1024
+_ASSET_DOWNLOAD_BUDGET = 15 * 60.0
 
 
 @dataclass
@@ -98,8 +99,9 @@ class _RuntimeHttp:
             result = await async_download_public_response(
                 self.session,
                 url,
-                deadline=time.monotonic() + timeout,
+                deadline=time.monotonic() + max(timeout, _ASSET_DOWNLOAD_BUDGET),
                 timeout=timeout,
+                total_timeout=max(timeout, _ASSET_DOWNLOAD_BUDGET),
                 max_bytes=_MAX_ASSET_BYTES,
                 byte_range=byte_range,
             )
