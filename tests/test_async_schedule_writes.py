@@ -13,6 +13,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
     DreameLawnMowerCommandRejectedError,
+    attempted_write_fields,
 )
 
 from .test_app_schedules import _FakeAppScheduleCloud, decode_schedule_payload_text
@@ -219,11 +220,12 @@ def test_native_schedule_rejects_stale_task_state(monkeypatch, failure):
 
 
 @pytest.mark.parametrize("stop", ["cancel", "close"])
+@pytest.mark.parametrize("kind", ["upload", "table"])
 def test_schedule_write_holds_transaction_and_cancels_without_later_legs(
-    monkeypatch, stop
+    monkeypatch, stop, kind
 ):
     strings = cloud_strings("dreame")
-    peer = _FakeAppScheduleCloud()
+    peer = TableCloud() if kind == "table" else _FakeAppScheduleCloud()
 
     async def refresh(client, **kwargs):
         snapshot = SimpleNamespace(
@@ -253,16 +255,23 @@ def test_schedule_write_holds_transaction_and_cancels_without_later_legs(
             if action["m"] == "s":
                 entered.set()
                 await release.wait()
-            result = (
-                {"out": [{"r": 7}]}
-                if action["t"] in {"SCHDIV3", "SCHDI"}
-                else peer.call_app_action(action)
-            )
+            if kind == "table" and action["t"] not in {
+                "SCHDT", "SCHDI", "SCHDC", "SCHDS", "SCHDIV2",
+            }:
+                result = {"out": [{"r": 7}]}
+            elif kind != "table" and action["t"] in {"SCHDIV3", "SCHDI"}:
+                result = {"out": [{"r": 7}]}
+            else:
+                result = peer.call_app_action(action)
             return web.json_response({"code": 0, "data": {"result": result}})
 
         async with server(monkeypatch, handler), ClientSession() as session:
             client = client_for(session)
-            operation = asyncio.create_task(
+            pending_write = (
+                client.async_set_app_schedule_plan_enabled(
+                    map_index=2, plan_id=1, enabled=True,
+                    execute=True, confirm_write=True,
+                ) if kind == "table" else
                 client.async_plan_app_schedule_upload(
                     map_index=0,
                     plans=decode_schedule_payload_text(peer.payloads[0]["text"]),
@@ -271,6 +280,7 @@ def test_schedule_write_holds_transaction_and_cancels_without_later_legs(
                     chunk_size=10,
                 )
             )
+            operation = asyncio.create_task(pending_write)
             reader = None
             try:
                 await asyncio.wait_for(entered.wait(), 2)
@@ -288,8 +298,9 @@ def test_schedule_write_holds_transaction_and_cancels_without_later_legs(
                     reader.cancel()
                     await asyncio.gather(reader, return_exceptions=True)
                     operation.cancel()
-                with pytest.raises(asyncio.CancelledError):
+                with pytest.raises(asyncio.CancelledError) as raised:
                     await operation
+                assert attempted_write_fields(raised.value) == ("schedule",)
                 release.set()
                 await client.async_close()
                 assert len(actions) == count

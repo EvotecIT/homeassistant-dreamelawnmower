@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import time
@@ -146,7 +147,7 @@ def plan_schedule_start_time(
             (yield ReadSchedules(0, include_raw=True))
         )
         require_exact_schedule_edit(confirmed_native, target)
-    except Exception as err:
+    except (Exception, asyncio.CancelledError) as err:
         # Validation can also fail after the mower accepted a row.
         mark_write_attempted(err, fields=["schedule"])
         raise

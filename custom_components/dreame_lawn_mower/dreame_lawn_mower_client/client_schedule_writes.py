@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Generator
 from typing import TYPE_CHECKING, Any
@@ -9,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from .client_app_reads import async_command_app_action, async_run_app_read
 from .client_schedule_async import async_schedule_operation
 from .client_schedule_write_transport import capture_schedule_write
-from .exceptions import DreameLawnMowerCommandRejectedError
+from .exceptions import DreameLawnMowerCommandRejectedError, mark_write_attempted
 from .schedule import schedule_write_block_reason
 from .schedule_read_plan import read_schedules, read_tables
 from .schedule_write_plan import (
@@ -82,7 +83,9 @@ async def async_run_schedule_write(
             while True:
                 try:
                     response = await dispatch(request)
-                except Exception as error:
+                except (Exception, asyncio.CancelledError) as error:
+                    if isinstance(request, ScheduleCommand):
+                        mark_write_attempted(error, fields=["schedule"])
                     request = driver.throw(error)
                 else:
                     request = driver.send(response)
