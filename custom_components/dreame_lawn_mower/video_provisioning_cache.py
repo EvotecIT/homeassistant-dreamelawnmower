@@ -217,12 +217,16 @@ def _decode_provisioning_payload(
             or "ipc.flv?action=live&channel={channel}&quality=high&_crypto=on"
         ),
     )
+    port = raw_config.get("port")
+    protocol_type = raw_config.get("protocol_type")
+    if port is None or protocol_type is None:
+        return None, None
     try:
         config = DreameLawnMowerXp2pDeviceConfig(
             server=_text(raw_config.get("server")) or "",
             ip=_text(raw_config.get("ip")) or "",
-            port=int(raw_config.get("port")),
-            protocol_type=int(raw_config.get("protocol_type")),
+            port=int(port),
+            protocol_type=int(protocol_type),
             cross=bool(raw_config.get("cross", False)),
         )
     except (TypeError, ValueError):
