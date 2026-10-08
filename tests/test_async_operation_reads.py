@@ -14,11 +14,11 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     device as device_module,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import device_types
-from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
-    DreameLawnMowerMapView,
-)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_types import (
     MapData,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
+    DreameLawnMowerMapView,
 )
 
 from .test_async_app_preferences import make_client
