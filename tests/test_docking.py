@@ -38,6 +38,17 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.mowing_tasks i
 )
 
 
+def _control_client() -> DreameLawnMowerClient:
+    """Retain real task ownership while individual command IO is mocked."""
+    client = object.__new__(DreameLawnMowerClient)
+    client._closing = False
+    client._native_updates = None
+    client._async_cloud = object()
+    client._cloud_read_tasks = set()
+    client._task_control_gate = asyncio.Lock()
+    return client
+
+
 def test_active_mowing_session_stops_before_docking() -> None:
     calls: list[str] = []
     states = iter(("mowing", "idle"))
@@ -179,7 +190,7 @@ def test_docking_continues_when_stop_action_fails() -> None:
 
 
 def test_dock_without_stopping_preserves_session_by_docking_directly() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud = object()
@@ -324,7 +335,7 @@ def _task_snapshot(
 
 
 def test_cancel_current_task_waits_for_authoritative_inactive_state() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud = object()
@@ -358,7 +369,7 @@ def test_cancel_current_task_waits_for_authoritative_inactive_state() -> None:
 
 
 def test_cancel_confirmation_window_starts_after_stop_dispatch() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud = object()
@@ -409,7 +420,7 @@ def test_cancel_confirmation_window_starts_after_stop_dispatch() -> None:
 
 
 def test_cancel_current_task_is_idempotent_while_idle() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud = object()
@@ -426,7 +437,7 @@ def test_cancel_current_task_is_idempotent_while_idle() -> None:
 
 
 def test_cancel_current_task_uses_active_flags_when_session_state_is_unknown() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud = object()
@@ -451,7 +462,7 @@ def test_cancel_current_task_uses_active_flags_when_session_state_is_unknown() -
 
 
 def test_cancel_current_task_uses_active_flags_when_session_is_inactive() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud = object()
@@ -475,7 +486,7 @@ def test_cancel_current_task_uses_active_flags_when_session_is_inactive() -> Non
 
 
 def test_cancel_current_task_rejects_fast_mapping_without_docking() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud = object()
@@ -500,7 +511,7 @@ def test_cancel_current_task_rejects_fast_mapping_without_docking() -> None:
 
 
 def test_public_authoritative_refresh_forwards_deadline() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud = object()
@@ -518,7 +529,7 @@ def test_public_authoritative_refresh_forwards_deadline() -> None:
 
 
 def test_cancel_current_task_accepts_stop_race_after_inactive_readback() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud = object()
@@ -536,7 +547,7 @@ def test_cancel_current_task_accepts_stop_race_after_inactive_readback() -> None
 
 
 def test_cancel_current_task_settles_after_ambiguous_stop_response() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud = object()
@@ -563,7 +574,7 @@ def test_cancel_current_task_settles_after_ambiguous_stop_response() -> None:
 
 
 def test_cancel_current_task_preserves_stop_rejection_while_still_active() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud = object()
@@ -580,7 +591,7 @@ def test_cancel_current_task_preserves_stop_rejection_while_still_active() -> No
 
 
 def test_cancel_current_task_translates_local_stop_rejection_while_active() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud = object()
@@ -596,7 +607,7 @@ def test_cancel_current_task_translates_local_stop_rejection_while_active() -> N
 
 
 def test_cancel_current_task_rejects_unsettled_active_state() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud = object()
@@ -623,7 +634,7 @@ def test_cancel_current_task_rejects_unsettled_active_state() -> None:
 
 
 def test_cancel_current_task_reports_failed_authoritative_readback() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud = object()
@@ -651,7 +662,7 @@ def test_cancel_current_task_reports_failed_authoritative_readback() -> None:
 
 
 def test_cancel_current_task_reports_lost_final_readback_as_ambiguous() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud = object()
@@ -683,7 +694,7 @@ def test_cancel_current_task_reports_lost_final_readback_as_ambiguous() -> None:
 
 
 def test_cancel_current_task_honors_confirmed_dock_over_stale_returning_state() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud = object()
@@ -712,7 +723,7 @@ def test_cancel_current_task_honors_confirmed_dock_over_stale_returning_state() 
 
 
 def test_cancel_current_task_ends_resumable_task_at_dock() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud = object()
@@ -740,7 +751,7 @@ def test_cancel_current_task_ends_resumable_task_at_dock() -> None:
 
 
 def test_start_resumes_heartbeat_confirmed_paused_session() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     client.async_get_status_blob = AsyncMock(
         return_value=SimpleNamespace(task_resumable=True)
@@ -760,7 +771,7 @@ def test_start_resumes_heartbeat_confirmed_paused_session() -> None:
 
 
 def test_lost_resume_acknowledgement_requires_transition_out_of_paused() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     client.async_get_status_blob = AsyncMock(
         return_value=SimpleNamespace(task_resumable=True)
@@ -799,7 +810,7 @@ def test_lost_resume_acknowledgement_requires_transition_out_of_paused() -> None
 
 
 def test_lost_resume_acknowledgement_accepts_active_mowing_transition() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     client.async_get_status_blob = AsyncMock(
         return_value=SimpleNamespace(task_resumable=True)
@@ -832,7 +843,7 @@ def test_lost_resume_acknowledgement_accepts_active_mowing_transition() -> None:
 
 
 def test_start_uses_fresh_action_without_resumable_session() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client.async_get_status_blob = AsyncMock(
         return_value=SimpleNamespace(
             task_status="idle",
@@ -858,7 +869,7 @@ def test_start_uses_fresh_action_without_resumable_session() -> None:
 
 def test_duplicate_start_preserves_active_mission_identity() -> None:
     """Starting an already active mower is not a fresh mission boundary."""
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client.async_get_status_blob = AsyncMock(
         return_value=SimpleNamespace(
             task_status="mowing",
@@ -879,7 +890,7 @@ def test_duplicate_start_preserves_active_mission_identity() -> None:
 
 def test_start_while_returning_forwards_resume_without_new_session() -> None:
     """Start can abort a return-to-dock without replacing mission identity."""
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client.async_get_status_blob = AsyncMock(
         return_value=SimpleNamespace(
             task_status="returning_to_dock",
@@ -899,7 +910,7 @@ def test_start_while_returning_forwards_resume_without_new_session() -> None:
 
 def test_start_with_unrecognized_heartbeat_uses_cached_identity() -> None:
     """A decoded blob without task state cannot declare a fresh mission."""
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client.async_get_status_blob = AsyncMock(
         return_value=SimpleNamespace(
             task_status=None,
@@ -922,7 +933,7 @@ def test_start_without_heartbeat_preserves_cached_session_identity(
     expected_new_session: bool | None,
 ) -> None:
     """Heartbeat failure returns the fallback command's session identity."""
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client.async_get_status_blob = AsyncMock(
         side_effect=DreameLawnMowerConnectionError("status unavailable")
     )
@@ -937,7 +948,7 @@ def test_start_without_heartbeat_preserves_cached_session_identity(
 
 
 def test_explicit_zone_rejection_is_not_reconciled_after_preflight() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     client._async_call_mowing_task = AsyncMock(
         side_effect=DreameLawnMowerCommandRejectedError("mower is busy")
@@ -959,7 +970,7 @@ def test_explicit_zone_rejection_is_not_reconciled_after_preflight() -> None:
 
 
 def test_authoritative_confirmation_forces_device_property_request() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud_read = lambda read: read(None)
@@ -982,7 +993,7 @@ def test_authoritative_confirmation_forces_device_property_request() -> None:
 
 
 def test_authoritative_confirmation_forwards_shared_deadline() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     client._closing = False
     client._native_updates = None
@@ -1058,7 +1069,7 @@ def test_targeted_task_preflight_rejects_same_active_task_before_dispatch(
     task_region_ids: tuple[int, ...] | None,
     task_area_ids: tuple[int, ...] | None,
 ) -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     baseline = SimpleNamespace(
         state="mowing",
@@ -1111,7 +1122,7 @@ def test_targeted_task_preflight_rejects_same_active_task_before_dispatch(
 def test_scheduled_target_requires_fresh_inactive_evidence_before_dispatch(
     method_name, command_name, arguments, docked, active, resumable
 ) -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     client._async_refresh_authoritative_snapshot = AsyncMock(
         return_value=SimpleNamespace(
@@ -1128,7 +1139,7 @@ def test_scheduled_target_requires_fresh_inactive_evidence_before_dispatch(
 
 
 def test_lost_zone_acknowledgement_accepts_requested_task_transition() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     baseline = SimpleNamespace(
         state="mowing",
@@ -1190,7 +1201,7 @@ def test_lost_targeted_acknowledgement_uses_bounded_confirmation_owner(
     command_name: str,
     arguments: tuple[object, ...],
 ) -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     baseline = SimpleNamespace(
         state="charging",
@@ -1235,7 +1246,7 @@ def test_acknowledged_targeted_task_rejects_wrong_mowing_mode(
     command_name: str,
     arguments: tuple[object, ...],
 ) -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     baseline = SimpleNamespace(
         state="charging",
@@ -1285,7 +1296,7 @@ def test_acknowledged_targeted_task_rejects_wrong_mowing_mode(
 
 
 def test_acknowledged_zone_task_accepts_generic_heartbeat_while_transiting() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     baseline = SimpleNamespace(
         state="charging",
@@ -1329,7 +1340,7 @@ def test_acknowledged_zone_task_accepts_generic_heartbeat_while_transiting() -> 
 
 
 def test_acknowledged_zone_task_accepts_late_realtime_heartbeat() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     baseline = SimpleNamespace(
         state="charging",
@@ -1384,7 +1395,7 @@ def test_acknowledged_zone_task_accepts_late_realtime_heartbeat() -> None:
 
 def test_acknowledged_zone_task_confirmation_has_shared_deadline() -> None:
     async def run() -> None:
-        client = object.__new__(DreameLawnMowerClient)
+        client = _control_client()
         client._async_cloud_read = lambda read: read(None)
         baseline = SimpleNamespace(
             state="charging",
@@ -1448,7 +1459,7 @@ def test_acknowledged_zone_task_confirmation_has_shared_deadline() -> None:
 
 
 def test_acknowledged_zone_task_accepts_cached_heartbeat_after_failed_read() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     baseline = SimpleNamespace(
         state="charging",
@@ -1495,7 +1506,7 @@ def test_acknowledged_zone_task_accepts_cached_heartbeat_after_failed_read() -> 
 
 
 def test_acknowledged_zone_task_rejects_changed_cached_wrong_task() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     baseline = SimpleNamespace(
         state="charging",
@@ -1548,7 +1559,7 @@ def test_acknowledged_zone_task_rejects_changed_cached_wrong_task() -> None:
 
 
 def test_zone_preflight_allows_different_region_target() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     baseline = SimpleNamespace(
         state="mowing",
@@ -1593,7 +1604,7 @@ def test_zone_preflight_allows_different_region_target() -> None:
 
 
 def test_spot_preflight_allows_different_area_target() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     baseline = SimpleNamespace(
         state="mowing",
@@ -1636,7 +1647,7 @@ def test_spot_preflight_allows_different_area_target() -> None:
 
 
 def test_zone_preflight_ignores_stale_task_identity_after_session_ends() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     idle_baseline = SimpleNamespace(
         state="idle",
@@ -1685,7 +1696,7 @@ def test_zone_preflight_ignores_stale_task_identity_after_session_ends() -> None
 
 
 def test_acknowledged_zone_task_fails_closed_when_readback_is_unavailable() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     baseline = SimpleNamespace(
         state="charging",
@@ -1727,7 +1738,7 @@ def test_acknowledged_zone_task_fails_closed_when_readback_is_unavailable() -> N
 
 
 def test_targeted_task_does_not_dispatch_without_authoritative_preflight() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     client._async_call_mowing_task = AsyncMock(return_value={"r": 0})
     client._async_refresh_authoritative_snapshot = AsyncMock(
@@ -1767,7 +1778,7 @@ def test_acknowledged_targeted_task_rejects_cross_target_operation(
     task_status: str,
     wrong_operation: int,
 ) -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     baseline = SimpleNamespace(
         state="charging",
@@ -1832,7 +1843,7 @@ def test_acknowledged_targeted_task_accepts_status_alias_with_matching_operation
     task_status: str,
     task_operation: int,
 ) -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     baseline = SimpleNamespace(
         state="charging",
@@ -1920,7 +1931,7 @@ def test_acknowledged_targeted_task_accepts_immediate_paused_state(
     task_region_ids: tuple[int, ...] | None,
     task_area_ids: tuple[int, ...] | None,
 ) -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     baseline = SimpleNamespace(
         state="charging",
@@ -1963,7 +1974,7 @@ def test_acknowledged_targeted_task_accepts_immediate_paused_state(
 
 
 def test_acknowledged_zone_task_rejects_different_region_ids() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     baseline = SimpleNamespace(
         state="charging",
@@ -2007,7 +2018,7 @@ def test_acknowledged_zone_task_rejects_different_region_ids() -> None:
 
 
 def test_acknowledged_spot_task_rejects_different_area_ids() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._async_cloud_read = lambda read: read(None)
     baseline = SimpleNamespace(
         state="charging",
@@ -2050,7 +2061,7 @@ def test_acknowledged_spot_task_rejects_different_area_ids() -> None:
 
 
 def test_normal_dock_uses_heartbeat_session_state_at_base() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud = object()
@@ -2079,7 +2090,7 @@ def test_normal_dock_uses_heartbeat_session_state_at_base() -> None:
 
 
 def test_normal_dock_falls_back_when_preflight_refresh_fails() -> None:
-    client = object.__new__(DreameLawnMowerClient)
+    client = _control_client()
     client._closing = False
     client._native_updates = None
     client._async_cloud = object()
