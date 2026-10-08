@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -117,6 +118,78 @@ def test_native_handshake_sequence(monkeypatch, account, mode, outcome):
             finally:
                 await client.async_close()
             assert not session.closed
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("delayed_poll", [True, False])
+def test_positive_handshake_polling_budget_preserves_end_cleanup(
+    monkeypatch, delayed_poll,
+):
+    """The polling deadline bounds HTTP and sleeps while End retains ownership."""
+    strings = cloud_strings("dreame")
+
+    async def scenario():
+        started = False
+        ended = asyncio.Event()
+        release = asyncio.Event()
+        polls = 0
+        start_time = 0.0
+        end_time = 0.0
+
+        async def handler(request):
+            nonlocal started, polls, start_time, end_time
+            if request.path == strings[17]:
+                return web.json_response(login_response(strings))
+            body = await request.json()
+            if "data" not in body:
+                return web.json_response({"code": 0, "data": {}})
+            rpc = body["data"]
+            if rpc["method"] == "get_properties":
+                if started and not ended.is_set():
+                    polls += 1
+                    if delayed_poll:
+                        await release.wait()
+                result = [{"siid": 10001, "piid": 1, "code": 0, "value": ""}]
+            else:
+                phase = "start" if rpc["params"]["in"][0]["d"]["on"] else "end"
+                if phase == "start":
+                    started = True
+                    start_time = time.monotonic()
+                else:
+                    end_time = time.monotonic()
+                    ended.set()
+                    release.set()
+                result = {"out": [{"r": 0}]}
+            return web.json_response({"code": 0, "data": {"result": result}})
+
+        async with server(monkeypatch, handler), ClientSession() as session:
+            client = handshake_client(session, "dreame")
+            client._device.status.stream_status = None
+            task = asyncio.create_task(client.async_probe_camera_stream_handshake(
+                timeout=0.15, interval=1.0,
+            ))
+            try:
+                # Observe End directly: preparation and mandatory cleanup have
+                # independent budgets and must not be confused with polling.
+                await asyncio.wait_for(ended.wait(), 0.8)
+                assert 0 <= end_time - start_time < 0.6
+                assert polls == 1
+                if delayed_poll:
+                    with pytest.raises(DreameLawnMowerConnectionError):
+                        await task
+                else:
+                    result = await task
+                    assert len(result["polls"]) == 1
+                    assert result["cleanup_error"] is None
+                assert not client._cloud_read_tasks
+                assert not session.closed
+            finally:
+                release.set()
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                await client.async_close()
 
     asyncio.run(scenario())
 
