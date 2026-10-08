@@ -474,7 +474,10 @@ async def test_released_video_owners_cannot_recreate_removed_files(tmp_path, cle
             ):
                 assert await async_unload_entry(hass, entry)
         else:
-            await _async_cleanup_failed_setup(hass, entry, owner)
+            with patch.object(hass, "config_entries", SimpleNamespace(
+                async_entries=lambda domain: [],
+            )):
+                await _async_cleanup_failed_setup(hass, entry, owner)
         assert not hasattr(entry, "runtime_data")
         assert await hass.async_add_executor_job(lambda: all(p.exists() for p in paths))
         await async_remove_entry(hass, entry)

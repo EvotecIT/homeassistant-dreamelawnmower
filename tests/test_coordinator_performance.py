@@ -3319,6 +3319,7 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
             bus=SimpleNamespace(async_listen_once=Mock(return_value=Mock())),
             data={},
             config_entries=SimpleNamespace(
+                async_entries=lambda domain: [],
                 async_forward_entry_setups=AsyncMock(
                     side_effect=RuntimeError("platform failed")
                 )

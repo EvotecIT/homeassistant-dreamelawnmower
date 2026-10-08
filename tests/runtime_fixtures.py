@@ -14,6 +14,7 @@ def runtime_hass(coordinators, **attributes):
         for entry_id, coordinator in coordinators.items()
     }
     config_entries = attributes.pop("config_entries", SimpleNamespace())
+    config_entries.entries = entries
     config_entries.async_get_entry = entries.get
     config_entries.async_entries = lambda domain: [
         entry for entry in entries.values() if entry.domain == domain

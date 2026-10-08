@@ -211,8 +211,7 @@ async def _async_cleanup_failed_setup(
 ) -> None:
     """Drain coordinator resources registered before a failed setup."""
     await _async_close_video_caches(coordinator)
-    if getattr(entry, "runtime_data", None) is coordinator:
-        del entry.runtime_data
+    released = await _async_release_entry_runtime(hass, entry, coordinator)
     try:
         await coordinator.async_shutdown()
     except Exception as err:  # noqa: BLE001 - preserve the original setup error
@@ -220,6 +219,27 @@ async def _async_cleanup_failed_setup(
             "Failed to fully close Dreame mower after setup error: %s",
             err,
         )
+    if released and not any(iter_coordinators(hass)):
+        await async_unload_services(hass)
+
+
+async def _async_release_entry_runtime(
+    hass: HomeAssistant,
+    entry: DreameLawnMowerConfigEntry,
+    coordinator: DreameLawnMowerCoordinator,
+) -> bool:
+    """Withdraw this runtime before retiring API work that could publish it."""
+    if getattr(entry, "runtime_data", None) is not coordinator:
+        return False
+    del entry.runtime_data
+    domain_data = hass.data.get(DOMAIN, {})
+    point_cloud_api = domain_data.get(POINT_CLOUD_API_DATA_KEY)
+    if isinstance(point_cloud_api, DreameLawnMowerPointCloudAPI):
+        point_cloud_api.purge_entry(entry.entry_id)
+    mowing_map_api = domain_data.get(MOWING_MAP_API_KEY)
+    if isinstance(mowing_map_api, MowingMapAPI):
+        await mowing_map_api.purge_entry(entry.entry_id)
+    return True
 
 
 async def async_unload_entry(
@@ -231,13 +251,7 @@ async def async_unload_entry(
     unload_ok = await hass.config_entries.async_unload_platforms(entry, platforms)
     if unload_ok:
         await _async_close_video_caches(coordinator)
-        del entry.runtime_data
-        point_cloud_api = hass.data[DOMAIN].get(POINT_CLOUD_API_DATA_KEY)
-        if isinstance(point_cloud_api, DreameLawnMowerPointCloudAPI):
-            point_cloud_api.purge_entry(entry.entry_id)
-        mowing_map_api = hass.data[DOMAIN].get(MOWING_MAP_API_KEY)
-        if isinstance(mowing_map_api, MowingMapAPI):
-            await mowing_map_api.purge_entry(entry.entry_id)
+        await _async_release_entry_runtime(hass, entry, coordinator)
         await coordinator.async_shutdown()
         if not any(iter_coordinators(hass)):
             await async_unload_services(hass)
