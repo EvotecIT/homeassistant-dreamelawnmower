@@ -5,58 +5,47 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
-from pathlib import Path
-from threading import Event
 from time import monotonic
 from typing import Any
 
 from homeassistant.components.camera import (
-    DATA_CAMERA_PREFS,
     Camera,
     CameraEntityFeature,
 )
-from homeassistant.components.stream import create_stream
-from homeassistant.components.stream.const import (
-    ATTR_STREAMS,
-)
-from homeassistant.components.stream.const import (
-    DOMAIN as STREAM_DOMAIN,
-)
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.components.camera.const import DATA_CAMERA_PREFS
+from homeassistant.components.stream import Stream, create_stream
 from homeassistant.const import MATCH_ALL
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.aiohttp_client import (
+    async_get_clientsession as async_get_clientsession,
+)
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import video_stream_helpers as video_helpers
+from . import video_stream_helpers as _video_helpers
 from .const import (
     CONF_VIDEO_RETENTION,
-    CONF_XP2P_LIBRARY_PATH,
-    CONF_XP2P_RUNNER_COMMAND,
-    CONF_XP2P_RUNNER_MODE,
     DEFAULT_VIDEO_RETENTION,
-    DOMAIN,
     VIDEO_RETENTION_OPTIONS,
-    VIDEO_TRANSPORT_AUTO,
     VIDEO_TRANSPORT_CLOUD,
     VIDEO_TRANSPORT_LAN,
-    XP2P_RUNNER_MODE_ONE_SHOT,
-    XP2P_RUNNER_MODE_PROCESS,
 )
 from .coordinator import DreameLawnMowerCoordinator
 from .debug import (
     sanitize_debug_data as sanitize_debug_data,
 )
-from .debug import sanitize_diagnostic_text
-from .diagnostic_events import record_diagnostic_event
-from .dreame_lawn_mower_client.client_refresh import _run_state_worker
+from .debug import sanitize_diagnostic_text as sanitize_diagnostic_text
+from .diagnostic_events import record_diagnostic_event as record_diagnostic_event
 from .dreame_lawn_mower_client.feature_capabilities import (
     CAPABILITY_SUPPORTED,
     FEATURE_LIVE_VIDEO,
 )
 from .dreame_lawn_mower_client.models import (
     DreameLawnMowerCameraStreamRuntimeInputs,
-    camera_stream_block_reason,
-    snapshot_advertises_video,
+)
+from .dreame_lawn_mower_client.models import (
+    camera_stream_block_reason as camera_stream_block_reason,
+)
+from .dreame_lawn_mower_client.models import (
+    snapshot_advertises_video as snapshot_advertises_video,
 )
 from .dreame_lawn_mower_client.stream_health import (
     DreameLawnMowerStreamUrlProbeResult as DreameLawnMowerStreamUrlProbeResult,
@@ -65,24 +54,40 @@ from .dreame_lawn_mower_client.video_provisioning_status import (
     XP2P_PROVISIONING_DEVICE_TRIPLE_MISSING as XP2P_PROVISIONING_DEVICE_TRIPLE_MISSING,
 )
 from .dreame_lawn_mower_client.video_runtime import (
-    DreameLawnMowerNativeXp2pRuntime,
-    DreameLawnMowerVideoRuntimeError,
-    DreameLawnMowerXp2pExternalRunner,
-    DreameLawnMowerXp2pLiveStreamSession,
-    DreameLawnMowerXp2pProcessRunner,
-    diagnose_native_xp2p_runtime,
+    DreameLawnMowerNativeXp2pRuntime as DreameLawnMowerNativeXp2pRuntime,
 )
-from .dreame_lawn_mower_client.xp2p_config import DreameLawnMowerXp2pDeviceConfig
+from .dreame_lawn_mower_client.video_runtime import (
+    DreameLawnMowerVideoRuntimeError as DreameLawnMowerVideoRuntimeError,
+)
+from .dreame_lawn_mower_client.video_runtime import (
+    DreameLawnMowerXp2pExternalRunner as DreameLawnMowerXp2pExternalRunner,
+)
+from .dreame_lawn_mower_client.video_runtime import (
+    DreameLawnMowerXp2pLiveStreamSession,
+)
+from .dreame_lawn_mower_client.video_runtime import (
+    DreameLawnMowerXp2pProcessRunner as DreameLawnMowerXp2pProcessRunner,
+)
+from .dreame_lawn_mower_client.video_runtime import (
+    diagnose_native_xp2p_runtime as diagnose_native_xp2p_runtime,
+)
 from .dreame_lawn_mower_client.xp2p_host_runtime import (
     DEFAULT_XP2P_HOST_STARTUP_TIMEOUT,
-    DreameLawnMowerXp2pHostAssets,
-    DreameLawnMowerXp2pHostRuntime,
 )
-from .dreame_lawn_mower_client.xp2p_runtime_async import async_ensure_xp2p_host_runtime
+from .dreame_lawn_mower_client.xp2p_host_runtime import (
+    DreameLawnMowerXp2pHostRuntime as DreameLawnMowerXp2pHostRuntime,
+)
+from .dreame_lawn_mower_client.xp2p_runtime_async import (
+    async_ensure_xp2p_host_runtime as async_ensure_xp2p_host_runtime,
+)
 from .dreame_lawn_mower_client.xp2p_runtime_bootstrap import (
-    ensure_xp2p_host_runtime,
+    ensure_xp2p_host_runtime as ensure_xp2p_host_runtime,
 )
+from .runtime_data import DreameLawnMowerConfigEntry
 from .video_cached_xp2p import async_start_cached_xp2p as async_start_cached_xp2p
+from .video_camera_cleanup import _PENDING_RUNTIME_STOPS as _PENDING_RUNTIME_STOPS
+from .video_camera_cleanup import ATTR_STREAMS as ATTR_STREAMS
+from .video_camera_cleanup import STREAM_DOMAIN as STREAM_DOMAIN
 from .video_camera_startup import (
     DreameLawnMowerVideoStartupMixin,
 )
@@ -96,13 +101,12 @@ from .video_lan_cache import DreameLawnMowerVideoLanCache
 from .video_provisioning_cache import DreameLawnMowerVideoProvisioningCache
 from .video_session_lifecycle import (
     DreameLawnMowerHaStreamIdleMonitor,
-    mower_video_mowing_session_is_current,
     mower_video_relay_idle_grace,
-    mower_video_session_should_stay_warm,
 )
 from .video_snapshot import VideoSnapshotRequest
 
 _LOGGER = logging.getLogger(__name__)
+video_helpers = _video_helpers
 _VIDEO_UPSTREAM_START_TIMEOUT = DEFAULT_XP2P_HOST_STARTUP_TIMEOUT
 _SNAPSHOT_STREAM_START_TIMEOUT = 15.0
 _SNAPSHOT_IMAGE_TIMEOUT = 15.0
@@ -112,14 +116,11 @@ _CAMERA_STREAM_DISABLE_TIMEOUT = 10.0
 _VIDEO_RETRY_BASE_DELAY = 1.0
 _VIDEO_RETRY_MAX_DELAY = 30.0
 _VIDEO_RETRY_STABLE_RESET = 60.0
-_PENDING_RUNTIME_STOPS: dict[str, set[asyncio.Future[Any]]] = {}
 
 
 class DreameLawnMowerVideoCamera(
     DreameLawnMowerVideoStartupMixin,
     DreameLawnMowerVideoStateMixin,
-    CoordinatorEntity[DreameLawnMowerCoordinator],
-    Camera,
 ):
     """Live stream camera backed by a configured XP2P runtime."""
 
@@ -132,71 +133,60 @@ class DreameLawnMowerVideoCamera(
     # in downloaded diagnostics but must never be persisted by the recorder.
     _unrecorded_attributes = frozenset({MATCH_ALL})
 
-    # Preserve the historical method surface while focused mixins own the
-    # implementations. Reading from ``__dict__`` retains property and
-    # staticmethod descriptors as well as normal methods.
-    _handle_coordinator_update = DreameLawnMowerVideoStateMixin.__dict__[
-        "_handle_coordinator_update"
-    ]
-    _async_cleanup_for_state_gate = DreameLawnMowerVideoStateMixin.__dict__[
-        "_async_cleanup_for_state_gate"
-    ]
+    # Preserve direct reflection while retaining concrete method signatures.
+    # Properties use their raw descriptors so class access cannot evaluate them.
+    _handle_coordinator_update = (
+        DreameLawnMowerVideoStateMixin._handle_coordinator_update
+    )
+    _async_cleanup_for_state_gate = (
+        DreameLawnMowerVideoStateMixin._async_cleanup_for_state_gate
+    )
     available = DreameLawnMowerVideoStateMixin.__dict__["available"]
     device_info = DreameLawnMowerVideoStateMixin.__dict__["device_info"]
     extra_state_attributes = DreameLawnMowerVideoStateMixin.__dict__[
         "extra_state_attributes"
     ]
-    video_runtime_diagnostics = DreameLawnMowerVideoStateMixin.__dict__[
-        "video_runtime_diagnostics"
-    ]
-    _async_start_stream = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_start_stream"
-    ]
-    _async_refresh_video_start_state = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_refresh_video_start_state"
-    ]
-    _video_start_is_blocked = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_video_start_is_blocked"
-    ]
-    _async_try_lan_stream = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_try_lan_stream"
-    ]
-    _async_try_cached_xp2p_stream = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_try_cached_xp2p_stream"
-    ]
-    _async_get_runtime_inputs = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_get_runtime_inputs"
-    ]
-    _async_cache_healthy_provisioning = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_cache_healthy_provisioning"
-    ]
-    _async_start_lan_runtime_session = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_start_lan_runtime_session"
-    ]
-    _adopt_stream_session = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_adopt_stream_session"
-    ]
-    _async_adopt_stream_session = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_adopt_stream_session"
-    ]
-    _async_cleanup_rejected_session = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_cleanup_rejected_session"
-    ]
-    _with_lan_failure = DreameLawnMowerVideoStartupMixin.__dict__["_with_lan_failure"]
-    _async_start_runtime_session = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_start_runtime_session"
-    ]
-    _schedule_late_start_cleanup = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_schedule_late_start_cleanup"
-    ]
-    _async_cleanup_late_start = DreameLawnMowerVideoStartupMixin.__dict__[
-        "_async_cleanup_late_start"
-    ]
+    video_runtime_diagnostics = DreameLawnMowerVideoStateMixin.video_runtime_diagnostics
+    _async_start_stream = DreameLawnMowerVideoStartupMixin._async_start_stream
+    _async_refresh_video_start_state = (
+        DreameLawnMowerVideoStartupMixin._async_refresh_video_start_state
+    )
+    _video_start_is_blocked = DreameLawnMowerVideoStartupMixin._video_start_is_blocked
+    _async_try_lan_stream = DreameLawnMowerVideoStartupMixin._async_try_lan_stream
+    _async_try_cached_xp2p_stream = (
+        DreameLawnMowerVideoStartupMixin._async_try_cached_xp2p_stream
+    )
+    _async_get_runtime_inputs = (
+        DreameLawnMowerVideoStartupMixin._async_get_runtime_inputs
+    )
+    _async_cache_healthy_provisioning = (
+        DreameLawnMowerVideoStartupMixin._async_cache_healthy_provisioning
+    )
+    _async_start_lan_runtime_session = (
+        DreameLawnMowerVideoStartupMixin._async_start_lan_runtime_session
+    )
+    _adopt_stream_session = DreameLawnMowerVideoStartupMixin._adopt_stream_session
+    _async_adopt_stream_session = (
+        DreameLawnMowerVideoStartupMixin._async_adopt_stream_session
+    )
+    _async_cleanup_rejected_session = (
+        DreameLawnMowerVideoStartupMixin._async_cleanup_rejected_session
+    )
+    _with_lan_failure = DreameLawnMowerVideoStartupMixin._with_lan_failure
+    _async_start_runtime_session = (
+        DreameLawnMowerVideoStartupMixin._async_start_runtime_session
+    )
+    _schedule_late_start_cleanup = (
+        DreameLawnMowerVideoStartupMixin._schedule_late_start_cleanup
+    )
+    _async_cleanup_late_start = (
+        DreameLawnMowerVideoStartupMixin._async_cleanup_late_start
+    )
 
     def __init__(
         self,
         coordinator: DreameLawnMowerCoordinator,
-        entry: ConfigEntry,
+        entry: DreameLawnMowerConfigEntry,
     ) -> None:
         Camera.__init__(self)
         CoordinatorEntity.__init__(self, coordinator)
@@ -221,7 +211,7 @@ class DreameLawnMowerVideoCamera(
         self._stream_lock = asyncio.Lock()
         self._snapshot_lock = asyncio.Lock()
         self._snapshot_requests = 0
-        self._snapshot_owned_stream: Any | None = None
+        self._snapshot_owned_stream = None
         self._snapshot_request = VideoSnapshotRequest()
         self._video_retention_mode = entry.options.get(
             CONF_VIDEO_RETENTION,
@@ -272,26 +262,28 @@ class DreameLawnMowerVideoCamera(
         self._last_managed_runtime_diagnostics: dict[str, Any] | None = None
         self._runtime_preparation_error: str | None = None
         self._last_image: bytes | None = None
-        self._lan_cache = getattr(coordinator, "video_lan_cache", None)
-        if self._lan_cache is None:
-            self._lan_cache = DreameLawnMowerVideoLanCache(
+        lan_cache = getattr(coordinator, "video_lan_cache", None)
+        if lan_cache is None:
+            lan_cache = DreameLawnMowerVideoLanCache(
                 coordinator.hass,
                 entry_id=entry.entry_id,
                 did=self._descriptor.did,
             )
+        self._lan_cache = lan_cache
         self._lan_cache_error: str | None = None
         self._last_lan_error: str | None = None
-        self._provisioning_cache = getattr(
+        provisioning_cache = getattr(
             coordinator,
             "video_provisioning_cache",
             None,
         )
-        if self._provisioning_cache is None:
-            self._provisioning_cache = DreameLawnMowerVideoProvisioningCache(
+        if provisioning_cache is None:
+            provisioning_cache = DreameLawnMowerVideoProvisioningCache(
                 coordinator.hass,
                 entry_id=entry.entry_id,
                 did=self._descriptor.did,
             )
+        self._provisioning_cache = provisioning_cache
         self._provisioning_cache_error: str | None = None
         self._last_cached_xp2p_error: str | None = None
         self._bypass_cached_xp2p = False
@@ -340,47 +332,6 @@ class DreameLawnMowerVideoCamera(
             self._async_prepare_runtime()
         )
 
-    async def _async_prepare_runtime(self) -> None:
-        """Prepare a configured runtime in the background before first playback."""
-        try:
-            await self._async_create_runtime()
-        except asyncio.CancelledError:
-            raise
-        except Exception as err:  # noqa: BLE001 - retry remains available on play.
-            self._runtime_preparation_error = sanitize_diagnostic_text(err)
-            _LOGGER.warning(
-                "Failed to prepare Dreame mower live video: %s",
-                self._runtime_preparation_error,
-            )
-        else:
-            self._runtime_preparation_error = None
-
-    async def _async_get_runtime(self) -> _DreameVideoRuntime:
-        """Reuse in-flight background preparation before starting a stream."""
-        prepare_task = self._runtime_prepare_task
-        if prepare_task is not None and not prepare_task.done():
-            await prepare_task
-        self._runtime_prepare_task = None
-        if self._prepared_runtime is not None:
-            return self._prepared_runtime
-        return await self._async_create_runtime()
-
-    async def _async_create_runtime(self) -> _DreameVideoRuntime:
-        """Download managed assets asynchronously before owned worker startup."""
-        if self._prepared_runtime is not None:
-            return self._prepared_runtime
-        if (
-            self._runner_command
-            or self._native_library_path
-            or not video_helpers.managed_runtime_supported()
-        ):
-            return await self.hass.async_add_executor_job(self._create_runtime)
-        assets = await async_ensure_xp2p_host_runtime(
-            Path(self.hass.config.path(".storage", DOMAIN, "xp2p-runtime")),
-            async_get_clientsession(self.hass),
-        )
-        return await _run_state_worker(lambda: self._create_runtime(assets), Event())
-
     async def stream_source(self) -> str | None:
         """Return a dormant local FLV source for HA HLS or WebRTC providers.
 
@@ -411,62 +362,6 @@ class DreameLawnMowerVideoCamera(
             subscriber_started=self._video_relay_subscriber_started,
             idle_grace=mower_video_relay_idle_grace(self._video_retention_mode),
         )
-
-    def _video_session_should_stay_warm(self) -> bool:
-        """Apply the configured retention policy to an active mower session."""
-        self._reset_video_live_view_if_inactive()
-        if not self._video_retention_state_is_fresh():
-            return False
-        # Retention is only for a stream that has already proved it can deliver
-        # decoder-ready media.  Keeping an unverified cold start alive lets a
-        # dashboard's reconnecting consumers pin a zero-frame XP2P attempt
-        # instead of allowing the normal cleanup/retry path to re-arm video.
-        if self._video_first_media_at is None:
-            return False
-        return mower_video_session_should_stay_warm(
-            self.coordinator.data,
-            retention_mode=self._video_retention_mode,
-            live_view_seen=self._video_live_view_seen,
-        )
-
-    def _video_retention_state_is_fresh(self) -> bool:
-        """Return whether zero-viewer retention has authoritative mower state."""
-        last_update_success = bool(
-            getattr(self.coordinator, "last_update_success", False)
-        )
-        connection_degraded = bool(
-            getattr(self.coordinator, "connection_degraded", False)
-        )
-        return last_update_success and not connection_degraded
-
-    def _reset_video_live_view_if_inactive(self) -> None:
-        """Do not carry live-view intent into a later mowing run."""
-        if not self._video_retention_state_is_fresh():
-            if not self._video_has_active_live_viewer():
-                self._video_live_view_seen = False
-            return
-        if not mower_video_mowing_session_is_current(self.coordinator.data):
-            self._video_live_view_seen = False
-
-    def _video_has_active_live_viewer(self) -> bool:
-        """Return whether a deliberate direct or HA live viewer remains."""
-        relay = getattr(self, "_flv_relay", None)
-        if getattr(relay, "direct_subscriber_count", 0) > 0:
-            return True
-        ha_stream = getattr(self, "stream", None)
-        if ha_stream is None or self._snapshot_owned_stream is ha_stream:
-            return False
-        outputs = getattr(ha_stream, "outputs", None)
-        return bool(outputs()) if callable(outputs) else False
-
-    def _mark_video_live_view(self) -> None:
-        """Remember a request already classified as deliberate live viewing."""
-        self._video_live_view_seen = True
-
-    def _video_relay_subscriber_started(self, ha_stream_owned: bool) -> None:
-        """Recognize a direct relay viewer; HA Stream is classified separately."""
-        if not ha_stream_owned:
-            self._mark_video_live_view()
 
     def _ensure_flv_relay(self) -> DreameLawnMowerFlvRelay:
         """Create the relay lazily for compatibility with restored entities."""
@@ -768,11 +663,12 @@ class DreameLawnMowerVideoCamera(
                 return await self._async_start_stream(skip_cached_xp2p=True)
             return await self._async_start_stream()
 
-    async def async_create_stream(self) -> Any | None:
+    async def async_create_stream(self) -> Stream | None:
         """Create HA's stream with enough time for native XP2P startup."""
-        if not getattr(self, "_create_stream_lock", None):
-            self._create_stream_lock = asyncio.Lock()
-        async with self._create_stream_lock:
+        create_stream_lock = getattr(self, "_create_stream_lock", None)
+        if create_stream_lock is None:
+            create_stream_lock = self._create_stream_lock = asyncio.Lock()
+        async with create_stream_lock:
             ha_stream = await self._async_create_stream_locked()
             if ha_stream is not None:
                 self._mark_video_live_view()
@@ -783,7 +679,7 @@ class DreameLawnMowerVideoCamera(
                 self._snapshot_owned_stream = None
             return ha_stream
 
-    async def _async_create_stream_locked(self) -> Any | None:
+    async def _async_create_stream_locked(self) -> Stream | None:
         """Create or reuse HA's HLS stream over the local fan-out relay."""
         async with self._stream_lock:
             if self.stream is not None:
@@ -878,9 +774,10 @@ class DreameLawnMowerVideoCamera(
         height: int | None,
     ) -> bytes | None:
         """Return one JPEG from Home Assistant's single FLV consumer."""
-        if not getattr(self, "_create_stream_lock", None):
-            self._create_stream_lock = asyncio.Lock()
-        async with self._create_stream_lock:
+        create_stream_lock = getattr(self, "_create_stream_lock", None)
+        if create_stream_lock is None:
+            create_stream_lock = self._create_stream_lock = asyncio.Lock()
+        async with create_stream_lock:
             previous_stream = getattr(self, "stream", None)
             try:
                 async with asyncio.timeout(_SNAPSHOT_STREAM_START_TIMEOUT):
@@ -934,7 +831,7 @@ class DreameLawnMowerVideoCamera(
             self._last_image = image
         return image or self._last_image
 
-    async def _async_stop_owned_stream(self, ha_stream: Any) -> None:
+    async def _async_stop_owned_stream(self, ha_stream: Stream) -> None:
         """Stop a one-shot HA decoder without interrupting another relay viewer."""
         async with self._stream_lock:
             snapshot_owned_stream = getattr(
@@ -1024,401 +921,3 @@ class DreameLawnMowerVideoCamera(
             else:
                 await self._stream_idle_monitor.async_cancel()
         await super().async_will_remove_from_hass()
-
-    async def _async_stop_active_session(
-        self,
-        *,
-        reason: str = "session_stop",
-        trigger: str | None = None,
-        failed_pump_task: asyncio.Task[Any] | None = None,
-    ) -> None:
-        """Stop the current runtime session if one is active."""
-        self._last_stream_cleanup_reason = reason
-        self._last_stream_cleanup_error = None
-        self._last_stream_cleanup_error_stage = None
-        if trigger is not None:
-            record_diagnostic_event(
-                self.coordinator,
-                code="video_state_gate_cleanup",
-                source="video_camera",
-                message="Active live-video session stopped after mower state changed.",
-                severity="info",
-                context={"reason": reason, "trigger": trigger},
-            )
-        try:
-            await self._stream_idle_monitor.async_cancel()
-            relay = getattr(self, "_flv_relay", None)
-            if relay is not None:
-                if failed_pump_task is None:
-                    await relay.async_stop_upstream()
-                else:
-                    await relay.async_stop_upstream(
-                        expected_task=failed_pump_task,
-                    )
-            cleanup_task = asyncio.create_task(
-                self._async_finish_active_session_cleanup()
-            )
-            try:
-                await asyncio.shield(cleanup_task)
-            except asyncio.CancelledError:
-                # Relay close may cancel its pump or idle callback while this
-                # entity owns the only runtime/session references. Finish the
-                # bounded resource cleanup before allowing cancellation out.
-                await cleanup_task
-                raise
-        finally:
-            self._last_stream_cleanup_at = datetime.now(UTC).isoformat()
-            self.async_write_ha_state()
-
-    async def _async_finish_active_session_cleanup(self) -> None:
-        """Finish resource cleanup independently of a cancelled relay callback."""
-        ha_stream = getattr(self, "stream", None)
-        self.stream = None
-        self._snapshot_owned_stream = None
-        runtime = self._runtime
-        session = self._session
-        self._runtime = None
-        self._session = None
-        self._unverified_playback_session = None
-        self._pending_provisioning_inputs = None
-        self._attr_is_streaming = False
-        if ha_stream is not None:
-            try:
-                async with asyncio.timeout(_HA_STREAM_STOP_TIMEOUT):
-                    await ha_stream.stop()
-            except TimeoutError:
-                self._record_stream_cleanup_error(
-                    "home_assistant_stream_stop",
-                    (
-                        "Home Assistant camera stream cleanup timed out after "
-                        f"{_HA_STREAM_STOP_TIMEOUT:g}s."
-                    ),
-                )
-            except Exception as err:  # noqa: BLE001 - continue XP2P cleanup.
-                self._record_stream_cleanup_error(
-                    "home_assistant_stream_stop",
-                    err,
-                )
-            finally:
-                self._unregister_ha_stream(ha_stream)
-        if runtime is None or session is None:
-            return
-        await self._async_stop_session(runtime, session)
-        camera_toggle_managed = getattr(
-            session,
-            "camera_toggle_managed",
-            getattr(session, "transport", VIDEO_TRANSPORT_CLOUD)
-            != VIDEO_TRANSPORT_LAN,
-        )
-        if camera_toggle_managed:
-            await self._async_disable_camera_stream()
-
-    def _unregister_ha_stream(self, ha_stream: Any) -> None:
-        """Remove a discarded HA Stream from the integration registry."""
-        hass = getattr(self, "hass", None)
-        data = getattr(hass, "data", None)
-        if not isinstance(data, dict):
-            return
-        stream_data = data.get(STREAM_DOMAIN)
-        if not isinstance(stream_data, dict):
-            return
-        streams = stream_data.get(ATTR_STREAMS)
-        if not isinstance(streams, list):
-            return
-        try:
-            streams.remove(ha_stream)
-        except ValueError:
-            pass
-
-    async def _async_stop_session(
-        self,
-        runtime: _DreameVideoRuntime,
-        session: DreameLawnMowerXp2pLiveStreamSession,
-    ) -> bool:
-        """Stop a runtime session without changing entity state bookkeeping."""
-        try:
-            stop_job = asyncio.ensure_future(
-                self.hass.async_add_executor_job(runtime.stop_live_stream, session)
-            )
-        except Exception as err:  # noqa: BLE001 - cleanup should not break unload.
-            self._record_stream_cleanup_error("runtime_session_stop", err)
-            return False
-        self._register_runtime_stop(stop_job)
-        try:
-            async with asyncio.timeout(_RUNTIME_SESSION_STOP_TIMEOUT):
-                await asyncio.shield(stop_job)
-            return True
-        except TimeoutError:
-            self._record_stream_cleanup_error(
-                "runtime_session_stop",
-                (
-                    "Dreame mower live-video runtime cleanup timed out after "
-                    f"{_RUNTIME_SESSION_STOP_TIMEOUT:g}s."
-                ),
-            )
-            return False
-        except Exception as err:  # noqa: BLE001 - cleanup should not break unload.
-            self._record_stream_cleanup_error("runtime_session_stop", err)
-            return False
-
-    def _register_runtime_stop(self, stop_job: asyncio.Future[Any]) -> None:
-        """Fence replacement sessions until an executor-backed stop really ends."""
-        key = self._runtime_stop_key
-        jobs = _PENDING_RUNTIME_STOPS.setdefault(key, set())
-        jobs.add(stop_job)
-
-        def _completed(future: asyncio.Future[Any]) -> None:
-            pending = _PENDING_RUNTIME_STOPS.get(key)
-            if pending is not None:
-                pending.discard(future)
-                if not pending:
-                    _PENDING_RUNTIME_STOPS.pop(key, None)
-            if future.cancelled():
-                return
-            try:
-                future.exception()
-            except (asyncio.CancelledError, Exception):
-                pass
-
-        stop_job.add_done_callback(_completed)
-
-    @property
-    def _runtime_stop_key(self) -> str:
-        """Return a stable mower identity shared across entity reloads."""
-        descriptor = getattr(self, "_descriptor", None)
-        return str(
-            getattr(descriptor, "did", None)
-            or getattr(descriptor, "unique_id", None)
-            or self._attr_unique_id
-        )
-
-    @property
-    def _runtime_cleanup_pending(self) -> bool:
-        """Return whether an earlier native stop still owns this mower service."""
-        jobs = _PENDING_RUNTIME_STOPS.get(self._runtime_stop_key)
-        if not jobs:
-            return False
-        active = {job for job in jobs if not job.done()}
-        if active:
-            _PENDING_RUNTIME_STOPS[self._runtime_stop_key] = active
-            return True
-        _PENDING_RUNTIME_STOPS.pop(self._runtime_stop_key, None)
-        return False
-
-    async def _async_stop_session_for_handoff(
-        self,
-        runtime: _DreameVideoRuntime,
-        session: DreameLawnMowerXp2pLiveStreamSession,
-    ) -> bool:
-        """Finish probe cleanup before cancellation or a replacement session."""
-        stop_task = asyncio.create_task(self._async_stop_session(runtime, session))
-        try:
-            return await asyncio.shield(stop_task)
-        except asyncio.CancelledError:
-            await stop_task
-            raise
-
-    async def _async_disable_camera_stream(self) -> None:
-        """Best-effort app-side video cleanup."""
-        try:
-            async with asyncio.timeout(_CAMERA_STREAM_DISABLE_TIMEOUT):
-                await self.coordinator.client.async_set_camera_stream_enabled(False)
-            self._last_stream_disable_error = None
-        except TimeoutError:
-            self._last_stream_disable_error = (
-                "Dreame app video-mode cleanup timed out after "
-                f"{_CAMERA_STREAM_DISABLE_TIMEOUT:g}s."
-            )
-            self._record_stream_cleanup_error(
-                "camera_stream_disable",
-                self._last_stream_disable_error,
-            )
-        except Exception as err:  # noqa: BLE001 - cleanup should not break unload.
-            self._last_stream_disable_error = sanitize_diagnostic_text(err)
-            self._record_stream_cleanup_error(
-                "camera_stream_disable",
-                self._last_stream_disable_error,
-            )
-
-    def _record_stream_cleanup_error(self, stage: str, error: object) -> None:
-        """Retain one safe cleanup failure and add it to shared diagnostics."""
-        safe_error = sanitize_diagnostic_text(error)
-        self._last_stream_cleanup_error = safe_error
-        self._last_stream_cleanup_error_stage = stage
-        record_diagnostic_event(
-            self.coordinator,
-            code=f"video_{stage}_failed",
-            source="video_camera",
-            message=safe_error,
-            context={
-                "cleanup_reason": self._last_stream_cleanup_reason,
-                "transport": self._video_transport,
-            },
-        )
-        _LOGGER.warning(
-            "Dreame mower live-video cleanup failed [%s]: %s",
-            stage,
-            safe_error,
-        )
-
-    def _create_runtime(
-        self,
-        managed_assets: DreameLawnMowerXp2pHostAssets | None = None,
-    ) -> _DreameVideoRuntime:
-        """Create the configured runtime adapter."""
-        if self._prepared_runtime is not None:
-            return self._prepared_runtime
-        if runner_command := self._runner_command:
-            self._last_native_runtime_diagnostics = None
-            command = video_helpers.split_runner_command(runner_command)
-            if self._runtime_mode == XP2P_RUNNER_MODE_ONE_SHOT:
-                runtime: _DreameVideoRuntime = DreameLawnMowerXp2pExternalRunner(
-                    command
-                )
-            else:
-                runtime = DreameLawnMowerXp2pProcessRunner(command)
-            self._prepared_runtime = runtime
-            return runtime
-
-        if library_path := self._native_library_path:
-            path = Path(library_path)
-            diagnostics = diagnose_native_xp2p_runtime(path)
-            self._last_native_runtime_diagnostics = video_helpers.safe_state_attribute(
-                diagnostics.as_dict()
-            )
-            if not diagnostics.ready:
-                raise DreameLawnMowerVideoRuntimeError(
-                    diagnostics.error or "Configured XP2P native library is not ready."
-                )
-            runtime = DreameLawnMowerNativeXp2pRuntime(
-                path,
-                config_fetcher=self._resolve_xp2p_config,
-            )
-            self._prepared_runtime = runtime
-            return runtime
-
-        if video_helpers.managed_runtime_supported():
-            runtime_root = Path(
-                self.hass.config.path(
-                    ".storage",
-                    DOMAIN,
-                    "xp2p-runtime",
-                )
-            )
-            runtime = DreameLawnMowerXp2pHostRuntime(
-                (
-                    managed_assets
-                    if managed_assets is not None
-                    else ensure_xp2p_host_runtime(runtime_root)
-                ),
-                config_fetcher=self._resolve_xp2p_config,
-            )
-            try:
-                runtime.require_compatible_worker()
-            except DreameLawnMowerVideoRuntimeError:
-                self._last_managed_runtime_diagnostics = (
-                    video_helpers.safe_state_attribute(runtime.last_failure)
-                )
-                raise
-            self._prepared_runtime = runtime
-            self._last_native_runtime_diagnostics = None
-            self._last_managed_runtime_diagnostics = None
-            return runtime
-
-        raise DreameLawnMowerVideoRuntimeError(
-            "Managed XP2P video requires a Linux aarch64 or x86_64 host. "
-            "Configure an advanced native XP2P library or runner override on "
-            "this platform."
-        )
-
-    def _resolve_xp2p_config(
-        self,
-        inputs: DreameLawnMowerCameraStreamRuntimeInputs,
-    ) -> DreameLawnMowerXp2pDeviceConfig:
-        """Resolve once, reusing persisted config for cached startup."""
-        return self._provisioning_cache.resolve_for_transport(
-            inputs,
-            auto=self._video_transport == VIDEO_TRANSPORT_AUTO,
-        )
-
-    @property
-    def _runtime_configured(self) -> bool:
-        return bool(
-            self._runner_command
-            or self._native_library_path
-            or video_helpers.managed_runtime_supported()
-        )
-
-    @property
-    def _runtime_mode(self) -> str:
-        if not self._runner_command and not self._native_library_path:
-            return "managed"
-        value = self._entry.options.get(CONF_XP2P_RUNNER_MODE)
-        if value == XP2P_RUNNER_MODE_ONE_SHOT:
-            return XP2P_RUNNER_MODE_ONE_SHOT
-        return XP2P_RUNNER_MODE_PROCESS
-
-    @property
-    def _video_transport(self) -> str:
-        return video_helpers.video_transport(self._entry)
-
-    @property
-    def _persisted_video_capability(self) -> bool:
-        """Return whether a prior healthy session proves video support."""
-        return bool(
-            (
-                self._lan_cache.inputs is not None
-                and self._lan_cache.endpoint is not None
-            )
-            or (
-                self._provisioning_cache.inputs is not None
-                and self._provisioning_cache.device_config is not None
-            )
-        )
-
-    @property
-    def _native_library_path(self) -> str | None:
-        return video_helpers.option_text(self._entry, CONF_XP2P_LIBRARY_PATH)
-
-    @property
-    def _runner_command(self) -> str | None:
-        return video_helpers.option_text(self._entry, CONF_XP2P_RUNNER_COMMAND)
-
-    def _set_stream_error(
-        self,
-        error: str,
-        *,
-        stage: str = "stream_start",
-    ) -> None:
-        safe_error = sanitize_diagnostic_text(error)
-        code = f"video_{stage}_failed"
-        changed = safe_error != getattr(self, "_last_error", None) or stage != getattr(
-            self, "_last_error_stage", None
-        )
-        self._last_error = safe_error
-        self._last_error_at = datetime.now(UTC).isoformat()
-        self._last_error_code = code
-        self._last_error_stage = stage
-        self._attr_is_streaming = False
-        snapshot = getattr(self.coordinator, "data", None)
-        record_diagnostic_event(
-            self.coordinator,
-            code=code,
-            source="video_camera",
-            message=safe_error,
-            context={
-                "model": getattr(getattr(self, "_descriptor", None), "model", None),
-                "firmware_version": getattr(snapshot, "firmware_version", None),
-                "transport": self._video_transport,
-                "runtime_mode": self._runtime_mode,
-                "managed_runtime_supported": video_helpers.managed_runtime_supported(),
-            },
-        )
-        if changed:
-            _LOGGER.warning(
-                "Dreame mower live video failed [%s]: %s. Reproduce once, then "
-                "download integration diagnostics before reloading Home Assistant.",
-                code,
-                safe_error,
-            )
-        self.async_write_ha_state()

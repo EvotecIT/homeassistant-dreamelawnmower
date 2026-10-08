@@ -1,5 +1,7 @@
 """Dreame Home cloud transport and authentication protocol."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import math
@@ -16,7 +18,7 @@ import time
 import locale
 from datetime import datetime
 from paho.mqtt import client as mqtt_client
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Mapping, NotRequired, Optional, Tuple, TypeVar, TypedDict
 from Crypto.Cipher import ARC4
 from miio.miioprotocol import MiIOProtocol
 
@@ -38,6 +40,10 @@ from .cloud_wire import (
 from .deadline import DeadlineExceededError, run_with_deadline
 from .mqtt_tls import create_cloud_mqtt_ssl_context
 from .client_mqtt_connection import NativeMqttConnection
+from .protocol_queue import RequestQueue, ResponseCallback, run_callback_queue
+
+if TYPE_CHECKING:
+    from paho.mqtt.enums import CallbackAPIVersion
 
 _LOGGER = logging.getLogger(__name__)
 _TX_VIDEO_API_PATH = "/dreame-third-video/tx/"
@@ -156,8 +162,26 @@ def _post_cloud_response(
         ) from err
 
 
+_OperationResult = TypeVar("_OperationResult")
+
+
+class _MqttClientOptions(TypedDict):
+    client_id: str
+    clean_session: bool
+    userdata: DreameMowerDreameHomeCloudProtocol
+    # Paho 2's enum is imported only for typing; Paho 1.6 does not supply it.
+    callback_api_version: NotRequired[CallbackAPIVersion]
+
+
 class DreameMowerDreameHomeCloudProtocol:
-    def __init__(self, username: str, password: str, country: str = "cn", did: str = None, account_type: str = "dreame") -> None:
+    def __init__(
+        self,
+        username: str | None,
+        password: str | None,
+        country: str | None = "cn",
+        did: str | None = None,
+        account_type: str = "dreame",
+    ) -> None:
         self.two_factor_url = None
         self._account_type = account_type
         self._username = username
@@ -169,31 +193,31 @@ class DreameMowerDreameHomeCloudProtocol:
         self._deadline_operation_state = local()
         self._disconnect_pending = False
         self._shutdown_requested = False
-        self._disconnect_cleanup_thread = None
+        self._disconnect_cleanup_thread: Thread | None = None
         self._session = requests.session()
-        self._queue = queue.Queue()
-        self._thread = None
+        self._queue = RequestQueue()
+        self._thread: Thread | None = None
         self._id = random.randint(1, 100)
-        self._reconnect_timer = None
+        self._reconnect_timer: Timer | None = None
         self._native_authentication_request: Callable[[], None] | None = None
         self._native_mqtt_connection: NativeMqttConnection | None = None
-        self._host = None
-        self._model = None
+        self._host: str | None = None
+        self._model: str | None = None
         self._ti: str | None = None
         self._fail_count = 0
         self._connected = False
         self._client_connected = False
         self._client_connecting = False
-        self._client = None
-        self._message_callback = None
-        self._connected_callback = None
+        self._client: mqtt_client.Client | None = None
+        self._message_callback: ResponseCallback | None = None
+        self._connected_callback: Callable[[], None] | None = None
         self._logged_in: bool | None = None
-        self._stream_key = None
-        self._client_key = None
+        self._stream_key: str | None = None
+        self._client_key: str | None = None
         self._secondary_key: str | None = None
         self._key_expire: float | None = None
         self._key: str | None = None
-        self._uid = None
+        self._uid: str | None = None
         self._uuid: str | None = None
         self._strings: Sequence[str] | None = None
 
@@ -257,12 +281,12 @@ class DreameMowerDreameHomeCloudProtocol:
 
     def _run_serialized_operation(
         self,
-        operation: Callable[[], Any],
+        operation: Callable[[], _OperationResult],
         *,
         deadline: float | None,
-    ) -> Any:
+    ) -> _OperationResult | None:
         """Keep the shared lock with a deadline worker until transport exits."""
-        def run_if_active() -> Any:
+        def run_if_active() -> _OperationResult | None:
             if self._shutdown_is_requested():
                 return None
             return operation()
@@ -278,7 +302,7 @@ class DreameMowerDreameHomeCloudProtocol:
             state = local()
             self._deadline_operation_state = state
 
-        def run() -> Any:
+        def run() -> _OperationResult | None:
             state.active = True
             try:
                 with self._operation_lock_with_deadline(deadline):
@@ -317,17 +341,22 @@ class DreameMowerDreameHomeCloudProtocol:
         finally:
             lock.release()
 
-    def _api_task(self):
-        while True:
-            item = self._queue.get()
-            if len(item) == 0:
-                self._queue.task_done()
-                return
-            item[0](self._api_call(item[1], item[2], item[3]))
-            sleep(0.1)
-            self._queue.task_done()
+    def _api_task(self) -> None:
+        run_callback_queue(self._queue, self._api_call, _LOGGER, delay=0.1)
 
-    def _api_call_async(self, callback, url, params=None, retry_count=2):
+    def _protocol_strings(self) -> Sequence[str]:
+        """Return the shared vendor wire definition, including before login."""
+        if self._strings is None:
+            self._strings = cloud_strings(self._account_type)
+        return self._strings
+
+    def _api_call_async(
+        self,
+        callback: ResponseCallback,
+        url: str,
+        params: Any = None,
+        retry_count: int = 2,
+    ) -> None:
         if self._thread is None:
             self._thread = Thread(target=self._api_task, daemon=True)
             self._thread.start()
@@ -336,15 +365,15 @@ class DreameMowerDreameHomeCloudProtocol:
 
     def _api_call(
         self,
-        url,
-        params=None,
-        retry_count=2,
-        timeout=20,
+        url: str,
+        params: Any = None,
+        retry_count: int = 2,
+        timeout: float = 20,
         *,
         deadline: float | None = None,
         redact_response: bool = False,
         on_dispatch: Callable[[], None] | None = None,
-    ):
+    ) -> Any:
         return self.request(
             f"{self.get_api_url()}/{url}",
             json.dumps(params, separators=(",", ":")
@@ -357,10 +386,11 @@ class DreameMowerDreameHomeCloudProtocol:
         )
 
     def get_api_url(self) -> str:
-        return f"https://{self._country}{self._strings[0]}:{self._strings[1]}"
+        strings = self._protocol_strings()
+        return f"https://{self._country}{strings[0]}:{strings[1]}"
 
     @property
-    def device_id(self) -> str:
+    def device_id(self) -> str | None:
         return self._did
 
     @property
@@ -372,20 +402,20 @@ class DreameMowerDreameHomeCloudProtocol:
         return f"{self._model}/{self._uid}/{str(self._did)}/0"
 
     @property
-    def logged_in(self) -> bool:
+    def logged_in(self) -> bool | None:
         return self._logged_in
 
     @property
     def connected(self) -> bool:
         return self._connected and self._client_connected
 
-    def _reconnect_timer_cancel(self):
+    def _reconnect_timer_cancel(self) -> None:
         reconnect_timer = getattr(self, "_reconnect_timer", None)
         if reconnect_timer is not None:
             reconnect_timer.cancel()
         self._reconnect_timer = None
 
-    def _reconnect_timer_task(self):
+    def _reconnect_timer_task(self) -> None:
         self._reconnect_timer_cancel()
         if self._client_connecting and self._client_connected:
             self._client_connected = False
@@ -402,7 +432,13 @@ class DreameMowerDreameHomeCloudProtocol:
         return False
 
     @staticmethod
-    def _on_client_connect(client, self, flags, rc):
+    def _on_client_connect(
+        client: mqtt_client.Client,
+        self: DreameMowerDreameHomeCloudProtocol,
+        flags: dict[str, int],
+        rc: int,
+    ) -> None:
+        strings = self._protocol_strings()
         if self._shutdown_is_requested():
             return
         self._client_connecting = False
@@ -412,7 +448,7 @@ class DreameMowerDreameHomeCloudProtocol:
                 self._client_connected = True
                 _LOGGER.debug("Connected to the device client")
             client.subscribe(
-                f"/{self._strings[7]}/{self._did}/{self._uid}/{self._model}/{self._country}/")
+                f"/{strings[7]}/{self._did}/{self._uid}/{self._model}/{self._country}/")
             if self._connected_callback:
                 try:
                     self._connected_callback()
@@ -430,7 +466,9 @@ class DreameMowerDreameHomeCloudProtocol:
                     self.login()
 
     @staticmethod
-    def _on_client_disconnect(client, self, rc):
+    def _on_client_disconnect(
+        client: mqtt_client.Client, self: DreameMowerDreameHomeCloudProtocol, rc: int
+    ) -> None:
         if getattr(self, "_shutdown_requested", False):
             self._reconnect_timer_cancel()
             self._client_connected = False
@@ -459,17 +497,19 @@ class DreameMowerDreameHomeCloudProtocol:
                     self._reconnect_timer.start()
 
     @staticmethod
-    def _on_client_message(client, self, message):
+    def _on_client_message(
+        client: mqtt_client.Client,
+        self: DreameMowerDreameHomeCloudProtocol,
+        message: mqtt_client.MQTTMessage,
+    ) -> None:
         if self._message_callback:
             try:
-                _LOGGER.debug("Message received: %s",
-                              message.payload.decode("utf-8"))
+                _LOGGER.debug("Device message received (%s bytes)", len(message.payload))
                 response = json.loads(message.payload.decode("utf-8"))
                 if "data" in response and response["data"]:
                     self._message_callback(response["data"])
-            except:
-                _LOGGER.error("Message: can't decode: %s")
-                pass
+            except Exception as err:
+                _LOGGER.error("Device message handling failed (%s)", type(err).__name__)
 
     @staticmethod
     def get_random_agent_id() -> str:
@@ -500,13 +540,21 @@ class DreameMowerDreameHomeCloudProtocol:
             if has_stream_key:
                 self._stream_key = stream_key
 
-    def connect(self, message_callback=None, connected_callback=None):
+    def connect(
+        self,
+        message_callback: ResponseCallback | None = None,
+        connected_callback: Callable[[], None] | None = None,
+    ) -> Mapping[str, Any] | None:
         with self._operation_lock():
             if self._shutdown_is_requested():
                 return None
             return self._connect_unlocked(message_callback, connected_callback)
 
-    def _connect_unlocked(self, message_callback=None, connected_callback=None):
+    def _connect_unlocked(
+        self,
+        message_callback: ResponseCallback | None = None,
+        connected_callback: Callable[[], None] | None = None,
+    ) -> Mapping[str, Any] | None:
         if self._disconnect_is_pending() or not self._logged_in:
             return None
         info = self.get_device_info()
@@ -515,10 +563,15 @@ class DreameMowerDreameHomeCloudProtocol:
         )
 
     def _connect_device_info_unlocked(
-        self, info, message_callback=None, connected_callback=None,
-        *, nonblocking: bool = False,
-    ):
+        self,
+        info: Mapping[str, Any] | None,
+        message_callback: ResponseCallback | None = None,
+        connected_callback: Callable[[], None] | None = None,
+        *,
+        nonblocking: bool = False,
+    ) -> Mapping[str, Any] | None:
         """Start MQTT from fetched device information while holding the owner lock."""
+        strings = self._protocol_strings()
         if self._disconnect_is_pending() or not self._logged_in or not info:
             return None
         if message_callback:
@@ -527,11 +580,13 @@ class DreameMowerDreameHomeCloudProtocol:
             if self._client is None:
                 _LOGGER.debug("Connecting to the device client")
                 try:
+                    if self._host is None:
+                        raise DreameLawnMowerConnectionError("Cloud MQTT host is missing")
                     host = self._host.split(":")
                     # HA 2025.1 supplies Paho 1.6; Paho 2 adds an
                     # explicit callback version with the same handlers.
-                    client_options = {
-                        "client_id": f"{self._strings[53]}{self._uid}{self._strings[54]}{DreameMowerDreameHomeCloudProtocol.get_random_agent_id()}{self._strings[54]}{host[0]}",
+                    client_options: _MqttClientOptions = {
+                        "client_id": f"{strings[53]}{self._uid}{strings[54]}{DreameMowerDreameHomeCloudProtocol.get_random_agent_id()}{strings[54]}{host[0]}",
                         "clean_session": True,
                         "userdata": self,
                     }
@@ -586,7 +641,7 @@ class DreameMowerDreameHomeCloudProtocol:
         timeout: float = 10,
         *,
         deadline: float | None = None,
-    ) -> bool:
+    ) -> bool | None:
         return self._run_serialized_operation(
             lambda: self._login_unlocked(timeout, deadline=deadline),
             deadline=deadline,
@@ -597,7 +652,7 @@ class DreameMowerDreameHomeCloudProtocol:
         timeout: float = 10,
         *,
         deadline: float | None = None,
-    ) -> bool:
+    ) -> bool | None:
         self._session.close()
         self._session = requests.session()
         self._logged_in = False
@@ -690,8 +745,9 @@ class DreameMowerDreameHomeCloudProtocol:
         *,
         deadline: float | None = None,
     ) -> Any:
+        strings = self._protocol_strings()
         response = self._api_call(
-            f"{self._strings[23]}/{self._strings[24]}/{self._strings[27]}/{self._strings[28]}",
+            f"{strings[23]}/{strings[24]}/{strings[27]}/{strings[28]}",
             retry_count=retry_count,
             timeout=timeout,
             deadline=deadline,
@@ -877,8 +933,9 @@ class DreameMowerDreameHomeCloudProtocol:
         *,
         deadline: float | None = None,
     ) -> dict[str, Any] | None:
+        strings = self._protocol_strings()
         response = self._api_call(
-            f"{self._strings[23]}/{self._strings[24]}/{self._strings[27]}/{self._strings[29]}",
+            f"{strings[23]}/{strings[24]}/{strings[27]}/{strings[29]}",
             {"did": self._did},
             retry_count=retry_count,
             timeout=timeout,
@@ -894,7 +951,7 @@ class DreameMowerDreameHomeCloudProtocol:
                 raise DeviceException("Cloud device info is not an object")
             self._handle_device_info(data)
             response = self._api_call(
-                f"{self._strings[23]}/{self._strings[25]}/{self._strings[30]}",
+                f"{strings[23]}/{strings[25]}/{strings[30]}",
                 {"did": self._did},
                 retry_count=retry_count,
                 timeout=timeout,
@@ -906,9 +963,9 @@ class DreameMowerDreameHomeCloudProtocol:
                 metadata = response["data"]
                 if not isinstance(metadata, dict):
                     raise DeviceException("Cloud device metadata is not an object")
-                if self._strings[31] in metadata:
-                    container = metadata[self._strings[31]]
-                    extra = container.get(self._strings[32]) if isinstance(container, dict) else None
+                if strings[31] in metadata:
+                    container = metadata[strings[31]]
+                    extra = container.get(strings[32]) if isinstance(container, dict) else None
                     if not isinstance(extra, dict):
                         raise DeviceException("Cloud device metadata properties are not an object")
                     data = {
@@ -924,8 +981,8 @@ class DreameMowerDreameHomeCloudProtocol:
                         deadline=deadline,
                     )
                     if devices is not None:
-                        container = devices.get(self._strings[34]) if isinstance(devices, dict) else None
-                        entries = container.get(self._strings[36]) if isinstance(container, dict) else None
+                        container = devices.get(strings[34]) if isinstance(devices, dict) else None
+                        entries = container.get(strings[36]) if isinstance(container, dict) else None
                         if not isinstance(entries, list):
                             raise DeviceException("Invalid cloud device list response")
                         for candidate in entries:
@@ -945,6 +1002,7 @@ class DreameMowerDreameHomeCloudProtocol:
         *,
         deadline: float | None = None,
     ) -> tuple[str | None, str | None]:
+        strings = self._protocol_strings()
         if self._did is not None:
             return " ", self._host
         devices = (
@@ -956,7 +1014,7 @@ class DreameMowerDreameHomeCloudProtocol:
             found = list(
                 filter(
                     lambda d: str(d["mac"]) == mac,
-                    devices[self._strings[34]][self._strings[36]],
+                    devices[strings[34]][strings[36]],
                 )
             )
             if len(found) > 0:
@@ -964,7 +1022,13 @@ class DreameMowerDreameHomeCloudProtocol:
                 return " ", self._host
         return None, None
 
-    def send_async(self, callback, method, parameters, retry_count: int = 2):
+    def send_async(
+        self,
+        callback: ResponseCallback,
+        method: str,
+        parameters: Any,
+        retry_count: int = 2,
+    ) -> None:
         with self._operation_lock():
             if self._shutdown_is_requested():
                 return None
@@ -977,27 +1041,28 @@ class DreameMowerDreameHomeCloudProtocol:
 
     def _send_async_unlocked(
         self,
-        callback,
-        method,
-        parameters,
+        callback: ResponseCallback,
+        method: str,
+        parameters: Any,
         retry_count: int = 2,
-    ):
+    ) -> None:
+        strings = self._protocol_strings()
         request_id = self._reserve_request_id()
         self._api_call_async(
             lambda api_response: callback(
-                None
-                if api_response is None or "data" not in api_response or "result" not in api_response["data"]
-                else api_response["data"]["result"]
+                api_response["data"].get("result")
+                if isinstance(api_response, Mapping) and isinstance(api_response.get("data"), Mapping)
+                else None
             ),
-            cloud_rpc_path(self._strings, self._host),
+            cloud_rpc_path(strings, self._host),
             cloud_rpc_params(self._did, request_id, method, parameters),
             retry_count,
         )
 
     def send(
         self,
-        method,
-        parameters,
+        method: str,
+        parameters: Any,
         retry_count: int = 2,
         timeout: float = 20,
         *,
@@ -1022,8 +1087,8 @@ class DreameMowerDreameHomeCloudProtocol:
 
     def _send_unlocked(
         self,
-        method,
-        parameters,
+        method: str,
+        parameters: Any,
         retry_count: int = 2,
         timeout: float = 20,
         *,
@@ -1032,9 +1097,10 @@ class DreameMowerDreameHomeCloudProtocol:
         on_dispatch: Callable[[], None] | None = None,
         raise_on_api_error: bool = False,
     ) -> Any:
+        strings = self._protocol_strings()
         request_id = self._reserve_request_id()
         api_response = self._api_call(
-            cloud_rpc_path(self._strings, self._host),
+            cloud_rpc_path(strings, self._host),
             cloud_rpc_params(self._did, request_id, method, parameters),
             retry_count,
             timeout,
@@ -1138,21 +1204,22 @@ class DreameMowerDreameHomeCloudProtocol:
                 response = self._session.get(url, timeout=6)
             except Exception as ex:
                 response = None
-                _LOGGER.warning("Unable to get file at %s: %s", url, ex)
+                _LOGGER.warning("Unable to get cloud file (%s)", type(ex).__name__)
             if response is not None and response.status_code == 200:
                 return response.content
             retries = retries + 1
         return None
 
     def get_file_url(self, object_name: str = "") -> Any:
+        strings = self._protocol_strings()
         api_response = self._api_call(
-            f"{self._strings[23]}/{self._strings[39]}/{self._strings[56]}",
+            f"{strings[23]}/{strings[39]}/{strings[56]}",
             {
                 "did": str(self._did),
                 "uid": str(self._uid),
-                self._strings[35]: self._model,
+                strings[35]: self._model,
                 "filename": object_name[1:],
-                self._strings[21]: self._country,
+                strings[21]: self._country,
             },
         )
         if api_response is None or "data" not in api_response:
@@ -1168,11 +1235,12 @@ class DreameMowerDreameHomeCloudProtocol:
         *,
         deadline: float | None = None,
         require_response: bool = False,
-    ) -> str:
+    ) -> Any:
+        strings = self._protocol_strings()
         api_response = self._api_call(
-            f"{self._strings[23]}/{self._strings[39]}/{self._strings[55]}",
+            f"{strings[23]}/{strings[39]}/{strings[55]}",
             interim_file_params(
-                self._strings, self._did, self._model, self._country, object_name,
+                strings, self._did, self._model, self._country, object_name,
             ),
             retry_count=retry_count,
             timeout=timeout,
@@ -1182,15 +1250,16 @@ class DreameMowerDreameHomeCloudProtocol:
 
     def get_properties(
         self,
-        keys,
+        keys: str,
         retry_count: int = 2,
         timeout: float = 20,
         *,
         deadline: float | None = None,
-    ):
+    ) -> Any:
+        strings = self._protocol_strings()
         params = cloud_properties_params(self._did, keys)
         api_response = self._api_call(
-            f"{self._strings[23]}/{self._strings[25]}/{self._strings[41]}",
+            f"{strings[23]}/{strings[25]}/{strings[41]}",
             params,
             retry_count=retry_count,
             timeout=timeout,
@@ -1201,31 +1270,54 @@ class DreameMowerDreameHomeCloudProtocol:
 
         return api_response["data"]
 
-    def get_device_property(self, key, limit=1, time_start=0, time_end=9999999999):
+    def get_device_property(
+        self,
+        key: str | None,
+        limit: int = 1,
+        time_start: int | None = 0,
+        time_end: int = 9999999999,
+    ) -> Any:
+        if key is None:
+            raise ValueError("Property history key is required")
         return self.get_device_data(key, "prop", limit, time_start, time_end)
 
-    def get_device_event(self, key, limit=1, time_start=0, time_end=9999999999):
+    def get_device_event(
+        self,
+        key: str,
+        limit: int = 1,
+        time_start: int | None = 0,
+        time_end: int = 9999999999,
+    ) -> Any:
         return self.get_device_data(key, "event", limit, time_start, time_end)
 
-    def get_device_data(self, key, type, limit=1, time_start=0, time_end=9999999999):
+    def get_device_data(
+        self,
+        key: str,
+        type: str,
+        limit: int = 1,
+        time_start: int | None = 0,
+        time_end: int = 9999999999,
+    ) -> Any:
+        strings = self._protocol_strings()
         params = history_params(
-            self._strings, self._uid, self._did, self._country,
-            key, type, limit, time_start,
+            strings, self._uid, self._did, self._country,
+            key, type, limit, time_start or 0,
         )
         api_response = self._api_call(
-            f"{self._strings[23]}/{self._strings[25]}/{self._strings[43]}", params)
-        return history_result(api_response, self._strings)
+            f"{strings[23]}/{strings[25]}/{strings[43]}", params)
+        return history_result(api_response, strings)
 
     def get_batch_device_datas(
         self,
-        props,
+        props: Sequence[str],
         *,
         timeout: float = 20,
         deadline: float | None = None,
     ) -> Any:
+        strings = self._protocol_strings()
         api_response = self._api_call(
-            f"{self._strings[23]}/{self._strings[26]}/{self._strings[44]}",
-            cloud_batch_data_params(self._strings, self._did, props),
+            f"{strings[23]}/{strings[26]}/{strings[44]}",
+            cloud_batch_data_params(strings, self._did, props),
             timeout=timeout,
             deadline=deadline,
         )
@@ -1233,10 +1325,11 @@ class DreameMowerDreameHomeCloudProtocol:
             return None
         return api_response["data"]
 
-    def set_batch_device_datas(self, props) -> Any:
+    def set_batch_device_datas(self, props: Mapping[str, Any]) -> Any:
+        strings = self._protocol_strings()
         api_response = self._api_call(
-            f"{self._strings[23]}/{self._strings[26]}/{self._strings[45]}",
-            {"did": self._did, self._strings[35]: props},
+            f"{strings[23]}/{strings[26]}/{strings[45]}",
+            {"did": self._did, strings[35]: props},
             retry_count=0,
         )
         if api_response is None or "result" not in api_response:
@@ -1246,9 +1339,9 @@ class DreameMowerDreameHomeCloudProtocol:
     def request(
         self,
         url: str,
-        data,
-        retry_count=2,
-        timeout=20,
+        data: str | None,
+        retry_count: int = 2,
+        timeout: float = 20,
         *,
         deadline: float | None = None,
         redact_response: bool = False,
@@ -1270,14 +1363,15 @@ class DreameMowerDreameHomeCloudProtocol:
     def _request_unlocked(
         self,
         url: str,
-        data,
-        retry_count=2,
-        timeout=20,
+        data: str | None,
+        retry_count: int = 2,
+        timeout: float = 20,
         *,
         deadline: float | None = None,
         redact_response: bool = False,
         on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
+        strings = self._protocol_strings()
         _LOGGER.debug(
             "DreameMowerDreameHomeCloudProtocol.request %s %s",
             url,
@@ -1309,11 +1403,12 @@ class DreameMowerDreameHomeCloudProtocol:
                                 "the response deadline."
                             )
 
-                headers = cloud_headers(self._strings, self._country, self._ti)
-                headers[self._strings[51]] = self._strings[52]
-                headers[self._strings[46]] = self._key
+                headers = cloud_headers(strings, self._country, self._ti)
+                headers[strings[51]] = strings[52]
+                if self._key is not None:
+                    headers[strings[46]] = self._key
 
-                request_options = {
+                request_options: dict[str, Any] = {
                     "headers": headers,
                     "data": data,
                     "timeout": timeout,
@@ -1369,7 +1464,7 @@ class DreameMowerDreameHomeCloudProtocol:
                 last_timeout = None
                 if self._connected:
                     _LOGGER.warning(
-                        "Error while executing request: %s", str(ex))
+                        "Error while executing request (%s)", type(ex).__name__)
                 self._sleep_before_request_retry(
                     retries,
                     retry_count,
@@ -1391,7 +1486,7 @@ class DreameMowerDreameHomeCloudProtocol:
                         redact=redact_response,
                     ),
                 )
-                return json.loads(response_text)
+                return json.loads(response_text) if response_text is not None else None
             elif response.status_code == 401 and self._secondary_key:
                 _LOGGER.debug("Execute api call failed: Token Expired")
                 if deadline is None:
@@ -1446,7 +1541,7 @@ class DreameMowerDreameHomeCloudProtocol:
         self,
         url: str,
         params: Mapping[str, Any] | None = None,
-        retry_count=2,
+        retry_count: int = 2,
     ) -> Any:
         with self._operation_lock():
             if self._shutdown_is_requested():
@@ -1457,8 +1552,9 @@ class DreameMowerDreameHomeCloudProtocol:
         self,
         url: str,
         params: Mapping[str, Any] | None = None,
-        retry_count=2,
+        retry_count: int = 2,
     ) -> Any:
+        strings = self._protocol_strings()
         _LOGGER.debug("DreameMowerDreameHomeCloudProtocol.get %s %s", url, params)
 
         retries = 0
@@ -1470,18 +1566,19 @@ class DreameMowerDreameHomeCloudProtocol:
                 if self._key_expire and time.time() > self._key_expire:
                     self.login()
 
-                headers = {
+                headers: dict[str, str] = {
                     "Accept": "*/*",
                     "Accept-Language": "en-US;q=0.8",
                     "Accept-Encoding": "gzip, deflate",
-                    self._strings[47]: self._strings[3],
-                    self._strings[49]: self._strings[5],
-                    self._strings[50]: self._ti if self._ti else self._strings[6],
-                    self._strings[51]: self._strings[52],
-                    self._strings[46]: self._key,
+                    strings[47]: strings[3],
+                    strings[49]: strings[5],
+                    strings[50]: self._ti if self._ti else strings[6],
+                    strings[51]: strings[52],
                 }
+                if self._key is not None:
+                    headers[strings[46]] = self._key
                 if self._country == "cn":
-                    headers[self._strings[48]] = self._strings[4]
+                    headers[strings[48]] = strings[4]
 
                 response = self._session.get(
                     url,
@@ -1504,7 +1601,7 @@ class DreameMowerDreameHomeCloudProtocol:
                 retries = retries + 1
                 response = None
                 if self._connected:
-                    _LOGGER.warning("Error while executing get request: %s", str(ex))
+                    _LOGGER.warning("Error while executing get request (%s)", type(ex).__name__)
 
         if response is not None:
             if response.status_code == 200:
@@ -1530,7 +1627,7 @@ class DreameMowerDreameHomeCloudProtocol:
             self._fail_count = self._fail_count + 1
         return None
 
-    def disconnect(self, timeout: float = _CLOUD_DISCONNECT_TIMEOUT_SECONDS):
+    def disconnect(self, timeout: float = _CLOUD_DISCONNECT_TIMEOUT_SECONDS) -> bool:
         self._shutdown_requested = True
         self._reconnect_timer_cancel()
         self._disconnect_pending = True
@@ -1552,25 +1649,25 @@ class DreameMowerDreameHomeCloudProtocol:
             thread = getattr(self, "_thread", None)
             request_queue = getattr(self, "_queue", None)
             if thread and request_queue is not None:
-                request_queue.put([])
+                request_queue.stop()
             self._schedule_deferred_disconnect()
             return False
         return True
 
-    def _disconnect_unlocked(self):
+    def _disconnect_unlocked(self) -> None:
         try:
             self._session.close()
             self._connected = False
             self._logged_in = False
             self._disconnect_mqtt_client()
             if self._thread:
-                self._queue.put([])
+                self._queue.stop()
             self._message_callback = None
             self._connected_callback = None
         finally:
             self._disconnect_pending = False
 
-    def _schedule_deferred_disconnect(self):
+    def _schedule_deferred_disconnect(self) -> None:
         """Finish session teardown after an active serialized request exits."""
         cleanup_thread = getattr(self, "_disconnect_cleanup_thread", None)
         if cleanup_thread is not None and cleanup_thread.is_alive():
@@ -1583,13 +1680,13 @@ class DreameMowerDreameHomeCloudProtocol:
         self._disconnect_cleanup_thread = cleanup_thread
         cleanup_thread.start()
 
-    def _complete_deferred_disconnect(self):
+    def _complete_deferred_disconnect(self) -> None:
         """Acquire the transport lock and complete a pending disconnect."""
         with self._operation_lock():
             if self._disconnect_is_pending():
                 self._disconnect_unlocked()
 
-    def _disconnect_mqtt_client(self):
+    def _disconnect_mqtt_client(self) -> None:
         client = self._client
         self._client = None
         self._client_connected = False
@@ -1599,8 +1696,8 @@ class DreameMowerDreameHomeCloudProtocol:
         try:
             client.loop_stop()
         except Exception as ex:
-            _LOGGER.debug("Failed to stop cloud MQTT loop: %s", ex)
+            _LOGGER.debug("Failed to stop cloud MQTT loop (%s)", type(ex).__name__)
         try:
             client.disconnect()
         except Exception as ex:
-            _LOGGER.debug("Failed to disconnect cloud MQTT client: %s", ex)
+            _LOGGER.debug("Failed to disconnect cloud MQTT client (%s)", type(ex).__name__)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
-from homeassistant.helpers.entity import EntityCategory
+from homeassistant.const import EntityCategory
 
 from .coordinator import DreameLawnMowerCoordinator
 from .dreame_lawn_mower_client.maintenance import (

@@ -857,7 +857,9 @@ def _current_vector_map_summary(
 
 
 def _app_map_entry_summary(entry: dict[str, Any]) -> dict[str, Any]:
-    summary = entry.get("summary") if isinstance(entry.get("summary"), dict) else {}
+    summary = entry.get("summary")
+    if not isinstance(summary, dict):
+        summary = {}
     result = {
         "idx": entry.get("idx"),
         "current": entry.get("current"),

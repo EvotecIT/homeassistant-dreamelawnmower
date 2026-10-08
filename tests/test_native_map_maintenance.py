@@ -15,7 +15,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
 from .test_async_app_commands import client_for
 
 
-@pytest.mark.parametrize("outcome", ["success", "changed", "md5", "close"])
+@pytest.mark.parametrize("outcome", ["success", "changed", "md5", "close", "malformed"])
 @pytest.mark.parametrize("recovery", [False, True])
 def test_saved_map_list_commit_requires_current_owner(monkeypatch, outcome, recovery):
     async def scenario():
@@ -26,6 +26,8 @@ def test_saved_map_list_commit_requires_current_owner(monkeypatch, outcome, reco
             assert url == "https://example.invalid/signed-map"
             entered.set()
             await release.wait()
+            if outcome == "malformed":
+                return b"{}" if recovery else b'{"mapstr":[{}],"curr_id":0}'
             return (
                 b'[{"id": 1, "info": []}]'
                 if recovery

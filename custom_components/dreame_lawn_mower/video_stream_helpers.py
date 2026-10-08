@@ -7,9 +7,8 @@ import os
 import platform
 import shlex
 from functools import partial
-from typing import Any
+from typing import Any, cast
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -27,6 +26,7 @@ from .dreame_lawn_mower_client.video_runtime import (
     DreameLawnMowerVideoRuntimeError,
     DreameLawnMowerXp2pLiveStreamSession,
 )
+from .runtime_data import DreameLawnMowerConfigEntry
 
 _STREAM_HEALTH_ATTEMPTS = 3
 _STREAM_HEALTH_RETRY_INTERVAL = 0.5
@@ -34,7 +34,7 @@ _STREAM_HEALTH_TIMEOUT = 3.0
 _STREAM_HEALTH_BYTES = 16
 
 
-def option_text(entry: ConfigEntry, key: str) -> str | None:
+def option_text(entry: DreameLawnMowerConfigEntry, key: str) -> str | None:
     """Return a trimmed non-empty string option."""
     value = entry.options.get(key)
     if not isinstance(value, str):
@@ -43,7 +43,7 @@ def option_text(entry: ConfigEntry, key: str) -> str | None:
     return value or None
 
 
-def video_transport(entry: ConfigEntry) -> str:
+def video_transport(entry: DreameLawnMowerConfigEntry) -> str:
     """Return one validated camera transport option."""
     value = entry.options.get(CONF_VIDEO_TRANSPORT)
     if value in {
@@ -96,7 +96,7 @@ def split_runner_command(command: str) -> tuple[str, ...]:
 
 def managed_runtime_supported() -> bool:
     """Return whether the self-managed runtime supports this HA host."""
-    return managed_runtime_environment()["supported"]
+    return cast(bool, managed_runtime_environment()["supported"])
 
 
 def managed_runtime_environment() -> dict[str, str | bool | int]:

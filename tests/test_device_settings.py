@@ -12,7 +12,6 @@ import pytest
 from custom_components.dreame_lawn_mower.button import (
     DreameLawnMowerCaptureWeatherProbeButton,
 )
-from custom_components.dreame_lawn_mower.const import DOMAIN
 from custom_components.dreame_lawn_mower.coordinator import (
     DreameLawnMowerCoordinator,
 )
@@ -548,8 +547,10 @@ def test_mova_awd_switch_platform_omits_locked_ai_classes() -> None:
         schedules=None,
         async_add_listener=lambda listener: Mock(),  # noqa: ARG005
     )
-    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
-    entry = SimpleNamespace(entry_id="entry-1", async_on_unload=Mock())
+    hass = SimpleNamespace(data={})
+    entry = SimpleNamespace(
+        runtime_data=coordinator, entry_id="entry-1", async_on_unload=Mock(),
+    )
     added: list[object] = []
 
     asyncio.run(async_setup_switch_entry(hass, entry, added.extend))
@@ -577,8 +578,10 @@ def test_setting_platforms_add_only_reported_entities_and_follow_late_discovery(
         schedules=None,
         async_add_listener=lambda listener: listeners.append(listener) or Mock(),
     )
-    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
-    entry = SimpleNamespace(entry_id="entry-1", async_on_unload=Mock())
+    hass = SimpleNamespace(data={})
+    entry = SimpleNamespace(
+        runtime_data=coordinator, entry_id="entry-1", async_on_unload=Mock(),
+    )
     added: list[object] = []
 
     async def setup() -> None:

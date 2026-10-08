@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, Protocol
 
 import voluptuous as vol
 from homeassistant.components import persistent_notification
@@ -29,6 +29,7 @@ from .dreame_lawn_mower_client.schedule import (
     encode_schedule_payload_text,
 )
 from .manual_control import remote_control_block_reason
+from .runtime_data import get_coordinator, iter_coordinators
 
 ATTR_ENTRY_ID = "entry_id"
 ATTR_CHUNK_SIZE = "chunk_size"
@@ -211,7 +212,7 @@ PLAN_MAINTENANCE_RESET_SCHEMA = vol.Schema(
     }
 )
 
-MOWING_PREFERENCE_CHANGE_FIELDS = {
+MOWING_PREFERENCE_CHANGE_FIELDS: dict[str | vol.Marker, Any] = {
     vol.Optional(ATTR_PREFERENCE_MODE): _preference_mode_validator,
     vol.Optional(ATTR_EFFICIENT_MODE): _int_range(
         name=ATTR_EFFICIENT_MODE,
@@ -452,13 +453,6 @@ async def async_unload_services(hass: HomeAssistant) -> None:
     domain_data.pop(_SERVICES_REGISTERED, None)
 
 
-def _coordinator_values(hass: HomeAssistant) -> Iterable[DreameLawnMowerCoordinator]:
-    """Yield configured mower coordinators from domain data."""
-    for value in hass.data.get(DOMAIN, {}).values():
-        if isinstance(value, DreameLawnMowerCoordinator):
-            yield value
-
-
 def _coordinator_from_call(
     hass: HomeAssistant,
     call: ServiceCall,
@@ -466,12 +460,12 @@ def _coordinator_from_call(
     """Return the coordinator targeted by a service call."""
     entry_id = call.data.get(ATTR_ENTRY_ID)
     if entry_id:
-        coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
-        if isinstance(coordinator, DreameLawnMowerCoordinator):
+        coordinator = get_coordinator(hass, entry_id)
+        if coordinator is not None:
             return coordinator
         raise HomeAssistantError(f"No Dreame lawn mower entry found for {entry_id}.")
 
-    coordinators = list(_coordinator_values(hass))
+    coordinators = list(iter_coordinators(hass))
     if len(coordinators) == 1:
         return coordinators[0]
     if not coordinators:
@@ -504,7 +498,12 @@ def _guard_schedule_write_request(call: ServiceCall) -> None:
         )
 
 
-def _guard_preference_write_request(call: ServiceCall) -> None:
+class _PreferenceWriteRequest(Protocol):
+    @property
+    def data(self) -> Mapping[str, Any]: ...
+
+
+def _guard_preference_write_request(call: _PreferenceWriteRequest) -> None:
     """Block preference writes unless the HA service confirmation gate is set."""
     if call.data[ATTR_EXECUTE] and not call.data[ATTR_CONFIRM_PREFERENCE_WRITE]:
         raise HomeAssistantError(

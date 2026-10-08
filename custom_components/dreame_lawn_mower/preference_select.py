@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.select import SelectEntity
-from homeassistant.helpers.entity import EntityCategory
+from homeassistant.const import EntityCategory
 
 from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity

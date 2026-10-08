@@ -26,7 +26,6 @@ from custom_components.dreame_lawn_mower.const import (
     CONF_NAME,
     CONF_PASSWORD,
     CONF_USERNAME,
-    DOMAIN,
 )
 from custom_components.dreame_lawn_mower.coordinator import (
     DEVICE_SNAPSHOT_GENERATION_HISTORY,
@@ -3328,6 +3327,7 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
             bus=SimpleNamespace(async_listen_once=Mock(return_value=Mock())),
             data={},
             config_entries=SimpleNamespace(
+                async_entries=lambda domain: [],
                 async_forward_entry_setups=AsyncMock(
                     side_effect=RuntimeError("platform failed")
                 )
@@ -3384,7 +3384,7 @@ def test_failed_platform_setup_removes_coordinator_and_drains_resources() -> Non
         coordinator.video_lan_cache.async_close.assert_awaited_once_with()
         coordinator.video_provisioning_cache.async_close.assert_awaited_once_with()
         coordinator.async_shutdown.assert_awaited_once_with()
-        assert "entry-1" not in hass.data[DOMAIN]
+        assert not hasattr(entry, "runtime_data")
         sample = performance.as_dict()["latest_by_operation"]["setup"]
         assert sample["outcome"] == "RuntimeError"
 
@@ -3546,7 +3546,7 @@ def test_initial_connection_failure_keeps_complete_platform_setup_pending() -> N
         coordinator.video_lan_cache.async_close.assert_awaited_once_with()
         coordinator.video_provisioning_cache.async_close.assert_awaited_once_with()
         coordinator.async_shutdown.assert_awaited_once_with()
-        assert entry.entry_id not in hass.data.get(DOMAIN, {})
+        assert not hasattr(entry, "runtime_data")
 
     asyncio.run(scenario())
 

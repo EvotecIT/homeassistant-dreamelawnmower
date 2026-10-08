@@ -16,6 +16,7 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device import (
     DreameMowerDevice,
+    DreameMowerDeviceInfo,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.device_types import (
     DirtyData,
@@ -86,6 +87,33 @@ def test_connect_device_defers_initial_map_request(monkeypatch, mqtt_connected) 
     map_manager.update.assert_not_called()
     assert mower.available is True
     assert mower._ready is True
+
+
+@pytest.mark.parametrize("model", [None, 42])
+def test_map_initialization_preserves_missing_model_metadata(model) -> None:
+    class InitializingDevice(DreameMowerDevice):
+        _map_update_interval = 10
+
+    map_manager = Mock()
+    mower = object.__new__(InitializingDevice)
+    mower.__dict__.update(
+        info=DreameMowerDeviceInfo({"model": model}),
+        _protocol=SimpleNamespace(cloud=SimpleNamespace(connected=False)),
+        _map_manager=map_manager,
+        _ready=False,
+        available=False,
+        status=SimpleNamespace(
+            running=False, docked=True, started=False, current_map=None,
+        ),
+        capability=SimpleNamespace(),
+    )
+
+    mower._finish_device_initialization(refresh_privacy=False)
+
+    assert mower.available is True
+    assert mower._ready is True
+    map_manager.set_aes_iv.assert_not_called()
+    map_manager.set_update_interval.assert_called_once_with(10)
 
 
 def test_docked_map_state_defers_request_to_maintenance() -> None:
@@ -264,3 +292,13 @@ def test_poll_completion_preserves_new_device_values(monkeypatch):
     assert mower._update_running is False
     map_manager.set_update_interval.assert_called_once_with(10)
     map_manager.set_device_running.assert_called_once_with(False, True)
+
+
+@pytest.mark.parametrize("connected", [None, False, True])
+def test_cloud_connection_state_is_boolean(connected: bool | None) -> None:
+    """Local-only and disconnected devices expose false rather than null."""
+    mower = object.__new__(DreameMowerDevice)
+    cloud = None if connected is None else SimpleNamespace(connected=connected)
+    mower._protocol = SimpleNamespace(cloud=cloud)
+
+    assert mower.cloud_connected is bool(connected)

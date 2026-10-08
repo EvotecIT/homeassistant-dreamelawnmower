@@ -13,7 +13,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import IO, Any
 
 from .lan_video import (
     DEFAULT_LAN_DISCOVERY_TIMEOUT,
@@ -451,7 +451,7 @@ class DreameLawnMowerXp2pHostRuntime:
             )
             if native_detail:
                 details.append(f"native={native_detail}")
-            failure = {
+            failure: dict[str, Any] = {
                 "stage": startup_stage,
                 "exception": type(err).__name__,
             }
@@ -616,7 +616,7 @@ def _encode_request(
 
 
 def _read_response(
-    stream: BinaryIO | None,
+    stream: IO[bytes] | None,
     *,
     timeout: float,
 ) -> tuple[int, bytes]:
@@ -660,7 +660,7 @@ def _read_response(
     return value
 
 
-def _read_exact(stream: BinaryIO, length: int) -> bytes:
+def _read_exact(stream: IO[bytes], length: int) -> bytes:
     result = bytearray()
     while len(result) < length:
         chunk = stream.read(length - len(result))
@@ -702,7 +702,7 @@ def _stun_servers(config: DreameLawnMowerXp2pDeviceConfig) -> tuple[str, ...]:
 
 
 def _start_binary_drain_thread(
-    stream: BinaryIO | None,
+    stream: IO[bytes] | None,
     *,
     name: str,
     tail: list[bytes] | None = None,

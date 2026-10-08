@@ -11,17 +11,19 @@ import time
 from io import BytesIO
 from typing import Any
 
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 from PIL import Image
 
 from .const import DOMAIN
+from .runtime_data import DreameLawnMowerConfigEntry
 
 CONF_MAP_RESTART_PREVIEW = "map_restart_preview"
 MAX_PREVIEW_BYTES = 2 * 1024 * 1024
 MAX_PREVIEW_AGE_SECONDS = 24 * 60 * 60
 
 
-def preview_store(hass: Any, entry_id: str) -> Store:
+def preview_store(hass: HomeAssistant, entry_id: str) -> Store[dict[str, Any]]:
     """Keep one private HA-managed record per configuration entry."""
     return Store(hass, 1, f"{DOMAIN}.{entry_id}.map_preview", private=True)
 
@@ -32,14 +34,16 @@ def preview_scope(device_id: str, render_context: tuple[Any, ...]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-async def async_remove_restart_preview(hass: Any, entry_id: str) -> None:
+async def async_remove_restart_preview(
+    hass: Any, entry: DreameLawnMowerConfigEntry,
+) -> None:
     """Honor opt-out without requiring a successfully loaded coordinator."""
-    coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
+    coordinator = getattr(entry, "runtime_data", None)
     preview = getattr(coordinator, "map_restart_preview", None)
     if isinstance(preview, RestartMapPreview):
         await preview.async_remove()
     else:
-        await preview_store(hass, entry_id).async_remove()
+        await preview_store(hass, entry.entry_id).async_remove()
 
 
 def encode_preview(
@@ -97,7 +101,7 @@ def verified_preview(record: Any, scope: str) -> tuple[bytes, float] | None:
 class RestartMapPreview:
     """Own lazy restore and rate-limited persistence for one primary map camera."""
 
-    def __init__(self, hass: Any, entry_id: str):
+    def __init__(self, hass: HomeAssistant, entry_id: str):
         self._hass = hass
         self._store = preview_store(hass, entry_id)
         self._loaded = False

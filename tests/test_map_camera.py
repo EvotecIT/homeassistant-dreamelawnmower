@@ -86,9 +86,9 @@ def test_camera_setup_only_omits_definitively_unsupported_video(
             frozenset(),
         ),
     )
-    entry = SimpleNamespace(entry_id="entry-1")
+    entry = SimpleNamespace(runtime_data=coordinator, entry_id="entry-1")
     hass = SimpleNamespace(
-        data={camera_module.DOMAIN: {entry.entry_id: coordinator}},
+        data={},
     )
     added: list[object] = []
 

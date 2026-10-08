@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.helpers.entity import EntityCategory
+from homeassistant.const import EntityCategory
 
 from .coordinator import DreameLawnMowerCoordinator
 from .dreame_lawn_mower_client.mowing_preferences import OBSTACLE_AI_CLASSES

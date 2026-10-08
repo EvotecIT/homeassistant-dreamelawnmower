@@ -8,12 +8,20 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+
+if TYPE_CHECKING:
+    from .map_preview import RestartMapPreview
+    from .observation_checkpoint import ObservationCheckpoint
+    from .option_updates import EntryUpdateSnapshot
+    from .video_lan_cache import DreameLawnMowerVideoLanCache
+    from .video_provisioning_cache import DreameLawnMowerVideoProvisioningCache
 
 from .api import (
     DreameLawnMowerClient,
@@ -92,6 +100,7 @@ from .runtime_cache import (
     runtime_mission_session_identity,
     runtime_mission_session_started_at,
 )
+from .runtime_data import DreameLawnMowerConfigEntry
 from .schedule_cache import (
     ScheduleActionReadBackoff,
     batch_schedule_version,
@@ -204,6 +213,7 @@ def _batch_mowing_preferences_read_complete(
     mapped_entries = [entry for entry in maps if isinstance(entry, Mapping)]
     if not mapped_entries:
         return False
+    target_entries: Sequence[Mapping[str, Any] | None]
     if expected_map_indices:
         mapped_by_index = {
             entry.get("idx"): entry
@@ -407,7 +417,15 @@ class DreameLawnMowerCoordinator(
 ):
     """Manage mower state updates for a single config entry."""
 
-    def __init__(self, hass, entry: ConfigEntry) -> None:
+    # Setup and the map camera attach these resources to this lifecycle owner.
+    applied_entry_update: EntryUpdateSnapshot
+    observation_checkpoint: ObservationCheckpoint
+    video_lan_cache: DreameLawnMowerVideoLanCache
+    video_provisioning_cache: DreameLawnMowerVideoProvisioningCache
+    loaded_platforms: tuple[Platform, ...]
+    map_restart_preview: RestartMapPreview
+
+    def __init__(self, hass: HomeAssistant, entry: DreameLawnMowerConfigEntry) -> None:
         descriptor = DreameLawnMowerDescriptor(
             did=entry.data[CONF_DID],
             name=entry.data[CONF_NAME],
@@ -1028,8 +1046,8 @@ class DreameLawnMowerCoordinator(
             "errors": [],
         }
         if attempt_action_read:
+            action_read_generation = self._begin_schedule_read()
             try:
-                action_read_generation = self._begin_schedule_read()
                 payload = await self.client.async_get_app_schedules(
                     include_current_task=False,
                     map_indices=request_schedule_indices,
@@ -1460,11 +1478,9 @@ class DreameLawnMowerCoordinator(
         plan_states: Mapping[int, bool] | None = None,
     ) -> None:
         """Apply a confirmed schedule write to the shared cache."""
-        schedules = (
-            self.schedules.get("schedules")
-            if isinstance(self.schedules, dict)
-            else None
-        )
+        if not isinstance(self.schedules, dict):
+            return
+        schedules = self.schedules.get("schedules")
         if not isinstance(schedules, list):
             return
         source_version = (
@@ -1594,7 +1610,7 @@ class DreameLawnMowerCoordinator(
                 pending_states.pop(key, None)
                 pending_contradictions.pop(key, None)
                 continue
-            plans = schedule.get("plans")
+            plans = schedule["plans"]
             plan = next(
                 (
                     entry
@@ -1617,11 +1633,9 @@ class DreameLawnMowerCoordinator(
     def _apply_pending_schedule_plan_states(self) -> None:
         """Keep confirmed toggles visible while cloud readbacks lag."""
         pending_states = getattr(self, "_pending_schedule_plan_states", None)
-        schedules = (
-            self.schedules.get("schedules")
-            if isinstance(self.schedules, Mapping)
-            else None
-        )
+        if not isinstance(self.schedules, Mapping):
+            return
+        schedules = self.schedules.get("schedules")
         if not pending_states or not isinstance(schedules, Sequence):
             return
         for (map_index, plan_id), (version, enabled) in pending_states.items():
@@ -1743,9 +1757,10 @@ class DreameLawnMowerCoordinator(
         normalized_plans = decode_schedule_payload_text(
             encode_schedule_payload_text(list(plans))
         )
+        schedule_cache = getattr(self, "schedules", None)
         schedules = (
-            self.schedules.get("schedules")
-            if isinstance(getattr(self, "schedules", None), Mapping)
+            schedule_cache.get("schedules")
+            if isinstance(schedule_cache, Mapping)
             else None
         )
         cached_schedule = next(
@@ -1803,8 +1818,8 @@ class DreameLawnMowerCoordinator(
             pending_active_indices = set()
             self._pending_schedule_upload_active_indices = pending_active_indices
         if (
-            isinstance(getattr(self, "schedules", None), Mapping)
-            and self.schedules.get("active_schedule_index") == map_index
+            isinstance(schedule_cache, Mapping)
+            and schedule_cache.get("active_schedule_index") == map_index
         ):
             pending_active_indices.add(map_index)
         else:
@@ -1880,11 +1895,10 @@ class DreameLawnMowerCoordinator(
     def _apply_pending_schedule_uploads(self) -> None:
         """Keep confirmed full uploads visible while cloud readbacks lag."""
         pending_uploads = getattr(self, "_pending_schedule_uploads", None)
-        schedules = (
-            self.schedules.get("schedules")
-            if isinstance(getattr(self, "schedules", None), dict)
-            else None
-        )
+        schedule_cache = getattr(self, "schedules", None)
+        if not isinstance(schedule_cache, dict):
+            return
+        schedules = schedule_cache.get("schedules")
         if not pending_uploads or not isinstance(schedules, list):
             return
 
@@ -1912,11 +1926,11 @@ class DreameLawnMowerCoordinator(
             if (
                 isinstance(unknown_fallback, Mapping)
                 and unknown_fallback.get("plans") != pending_schedule.get("plans")
-                and self.schedules.get("active_schedule_index") is None
+                and schedule_cache.get("active_schedule_index") is None
             ):
                 # The batch version cannot identify which colliding slot is
                 # active, and its content may predate the confirmed upload.
-                self.schedules["active_selection_available"] = False
+                schedule_cache["active_selection_available"] = False
 
     async def async_plan_schedule_upload(
         self,
@@ -2127,7 +2141,9 @@ class DreameLawnMowerCoordinator(
                     if isinstance(self.batch_device_data, Mapping)
                     else None
                 )
-                if isinstance(current_preferences, Mapping):
+                if isinstance(self.batch_device_data, Mapping) and isinstance(
+                    current_preferences, Mapping
+                ):
                     updated_batch_device_data = dict(self.batch_device_data)
                     updated_batch_device_data["batch_mowing_preferences"] = (
                         self._reconcile_pending_preference_readbacks(
@@ -2645,7 +2661,11 @@ class DreameLawnMowerCoordinator(
             direct_preferences
             and _direct_mowing_preferences_read_complete(direct_preferences)
         )
-        if direct_complete and not pending_map_indices:
+        if (
+            direct_preferences is not None
+            and direct_complete
+            and not pending_map_indices
+        ):
             if not mowing_preferences_need_optional_fallback(direct_preferences):
                 return direct_preferences, direct_preferences, None
 
@@ -2660,9 +2680,11 @@ class DreameLawnMowerCoordinator(
                 cached_preferences,
                 expected_map_indices,
             )
-        effective_cached_preferences_succeeded = bool(
-            isinstance(effective_cached_preferences, Mapping)
+        usable_cached_preferences: Mapping[str, Any] | None = (
+            effective_cached_preferences
+            if isinstance(effective_cached_preferences, Mapping)
             and _mowing_preferences_read_succeeded(effective_cached_preferences)
+            else None
         )
 
         try:
@@ -2699,11 +2721,11 @@ class DreameLawnMowerCoordinator(
         if (
             batch_preferences_succeeded
             and not batch_preferences_complete
-            and effective_cached_preferences_succeeded
+            and usable_cached_preferences is not None
         ):
             effective_batch_preferences = merge_mowing_preference_readbacks(
                 batch_preferences,
-                effective_cached_preferences,
+                usable_cached_preferences,
                 source="batch_device_data_mowing_preferences_with_cache_fallback",
             )
         if direct_preferences and _mowing_preferences_read_succeeded(
@@ -2712,8 +2734,8 @@ class DreameLawnMowerCoordinator(
             fallback_preferences = (
                 effective_batch_preferences
                 if batch_preferences_succeeded
-                else dict(effective_cached_preferences)
-                if effective_cached_preferences_succeeded
+                else dict(usable_cached_preferences)
+                if usable_cached_preferences is not None
                 else batch_preferences
             )
             return (
@@ -2726,8 +2748,8 @@ class DreameLawnMowerCoordinator(
             )
         if batch_preferences_succeeded:
             return effective_batch_preferences, None, batch_preferences
-        if effective_cached_preferences_succeeded:
-            return dict(effective_cached_preferences), None, None
+        if usable_cached_preferences is not None:
+            return dict(usable_cached_preferences), None, None
         return batch_preferences, None, None
 
     def _schedule_map_index_hint(self) -> int | None:
@@ -3332,17 +3354,18 @@ class DreameLawnMowerCoordinator(
         """Expire schedule selection tied to the previous active map."""
         self.schedules_refreshed_at = None
         getattr(self, "_pending_schedule_status_active_indices", set()).clear()
-        if isinstance(getattr(self, "schedules", None), dict):
-            self.schedules.pop("active_schedule_version", None)
-            self.schedules.pop("active_schedule_index", None)
-            self.schedules.pop("current_task", None)
-            self.schedules["active_selection_available"] = False
-            entries = self.schedules.get("schedules")
+        schedules = getattr(self, "schedules", None)
+        if isinstance(schedules, dict):
+            schedules.pop("active_schedule_version", None)
+            schedules.pop("active_schedule_index", None)
+            schedules.pop("current_task", None)
+            schedules["active_selection_available"] = False
+            entries = schedules.get("schedules")
             if isinstance(entries, Sequence) and not isinstance(
                 entries,
                 str | bytes | bytearray,
             ):
-                self.schedules["schedules"] = [
+                schedules["schedules"] = [
                     entry
                     for entry in entries
                     if not isinstance(entry, Mapping) or entry.get("idx") is not None
@@ -3403,7 +3426,9 @@ class DreameLawnMowerCoordinator(
 
     async def _async_close_client(self) -> None:
         """Close the client through one shared shutdown owner."""
-        close_task = getattr(self, "_client_close_task", None)
+        close_task: asyncio.Task[None] | None = getattr(
+            self, "_client_close_task", None
+        )
         if close_task is None or close_task.done():
             close_task = asyncio.create_task(
                 self.client.async_close(),

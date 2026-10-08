@@ -292,7 +292,7 @@ async def test_entry_removal_deletes_video_files_and_preserves_other_mower(
         )
         entry = SimpleNamespace(entry_id="removed")
         if retained_owner:
-            hass.data["dreame_lawn_mower"] = {"removed": owners["removed"]}
+            entry.runtime_data = owners["removed"]
         await async_remove_entry(hass, entry)
         if retained_owner:
             await owners["removed"].video_lan_cache.async_save_identity(inputs)
@@ -360,9 +360,7 @@ async def test_video_removal_drains_an_inflight_disk_write(
             if cancel_write:
                 tasks[0].cancel()
             entry = SimpleNamespace(entry_id="removed")
-            hass.data["dreame_lawn_mower"] = {
-                "removed": SimpleNamespace(**{f"{kind}_cache": cache}),
-            }
+            entry.runtime_data = SimpleNamespace(**{f"{kind}_cache": cache})
             tasks.append(asyncio.create_task(async_remove_entry(hass, entry)))
             # Wait until removal reaches this owner's write lock.
             for _ in range(100):
@@ -414,11 +412,35 @@ async def test_shutdown_then_fallback_removal_cannot_recreate_checkpoint(tmp_pat
         await hass.async_stop()
 
 
+async def test_retained_owner_cannot_recreate_checkpoint_after_entry_removal(tmp_path):
+    """A removed entry can retain runtime data when platform unloading failed."""
+    hass = HomeAssistant(str(tmp_path))
+    owner = coordinator()
+    checkpoint = ObservationCheckpoint(hass, "test-entry", owner)
+    owner.observation_checkpoint = checkpoint
+    entry = SimpleNamespace(entry_id="test-entry", runtime_data=owner)
+    path = tmp_path / ".storage" / checkpoint._key
+    try:
+        await checkpoint.async_flush()
+        assert await hass.async_add_executor_job(path.exists)
+        checkpoint.async_schedule_save()
+        await async_remove_entry(hass, entry)
+        checkpoint.async_schedule_save()
+        await checkpoint.async_flush()
+        await checkpoint.async_close()
+        await hass.async_block_till_done()
+        assert not await hass.async_add_executor_job(path.exists)
+    finally:
+        await checkpoint.async_close()
+        await hass.async_stop()
+
+
+
 @pytest.mark.parametrize("cleanup", ["unload", "failed_setup"])
 async def test_released_video_owners_cannot_recreate_removed_files(tmp_path, cleanup):
     """Released owners retain reload data but cannot write after entry removal."""
     hass = HomeAssistant(str(tmp_path))
-    entry = SimpleNamespace(entry_id="removed")
+    entry = SimpleNamespace(entry_id="removed", domain="dreame_lawn_mower")
     lan = DreameLawnMowerVideoLanCache(hass, entry_id=entry.entry_id, did="test")
     provisioning = DreameLawnMowerVideoProvisioningCache(
         hass, entry_id=entry.entry_id, did="test",
@@ -432,7 +454,7 @@ async def test_released_video_owners_cannot_recreate_removed_files(tmp_path, cle
         video_lan_cache=lan, video_provisioning_cache=provisioning,
         loaded_platforms=(), async_shutdown=AsyncMock(),
     )
-    hass.data["dreame_lawn_mower"] = {entry.entry_id: owner}
+    entry.runtime_data = owner
     paths = [
         tmp_path / ".storage" / f"dreame_lawn_mower.{kind}.{entry.entry_id}"
         for kind in ("video_lan", "video_provisioning")
@@ -444,14 +466,20 @@ async def test_released_video_owners_cannot_recreate_removed_files(tmp_path, cle
             with (
                 patch.object(hass, "config_entries", SimpleNamespace(
                     async_unload_platforms=AsyncMock(return_value=True),
+                    async_entries=lambda domain: [entry],
+                    async_get_entry=lambda entry_id: entry,
                 )),
                 patch("custom_components.dreame_lawn_mower.async_unload_services",
                       new_callable=AsyncMock),
             ):
                 assert await async_unload_entry(hass, entry)
         else:
-            await _async_cleanup_failed_setup(hass, entry, owner)
-        assert entry.entry_id not in hass.data["dreame_lawn_mower"]
+            with patch.object(hass, "config_entries", SimpleNamespace(
+                async_entries=lambda domain: [entry],
+                async_get_entry=lambda entry_id: entry,
+            )):
+                await _async_cleanup_failed_setup(hass, entry, owner)
+        assert not hasattr(entry, "runtime_data")
         assert await hass.async_add_executor_job(lambda: all(p.exists() for p in paths))
         await async_remove_entry(hass, entry)
         await lan.async_save_identity(inputs)

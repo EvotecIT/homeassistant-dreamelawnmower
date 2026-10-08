@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, overload
 
 from .dreame_lawn_mower_client.app_protocol import (
     MOWER_BATTERY_PROPERTY_KEY,
@@ -100,32 +100,31 @@ def task_status_probe_summary(
     }
     unknown_keys = scan_summary.get("unknown_non_empty_keys", [])
 
-    return _drop_empty(
-        {
-            "state": _state_summary(state_entry),
-            "runtime_status": _status_blob_summary(runtime_status_entry),
-            "bluetooth_connected": _entry_value(bluetooth_entry),
-            "task_status": task_entry.get("task_status")
-            if isinstance(task_entry, Mapping)
-            else None,
-            "error": _error_summary(
-                error_entry,
-                state_entry=state_entry,
-                model=model,
-            ),
-            "error_active": _error_active(
-                error_entry,
-                state_entry=state_entry,
-                model=model,
-            ),
-            "battery_level": _entry_value(battery_entry),
-            "device_time": _entry_json_value(time_entry),
-            "status_matrix": _status_matrix_summary(status_matrix_entry),
-            "auxiliary_live_properties": auxiliary_live_properties,
-            "service_5_latest": service_5_latest,
-            "unknown_non_empty_keys": unknown_keys,
-        }
-    )
+    summary: dict[str, object] = {
+        "state": _state_summary(state_entry),
+        "runtime_status": _status_blob_summary(runtime_status_entry),
+        "bluetooth_connected": _entry_value(bluetooth_entry),
+        "task_status": task_entry.get("task_status")
+        if isinstance(task_entry, Mapping)
+        else None,
+        "error": _error_summary(
+            error_entry,
+            state_entry=state_entry,
+            model=model,
+        ),
+        "error_active": _error_active(
+            error_entry,
+            state_entry=state_entry,
+            model=model,
+        ),
+        "battery_level": _entry_value(battery_entry),
+        "device_time": _entry_json_value(time_entry),
+        "status_matrix": _status_matrix_summary(status_matrix_entry),
+        "auxiliary_live_properties": auxiliary_live_properties,
+        "service_5_latest": service_5_latest,
+        "unknown_non_empty_keys": unknown_keys,
+    }
+    return _drop_empty(summary)
 
 
 def task_status_probe_state(result: Mapping[str, Any] | None) -> str:
@@ -223,13 +222,12 @@ def _entry_json_value(entry: Mapping[str, Any] | None) -> Any:
 def _state_summary(entry: Mapping[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(entry, Mapping):
         return None
-    return _drop_empty(
-        {
-            "value": _entry_value(entry),
-            "label": entry.get("decoded_label"),
-            "state_key": entry.get("state_key"),
-        }
-    )
+    summary: dict[str, object] = {
+        "value": _entry_value(entry),
+        "label": entry.get("decoded_label"),
+        "state_key": entry.get("state_key"),
+    }
+    return _drop_empty(summary)
 
 
 def _error_summary(
@@ -240,18 +238,17 @@ def _error_summary(
 ) -> dict[str, Any] | None:
     if not isinstance(entry, Mapping):
         return None
-    return _drop_empty(
-        {
-            "value": _entry_value(entry),
-            "label": entry.get("decoded_label"),
-            "label_source": entry.get("decoded_label_source"),
-            "active": _error_active(
-                entry,
-                state_entry=state_entry,
-                model=model,
-            ),
-        }
-    )
+    summary: dict[str, object] = {
+        "value": _entry_value(entry),
+        "label": entry.get("decoded_label"),
+        "label_source": entry.get("decoded_label_source"),
+        "active": _error_active(
+            entry,
+            state_entry=state_entry,
+            model=model,
+        ),
+    }
+    return _drop_empty(summary)
 
 
 def _error_active(
@@ -284,35 +281,34 @@ def _status_blob_summary(entry: Mapping[str, Any] | None) -> dict[str, Any] | No
     if not isinstance(blob, Mapping):
         return None
     notes = blob.get("notes")
-    return _drop_empty(
-        {
-            "length": blob.get("length"),
-            "hex": blob.get("hex"),
-            "frame_valid": blob.get("frame_valid"),
-            "candidate_battery_level": blob.get("candidate_battery_level"),
-            "candidate_runtime_progress_percent": blob.get(
-                "candidate_runtime_progress_percent"
-            ),
-            "candidate_runtime_area_progress_percent": blob.get(
-                "candidate_runtime_area_progress_percent"
-            ),
-            "candidate_runtime_current_area_sqm": blob.get(
-                "candidate_runtime_current_area_sqm"
-            ),
-            "candidate_runtime_total_area_sqm": blob.get(
-                "candidate_runtime_total_area_sqm"
-            ),
-            "candidate_runtime_region_id": blob.get("candidate_runtime_region_id"),
-            "candidate_runtime_task_id": blob.get("candidate_runtime_task_id"),
-            "candidate_runtime_pose_x": blob.get("candidate_runtime_pose_x"),
-            "candidate_runtime_pose_y": blob.get("candidate_runtime_pose_y"),
-            "candidate_runtime_heading_deg": blob.get("candidate_runtime_heading_deg"),
-            "notes": list(notes)
-            if isinstance(notes, Sequence)
-            and not isinstance(notes, str | bytes | bytearray)
-            else None,
-        }
-    )
+    summary: dict[str, object] = {
+        "length": blob.get("length"),
+        "hex": blob.get("hex"),
+        "frame_valid": blob.get("frame_valid"),
+        "candidate_battery_level": blob.get("candidate_battery_level"),
+        "candidate_runtime_progress_percent": blob.get(
+            "candidate_runtime_progress_percent"
+        ),
+        "candidate_runtime_area_progress_percent": blob.get(
+            "candidate_runtime_area_progress_percent"
+        ),
+        "candidate_runtime_current_area_sqm": blob.get(
+            "candidate_runtime_current_area_sqm"
+        ),
+        "candidate_runtime_total_area_sqm": blob.get(
+            "candidate_runtime_total_area_sqm"
+        ),
+        "candidate_runtime_region_id": blob.get("candidate_runtime_region_id"),
+        "candidate_runtime_task_id": blob.get("candidate_runtime_task_id"),
+        "candidate_runtime_pose_x": blob.get("candidate_runtime_pose_x"),
+        "candidate_runtime_pose_y": blob.get("candidate_runtime_pose_y"),
+        "candidate_runtime_heading_deg": blob.get("candidate_runtime_heading_deg"),
+        "notes": list(notes)
+        if isinstance(notes, Sequence)
+        and not isinstance(notes, str | bytes | bytearray)
+        else None,
+    }
+    return _drop_empty(summary)
 
 
 def _status_matrix_summary(entry: Mapping[str, Any] | None) -> dict[str, Any] | None:
@@ -348,7 +344,15 @@ def _status_pairs(value: Any) -> list[list[Any]]:
     return pairs
 
 
-def _drop_empty(value: Any) -> Any:
+@overload
+def _drop_empty(value: Mapping[str, object]) -> dict[str, Any]: ...
+
+
+@overload
+def _drop_empty(value: object) -> Any: ...
+
+
+def _drop_empty(value: object) -> Any:
     if isinstance(value, Mapping):
         return {
             key: cleaned

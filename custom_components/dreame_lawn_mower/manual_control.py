@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .dreame_lawn_mower_client.models import (
+    DreameLawnMowerSnapshot,
     remote_control_block_reason,
     remote_control_state_safe,
 )
@@ -15,7 +16,9 @@ __all__ = [
 ]
 
 
-def maintenance_point_movement_block_reason(snapshot: object) -> str | None:
+def maintenance_point_movement_block_reason(
+    snapshot: DreameLawnMowerSnapshot | None,
+) -> str | None:
     """Return why configured maintenance-point movement is unsafe."""
     if snapshot is not None and not getattr(snapshot, "available", True):
         return "Mower is not available."
@@ -27,7 +30,7 @@ def maintenance_point_movement_block_reason(snapshot: object) -> str | None:
     session_active = getattr(snapshot, "mowing_session_active", None)
     control_state = (
         snapshot_session_control_state(snapshot)
-        if session_active is not None
+        if snapshot is not None and session_active is not None
         else str(getattr(snapshot, "activity", "") or "").casefold()
     )
     if control_state not in {"idle", "docked"}:

@@ -351,6 +351,58 @@ def test_video_camera_facade_preserves_split_method_surface() -> None:
     )
 
 
+@pytest.mark.parametrize("path", ["prepare", "start", "cleanup", "disable"])
+def test_video_failure_reporting_uses_facade_bindings(path: str) -> None:
+    """Keep injected redaction and event recording on moved failure paths."""
+    events: list[dict[str, object]] = []
+
+    def record_event(_coordinator: object, **event: object) -> None:
+        events.append(event)
+
+    async def fail(*_args: object) -> None:
+        raise RuntimeError("synthetic transport failure")
+
+    async def scenario() -> None:
+        entity = _uninitialized_entity()
+        entity.async_write_ha_state = lambda: None
+        entity._last_stream_cleanup_reason = "test_cleanup"
+        entity._async_create_runtime = fail
+        entity.coordinator.client = SimpleNamespace(
+            async_set_camera_stream_enabled=fail,
+        )
+        with (
+            patch.object(
+                video_camera_module,
+                "sanitize_diagnostic_text",
+                lambda _value: "replacement redaction",
+            ),
+            patch.object(video_camera_module, "record_diagnostic_event", record_event),
+        ):
+            if path == "prepare":
+                await entity._async_prepare_runtime()
+                assert entity._runtime_preparation_error == "replacement redaction"
+                assert not events
+            elif path == "start":
+                entity._set_stream_error("synthetic transport failure", stage="test")
+                assert entity._last_error == "replacement redaction"
+                assert events[0]["code"] == "video_test_failed"
+            elif path == "cleanup":
+                entity._record_stream_cleanup_error(
+                    "test", "synthetic transport failure"
+                )
+                assert entity._last_stream_cleanup_error == "replacement redaction"
+                assert events[0]["code"] == "video_test_failed"
+            else:
+                await entity._async_disable_camera_stream()
+                assert entity._last_stream_disable_error == "replacement redaction"
+                assert entity._last_stream_cleanup_error == "replacement redaction"
+                assert events[0]["code"] == "video_camera_stream_disable_failed"
+        if events:
+            assert events[0]["message"] == "replacement redaction"
+
+    asyncio.run(scenario())
+
+
 def test_split_startup_observes_historical_facade_monkeypatch() -> None:
     """Keep dependency injection through the original module path working."""
 

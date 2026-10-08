@@ -36,7 +36,7 @@ class VideoStartupTiming:
         if self._verified is None:
             self._verified = self._clock()
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, str | float | dict[str, float] | None]:
         """Return only phase names, outcomes, and milliseconds."""
         now = self._clock()
         phases = dict(self._phases)

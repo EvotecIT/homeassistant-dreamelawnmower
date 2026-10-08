@@ -12,6 +12,7 @@ import pytest
 
 from dreame_lawn_mower_client import DreameLawnMowerPointCloudError, parse_pcd_metadata
 from dreame_lawn_mower_client._loader import load_internal_module
+from tests.runtime_fixtures import runtime_hass
 from tests.test_point_cloud import _binary_pcd, _client, cpu_plan_driver  # noqa: F401
 
 trace_module = load_internal_module("point_cloud_trace")
@@ -290,7 +291,6 @@ def test_trace_boundary_does_not_recurse_into_nested_timeline():
 
 @pytest.mark.usefixtures("cpu_plan_driver")
 def test_real_client_trace_reaches_http_and_saved_event(monkeypatch, request):
-    from custom_components.dreame_lawn_mower.const import DOMAIN
     from custom_components.dreame_lawn_mower.diagnostic_events import (
         DreameLawnMowerDiagnosticEventStore,
     )
@@ -345,7 +345,7 @@ def test_real_client_trace_reaches_http_and_saved_event(monkeypatch, request):
         client=client, diagnostic_events=DreameLawnMowerDiagnosticEventStore()
     )
     api = DreameLawnMowerPointCloudAPI(
-        SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+        runtime_hass(coordinators={"entry-1": coordinator})
     )
     from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
         client_point_cloud_async,

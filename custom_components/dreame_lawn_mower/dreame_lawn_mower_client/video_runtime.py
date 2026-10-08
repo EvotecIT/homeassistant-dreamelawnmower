@@ -23,7 +23,7 @@ from ctypes import (
 )
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol, cast, overload
 from urllib.parse import quote
 
 from .models import DreameLawnMowerCameraStreamRuntimeInputs
@@ -226,7 +226,7 @@ class DreameLawnMowerXp2pLiveStreamRequest:
 
     def as_dict(self, *, redact: bool = False) -> dict[str, Any]:
         """Return a JSON-safe request payload."""
-        payload = {
+        payload: dict[str, Any] = {
             "service_id": self.service_id,
             "delegate_id": self.delegate_id,
             "flv_channel_id": self.delegate_id,
@@ -911,6 +911,26 @@ class DreameLawnMowerNativeXp2pRuntime:
             raise
         return stun_file
 
+    @overload
+    def _bind(
+        self,
+        name: str,
+        argtypes: list[Any],
+        restype: Any,
+        *,
+        required: Literal[True] = True,
+    ) -> _NativeCallable: ...
+
+    @overload
+    def _bind(
+        self,
+        name: str,
+        argtypes: list[Any],
+        restype: Any,
+        *,
+        required: Literal[False],
+    ) -> _NativeCallable | None: ...
+
     def _bind(
         self,
         name: str,
@@ -931,7 +951,7 @@ class DreameLawnMowerNativeXp2pRuntime:
             function.restype = restype
         except AttributeError:
             pass
-        return function
+        return cast(_NativeCallable, function)
 
 
 def _app_config_from_device_config(
@@ -962,6 +982,7 @@ def diagnose_native_xp2p_runtime(
 ) -> DreameLawnMowerXp2pRuntimeDiagnostics:
     """Return load/symbol readiness for a native XP2P runtime library."""
     path = str(library_path)
+    error: str | None
     inspection = _inspect_native_library_file(Path(path)) if library is None else {}
     try:
         loaded_library = library if library is not None else CDLL(path)
@@ -1286,7 +1307,7 @@ def _decode_device_status_code(response: bytes | None) -> int | None:
     if isinstance(status, bool):
         return None
     try:
-        return int(status)
+        return int(cast(Any, status))
     except (TypeError, ValueError):
         return None
 

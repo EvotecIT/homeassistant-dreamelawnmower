@@ -6,7 +6,6 @@ import asyncio
 from collections.abc import Mapping
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.storage import Store
@@ -20,6 +19,7 @@ from .dreame_lawn_mower_client.xp2p_config import (
     DreameLawnMowerXp2pDeviceConfig,
     async_resolve_xp2p_device_config,
 )
+from .runtime_data import DreameLawnMowerConfigEntry
 from .video_cache_storage import async_save_video_cache
 
 _STORAGE_VERSION = 1
@@ -37,11 +37,11 @@ def _cache_store(hass: HomeAssistant, entry_id: str) -> Store[dict[str, Any]]:
 
 
 async def async_remove_video_provisioning_cache(
-    hass: HomeAssistant, entry: ConfigEntry,
+    hass: HomeAssistant, entry: DreameLawnMowerConfigEntry,
 ) -> None:
     """Remove persisted data even if this entry never loaded successfully."""
     owner = getattr(
-        hass.data.get(DOMAIN, {}).get(entry.entry_id), "video_provisioning_cache", None,
+        getattr(entry, "runtime_data", None), "video_provisioning_cache", None,
     )
     if isinstance(owner, DreameLawnMowerVideoProvisioningCache):
         await owner.async_remove()

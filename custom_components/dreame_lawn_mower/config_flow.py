@@ -7,8 +7,7 @@ from typing import Any
 
 import voluptuous as vol
 from aiohttp import ClientSession
-from homeassistant.config_entries import ConfigFlow, OptionsFlow
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -79,6 +78,7 @@ from .const import (
     XP2P_RUNNER_MODE_PROCESS,
 )
 from .map_preview import CONF_MAP_RESTART_PREVIEW, async_remove_restart_preview
+from .runtime_data import DreameLawnMowerConfigEntry
 
 CONF_DEVICE = "device"
 
@@ -142,14 +142,16 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
         self._errors: dict[str, str] = {}
 
     @staticmethod
-    def async_get_options_flow(config_entry):
+    def async_get_options_flow(
+        config_entry: DreameLawnMowerConfigEntry,
+    ) -> DreameLawnMowerOptionsFlow:
         """Return the options flow."""
         return DreameLawnMowerOptionsFlow(config_entry)
 
     async def async_step_user(
         self,
         user_input: dict[str, Any] | None = None,
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the initial config flow."""
         self._errors = {}
 
@@ -218,7 +220,7 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_device(
         self,
         user_input: dict[str, Any] | None = None,
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle selection when multiple mowers are discovered."""
         if user_input is not None:
             return await self._async_create_entry(
@@ -252,7 +254,7 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reauth(
         self,
         user_input: dict[str, Any] | None = None,
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle credential refresh."""
         self._errors = {}
         entry = self._get_reauth_entry()
@@ -318,7 +320,7 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
     async def _async_create_entry(
         self,
         descriptor: DreameLawnMowerDescriptor,
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         await self.async_set_unique_id(descriptor.unique_id)
         self._abort_if_unique_id_configured()
         return self.async_create_entry(
@@ -341,14 +343,14 @@ class DreameLawnMowerConfigFlow(ConfigFlow, domain=DOMAIN):
 class DreameLawnMowerOptionsFlow(OptionsFlow):
     """Handle integration options."""
 
-    def __init__(self, config_entry) -> None:
+    def __init__(self, config_entry: DreameLawnMowerConfigEntry) -> None:
         self._source_entry = config_entry
         self._entry_options = dict(config_entry.options)
 
     async def async_step_init(
         self,
         user_input: dict[str, Any] | None = None,
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         if user_input is not None:
             options = dict(user_input)
             if CONF_MAP_ROTATION in options:
@@ -359,7 +361,7 @@ class DreameLawnMowerOptionsFlow(OptionsFlow):
                 CONF_MAP_RESTART_PREVIEW
             ):
                 await async_remove_restart_preview(
-                    self.hass, self._source_entry.entry_id
+                    self.hass, self._source_entry
                 )
             return self.async_create_entry(title="", data=options)
 

@@ -5,10 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
-from homeassistant.helpers.entity import EntityCategory
+from homeassistant.const import EntityCategory
 
 from .control_options import current_zone_entries
-from .coordinator import DreameLawnMowerCoordinator, runtime_tracking_active
+from .coordinator import DreameLawnMowerCoordinator
+from .coordinator_refresh import runtime_tracking_active
 from .entity import DreameLawnMowerEntity
 from .runtime_cache import (
     DreameLawnMowerRuntimeTelemetryCache,

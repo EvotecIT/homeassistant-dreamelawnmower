@@ -6,7 +6,6 @@ import asyncio
 import logging
 from datetime import timedelta
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import Event, HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -35,6 +34,7 @@ from .point_cloud_api import (
     DreameLawnMowerPointCloudAPI,
     async_setup_point_cloud_api,
 )
+from .runtime_data import DreameLawnMowerConfigEntry, get_coordinator, iter_coordinators
 from .services import async_setup_services, async_unload_services
 from .video_lan_cache import DreameLawnMowerVideoLanCache, async_remove_video_lan_cache
 from .video_provisioning_cache import (
@@ -46,7 +46,9 @@ _LOGGER = logging.getLogger(__name__)
 SLOW_SETUP_SECONDS = 15.0
 
 
-async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_migrate_entry(
+    hass: HomeAssistant, entry: DreameLawnMowerConfigEntry,
+) -> bool:
     """Enable the primary map camera without overriding user choices."""
     if entry.version > CONFIG_ENTRY_VERSION:
         return False
@@ -81,10 +83,12 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(
+    hass: HomeAssistant, entry: DreameLawnMowerConfigEntry,
+) -> bool:
     """Set up Dreame lawn mower from a config entry."""
     if not entry.options.get(CONF_MAP_RESTART_PREVIEW):
-        await async_remove_restart_preview(hass, entry.entry_id)
+        await async_remove_restart_preview(hass, entry)
     coordinator = DreameLawnMowerCoordinator(hass, entry)
     coordinator.applied_entry_update = EntryUpdateSnapshot.capture(entry)
 
@@ -144,7 +148,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         finally:
             coordinator._defer_active_runtime_during_setup = False
 
-        hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+        entry.runtime_data = coordinator
         async_setup_point_cloud_api(hass)
         async_setup_mowing_map_api(hass)
         coordinator.loaded_platforms = platforms
@@ -202,17 +206,12 @@ async def _async_close_video_caches(coordinator: DreameLawnMowerCoordinator) -> 
 
 async def _async_cleanup_failed_setup(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: DreameLawnMowerConfigEntry,
     coordinator: DreameLawnMowerCoordinator,
 ) -> None:
     """Drain coordinator resources registered before a failed setup."""
     await _async_close_video_caches(coordinator)
-    domain_data = hass.data.get(DOMAIN)
-    if (
-        isinstance(domain_data, dict)
-        and domain_data.get(entry.entry_id) is coordinator
-    ):
-        domain_data.pop(entry.entry_id, None)
+    released = await _async_release_entry_runtime(hass, entry, coordinator)
     try:
         await coordinator.async_shutdown()
     except Exception as err:  # noqa: BLE001 - preserve the original setup error
@@ -220,42 +219,62 @@ async def _async_cleanup_failed_setup(
             "Failed to fully close Dreame mower after setup error: %s",
             err,
         )
+    if released and not any(iter_coordinators(hass)):
+        await async_unload_services(hass)
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def _async_release_entry_runtime(
+    hass: HomeAssistant,
+    entry: DreameLawnMowerConfigEntry,
+    coordinator: DreameLawnMowerCoordinator,
+) -> bool:
+    """Withdraw this runtime before retiring API work that could publish it."""
+    if getattr(entry, "runtime_data", None) is not coordinator:
+        return False
+    del entry.runtime_data
+    domain_data = hass.data.get(DOMAIN, {})
+    point_cloud_api = domain_data.get(POINT_CLOUD_API_DATA_KEY)
+    if isinstance(point_cloud_api, DreameLawnMowerPointCloudAPI):
+        point_cloud_api.purge_entry(entry.entry_id)
+    mowing_map_api = domain_data.get(MOWING_MAP_API_KEY)
+    if isinstance(mowing_map_api, MowingMapAPI):
+        await mowing_map_api.purge_entry(entry.entry_id)
+    return True
+
+
+async def async_unload_entry(
+    hass: HomeAssistant, entry: DreameLawnMowerConfigEntry,
+) -> bool:
     """Unload a Dreame lawn mower entry."""
-    coordinator: DreameLawnMowerCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
     platforms = getattr(coordinator, "loaded_platforms", tuple(PLATFORMS))
     unload_ok = await hass.config_entries.async_unload_platforms(entry, platforms)
     if unload_ok:
         await _async_close_video_caches(coordinator)
-        coordinator = hass.data[DOMAIN].pop(entry.entry_id)
-        point_cloud_api = hass.data[DOMAIN].get(POINT_CLOUD_API_DATA_KEY)
-        if isinstance(point_cloud_api, DreameLawnMowerPointCloudAPI):
-            point_cloud_api.purge_entry(entry.entry_id)
-        mowing_map_api = hass.data[DOMAIN].get(MOWING_MAP_API_KEY)
-        if isinstance(mowing_map_api, MowingMapAPI):
-            await mowing_map_api.purge_entry(entry.entry_id)
+        await _async_release_entry_runtime(hass, entry, coordinator)
         await coordinator.async_shutdown()
-        if not any(
-            isinstance(value, DreameLawnMowerCoordinator)
-            for value in hass.data[DOMAIN].values()
-        ):
+        if not any(iter_coordinators(hass)):
             await async_unload_services(hass)
     return unload_ok
 
 
-async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def _async_update_listener(
+    hass: HomeAssistant, entry: DreameLawnMowerConfigEntry,
+) -> None:
     """Apply presentation/polling changes without dropping live connections."""
-    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    coordinator = get_coordinator(hass, entry.entry_id)
     applied = getattr(coordinator, "applied_entry_update", None)
-    if not isinstance(applied, EntryUpdateSnapshot) or applied.requires_reload(entry):
+    if (
+        coordinator is None
+        or not isinstance(applied, EntryUpdateSnapshot)
+        or applied.requires_reload(entry)
+    ):
         if (
             isinstance(applied, EntryUpdateSnapshot)
             and applied.options.get(CONF_MAP_RESTART_PREVIEW)
             and not entry.options.get(CONF_MAP_RESTART_PREVIEW)
         ):
-            await async_remove_restart_preview(hass, entry.entry_id)
+            await async_remove_restart_preview(hass, entry)
         await hass.config_entries.async_reload(entry.entry_id)
         return
     changed = applied.changed_options(entry.options)
@@ -270,9 +289,11 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
         coordinator.async_update_listeners()
 
 
-async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def async_remove_entry(
+    hass: HomeAssistant, entry: DreameLawnMowerConfigEntry,
+) -> None:
     """Remove private cached evidence when its entry is deleted."""
-    await async_remove_restart_preview(hass, entry.entry_id)
-    await async_remove_observation_checkpoint(hass, entry.entry_id)
+    await async_remove_restart_preview(hass, entry)
+    await async_remove_observation_checkpoint(hass, entry)
     await async_remove_video_lan_cache(hass, entry)
     await async_remove_video_provisioning_cache(hass, entry)

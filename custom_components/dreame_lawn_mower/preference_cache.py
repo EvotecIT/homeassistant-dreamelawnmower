@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Any
+from typing import Any, TypeGuard
 
 from .dreame_lawn_mower_client.mowing_preferences import (
     MOWING_PREFERENCE_OPTIONAL_PAYLOAD_FIELDS,
@@ -847,7 +847,7 @@ def _preference_map(
     return None if map_position is None else maps[map_position]
 
 
-def _valid_batch_preferences(value: Any) -> bool:
+def _valid_batch_preferences(value: object) -> TypeGuard[Mapping[Any, Any]]:
     return bool(
         isinstance(value, Mapping)
         and value.get("available") is True
@@ -1012,7 +1012,7 @@ def _as_dict(value: Mapping[str, Any]) -> dict[str, Any]:
     return value if isinstance(value, dict) else dict(value)
 
 
-def _field_sequence(value: Any) -> bool:
+def _field_sequence(value: object) -> TypeGuard[Sequence[str]]:
     return bool(
         isinstance(value, Sequence)
         and not isinstance(value, str | bytes | bytearray)
@@ -1020,7 +1020,7 @@ def _field_sequence(value: Any) -> bool:
     )
 
 
-def _mapping_sequence(value: Any) -> bool:
+def _mapping_sequence(value: object) -> TypeGuard[Sequence[Mapping[Any, Any]]]:
     return bool(
         isinstance(value, Sequence)
         and not isinstance(value, str | bytes | bytearray)

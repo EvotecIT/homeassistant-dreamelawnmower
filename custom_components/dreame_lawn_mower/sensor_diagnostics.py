@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
-from homeassistant.helpers.entity import EntityCategory
+from homeassistant.const import EntityCategory
 
 from .coordinator import DreameLawnMowerCoordinator
 from .entity import DreameLawnMowerEntity

@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-from typing import Any
+from typing import Any, cast
 
 from .dreame_lawn_mower_client.models import DreameLawnMowerMapView
 
@@ -127,7 +127,7 @@ class DreameLawnMowerMapCameraCache:
         """Store an error view and return it."""
         view = DreameLawnMowerMapView(source=source, error=error)
         self.store_view(view, now=now)
-        return self.last_view
+        return cast(DreameLawnMowerMapView, self.last_view)
 
     def image_matches_source(
         self,

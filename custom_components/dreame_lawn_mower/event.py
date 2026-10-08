@@ -3,25 +3,26 @@
 from datetime import UTC, datetime
 
 from homeassistant.components.event import EventDeviceClass, EventEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
 from .coordinator import DreameLawnMowerCoordinator
 from .dreame_lawn_mower_client.device_code_semantics import (
     supports_operational_human_detection,
 )
 from .dreame_lawn_mower_client.notice_events import MowerNoticeEventCursor
 from .entity import DreameLawnMowerEntity
+from .runtime_data import DreameLawnMowerConfigEntry
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: DreameLawnMowerConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Expose person detection on models with confirmed operational notices."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
     if supports_operational_human_detection(coordinator.client.descriptor.model):
         async_add_entities([DreameLawnMowerPersonDetectionEvent(coordinator)])
 

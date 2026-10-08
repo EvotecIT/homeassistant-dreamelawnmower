@@ -8,8 +8,9 @@ import json
 import logging
 import math
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.core import CoreState
 from homeassistant.helpers.storage import Store
@@ -18,6 +19,7 @@ from .const import DOMAIN
 from .dreame_lawn_mower_client.scheduled_run_history import ScheduledRunHistory
 from .dreame_lawn_mower_client.session_timing import ObservedMowingTimer
 from .mower_condition_history import MowerConditionHistory
+from .runtime_data import DreameLawnMowerConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 MAX_CHECKPOINT_BYTES = 16 * 1024
@@ -27,7 +29,7 @@ MIN_TRANSITION_INTERVAL_SECONDS = 10
 MAX_CHECKPOINT_AGE_SECONDS = 30 * 86400
 
 
-class ObservationStore(Store):
+class ObservationStore(Store[dict[str, Any]]):
     """Keep HA's atomic storage while exposing immediate write failures.
 
     Store logs and consumes write errors. The scheduler needs that outcome to
@@ -40,7 +42,8 @@ class ObservationStore(Store):
         self._checkpoint_write_error: Exception | None = None
         await super().async_save(data)
         if self.hass.state is CoreState.stopping:
-            await self._async_handle_write_data()
+            # Both supported HA versions expose this unannotated shutdown coroutine.
+            await cast(Callable[[], Awaitable[None]], self._async_handle_write_data)()
         if self._checkpoint_write_error is not None:
             raise self._checkpoint_write_error
 
@@ -54,7 +57,7 @@ class ObservationStore(Store):
             raise
 
 
-def checkpoint_store(hass: Any, entry_id: str) -> Store:
+def checkpoint_store(hass: Any, entry_id: str) -> Store[dict[str, Any]]:
     """Use one private, overwritten HA store per mower configuration entry."""
     return ObservationStore(
         hass,
@@ -95,7 +98,7 @@ class ObservationCheckpoint:
         ).hexdigest()
         self._lock = asyncio.Lock()
         self._handle: asyncio.TimerHandle | None = None
-        self._task: asyncio.Task | None = None
+        self._task: asyncio.Task[None] | None = None
         self._closed = False
         self._close_complete = False
         self._removed = False
@@ -290,11 +293,13 @@ class ObservationCheckpoint:
             await self._store.async_remove()
 
 
-async def async_remove_observation_checkpoint(hass: Any, entry_id: str) -> None:
+async def async_remove_observation_checkpoint(
+    hass: Any, entry: DreameLawnMowerConfigEntry,
+) -> None:
     """Remove evidence even when the config entry failed to load."""
-    coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
+    coordinator = getattr(entry, "runtime_data", None)
     checkpoint = getattr(coordinator, "observation_checkpoint", None)
     if isinstance(checkpoint, ObservationCheckpoint):
         await checkpoint.async_remove()
     else:
-        await checkpoint_store(hass, entry_id).async_remove()
+        await checkpoint_store(hass, entry.entry_id).async_remove()
