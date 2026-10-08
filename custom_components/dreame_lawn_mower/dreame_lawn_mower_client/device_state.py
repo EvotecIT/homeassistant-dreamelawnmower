@@ -878,7 +878,7 @@ class _DreameMowerDeviceStateMixin(_DreameMowerDeviceContext):
             for prop in DreameMowerStrAIProperty:
                 if prop.value in settings:
                     value = settings[prop.value]
-                    if prop.value in self._dirty_ai_data:
+                    if prop.name in self._dirty_ai_data:
                         if (
                             self._dirty_ai_data[prop.name].value != value
                             and time.time() - self._dirty_ai_data[prop.name].update_time < self._discard_timeout
@@ -889,7 +889,6 @@ class _DreameMowerDeviceStateMixin(_DreameMowerDeviceContext):
                                 self._dirty_ai_data[prop.name].value,
                                 value,
                             )
-                            del self._dirty_ai_data[prop.name]
                             continue
                         del self._dirty_ai_data[prop.name]
 
@@ -924,7 +923,6 @@ class _DreameMowerDeviceStateMixin(_DreameMowerDeviceContext):
                             self._dirty_ai_data[prop.name].value,
                             value,
                         )
-                        del self._dirty_ai_data[prop.name]
                         continue
                     del self._dirty_ai_data[prop.name]
 
@@ -947,9 +945,8 @@ class _DreameMowerDeviceStateMixin(_DreameMowerDeviceContext):
             if self._ready:
                 self._property_changed()
 
-        self.status.ai_policy_accepted = bool(
-            self.status.ai_policy_accepted or self.status.ai_obstacle_detection or self.status.ai_obstacle_picture
-        )
+        # Device feature state is not evidence of cloud privacy-policy consent.
+        # Only a validated cloud acceptance response updates that status.
 
     def _auto_switch_settings_changed(self, previous_auto_switch_settings: Any = None) -> None:
         value = self.get_property(DreameMowerProperty.AUTO_SWITCH_SETTINGS)
