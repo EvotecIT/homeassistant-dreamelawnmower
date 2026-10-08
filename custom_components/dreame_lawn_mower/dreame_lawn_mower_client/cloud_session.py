@@ -381,6 +381,7 @@ class DreameCloudSession:
     async def async_command_device_action(
         self, did: str, host: str | None, request_id: int,
         siid: int, aiid: int, parameters: Any, *, deadline: float,
+        on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
         """Dispatch one mapped device action without replay after sending."""
         return await self._async_rpc(
@@ -388,19 +389,20 @@ class DreameCloudSession:
             {"did": str(did), "siid": siid, "aiid": aiid,
              "in": [] if parameters is None else parameters},
             timeout=max(0.001, deadline - time.monotonic()),
-            deadline=deadline, command=True,
+            deadline=deadline, command=True, on_dispatch=on_dispatch,
         )
 
     async def async_command_device_property(
         self, did: str, host: str | None, request_id: int,
         siid: int, piid: int, value: Any, *, deadline: float,
+        on_dispatch: Callable[[], None] | None = None,
     ) -> Any:
         """Write a property once without replaying an uncertain mutation."""
         return await self._async_rpc(
             did, host, request_id, "set_properties",
             [{"did": str(did), "siid": siid, "piid": piid, "value": value}],
             timeout=max(0.001, deadline - time.monotonic()),
-            deadline=deadline, command=True,
+            deadline=deadline, command=True, on_dispatch=on_dispatch,
         )
 
     async def async_read_app_action(

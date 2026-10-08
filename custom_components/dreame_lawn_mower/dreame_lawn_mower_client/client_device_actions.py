@@ -194,10 +194,16 @@ async def async_run_device_plan(
                                     request.properties,
                                     deadline=read_deadline,
                                 )
-                            attempted = True
-                            if isinstance(request, PropertyRequest):
-                                if request.on_dispatch is not None:
+                            def mark_dispatched() -> None:
+                                nonlocal attempted
+                                attempted = True
+                                if (
+                                    isinstance(request, PropertyRequest)
+                                    and request.on_dispatch is not None
+                                ):
                                     request.on_dispatch()
+
+                            if isinstance(request, PropertyRequest):
                                 return await cloud.async_command_device_property(
                                     client._descriptor.did,
                                     protocol._host,
@@ -206,6 +212,7 @@ async def async_run_device_plan(
                                     request.piid,
                                     request.value,
                                     deadline=deadline,
+                                    on_dispatch=mark_dispatched,
                                 )
                             return await cloud.async_command_device_action(
                                 client._descriptor.did,
@@ -215,6 +222,7 @@ async def async_run_device_plan(
                                 request.aiid,
                                 request.parameters,
                                 deadline=deadline,
+                                on_dispatch=mark_dispatched,
                             )
 
                         response = await async_device_rpc(
