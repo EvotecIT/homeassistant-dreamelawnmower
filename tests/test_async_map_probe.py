@@ -15,6 +15,9 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions imp
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_probe import (
     MAP_HISTORY_PROPERTY_KEYS,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_types import (
+    MapData,
+)
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
     DreameLawnMowerMapView,
 )
@@ -109,7 +112,11 @@ def test_probe_close_stops_later_sections_and_drains_legacy(monkeypatch, phase):
 
         async with server(monkeypatch, handler), ClientSession() as session:
             client = prepare_client(session)
-            ready_device(monkeypatch, client)
+            device = ready_device(monkeypatch, client)
+            map_data = MapData()
+            monkeypatch.setattr(
+                type(device.status), "current_map", property(lambda _: map_data),
+            )
             client._async_update_device = AsyncMock(return_value=client._device)
             del client._async_refresh_legacy_map_view
             client._render_legacy_map_view = legacy

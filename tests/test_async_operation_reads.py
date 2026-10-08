@@ -17,6 +17,9 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import device_
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.models import (
     DreameLawnMowerMapView,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_types import (
+    MapData,
+)
 
 from .test_async_app_preferences import make_client
 from .test_async_cloud_session import cloud_strings, login_response, server
@@ -126,6 +129,10 @@ def test_operation_snapshot_cancellation_drains_map_and_stops_later_sections(
             client = make_client(session)
             device = ready_device(monkeypatch, client)
             client._render_legacy_map_view = read_map
+            map_data = MapData()
+            monkeypatch.setattr(
+                type(device.status), "current_map", property(lambda _: map_data),
+            )
             client.async_get_app_maps = AsyncMock(return_value={"maps": []})
             client.async_refresh_vector_map_view = AsyncMock(
                 return_value=DreameLawnMowerMapView(source="batch_vector_map"),
