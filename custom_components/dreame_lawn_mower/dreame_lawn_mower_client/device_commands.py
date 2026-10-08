@@ -193,7 +193,7 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
 
     def set_property_value(self, prop: str, value: Any) -> object:
         if prop is not None and value is not None:
-            set_fn: Callable[[int], object] | None = getattr(
+            set_fn: Callable[[Any], object] | None = getattr(
                 self, "set_" + prop.lower(), None
             )
             property_key = prop.upper()
@@ -203,7 +203,7 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
             ) = property_key
             if property_key in DreameMowerProperty.__members__:
                 resolved = DreameMowerProperty(DreameMowerProperty[property_key])
-                if resolved not in self._read_write_properties:
+                if set_fn is None and resolved not in self._read_write_properties:
                     raise InvalidActionException("Invalid property")
             elif property_key in DreameMowerAutoSwitchProperty.__members__:
                 resolved = DreameMowerAutoSwitchProperty(DreameMowerAutoSwitchProperty[property_key])
@@ -235,6 +235,15 @@ class _DreameMowerDeviceCommandMixin(_DreameMowerDeviceContext):
                 and not PROPERTY_AVAILABILITY[prop_name](self)
             ):
                 raise InvalidActionException("Property unavailable")
+
+            if resolved in (DreameMowerProperty.DND_START, DreameMowerProperty.DND_END):
+                if not isinstance(value, str) or re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", value) is None:
+                    raise InvalidActionException("Invalid value")
+                if not self.device_connected:
+                    raise InvalidActionException("Device unavailable")
+                if set_fn is None:
+                    raise InvalidActionException("Invalid property")
+                return set_fn(value)
 
             def get_int_value(
                 enum: type[Enum], value: object,

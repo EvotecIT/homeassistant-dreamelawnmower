@@ -114,11 +114,35 @@ def test_string_enum_dispatch_uses_auto_switch_cache(device):
     device.set_property.assert_called_once_with(prop, 1)
 
 
-def test_read_only_property_cannot_reach_a_named_setter(device):
-    device.set_battery_level = Mock()
+@pytest.mark.parametrize(
+    "name,value,prop",
+    [
+        ("DND", True, DreameMowerProperty.DND),
+        ("DND_START", "22:00", DreameMowerProperty.DND_START),
+        ("DND_END", "08:00", DreameMowerProperty.DND_END),
+    ],
+)
+def test_dnd_property_dispatch_uses_existing_dedicated_setters(
+    device, name, value, prop
+):
+    device.capability.dnd_task = False
+
+    assert device.set_property_value(name, value) is True
+
+    device.set_property.assert_called_once_with(prop, value)
+
+
+@pytest.mark.parametrize("value", ["24:00", "22:99", 1])
+def test_invalid_dnd_time_never_reaches_device(device, value):
+    with pytest.raises(InvalidActionException, match="Invalid value"):
+        device.set_property_value("DND_START", value)
+    device.set_property.assert_not_called()
+
+
+def test_read_only_property_never_reaches_device(device):
     with pytest.raises(InvalidActionException, match="Invalid property"):
         device.set_property_value("battery_level", 50)
-    device.set_battery_level.assert_not_called()
+    device.set_property.assert_not_called()
 
 
 def test_disconnected_device_rejects_named_action(device, monkeypatch):
