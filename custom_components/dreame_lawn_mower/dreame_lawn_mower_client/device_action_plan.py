@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Generator
-from dataclasses import dataclass
+from collections.abc import Callable, Generator
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 from .device_types import ACTION_AVAILABILITY, DreameMowerAction, DreameMowerProperty
@@ -42,6 +42,10 @@ class PropertyRequest:
     value: Any
     # Preserve explicit legacy transport policy; native commands never replay.
     legacy_retry_count: int | None = None
+    # State plans distinguish unsent cancellation from uncertain device writes.
+    on_dispatch: Callable[[], None] | None = field(
+        default=None, compare=False, repr=False,
+    )
 
 @dataclass(frozen=True)
 class PropertyReadRequest:
@@ -239,6 +243,8 @@ def run_device_plan[Result](
                         )
                     )
                 elif isinstance(effect, PropertyRequest):
+                    if effect.on_dispatch is not None:
+                        effect.on_dispatch()
                     response = device._protocol.set_property(
                         effect.siid, effect.piid, effect.value,
                         **({"retry_count": effect.legacy_retry_count}

@@ -196,6 +196,8 @@ async def async_run_device_plan(
                                 )
                             attempted = True
                             if isinstance(request, PropertyRequest):
+                                if request.on_dispatch is not None:
+                                    request.on_dispatch()
                                 return await cloud.async_command_device_property(
                                     client._descriptor.did,
                                     protocol._host,

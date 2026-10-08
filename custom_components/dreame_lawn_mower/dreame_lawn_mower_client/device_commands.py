@@ -1,6 +1,7 @@
 """Commands and settings mutations for the legacy device."""
 
 from __future__ import annotations
+import asyncio
 import logging
 import time
 import json
@@ -13,7 +14,7 @@ from datetime import datetime
 from random import randrange
 from threading import RLock, Timer
 from typing import TYPE_CHECKING, Any, Optional
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 
 if TYPE_CHECKING:
     from .device_action_plan import ActionDelay, ActionRequest, PropertyRequest
@@ -379,6 +380,7 @@ class _DreameMowerDeviceCommandMixin:
         from .device_action_plan import PropertyRequest
 
         self.schedule_update(10)
+        previous_dirty = self._dirty_data.get(prop.value)
         current_value = self._update_property(prop, value)
         if current_value is not None:
             if prop not in self._discarded_properties:
@@ -386,10 +388,25 @@ class _DreameMowerDeviceCommandMixin:
 
             self._last_change = time.time()
             self._last_settings_request = 0
+            dispatched = False
+
+            def mark_dispatched() -> None:
+                nonlocal dispatched
+                dispatched = True
+
+            def rollback() -> None:
+                self._update_property(prop, current_value)
+                if previous_dirty is None:
+                    self._dirty_data.pop(prop.value, None)
+                else:
+                    self._dirty_data[prop.value] = previous_dirty
 
             try:
                 mapping = self.property_mapping[prop]
-                result = yield PropertyRequest(mapping["siid"], mapping["piid"], value)
+                result = yield PropertyRequest(
+                    mapping["siid"], mapping["piid"], value,
+                    on_dispatch=mark_dispatched,
+                )
 
                 if result is None or result[0]["code"] != 0:
                     _LOGGER.error(
@@ -398,9 +415,7 @@ class _DreameMowerDeviceCommandMixin:
                         current_value,
                         value,
                     )
-                    self._update_property(prop, current_value)
-                    if prop.value in self._dirty_data:
-                        del self._dirty_data[prop.value]
+                    rollback()
                     self._property_changed()
 
                     self.schedule_update(2)
@@ -412,10 +427,13 @@ class _DreameMowerDeviceCommandMixin:
 
                     self.schedule_update(2)
                     return True
+            except (GeneratorExit, asyncio.CancelledError):
+                if not dispatched:
+                    rollback()
+                    self.schedule_update(1)
+                raise
             except Exception as ex:
-                self._update_property(prop, current_value)
-                if prop.value in self._dirty_data:
-                    del self._dirty_data[prop.value]
+                rollback()
                 self.schedule_update(1)
                 raise DeviceUpdateFailedException("Set property failed %s: %s", prop.name, ex) from None
 
@@ -1400,7 +1418,7 @@ class _DreameMowerDeviceCommandMixin:
         return run_device_plan(self, self._set_auto_switch_settings_plan(settings))
 
     def _set_auto_switch_settings_plan(
-        self, settings: Any,
+        self, settings: Any, *, on_dispatch: Callable[[], None] | None = None,
     ) -> Generator[PropertyRequest, Any, Any]:
         from .device_action_plan import PropertyRequest
 
@@ -1411,6 +1429,7 @@ class _DreameMowerDeviceCommandMixin:
                 mapping["piid"],
                 str(json.dumps(settings, separators=(",", ":"))).replace(" ", ""),
                 legacy_retry_count=1,
+                on_dispatch=on_dispatch,
             ))
 
     def set_auto_switch_property(self, prop: DreameMowerAutoSwitchProperty, value: int) -> dict[str, Any] | None:
@@ -1426,12 +1445,30 @@ class _DreameMowerDeviceCommandMixin:
                 raise InvalidActionException("Not supported")
             current_value = self.get_auto_switch_property(prop)
             if current_value != value:
+                previous_dirty = self._dirty_auto_switch_data.get(prop.name)
                 self._dirty_auto_switch_data[prop.name] = DirtyData(value, current_value, time.time())
                 self.auto_switch_data[prop.name] = value
                 self._property_changed()
                 result = None
+                dispatched = False
+
+                def mark_dispatched() -> None:
+                    nonlocal dispatched
+                    dispatched = True
+
+                def rollback() -> None:
+                    if previous_dirty is None:
+                        self._dirty_auto_switch_data.pop(prop.name, None)
+                    else:
+                        self._dirty_auto_switch_data[prop.name] = previous_dirty
+                    self.auto_switch_data[prop.name] = current_value
+                    self._property_changed()
+
                 try:
-                    result = yield from self._set_auto_switch_settings_plan({"k": prop.value, "v": int(value)})
+                    result = yield from self._set_auto_switch_settings_plan(
+                        {"k": prop.value, "v": int(value)},
+                        on_dispatch=mark_dispatched,
+                    )
                     if result is None or result[0]["code"] != 0:
                         _LOGGER.error(
                             "Auto Switch Property not updated: %s: %s -> %s",
@@ -1439,19 +1476,17 @@ class _DreameMowerDeviceCommandMixin:
                             current_value,
                             value,
                         )
-                        if prop.name in self._dirty_auto_switch_data:
-                            del self._dirty_auto_switch_data[prop.name]
-                        self.auto_switch_data[prop.name] = current_value
-                        self._property_changed()
+                        rollback()
                     else:
                         _LOGGER.info("Update Property: %s: %s -> %s", prop.name, current_value, value)
                         if prop.name in self._dirty_auto_switch_data:
                             self._dirty_auto_switch_data[prop.name].update_time = time.time()
+                except (GeneratorExit, asyncio.CancelledError):
+                    if not dispatched:
+                        rollback()
+                    raise
                 except Exception:
-                    if prop.name in self._dirty_auto_switch_data:
-                        del self._dirty_auto_switch_data[prop.name]
-                    self.auto_switch_data[prop.name] = current_value
-                    self._property_changed()
+                    rollback()
                 return result
 
     def set_camera_light_brightness(self, brightness: int) -> dict[str, Any] | None:
