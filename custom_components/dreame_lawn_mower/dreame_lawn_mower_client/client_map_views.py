@@ -108,16 +108,10 @@ async def async_legacy_map_view(
                     client, lambda device: device.status.current_map, refresh=False,
                 )
         except (DeviceException, DreameLawnMowerConnectionError) as err:
-            error = str(err)
-            return await async_read_device_state(
-                client,
-                lambda _device: DreameLawnMowerMapView(
-                    source="legacy_current_map", error=error,
-                    diagnostics=client._safe_map_diagnostics(
-                        source="legacy_current_map", reason=error,
-                    ),
-                ),
-                refresh=False,
+            # State may be unavailable after the failed read. Diagnostics are
+            # optional; reporting the original error must not acquire it again.
+            return DreameLawnMowerMapView(
+                source="legacy_current_map", error=str(err),
             )
         return await async_read_device_state(
             client,
