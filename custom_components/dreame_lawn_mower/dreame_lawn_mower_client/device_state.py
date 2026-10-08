@@ -343,7 +343,6 @@ class _DreameMowerDeviceStateMixin:
                             self._dirty_data[data_id].value,
                             value,
                         )
-                        del self._dirty_data[data_id]
                         continue
                     del self._dirty_data[data_id]
 
@@ -1088,7 +1087,6 @@ class _DreameMowerDeviceStateMixin:
                                     self._dirty_auto_switch_data[prop.name].value,
                                     value,
                                 )
-                                del self._dirty_auto_switch_data[prop.name]
                                 continue
                             del self._dirty_auto_switch_data[prop.name]
 
