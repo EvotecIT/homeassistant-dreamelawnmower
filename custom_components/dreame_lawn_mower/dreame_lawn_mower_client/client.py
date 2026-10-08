@@ -89,6 +89,7 @@ from .client_schedules import (
 )
 from .client_schedules import _DreameLawnMowerClientSchedulesMixin
 from .client_settings import _DreameLawnMowerClientSettingsMixin
+from .client_task_control import serialized_task_control as _serialized_task_control
 from .client_tracking import _DreameLawnMowerClientTrackingMixin
 from .cloud_session import DreameCloudSession as _DreameCloudSession
 from .deadline import DeadlineExceededError as DeadlineExceededError
@@ -570,6 +571,7 @@ class DreameLawnMowerClient(
         self._schedule_operation_lock = _threading.RLock()
         self._schedule_async_gate = asyncio.Lock()
         self._device_settings_write_lock = asyncio.Lock()
+        self._task_control_gate = asyncio.Lock()
         self._app_schedule_retry_offset = 0
         self._schedule_protocols: dict[int, str] = {}
         self._schedule_document_versions: dict[int, int] = {}
@@ -727,6 +729,7 @@ class DreameLawnMowerClient(
         self._latest_snapshot = snapshot
         return snapshot
 
+    @_serialized_task_control
     async def async_start_mowing(self) -> bool | None:
         """Start mowing and report fresh, resumed, or unknown session identity."""
         try:
@@ -775,6 +778,7 @@ class DreameLawnMowerClient(
             self, require_new_session=require_new_session,
         )
 
+    @_serialized_task_control
     async def async_pause(self) -> None:
         """Pause mowing."""
         from .client_device_actions import async_run_device_plan
@@ -794,6 +798,7 @@ class DreameLawnMowerClient(
 
         await self._async_cloud_read(pause)
 
+    @_serialized_task_control
     async def async_start_fresh_mowing(self) -> bool | None:
         """Start an explicit all-area task, refusing resumable or unknown sessions."""
         baseline = await self.async_refresh_authoritative_snapshot()
@@ -815,6 +820,7 @@ class DreameLawnMowerClient(
 
         return await async_read_start_evidence(self)
 
+    @_serialized_task_control
     async def async_cancel_current_task(self) -> bool:
         """End the current task and require authoritative inactive readback.
 
@@ -941,6 +947,7 @@ class DreameLawnMowerClient(
             raise readback_error from ambiguous_stop_error
         raise readback_error
 
+    @_serialized_task_control
     async def async_dock(self) -> None:
         """End an active mowing session and return the mower to base."""
         async def dock(_cloud: _DreameCloudSession) -> None:
@@ -997,10 +1004,12 @@ class DreameLawnMowerClient(
             refresh_state=async_refresh_state,
         )
 
+    @_serialized_task_control
     async def async_dock_without_stopping(self) -> None:
         """Return to base while preserving a resumable mowing session."""
         await self._async_device_control(dock=True)
 
+    @_serialized_task_control
     async def async_start_zone_mowing(
         self, zone_ids: Sequence[int], *, require_inactive_task: bool = False
     ) -> Any:
@@ -1044,6 +1053,7 @@ class DreameLawnMowerClient(
 
         return await self._async_cloud_read(start_task)
 
+    @_serialized_task_control
     async def async_start_edge_mowing(
         self,
         contour_ids: Sequence[Sequence[int]],
@@ -1089,6 +1099,7 @@ class DreameLawnMowerClient(
 
         return await self._async_cloud_read(start_task)
 
+    @_serialized_task_control
     async def async_start_spot_mowing(
         self, spot_ids: Sequence[int], *, require_inactive_task: bool = False
     ) -> Any:
@@ -1277,6 +1288,7 @@ class DreameLawnMowerClient(
             raise DreameLawnMowerConnectionError(str(err)) from err
         return client_task_result(response, task_name=task_name)
 
+    @_serialized_task_control
     async def async_go_to_maintenance_point(self, point_id: int) -> Any:
         """Drive to one configured map maintenance point."""
         snapshot = await self.async_refresh_authoritative_snapshot()
@@ -1290,6 +1302,7 @@ class DreameLawnMowerClient(
             task_name="maintenance point",
         )
 
+    @_serialized_task_control
     async def async_switch_current_map(self, map_index: int) -> Any:
         """Switch the active map only while idle and require map-list readback."""
         map_index = int(map_index)
@@ -1361,6 +1374,7 @@ class DreameLawnMowerClient(
             self, self._remote_control_support_from_device, refresh=refresh,
         )
 
+    @_serialized_task_control
     async def async_remote_control_move_step(
         self,
         *,
