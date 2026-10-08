@@ -1,8 +1,10 @@
 """Native startup contract through the real client and local HTTP transport."""
 
 import asyncio
+import base64
 import json
 import time
+import zlib
 from threading import Event
 from unittest.mock import Mock
 
@@ -12,6 +14,9 @@ from aiohttp import ClientSession, web
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     client_startup,
     protocol_cloud,
+)
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
+    device as device_module,
 )
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.client import (
     DreameLawnMowerClient,
@@ -39,10 +44,14 @@ from tests.test_async_cloud_session import (
 
 @pytest.mark.parametrize("account_type", ["dreame", "mova"])
 @pytest.mark.parametrize(
-    "fallback", [False, True, "empty", "vendor_error", "http_error"],
+    "fallback,supplied_deadline,initialize_maps", [
+        (False, False, False), (True, False, False), ("empty", False, False),
+        ("vendor_error", False, False), ("http_error", False, False),
+        (False, True, False), (False, False, True),
+    ],
 )
 def test_startup_uses_native_metadata_and_initial_properties(
-    monkeypatch, account_type, fallback,
+    monkeypatch, account_type, fallback, supplied_deadline, initialize_maps,
 ):
     strings = cloud_strings(account_type)
     info = {
@@ -57,6 +66,12 @@ def test_startup_uses_native_metadata_and_initial_properties(
     battery = DreameMowerProperty.BATTERY_LEVEL
     mqtt = Mock()
     monkeypatch.setattr(protocol_cloud.mqtt_client, "Client", Mock(return_value=mqtt))
+    if initialize_maps:
+        # The supplied vendor catalog determines which models need an IV.
+        catalog = json.dumps({"0123456789abcdef": ["g2408"]}).encode()
+        monkeypatch.setattr(
+            device_module, "DEVICE_KEY", base64.b64encode(zlib.compress(catalog)),
+        )
 
     async def handler(request):
         seen.append(request.path)
@@ -101,8 +116,13 @@ def test_startup_uses_native_metadata_and_initial_properties(
                 ),
             )
             device = client._ensure_device()
-            # Map maintenance has a separate lifecycle and transport migration.
-            device._map_manager = None
+            manager = device._map_manager if initialize_maps else None
+            device._map_manager = manager
+            if manager is not None:
+                # Keep timers/network requests inert while using the real map
+                # initialization and decoder configuration owners.
+                manager.schedule_update = Mock()
+                manager._request_map = Mock(return_value=None)
             owner = device._protocol.cloud
             owner.login = Mock(side_effect=AssertionError("Synchronous login"))
             owner.get_device_info = Mock(side_effect=AssertionError("Synchronous info"))
@@ -113,13 +133,19 @@ def test_startup_uses_native_metadata_and_initial_properties(
                 side_effect=AssertionError("Synchronous initial properties"),
             )
             try:
-                assert await client._async_update_device() is device
+                assert await client._async_update_device(
+                    deadline=time.monotonic() + 5 if supplied_deadline else None,
+                ) is device
                 assert device._ready and device.available
                 assert device.info.model == info["model"]
                 assert device.info.firmware_version == (
                     None if fallback in {"vendor_error", "http_error"} else "4.3.6_1200"
                 )
                 assert device.data[battery.value] == 55
+                if manager is not None:
+                    assert not device.device_connected  # CONNACK has not arrived.
+                    assert manager._aes_iv == "0123456789abcdef"
+                    assert manager._capability is device.capability
                 assert device.status.ai_policy_accepted is True
                 assert owner._uuid == "account"
                 assert owner._uid == "device-owner"

@@ -1,19 +1,94 @@
 """Native map-frame RPC preserves the synchronous wire envelope."""
 
 import asyncio
+import gzip
 import time
-from unittest.mock import Mock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from aiohttp import ClientSession, web
 
 from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     client_map_frames,
+    client_map_maintenance,
+    cloud_session,
+    exceptions,
     map_manager,
 )
 
 from .test_async_app_commands import client_for
 from .test_async_cloud_session import cloud_strings, login_response, server
+
+
+@pytest.mark.parametrize("kind", ["frame", "saved", "recovery"])
+@pytest.mark.parametrize("oversized", [False, True])
+def test_map_objects_use_content_limit_and_preserve_owner(monkeypatch, kind, oversized):
+    """Detailed maps exceed metadata size; excessive decoded objects stay bounded."""
+    content = (
+        b"frame-data" if kind == "frame"
+        else b'[{"id": 1, "info": []}]' if kind == "recovery"
+        else b'{"mapstr": [], "curr_id": 0}'
+    )
+    payload = content + b" " * ((32 if oversized else 2) * 1024 * 1024)
+    encoded = gzip.compress(payload)
+
+    async def handler(request):
+        assert "X-Account-Token" not in request.headers
+        assert "Authorization" not in request.headers
+        return web.Response(body=encoded, headers={"Content-Encoding": "gzip"})
+
+    async def scenario():
+        async with server(monkeypatch, handler) as url, ClientSession(
+            headers={"X-Account-Token": "private"},
+        ) as session:
+            sign = AsyncMock(return_value=url)
+            monkeypatch.setattr(
+                cloud_session.DreameCloudSession, "async_get_interim_file_url", sign,
+            )
+            client = client_for(session)
+            device = client._ensure_device()
+            manager = device._map_manager
+            manager._map_list_object_name = "saved-object"
+            manager._recovery_map_list_object_name = "recovery-object"
+            manager._need_map_list_request = kind != "recovery"
+            manager._need_recovery_map_list_request = True
+            saved_map = SimpleNamespace(recovery_map_list=["old"])
+            manager._saved_map_data = {1: saved_map}
+            manager._map_list = [1]
+            try:
+                operation = (
+                    client_map_frames.async_download_frame_object(
+                        client, device, manager, "frame-object,frame-key",
+                        deadline=time.monotonic() + 5,
+                    ) if kind == "frame" else
+                    client_map_maintenance.async_refresh_saved_map_list(
+                        client, recovery=kind == "recovery",
+                    )
+                )
+                if oversized:
+                    with pytest.raises(exceptions.DreameLawnMowerConnectionError):
+                        await operation
+                    assert manager._saved_map_data == {1: saved_map}
+                    assert saved_map.recovery_map_list == ["old"]
+                else:
+                    result = await operation
+                    if kind == "frame":
+                        assert result == (payload, "frame-key")
+                    elif kind == "saved":
+                        assert manager._map_list == []
+                        assert manager._need_map_list_request is False
+                    else:
+                        assert saved_map.recovery_map_list == []
+                        assert manager._need_recovery_map_list_request is False
+                assert sign.await_count == 1
+                assert not session.closed
+                assert not session.connector.closed
+                assert not client._cloud_read_tasks
+            finally:
+                await client.async_close()
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("account", ["dreame", "mova"])
@@ -137,7 +212,7 @@ def test_frame_download_retains_key_and_rejects_stale_owner(monkeypatch, outcome
         entered, release = asyncio.Event(), asyncio.Event()
         sign = AsyncMock(return_value="https://example.invalid/private-frame")
 
-        async def download(self, url, *, deadline):
+        async def download(self, url, *, deadline, max_bytes):
             assert url == "https://example.invalid/private-frame"
             entered.set()
             await release.wait()

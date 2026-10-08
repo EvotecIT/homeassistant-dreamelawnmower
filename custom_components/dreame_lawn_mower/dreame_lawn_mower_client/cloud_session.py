@@ -145,12 +145,14 @@ class DreameCloudSession:
 
     async def async_get_public_file(
         self, url: str, *, deadline: float, attempts: int = 1, timeout: float = 20,
+        max_bytes: int = MAX_CLOUD_RESPONSE_BYTES,
     ) -> bytes:
         """Download without account credentials using the injected connection pool."""
         from .public_download import async_download_public_file
 
         return await async_download_public_file(
             self._session, url, deadline=deadline, attempts=attempts, timeout=timeout,
+            max_bytes=max_bytes,
         )
 
     async def async_login(

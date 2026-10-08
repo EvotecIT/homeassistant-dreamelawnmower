@@ -390,14 +390,19 @@ class DreameMowerDreameHomeCloudProtocol:
             _LOGGER.warn("Device client reconnect failed! Retrying...")
 
     def _set_client_key(self) -> bool:
+        client = self._client
+        if client is None:
+            return False
         if self._client_key != self._key:
             self._client_key = self._key
-            self._client.username_pw_set(self._uuid, self._client_key)
+            client.username_pw_set(self._uuid, self._client_key)
             return True
         return False
 
     @staticmethod
     def _on_client_connect(client, self, flags, rc):
+        if self._shutdown_is_requested():
+            return
         self._client_connecting = False
         self._reconnect_timer_cancel()
         if rc == 0:
@@ -413,8 +418,14 @@ class DreameMowerDreameHomeCloudProtocol:
                     pass
         else:
             _LOGGER.warn("Device client connection failed: %s", rc)
-            if not self._set_client_key():
-                self._client_connected = False
+            self._client_connected = False
+            if not self._set_client_key() and rc in (4, 5):
+                # MQTT 3 CONNACK authentication rejection is reported here,
+                # including revoked tokens that have not reached their expiry.
+                if self._native_authentication_request is not None:
+                    self._native_authentication_request()
+                else:
+                    self.login()
 
     @staticmethod
     def _on_client_disconnect(client, self, rc):

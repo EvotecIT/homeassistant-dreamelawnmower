@@ -23,6 +23,9 @@ from .exceptions import DreameLawnMowerConnectionError
 from .http_response import async_read_bounded_response
 
 MAX_PUBLIC_JSON_BYTES = 1024 * 1024
+# Stored map frames and multi-map lists need a larger content budget than
+# metadata. Keep their HTTP-decoded bytes bounded to the point-cloud scale.
+MAX_PUBLIC_MAP_BYTES = 32 * 1024 * 1024
 
 
 @dataclass(frozen=True)

@@ -84,3 +84,32 @@ def test_mqtt_connection_error_does_not_log_exception_secrets(monkeypatch, caplo
         assert "private-auth-token" not in caplog.text
     finally:
         cloud.disconnect()
+
+
+def test_pending_mqtt_key_is_preserved_until_client_exists():
+    cloud = protocol_cloud.DreameMowerDreameHomeCloudProtocol("user", "password")
+    cloud._key = "new-key"
+    cloud._client_key = "old-key"
+    cloud._uuid = "account"
+    try:
+        assert cloud._set_client_key() is False
+        assert cloud._client_key == "old-key"
+        cloud._client = mqtt = Mock()
+        assert cloud._set_client_key() is True
+        mqtt.username_pw_set.assert_called_once_with("account", "new-key")
+        assert cloud._set_client_key() is False
+        assert mqtt.username_pw_set.call_count == 1
+    finally:
+        cloud.disconnect()
+
+
+@pytest.mark.parametrize("result", [0, 4, 5])
+def test_late_connect_callback_cannot_restore_closed_client(result):
+    cloud = protocol_cloud.DreameMowerDreameHomeCloudProtocol("user", "password")
+    cloud._client = mqtt = Mock()
+    cloud._key = "new-key"
+    cloud.disconnect()
+    cloud._on_client_connect(mqtt, cloud, {}, result)
+    assert cloud._client_connected is False
+    mqtt.subscribe.assert_not_called()
+    mqtt.username_pw_set.assert_not_called()

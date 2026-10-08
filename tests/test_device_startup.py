@@ -25,7 +25,8 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.map_manager im
 )
 
 
-def test_connect_device_defers_initial_map_request(monkeypatch) -> None:
+@pytest.mark.parametrize("mqtt_connected", [False, True])
+def test_connect_device_defers_initial_map_request(monkeypatch, mqtt_connected) -> None:
     """The first state snapshot must not wait for cloud map acquisition."""
     monkeypatch.setattr(
         device_module,
@@ -65,7 +66,9 @@ def test_connect_device_defers_initial_map_request(monkeypatch) -> None:
     state = vars(mower)
     mower = object.__new__(DreameMowerDevice)
     mower.__dict__.update(state)
-    monkeypatch.setattr(DreameMowerDevice, "device_connected", property(lambda _: True))
+    monkeypatch.setattr(
+        DreameMowerDevice, "device_connected", property(lambda _: mqtt_connected),
+    )
     monkeypatch.setattr(DreameMowerDevice, "cloud_connected", property(lambda _: False))
     monkeypatch.setattr(
         DreameMowerDevice, "_map_update_interval", property(lambda _: 10),
@@ -74,6 +77,7 @@ def test_connect_device_defers_initial_map_request(monkeypatch) -> None:
 
     mower._request_properties.assert_called_once_with()
     map_manager.set_update_interval.assert_called_once_with(10)
+    map_manager.set_capability.assert_called_once_with(mower.capability)
     map_manager.schedule_update.assert_not_called()
     map_manager.update.assert_not_called()
     assert mower.available is True
