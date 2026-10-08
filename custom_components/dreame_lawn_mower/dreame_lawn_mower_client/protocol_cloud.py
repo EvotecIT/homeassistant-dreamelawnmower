@@ -420,8 +420,14 @@ class DreameMowerDreameHomeCloudProtocol:
                     pass
         else:
             _LOGGER.warn("Device client connection failed: %s", rc)
-            if not self._set_client_key():
-                self._client_connected = False
+            self._client_connected = False
+            if not self._set_client_key() and rc in (4, 5):
+                # MQTT 3 CONNACK authentication rejection is reported here,
+                # including revoked tokens that have not reached their expiry.
+                if self._native_authentication_request is not None:
+                    self._native_authentication_request()
+                else:
+                    self.login()
 
     @staticmethod
     def _on_client_disconnect(client, self, rc):
