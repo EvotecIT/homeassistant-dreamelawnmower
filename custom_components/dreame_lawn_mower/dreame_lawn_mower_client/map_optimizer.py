@@ -1413,6 +1413,8 @@ class DreameMowerMapOptimizer:
             return
         dimensions, source_pixels = current_geometry
         saved_dimensions, saved_pixels = saved_geometry
+        if saved_dimensions.grid_size != dimensions.grid_size:
+            return
         if saved_map_data:
             maxX = dimensions.left + (dimensions.width * dimensions.grid_size)
             maxY = dimensions.top + (dimensions.height * dimensions.grid_size)
@@ -1538,6 +1540,8 @@ class DreameMowerMapOptimizer:
         saved_geometry = (
             self._valid_raster(saved_map_data) if saved_map_data is not None else None
         )
+        if saved_geometry is not None and saved_geometry[0].grid_size != dimensions.grid_size:
+            saved_geometry = None
         if saved_geometry is None:
             saved_map_data = None
         else:

@@ -169,6 +169,20 @@ def test_path_start_breaks_lines_without_drawing_between_sections():
     ]
 
 
+@pytest.mark.parametrize("sections", ["single", "starts", "trailing-start"])
+def test_path_entities_contain_only_drawable_segments(sections):
+    data = _map()
+    expected = []
+    if sections == "single":
+        data.path = data.path[:1]
+    elif sections == "starts":
+        data.path = [Path(0, 0, PathType.SWEEP), Path(150, 200, PathType.SWEEP)]
+    else:
+        data.path.append(Path(150, 200, PathType.SWEEP))
+        expected = [{"type": "path", "points": [3277, 3277, 3282, 3267]}]
+    assert _entities(_metadata(Renderer().render_map(data)), "path") == expected
+
+
 def test_restrictions_and_unknown_headings_follow_mutable_current_state():
     renderer, data = Renderer(), _map()
     data.robot_position.a = None

@@ -201,10 +201,12 @@ class DreameMowerMapDataJsonRenderer:
                     points.extend(cls._convert_coordinates(previous.x, previous.y))
                     points.extend(cls._convert_coordinates(point.x, point.y))
                 else:
-                    entities.append({"type": "path", "points": points})
+                    if points:
+                        entities.append({"type": "path", "points": points})
                     points = []
                 previous = point
-            entities.append({"type": "path", "points": points})
+            if points:
+                entities.append({"type": "path", "points": points})
         return entities
 
     @staticmethod

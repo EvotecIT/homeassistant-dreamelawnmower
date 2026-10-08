@@ -193,7 +193,8 @@ def test_older_frame_without_time_does_not_crash_or_replace_current_map():
 
 def test_cached_file_url_uses_expiry_and_failed_download_is_retryable(monkeypatch):
     cloud = SimpleNamespace(
-        logged_in=True, get_interim_file_url=Mock(return_value="https://example.invalid/map?sig=fake"),
+        logged_in=True,
+        get_interim_file_url=Mock(return_value="https://example.invalid/map?sig=fake"),
         get_file=Mock(side_effect=[None, b"map"]),
     )
     manager = DreameMapMowerMapManager(SimpleNamespace(cloud=cloud))
