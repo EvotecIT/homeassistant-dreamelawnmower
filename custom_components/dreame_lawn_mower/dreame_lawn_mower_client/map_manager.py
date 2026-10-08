@@ -1500,7 +1500,10 @@ class DreameMapMowerMapManager:
         if self._device_docked != docked:
             if docked:
                 if not self._vslam_map:
-                    self._request_map()
+                    # State setters also run inside native startup/readback.
+                    # Let the existing scheduled worker perform map I/O.
+                    self._map_request_count = 0
+                    self._need_map_request = True
                 elif self._map_data and self._map_data.saved_map_status == 1:
                     saved_map_data = self._map_manager.selected_map
                     self._map_data.segments = copy.deepcopy(saved_map_data.segments)

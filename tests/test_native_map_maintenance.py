@@ -22,7 +22,7 @@ def test_saved_map_list_commit_requires_current_owner(monkeypatch, outcome, reco
         entered, release = asyncio.Event(), asyncio.Event()
         signing = AsyncMock(return_value="https://example.invalid/signed-map")
 
-        async def download(self, url, *, deadline):
+        async def download(self, url, *, deadline, max_bytes):
             assert url == "https://example.invalid/signed-map"
             entered.set()
             await release.wait()

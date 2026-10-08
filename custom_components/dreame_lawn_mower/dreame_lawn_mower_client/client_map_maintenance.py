@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from .client_state_reads import async_read_device_state
 from .exceptions import DreameLawnMowerConnectionError
+from .public_download import MAX_PUBLIC_MAP_BYTES
 
 if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
@@ -127,7 +128,9 @@ async def async_refresh_saved_map_list(
                 )
                 if not url:
                     return
-                payload = await cloud.async_get_public_file(url, deadline=deadline)
+                payload = await cloud.async_get_public_file(
+                    url, deadline=deadline, max_bytes=MAX_PUBLIC_MAP_BYTES,
+                )
 
                 def apply(current: DreameMowerDevice) -> None:
                     current_name = (
