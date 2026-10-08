@@ -115,7 +115,7 @@ def test_pending_mqtt_key_is_preserved_until_client_exists():
         cloud.disconnect()
 
 
-@pytest.mark.parametrize("result", [0, 5])
+@pytest.mark.parametrize("result", [0, 4, 5])
 def test_late_connect_callback_cannot_restore_closed_client(result):
     cloud = protocol_cloud.DreameMowerDreameHomeCloudProtocol("user", "password")
     cloud._client = mqtt = Mock()

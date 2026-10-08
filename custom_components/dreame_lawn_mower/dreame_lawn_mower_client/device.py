@@ -420,7 +420,9 @@ class DreameMowerDevice(
         """Start map maintenance after initial properties establish capabilities."""
         self._last_update_failed = None
 
-        if self.device_connected and self._protocol.cloud is not None and (not self._ready or not self.available):
+        # HTTP startup has already established identity and capabilities. MQTT
+        # may still be connecting; map decoding must not depend on its timing.
+        if self._protocol.cloud is not None and (not self._ready or not self.available):
             if self._map_manager:
                 model = self.info.model.split(".")
                 if len(model) == 3:

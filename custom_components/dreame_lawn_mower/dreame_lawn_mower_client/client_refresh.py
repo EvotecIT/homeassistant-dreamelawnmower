@@ -107,8 +107,9 @@ async def async_update_device(
                     "while another update is running."
                 )
             return device, None
-        if supplied_deadline is None and (
-            not device.cloud_connected or not device._ready
+        if _cleanup is None and (
+            not device._ready
+            or (supplied_deadline is None and not device.cloud_connected)
         ):
             return device, []
         return device, select_properties(device)
@@ -138,8 +139,9 @@ async def async_update_device(
                 rpc_deadline = (
                     deadline if deadline is not None else time.monotonic() + 20
                 )
-                if supplied_deadline is None and (
-                    not device.cloud_connected or not device._ready
+                if _cleanup is None and (
+                    not device._ready
+                    or (supplied_deadline is None and not device.cloud_connected)
                 ):
                     await async_start_device(
                         client,
