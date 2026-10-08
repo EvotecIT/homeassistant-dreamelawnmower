@@ -383,8 +383,10 @@ class _DreameMowerDeviceCommandMixin:
         previous_dirty = self._dirty_data.get(prop.value)
         current_value = self._update_property(prop, value)
         if current_value is not None:
+            pending_write = None
             if prop not in self._discarded_properties:
-                self._dirty_data[prop.value] = DirtyData(value, current_value, time.time())
+                pending_write = DirtyData(value, current_value, time.time())
+                self._dirty_data[prop.value] = pending_write
 
             self._last_change = time.time()
             self._last_settings_request = 0
@@ -395,6 +397,8 @@ class _DreameMowerDeviceCommandMixin:
                 dispatched = True
 
             def rollback() -> None:
+                if pending_write is not None and self._dirty_data.get(prop.value) is not pending_write:
+                    return
                 self._update_property(prop, current_value)
                 if previous_dirty is None:
                     self._dirty_data.pop(prop.value, None)
@@ -422,8 +426,8 @@ class _DreameMowerDeviceCommandMixin:
                     return False
                 else:
                     _LOGGER.info("Update Property: %s: %s -> %s", prop.name, current_value, value)
-                    if prop.value in self._dirty_data:
-                        self._dirty_data[prop.value].update_time = time.time()
+                    if pending_write is not None and self._dirty_data.get(prop.value) is pending_write:
+                        pending_write.update_time = time.time()
 
                     self.schedule_update(2)
                     return True
@@ -1446,7 +1450,8 @@ class _DreameMowerDeviceCommandMixin:
             current_value = self.get_auto_switch_property(prop)
             if current_value != value:
                 previous_dirty = self._dirty_auto_switch_data.get(prop.name)
-                self._dirty_auto_switch_data[prop.name] = DirtyData(value, current_value, time.time())
+                pending_write = DirtyData(value, current_value, time.time())
+                self._dirty_auto_switch_data[prop.name] = pending_write
                 self.auto_switch_data[prop.name] = value
                 self._property_changed()
                 result = None
@@ -1457,6 +1462,8 @@ class _DreameMowerDeviceCommandMixin:
                     dispatched = True
 
                 def rollback() -> None:
+                    if self._dirty_auto_switch_data.get(prop.name) is not pending_write:
+                        return
                     if previous_dirty is None:
                         self._dirty_auto_switch_data.pop(prop.name, None)
                     else:
@@ -1479,8 +1486,8 @@ class _DreameMowerDeviceCommandMixin:
                         rollback()
                     else:
                         _LOGGER.info("Update Property: %s: %s -> %s", prop.name, current_value, value)
-                        if prop.name in self._dirty_auto_switch_data:
-                            self._dirty_auto_switch_data[prop.name].update_time = time.time()
+                        if self._dirty_auto_switch_data.get(prop.name) is pending_write:
+                            pending_write.update_time = time.time()
                 except (GeneratorExit, asyncio.CancelledError):
                     if not dispatched:
                         rollback()
