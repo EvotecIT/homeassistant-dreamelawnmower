@@ -3979,6 +3979,48 @@ def test_video_camera_cloud_start_cancellation_cleans_late_session() -> None:
     )
 
 
+@pytest.mark.parametrize("cancel", [False, True])
+def test_lan_rediscovery_preserves_cached_failure_and_cancellation(cancel) -> None:
+    async def run():
+        entity = _uninitialized_entity()
+        endpoint = SimpleNamespace(address="192.0.2.20")
+        entity._lan_cache = SimpleNamespace(endpoint=endpoint)
+        entity.hass = SimpleNamespace(
+            async_add_executor_job=lambda fn: asyncio.create_task(
+                asyncio.to_thread(fn),
+            ),
+        )
+        inputs = DreameLawnMowerCameraStreamRuntimeInputs(
+            source="lan_video_cache", did="did-1",
+            product_id="product-1", device_name="device-1",
+        )
+
+        def start(_inputs, *, endpoint):
+            raise DreameLawnMowerVideoRuntimeError("cached endpoint unavailable")
+
+        async def discover(*args, **kwargs):
+            assert kwargs["timeout"] == 5.0
+            assert kwargs["preferred_address"] == endpoint.address
+            if cancel:
+                raise asyncio.CancelledError
+            raise DreameLawnMowerVideoRuntimeError("rediscovery unavailable")
+
+        with patch.object(
+            video_camera_startup_module, "async_discover_lan_video_endpoint", discover,
+        ):
+            with pytest.raises(
+                asyncio.CancelledError if cancel else DreameLawnMowerVideoRuntimeError,
+            ) as result:
+                await entity._async_start_lan_runtime_session(
+                    SimpleNamespace(start_lan_stream=start), inputs,
+                )
+            if not cancel:
+                assert "cached endpoint unavailable" in str(result.value)
+                assert "rediscovery unavailable" in str(result.value)
+
+    asyncio.run(run())
+
+
 def test_video_camera_lan_handoff_raises_when_probe_stop_fails() -> None:
     async def _run() -> tuple[int, int, str | None]:
         entity = _uninitialized_entity()

@@ -50,6 +50,7 @@ from .video_camera_types import (
 from .video_startup_timing import VideoStartupTiming
 
 _LOGGER = logging.getLogger(__name__)
+_LAN_DISCOVERY_STAGE_TIMEOUT = 5.0
 video_helpers = _FacadeModuleProxy("video_helpers", _video_helpers)
 
 
@@ -609,21 +610,31 @@ class DreameLawnMowerVideoStartupMixin:
                 self._schedule_late_start_cleanup(runtime, start_job)
                 raise
 
+        cached_error: str | None = None
         if cached_endpoint is not None:
             try:
                 return await start_at_endpoint(cached_endpoint)
-            except DreameLawnMowerVideoRuntimeError:
-                pass
+            except DreameLawnMowerVideoRuntimeError as err:
+                cached_error = sanitize_diagnostic_text(err)
         request = DreameLawnMowerXp2pLiveStreamRequest.from_lan_runtime_inputs(inputs)
-        endpoint = await async_discover_lan_video_endpoint(
-            request.product_id,
-            device_name=request.device_name,
-            client_token=inputs.lan_client_token,
-            preferred_address=(
-                cached_endpoint.address if cached_endpoint is not None else None
-            ),
-        )
-        return await start_at_endpoint(endpoint)
+        try:
+            endpoint = await async_discover_lan_video_endpoint(
+                request.product_id,
+                device_name=request.device_name,
+                client_token=inputs.lan_client_token,
+                timeout=_LAN_DISCOVERY_STAGE_TIMEOUT,
+                preferred_address=(
+                    cached_endpoint.address if cached_endpoint is not None else None
+                ),
+            )
+            return await start_at_endpoint(endpoint)
+        except Exception as err:
+            if cached_error is not None:
+                raise DreameLawnMowerVideoRuntimeError(
+                    f"Cached LAN endpoint failed: {cached_error}. "
+                    f"LAN rediscovery/start failed: {sanitize_diagnostic_text(err)}"
+                ) from None
+            raise
 
     def _adopt_stream_session(
         self,
