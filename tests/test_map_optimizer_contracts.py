@@ -1,6 +1,7 @@
 """Supported optimizer paths preserve map ownership, pixels and optional geometry."""
 
 import logging
+from copy import deepcopy
 
 import numpy as np
 import pytest
@@ -167,3 +168,24 @@ def test_python_saved_map_merge_preserves_origins_and_both_source_rasters(caplog
     assert pixels[0, 0] == 0
     np.testing.assert_array_equal(data.pixel_type, data_source)
     np.testing.assert_array_equal(saved.pixel_type, saved_source)
+
+
+@pytest.mark.parametrize("js_optimizer", [True, False])
+@pytest.mark.parametrize("saved_grid", [25, 100])
+def test_different_saved_grid_preserves_current_map_geometry(js_optimizer, saved_grid):
+    data, saved = _frame(), _frame()
+    saved.dimensions.grid_size = saved_grid
+    saved.dimensions.left -= 150
+    saved.dimensions.top -= 100
+    data_source, saved_source = data.pixel_type.copy(), saved.pixel_type.copy()
+    expected = deepcopy(data)
+    optimizer = _optimizer.DreameMowerMapOptimizer()
+    optimizer.optimize(expected, js_optimizer=js_optimizer)
+    assert optimizer.optimize(data, saved, js_optimizer) is data
+    assert data.optimized_dimensions == expected.optimized_dimensions
+    np.testing.assert_array_equal(
+        data.optimized_pixel_type, expected.optimized_pixel_type
+    )
+    np.testing.assert_array_equal(data.pixel_type, data_source)
+    np.testing.assert_array_equal(saved.pixel_type, saved_source)
+    assert saved.dimensions.grid_size == saved_grid

@@ -151,6 +151,26 @@ def test_shortcut_rename_preserves_a_string_name_and_wire_payload(mower, outcome
         assert mower.get_property(DreameMowerProperty.SHORTCUTS) == original_raw
 
 
+@pytest.mark.parametrize(
+    ("raw", "error"),
+    [("{", json.JSONDecodeError), ('[{"name":"Morning"}]', KeyError)],
+)
+def test_shortcut_rename_preserves_cached_name_when_raw_state_is_invalid(
+    mower, raw, error,
+):
+    mower.capability.shortcuts = True
+    mower.status.shortcuts = {1: Shortcut(id=1, name="Morning")}
+    mower.data[DreameMowerProperty.SHORTCUTS.value] = raw
+    mower.call_shortcut_action = Mock()
+
+    with pytest.raises(error):
+        mower.rename_shortcut(1, "Evening")
+
+    assert mower.status.shortcuts[1].name == "Morning"
+    assert mower.get_property(DreameMowerProperty.SHORTCUTS) == raw
+    mower.call_shortcut_action.assert_not_called()
+
+
 @pytest.mark.parametrize("language", ["english", "EN"])
 def test_generic_language_setter_dispatches_the_existing_string_enum(mower, language):
     mower.data[DreameMowerProperty.VOICE_ASSISTANT.value] = 1
