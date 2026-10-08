@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from threading import Event
 
 import pytest
@@ -12,12 +13,48 @@ from custom_components.dreame_lawn_mower.dreame_lawn_mower_client import (
     app_protocol,
     client_state_reads,
 )
+from custom_components.dreame_lawn_mower.dreame_lawn_mower_client.exceptions import (
+    DreameLawnMowerConnectionError,
+)
 
 from .test_async_app_preferences import make_client
 from .test_async_cloud_session import cloud_strings, login_response, server
 
 MOWER_BLUETOOTH_PROPERTY_KEY = app_protocol.MOWER_BLUETOOTH_PROPERTY_KEY
 async_read_device_state = client_state_reads.async_read_device_state
+
+
+def test_state_read_uses_callers_deadline_without_releasing_a_foreign_lock():
+    async def scenario():
+        async with ClientSession() as session:
+            client = make_client(session)
+            device = client._device
+            locked, release, read_called = Event(), Event(), Event()
+
+            def hold_state():
+                with device._state_lock:
+                    locked.set()
+                    release.wait(3)
+
+            holder = asyncio.create_task(asyncio.to_thread(hold_state))
+            assert await asyncio.to_thread(locked.wait, 1)
+            started = time.monotonic()
+            try:
+                with pytest.raises(DreameLawnMowerConnectionError, match="timed out"):
+                    await asyncio.wait_for(async_read_device_state(
+                        client, lambda _: read_called.set(), refresh=False,
+                        deadline=started + 0.15,
+                    ), 0.6)
+                assert time.monotonic() - started < 0.5
+                assert not read_called.is_set()
+                assert not holder.done()
+                assert not session.closed
+            finally:
+                release.set()
+                await holder
+                await client.async_close()
+
+    asyncio.run(scenario())
 
 
 @pytest.mark.parametrize("cached,include_cloud,expected", [
