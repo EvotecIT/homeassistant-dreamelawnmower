@@ -108,7 +108,8 @@ def test_cancelled_route_probe_drains_native_callback_before_closing_stream(
             await release_server.wait()
             return response
 
-        def refresh(stream):
+        def refresh(stream, *, timeout):
+            assert timeout == video_stream_helpers._STREAM_HEALTH_TIMEOUT
             loop.call_soon_threadsafe(entered.set)
             assert release_worker.wait(3)
             finished.append(True)

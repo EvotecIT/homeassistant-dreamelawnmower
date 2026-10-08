@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import queue
 import struct
@@ -514,7 +515,10 @@ class DreameLawnMowerXp2pHostRuntime:
         retry_interval: float = 0.2,
         timeout: float = 2.0,
     ) -> int | None:
-        """Ask the live worker whether media is direct (62) or relayed (63)."""
+        """Ask for route mode with one timeout budget for reads and retries."""
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("Route refresh timeout must be finite and positive")
+        deadline = time.monotonic() + timeout
         process = session.runner_process
         if (
             process is None
@@ -524,10 +528,13 @@ class DreameLawnMowerXp2pHostRuntime:
         ):
             return session.stream_link_mode
         for attempt in range(max(int(attempts), 1)):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return session.stream_link_mode
             try:
                 process.stdin.write(b"Q")
                 process.stdin.flush()
-                status, response = _read_response(process.stdout, timeout=timeout)
+                status, response = _read_response(process.stdout, timeout=remaining)
             except (BrokenPipeError, OSError, DreameLawnMowerVideoRuntimeError):
                 return session.stream_link_mode
             if status == 0:
@@ -536,7 +543,10 @@ class DreameLawnMowerXp2pHostRuntime:
                     session.stream_link_mode = int(value)
                     return session.stream_link_mode
             if attempt + 1 < attempts:
-                time.sleep(max(float(retry_interval), 0.0))
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return session.stream_link_mode
+                time.sleep(min(max(float(retry_interval), 0.0), remaining))
         return session.stream_link_mode
 
 

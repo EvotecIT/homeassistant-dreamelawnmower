@@ -14,6 +14,7 @@ import subprocess
 import threading
 import zipfile
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 import requests
@@ -574,7 +575,10 @@ def test_host_worker_accepts_legacy_url_only_success_payload() -> None:
     )
 
 
-def test_host_runtime_refreshes_authoritative_relay_mode(tmp_path) -> None:
+@pytest.mark.parametrize("late", [False, True])
+def test_host_runtime_refreshes_authoritative_relay_mode(
+    tmp_path, monkeypatch, late,
+) -> None:
     payload = b"63"
 
     class _Process:
@@ -600,6 +604,31 @@ def test_host_runtime_refreshes_authoritative_relay_mode(tmp_path) -> None:
         runner_process=process,
     )
 
+    if late:
+        # A responsive worker can repeatedly report an unknown route just
+        # before each read timeout. All reads and retry delays share one budget.
+        now = [0.0]
+        reads = []
+
+        def read(_stream, *, timeout):
+            reads.append(timeout)
+            now[0] += min(1.7, timeout)
+            return 0, b"0"
+
+        monkeypatch.setattr(xp2p_host_runtime, "_read_response", read)
+        monkeypatch.setattr(
+            xp2p_host_runtime, "time",
+            SimpleNamespace(
+                monotonic=lambda: now[0],
+                sleep=lambda wait: now.__setitem__(0, now[0] + wait),
+            ),
+        )
+        assert runtime.refresh_stream_link_mode(session, timeout=2.5) is None
+        assert now[0] <= 2.5
+        assert len(reads) == 2
+        assert reads == pytest.approx([2.5, 0.6])
+        assert process.stdin.getvalue() == b"QQ"
+        return
     assert runtime.refresh_stream_link_mode(session) == 63
     assert session.stream_link_mode == 63
     assert session.as_dict()["sdk_stream_network_type"] == 63

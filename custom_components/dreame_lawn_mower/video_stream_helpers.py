@@ -6,6 +6,7 @@ import asyncio
 import os
 import platform
 import shlex
+from functools import partial
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -183,7 +184,9 @@ async def async_probe_stream_health_and_route(
         refresh = getattr(runtime, "refresh_stream_link_mode", None)
         if not callable(refresh):
             return
-        worker = asyncio.ensure_future(hass.async_add_executor_job(refresh, session))
+        worker = asyncio.ensure_future(hass.async_add_executor_job(
+            partial(refresh, timeout=_STREAM_HEALTH_TIMEOUT), session,
+        ))
         try:
             await asyncio.shield(worker)
         except asyncio.CancelledError:

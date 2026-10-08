@@ -13,6 +13,7 @@ from .client_state_reads import async_read_device_state
 from .device_types import DreameMowerAction, DreameMowerActionMapping
 from .exceptions import DreameLawnMowerConnectionError
 from .map_frame_request import map_frame_parameters
+from .public_download import MAX_PUBLIC_MAP_BYTES
 
 if TYPE_CHECKING:
     from .client import DreameLawnMowerClient
@@ -139,7 +140,9 @@ async def async_download_frame_object(
                     deadline=deadline,
                 )
                 payload = (
-                    await cloud.async_get_public_file(url, deadline=deadline)
+                    await cloud.async_get_public_file(
+                        url, deadline=deadline, max_bytes=MAX_PUBLIC_MAP_BYTES,
+                    )
                     if url
                     else None
                 )
