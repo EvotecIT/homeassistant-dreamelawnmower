@@ -24,6 +24,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
+  "mypy==2.4.0",
   "pytest>=8.3.0",
   "pytest-asyncio>=0.24.0",
   "pytest-homeassistant-custom-component>=0.13.201",
@@ -53,6 +54,22 @@ include = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.mypy]
+strict = true
+
+[[tool.mypy.overrides]]
+# Minimum HA uses Requests 2.32 and Paho MQTT 1.6 without type markers.
+# Exempt only these third-party imports when type information is unavailable;
+# typed installations and all integration/bundled-client modules stay checked.
+module = ["requests", "paho", "paho.mqtt", "paho.mqtt.client", "paho.mqtt.enums"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Requests 2.32 in minimum HA has no type marker. Infer its exception
+# definitions while retaining strict checks for integration and client code.
+module = ["requests.exceptions"]
+follow_untyped_imports = true
 
 [tool.ruff]
 target-version = "py313"

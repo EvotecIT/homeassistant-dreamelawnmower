@@ -56,6 +56,9 @@ jobs:
       - name: Ruff
         run: ruff check .
 
+      - name: Strict integration and client typing
+        run: python -m mypy --strict custom_components/dreame_lawn_mower
+
       - name: Pytest
         env:
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
