@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from threading import Event, Thread
 from unittest.mock import AsyncMock
 
 import numpy as np
@@ -74,6 +75,40 @@ def test_legacy_view_refreshes_over_async_http_and_keeps_rendering(monkeypatch):
             finally:
                 await client.async_close()
             assert not session.closed
+
+    asyncio.run(scenario())
+
+
+def test_legacy_error_view_does_not_wait_for_unavailable_device_state(monkeypatch):
+    async def scenario():
+        async with ClientSession() as session:
+            client = make_client(session)
+            device = client._device
+            error = DreameLawnMowerConnectionError("Device state read timed out")
+            client._async_update_device = AsyncMock(side_effect=error)
+            locked, release = Event(), Event()
+
+            def hold_state():
+                with device._state_lock:
+                    locked.set()
+                    release.wait(timeout=5)
+
+            worker = Thread(target=hold_state, name="legacy-error-state-holder")
+            worker.start()
+            try:
+                assert await asyncio.to_thread(locked.wait, 1)
+                result = await asyncio.wait_for(
+                    client._async_refresh_legacy_map_view(0, 0.1), 0.5,
+                )
+                assert result.source == "legacy_current_map"
+                assert result.error == str(error)
+                assert result.image_png is None
+                assert result.diagnostics is None
+            finally:
+                release.set()
+                await asyncio.to_thread(worker.join, 2)
+                assert not worker.is_alive()
+                await client.async_close()
 
     asyncio.run(scenario())
 
